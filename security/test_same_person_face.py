@@ -163,6 +163,12 @@ class SamePersonFaceTests(TestCase):
         # After the window: rejected with a way forward, never pending forever.
         self.assertEqual((old.status, old.rejected_reason), ('rejected', didit.FACE_UNCONFIRMED_MESSAGE))
         self.assertNotIn(didit.SAME_FACE_RETRY_KEY, old.risk_factors)
+        self.assertTrue(old.risk_factors[didit.SAME_FACE_EXHAUSTED_KEY])
+        with mock.patch.object(didit, '_same_face', return_value=didit.FACE_UNAVAILABLE) as compare:
+            self.assertIsNone(didit.precompute_same_face(old, _extracted(), _decision()))
+            self.assertEqual(didit._bind_to_person(old, _extracted(), _decision()),
+                             ('rejected', didit.FACE_UNCONFIRMED_MESSAGE))
+        compare.assert_not_called()
 
     def test_a_primary_rejected_after_the_window_is_notified_and_others_still_run(self):
         stale = (timezone.now() - timezone.timedelta(days=8)).isoformat()
@@ -241,6 +247,30 @@ class SamePersonFaceTests(TestCase):
         row.refresh_from_db()
         self.assertEqual((row.status, row.rejected_reason), ('rejected', didit.NOT_SAME_PERSON_MESSAGE))
 
+        # Expiry can commit while the sync is doing its unlocked downloads.
+        def expire_during_comparison(*args):
+            factors = dict(row.risk_factors)
+            factors[didit.SAME_FACE_EXHAUSTED_KEY] = True
+            IdentityVerification.all_documents.filter(pk=row.pk).update(risk_factors=factors)
+            return (primary.pk, didit.FACE_MATCH)
+
+        with mock.patch('security.didit.retrieve_didit_decision', return_value=approved), \
+                mock.patch('security.didit.precompute_same_face', side_effect=expire_during_comparison), \
+                mock.patch('security.didit._notify_verification_status_change'):
+            didit.sync_didit_session(session_id='s-extra', expected_user=self.user)
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.rejected_reason), ('rejected', didit.FACE_UNCONFIRMED_MESSAGE))
+        self.assertTrue(row.risk_factors[didit.SAME_FACE_EXHAUSTED_KEY])
+        # A later manual sync must not restart the exhausted seven-day window.
+        with mock.patch('security.didit.retrieve_didit_decision', return_value=approved), \
+                mock.patch('security.didit._same_face') as compare, \
+                mock.patch('security.didit._notify_verification_status_change'):
+            didit.sync_didit_session(session_id='s-extra', expected_user=self.user)
+        compare.assert_not_called()
+        row.refresh_from_db()
+        self.assertEqual(row.status, 'rejected')
+        self.assertNotIn(didit.SAME_FACE_RETRY_KEY, row.risk_factors)
+
 
 @override_settings(FACE_STEP_UP_ENABLED=False)
 class DuplicatedFaceHoldTests(TestCase):
@@ -277,9 +307,39 @@ class DuplicatedFaceHoldTests(TestCase):
 
     def test_an_unverified_or_company_verification_does_not_hold(self):
         flag = {'provider': 'didit', 'duplicated_face': {'risks': ['DUPLICATED_FACE'], 'matched_user_ids': []}}
-        _document(self.user, 'V-10', status='rejected', risk_factors=flag)
+        _document(self.user, 'V-10', status='rejected', verified_at=None, risk_factors=flag)
         _document(self.user, 'J-10', risk_factors={**flag, 'account_type': 'business'})
         self.assertEqual(self.check(), '')
+
+    def test_previously_verified_face_holds_after_status_downgrade_until_reviewed(self):
+        row = _document(self.user, 'V-history', risk_factors={
+            'duplicated_face': {'risks': ['DUPLICATED_FACE'], 'matched_user_ids': []}})
+        for status in ('pending', 'rejected', 'expired'):
+            row.status = status
+            row.save()
+            self.assertEqual(self.check(), MESSAGE)
+        case = SuspiciousActivity.objects.get(user=self.user)
+        case.status, case.investigated_by = 'dismissed', self.reviewer
+        case.investigation_notes = 'Reviewed historical face match.'
+        case.save()
+        self.assertEqual(self.check(), '')
+
+    def test_malformed_face_search_is_unavailable_not_no_matches(self):
+        bodies = [{}, [], {'face_search': {}}, {'face_search': {'matches': None}},
+                  {'face_search': {'matches': {}}}]
+        for item in (None, {}, {'similarity_percentage': 'bad'}, {'similarity_percentage': 'NaN'},
+                     {'similarity_percentage': float('inf')}, {'similarity_percentage': -1},
+                     {'similarity_percentage': 101}, {'similarity_percentage': True}):
+            bodies.append({'face_search': {'matches': [item]}})
+        with override_settings(DIDIT_API_KEY='key'), \
+                mock.patch('security.face_step_up._download_selfie', return_value=(b'img', 'image/jpeg')):
+            for body in bodies:
+                with self.subTest(body=body), mock.patch('security.didit.requests.post', return_value=
+                        SimpleNamespace(raise_for_status=lambda: None, json=lambda: body)):
+                    self.assertIsNone(didit.other_users_with_face(self.user, _decision()))
+            with mock.patch('security.didit.requests.post', return_value=SimpleNamespace(
+                    raise_for_status=lambda: None, json=lambda: {'face_search': {'matches': []}})):
+                self.assertEqual(didit.other_users_with_face(self.user, _decision()), [])
 
     def sync_with_duplicate(self, others, number='P-11'):
         row = _document(self.user, number, status='pending',
@@ -515,3 +575,44 @@ class FaceBlocklistTests(TestCase):
         with mock.patch('security.didit_blocklist.requests.request', return_value=_response(404)):
             self.sync()
         self.assertFalse(DiditFaceBlocklistEntry.objects.filter(removed_at__isnull=True).exists())
+
+    def test_bad_creation_payload_preserves_previous_success_and_continues(self):
+        self.ban()
+        _document(self.user, 'Z-20')
+        for bad in (None, [], {'uuid': []}, {'uuid': 'x' * 65}):
+            with self.subTest(bad=bad):
+                DiditFaceBlocklistEntry.objects.all().delete()
+                with mock.patch('security.didit_blocklist._call', side_effect=[
+                        {'results': [{'uuid': 'face-list'}]}, {'uuid': 'entry-p'}, bad,
+                        {'uuid': 'entry-z'}]) as call:
+                    with self.assertRaises(didit.DiditAPIError):
+                        self.sync()
+                self.assertEqual(call.call_count, 4)
+                self.assertEqual(set(DiditFaceBlocklistEntry.objects.values_list('session_id', flat=True)),
+                                 {'session-P-20', 'session-Z-20'})
+
+    def test_orphan_cleanup_reads_all_pages_before_deleting(self):
+        from security.didit_blocklist import _remove_untracked
+        label = f'confio-user-{self.user.pk}'
+        first = f'/v3/lists/face-list/entries/?search={label}'
+        second = first + '&offset=25'
+        with mock.patch('security.didit_blocklist._call', side_effect=[
+                {'results': [{'uuid': 'first', 'display_label': label},
+                             {'uuid': 'unrelated', 'display_label': label + '9'}],
+                 'next': 'https://didit.test' + second},
+                {'results': [{'uuid': 'second', 'display_label': label}], 'next': None}, {}, {}]) as call:
+            _remove_untracked(self.user.pk, {'face-list'})
+        self.assertEqual(call.call_args_list, [
+            mock.call('GET', first, missing_ok=True), mock.call('GET', second, missing_ok=True),
+            mock.call('DELETE', '/v3/lists/face-list/entries/first/', missing_ok=True),
+            mock.call('DELETE', '/v3/lists/face-list/entries/second/', missing_ok=True)])
+
+    def test_pagination_cannot_leave_endpoint_or_loop(self):
+        from security.didit_blocklist import _all_rows
+        path = '/v3/lists/face-list/entries/'
+        for next_url in ('https://other.example' + path, '/v3/session/', path, 123):
+            with self.subTest(next_url=next_url), mock.patch('security.didit_blocklist._call',
+                    return_value={'results': [], 'next': next_url}) as call:
+                with self.assertRaises(didit.DiditAPIError):
+                    _all_rows(path)
+                self.assertEqual(call.call_count, 1)

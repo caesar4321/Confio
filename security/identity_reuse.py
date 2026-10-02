@@ -192,8 +192,9 @@ def outgoing_identity_restriction(user):
     # verified personal documents, whichever was verified first. No ban
     # needed: one person behind two accounts is itself the review.
     flagged = IdentityVerification.all_objects.filter(
-        user_id=user.pk, status='verified', risk_factors__has_key='duplicated_face',
-    ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+        user_id=user.pk, risk_factors__has_key='duplicated_face',
+    ).filter(Q(status='verified') | Q(verified_at__isnull=False)).filter(
+        Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
     for verification_id, flag in flagged.values_list('pk', 'risk_factors__duplicated_face'):
         fingerprint = hashlib.sha256(json.dumps(['duplicated_face', verification_id]).encode()).hexdigest()
         others = (flag or {}).get('matched_user_ids') if isinstance(flag, dict) else []

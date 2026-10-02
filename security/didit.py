@@ -372,6 +372,7 @@ def other_users_with_face(user, response_payload: dict[str, Any]) -> list[int] |
     (free, 1:N) returns each match's vendor_data, so the person's own
     sessions are left out and the others can be linked to the review case.
     """
+    import math
     from .face_step_up import FaceStepUpError, _didit_selfie_url, _download_selfie
     try:
         url = _didit_selfie_url(response_payload)
@@ -385,21 +386,25 @@ def other_users_with_face(user, response_payload: dict[str, Any]) -> list[int] |
         response.raise_for_status()
         body = response.json()
         search = body.get('face_search') if isinstance(body, dict) else None
-        matches = (search.get('matches') if isinstance(search, dict) else None) or []
+        matches = search.get('matches') if isinstance(search, dict) else None
         if not isinstance(matches, list):
             raise ValueError('Unexpected face search payload')
+        for match in matches:
+            if not isinstance(match, dict):
+                raise ValueError('Unexpected face search match')
+            score = match.get('similarity_percentage')
+            if isinstance(score, bool) or not isinstance(score, (int, float, str)):
+                raise ValueError('Missing face search similarity')
+            similarity = float(score)
+            if not math.isfinite(similarity) or not 0 <= similarity <= 100:
+                raise ValueError('Invalid face search similarity')
     except (requests.RequestException, ValueError, FaceStepUpError, DiditConfigurationError) as exc:
         logger.error('Didit face search unavailable for session %s (%s)',
                      response_payload.get('session_id'), type(exc).__name__)
         return None
     others = set()
     for match in matches:
-        if not isinstance(match, dict):
-            continue
-        try:
-            similarity = float(match.get('similarity_percentage') or 0)
-        except (TypeError, ValueError):
-            continue
+        similarity = float(match['similarity_percentage'])
         if similarity < FACE_SEARCH_MIN_SIMILARITY:
             continue
         owner = str(_safe_json_loads(match.get('vendor_data')).get('user_id') or '')
@@ -1299,6 +1304,7 @@ FACE_UNCONFIRMED_MESSAGE = 'No pudimos confirmar que el documento sea tuyo. Veri
 # When a document started waiting for the face comparison (AWS or Didit was
 # unreachable); retry_pending_same_face re-syncs those sessions for a week.
 SAME_FACE_RETRY_KEY = 'same_face_retry_since'
+SAME_FACE_EXHAUSTED_KEY = 'same_face_retry_exhausted'
 SAME_FACE_RETRY_WINDOW_DAYS = 7
 
 
@@ -1413,16 +1419,22 @@ def retry_pending_same_face() -> int:
     # Past the window: a new verification is the way forward, never an
     # endless "pending" the rail that asked for the document waits on.
     from django.db import transaction
+    from django.contrib.auth import get_user_model
+    users = get_user_model().all_objects
     expired_ids = IdentityVerification.all_documents.filter(
-        status='pending', **{f'risk_factors__{SAME_FACE_RETRY_KEY}__lt': cutoff}).values_list('pk', flat=True)
-    for verification_id in list(expired_ids):
+        status='pending', **{f'risk_factors__{SAME_FACE_RETRY_KEY}__lt': cutoff}).values_list('pk', 'user_id')
+    for verification_id, user_id in list(expired_ids):
         with transaction.atomic():
+            # Same order as a sync: serialize its final decision with expiry.
+            users.select_for_update().filter(pk=user_id).first()
             expired = IdentityVerification.all_documents.select_for_update().filter(
-                pk=verification_id, status='pending').first()
+                pk=verification_id, status='pending',
+                **{f'risk_factors__{SAME_FACE_RETRY_KEY}__lt': cutoff}).first()
             if expired is None:  # a sync decided it meanwhile
                 continue
             factors = dict(expired.risk_factors or {})
             factors.pop(SAME_FACE_RETRY_KEY, None)
+            factors[SAME_FACE_EXHAUSTED_KEY] = True
             expired.status, expired.rejected_reason, expired.risk_factors = (
                 'rejected', FACE_UNCONFIRMED_MESSAGE, factors)
             expired.save(update_fields=['status', 'rejected_reason', 'risk_factors', 'updated_at'])
@@ -1437,8 +1449,6 @@ def retry_pending_same_face() -> int:
     waiting = IdentityVerification.all_documents.filter(
         status='pending', **{f'risk_factors__{SAME_FACE_RETRY_KEY}__gte': cutoff},
     ).values_list('user_id', 'risk_factors__didit__session_id')
-    from django.contrib.auth import get_user_model
-    users = get_user_model().all_objects
     synced = 0
     for user_id, session_id in waiting:
         if not session_id:
@@ -1471,7 +1481,7 @@ def precompute_same_face(verification: IdentityVerification, extracted: dict[str
     """(anchor id, _same_face result), run BEFORE the per-user lock: its
     downloads and AWS call must not hold the user's row (withdrawals lock it
     too). _bind_to_person uses it when the anchor is still the same."""
-    if verification.status == 'verified':
+    if verification.status == 'verified' or (verification.risk_factors or {}).get(SAME_FACE_EXHAUSTED_KEY):
         return None
     anchor = _anchor_for(verification)
     if anchor is None or not _same_person(anchor, extracted):
@@ -1493,6 +1503,8 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
     also drops rows missing the key. Same identity data first (free), then the
     same face (_same_face) when a decision payload is given.
     """
+    if (verification.risk_factors or {}).get(SAME_FACE_EXHAUSTED_KEY):
+        return 'rejected', FACE_UNCONFIRMED_MESSAGE
     anchor = _anchor_for(verification)
     if anchor is None:
         return 'verified', ''
@@ -1688,6 +1700,11 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         type(user).objects.select_for_update().filter(pk=user.pk).first()
         current = IdentityVerification.all_documents.filter(pk=verification.pk).values(
             'is_additional_document', 'risk_factors').first() or {}
+        if (current.get('risk_factors') or {}).get(SAME_FACE_EXHAUSTED_KEY):
+            # Expiry may have committed while this sync was fetching images.
+            verification.risk_factors[SAME_FACE_EXHAUSTED_KEY] = True
+            verification.risk_factors.pop(SAME_FACE_RETRY_KEY, None)
+            status, review_reason = 'rejected', FACE_UNCONFIRMED_MESSAGE
         if current.get('is_additional_document'):
             verification.is_additional_document = True
         request_now = (current.get('risk_factors') or {}).get('document_request')
