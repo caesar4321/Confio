@@ -75,6 +75,23 @@ def _verified_sessions(user_id) -> set[str]:
     return {str(session_id) for session_id in rows if session_id}
 
 
+def _label(user_id) -> str:
+    return f'confio-user-{user_id}'
+
+
+def _remove_untracked(user_id, list_uuids) -> None:
+    """Entries with this user's label that no row tracks: an add Didit carried
+    out whose answer never arrived. Only for a user who is not banned."""
+    label = _label(user_id)
+    for list_uuid in sorted(set(list_uuids) or {face_blocklist_uuid()}):
+        data = _call('GET', f'/v3/lists/{list_uuid}/entries/?search={label}', missing_ok=True)
+        rows = data.get('results') if isinstance(data, dict) else data
+        for row in rows or []:
+            if isinstance(row, dict) and row.get('display_label') == label and row.get('uuid'):
+                _call('DELETE', f"/v3/lists/{list_uuid}/entries/{row['uuid']}/", missing_ok=True)
+                logger.info('Untracked face blocklist entry removed: user=%s entry=%s', user_id, row['uuid'])
+
+
 def sync_face_blocklist(user_id) -> None:
     from django.contrib.auth import get_user_model
     failure = None
@@ -91,20 +108,21 @@ def sync_face_blocklist(user_id) -> None:
                 try:
                     created = _call('POST', f'/v3/lists/{list_uuid}/entries/', {
                         'reference_session_id': session_id,
-                        'display_label': f'confio-user-{user_id}',
+                        'display_label': _label(user_id),
                         'comment': COMMENT,
                         'metadata': {'reference_type': 'vendor_user', 'confio_user_id': user_id},
                     })
                 except DiditAPIError as exc:
                     # Keep the entries Didit already created: rolling their
                     # rows back would leave them on Didit untracked, never
-                    # removed when the ban is lifted.
-                    failure = exc
-                    break
+                    # removed when the ban is lifted. One session Didit refuses
+                    # must not keep the others off the blocklist.
+                    failure = failure or exc
+                    continue
                 entry_uuid = str(created.get('uuid') or created.get('id') or '')
                 if not entry_uuid:
-                    failure = DiditAPIError('Didit did not return the blocklist entry id')
-                    break
+                    failure = failure or DiditAPIError('Didit did not return the blocklist entry id')
+                    continue
                 DiditFaceBlocklistEntry.objects.create(user_id=user_id, session_id=session_id,
                                                        list_uuid=list_uuid, entry_uuid=entry_uuid)
                 logger.info('Face blocklisted: user=%s session=%s', user_id, session_id)
@@ -113,11 +131,17 @@ def sync_face_blocklist(user_id) -> None:
                 try:
                     _call('DELETE', f'/v3/lists/{entry.list_uuid}/entries/{entry.entry_uuid}/', missing_ok=True)
                 except DiditAPIError as exc:
-                    failure = exc
-                    break
+                    failure = failure or exc
+                    continue
                 entry.removed_at = timezone.now()
                 entry.save(update_fields=['removed_at'])
                 logger.info('Face blocklist entry removed: user=%s session=%s', user_id, entry.session_id)
+            # Only someone once banned permanently can have an untracked entry.
+            if UserBan.all_objects.filter(user_id=user_id, ban_type='permanent').exists():
+                try:
+                    _remove_untracked(user_id, {entry.list_uuid for entry in active})
+                except DiditAPIError as exc:
+                    failure = failure or exc
     if failure is not None:
         raise failure
 

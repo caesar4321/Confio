@@ -1312,13 +1312,22 @@ def _anchor_selfie(anchor: IdentityVerification) -> bytes:
                  or FaceReference.objects.filter(user_id=anchor.user_id, is_active=True).first())
     if reference is not None:
         return _reference_bytes(reference)
+    from .face_step_up import FaceStepUpError
     session_id = ((anchor.risk_factors or {}).get('didit') or {}).get('session_id')
     if not session_id:
         raise _NoSelfie()
-    url = _didit_selfie_url(_didit_request('GET', f'/v3/session/{session_id}/decision/'))
-    if not url:
-        raise _NoSelfie()
-    return _download_selfie(url)[0]
+    try:
+        url = _didit_selfie_url(_didit_request('GET', f'/v3/session/{session_id}/decision/'))
+        if not url:
+            raise _NoSelfie()
+        return _download_selfie(url)[0]
+    except (DiditAPIError, FaceStepUpError) as exc:
+        # Not found is gone for good (session or media deleted), not an outage.
+        cause = exc.__cause__
+        status = getattr(exc, 'status_code', None) or getattr(getattr(cause, 'response', None), 'status_code', None)
+        if status == 404:
+            raise _NoSelfie() from None
+        raise
 
 
 FACE_MATCH, FACE_MISMATCH, FACE_UNAVAILABLE, FACE_NO_REFERENCE = 'match', 'mismatch', 'unavailable', 'no_reference'

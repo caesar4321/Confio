@@ -169,7 +169,9 @@ def _download_selfie(url: str) -> tuple[bytes, str]:
     except requests.RequestException as exc:
         raise FaceStepUpError(f'Selfie download failed ({type(exc).__name__})') from None
     if response.status_code != 200:
-        raise FaceStepUpError(f'Selfie download failed (HTTP {response.status_code})')
+        error = FaceStepUpError(f'Selfie download failed (HTTP {response.status_code})')
+        error.status_code = response.status_code
+        raise error
     body = response.content
     content_type = response.headers.get('Content-Type', '')
     if not body or len(body) > MAX_REFERENCE_BYTES or not content_type.startswith('image/'):
