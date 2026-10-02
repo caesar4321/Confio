@@ -151,6 +151,22 @@ class SamePersonFaceTests(TestCase):
         sync.assert_called_once_with(session_id='s-recent', expected_user=self.user)
         self.assertEqual(recent.status, 'pending')
 
+    def test_a_session_or_selfie_deleted_at_didit_counts_as_no_selfie_on_file(self):
+        import requests as http
+        _document(self.user, 'P-18', is_additional_document=True)
+        primary = _document(self.user, 'V-18', status='pending')
+        gone = didit.DiditAPIError('404')
+        gone.__cause__ = http.HTTPError(response=SimpleNamespace(status_code=404))
+        with mock.patch.object(didit, '_didit_request', side_effect=gone):
+            self.assertEqual(didit._bind_to_person(primary, _extracted(), _decision()), ('verified', ''))
+        self.assertEqual(primary.risk_factors.get('same_face'), 'no_reference_selfie')
+        # A 503 is an outage: retried, never waved through.
+        down = didit.DiditAPIError('503')
+        down.__cause__ = http.HTTPError(response=SimpleNamespace(status_code=503))
+        primary.risk_factors = {}
+        with mock.patch.object(didit, '_didit_request', side_effect=down):
+            self.assertEqual(didit._bind_to_person(primary, _extracted(), _decision()), ('pending', ''))
+
     def test_an_already_verified_document_is_not_compared_again(self):
         _document(self.user, 'V-7')
         extra = _document(self.user, 'P-7', is_additional_document=True)  # verified earlier
@@ -397,6 +413,41 @@ class FaceBlocklistTests(TestCase):
             with self.assertRaises(didit.DiditAPIError):
                 self.sync()
         self.assertFalse(DiditFaceBlocklistEntry.objects.exists())
+
+    def test_lifting_the_ban_also_removes_an_entry_whose_answer_was_lost(self):
+        ban = self.ban()
+        with mock.patch('security.tasks.sync_face_blocklist.delay'):
+            ban.soft_delete()
+        listed = {'results': [{'uuid': 'orphan', 'display_label': f'confio-user-{self.user.pk}'},
+                              {'uuid': 'someone-else', 'display_label': 'confio-user-999999'}]}
+
+        def request(method, url, **kwargs):
+            self.calls.append((method, url.replace('https://didit.test', ''), kwargs.get('json')))
+            if '/entries/?search=' in url:
+                return _response(body=listed)
+            if method == 'GET':
+                return _response(body={'results': [{'uuid': 'face-list'}]})
+            return _response(204)
+        with mock.patch('security.didit_blocklist.requests.request', side_effect=request):
+            self.sync()
+        self.assertEqual([call[1] for call in self.calls if call[0] == 'DELETE'],
+                         ['/v3/lists/face-list/entries/orphan/'])
+
+    def test_one_refused_session_does_not_keep_the_others_off(self):
+        self.ban()
+
+        def request(method, url, **kwargs):
+            self.calls.append((method, url, kwargs.get('json')))
+            if method == 'GET':
+                return _response(body={'results': [{'uuid': 'face-list'}]})
+            if kwargs['json']['reference_session_id'] == 'session-P-20':
+                return _response(400)
+            return _response(201, {'uuid': 'entry-v'})
+        with mock.patch('security.didit_blocklist.requests.request', side_effect=request):
+            with self.assertRaises(didit.DiditAPIError):
+                self.sync()
+        self.assertEqual(list(DiditFaceBlocklistEntry.objects.values_list('session_id', flat=True)),
+                         ['session-V-20'])
 
     def test_an_entry_already_removed_in_didit_is_not_an_error(self):
         ban = self.ban()
