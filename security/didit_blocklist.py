@@ -17,6 +17,7 @@ hourly for whatever that missed. Both are idempotent.
 """
 import hashlib
 import logging
+from urllib.parse import urljoin, urlsplit
 
 import requests
 from django.db import connection, transaction
@@ -51,10 +52,39 @@ def _call(method, path, payload=None, *, missing_ok=False):
         raise DiditAPIError(f'Didit {method} {path} returned invalid JSON') from None
 
 
+def _all_rows(path, *, missing_ok=False):
+    """Read all pages before callers mutate entries; never send credentials
+    to a pagination URL outside the original Didit endpoint."""
+    endpoint = urlsplit(_didit_url(path))
+    seen = set()
+    rows = []
+    while path:
+        if path in seen or len(seen) >= 1000:
+            raise DiditAPIError('Didit list pagination did not terminate')
+        seen.add(path)
+        data = _call('GET', path, missing_ok=missing_ok)
+        if missing_ok and data == {}:
+            return rows
+        page = data.get('results') if isinstance(data, dict) else data
+        if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+            raise DiditAPIError('Didit returned an invalid list page')
+        rows.extend(page)
+        next_url = data.get('next') if isinstance(data, dict) else None
+        if not next_url:
+            break
+        if not isinstance(next_url, str):
+            raise DiditAPIError('Didit returned invalid pagination')
+        next_page = urlsplit(urljoin(_didit_url(path), next_url))
+        if (next_page.scheme, next_page.netloc, next_page.path) != (
+                endpoint.scheme, endpoint.netloc, endpoint.path) or next_page.fragment:
+            raise DiditAPIError('Didit pagination left the original endpoint')
+        path = next_page.path + ('?' + next_page.query if next_page.query else '')
+    return rows
+
+
 def face_blocklist_uuid() -> str:
     """The application's face blocklist: system-provisioned, one per entry type."""
-    data = _call('GET', '/v3/lists/?list_type=blocklist&entry_type=face')
-    rows = data.get('results') if isinstance(data, dict) else data
+    rows = _all_rows('/v3/lists/?list_type=blocklist&entry_type=face')
     for row in rows or []:
         if isinstance(row, dict) and row.get('list_type', 'blocklist') == 'blocklist' \
                 and row.get('entry_type', 'face') == 'face' and row.get('uuid'):
@@ -85,8 +115,7 @@ def _remove_untracked(user_id, list_uuids) -> None:
     out whose answer never arrived. Only for a user who is not banned."""
     label = _label(user_id)
     for list_uuid in sorted(set(list_uuids) or {face_blocklist_uuid()}):
-        data = _call('GET', f'/v3/lists/{list_uuid}/entries/?search={label}', missing_ok=True)
-        rows = data.get('results') if isinstance(data, dict) else data
+        rows = _all_rows(f'/v3/lists/{list_uuid}/entries/?search={label}', missing_ok=True)
         for row in rows or []:
             if isinstance(row, dict) and row.get('display_label') == label and row.get('uuid'):
                 _call('DELETE', f"/v3/lists/{list_uuid}/entries/{row['uuid']}/", missing_ok=True)
@@ -121,16 +150,15 @@ def sync_face_blocklist(user_id) -> None:
                         'comment': COMMENT,
                         'metadata': {'reference_type': 'vendor_user', 'confio_user_id': user_id},
                     })
+                    entry_uuid = created.get('uuid') or created.get('id') if isinstance(created, dict) else None
+                    if not isinstance(entry_uuid, str) or not entry_uuid or len(entry_uuid) > 64:
+                        raise DiditAPIError('Didit did not return a valid blocklist entry id')
                 except DiditAPIError as exc:
                     # Keep the entries Didit already created: rolling their
                     # rows back would leave them on Didit untracked, never
                     # removed when the ban is lifted. One session Didit refuses
                     # must not keep the others off the blocklist.
                     failure = failure or exc
-                    continue
-                entry_uuid = str(created.get('uuid') or created.get('id') or '')
-                if not entry_uuid:
-                    failure = failure or DiditAPIError('Didit did not return the blocklist entry id')
                     continue
                 DiditFaceBlocklistEntry.objects.create(user_id=user_id, session_id=session_id,
                                                        list_uuid=list_uuid, entry_uuid=entry_uuid)
