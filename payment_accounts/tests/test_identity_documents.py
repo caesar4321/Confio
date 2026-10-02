@@ -57,6 +57,11 @@ class DocumentRequestTests(SimpleTestCase):
 
 class AdditionalDocumentTests(TestCase):
     def setUp(self):
+        # Identity data only here; the selfie comparison has its own tests
+        # (security/test_same_person_face.py).
+        face = mock.patch('security.didit._same_face', return_value=True)
+        face.start()
+        self.addCleanup(face.stop)
         self.user = User.objects.create_user(username='two-documents', firebase_uid='two-documents')
         self.owner = Account.objects.create(user=self.user, account_type='personal')
 

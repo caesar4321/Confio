@@ -29,6 +29,11 @@ app.conf.beat_schedule.setdefault('security-purge-face-check-evidence', {
     'schedule': crontab(hour=4, minute=20),
 })
 
+app.conf.beat_schedule.setdefault('security-reconcile-face-blocklist', {
+    'task': 'security.reconcile_face_blocklist',
+    'schedule': crontab(minute=17),
+})
+
 app.conf.beat_schedule.setdefault('users-rollup-funnel-events', {
     'task': 'users.rollup_funnel_events',
     'schedule': crontab(hour=3, minute=30),

@@ -342,6 +342,23 @@ def _store_face_reference(verification: IdentityVerification, response_payload: 
                      verification.pk, type(exc).__name__)
 
 
+# Didit's 1:N face search: this face already passed in ANOTHER user's
+# session (its own earlier sessions share vendor_data and never count).
+# Informational by default in Didit; Confío holds the account for review.
+DUPLICATED_FACE_RISKS = frozenset({'DUPLICATED_FACE', 'POSSIBLE_DUPLICATED_FACE'})
+
+
+def duplicated_face_risks(response_payload: dict[str, Any]) -> list[str]:
+    found = set()
+    for key in ('liveness_checks', 'face_matches'):
+        items = response_payload.get(key)
+        for item in items if isinstance(items, list) else []:
+            for warning in (item or {}).get('warnings') or []:
+                if isinstance(warning, dict) and warning.get('risk') in DUPLICATED_FACE_RISKS:
+                    found.add(warning['risk'])
+    return sorted(found)
+
+
 def user_facing_decline_reason(response_payload: dict[str, Any]) -> str:
     """The retry hint for a Didit decline, or '' for the generic copy."""
     warnings = []
@@ -1226,15 +1243,74 @@ def _same_person(primary: IdentityVerification, extracted: dict[str, Any]) -> bo
     )
 
 
-def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any]) -> tuple[str, str]:
+NOT_SAME_PERSON_MESSAGE = 'El documento no coincide con tu identidad verificada.'
+
+
+def _anchor_selfie(anchor: IdentityVerification) -> bytes:
+    """The live selfie of the anchor's own Didit session.
+
+    The stored KYC reference when it came from this verification (no Didit
+    call); otherwise, e.g. an extra document verified before the primary,
+    Didit's decision for that session, whose media links are fresh.
+    """
+    from .face_step_up import _didit_selfie_url, _download_selfie, _reference_bytes
+    from .models import FaceReference
+    reference = FaceReference.objects.filter(identity_verification=anchor).order_by('-is_active', '-pk').first()
+    if reference is not None:
+        return _reference_bytes(reference)
+    session_id = ((anchor.risk_factors or {}).get('didit') or {}).get('session_id')
+    if not session_id:
+        raise DiditAPIError('The verified document has no Didit session')
+    url = _didit_selfie_url(_didit_request('GET', f'/v3/session/{session_id}/decision/'))
+    if not url:
+        raise DiditAPIError('The verified document has no selfie')
+    return _download_selfie(url)[0]
+
+
+def _same_face(anchor: IdentityVerification, response_payload: dict[str, Any]) -> bool | None:
+    """Whether this session's selfie is the anchor session's face; None when it
+    cannot be compared now (the caller keeps the document pending).
+
+    Didit proves each document's portrait matches the selfie of ITS session.
+    Only this proves both sessions had the same person in front of the camera:
+    matching names and birth date alone let a namesake's or twin's document
+    through. One Rekognition CompareFaces call.
+    """
+    from .face_step_up import (FACE_MIN_SIMILARITY, FaceStepUpError, _didit_selfie_url, _download_selfie,
+                               _rekognition, _setting)
+    from decimal import Decimal
+    try:
+        url = _didit_selfie_url(response_payload)
+        if not url:
+            raise DiditAPIError('The session has no selfie')
+        current = _download_selfie(url)[0]
+        matches = _rekognition().compare_faces(
+            SourceImage={'Bytes': current}, TargetImage={'Bytes': _anchor_selfie(anchor)},
+            SimilarityThreshold=0,
+        ).get('FaceMatches') or []
+    except (DiditAPIError, FaceStepUpError) as exc:
+        logger.error('Same-person face check unavailable: verification=%s anchor=%s (%s)',
+                     response_payload.get('session_id'), anchor.pk, exc)
+        return None
+    except Exception as exc:  # Rekognition / S3 trouble; never log request details
+        logger.error('Same-person face check failed: anchor=%s (%s)', anchor.pk, type(exc).__name__)
+        return None
+    similarity = max((Decimal(str(m.get('Similarity') or 0)) for m in matches), default=Decimal('0'))
+    return similarity >= Decimal(str(_setting('FACE_MIN_SIMILARITY', FACE_MIN_SIMILARITY)))
+
+
+def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any],
+                    response_payload: dict[str, Any] | None = None) -> tuple[str, str]:
     """('verified', '') when this document is the same person as the user's other
-    verified personal documents (or is the first one), else ('rejected', why).
+    verified personal documents (or is the first one), ('rejected', why) when it
+    is not, and ('pending', '') when the faces could not be compared yet.
 
     Applies to every personal document, primary or extra, whichever came first:
     an account belongs to one person. The anchor is the primary verification,
     else the earliest other verified personal document (all_documents, because
     the default manager hides extra ones). Null-safe: excluding a JSON key value
-    also drops rows missing the key.
+    also drops rows missing the key. Same identity data first (free), then the
+    same face (_same_face) when a decision payload is given.
     """
     from django.db.models import Q
     anchor = (
@@ -1251,7 +1327,15 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
     if anchor is None:
         return 'verified', ''
     if not _same_person(anchor, extracted):
-        return 'rejected', 'El documento no coincide con tu identidad verificada.'
+        return 'rejected', NOT_SAME_PERSON_MESSAGE
+    # Once: a later sync of an already verified document neither pays for
+    # another comparison nor drops the KYC to pending when AWS is unreachable.
+    if response_payload is not None and verification.status != 'verified':
+        same = _same_face(anchor, response_payload)
+        if same is None:
+            return 'pending', ''
+        if not same:
+            return 'rejected', NOT_SAME_PERSON_MESSAGE
     return 'verified', ''
 
 
@@ -1272,16 +1356,16 @@ def _review_additional_document(verification: IdentityVerification, extracted: d
     """(status, rejection reason) for an extra document Didit approved.
 
     Didit's own session already proved the document is genuine and that its
-    portrait matches the live selfie. Requiring the SAME identity as the
-    primary document (date of birth and names) then binds both documents to
-    one person, so no second, paid face comparison is needed. Also checks the
+    portrait matches the live selfie of THIS session. _bind_to_person then
+    requires the same identity data and the same face as the user's verified
+    document, which binds both documents to one person. Also checks the
     document is what the rail asked for.
     """
     request = (verification.risk_factors or {}).get('document_request') or {}
     unmet = _unmet_request(extracted.get('document_issuing_country'), extracted.get('document_type'), request)
     if unmet:
         return 'rejected', unmet
-    return _bind_to_person(verification, extracted)
+    return _bind_to_person(verification, extracted, decision)
 
 
 _DEFAULT_ADDITIONAL_REQUEST = {'id_country': '', 'document_types': ['ID', 'P']}
@@ -1371,6 +1455,11 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         risk_factors['account_type'] = 'business'
     if business_id:
         risk_factors['business_id'] = str(business_id)
+    duplicated = duplicated_face_risks(response_payload)
+    if duplicated and account_type != 'business':
+        # Sticky: a later sync without the warning never clears the hold
+        # (security/identity_reuse.py); support releases it.
+        risk_factors['duplicated_face'] = duplicated
 
     verification.verified_first_name = extracted['verified_first_name']
     verification.verified_last_name = extracted['verified_last_name']
@@ -1419,7 +1508,7 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
             status, review_reason = _review_additional_document(verification, extracted, response_payload)
         elif status == 'verified' and (verification.risk_factors or {}).get('account_type') != 'business':
             # A primary verified after an extra document must be the same person too.
-            status, review_reason = _bind_to_person(verification, extracted)
+            status, review_reason = _bind_to_person(verification, extracted, response_payload)
         verification.status = status
         if status == 'verified' and verification.verified_at is None:
             verification.verified_at = timezone.now()
