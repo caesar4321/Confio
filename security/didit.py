@@ -383,14 +383,24 @@ def other_users_with_face(user, response_payload: dict[str, Any]) -> list[int] |
                                  files={'user_image': ('selfie', image, content_type)},
                                  data={'save_api_request': 'false'})
         response.raise_for_status()
-        matches = ((response.json() or {}).get('face_search') or {}).get('matches') or []
+        body = response.json()
+        search = body.get('face_search') if isinstance(body, dict) else None
+        matches = (search.get('matches') if isinstance(search, dict) else None) or []
+        if not isinstance(matches, list):
+            raise ValueError('Unexpected face search payload')
     except (requests.RequestException, ValueError, FaceStepUpError, DiditConfigurationError) as exc:
         logger.error('Didit face search unavailable for session %s (%s)',
                      response_payload.get('session_id'), type(exc).__name__)
         return None
     others = set()
     for match in matches:
-        if not isinstance(match, dict) or float(match.get('similarity_percentage') or 0) < FACE_SEARCH_MIN_SIMILARITY:
+        if not isinstance(match, dict):
+            continue
+        try:
+            similarity = float(match.get('similarity_percentage') or 0)
+        except (TypeError, ValueError):
+            continue
+        if similarity < FACE_SEARCH_MIN_SIMILARITY:
             continue
         owner = str(_safe_json_loads(match.get('vendor_data')).get('user_id') or '')
         if owner == str(user.pk):
@@ -1285,6 +1295,7 @@ def _same_person(primary: IdentityVerification, extracted: dict[str, Any]) -> bo
 
 
 NOT_SAME_PERSON_MESSAGE = 'El documento no coincide con tu identidad verificada.'
+FACE_UNCONFIRMED_MESSAGE = 'No pudimos confirmar que el documento sea tuyo. Verifícalo de nuevo.'
 # When a document started waiting for the face comparison (AWS or Didit was
 # unreachable); retry_pending_same_face re-syncs those sessions for a week.
 SAME_FACE_RETRY_KEY = 'same_face_retry_since'
@@ -1331,6 +1342,10 @@ def _anchor_selfie(anchor: IdentityVerification) -> bytes:
 
 
 FACE_MATCH, FACE_MISMATCH, FACE_UNAVAILABLE, FACE_NO_REFERENCE = 'match', 'mismatch', 'unavailable', 'no_reference'
+# This session's selfie cannot be compared at all (none, or no face AWS can
+# read): a new session can fix it, a retry of this one cannot.
+FACE_UNCONFIRMED = 'unconfirmed'
+_UNREADABLE_IMAGE_ERRORS = {'InvalidParameterException', 'InvalidImageFormatException', 'ImageTooLargeException'}
 
 
 def _same_face(anchor: IdentityVerification, response_payload: dict[str, Any]) -> str:
@@ -1348,15 +1363,25 @@ def _same_face(anchor: IdentityVerification, response_payload: dict[str, Any]) -
     from .face_step_up import (FACE_MIN_SIMILARITY, FaceStepUpError, _didit_selfie_url, _download_selfie,
                                _rekognition, _setting)
     from decimal import Decimal
+    from botocore.exceptions import ClientError
+    url = _didit_selfie_url(response_payload)
+    if not url:
+        logger.warning('Same-person face check: session %s has no selfie', response_payload.get('session_id'))
+        return FACE_UNCONFIRMED
     try:
-        url = _didit_selfie_url(response_payload)
-        if not url:
-            raise DiditAPIError('The session has no selfie')
         current = _download_selfie(url)[0]
+        reference = _anchor_selfie(anchor)
         matches = _rekognition().compare_faces(
-            SourceImage={'Bytes': current}, TargetImage={'Bytes': _anchor_selfie(anchor)},
+            SourceImage={'Bytes': current}, TargetImage={'Bytes': reference},
             SimilarityThreshold=0,
         ).get('FaceMatches') or []
+    except ClientError as exc:
+        code = exc.response.get('Error', {}).get('Code', '')
+        if code in ('NoSuchKey', '404'):  # the stored KYC selfie is gone
+            logger.warning('Same-person face check: stored selfie missing for anchor=%s', anchor.pk)
+            return FACE_NO_REFERENCE
+        logger.error('Same-person face check failed: anchor=%s (%s)', anchor.pk, code or 'ClientError')
+        return FACE_UNCONFIRMED if code in _UNREADABLE_IMAGE_ERRORS else FACE_UNAVAILABLE
     except _NoSelfie:
         logger.warning('Same-person face check: no selfie on file for anchor=%s', anchor.pk)
         return FACE_NO_REFERENCE
@@ -1377,6 +1402,23 @@ def retry_pending_same_face() -> int:
     could not run, for SAME_FACE_RETRY_WINDOW_DAYS. Returns how many synced."""
     from datetime import timedelta
     cutoff = (timezone.now() - timedelta(days=SAME_FACE_RETRY_WINDOW_DAYS)).isoformat()
+    # Past the window: a new verification is the way forward, never an
+    # endless "pending" the rail that asked for the document waits on.
+    from django.db import transaction
+    expired_ids = IdentityVerification.all_documents.filter(
+        status='pending', **{f'risk_factors__{SAME_FACE_RETRY_KEY}__lt': cutoff}).values_list('pk', flat=True)
+    for verification_id in list(expired_ids):
+        with transaction.atomic():
+            expired = IdentityVerification.all_documents.select_for_update().filter(
+                pk=verification_id, status='pending').first()
+            if expired is None:  # a sync decided it meanwhile
+                continue
+            factors = dict(expired.risk_factors or {})
+            factors.pop(SAME_FACE_RETRY_KEY, None)
+            expired.status, expired.rejected_reason, expired.risk_factors = (
+                'rejected', FACE_UNCONFIRMED_MESSAGE, factors)
+            expired.save(update_fields=['status', 'rejected_reason', 'risk_factors', 'updated_at'])
+        logger.warning('Same-face retries exhausted: verification=%s', verification_id)
     waiting = IdentityVerification.all_documents.filter(
         status='pending', **{f'risk_factors__{SAME_FACE_RETRY_KEY}__gte': cutoff},
     ).values_list('user_id', 'risk_factors__didit__session_id')
@@ -1441,6 +1483,8 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
         verification.risk_factors = factors
         if same == FACE_MISMATCH:
             return 'rejected', NOT_SAME_PERSON_MESSAGE
+        if same == FACE_UNCONFIRMED:
+            return 'rejected', FACE_UNCONFIRMED_MESSAGE
     return 'verified', ''
 
 

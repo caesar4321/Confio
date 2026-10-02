@@ -113,8 +113,17 @@ class SamePersonFaceTests(TestCase):
         self.assertEqual(didit._review_additional_document(extra, _extracted(), _decision()), ('pending', ''))
         self.assertIn(didit.SAME_FACE_RETRY_KEY, extra.risk_factors)  # retried hourly
         self.rek.compare_faces.side_effect = None
+        # Nothing a retry of THIS session can fix: a new verification can.
         self.assertEqual(didit._review_additional_document(extra, _extracted(), _decision(url='')),
-                         ('pending', ''))  # no selfie in this session
+                         ('rejected', didit.FACE_UNCONFIRMED_MESSAGE))
+        from botocore.exceptions import ClientError
+        self.rek.compare_faces.side_effect = ClientError(
+            {'Error': {'Code': 'InvalidParameterException'}}, 'CompareFaces')
+        self.assertEqual(didit._review_additional_document(extra, _extracted(), _decision()),
+                         ('rejected', didit.FACE_UNCONFIRMED_MESSAGE))
+        self.rek.compare_faces.side_effect = ClientError({'Error': {'Code': 'NoSuchKey'}}, 'GetObject')
+        self.assertEqual(didit._review_additional_document(extra, _extracted(), _decision()), ('verified', ''))
+        self.assertEqual(extra.risk_factors.get('same_face'), 'no_reference_selfie')
 
     def test_an_account_with_no_selfie_on_file_is_bound_by_identity_data_and_recorded(self):
         # Verified before selfies were kept, or Didit's media is gone: retrying
@@ -150,6 +159,10 @@ class SamePersonFaceTests(TestCase):
             self.assertEqual(didit.retry_pending_same_face(), 1)
         sync.assert_called_once_with(session_id='s-recent', expected_user=self.user)
         self.assertEqual(recent.status, 'pending')
+        old = IdentityVerification.all_documents.get(document_number='P-16')
+        # After the window: rejected with a way forward, never pending forever.
+        self.assertEqual((old.status, old.rejected_reason), ('rejected', didit.FACE_UNCONFIRMED_MESSAGE))
+        self.assertNotIn(didit.SAME_FACE_RETRY_KEY, old.risk_factors)
 
     def test_a_session_or_selfie_deleted_at_didit_counts_as_no_selfie_on_file(self):
         import requests as http
