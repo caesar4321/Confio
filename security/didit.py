@@ -1322,7 +1322,15 @@ def _anchor_selfie(anchor: IdentityVerification) -> bytes:
     reference = (FaceReference.objects.filter(identity_verification=anchor).order_by('-is_active', '-pk').first()
                  or FaceReference.objects.filter(user_id=anchor.user_id, is_active=True).first())
     if reference is not None:
-        return _reference_bytes(reference)
+        from botocore.exceptions import ClientError
+        try:
+            return _reference_bytes(reference)
+        except ClientError as exc:
+            # The stored copy is gone: the anchor session's own selfie at
+            # Didit still binds the person; never skip straight to no selfie.
+            if exc.response.get('Error', {}).get('Code', '') not in ('NoSuchKey', '404'):
+                raise
+            logger.warning('Same-person face check: stored selfie missing for anchor=%s', anchor.pk)
     from .face_step_up import FaceStepUpError
     session_id = ((anchor.risk_factors or {}).get('didit') or {}).get('session_id')
     if not session_id:
@@ -1436,8 +1444,37 @@ def retry_pending_same_face() -> int:
     return synced
 
 
+def _anchor_for(verification: IdentityVerification) -> IdentityVerification | None:
+    from django.db.models import Q
+    return (
+        IdentityVerification.all_documents.filter(user=verification.user, status='verified')
+        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+        .exclude(pk=verification.pk)
+        # The personal copy a company verification creates (security.models
+        # ensure_personal_verified_on_save: empty risk_factors, the company's
+        # document number) describes the company, not the person.
+        .exclude(risk_factors={}, document_number__in=IdentityVerification.all_documents.filter(
+            user=verification.user, risk_factors__account_type='business').values('document_number'))
+        .order_by('is_additional_document', 'verified_at', 'created_at').first()
+    )
+
+
+def precompute_same_face(verification: IdentityVerification, extracted: dict[str, Any],
+                         response_payload: dict[str, Any]) -> tuple[int, str] | None:
+    """(anchor id, _same_face result), run BEFORE the per-user lock: its
+    downloads and AWS call must not hold the user's row (withdrawals lock it
+    too). _bind_to_person uses it when the anchor is still the same."""
+    if verification.status == 'verified':
+        return None
+    anchor = _anchor_for(verification)
+    if anchor is None or not _same_person(anchor, extracted):
+        return None
+    return anchor.pk, _same_face(anchor, response_payload)
+
+
 def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any],
-                    response_payload: dict[str, Any] | None = None) -> tuple[str, str]:
+                    response_payload: dict[str, Any] | None = None,
+                    precomputed: tuple[int, str] | None = None) -> tuple[str, str]:
     """('verified', '') when this document is the same person as the user's other
     verified personal documents (or is the first one), ('rejected', why) when it
     is not, and ('pending', '') when the faces could not be compared yet.
@@ -1449,18 +1486,7 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
     also drops rows missing the key. Same identity data first (free), then the
     same face (_same_face) when a decision payload is given.
     """
-    from django.db.models import Q
-    anchor = (
-        IdentityVerification.all_documents.filter(user=verification.user, status='verified')
-        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        .exclude(pk=verification.pk)
-        # The personal copy a company verification creates (security.models
-        # ensure_personal_verified_on_save: empty risk_factors, the company's
-        # document number) describes the company, not the person.
-        .exclude(risk_factors={}, document_number__in=IdentityVerification.all_documents.filter(
-            user=verification.user, risk_factors__account_type='business').values('document_number'))
-        .order_by('is_additional_document', 'verified_at', 'created_at').first()
-    )
+    anchor = _anchor_for(verification)
     if anchor is None:
         return 'verified', ''
     if not _same_person(anchor, extracted):
@@ -1469,7 +1495,8 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
     # another comparison nor drops the KYC to pending when AWS is unreachable.
     if response_payload is not None and verification.status != 'verified':
         factors = dict(verification.risk_factors or {})
-        same = _same_face(anchor, response_payload)
+        same = (precomputed[1] if precomputed and precomputed[0] == anchor.pk
+                else _same_face(anchor, response_payload))
         if same == FACE_UNAVAILABLE:
             # retry_pending_same_face re-syncs it: Didit sends its webhook once.
             factors.setdefault(SAME_FACE_RETRY_KEY, timezone.now().isoformat())
@@ -1501,7 +1528,8 @@ def _unmet_request(issuing_country: Any, document_type: Any, request: dict[str, 
 
 
 def _review_additional_document(verification: IdentityVerification, extracted: dict[str, Any],
-                                decision: dict[str, Any]) -> tuple[str, str]:
+                                decision: dict[str, Any],
+                                precomputed: tuple[int, str] | None = None) -> tuple[str, str]:
     """(status, rejection reason) for an extra document Didit approved.
 
     Didit's own session already proved the document is genuine and that its
@@ -1514,7 +1542,7 @@ def _review_additional_document(verification: IdentityVerification, extracted: d
     unmet = _unmet_request(extracted.get('document_issuing_country'), extracted.get('document_type'), request)
     if unmet:
         return 'rejected', unmet
-    return _bind_to_person(verification, extracted, decision)
+    return _bind_to_person(verification, extracted, decision, precomputed)
 
 
 _DEFAULT_ADDITIONAL_REQUEST = {'id_country': '', 'document_types': ['ID', 'P']}
@@ -1642,6 +1670,9 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
     )
     if status == 'rejected' and not review_reason and 'document_capture_holder' not in risk_factors:
         review_reason = user_facing_decline_reason(response_payload)
+    precomputed_face = None
+    if status == 'verified' and account_type != 'business':
+        precomputed_face = precompute_same_face(verification, extracted, response_payload)
     from django.db import transaction
     # One per-user lock for everything that records a Didit result: extra
     # documents of different people can never both pass, and a registration
@@ -1658,10 +1689,11 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
             # replaced the webhook's default with the rail's exact requirement.
             verification.risk_factors = {**(verification.risk_factors or {}), 'document_request': request_now}
         if verification.is_additional_document and status == 'verified':
-            status, review_reason = _review_additional_document(verification, extracted, response_payload)
+            status, review_reason = _review_additional_document(verification, extracted, response_payload,
+                                                                precomputed_face)
         elif status == 'verified' and (verification.risk_factors or {}).get('account_type') != 'business':
             # A primary verified after an extra document must be the same person too.
-            status, review_reason = _bind_to_person(verification, extracted, response_payload)
+            status, review_reason = _bind_to_person(verification, extracted, response_payload, precomputed_face)
         verification.status = status
         if status == 'verified' and verification.verified_at is None:
             verification.verified_at = timezone.now()

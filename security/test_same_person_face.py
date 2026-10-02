@@ -180,6 +180,25 @@ class SamePersonFaceTests(TestCase):
         with mock.patch.object(didit, '_didit_request', side_effect=down):
             self.assertEqual(didit._bind_to_person(primary, _extracted(), _decision()), ('pending', ''))
 
+    def test_the_comparison_runs_before_the_lock_and_is_reused_inside_it(self):
+        primary = _document(self.user, 'V-19')
+        FaceReference.objects.create(user=self.user, identity_verification=primary, s3_key='k', sha256='0' * 64,
+                                     source='didit_liveness')
+        extra = _document(self.user, 'P-19', status='pending', is_additional_document=True)
+        precomputed = didit.precompute_same_face(extra, _extracted(), _decision())
+        self.assertEqual(precomputed, (primary.pk, didit.FACE_MATCH))
+        self.rek.compare_faces.reset_mock()
+        self.assertEqual(didit._review_additional_document(extra, _extracted(), _decision(), precomputed),
+                         ('verified', ''))
+        self.rek.compare_faces.assert_not_called()
+        # The anchor changed meanwhile: compared again against the new one.
+        self.assertEqual(didit._review_additional_document(extra, _extracted(), _decision(), (-1, 'match')),
+                         ('verified', ''))
+        self.rek.compare_faces.assert_called_once()
+        # Nothing to compare: different data, or already verified.
+        self.assertIsNone(didit.precompute_same_face(extra, _extracted(verified_last_name='GOMEZ'), _decision()))
+        self.assertIsNone(didit.precompute_same_face(primary, _extracted(), _decision()))
+
     def test_an_already_verified_document_is_not_compared_again(self):
         _document(self.user, 'V-7')
         extra = _document(self.user, 'P-7', is_additional_document=True)  # verified earlier
@@ -445,6 +464,19 @@ class FaceBlocklistTests(TestCase):
             self.sync()
         self.assertEqual([call[1] for call in self.calls if call[0] == 'DELETE'],
                          ['/v3/lists/face-list/entries/orphan/'])
+
+    def test_the_reconcile_keeps_cleaning_up_for_a_week_after_a_ban_is_lifted(self):
+        from security.didit_blocklist import reconcile_face_blocklist
+        ban = self.ban()
+        with mock.patch('security.tasks.sync_face_blocklist.delay'):
+            ban.soft_delete()
+        with mock.patch('security.didit_blocklist.sync_face_blocklist') as sync:
+            reconcile_face_blocklist()
+        sync.assert_called_once_with(self.user.pk)
+        UserBan.all_objects.filter(pk=ban.pk).update(deleted_at=timezone.now() - timezone.timedelta(days=8))
+        with mock.patch('security.didit_blocklist.sync_face_blocklist') as sync:
+            reconcile_face_blocklist()
+        sync.assert_not_called()
 
     def test_one_refused_session_does_not_keep_the_others_off(self):
         self.ban()

@@ -15,10 +15,11 @@ ban is lifted. Only the face: a reused document is already a review hold
 Each ban change queues sync_face_blocklist; reconcile_face_blocklist runs
 hourly for whatever that missed. Both are idempotent.
 """
+import hashlib
 import logging
 
 import requests
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -96,8 +97,16 @@ def sync_face_blocklist(user_id) -> None:
     from django.contrib.auth import get_user_model
     failure = None
     with transaction.atomic():
-        # One sync per user at a time: never two entries for one session.
-        get_user_model().all_objects.select_for_update().filter(pk=user_id).first()
+        # One sync per user at a time: never two entries for one session. Its
+        # own advisory lock, not the user's row: Didit calls can take a while,
+        # and withdrawals lock that row.
+        if connection.vendor == 'postgresql':
+            lock_id = int.from_bytes(hashlib.sha256(f'face-blocklist:{user_id}'.encode()).digest()[:8],
+                                     'big', signed=True)
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT pg_advisory_xact_lock(%s)', [lock_id])
+        else:
+            get_user_model().all_objects.select_for_update().filter(pk=user_id).first()
         active = list(DiditFaceBlocklistEntry.objects.filter(user_id=user_id, removed_at__isnull=True))
         if blocks_face(user_id):
             missing = _verified_sessions(user_id) - {entry.session_id for entry in active}
@@ -146,14 +155,24 @@ def sync_face_blocklist(user_id) -> None:
         raise failure
 
 
+LIFTED_CLEANUP_DAYS = 7
+
+
 def reconcile_face_blocklist() -> int:
-    """Sync every user with a live permanent ban or an active entry. Returns
-    how many failed (retried on the next run)."""
+    """Sync every user with a live permanent ban or an active entry, and for
+    LIFTED_CLEANUP_DAYS every user whose permanent ban was lifted or expired
+    (an untracked entry has no row to keep them listed). Returns how many
+    failed (retried on the next run)."""
+    from datetime import timedelta
+    now = timezone.now()
     banned = set(UserBan.objects.filter(ban_type='permanent').filter(
-        Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())).values_list('user_id', flat=True))
+        Q(expires_at__isnull=True) | Q(expires_at__gt=now)).values_list('user_id', flat=True))
     listed = set(DiditFaceBlocklistEntry.objects.filter(removed_at__isnull=True).values_list('user_id', flat=True))
+    since = now - timedelta(days=LIFTED_CLEANUP_DAYS)
+    lifted = set(UserBan.all_objects.filter(ban_type='permanent').filter(
+        Q(deleted_at__gte=since) | Q(expires_at__gte=since, expires_at__lte=now)).values_list('user_id', flat=True))
     failed = 0
-    for user_id in sorted(banned | listed):
+    for user_id in sorted(banned | listed | lifted):
         try:
             sync_face_blocklist(user_id)
         except Exception:
