@@ -20,6 +20,14 @@ def reconcile_face_blocklist():
     return reconcile()
 
 
+@shared_task(name='security.retry_pending_same_face')
+def retry_pending_same_face():
+    """Hourly: documents left pending because their face comparison could not
+    run (AWS or Didit unreachable); Didit sends the decision webhook once."""
+    from .didit import retry_pending_same_face as retry
+    return retry()
+
+
 @shared_task(name='security.purge_face_check_evidence')
 def purge_face_check_evidence():
     """Daily: drop frames of passed Confío Face checks past their retention."""
