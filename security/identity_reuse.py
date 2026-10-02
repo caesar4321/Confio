@@ -21,6 +21,14 @@ from .models import IdentityVerification, SuspiciousActivity, UserBan, banned_ph
 
 TRIGGER = 'identity_reuse_active_ban'
 PHONE_TRIGGER = 'phone_reuse_active_ban'
+DUPLICATED_FACE_TRIGGER = 'didit_duplicated_face'
+ACTIONS = {
+    TRIGGER: 'New outgoing activity restricted pending identity review.',
+    PHONE_TRIGGER: ('New outgoing activity restricted pending review: this verified phone '
+                    'number belonged to a banned account.'),
+    DUPLICATED_FACE_TRIGGER: ('New outgoing activity restricted pending review: Didit found this face '
+                              "in another user's approved verification."),
+}
 MESSAGE = 'Las salidas de tu cuenta están temporalmente restringidas. Contacta con soporte para revisar tu cuenta.'
 
 
@@ -173,13 +181,22 @@ def outgoing_identity_restriction(user):
         for ban in _live_bans().filter(user_id__in=others.values('user_id')):
             binding = [country, kind, number, *_ban_binding(ban)]
             fingerprint = hashlib.sha256(json.dumps(binding).encode()).hexdigest()
-            matches[fingerprint] = (ban, TRIGGER)
+            matches[fingerprint] = (TRIGGER, ban)
     phone_hash = banned_phone_hash(getattr(user, 'phone_key', None))
     if phone_hash:
         for ban in _live_bans().filter(phone_hash=phone_hash).exclude(user_id=user.pk):
             binding = ['phone', phone_hash, *_ban_binding(ban)]
             fingerprint = hashlib.sha256(json.dumps(binding).encode()).hexdigest()
-            matches[fingerprint] = (ban, PHONE_TRIGGER)
+            matches[fingerprint] = (PHONE_TRIGGER, ban)
+    # A face Didit already approved for another user, on any of this user's
+    # verified personal documents, whichever was verified first. No ban
+    # needed: one person behind two accounts is itself the review.
+    flagged = IdentityVerification.all_objects.filter(
+        user_id=user.pk, status='verified', risk_factors__has_key='duplicated_face',
+    ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+    for verification_id in flagged.values_list('pk', flat=True):
+        fingerprint = hashlib.sha256(json.dumps(['duplicated_face', verification_id]).encode()).hexdigest()
+        matches[fingerprint] = (DUPLICATED_FACE_TRIGGER, None)
     if not matches:
         return ''
     held = False
@@ -187,7 +204,7 @@ def outgoing_identity_restriction(user):
         # All automatic case creation takes this same lock; simultaneous
         # requests cannot create conflicting review decisions for one match.
         get_user_model().objects.select_for_update().get(pk=user.pk)
-        for fingerprint, (ban, trigger) in matches.items():
+        for fingerprint, (trigger, ban) in matches.items():
             case = SuspiciousActivity.objects.filter(
                 user=user, detection_data__trigger=trigger,
                 detection_data__match_key=fingerprint).order_by('-pk').first()
@@ -196,11 +213,11 @@ def outgoing_identity_restriction(user):
                     user=user, activity_type='multiple_accounts', status='pending',
                     severity_score=9,
                     detection_data={'trigger': trigger, 'match_key': fingerprint,
-                                    'matched_user_id': ban.user_id, 'ban_id': ban.pk},
-                    action_taken=('New outgoing activity restricted pending review: this verified phone '
-                                  'number belonged to a banned account.' if trigger == PHONE_TRIGGER else
-                                  'New outgoing activity restricted pending identity review.'))
-                case.related_users.add(ban.user_id)
+                                    'matched_user_id': ban.user_id if ban else None,
+                                    'ban_id': ban.pk if ban else None},
+                    action_taken=ACTIONS[trigger])
+                if ban is not None:
+                    case.related_users.add(ban.user_id)
             released = (case.status == 'dismissed' and case.investigated_by_id is not None
                         and bool(case.investigation_notes.strip()))
             held = held or not released

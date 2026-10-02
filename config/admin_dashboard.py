@@ -1898,6 +1898,9 @@ from security.models import FaceReference, FaceCheck
 from security.admin import FaceReferenceAdmin, FaceCheckAdmin
 confio_admin_site.register(FaceReference, FaceReferenceAdmin)
 confio_admin_site.register(FaceCheck, FaceCheckAdmin)
+from security.models import DiditFaceBlocklistEntry
+from security.admin import DiditFaceBlocklistEntryAdmin
+confio_admin_site.register(DiditFaceBlocklistEntry, DiditFaceBlocklistEntryAdmin)
 confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)

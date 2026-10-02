@@ -668,6 +668,45 @@ class UserBan(SoftDeleteModel):
         return True
 
 
+class DiditFaceBlocklistEntry(models.Model):
+    """A verified Didit session whose face Confío put on Didit's face blocklist.
+
+    Only for permanently banned accounts (security/didit_blocklist.py): a
+    match declines the KYC of any new account with that face, whatever
+    document it brings. Kept so the entry can be removed if the ban is lifted.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='didit_face_blocklist_entries')
+    session_id = models.CharField(max_length=64)
+    list_uuid = models.CharField(max_length=64)
+    entry_uuid = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['session_id'], condition=Q(removed_at__isnull=True),
+            name='one_active_face_block_per_session')]
+
+    def __str__(self):
+        return f'{self.user_id} {self.session_id}'
+
+
+@receiver(post_save, sender='security.UserBan')
+def _sync_face_blocklist_on_ban_change(sender, instance, **kwargs):
+    """Issuing or lifting a ban updates Didit after commit; the hourly
+    reconcile (security.reconcile_face_blocklist) retries what fails here."""
+    def enqueue(user_id=instance.user_id):
+        try:
+            from .tasks import sync_face_blocklist
+            sync_face_blocklist.delay(user_id)
+        except Exception:  # broker trouble: the reconcile picks it up
+            import logging
+            logging.getLogger(__name__).exception('Face blocklist sync not queued: user=%s', user_id)
+    transaction.on_commit(enqueue, robust=True)
+
+
 class RegistrationRestriction(models.Model):
     """Exact source denylist for new accounts; existing users keep access."""
 

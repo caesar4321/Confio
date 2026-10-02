@@ -603,8 +603,8 @@ class SuspiciousActivityAdmin(admin.ModelAdmin):
     mark_as_confirmed.short_description = "Mark as confirmed"
     
     def mark_as_dismissed(self, request, queryset):
-        from .identity_reuse import PHONE_TRIGGER, TRIGGER
-        identity_cases = queryset.filter(detection_data__trigger__in=[TRIGGER, PHONE_TRIGGER])
+        from .identity_reuse import ACTIONS
+        identity_cases = queryset.filter(detection_data__trigger__in=list(ACTIONS))
         # A bulk dismissal without a documented reviewer is not an override.
         # Operators first add investigation notes on each case's detail page.
         releasable_ids = [case.pk for case in identity_cases if case.investigation_notes.strip()]
@@ -1593,6 +1593,20 @@ class FaceReferenceAdmin(admin.ModelAdmin):
     readonly_fields = ('user', 'identity_verification', 's3_key', 'sha256', 'source', 'is_active', 'created_at')
 
     def has_add_permission(self, request):
+        return False
+
+
+class DiditFaceBlocklistEntryAdmin(admin.ModelAdmin):
+    """Read-only: entries follow permanent bans (security/didit_blocklist.py)."""
+    list_display = ('id', 'user', 'session_id', 'created_at', 'removed_at')
+    list_filter = ('removed_at',)
+    search_fields = ('user__username', 'user__email', 'session_id')
+    readonly_fields = ('user', 'session_id', 'list_uuid', 'entry_uuid', 'created_at', 'removed_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
 

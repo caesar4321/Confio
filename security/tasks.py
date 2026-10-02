@@ -1,6 +1,25 @@
 from celery import shared_task
 
 
+@shared_task(name='security.sync_face_blocklist', bind=True, max_retries=5)
+def sync_face_blocklist(self, user_id):
+    """Put a permanently banned user's faces on Didit's blocklist, or take
+    them off once the ban is lifted."""
+    from .didit import DiditAPIError
+    from .didit_blocklist import sync_face_blocklist as sync
+    try:
+        sync(user_id)
+    except DiditAPIError as exc:
+        raise self.retry(exc=exc, countdown=60 * 2 ** self.request.retries)
+
+
+@shared_task(name='security.reconcile_face_blocklist')
+def reconcile_face_blocklist():
+    """Hourly: whatever the per-ban sync missed (broker down, Didit down)."""
+    from .didit_blocklist import reconcile_face_blocklist as reconcile
+    return reconcile()
+
+
 @shared_task(name='security.purge_face_check_evidence')
 def purge_face_check_evidence():
     """Daily: drop frames of passed Confío Face checks past their retention."""
