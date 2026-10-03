@@ -305,10 +305,32 @@ class User(AbstractUser, SoftDeleteModel):
     @property
     def requires_backup_completion(self):
         """
-        Users are only considered safe once a successful backup verification
-        has been reported back to the server.
+        Gate V2 setup on a confirmed backup, without trapping legacy-only
+        accounts before they can reach the V1-to-V2 migration flow.
         """
-        return self.backup_verified_at is None
+        if self.backup_verified_at is not None:
+            return False
+
+        # V1 is reconstructed through authenticated derivation, not a V2
+        # master-secret backup. Sending it to V2 backup setup makes the legacy
+        # address an impossible V2 anchor. This is only a routing exemption:
+        # do not mark a backup verified or a wallet migrated. Migration still
+        # backs up its destination before moving funds; transaction guards
+        # independently require is_keyless_migrated.
+        accounts = list(self.accounts.filter(deleted_at__isnull=True).values(
+            'account_type', 'account_index', 'algorand_address',
+            'bsc_address', 'is_keyless_migrated',
+        ))
+        has_primary = any(
+            row['account_type'] == 'personal' and row['account_index'] == 0
+            for row in accounts
+        )
+        legacy_only = has_primary and all(
+            row['algorand_address'] and not row['bsc_address']
+            and not row['is_keyless_migrated']
+            for row in accounts
+        )
+        return not legacy_only
 
     # ── Status tier (referral-count-gated) ──────────────────────────
     # Tier thresholds: 1 → early_supporter, 3 → community_builder, 10 → embajador
