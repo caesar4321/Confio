@@ -13,6 +13,8 @@ import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
+import { CategoryPrompt } from '../components/CategoryChips';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
@@ -485,6 +487,15 @@ export const TransactionSuccessScreen = () => {
           </View>
         </ViewShot>
 
+        {/* "¿Qué fue este pago?" sits OUTSIDE the ViewShot so it never appears
+            in the shared receipt image; asks only for confirmed/pending
+            spending (server-decided), never for received or failed. */}
+        {(transactionData.type === 'sent' || transactionData.type === 'payment') && (
+          <View style={styles.promptWrap}>
+            <CategoryPrompt internalId={(transactionData as any).internalId} status={settledStatus} />
+          </View>
+        )}
+
         {/* Invitation urgency — the one loud block, only when money can expire */}
         {needsInvitation && (
           <View style={styles.invitationCard}>
@@ -530,12 +541,14 @@ export const TransactionSuccessScreen = () => {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.ctaWrap}>
-          <TouchableOpacity style={styles.cta} onPress={handleGoHome} activeOpacity={0.85} accessibilityRole="button">
-            <Text style={styles.ctaText}>Listo</Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
+
+      {/* Listo pinned outside the scroll: visible on small phones (design 2F). */}
+      <SafeAreaView edges={['bottom']} style={styles.ctaPinned}>
+        <TouchableOpacity style={styles.cta} onPress={handleGoHome} activeOpacity={0.85} accessibilityRole="button">
+          <Text style={styles.ctaText}>Listo</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
 
       {/* Technical Details Modal */}
       <Modal
@@ -738,12 +751,18 @@ const styles = StyleSheet.create({
     color: colors.gray700,
   },
   // Primary CTA pill
-  ctaWrap: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  promptWrap: {
+    marginHorizontal: 24,
+    marginBottom: 8,
+  },
+  ctaPinned: {
     alignItems: 'center',
-    paddingTop: 28,
+    paddingTop: 12,
+    paddingBottom: 16,
     paddingHorizontal: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.white,
   },
   cta: {
     backgroundColor: colors.primary,

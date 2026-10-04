@@ -28,6 +28,13 @@ CLIENT_EMITTABLE_EVENTS = frozenset({
     'receive_rail_interest',
     'local_rail_interest',
     'local_rail_blocked_interest',
+    # "Tu mes" month summary + category chips (design R15)
+    'tu_mes_opened',
+    'hero_cashflow_tapped',
+    'category_chip_shown',
+    'category_chip_answered',
+    'category_chip_skipped',
+    'category_chip_dismissed',
 })
 
 

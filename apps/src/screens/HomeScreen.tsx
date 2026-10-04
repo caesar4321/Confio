@@ -72,6 +72,9 @@ import {
 } from '../utils/deferredReferralRegistration';
 import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 import { PendingIncomingCard, usePendingIncoming } from '../components/PendingIncomingCard';
+import { HeroMonthLine } from '../components/HeroMonthLine';
+import { useMonthHeroLine } from '../hooks/useMonthHeroLine';
+import { AnalyticsService } from '../services/analyticsService';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const BALANCE_VISIBILITY_KEY = 'balance_visibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
@@ -186,6 +189,7 @@ export const HomeScreen = () => {
     activeAccount,
     accounts,
     refreshAccounts,
+    isLoading: accountLoading,
   } = useAccount();
 
   // Use atomic account switching
@@ -263,6 +267,12 @@ export const HomeScreen = () => {
   const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
   const isPersonalAccount = (activeAccount?.type || '').toLowerCase() === 'personal';
   const isEmployeeDelegate = !!activeAccount?.isEmployee;
+  // "Tu mes" hero line — owners only (employees never see the month view).
+  const { summary: heroMonth } = useMonthHeroLine(
+    activeAccount?.id,
+    !activeAccount?.isEmployee,
+    accountLoading || switchState.isLoading,
+  );
   const { data: billingSummaryData, refetch: refetchBillingSummary } = useQuery(GET_MY_BILLING_SUMMARY, {
     skip: !isAuthReady || !isPersonalAccount,
     fetchPolicy: 'cache-and-network',
@@ -1242,6 +1252,20 @@ export const HomeScreen = () => {
               {displayedPortfolioBalance}
             </Text>
           </Animated.View>
+
+          {/* Month line: always in US$ whatever the balance toggle shows (5A),
+              masked with the balance (6A), rendered from cache only so the
+              verbs below never jump (2A). */}
+          {heroMonth && (
+            <HeroMonthLine
+              summary={heroMonth}
+              masked={!showBalance || !canViewBalance}
+              onPress={() => {
+                AnalyticsService.logFunnelEvent('hero_cashflow_tapped');
+                navigation.navigate('MonthSummary', { masked: !showBalance || !canViewBalance });
+              }}
+            />
+          )}
 
           {/* The two verbs sit ON the brand field, where the coin ring runs
               behind them — part of the hero, not a white slab under it. The

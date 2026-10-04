@@ -455,3 +455,60 @@ class CategoryLabelTests(__import__('django.test', fromlist=['TestCase']).TestCa
         self.assertEqual(list(CounterpartyRule.objects.values_list('account_id', 'counterparty_key', 'category')),
                          [(self.account.id, f'user:{self.friend.id}', 'food')])
         self.assertEqual(Account.objects.filter(user=self.user).count(), 1)
+
+
+class MonthMovementsTests(CategoryLabelTests):
+    """monthMovements lists add up to the summary number they were opened from."""
+
+    def _movements(self, filter_by, value=None):
+        from django.utils import timezone
+        from users.cashflow_schema import MonthSummaryQuery
+        now = timezone.now()
+        return self._call(MonthSummaryQuery().resolve_month_movements, info=self._info(), year=now.year,
+                          month=now.month, timezone='UTC', filter_by=filter_by, value=value)
+
+    def test_lists_match_their_totals(self):
+        from decimal import Decimal
+        a, b = self.pay('10.00'), self.pay('4.00')
+        self._categorize(a, 'food', 'movement')
+        spending = self._movements('spending')
+        self.assertEqual(sum(Decimal(m.amount_usd) for m in spending), Decimal('14.00'))
+        self.assertEqual([m.amount_usd for m in self._movements('category', 'food')], ['10.00'])
+        uncategorized = self._movements('uncategorized')
+        self.assertEqual([(m.amount_usd, m.counterparty_name) for m in uncategorized], [('4.00', 'Doña Rosa')])
+        self.assertEqual(len(self._movements('counterparty', f'user:{self.friend.id}')), 2)
+        self.assertEqual(self._movements('nonsense'), [])
+        # each item carries the id the chips/edit flow use
+        self.assertEqual({int(m.id) for m in spending}, {a.pk, b.pk})
+
+    def test_employees_get_no_movements(self):
+        self.jwt = {'account_type': 'business', 'account_index': 0, 'business_id': 777}
+        self.pay('1.00')
+        self.assertEqual(self._movements('spending'), [])
+
+    def _receive(self, amount):
+        from django.utils import timezone
+        from users.models_unified import UnifiedTransactionTable
+        return UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount=amount, token_type='USDT', status='CONFIRMED',
+            sender_user=self.friend, sender_type='user', counterparty_user=self.user, counterparty_type='user',
+            from_address=self.other, to_address=self.account.bsc_address,
+            sender_display_name='Doña Rosa', transaction_date=timezone.now())
+
+    def test_sub_cent_amounts_still_add_up_to_the_summary(self):
+        from decimal import Decimal
+        for _ in range(6):
+            self.pay('0.991')
+        listed = sum(Decimal(m.amount_usd) for m in self._movements('spending'))
+        self.assertEqual(Decimal(self._summary().current.spending_usd), listed)
+
+    def test_see_all_people_includes_incoming_and_outgoing(self):
+        self.pay('3.00')
+        self._receive('5.00')
+        self.assertEqual(sorted(m.direction for m in self._movements('counterparties')), ['received', 'sent'])
+        self.assertEqual(self._movements('spending')[0].direction, 'sent')
+
+    def test_own_money_rows_open_only_their_bucket(self):
+        self.pay('3.00')
+        self.assertEqual(self._movements('own_money', 'savings'), [])
+        self.assertEqual(self._movements('own_money', 'nonsense'), [])

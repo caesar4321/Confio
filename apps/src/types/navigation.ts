@@ -315,6 +315,16 @@ export type MainStackParamList = {
     transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion' | 'ramp';
     transactionData?: any; // You can make this more specific based on your data structure
   };
+  // "Tu mes": month summary and the movement lists behind each number
+  MonthSummary: { year?: number; month?: number; masked?: boolean } | undefined;
+  MonthMovements: {
+    year: number;
+    month: number;
+    filterBy: 'income' | 'spending' | 'category' | 'uncategorized' | 'counterparty' | 'counterparties' | 'own_money';
+    value?: string;
+    title: string;
+    masked?: boolean;
+  };
   TransactionProcessing: {
     transactionData: {
       type: 'sent' | 'payment';

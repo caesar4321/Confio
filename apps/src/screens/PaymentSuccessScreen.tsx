@@ -23,6 +23,8 @@ import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { formatTokenLabel } from '../utils/tokenDisplay';
+import { CategoryPrompt } from '../components/CategoryChips';
+import { useSettlementStatus } from '../hooks/useSettlementStatus';
 
 type PaymentSuccessRouteProp = RouteProp<{
   PaymentSuccess: {
@@ -151,6 +153,9 @@ export const PaymentSuccessScreen = () => {
   };
 
   const isPending = transactionData.status === 'SUBMITTED' || !transactionData.transactionHash;
+  // Only feeds the category prompt: a payment that fails after the screen
+  // opened must stop asking what it was for.
+  const settledStatus = useSettlementStatus('payment', transactionData.internalId, transactionData.status);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -160,6 +165,12 @@ export const PaymentSuccessScreen = () => {
           amount={`$${transactionData.amount} ${formatCurrency(transactionData.currency)}`}
           hint={`Pagado en ${transactionData.merchant}`}
         />
+
+        {/* "¿Qué fue este pago?" — optional, asks only when the server says so
+            (never for failed payments); Listo below never depends on it. */}
+        <View style={styles.promptWrap}>
+          <CategoryPrompt internalId={transactionData.internalId} status={settledStatus} />
+        </View>
 
         {/* Compact receipt card: everything else is one quiet card. */}
         <View style={styles.card}>
@@ -234,12 +245,15 @@ export const PaymentSuccessScreen = () => {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.ctaWrap}>
-          <TouchableOpacity style={styles.cta} onPress={handleGoHome} activeOpacity={0.85} accessibilityRole="button">
-            <Text style={styles.ctaText}>Listo</Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
+
+      {/* Listo is pinned outside the scroll so it stays visible on small phones
+          even with the category prompt above the receipt (design 2F). */}
+      <View style={styles.ctaPinned}>
+        <TouchableOpacity style={styles.cta} onPress={handleGoHome} activeOpacity={0.85} accessibilityRole="button">
+          <Text style={styles.ctaText}>Listo</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Technical Details Modal */}
       <Modal
@@ -396,12 +410,18 @@ const styles = StyleSheet.create({
     color: colors.gray700,
   },
   // Primary CTA pill
-  ctaWrap: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  promptWrap: {
+    marginHorizontal: 24,
+    marginBottom: 16,
+  },
+  ctaPinned: {
     alignItems: 'center',
-    paddingTop: 28,
+    paddingTop: 12,
+    paddingBottom: 16,
     paddingHorizontal: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.white,
   },
   cta: {
     backgroundColor: colors.primary,
