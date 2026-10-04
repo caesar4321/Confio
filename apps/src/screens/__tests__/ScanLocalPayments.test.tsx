@@ -44,7 +44,7 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 const scan = (value: string) => mockScanner.onCodeScanned([{value}]);
 
-it.each([['BR','br_qr'],['AR','ar_qr'],['CO','co_qr']])('routes %s QR through server availability, without paying', async (country, methodId) => {
+it.each([['BR','br_qr'],['AR','ar_qr'],['CO','co_qr'],['BO','bo_qr']])('routes %s QR through server availability, without paying', async (country, methodId) => {
   mockQuery.mockResolvedValue({data: {localMoneyMethods: [{id: methodId, status: 'live'}]}});
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {tree = renderer.create(<ScanScreen />);});
@@ -192,5 +192,14 @@ it('stops an employee at a local QR before any server lookup (owner-only rail)',
   expect(mockQuery).not.toHaveBeenCalled();
   expect(mockNavigate).not.toHaveBeenCalled();
   expect(Alert.alert).toHaveBeenCalledWith('Solo para el dueño', expect.any(String), expect.any(Array), {cancelable: false});
+  await act(async () => tree.unmount());
+});
+it('routes encrypted Bolivia QR only after server approval', async () => {
+  mockQuery.mockResolvedValue({data:{localMoneyMethods:[{id:'bo_qr',status:'live'}]}});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree=renderer.create(<ScanScreen />);});
+  const raw='K6AEx9BgdJHPb3CfWLKYU9XhoSIRJvRX9Hw|1c8618ba4382fb49';
+  await act(async () => scan(raw));
+  expect(mockNavigate).toHaveBeenCalledWith('LocalSend',{methodId:'bo_qr',scannedQr:raw}); expect(mockInvoice).not.toHaveBeenCalled();
   await act(async () => tree.unmount());
 });

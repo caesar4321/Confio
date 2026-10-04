@@ -32,7 +32,7 @@ jest.mock('@react-navigation/native', () => ({useNavigation: () => ({navigate: m
 jest.mock('../../components/breb/BrebLocationGate', () => ({BrebLocationGate: ({children}: any) => children}));
 jest.mock('../../services/brebLocation', () => ({isBrebLocationFailure: (error: any) => Boolean(error?.brebLocation)}));
 jest.mock('../../apollo/queries', () => ({GET_MY_RAMP_ADDRESS: 'address'}));
-jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: {type: 'personal'}})}));
+jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: {id:'personal-1', type: 'personal'}})}));
 jest.mock('../../hooks/useSavingsPortfolio', () => ({useSavingsPortfolio: () => ({savings: {balanceUsd: 20}, cusdBalanceUsd: 30, usdtBalanceUsd: 100})}));
 jest.mock('../../components/PaymentQrScannerModal', () => ({PaymentQrScannerModal: 'Scanner'}));
 jest.mock('../../components/ramps/RampActionBar', () => ({RampActionBar: 'ActionBar'}));
@@ -55,6 +55,7 @@ jest.mock('../../services/localMoney', () => ({
   resolveLocalDestination: (...args: any[]) => mockResolve(...args),
 }));
 import Screen from '../LocalSendScreen';
+jest.mock('../BoliviaQrSendScreen', () => 'BoliviaQrSendScreen');
 
 beforeEach(() => {
   jest.clearAllMocks(); mockAccountStatus = 'none'; mockMethodId = 'co_breb';
@@ -622,4 +623,14 @@ it('does not silently turn pasted text containing letters into a bank account', 
   } finally {
     await act(async () => tree.unmount());
   }
+});
+
+it('routes Bolivia directly to its own QR flow with the scanned payload', async () => {
+  mockMethodId = 'bo_qr'; mockInitialQr = 'bank-qr';
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const screen = tree.root.findByType('BoliviaQrSendScreen' as any);
+  expect(screen.props.accountId).toBe('personal-1');
+  expect(screen.props.initialQr).toBe('bank-qr');
+  await act(async () => tree.unmount());
 });

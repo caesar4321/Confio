@@ -1,0 +1,22 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Stereum test console</h1>
+<p>Test records only. These operations never credit Confío wallets.</p>
+<p>Test mutations: <strong>{{ writes_enabled|yesno:"enabled,disabled" }}</strong>. Use only Stereum testnet credentials and test customer data.</p>
+<p>QR decoding displays the recipient encoded in the QR; it does not verify bank account ownership.</p>
+<p><a href="{% url 'admin:stereum_customer_console' %}">Register your test customer</a>, then choose “Customer Quote” to use that identity. “Quote” uses corporate treasury SELF.</p>
+<form method="post">{% csrf_token %}
+  {{ form.as_p }}
+  <input type="submit" value="Run test request">
+</form>
+{% if operation %}
+<h2>Result — {{ operation.status }}</h2>
+<p>Request: {{ operation.request_id }} · Provider resource: {{ operation.provider_id|default:"none" }}</p>
+{% if operation.error %}<p class="errornote">{{ operation.error }}</p>{% endif %}
+<pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ result }}</pre>
+<p><a href="{% url 'admin:stereum_test_console' %}">Start another request with a new UUID</a></p>
+{% endif %}
+<details><summary>Request examples</summary><pre>{{ examples }}</pre></details>
+<p>Use the operation list’s “Refresh provider status” action to reconcile a charge, payout or FX order.</p>
+<a href="{% url 'admin:ramps_stereumtestoperation_changelist' %}">Test operation history</a>
+{% endblock %}

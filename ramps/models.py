@@ -5,6 +5,59 @@ from django.db import models
 from users.models import SoftDeleteModel
 
 
+class StereumTestOperation(models.Model):
+    """Isolated test records: never a RampTransaction or a customer ledger credit."""
+
+    request_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    consumption_key = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    actor = models.ForeignKey('users.User', on_delete=models.PROTECT)
+    credential_scope = models.CharField(max_length=64)
+    action = models.CharField(max_length=32)
+    request_data = models.JSONField(default=dict)
+    response_data = models.JSONField(default=dict)
+    provider_id = models.CharField(max_length=160, blank=True)
+    status = models.CharField(max_length=24, default='prepared')
+    provider_status = models.CharField(max_length=80, blank=True)
+    error = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class StereumTestWebhook(models.Model):
+    digest = models.CharField(max_length=64, unique=True)
+    credential_scope = models.CharField(max_length=64)
+    payload = models.JSONField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+
+class StereumCustomer(models.Model):
+    """One sandbox customer per Confío user and provider credential."""
+
+    user = models.ForeignKey('users.User', on_delete=models.PROTECT)
+    credential_scope = models.CharField(max_length=64)
+    external_user_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    source_verification = models.ForeignKey('security.IdentityVerification', on_delete=models.PROTECT)
+    identity_fingerprint = models.CharField(max_length=64)
+    request_snapshot = models.JSONField()
+    status = models.CharField(max_length=24, default='validating')
+    validation_id = models.CharField(max_length=160, blank=True)
+    provider_customer_id = models.CharField(max_length=160, blank=True)
+    error = models.CharField(max_length=300, blank=True)
+    consent_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'credential_scope'], name='stereum_customer_user_scope'),
+            models.UniqueConstraint(fields=['credential_scope', 'provider_customer_id'],
+                condition=~models.Q(provider_customer_id=''), name='stereum_customer_provider_scope'),
+        ]
+
+
 class RampPaymentMethod(SoftDeleteModel):
     PROVIDER_TYPES = [
         ('bank', 'Traditional Bank'),

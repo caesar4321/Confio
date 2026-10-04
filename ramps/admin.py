@@ -5,6 +5,81 @@ from django.contrib import admin
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress, RampWebhookEvent
 
 
+from ramps.models import StereumTestOperation, StereumTestWebhook, StereumCustomer
+
+
+@admin.register(StereumTestOperation)
+class StereumTestOperationAdmin(admin.ModelAdmin):
+    change_list_template = 'admin/ramps/stereum_test_operations.html'
+    list_display = ('request_id', 'action', 'status', 'provider_status', 'actor', 'created_at')
+    list_filter = ('action', 'status')
+    readonly_fields = tuple(field.name for field in StereumTestOperation._meta.fields)
+    actions = ['refresh_status']
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_urls(self):
+        from django.urls import path
+        from .stereum_views import console
+        return [path('console/', self.admin_site.admin_view(console), name='stereum_test_console')] + super().get_urls()
+
+    @admin.action(description='Refresh provider status (no funds moved)', permissions=['view'])
+    def refresh_status(self, request, queryset):
+        from .stereum_client import StereumError
+        from .stereum_service import refresh
+        for operation in queryset.filter(actor=request.user):
+            try:
+                refresh(request.user, operation.request_id)
+            except StereumError as exc:
+                self.message_user(request, str(exc), level='ERROR')
+
+
+@admin.register(StereumTestWebhook)
+class StereumTestWebhookAdmin(admin.ModelAdmin):
+    list_display = ('digest', 'received_at')
+    readonly_fields = tuple(field.name for field in StereumTestWebhook._meta.fields)
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(StereumCustomer)
+class StereumCustomerAdmin(StereumTestWebhookAdmin):
+    list_display = ('user', 'status', 'created_at', 'updated_at')
+    readonly_fields = tuple(field.name for field in StereumCustomer._meta.fields)
+    change_list_template = 'admin/ramps/stereum_customer_list.html'
+
+    def get_urls(self):
+        from django.urls import path
+        from .stereum_views import customer_console
+        return [path('onboarding/', self.admin_site.admin_view(customer_console), name='stereum_customer_console')] + super().get_urls()
+
+
 @admin.register(KoyweBankInfo)
 class KoyweBankInfoAdmin(admin.ModelAdmin):
     list_display = ('name', 'bank_code', 'country_code', 'is_active', 'synced_at')

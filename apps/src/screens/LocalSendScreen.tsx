@@ -5,12 +5,11 @@ import {
   SafeAreaView,
   ScrollView,
   StatusBar,
-  Text,
-  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -29,6 +28,7 @@ import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { PaymentQrScannerModal } from '../components/PaymentQrScannerModal';
+import BoliviaQrSendScreen from './BoliviaQrSendScreen';
 import { formatRampMoney, formatRampRate, USD_UNIT } from '../utils/rampFormat';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
@@ -133,6 +133,17 @@ const initialsOf = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('') || '?';
 
 export default function LocalSendScreen() {
+  const {params} = useRoute<Route>();
+  const {activeAccount} = useAccount();
+  const navigation = useNavigation<Nav>();
+  if (params.methodId === 'bo_qr') {
+    if (!activeAccount?.id) return <View><Text>Selecciona tu cuenta personal.</Text></View>;
+    return <BoliviaQrSendScreen key={activeAccount.id} accountId={String(activeAccount.id)} initialQr={params.scannedQr} onBack={() => navigation.goBack()} />;
+  }
+  return <InfiniaLocalSendScreen />;
+}
+
+function InfiniaLocalSendScreen() {
   const navigation = useNavigation<Nav>();
   const { methodId, scannedQr: initialQr } = useRoute<Route>().params;
   const { width } = useWindowDimensions();
