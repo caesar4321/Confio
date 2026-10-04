@@ -20,6 +20,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useQuery } from '@apollo/client';
 import { GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
+import { colors } from '../config/theme';
 
 // Single navigator instance
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
@@ -69,7 +70,7 @@ export const BottomTabNavigator = () => {
       onProfilePress={profileMenu.openProfileMenu}
       onNotificationPress={handleNotificationPress}
       onMessagePress={handleMessagesPress}
-      backgroundColor="#34d399"
+      backgroundColor={colors.heroField}
       showBackButton={false}
       isLight={false}
       unreadNotifications={unreadNotifications}
@@ -90,7 +91,7 @@ export const BottomTabNavigator = () => {
       title="Mi Perfil"
       onProfilePress={undefined}
       onNotificationPress={undefined}
-      backgroundColor="#34d399"
+      backgroundColor={colors.heroField}
       showBackButton={false}
       isLight={true}
       unreadNotifications={0}
@@ -181,7 +182,7 @@ export const BottomTabNavigator = () => {
                 navigation={navigation}
                 isHomeScreen={false}
                 title="Invertir"
-                backgroundColor="#34d399"
+                backgroundColor={colors.heroField}
                 showBackButton={false}
                 isLight
                 unreadNotifications={0}

@@ -207,7 +207,7 @@ export const EditBusinessScreen = () => {
         <Header
           navigation={navigation as any}
           title="Editar Negocio"
-          backgroundColor={colors.primary}
+          backgroundColor={colors.heroField}
           isLight
           showBackButton
         />
@@ -262,7 +262,7 @@ export const EditBusinessScreen = () => {
       <Header
         navigation={navigation as any}
         title="Editar Negocio"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />
@@ -453,7 +453,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
   },
   verifiedHero: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
   },
   verifiedHeroInner: {

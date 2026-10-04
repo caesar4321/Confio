@@ -28,8 +28,8 @@ type Props = {
  */
 export const BrandFieldBackground = ({
   id,
-  fromColor = colors.primary,
-  toColor = colors.primaryDark,
+  fromColor = colors.heroField,
+  toColor = colors.heroFieldDark,
   ringCx = '105%',
   ringCy = '30%',
   ringR = 90,

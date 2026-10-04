@@ -424,7 +424,7 @@ export const ProfileScreen = () => {
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
         {/* Header Section — brand field: same vertical gradient + coin ring
-            family as Home; top edge is exactly colors.primary so it meets the
+            family as Home; top edge is exactly colors.heroField so it meets the
             flat nav header without a seam. Padding lives on headerInner (Yoga
             insets absolute children by the parent's padding). */}
         <View
@@ -444,8 +444,8 @@ export const ProfileScreen = () => {
           >
             <Defs>
               <SvgLinearGradient id="profileField" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={colors.primary} />
-                <Stop offset="1" stopColor={colors.primaryDark} />
+                <Stop offset="0" stopColor={colors.heroField} />
+                <Stop offset="1" stopColor={colors.heroFieldDark} />
               </SvgLinearGradient>
             </Defs>
             <Rect width="100%" height="100%" fill="url(#profileField)" />
@@ -1027,7 +1027,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
     overflow: 'hidden',

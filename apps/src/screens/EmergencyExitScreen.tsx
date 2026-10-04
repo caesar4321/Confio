@@ -881,8 +881,8 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
+      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }}>
         <View style={styles.header}>
           <BrandFieldBackground id="emergencyField" ringCy="30%" />
           <View style={styles.headerInner}>
@@ -1242,7 +1242,7 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
-  header: { backgroundColor: colors.primary, overflow: 'hidden' },
+  header: { backgroundColor: colors.heroField, overflow: 'hidden' },
   headerInner: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

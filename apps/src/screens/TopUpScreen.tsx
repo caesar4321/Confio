@@ -454,7 +454,7 @@ const TopUpScreen = () => {
   if (!countryCode) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <RampReveal delay={0}>
             <RampHero
@@ -521,7 +521,7 @@ const TopUpScreen = () => {
   return (
     <>
       <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <RampReveal delay={0}>
         <RampHero

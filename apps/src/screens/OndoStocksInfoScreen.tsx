@@ -251,7 +251,7 @@ export const OndoStocksInfoScreen = () => {
       <Header
         navigation={navigation as any}
         title="Acciones de EE.UU."
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />

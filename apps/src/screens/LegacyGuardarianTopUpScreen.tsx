@@ -405,7 +405,7 @@ const TopUpScreen = () => {
       <Header
         navigation={navigation as any}
         title="Recargar"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
         rightAccessory={(
@@ -428,8 +428,8 @@ const TopUpScreen = () => {
           <Svg style={StyleSheet.absoluteFill}>
             <Defs>
               <SvgLinearGradient id="guardarianTopUpField" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={colors.primary} />
-                <Stop offset="1" stopColor={colors.primaryDark} />
+                <Stop offset="0" stopColor={colors.heroField} />
+                <Stop offset="1" stopColor={colors.heroFieldDark} />
               </SvgLinearGradient>
             </Defs>
             <Rect width="100%" height="100%" fill="url(#guardarianTopUpField)" />
@@ -688,7 +688,7 @@ const TopUpScreen = () => {
 
 const styles = StyleSheet.create({
   brandField: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
     marginHorizontal: -20,
     marginTop: -24,

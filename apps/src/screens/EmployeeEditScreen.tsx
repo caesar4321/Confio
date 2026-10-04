@@ -82,7 +82,7 @@ export const EmployeeEditScreen = () => {
       <Header
         navigation={navigation as any}
         title="Editar Empleado"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />

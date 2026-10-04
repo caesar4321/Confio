@@ -268,7 +268,7 @@ describe('membership checkout', () => {
     // Hand-rolling a header here previously dropped the iOS top inset and left
     // dark-content status bar text on an emerald band.
     const header = tree.root.findByType(Header);
-    expect(header.props.backgroundColor).toBe('#34D399');
+    expect(header.props.backgroundColor).toBe('#34D399'); // hero field
     expect(header.props.isLight).toBe(true);
     expect(header.props.showBackButton).toBe(true);
     await act(async () => { tree.unmount(); });

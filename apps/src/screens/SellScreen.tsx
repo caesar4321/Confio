@@ -575,7 +575,7 @@ export const SellScreen = () => {
   if (!countryCode) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <RampReveal delay={0}>
             <RampHero
@@ -624,7 +624,7 @@ export const SellScreen = () => {
   if (isBoliviaOffRampUnavailable) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <RampReveal delay={0}>
             <RampHero
@@ -657,7 +657,7 @@ export const SellScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* ─── Hero with gradient ─── */}
         <RampReveal delay={0}>

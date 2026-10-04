@@ -421,6 +421,9 @@ export const AccountDetailScreen = () => {
     balanceHidden: "•••••••",
     color: isConfio ? colors.secondary : colors.primary,
     colorDark: isConfio ? colors.secondaryDark : colors.primaryDark,
+    // Brand field (status bar, balance backdrop): darker hero tokens (DT1).
+    fieldColor: isConfio ? colors.secondary : colors.heroField,
+    fieldColorDark: isConfio ? colors.secondaryDark : colors.heroFieldDark,
     textColor: isConfio ? colors.secondaryText : colors.primaryText,
     address: accountAddress,
     addressShort: accountAddress ? `${accountAddress.slice(0, 6)}...${accountAddress.slice(-6)}` : '',
@@ -1991,7 +1994,7 @@ export const AccountDetailScreen = () => {
       <Header
         navigation={navigation as any}
         title={account.name}
-        backgroundColor={account.color}
+        backgroundColor={account.fieldColor}
         isLight={true}
         showBackButton={true}
         // Same convention as Acciones de EE.UU.: "¿Cómo funciona?" is the ?
@@ -2013,7 +2016,7 @@ export const AccountDetailScreen = () => {
           Vertical gradient meets the flat nav header without a seam; padding
           lives on balanceInner (Yoga insets absolute children by padding). */}
       <View
-        style={[styles.balanceSection, { backgroundColor: account.color }]}
+        style={[styles.balanceSection, { backgroundColor: account.fieldColor }]}
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
           setFieldSize((prev) =>
@@ -2033,8 +2036,8 @@ export const AccountDetailScreen = () => {
         >
           <Defs>
             <SvgLinearGradient id={`accountField-${route.params.accountType}`} x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={account.color} />
-              <Stop offset="1" stopColor={account.colorDark} />
+              <Stop offset="0" stopColor={account.fieldColor} />
+              <Stop offset="1" stopColor={account.fieldColorDark} />
             </SvgLinearGradient>
           </Defs>
           <Rect width="100%" height="100%" fill={`url(#accountField-${route.params.accountType})`} />

@@ -72,7 +72,7 @@ import {
 } from '../utils/deferredReferralRegistration';
 import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 import { PendingIncomingCard, usePendingIncoming } from '../components/PendingIncomingCard';
-import { HeroMonthLine } from '../components/HeroMonthLine';
+import { HeroMonthSlot } from '../components/HeroMonthLine';
 import { useMonthHeroLine } from '../hooks/useMonthHeroLine';
 import { AnalyticsService } from '../services/analyticsService';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
@@ -268,7 +268,7 @@ export const HomeScreen = () => {
   const isPersonalAccount = (activeAccount?.type || '').toLowerCase() === 'personal';
   const isEmployeeDelegate = !!activeAccount?.isEmployee;
   // "Tu mes" hero line — owners only (employees never see the month view).
-  const { summary: heroMonth } = useMonthHeroLine(
+  const { summary: heroMonth, reserved: heroMonthReserved } = useMonthHeroLine(
     activeAccount?.id,
     !activeAccount?.isEmployee,
     accountLoading || switchState.isLoading,
@@ -1184,7 +1184,7 @@ export const HomeScreen = () => {
       >
         {/* Enhanced Balance Card Section — brand field: same gradient + coin
             ring family as Auth/splash/Biometric. Vertical gradient so the top
-            edge is exactly colors.primary and meets the flat nav header with
+            edge is exactly colors.heroField and meets the flat nav header with
             no seam. Padding lives on the inner view, never on the SVG's
             parent (Yoga insets absolute children by the parent's padding). */}
         <Animated.View
@@ -1256,16 +1256,20 @@ export const HomeScreen = () => {
           {/* Month line: always in US$ whatever the balance toggle shows (5A),
               masked with the balance (6A), rendered from cache only so the
               verbs below never jump (2A). */}
-          {heroMonth && (
-            <HeroMonthLine
-              summary={heroMonth}
-              masked={!showBalance || !canViewBalance}
-              onPress={() => {
-                AnalyticsService.logFunnelEvent('hero_cashflow_tapped');
-                navigation.navigate('MonthSummary', { masked: !showBalance || !canViewBalance });
-              }}
-            />
-          )}
+          <HeroMonthSlot
+            summary={heroMonth}
+            reserved={heroMonthReserved}
+            masked={!showBalance || !canViewBalance}
+            onPress={(month) => {
+              AnalyticsService.logFunnelEvent('hero_cashflow_tapped');
+              // Early in the month the line can be last month's: open that one.
+              navigation.navigate('MonthSummary', {
+                year: month.year,
+                month: month.month,
+                masked: !showBalance || !canViewBalance,
+              });
+            }}
+          />
 
           {/* The two verbs sit ON the brand field, where the coin ring runs
               behind them — part of the hero, not a white slab under it. The
@@ -1801,7 +1805,7 @@ const styles = StyleSheet.create({
   // (skeleton overlay reuses this style without the SVG); overflow hidden
   // clips the gradient/ring to the rounded corners.
   balanceCard: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
     overflow: 'hidden',

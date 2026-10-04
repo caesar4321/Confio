@@ -630,7 +630,7 @@ export const SellScreen = ({
             <Header
                 navigation={navigation as any}
                 title={isSavings ? `Retirar mi ${balanceNoun}` : 'Vender USDC'}
-                backgroundColor={colors.primary}
+                backgroundColor={colors.heroField}
                 isLight
                 showBackButton
                 rightAccessory={(
@@ -652,8 +652,8 @@ export const SellScreen = ({
                     <Svg style={StyleSheet.absoluteFill}>
                         <Defs>
                             <SvgLinearGradient id="guardarianSellField" x1="0" y1="0" x2="0" y2="1">
-                                <Stop offset="0" stopColor={colors.primary} />
-                                <Stop offset="1" stopColor={colors.primaryDark} />
+                                <Stop offset="0" stopColor={colors.heroField} />
+                                <Stop offset="1" stopColor={colors.heroFieldDark} />
                             </SvgLinearGradient>
                         </Defs>
                         <Rect width="100%" height="100%" fill="url(#guardarianSellField)" />
@@ -848,7 +848,7 @@ export const SellScreen = ({
 
 const styles = StyleSheet.create({
   brandField: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
     marginHorizontal: -20,
     marginTop: -20,

@@ -233,7 +233,7 @@ export const MembershipsScreen = () => {
       {/* The global default is dark-content on white; an emerald header needs
           light-content, and the shared Header owns the top inset so the band
           extends under the status bar instead of starting below it. */}
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <Header
         navigation={navigation as any}
         title={title}
@@ -242,7 +242,7 @@ export const MembershipsScreen = () => {
             ? 'Estás al día'
             : `${outstanding.length} ${outstanding.length === 1 ? 'cuota pendiente' : 'cuotas pendientes'}`)
           : undefined}
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
         onBackPress={() => navigation.goBack()}

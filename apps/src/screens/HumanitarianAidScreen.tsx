@@ -718,7 +718,7 @@ const softShadow = {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
-  safeTop: { backgroundColor: colors.primary },
+  safeTop: { backgroundColor: colors.heroField },
   scroll: { flex: 1, backgroundColor: colors.neutral },
   content: { paddingBottom: 36 },
   body: { paddingHorizontal: 16 },
@@ -730,7 +730,7 @@ const styles = StyleSheet.create({
   backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   backButtonLight: { backgroundColor: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.28)' },
 
-  hero: { backgroundColor: colors.primary, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden' },
+  hero: { backgroundColor: colors.heroField, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden' },
   heroInner: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 30 },
   heroTopBar: { alignItems: 'flex-start', marginBottom: 12 },
   heroBody: {},

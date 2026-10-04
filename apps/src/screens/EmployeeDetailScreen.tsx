@@ -176,7 +176,7 @@ export const EmployeeDetailScreen = () => {
       <Header
         navigation={navigation as any}
         title="Detalles del Empleado"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight={true}
         showBackButton={true}
       />
@@ -322,7 +322,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   employeeHeader: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
   },
   employeeHeaderInner: {

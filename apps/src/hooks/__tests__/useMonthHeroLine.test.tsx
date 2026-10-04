@@ -6,25 +6,39 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 
+// A value applies to every month; a function picks per {year, month}.
 let mockCached: any = null;
 let mockNetwork: any = null;
-const mockQuery = jest.fn(() => Promise.resolve({ data: { monthSummary: mockNetwork } }));
-const mockReadQuery = jest.fn(() => (mockCached ? { monthSummary: mockCached } : null));
+const per = (v: any, vars: any) => (typeof v === 'function' ? v(vars) : v);
+const mockQuery = jest.fn((opts: any) => Promise.resolve({ data: { monthSummary: per(mockNetwork, opts.variables) } }));
+const mockReadQuery = jest.fn((opts: any) => {
+  const v = per(mockCached, opts.variables);
+  return v ? { monthSummary: v } : null;
+});
+let mockHints: Record<string, boolean> = {};
+const mockClient = { readQuery: (o: any) => mockReadQuery(o), query: (o: any) => mockQuery(o) };
 
 jest.mock('@apollo/client', () => ({
   gql: (s: TemplateStringsArray) => s.join(''),
-  useApolloClient: () => ({ readQuery: mockReadQuery, query: mockQuery }),
+  // Stable like the real client (a new object per render would re-run load).
+  useApolloClient: () => mockClient,
 }));
 // Focus behaves like the real hook on an always-focused screen: runs on
 // mount and again whenever the callback identity changes.
+jest.mock('../../utils/heroLineHint', () => ({
+  heroLineHintReady: Promise.resolve(),
+  isHeroLineHintLoaded: () => true,
+  hadHeroLine: (k: string) => mockHints[k] === true,
+  setHadHeroLine: (k: string, v: boolean) => { mockHints[k] = v; },
+}));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (cb: () => void | (() => void)) => require('react').useEffect(cb, [cb]),
 }));
 
 import { useMonthHeroLine } from '../useMonthHeroLine';
 
-const summary = (movementCount: number) => ({
-  year: 2026, month: 10, timezone: 'UTC', previousIsPartial: true,
+const summary = (movementCount: number, month = 10) => ({
+  year: 2026, month, timezone: 'UTC', previousIsPartial: true,
   current: { incomeUsd: '420', spendingUsd: '310', movementCount, spendingByCategory: [] },
   previous: null, counterparties: [],
 });
@@ -53,6 +67,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  mockHints = {};
   mockCached = null;
   mockNetwork = null;
   mockQuery.mockClear();
@@ -179,6 +194,57 @@ describe('useMonthHeroLine', () => {
     rerender('acc-1', true, false);
     await flush();
     expect(hook().summary?.current.movementCount).toBe(4);
+  });
+
+  it('early in the month shows last month until this one has 3 movements', async () => {
+    const { year, month } = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+    mockCached = (v: any) => (v.month === month && v.year === year ? summary(1, month) : summary(12, v.month));
+    const { hook } = mount('acc-1');
+    await flush();
+    expect(hook().summary?.current.movementCount).toBe(12);
+    expect(hook().summary?.month).not.toBe(month);
+  });
+
+  it('cold launch with a hint reserves the row, then fills it when data lands', async () => {
+    mockHints = { 'acc-1': true };
+    let release!: (v: any) => void;
+    mockQuery.mockImplementationOnce(() => new Promise(r => { release = r; }));
+    const { hook } = mount('acc-1');
+    expect(hook().reserved).toBe(true);
+    expect(hook().summary).toBeNull();
+    await act(async () => release({ data: { monthSummary: summary(7) } }));
+    expect(hook().reserved).toBe(false);
+    expect(hook().summary?.current.movementCount).toBe(7);
+  });
+
+  it('cold launch without a hint reserves nothing and never inserts late', async () => {
+    mockNetwork = summary(7);
+    const { hook } = mount('acc-1');
+    expect(hook().reserved).toBe(false);
+    await flush();
+    expect(hook().summary).toBeNull();
+    expect(mockHints['acc-1']).toBe(true); // next launch reserves the row
+  });
+
+  it('a reserved row collapses if the request fails', async () => {
+    mockHints = { 'acc-1': true };
+    mockQuery.mockImplementationOnce(() => Promise.reject(new Error('offline')));
+    const { hook } = mount('acc-1');
+    expect(hook().reserved).toBe(true);
+    await flush();
+    expect(hook().reserved).toBe(false);
+  });
+
+  it('after a failed reserved load, a foreground re-load does not reserve the row again', async () => {
+    mockHints = { 'acc-1': true };
+    mockQuery.mockImplementationOnce(() => Promise.reject(new Error('offline')));
+    const { hook, rerender } = mount('acc-1');
+    await flush();
+    expect(hook().reserved).toBe(false);
+    mockQuery.mockImplementationOnce(() => new Promise(() => undefined)); // still in flight
+    rerender('acc-1', true, true);
+    rerender('acc-1', true, false); // re-load (stands in for app foreground)
+    expect(hook().reserved).toBe(false);
   });
 });
 

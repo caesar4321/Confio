@@ -36,7 +36,7 @@ export const MessageScreen = () => {
           title="Mensajes"
           navigation={navigation as any}
           onBackPress={() => navigation.goBack()}
-          backgroundColor={colors.primary}
+          backgroundColor={colors.heroField}
           isLight
         />
       )}

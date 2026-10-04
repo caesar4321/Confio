@@ -149,8 +149,8 @@ const STEPS = stepsFor(destination);
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
+      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
             <Icon name="arrow-left" size={24} color={colors.white} />
@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 16,

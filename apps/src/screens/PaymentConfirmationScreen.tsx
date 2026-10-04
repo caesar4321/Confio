@@ -594,8 +594,8 @@ export const PaymentConfirmationScreen = () => {
           <Svg style={StyleSheet.absoluteFill}>
             <Defs>
               <SvgLinearGradient id="payConfirmField" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={colors.primary} />
-                <Stop offset="1" stopColor={colors.primaryDark} />
+                <Stop offset="0" stopColor={colors.heroField} />
+                <Stop offset="1" stopColor={colors.heroFieldDark} />
               </SvgLinearGradient>
             </Defs>
             <Rect width="100%" height="100%" fill="url(#payConfirmField)" />
@@ -794,7 +794,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
   },
   headerInner: {

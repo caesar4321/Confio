@@ -34,8 +34,8 @@ export const RampHero = ({
   subtitle,
   onBack,
   compact = false,
-  fromColor = colors.primary,
-  toColor = colors.primaryDark,
+  fromColor = colors.heroField,
+  toColor = colors.heroFieldDark,
 }: Props) => {
   const insets = useSafeAreaInsets();
 
@@ -65,7 +65,7 @@ export const RampHero = ({
 
 const styles = StyleSheet.create({
   heroWrapper: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
     marginBottom: 20,
   },
