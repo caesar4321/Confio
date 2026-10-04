@@ -1428,6 +1428,12 @@ Approval readiness (second pass): PASS — scope record cites D1 + D2 (2nd pass)
 - Unresolved decisions: 0
 - Lake Score: 1/1 coverage choice took the complete option except D5 (A=8/10 chosen over B=10/10; no shortcut log needed above 7)
 
+## Implementation notes (T1 month summary, 2026-10-04)
+- R2 revisited during build: prod has holder_id_number empty on all 13 PayoutDestinations, so the ID match never fires today. Offered the existing exact full-name rule (sender_matches); founder kept the ID match ("Keep ID match"). Type vocabularies differ (KYC 'national_id' vs free-text 'DNI'/'CI'/'Cédula'), so types are compared by family (_doc_family) before the exact number match.
+- Koywe on-ramps leave two ledger rows: the ramp row and the USDT landing send (linked by RampTransaction.metadata['bsc_arrival_tx_hash']). The summary excludes the landing; whether the history list shows both is a separate task.
+- to_savings conversions that ended DELIVERED_USDT are mirrored as CONFIRMED; only COMPLETED counts as savings.
+- Codex audit: 3 rounds, final "no findings". users tests 239/239.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
