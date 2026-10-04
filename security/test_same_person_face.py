@@ -515,6 +515,20 @@ class FaceBlocklistTests(TestCase):
         self.sync()
         self.assertEqual(self.calls, [])  # nothing missing: no Didit call at all
 
+    def test_a_rejected_session_with_approved_liveness_is_blocklisted_too(self):
+        # e.g. KYC rejected after the fact because someone else held the phone.
+        _document(self.user, 'X-20', status='rejected', risk_factors={'provider': 'didit', 'didit': {
+            'session_id': 'session-X-20', 'session': {'liveness_checks': [{'status': 'Approved'}]}}})
+        # Liveness failed or never reviewed: maybe a photo of someone else.
+        for number, status in (('Y-20', 'Declined'), ('Z-20', 'In Review')):
+            _document(self.user, number, status='rejected', risk_factors={'provider': 'didit', 'didit': {
+                'session_id': f'session-{number}', 'session': {'liveness_checks': [{'status': status}],
+                                                                'face_matches': [{'status': 'Approved'}]}}})
+        self.ban()
+        self.sync()
+        posted = sorted(call[2]['reference_session_id'] for call in self.calls if call[0] == 'POST')
+        self.assertEqual(posted, ['session-P-20', 'session-V-20', 'session-X-20'])  # R-20: no face captured
+
     def test_lifting_the_ban_removes_the_entries(self):
         ban = self.ban()
         self.sync()
