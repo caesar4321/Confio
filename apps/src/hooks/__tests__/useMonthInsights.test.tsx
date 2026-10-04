@@ -1,0 +1,106 @@
+import React from 'react';
+import renderer, { act } from 'react-test-renderer';
+import { GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED } from '../../apollo/monthSummary';
+
+const mockQuery = jest.fn();
+const mockClient = { query: (...a: any[]) => mockQuery(...a) };
+jest.mock('@apollo/client', () => ({ ...jest.requireActual('@apollo/client'), useApolloClient: () => mockClient }));
+
+import { mergeValues, REVEAL_WINDOW_MS, useMonthInsights } from '../useMonthInsights';
+
+const insights = (keys: string[]) => ({
+  previousMonthSpendingUsd: '390.00',
+  recurring: keys.map((k, i) => ({ counterpartyKey: k, name: k, expectedDay: 5 + i, expectedAmountUsd: '100.00', category: null })),
+});
+
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+let latest: any;
+function Probe(props: any) {
+  latest = useMonthInsights(props);
+  return null;
+}
+const base = { accountKey: 'a1', year: 2026, month: 10, timezone: 'UTC', isCurrent: true, ready: true };
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  mockQuery.mockReset();
+});
+afterEach(() => jest.useRealTimers());
+
+it('reveals once every query settles, together', async () => {
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_MONTH_INSIGHTS ? { monthInsights: insights(['karen']) }
+      : query === GET_SAVINGS_EARNED ? { savingsEarned: { earnedUsd: '0.42', daily: [] } }
+        : { protectionValue: null } }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.revealed).toBe(true);
+  expect(latest.insights.recurring).toHaveLength(1);
+  expect(latest.savings.earnedUsd).toBe('0.42');
+});
+
+it('reveals what arrived by 800ms and drops anything later (8A)', async () => {
+  const slow = deferred<any>();
+  mockQuery.mockImplementation(({ query }: any) => (query === GET_PROTECTION_VALUE ? slow.promise
+    : Promise.resolve({ data: query === GET_MONTH_INSIGHTS ? { monthInsights: insights([]) } : { savingsEarned: { earnedUsd: '0.42', daily: [] } } })));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.revealed).toBe(false);
+  await act(async () => { jest.advanceTimersByTime(REVEAL_WINDOW_MS); });
+  expect(latest.revealed).toBe(true);
+  expect(latest.protection).toBeNull();
+  await act(async () => { slow.resolve({ data: { protectionValue: { currency: 'BOB' } } }); });
+  expect(latest.protection).toBeNull();          // late: never swaps the slot after the reveal
+});
+
+it('waits for Card A before starting, and skips protection on past months', async () => {
+  mockQuery.mockResolvedValue({ data: {} });
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Probe {...base} ready={false} />); });
+  expect(mockQuery).not.toHaveBeenCalled();
+  await act(async () => { tree.update(<Probe {...base} ready isCurrent={false} month={9} />); });
+  expect(mockQuery.mock.calls.map((c) => c[0].query)).not.toContain(GET_PROTECTION_VALUE);
+});
+
+it('refocus updates values but never adds, removes or swaps a card or row', () => {
+  const shown = { insights: insights(['karen']), savings: null, protection: null };
+  const next = { insights: { ...insights(['karen', 'wilber']), previousMonthSpendingUsd: '400.00' },
+    savings: { earnedUsd: '1.00', daily: [] }, protection: null };
+  next.insights.recurring[0].expectedAmountUsd = '105.00';
+  const merged = mergeValues(shown, next);
+  expect(merged.insights!.recurring.map((r) => [r.counterpartyKey, r.expectedAmountUsd])).toEqual([['karen', '105.00']]);
+  expect(merged.insights!.previousMonthSpendingUsd).toBe('400.00');
+  expect(merged.savings).toBeNull();                 // was not shown: not added
+  expect(mergeValues({ ...shown, savings: { earnedUsd: '0.42', daily: [] } }, { ...next, savings: null }).savings)
+    .toEqual({ earnedUsd: '0.42', daily: [] });      // shown: kept when the refetch has none
+});
+
+it('a sub-cent savings answer is not a card, so a refocus cannot insert it (audit #7)', () => {
+  const { visibleAtReveal } = require('../useMonthInsights');
+  const revealed = visibleAtReveal({ insights: null, savings: { earnedUsd: '0.00', daily: [] }, protection: null });
+  expect(revealed.savings).toBeNull();
+  const merged = mergeValues(revealed, { insights: null, savings: { earnedUsd: '0.02', daily: [] }, protection: null });
+  expect(merged.savings).toBeNull();
+});
+
+it('an older refresh never overwrites a newer visit to the same month (audit #6)', async () => {
+  const stale = deferred<any>();
+  let calls = 0;
+  mockQuery.mockImplementation(({ query }: any) => {
+    if (query !== GET_MONTH_INSIGHTS) return Promise.resolve({ data: {} });
+    calls += 1;
+    if (calls === 2) return stale.promise;                 // the October refresh that answers late
+    return Promise.resolve({ data: { monthInsights: insights(calls === 1 ? ['karen'] : ['karen']) } });
+  });
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Probe {...base} />); });
+  act(() => { latest.refresh(); });                        // October refresh in flight
+  await act(async () => { tree.update(<Probe {...base} month={9} isCurrent={false} />); });
+  await act(async () => { tree.update(<Probe {...base} />); });   // back to October: a new view
+  const fresh = latest.insights;
+  await act(async () => { stale.resolve({ data: { monthInsights: { ...insights(['karen']), previousMonthSpendingUsd: '1.00' } } }); });
+  expect(latest.insights).toBe(fresh);
+});

@@ -93,3 +93,40 @@ class CounterpartyPromptState(models.Model):
 
     def __str__(self):
         return f'{self.account_id} {self.counterparty_key} skip={self.skip_count} dismiss={self.dismiss_count}'
+
+
+class CusdPlusPriceSnapshot(models.Model):
+    """One per UTC day: the cUSD+ share price at a pinned BSC block, written
+    by cusd_plus.snapshot_savings_daily (docs/designs/tu-mes-insights.md R20,
+    R26, R28). Savings earnings for "Tu mes" are computed from consecutive
+    snapshots; a day without a row is unknown, never zero."""
+    date = models.DateField(unique=True)
+    pps_wad = models.DecimalField(max_digits=40, decimal_places=0, help_text='pPlus() at block_number, 1e18 = US$1')
+    block_number = models.BigIntegerField()
+    complete = models.BooleanField(
+        default=False, help_text='True once every holder batch was attempted (R26)')
+    failed_account_ids = models.JSONField(
+        default=list, blank=True, help_text='Accounts whose balance read failed after retries; their month is unknown (R28)')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f'{self.date} pps={self.pps_wad} block={self.block_number}'
+
+
+class CusdPlusHoldingSnapshot(models.Model):
+    """An account's cUSD+ shares on a snapshot day (same pinned block). Only
+    nonzero balances get a row: on a complete day, no row = 0 shares (R26)."""
+    account = models.ForeignKey('users.Account', on_delete=models.CASCADE, related_name='cusd_plus_snapshots')
+    date = models.DateField()
+    shares_raw = models.DecimalField(max_digits=40, decimal_places=0, help_text='balanceOf, 18 decimals')
+    block_number = models.BigIntegerField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['account', 'date'], name='uniq_cusd_plus_holding_day')]
+        indexes = [models.Index(fields=['account', 'date'])]
+
+    def __str__(self):
+        return f'{self.account_id} {self.date} {self.shares_raw}'

@@ -557,3 +557,84 @@ class MonthMovementsTests(CategoryLabelTests):
         self.assertTrue(getattr(result, 'success', True))
         cats = [(c.category, c.amount_usd) for c in self._summary().current.spending_by_category]
         self.assertIn(('health', '25.00'), cats)
+
+
+class RecurringCircleTests(SimpleTestCase):
+    """Habitual-payment day math on the 31-day month circle (insights §5)."""
+
+    def test_wraparound_days_are_close_and_center_late_in_the_month(self):
+        from users.cashflow import _circular_median, _circular_spread
+        self.assertEqual(_circular_spread([28, 2]), 5)
+        self.assertEqual(_circular_median([28, 2]), 30)        # never the linear 15th
+        self.assertEqual(_circular_median([30, 1, 2]), 1)
+
+    def test_far_apart_days_are_not_one_habit(self):
+        from users.cashflow import _circular_spread
+        self.assertEqual(_circular_spread([1, 20]), 12)
+        self.assertEqual(_circular_spread([5, 5]), 0)
+
+
+class MonthInsightsResolverTests(MonthSummaryResolverTests):
+    """End to end over real ledger rows for monthInsights."""
+
+    def _pay(self, who, amount, year, month, day, status='CONFIRMED'):
+        from users.models_unified import UnifiedTransactionTable
+        when = datetime(year, month, day, 15, 0, tzinfo=ZoneInfo('UTC'))
+        return UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount=amount, fee_amount='', token_type='USDT', status=status,
+            sender_user=self.user, sender_type='user', counterparty_user=who, counterparty_type='user',
+            from_address=self.mine, to_address='0x' + format(who.id, '040x'),
+            sender_display_name='Yo', counterparty_display_name=who.username, transaction_date=when)
+
+    def _person(self, name):
+        from users.models import User
+        return User.objects.create_user(username=name, email=f'{name}@example.com', password='x', firebase_uid=name)
+
+    def _insights(self, year, month, jwt=None):
+        from types import SimpleNamespace
+        from users.cashflow_schema import MonthSummaryQuery
+        jwt = jwt or {'account_type': 'personal', 'account_index': 0, 'business_id': None}
+        with mock.patch('users.jwt_context.get_jwt_business_context_with_validation', return_value=jwt):
+            return MonthSummaryQuery().resolve_month_insights(
+                SimpleNamespace(context=SimpleNamespace(user=self.user)), year=year, month=month, timezone='UTC')
+
+    def test_detects_habits_and_skips_noise(self):
+        karen, wilber, ana, beto, carla = (self._person(n) for n in ('karen', 'wilber', 'ana', 'beto', 'carla'))
+        # Viewed month: July 2026 → looks at April, May, June.
+        for m, d, amt in ((4, 5, '100.00'), (5, 6, '95.00'), (6, 4, '105.00')):
+            self._pay(karen, amt, 2026, m, d)                    # habit: every month ~day 5
+        self._pay(wilber, '35.00', 2026, 6, 12)                  # once: not a habit
+        self._pay(ana, '50.00', 2026, 5, 10); self._pay(ana, '120.00', 2026, 6, 10)   # amounts too different
+        self._pay(beto, '40.00', 2026, 5, 1); self._pay(beto, '40.00', 2026, 6, 20)   # days too far apart
+        self._pay(carla, '0.50', 2026, 5, 3); self._pay(carla, '0.50', 2026, 6, 3)    # under US$1
+        self._pay(karen, '60.00', 2026, 5, 20, status='FAILED')  # failed rows never count
+
+        result = self._insights(2026, 7)
+        self.assertEqual([(r.name, r.expected_day, r.expected_amount_usd) for r in result.recurring],
+                         [('karen', 5, '100.00')])
+        # Full June Salió (Karen 105 + Wilber 35 + Ana 120 + Beto 40 + Carla 0.50)
+        self.assertEqual(result.previous_month_spending_usd, '300.50')
+
+    def test_rent_split_in_two_payments_is_one_monthly_sum(self):
+        landlord = self._person('landlord')
+        self._pay(landlord, '100.00', 2026, 5, 28)
+        self._pay(landlord, '50.00', 2026, 6, 30); self._pay(landlord, '50.00', 2026, 6, 31 - 1)
+        result = self._insights(2026, 7)
+        self.assertEqual([(r.expected_day, r.expected_amount_usd) for r in result.recurring], [(29, '100.00')])
+
+    def test_wraparound_day_is_clamped_to_the_viewed_month(self):
+        landlord = self._person('landlord2')
+        self._pay(landlord, '80.00', 2026, 3, 31)
+        self._pay(landlord, '80.00', 2026, 4, 2)
+        self._pay(landlord, '80.00', 2026, 5, 30)
+        result = self._insights(2026, 6)                         # June has 30 days
+        self.assertEqual([r.expected_day for r in result.recurring], [30])
+
+    def test_employees_and_bad_monetary_rows(self):
+        jwt = {'account_type': 'business', 'account_index': 0, 'business_id': 424242}
+        self.assertIsNone(self._insights(2026, 7, jwt=jwt))
+        karen = self._person('karen-bad')
+        self._pay(karen, 'not-a-number', 2026, 6, 5)
+        from graphql import GraphQLError
+        with self.assertRaises(GraphQLError):                    # never "no habits" from unreadable data
+            self._insights(2026, 7)

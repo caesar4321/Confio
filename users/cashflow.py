@@ -614,3 +614,129 @@ def month_movements(user, account, account_type, business_id, year, month, tz,
             out.append(m)
     out.sort(key=lambda m: m.when, reverse=True)
     return out
+
+
+# ── Tu mes insights (docs/designs/tu-mes-insights.md §5, §6) ──────────────
+RECURRING_LOOKBACK_MONTHS = 3      # detect from the 3 calendar months before the viewed one
+RECURRING_MIN_MONTHS = 2           # seen in at least 2 of them
+RECURRING_AMOUNT_TOLERANCE = Decimal('0.25')   # each month's sum within ±25% of the median
+RECURRING_MAX_DAY_SPREAD = 6       # first-payment days within 6 days (on the month circle)
+RECURRING_MIN_USD = Decimal('1')   # ignore payments under US$1
+DAY_CIRCLE = 31
+
+
+@dataclass
+class RecurringPayment:
+    counterparty_key: str
+    name: str
+    expected_day: int              # clamped to the viewed month's length
+    expected_amount: Decimal       # median monthly sum
+    category: str | None = None    # the counterparty rule, when the user set one
+
+
+@dataclass
+class MonthInsights:
+    recurring: list
+    previous_month_spending: Decimal   # the FULL previous month's Salió (Card A pace caption)
+
+
+def _circular_distance(a: int, b: int) -> int:
+    d = abs(a - b) % DAY_CIRCLE
+    return min(d, DAY_CIRCLE - d)
+
+
+def _circular_spread(days: list[int]) -> int:
+    """Smallest arc (in days) covering every day on the 31-day circle, so the
+    28th and the 2nd are 5 days apart, not 26."""
+    ordered = sorted(set(days))
+    if len(ordered) < 2:
+        return 0
+    gaps = [(ordered[(i + 1) % len(ordered)] - ordered[i]) % DAY_CIRCLE for i in range(len(ordered))]
+    return DAY_CIRCLE - max(gaps)
+
+
+def _circular_median(days: list[int]) -> int:
+    """The day (1..31) with the smallest total distance to every observed day
+    on the month circle. Ties form an arc; take its middle, so 28 and 2 give
+    the 30th, never the 15th (a linear median) nor an arbitrary end."""
+    cost = {c: sum(_circular_distance(c, d) for d in days) for c in range(1, DAY_CIRCLE + 1)}
+    best = min(cost.values())
+    winners = [c for c in range(1, DAY_CIRCLE + 1) if cost[c] == best]
+    if len(winners) == 1:
+        return winners[0]
+    # Order the tied days along the circle, starting after the widest gap.
+    gaps = [((winners[(i + 1) % len(winners)] - winners[i]) % DAY_CIRCLE, i) for i in range(len(winners))]
+    _, widest = max(gaps)
+    arc = winners[widest + 1:] + winners[:widest + 1]
+    return arc[(len(arc) - 1) // 2]
+
+
+def _median(values: list[Decimal]) -> Decimal:
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    return ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def month_insights(user, account, account_type, business_id, year, month, tz) -> MonthInsights:
+    """Habitual payments for the viewed month and the full previous month's
+    Salió. Same rows and classify() as summarize(); detection runs on RAW
+    counterparty keys (before any unknown-wallet merge), and bad monetary
+    evidence raises SummaryUnavailable instead of returning "nothing found"."""
+    from users.graphql_views import account_unified_queryset
+
+    months = []
+    y, m = year, month
+    for _ in range(RECURRING_LOOKBACK_MONTHS):
+        y, m = previous_month(y, m)
+        months.append((y, m))
+    months.reverse()                                  # oldest first
+    windows = [month_window(y, m, tz) for y, m in months]
+    start, end = windows[0][0], windows[-1][1]        # end = the viewed month's start
+
+    scope = account_unified_queryset(user, account, account_type, business_id)
+    rows = list(scope.filter(transaction_date__gte=start, transaction_date__lt=end).select_related(*ROW_RELATIONS))
+    ctx = prepare_context(user, account, account_type, business_id, scope, rows)
+
+    # counterparty -> month index -> [first local day, summed amount]
+    seen: dict[str, dict[int, list]] = {}
+    names: dict[str, str] = {}
+    previous_full = Totals()
+    for row in rows:
+        _stamp_viewer(row, account, account_type, business_id)
+        movement = classify(row, ctx)
+        if movement is None:
+            continue
+        idx = next(i for i, (w_start, w_end) in enumerate(windows) if w_start <= row.transaction_date < w_end)
+        if idx == len(windows) - 1:
+            previous_full.add(movement)
+        if movement.kind not in SPENDING_KINDS or not movement.counterparty_key:
+            continue
+        if movement.amount < RECURRING_MIN_USD:
+            continue
+        day = row.transaction_date.astimezone(tz).day
+        per_month = seen.setdefault(movement.counterparty_key, {})
+        slot = per_month.setdefault(idx, [day, Decimal('0')])
+        slot[0] = min(slot[0], day)
+        slot[1] += movement.amount
+        if movement.counterparty_name:
+            names[movement.counterparty_key] = movement.counterparty_name
+
+    month_length = calendar.monthrange(year, month)[1]
+    recurring = []
+    for key, per_month in seen.items():
+        if len(per_month) < RECURRING_MIN_MONTHS:
+            continue
+        days = [v[0] for v in per_month.values()]
+        sums = [v[1] for v in per_month.values()]
+        median_sum = _median(sums)
+        if median_sum <= 0 or any(abs(s - median_sum) > median_sum * RECURRING_AMOUNT_TOLERANCE for s in sums):
+            continue
+        if _circular_spread(days) > RECURRING_MAX_DAY_SPREAD:
+            continue
+        recurring.append(RecurringPayment(
+            counterparty_key=key, name=names.get(key, ''),
+            expected_day=min(_circular_median(days), month_length),
+            expected_amount=median_sum, category=ctx.category_rules.get(key)))
+    recurring.sort(key=lambda r: (r.expected_day, r.name))
+    return MonthInsights(recurring=recurring, previous_month_spending=previous_full.spending)
