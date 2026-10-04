@@ -70,8 +70,8 @@ export const BlockedAccountScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
+      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }}>
         <View style={styles.header}>
           <BrandFieldBackground id="blockedField" ringCy="30%" />
           <View style={styles.headerInner}>
@@ -128,7 +128,7 @@ export const BlockedAccountScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
-  header: { backgroundColor: colors.primary, overflow: 'hidden' },
+  header: { backgroundColor: colors.heroField, overflow: 'hidden' },
   headerInner: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 30, alignItems: 'center' },
   heroIconRing: {
     width: 56, height: 56, borderRadius: 28, borderWidth: 2, borderColor: 'rgba(255,255,255,0.55)',

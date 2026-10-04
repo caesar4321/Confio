@@ -354,7 +354,7 @@ export const CreateBusinessScreen = () => {
       <Header
         navigation={navigation as any}
         title="Crear Cuenta de Negocio"
-        backgroundColor={colors.primaryDark}
+        backgroundColor={colors.heroFieldDark}
         isLight={true}
         showBackButton={true}
       />

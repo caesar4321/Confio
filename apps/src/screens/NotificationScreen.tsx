@@ -1256,7 +1256,7 @@ export const NotificationScreen = () => {
         <Header
           navigation={navigation as any}
           title="Notificaciones"
-          backgroundColor={colors.primary}
+          backgroundColor={colors.heroField}
           isLight
           showBackButton
         />
@@ -1275,7 +1275,7 @@ export const NotificationScreen = () => {
         <Header
           navigation={navigation as any}
           title="Notificaciones"
-          backgroundColor={colors.primary}
+          backgroundColor={colors.heroField}
           isLight
           showBackButton
         />
@@ -1295,7 +1295,7 @@ export const NotificationScreen = () => {
       <Header
         navigation={navigation as any}
         title="Notificaciones"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />

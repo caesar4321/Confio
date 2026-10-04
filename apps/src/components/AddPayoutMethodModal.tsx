@@ -1413,8 +1413,8 @@ export const AddPayoutMethodModal = ({
         <Svg width="100%" height={70} style={StyleSheet.absoluteFill}>
           <Defs>
             <LinearGradient id="hdrGrad" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={colors.primary} />
-              <Stop offset="1" stopColor={colors.primaryDark} />
+              <Stop offset="0" stopColor={colors.heroField} />
+              <Stop offset="1" stopColor={colors.heroFieldDark} />
             </LinearGradient>
           </Defs>
           <Rect width="100%" height={70} fill="url(#hdrGrad)" />

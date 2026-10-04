@@ -190,7 +190,7 @@ export const PayeeDetailScreen = () => {
       <Header
         navigation={navigation as any}
         title="Detalle del destinatario"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />

@@ -127,7 +127,7 @@ export const ProtectedSavingsScreen = () => {
       <Header
         navigation={navigation as any}
         title="Ahorros Protegidos"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />

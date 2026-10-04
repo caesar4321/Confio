@@ -185,11 +185,11 @@ export const MyFinancierasScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <Header
         navigation={navigation as any}
         title="Mis financieras"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
         rightAccessory={(

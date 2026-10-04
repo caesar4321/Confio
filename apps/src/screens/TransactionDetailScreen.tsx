@@ -313,11 +313,18 @@ export const TransactionDetailScreen = () => {
   const styles = StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: colors.primary,
+      backgroundColor: colors.heroField,
+    },
+    // White card on the hero field: dark text keeps full contrast whatever
+    // the field green is (white or red text on it failed).
+    errorCard: {
+      margin: 20,
+      borderRadius: 16,
+      backgroundColor: colors.white,
     },
     errorText: {
       fontSize: 16,
-      color: colors.danger,
+      color: colors.error.text, // 8.3:1 on white (danger red is 3.8:1)
       textAlign: 'center',
       padding: 20,
     },
@@ -325,7 +332,7 @@ export const TransactionDetailScreen = () => {
       flex: 1,
     },
     header: {
-      backgroundColor: colors.primary,
+      backgroundColor: colors.heroField,
       overflow: 'hidden',
     },
     headerInner: {
@@ -1378,7 +1385,9 @@ export const TransactionDetailScreen = () => {
   if (!currentTx) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>No se pudo cargar la información de la transacción</Text>
+        <View style={styles.errorCard}>
+          <Text style={styles.errorText}>No se pudo cargar la información de la transacción</Text>
+        </View>
       </View>
     );
   }
@@ -1830,7 +1839,7 @@ export const TransactionDetailScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
 
       {/* Entire screen scrollable */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
@@ -1862,8 +1871,8 @@ export const TransactionDetailScreen = () => {
           >
             <Defs>
               <SvgLinearGradient id="txDetailField" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={colors.primary} />
-                <Stop offset="1" stopColor={colors.primaryDark} />
+                <Stop offset="0" stopColor={colors.heroField} />
+                <Stop offset="1" stopColor={colors.heroFieldDark} />
               </SvgLinearGradient>
             </Defs>
             <Rect width="100%" height="100%" fill="url(#txDetailField)" />

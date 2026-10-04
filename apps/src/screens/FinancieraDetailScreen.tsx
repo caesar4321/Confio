@@ -130,11 +130,11 @@ export const FinancieraDetailScreen = () => {
   if (loading && !financiera) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
         <Header
           navigation={navigation as any}
           title="Financiera"
-          backgroundColor={colors.primary}
+          backgroundColor={colors.heroField}
           isLight
           showBackButton
         />
@@ -188,11 +188,11 @@ export const FinancieraDetailScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <Header
         navigation={navigation as any}
         title={financiera.name}
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
         rightAccessory={(

@@ -388,7 +388,7 @@ export const RegisterFinancieraScreen = () => {
   if (!userProfile?.isIdentityVerified) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
         <Header title={edit ? 'Editar financiera' : 'Registrar financiera'} onBack={() => navigation.goBack()} />
         <VerificationGate
           onBack={() => navigation.goBack()}
@@ -400,7 +400,7 @@ export const RegisterFinancieraScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <Header title={edit ? 'Editar financiera' : 'Registrar financiera'} onBack={() => navigation.goBack()} />
 
       <KeyboardAvoidingView
@@ -616,7 +616,7 @@ const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
   <AppHeader
     navigation={undefined as any}
     title={title}
-    backgroundColor={colors.primary}
+    backgroundColor={colors.heroField}
     isLight
     showBackButton
     onBackPress={onBack}

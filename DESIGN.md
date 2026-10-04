@@ -41,6 +41,7 @@ aesthetics (no dark-noir, no neon, no monospace money, no terminal vibes).
 ## Color
 - **Approach:** Restrained-balanced, tokens 1:1 with `apps/src/config/theme.ts`.
 - **Primary:** `#34D399` (emerald-400) — brand, money, positivity. CTA fill: `#10B981` (emerald-500). Deep text-on-mint: `#064E3B`.
+- **Hero field (app):** stays `#34D399` → `#10B981` (= Primary → CTA fill), tokens `colors.heroField` / `heroFieldDark` so it is tuned in one place. White on it is only 1.9:1, so **new text on the field uses deep text-on-mint `#064E3B`** (`colors.onHeroField`) at ≥ 19 bold (WCAG large text: 5.1:1 at the top, 3.8:1 at the bottom). Status bar: dark icons.
 - **Mint surfaces:** `#ECFDF5` (blocks/kickers), `#D1FAE5` (emphasis).
 - **Secondary:** `#8B5CF6` violet — **appears ONLY next to $CONFIO token content** (same law as the app). Never as generic decoration. **One recorded exception (founder decision 2026-07-07):** the Business pricing card in the fee section keeps its violet theme as deliberate differentiation from the free personal plan.
 - **Accent:** `#3B82F6` blue — informational only, sparingly.
@@ -83,5 +84,6 @@ aesthetics (no dark-noir, no neon, no monospace money, no terminal vibes).
 | 2026-07-07 | Hero must use real app screenshots | Founder request; the product is the proof |
 | 2026-07-07 | Two-tone wordmark ("Conf"+green "ío") rejected | Not the brand — lockup is the CONFIO.png mark + single-color "Confío" text |
 | 2026-10-04 | Instrument Sans adopted in the mobile app too (founder decision, "Tu mes" design review D20) | App and site share one typeface. App renders through `components/common/AppText` (React 19 has no global Text default); static Regular/Medium/SemiBold/Bold files, 800/900 → Bold, explicit families (monospace) kept |
+| 2026-10-04 | App hero field KEEPS the bright `#34D399 → #10B981`; new text on it is deep text-on-mint `#064E3B`, 19 bold (founder decision) | Design review D19/D23 darkened the field (`#047857 → #065F46`, then `#10B981 → #059669`) so white text would pass; on device the founder found both too dark. Dark-on-mint text gets the contrast without changing the brand look |
 
 Preview artifact: `~/.gstack/projects/caesar4321-Confio/designs/design-system-20260707/radicalmente-normal-preview.html`

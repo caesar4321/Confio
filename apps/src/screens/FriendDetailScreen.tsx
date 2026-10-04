@@ -127,7 +127,7 @@ export function FriendDetailScreen() {
         <Header
           navigation={navigation}
           title="Error"
-          backgroundColor={colors.primary}
+          backgroundColor={colors.heroField}
           isLight={true}
           showBackButton={true}
         />
@@ -541,7 +541,7 @@ export function FriendDetailScreen() {
       <Header
         navigation={navigation}
         title={friend.name}
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight={true}
         showBackButton={true}
       />
@@ -836,7 +836,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   friendSection: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
   },
   friendSectionInner: {

@@ -324,7 +324,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.white },
   headerWrap: { gap: 12, marginBottom: 8 },
   brandField: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
     marginHorizontal: -16,
     marginTop: -16,

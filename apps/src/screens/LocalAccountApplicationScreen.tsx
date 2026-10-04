@@ -299,7 +299,7 @@ function Application({ methodId }: { methodId: string }) {
   if (hiddenKey) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {hero}
           <View style={styles.emptyStateCard}>
@@ -323,7 +323,7 @@ function Application({ methodId }: { methodId: string }) {
   if (brebKey) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {hero}
           <RampReveal delay={80}>
@@ -461,7 +461,7 @@ function Application({ methodId }: { methodId: string }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {hero}
 

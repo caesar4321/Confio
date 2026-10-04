@@ -181,7 +181,7 @@ export const FinancieraReviewScreen = () => {
   if (!userProfile?.isIdentityVerified) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
         <Header title="Dejar reseña" onBack={() => navigation.goBack()} />
         <VerificationGate
           onBack={() => navigation.goBack()}
@@ -194,7 +194,7 @@ export const FinancieraReviewScreen = () => {
   if (sendsLoading && reviewableSends.length === 0) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
         <Header title="Dejar reseña" onBack={() => navigation.goBack()} />
         <View style={styles.gate}>
           <ActivityIndicator color={colors.primary} size="large" />
@@ -206,7 +206,7 @@ export const FinancieraReviewScreen = () => {
   if (reviewableSends.length === 0) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
         <Header title="Dejar reseña" onBack={() => navigation.goBack()} />
         <NoSendsGate onBack={() => navigation.goBack()} />
       </View>
@@ -215,7 +215,7 @@ export const FinancieraReviewScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <Header title="Dejar reseña" onBack={() => navigation.goBack()} />
 
       <KeyboardAvoidingView
@@ -368,7 +368,7 @@ export const FinancieraReviewScreen = () => {
 };
 
 const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
-  <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+  <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }}>
     <View style={styles.header}>
       <TouchableOpacity onPress={onBack} style={styles.headerIconBtn} accessibilityRole="button" accessibilityLabel="Volver">
         <Icon name="arrow-left" size={24} color={colors.white} />
@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
   header: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 16,

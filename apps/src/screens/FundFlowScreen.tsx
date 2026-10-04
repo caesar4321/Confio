@@ -116,7 +116,7 @@ export const FundFlowScreen = () => {
       <Header
         navigation={navigation as any}
         title="Dinero en movimiento"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.white },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scrollContent: { paddingBottom: 32 },
-  field: { backgroundColor: colors.primary, overflow: 'hidden' },
+  field: { backgroundColor: colors.heroField, overflow: 'hidden' },
   fieldInner: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 22 },
   fieldEyebrow: {
     fontSize: 11,

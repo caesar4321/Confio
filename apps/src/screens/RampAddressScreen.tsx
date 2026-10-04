@@ -188,11 +188,11 @@ export const RampAddressScreen: React.FC = () => {
 
   return (
     <View style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <Header
         navigation={navigation as any}
         title="Recargas y retiros"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />
@@ -205,8 +205,8 @@ export const RampAddressScreen: React.FC = () => {
           <Svg style={StyleSheet.absoluteFill}>
             <Defs>
               <SvgLinearGradient id="rampField" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={colors.primary} />
-                <Stop offset="1" stopColor={colors.primaryDark} />
+                <Stop offset="0" stopColor={colors.heroField} />
+                <Stop offset="1" stopColor={colors.heroFieldDark} />
               </SvgLinearGradient>
             </Defs>
             <Rect width="100%" height="100%" fill="url(#rampField)" />
@@ -457,7 +457,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   brandField: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
   },
   fieldInner: {

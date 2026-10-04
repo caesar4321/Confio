@@ -207,7 +207,7 @@ export const EditProfileScreen = () => {
         <Header
           navigation={navigation as any}
           title="Editar Perfil"
-          backgroundColor={colors.primary}
+          backgroundColor={colors.heroField}
           isLight
           showBackButton
           onBackPress={handleCancel}
@@ -230,7 +230,7 @@ export const EditProfileScreen = () => {
       <Header
         navigation={navigation as any}
         title="Editar Perfil"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
         onBackPress={handleCancel}

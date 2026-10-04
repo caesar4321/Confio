@@ -275,7 +275,7 @@ export const RampInstructionsScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
@@ -568,7 +568,7 @@ export const RampInstructionsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.primaryDark,
+    backgroundColor: colors.heroFieldDark, // top inset meets RampHero (iOS)
   },
   scroll: {
     flex: 1,

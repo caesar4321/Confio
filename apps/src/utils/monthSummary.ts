@@ -41,10 +41,21 @@ export function currentYearMonth(now: Date = new Date()): { year: number; month:
  * "US$1,234.56". Always "US$" (design 5A): a bare "$" reads as pesos in
  * AR/CO/MX. `whole` drops cents for big headline numbers.
  */
-export function formatUsd(amount: string | number, { whole = false }: { whole?: boolean } = {}): string {
+export function formatUsd(
+  amount: string | number,
+  { whole = false, compact = false }: { whole?: boolean; compact?: boolean } = {},
+): string {
   const value = typeof amount === 'number' ? amount : Number(amount);
   if (!Number.isFinite(value)) return 'US$—';
   const abs = Math.abs(value);
+  // compact: never wider than "US$99,999" (Home line's reserved layout).
+  // Threshold on the ROUNDED whole value: 99,999.5 would display as 100,000.
+  if (compact && Math.round(abs) >= 100_000) {
+    const rounded = Math.round(abs);
+    const [n, unit] = rounded >= 1_000_000 ? [rounded / 1_000_000, 'M'] : [rounded / 1_000, 'K'];
+    const shown = n >= 100 ? Math.floor(n).toString() : (Math.floor(n * 10) / 10).toString();
+    return `${value < 0 ? '-' : ''}US$${shown}${unit}`;
+  }
   const digits = whole && abs >= 100 ? 0 : 2;
   const text = abs.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
   return `${value < 0 ? '-' : ''}US$${text}`;

@@ -115,7 +115,7 @@ export const InvestScreen = () => {
   return (
     <View style={styles.screen}>
       {/* Scoped to focus: the tab stays mounted under the other tabs. */}
-      {isFocused && <StatusBar barStyle="light-content" backgroundColor={colors.primary} />}
+      {isFocused && <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />}
       <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
           <BrandFieldBackground id="investField" ringCx="100%" ringCy="20%" ringR={90} ringWidth={22} />
@@ -289,7 +289,7 @@ export const InvestScreen = () => {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.neutral },
-  hero: { backgroundColor: colors.primary, overflow: 'hidden' },
+  hero: { backgroundColor: colors.heroField, overflow: 'hidden' },
   heroInner: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 56 },
   heroHeadline: { fontSize: 26, fontWeight: '800', color: colors.white, marginTop: 4 },
   heroSub: { fontSize: 15, lineHeight: 21, color: colors.white, opacity: 0.9, marginTop: 4 },

@@ -520,7 +520,7 @@ const VerificationScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Header title="Verificación" navigation={navigation} backgroundColor={colors.primary} isLight={true} />
+      <Header title="Verificación" navigation={navigation} backgroundColor={colors.heroField} isLight={true} />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}

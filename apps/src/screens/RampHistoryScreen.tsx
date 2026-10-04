@@ -368,7 +368,7 @@ export const RampHistoryScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <FlatList
         data={listRows}
         keyExtractor={(row) => row.key}
@@ -436,7 +436,7 @@ export default RampHistoryScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
   },
   list: {
     flex: 1,

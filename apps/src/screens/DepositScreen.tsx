@@ -666,14 +666,14 @@ const DepositScreen = () => {
       <Header
         navigation={navigation as any}
         title="Depositar"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Hero section */}
-        <View style={{ backgroundColor: colors.primary, paddingBottom: 32, paddingHorizontal: 16 }}>
+        <View style={{ backgroundColor: colors.heroField, paddingBottom: 32, paddingHorizontal: 16 }}>
           <View style={styles.headerInfo}>
             <View style={styles.logoContainer}>
               <View style={styles.logoCircle}>

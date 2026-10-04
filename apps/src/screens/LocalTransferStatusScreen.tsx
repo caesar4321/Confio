@@ -439,7 +439,7 @@ export default function LocalTransferStatusScreen() {
   const journeyId = useRoute<Route>().params?.journeyId;
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
       {journeyId ? <JourneyDetail key={journeyId} journeyId={journeyId} /> : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <JourneyList />

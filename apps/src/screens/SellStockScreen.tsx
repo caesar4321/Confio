@@ -176,8 +176,8 @@ export const SellStockScreen = () => {
   if (phase === 'success') {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-        <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
+        <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }} />
         <StockTradeSuccessContent>
           <SuccessHero
             title="Vendido"
@@ -208,12 +208,12 @@ export const SellStockScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <Header
         navigation={navigation as any}
         title={`Vender ${stock.ticker}`}
         titleAccessory={<TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={26} />}
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
         onBackPress={() => { if (phase !== 'processing') navigation.goBack(); }}

@@ -79,8 +79,8 @@ export const WithdrawSavingsScreen = () => {
   if (phase === 'success') {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-        <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }} />
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
+        <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }} />
         <View style={styles.successWrap}>
           <SuccessHero
             title="Listo — está en tu cUSD"
@@ -111,8 +111,8 @@ export const WithdrawSavingsScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
+      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }}>
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
@@ -233,7 +233,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
   header: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 16,

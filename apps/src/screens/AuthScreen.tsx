@@ -159,7 +159,7 @@ export const AuthScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
 
       {/* Brand field: the app's own grammar (emerald field + white sheet) at
           full volume. One graphic motif — a giant coin ring cropped off-canvas —
@@ -168,8 +168,8 @@ export const AuthScreen = () => {
         <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
           <Defs>
             <SvgLinearGradient id="field" x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor={colors.primary} />
-              <Stop offset="1" stopColor={colors.primaryDark} />
+              <Stop offset="0" stopColor={colors.heroField} />
+              <Stop offset="1" stopColor={colors.heroFieldDark} />
             </SvgLinearGradient>
           </Defs>
           <Rect width="100%" height="100%" fill="url(#field)" />

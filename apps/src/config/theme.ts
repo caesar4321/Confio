@@ -3,6 +3,15 @@ export const lightColors = {
   primaryText: '#34D399',
   primaryLight: '#D1FAE5', // emerald-100
   primaryDark: '#10B981', // emerald-500
+  // Brand field (hero backdrops, the flat headers/status bars that meet them).
+  // The founder kept the original bright field (DT1 darker variants rejected
+  // on device, 2026-10-04); one token so it can be tuned in one place.
+  heroField: '#34D399', // emerald-400 (= primary)
+  heroFieldDark: '#10B981', // emerald-500 (= primaryDark)
+  // NEW text on the hero field uses deep text-on-mint (DESIGN.md), not white:
+  // white is 1.9:1 there. 5.1:1 at the field top, 3.8:1 at the bottom, so it
+  // is set >= 19 bold (WCAG large text, 3:1) to pass everywhere.
+  onHeroField: '#064E3B', // emerald-900
   secondary: '#8B5CF6', // violet-500
   secondaryDark: '#7C3AED', // violet-600 — gradient partner of secondary (mirrors primary/primaryDark)
   secondaryText: '#8B5CF6',

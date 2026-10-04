@@ -109,7 +109,7 @@ export const LatamCommunityScreen = () => {
       <Header
         navigation={navigation as any}
         title="Tu comunidad en Confío"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
       />
@@ -172,7 +172,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   field: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
   },
   fieldInner: {

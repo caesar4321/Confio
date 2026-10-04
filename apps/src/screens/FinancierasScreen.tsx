@@ -512,16 +512,16 @@ export const FinancierasScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
+      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }}>
         {/* Brand field: emerald gradient + coin ring; padding on headerInner
             (Yoga insets absolute children by parent padding). */}
         <View style={styles.header}>
           <Svg style={StyleSheet.absoluteFill}>
             <Defs>
               <SvgLinearGradient id="financierasField" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={colors.primary} />
-                <Stop offset="1" stopColor={colors.primaryDark} />
+                <Stop offset="0" stopColor={colors.heroField} />
+                <Stop offset="1" stopColor={colors.heroFieldDark} />
               </SvgLinearGradient>
             </Defs>
             <Rect width="100%" height="100%" fill="url(#financierasField)" />
@@ -805,7 +805,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
   // Header
-  header: { backgroundColor: colors.primary, overflow: 'hidden' },
+  header: { backgroundColor: colors.heroField, overflow: 'hidden' },
   headerInner: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 20 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },

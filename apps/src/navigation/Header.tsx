@@ -7,6 +7,7 @@ import { NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 
 import { APP_LAYOUT } from '../config/layout';
+import { colors } from '../config/theme';
 
 export const HEADER_HEIGHT = APP_LAYOUT.headerHeight;
 
@@ -54,7 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isLightTheme = isLight || isHomeScreen;
   const textColor = isLightTheme ? '#FFFFFF' : '#1F2937';
   
-  const bg = backgroundColor ? backgroundColor : (isHomeScreen ? '#34d399' : '#F3F4F6');
+  const bg = backgroundColor ? backgroundColor : (isHomeScreen ? colors.heroField : '#F3F4F6');
   return (
     <SafeAreaView edges={['top']} style={{ backgroundColor: bg }}>
       <View

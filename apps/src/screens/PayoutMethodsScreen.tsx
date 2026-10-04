@@ -350,7 +350,7 @@ export const PayoutMethodsScreen = () => {
         <Header
           navigation={navigation as any}
           title="Mis cuentas"
-          backgroundColor={colors.primary}
+          backgroundColor={colors.heroField}
           isLight
           showBackButton
         />
@@ -465,7 +465,7 @@ export const PayoutMethodsScreen = () => {
       <Header
         navigation={navigation as any}
         title="Mis cuentas"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.heroField}
         isLight
         showBackButton
         rightAccessory={(
@@ -482,8 +482,8 @@ export const PayoutMethodsScreen = () => {
         <Svg style={StyleSheet.absoluteFill}>
           <Defs>
             <LinearGradient id="payoutField" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={colors.primary} />
-              <Stop offset="1" stopColor={colors.primaryDark} />
+              <Stop offset="0" stopColor={colors.heroField} />
+              <Stop offset="1" stopColor={colors.heroFieldDark} />
             </LinearGradient>
           </Defs>
           <Rect width="100%" height="100%" fill="url(#payoutField)" />
@@ -541,7 +541,7 @@ const styles = StyleSheet.create({
 
   // ── Brand field ──
   brandField: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.heroField,
     overflow: 'hidden',
   },
   fieldInner: {

@@ -27,7 +27,8 @@ import { AppState } from 'react-native';
 import { useApolloClient } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 import { GET_MONTH_SUMMARY, type MonthSummary } from '../apollo/monthSummary';
-import { currentYearMonth, deviceTimezone } from '../utils/monthSummary';
+import { currentYearMonth, deviceTimezone, previousMonth } from '../utils/monthSummary';
+import { hadHeroLine, isHeroLineHintLoaded, setHadHeroLine } from '../utils/heroLineHint';
 
 export const HERO_LINE_MIN_MOVEMENTS = 3;
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
@@ -37,15 +38,29 @@ function msUntilNextMonth(now = new Date()) {
   return Math.min(MAX_TIMEOUT_MS, Math.max(1000, next.getTime() - now.getTime()));
 }
 
+type Summary = { monthSummary: MonthSummary | null };
+
+const hasLine = (s: MonthSummary | null | undefined): s is MonthSummary =>
+  Boolean(s && s.current.movementCount >= HERO_LINE_MIN_MOVEMENTS);
+
+/** Early in the month (< 3 movements) the line shows last month instead,
+ *  until this month reaches 3 (amendment 2026-10-04). */
+const pickMonth = (current: MonthSummary | null, previous: MonthSummary | null) =>
+  hasLine(current) ? current : hasLine(previous) ? previous : null;
+
 export function useMonthHeroLine(accountKey: string | null | undefined, enabled: boolean, switching = false) {
   const client = useApolloClient();
   const [summary, setSummary] = useState<MonthSummary | null>(null);
+  // Cold launch with a hint that this account had a line: its row is held
+  // (placeholder) until the first answer fills or collapses it.
+  const [reserved, setReserved] = useState(false);
   const shownKey = useRef<string | null>(null);
   // The context whose fresh answer may replace the line as soon as it lands.
   // Kept until that answer arrives, so a repeated load cannot lose it.
   const replaceKey = useRef<string | null>(null);
   const request = useRef(0);
   const focused = useRef(false);
+  // Chosen line (this or last month) per account + current month.
   const fresh = useRef(new Map<string, MonthSummary | null>());
   // Only the very first eligible load of this Home is a cold start; later
   // context changes (incl. returning from an employee account) replace.
@@ -58,55 +73,81 @@ export function useMonthHeroLine(accountKey: string | null | undefined, enabled:
     lastAccount.current = accountKey;
     request.current += 1;
     if (summary !== null) setSummary(null);
+    if (reserved) setReserved(false);
   }
 
   const load = useCallback(() => {
     if (!enabled || !accountKey) {
       request.current += 1;
       setSummary(null);
+      setReserved(false);
       shownKey.current = null;
       replaceKey.current = null;
       return;
     }
     if (switching) return; // cache + JWT may still be the previous account's
     const { year, month } = currentYearMonth();
-    const variables = { year, month, timezone: deviceTimezone() };
+    const prev = previousMonth(year, month);
+    const timezone = deviceTimezone();
     const key = `${accountKey}:${year}-${month}`;
-    // The very first Home render never inserts the line late (cold cache).
-    if (started.current && shownKey.current !== key) replaceKey.current = key;
+    const coldStart = !started.current;
+    // A cold start never inserts the line late (cold cache) unless its row
+    // was reserved from the device hint, so nothing moves either way.
+    if (!coldStart && shownKey.current !== key) replaceKey.current = key;
+    // The hint is read at app start; if it is somehow not ready yet, this
+    // cold start reserves nothing (a late reservation would move the verbs).
+    const canReserve = coldStart && isHeroLineHintLoaded() && hadHeroLine(accountKey);
+    if (canReserve) replaceKey.current = key;
     started.current = true;
 
-    // Own answers first; else whatever Tu mes already cached for this month.
-    let cached: MonthSummary | null = fresh.current.get(key) ?? null;
-    if (!cached) {
+    const readCached = (y: number, m: number) => {
       try {
-        cached = client.readQuery<{ monthSummary: MonthSummary | null }>({ query: GET_MONTH_SUMMARY, variables })
+        return client.readQuery<Summary>({ query: GET_MONTH_SUMMARY, variables: { year: y, month: m, timezone } })
           ?.monthSummary ?? null;
       } catch {
-        cached = null;
+        return null;
       }
-    }
+    };
+    // Own answers first; else whatever Tu mes already cached.
+    let cached: MonthSummary | null = fresh.current.get(key) ?? null;
+    if (!cached) cached = pickMonth(readCached(year, month), readCached(prev.year, prev.month));
     if (cached || shownKey.current !== key) {
       setSummary(cached);
       shownKey.current = key;
     }
     if (cached && replaceKey.current === key) replaceKey.current = null;
+    // Only the cold start reserves; a later load never un-reserves a row that
+    // is still waiting for its answer (that collapse would move the verbs).
+    if (cached) setReserved(false);
+    else if (canReserve) setReserved(true);
+
+    const fetchMonth = (y: number, m: number) => client
+      .query<Summary>({ query: GET_MONTH_SUMMARY, variables: { year: y, month: m, timezone }, fetchPolicy: 'no-cache' })
+      .then(({ data }) => data?.monthSummary ?? null);
 
     const id = ++request.current;
-    client
-      .query<{ monthSummary: MonthSummary | null }>({ query: GET_MONTH_SUMMARY, variables, fetchPolicy: 'no-cache' })
-      .then(({ data }) => {
+    fetchMonth(year, month)
+      .then(async (current) => (hasLine(current) ? current : pickMonth(current, await fetchMonth(prev.year, prev.month))))
+      .then((chosen) => {
         if (id !== request.current) return; // asked for an earlier account/month
-        fresh.current.set(key, data?.monthSummary ?? null);
+        fresh.current.set(key, chosen);
+        setHadHeroLine(accountKey, chosen !== null);
         // Fresh data waits for the next focus, unless the line had to be
-        // cleared for a new account/month (then stale is worse than a move).
+        // cleared for a new account/month or its row is reserved.
         if (replaceKey.current === key) {
           replaceKey.current = null;
-          setSummary(data?.monthSummary ?? null);
+          setSummary(chosen);
+          setReserved(false);
         }
       })
       .catch(() => {
-        // The hero line is optional: on error it simply stays as it was.
+        // The hero line is optional: on error it stays as it was, and a
+        // reserved row collapses rather than waiting forever. The collapse is
+        // final for this context: a later answer waits for the next focus
+        // instead of re-reserving and moving the verbs again.
+        if (id !== request.current) return;
+        if (replaceKey.current === key) replaceKey.current = null;
+        setReserved(false);
       });
   }, [client, accountKey, enabled, switching]);
 
@@ -136,6 +177,6 @@ export function useMonthHeroLine(accountKey: string | null | undefined, enabled:
     };
   }, [load]);
 
-  const visible = Boolean(summary && summary.current.movementCount >= HERO_LINE_MIN_MOVEMENTS);
-  return { summary: visible ? summary : null };
+  const shown = hasLine(summary) ? summary : null;
+  return { summary: shown, reserved: !shown && reserved };
 }

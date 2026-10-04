@@ -1153,6 +1153,8 @@ Tu mes structure (top to bottom):
 
 ### Pass 2 — Interaction states (3 → 9/10)
 - 2A (D8): hero line renders **from the Apollo cache on first paint only**; fresh data applies on the next Home focus, never inserted mid-session. R10 adds an assertion that Enviar/Recibir positions do not change after the summary resolves.
+  - **Amendment 2026-10-04 (DT1 color, founder decision on device):** DT1 is dropped. The darker field (`#047857 → #065F46`, then `#10B981 → #059669`) read "so dark" on a Release build; the hero field stays `#34D399 → #10B981` (now behind tokens `colors.heroField` / `heroFieldDark`). The Home month line uses deep text-on-mint `#064E3B` instead of white, at 19 bold (WCAG large text: ≥ 3.8:1 everywhere on the gradient; 15-unit text would be ~4.2:1 where the line sits, under 4.5). Status bars keep the original dark icons.
+  - **Amendment 2026-10-04 (user decision, after shipping):** the line was invisible in practice (day 1–3 of every month, and on every cold launch). (1) Early month: when this month has < 3 Entró + Salió movements but last month has ≥ 3, the line shows last month ("Septiembre · …") and opens Tu mes on it; it switches once this month reaches 3. (2) Cold launch: a per-account Keychain hint ("had a line last time") reserves the 44pt row as a quiet placeholder; the first answer fills it (or collapses it on error / no line). No hint → unchanged (no late insert). The hero keeps its own answers (fetchPolicy no-cache) and never writes the shared summary cache.
 - 2B (D9): Tu mes states — Loading: skeleton rows (reuse TransactionItemSkeleton). Error: inline "No pudimos cargar tu mes · Reintentar", never US$0. Empty: "Todavía no hay movimientos en {mes}." + Enviar/Recibir shortcuts, empty sections hidden. First month: comparison line omitted. Below 3 movements Tu mes still shows real numbers (threshold is Home-only).
 - 2C (D10): protection — eligible phoneCountry reserves a fixed-height mint skeleton; null result collapses with 200ms ease-out; ineligible countries reserve nothing.
 - 2D (D11): "Ahora no" = **skip** (limit 2 per counterparty); leaving via Listo/back without answering = **dismiss** (limit 3, event `category_chip_dismissed`); either limit stops asks for that counterparty. Supersedes the single skip counter in eng R9/R15 (skip_count plus dismiss_count per counterparty).
@@ -1231,7 +1233,7 @@ Codex (completed) + Claude subagent (completed). Hard rejections: none. Litmus: 
 ## Design Implementation Tasks
 Synthesized from the design review findings. Checkbox as you ship. (Engineering tasks T1-T7 above still apply.)
 
-- [ ] **DT1 (P1, human: ~2d / CC: ~2h)** — brand — Darken hero field app-wide to #047857 → #065F46; add token to theme.ts; update DESIGN.md Color + Decisions Log; refresh website hero screenshots
+- [x] ~~**DT1 (P1, human: ~2d / CC: ~2h)** — brand — Darken hero field app-wide to #047857 → #065F46;~~ DROPPED 2026-10-04 (founder, on device): field stays bright behind hero tokens; new hero text = deep text-on-mint (see 2A amendment). add token to theme.ts; update DESIGN.md Color + Decisions Log; refresh website hero screenshots
   - Surfaced by: Pass 5 5B (D19), Pass 7 7A (D23)
   - Files: apps/src/components/common/BrandFieldBackground.tsx, apps/src/config/theme.ts, DESIGN.md, web/ hero assets
   - Verify: contrast check ≥4.5:1 for small white text at both stops; device screenshots of every screen using BrandFieldBackground
