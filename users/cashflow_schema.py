@@ -20,7 +20,7 @@ def _usd(value):
 
 
 class CategoryAmountType(graphene.ObjectType):
-    category = graphene.String(required=True, description="food|transport|home|family|work|other|uncategorized")
+    category = graphene.String(required=True, description="food|transport|home|bills|family|shopping|health|education|leisure|debt|work|other|uncategorized")
     amount_usd = graphene.String(required=True)
 
 

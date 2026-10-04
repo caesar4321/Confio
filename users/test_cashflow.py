@@ -550,3 +550,10 @@ class MonthMovementsTests(CategoryLabelTests):
                 to_address='0x' + f'{i + 0x40:02x}' * 20, transaction_date=timezone.now())
         names = [p.name for p in self._summary().counterparties if p.key == 'external']
         self.assertEqual(names, ['Billeteras externas (2)'])
+
+    def test_new_categories_are_accepted_and_summarized(self):
+        a = self.pay('25.00')
+        result = self._categorize(a, 'health', 'movement')
+        self.assertTrue(getattr(result, 'success', True))
+        cats = [(c.category, c.amount_usd) for c in self._summary().current.spending_by_category]
+        self.assertIn(('health', '25.00'), cats)
