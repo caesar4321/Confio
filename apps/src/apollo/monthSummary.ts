@@ -116,3 +116,77 @@ export type MonthMovement = {
   counterpartyName: string | null;
   date: string;
 };
+
+// ── Tu mes insights (docs/designs/tu-mes-insights.md). Three separate
+// queries: each card fails alone, and an older server without a field never
+// breaks monthSummary (feedback-isolate-new-graphql-fields).
+export const GET_MONTH_INSIGHTS = gql`
+  query MonthInsights($year: Int!, $month: Int!, $timezone: String) {
+    monthInsights(year: $year, month: $month, timezone: $timezone) {
+      previousMonthSpendingUsd
+      recurring {
+        counterpartyKey
+        name
+        expectedDay
+        expectedAmountUsd
+        category
+      }
+    }
+  }
+`;
+
+export const GET_SAVINGS_EARNED = gql`
+  query SavingsEarned($year: Int!, $month: Int!) {
+    savingsEarned(year: $year, month: $month) {
+      earnedUsd
+      daily {
+        date
+        usd
+      }
+    }
+  }
+`;
+
+export const GET_PROTECTION_VALUE = gql`
+  query ProtectionValue {
+    protectionValue {
+      currency
+      protectedUsd
+      paidLocal
+      todayLocal
+      gainLocal
+      avgRate
+      todayRate
+      quotedAt
+    }
+  }
+`;
+
+export type RecurringPayment = {
+  counterpartyKey: string;
+  name: string;
+  expectedDay: number;
+  expectedAmountUsd: string;
+  category: CategoryKey | null;
+};
+
+export type MonthInsights = {
+  previousMonthSpendingUsd: string;
+  recurring: RecurringPayment[];
+};
+
+export type SavingsEarned = {
+  earnedUsd: string;
+  daily: { date: string; usd: string }[];
+};
+
+export type ProtectionValue = {
+  currency: string;
+  protectedUsd: string;
+  paidLocal: string;
+  todayLocal: string;
+  gainLocal: string;
+  avgRate: string;
+  todayRate: string;
+  quotedAt: string;
+};

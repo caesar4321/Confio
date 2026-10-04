@@ -118,6 +118,43 @@ def _summary_context(info, year, month, timezone):
     return user, account, account_type, business_id, tz
 
 
+class RecurringPaymentType(graphene.ObjectType):
+    counterparty_key = graphene.String(required=True)
+    name = graphene.String(required=True)
+    expected_day = graphene.Int(required=True, description="Day of the viewed month (clamped to its length)")
+    expected_amount_usd = graphene.String(required=True, description='Median monthly sum (an estimate)')
+    category = graphene.String(description="The user's category for this counterparty, if any")
+
+
+class MonthInsightsType(graphene.ObjectType):
+    recurring = graphene.List(graphene.NonNull(RecurringPaymentType), required=True,
+                              description='Habitual payments: seen in 2 of the 3 previous months, sorted by day')
+    previous_month_spending_usd = graphene.String(
+        required=True, description="The FULL previous month's Salió (pace caption and eligibility)")
+
+
+class SavingsDayType(graphene.ObjectType):
+    date = graphene.Date(required=True)
+    usd = graphene.String(required=True, description='That day\'s accrual (6 decimals; bars are relative)')
+
+
+class SavingsEarnedType(graphene.ObjectType):
+    earned_usd = graphene.String(required=True, description='Estimate (daily accrual), 2 decimals')
+    daily = graphene.List(graphene.NonNull(SavingsDayType), required=True,
+                          description='Completed days only, oldest first')
+
+
+class ProtectionValueType(graphene.ObjectType):
+    currency = graphene.String(required=True, description='Ramp currency, e.g. BOB')
+    protected_usd = graphene.String(required=True, description='Dollars bought in Confío still held (R13 replay, capped)')
+    paid_local = graphene.String(required=True, description='What the user paid for them, local currency')
+    today_local = graphene.String(required=True, description="What Confío's buy rate would charge today")
+    gain_local = graphene.String(required=True)
+    avg_rate = graphene.String(required=True, description='Local per USD the user paid on average (2 decimals)')
+    today_rate = graphene.String(required=True, description="Confío's all-in buy rate for US$100 (2 decimals)")
+    quoted_at = graphene.String(required=True, description='ISO time of the quote the figures use')
+
+
 class MonthSummaryQuery(graphene.ObjectType):
     month_summary = graphene.Field(
         MonthSummaryType,
@@ -137,6 +174,84 @@ class MonthSummaryQuery(graphene.ObjectType):
         value=graphene.String(description='category key, or counterparty key'),
         description='The movements behind one number of monthSummary, newest first. Empty for employees.',
     )
+
+    month_insights = graphene.Field(
+        MonthInsightsType,
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True),
+        timezone=graphene.String(),
+        description='Tu mes insights (habitual payments, full previous month Salió). Own query: '
+                    'an older server without it fails only this request. Null for employees.',
+    )
+
+    savings_earned = graphene.Field(
+        SavingsEarnedType,
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True),
+        description='"Tu ahorro ganó": cUSD+ earnings for a UTC month from daily snapshots. Null when '
+                    'any needed snapshot is missing (never a fake zero). Own query. Null for employees.',
+    )
+
+    protection_value = graphene.Field(
+        ProtectionValueType,
+        description='"Tu dólar te protegió" for the active personal account (current figures). Null whenever '
+                    'anything is unknown (fail closed). Own query.',
+    )
+
+    def resolve_protection_value(self, info):
+        from django.utils import timezone as dj_tz
+        from users.protection import protection_value
+        now = dj_tz.now()
+        context = _summary_context(info, now.year, now.month, None)
+        if context is None:
+            return None
+        user, account, account_type, business_id, _tz = context
+        try:
+            p = protection_value(user, account, account_type, business_id)
+        except Exception:  # noqa: BLE001 — an unknown hides the card, never a guess
+            logger.warning('protection value unavailable for account %s', account.id, exc_info=True)
+            return None
+        if p is None:
+            return None
+        two = lambda v: format(v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), 'f')  # noqa: E731
+        return ProtectionValueType(
+            currency=p.currency, protected_usd=_usd(p.protected_usd), paid_local=two(p.paid_local),
+            today_local=two(p.today_local), gain_local=two(p.gain_local), avg_rate=two(p.avg_rate),
+            today_rate=two(p.today_rate), quoted_at=p.quoted_at)
+
+    def resolve_savings_earned(self, info, year, month):
+        from cusd_plus.savings_snapshots import savings_earned
+        context = _summary_context(info, year, month, None)
+        if context is None:
+            return None
+        _user, account, _account_type, _business_id, _tz = context
+        if not account.bsc_address:
+            return None                      # savings never activated on this account
+        result = savings_earned(account.id, int(year), int(month))
+        if result is None:
+            return None
+        total, daily = result
+        return SavingsEarnedType(
+            earned_usd=_usd(total),
+            daily=[SavingsDayType(date=d, usd=format(v.quantize(Decimal('0.000001')), 'f')) for d, v in daily])
+
+    def resolve_month_insights(self, info, year, month, timezone=None):
+        from users.cashflow import month_insights
+        context = _summary_context(info, year, month, timezone)
+        if context is None:
+            return None
+        user, account, account_type, business_id, tz = context
+        try:
+            result = month_insights(user, account, account_type, business_id, int(year), int(month), tz)
+        except SummaryUnavailable as exc:
+            # Never "no habitual payments" from data we couldn't read.
+            logger.error('month insights unavailable for account %s: %s', account.id, exc)
+            raise GraphQLError('El resumen del mes no está disponible.') from exc
+        return MonthInsightsType(
+            recurring=[RecurringPaymentType(
+                counterparty_key=r.counterparty_key, name=r.name, expected_day=r.expected_day,
+                expected_amount_usd=_usd(r.expected_amount), category=r.category) for r in result.recurring],
+            previous_month_spending_usd=_usd(result.previous_month_spending))
 
     def resolve_month_movements(self, info, year, month, filter_by, timezone=None, value=None):
         from users.cashflow import month_movements

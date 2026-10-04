@@ -1344,4 +1344,6 @@ from .models_cashflow import (  # noqa: F401,E402
     CounterpartyRule,
     MovementOverride,
     CounterpartyPromptState,
+    CusdPlusPriceSnapshot,
+    CusdPlusHoldingSnapshot,
 )

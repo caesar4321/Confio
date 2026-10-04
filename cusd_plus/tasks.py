@@ -2594,3 +2594,17 @@ def check_sponsor_balance():
 
     logger.info('BSC sponsor balance OK: %.6f BNB (~%s ops)', bnb, ops_left)
     return {'level': 'ok', 'balance_wei': balance, 'ops_left': ops_left}
+
+
+@shared_task(name='cusd_plus.snapshot_savings_daily')
+def snapshot_savings_daily():
+    """Daily cUSD+ price + holdings snapshot for "Tu ahorro ganó" (Tu mes).
+    Logic and failure rules: cusd_plus/savings_snapshots.py."""
+    from .savings_snapshots import snapshot_day
+    try:
+        status = snapshot_day()
+    except Exception:  # noqa: BLE001 — no row = that day stays unknown (fail closed)
+        logger.exception('savings snapshot failed; the day stays unknown')
+        return 'error'
+    logger.info('savings snapshot: %s', status)
+    return status

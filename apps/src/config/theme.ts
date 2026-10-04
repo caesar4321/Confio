@@ -90,6 +90,8 @@ export const lightColors = {
   violetLight: '#EDE9FE',
   warningLight: '#FEF3C7',
   primarySoft: '#ECFDF5', // emerald-50
+  // Tu mes protection card: the "Pagaste" comparison bar (neutral slate).
+  compareNeutral: '#CBD5E1',
   borderMedium: '#D1D5DB', // gray-300
   shadowBase: '#0F172A', // slate-900
   gray700: '#374151', // gray-700

@@ -1,17 +1,18 @@
-// "Tu mes" — the month in one screen (design: docs/designs/cashflow-home-tu-mes.md).
+// "Tu mes" — the month in one screen (designs: docs/designs/cashflow-home-tu-mes.md,
+// docs/designs/tu-mes-insights.md).
 //
-// Hierarchy (1D): Salió is the anchor, Entró beside it, plain type on white.
-// Sections each have one job (1A/1B): En qué se fue (spending only, by
-// category, "Sin categoría" last) · Entre tus cuentas (own money moving) ·
-// Con quién (who you received from / sent to). Amounts always US$ (5A),
-// masked with the balance (6A). States (2B): skeleton, inline retry (never
-// zeros), honest empty month.
+// Top to bottom: Card A "Te quedaron" (the single 34pt anchor, with the pace
+// line on the current month) · the dollar slot (protection, else savings
+// earned) · Pagos habituales · En qué se fue · Entre tus cuentas · Con quién.
+// Card A renders as soon as monthSummary answers; the insight cards and the
+// sections below are revealed together (≤800ms later), so nothing moves under
+// the user's finger. Amounts always US$, masked with the balance. A month with
+// no movements still shows the insight cards, with the empty message below.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
   Animated,
-  Easing,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -29,62 +30,20 @@ import type { MainStackParamList } from '../types/navigation';
 import {
   GET_MONTH_MOVEMENTS, GET_MONTH_SUMMARY, type CategoryKey, type MonthSummary, type MonthTotals,
 } from '../apollo/monthSummary';
+import { SummaryCard } from '../components/tuMes/SummaryCard';
+import { ProtectionCard, SavingsCard } from '../components/tuMes/ProtectionCard';
+import { RecurringCard } from '../components/tuMes/RecurringCard';
+import { useMonthInsights, type InsightData } from '../hooks/useMonthInsights';
+import { dollarSlot, paceLine } from '../utils/monthInsights';
 import { AnalyticsService } from '../services/analyticsService';
 import {
   CATEGORY_META, capitalize, categoryLabel, currentYearMonth, deviceTimezone, formatUsd, MASK,
   monthName, nextMonth, previousMonth,
 } from '../utils/monthSummary';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
-import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Route = RouteProp<MainStackParamList, 'MonthSummary'>;
-
-const TICK_MS = 1200;
-
-/** DESIGN.md "tick-settle": money rolls in once and settles; instant with Reduce Motion. */
-function useTickSettle(target: number, runKey: string) {
-  const anim = useRef(new Animated.Value(0)).current;
-  const [value, setValue] = useState(target);
-  // A refresh (cache, then network) can change the number mid-roll or after
-  // it settled: the roll heads for the latest target, and a settled number
-  // jumps straight to it instead of replaying the opening animation.
-  const targetRef = useRef(target);
-  const settled = useRef(false);
-  targetRef.current = target;
-  useEffect(() => {
-    if (settled.current) setValue(target);
-  }, [target]);
-  useEffect(() => {
-    let cancelled = false;
-    settled.current = false;
-    const id = anim.addListener(({ value: v }) => setValue(targetRef.current * v));
-    const settle = () => {
-      if (cancelled) return;
-      settled.current = true;
-      setValue(targetRef.current);
-    };
-    AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
-      if (cancelled) return;
-      if (reduce) {
-        anim.setValue(1);
-        settle();
-        return;
-      }
-      anim.setValue(0);
-      Animated.timing(anim, { toValue: 1, duration: TICK_MS, easing: Easing.out(Easing.cubic), useNativeDriver: false })
-        .start(settle);
-    }).catch(settle);
-    return () => {
-      cancelled = true;
-      anim.stopAnimation();
-      anim.removeListener(id);
-    };
-    // runKey: animate on the first open of each month view only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runKey]);
-  return value;
-}
 
 function monthsBetween(a: { year: number; month: number }, b: { year: number; month: number }) {
   return (b.year - a.year) * 12 + (b.month - a.month);
@@ -120,6 +79,12 @@ export function MonthSummaryScreen() {
     context: { queryDeduplication: false },
   });
   const summary = data?.monthSummary ?? null;
+  const insights = useMonthInsights({
+    accountKey: activeAccount?.id, year: period.year, month: period.month, timezone, isCurrent,
+    ready: Boolean(summary && summary.year === period.year && summary.month === period.month),
+  });
+  const refreshInsights = useRef(insights.refresh);
+  refreshInsights.current = insights.refresh;
 
   // Back from a movement list where categories may have changed: re-read.
   // (refetch via ref: the effect must run per focus, never per render.)
@@ -127,7 +92,10 @@ export function MonthSummaryScreen() {
   refetchRef.current = refetch;
   const focusedOnce = useRef(false);
   useFocusEffect(useCallback(() => {
-    if (focusedOnce.current) refetchRef.current().catch(() => undefined);
+    if (focusedOnce.current) {
+      refetchRef.current().catch(() => undefined);
+      refreshInsights.current();              // values only; no card added or removed
+    }
     focusedOnce.current = true;
   }, []));
 
@@ -191,6 +159,8 @@ export function MonthSummaryScreen() {
           summary={summary}
           masked={masked}
           isCurrent={isCurrent}
+          business={activeAccount?.type === 'business'}
+          insights={insights.revealed ? insights : null}
           runKey={`${period.year}-${period.month}`}
           onOpen={openList}
           onSend={() => navigation.navigate('Send')}
@@ -216,6 +186,9 @@ type BodyProps = {
   summary: MonthSummary;
   masked: boolean;
   isCurrent: boolean;
+  business: boolean;
+  /** null until the reveal (useMonthInsights): cards + sections below wait. */
+  insights: InsightData | null;
   runKey: string;
   onOpen: (filterBy: MainStackParamList['MonthMovements']['filterBy'], title: string, value?: string) => void;
   onSend: () => void;
@@ -257,14 +230,9 @@ const isUnknownWallet = (key: string, name: string) =>
 /** A single unknown wallet is a deposit only if no money went out to it. */
 const externalName = (sent: number) => (sent > 0 ? 'Billetera externa' : 'Depósito externo');
 
-function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onReceive }: BodyProps) {
+function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onOpen, onSend, onReceive }: BodyProps) {
   const cur = summary.current;
-  const spending = Number(cur.spendingUsd);
-  const income = Number(cur.incomeUsd);
-  const shownSpending = useTickSettle(spending, runKey);
-  const shownIncome = useTickSettle(income, runKey);
   const monthLabel = monthName(summary.month);
-  const prevLabel = monthName(previousMonth(summary.year, summary.month).month);
 
   const uncategorized = cur.spendingByCategory.find((c) => c.category === 'uncategorized');
   const categorized = cur.spendingByCategory.filter((c) => c.category !== 'uncategorized');
@@ -286,6 +254,20 @@ function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onRecei
   }, []));
   const pendingCount = uncategorized ? uncategorizedData?.monthMovements.length : 0;
 
+  // One fade for the revealed region (design review 19A); none with Reduce Motion.
+  const fade = useRef(new Animated.Value(0)).current;
+  const revealed = Boolean(insights);
+  useEffect(() => {
+    if (!revealed) {
+      fade.setValue(0);
+      return;
+    }
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((reduce) => (reduce ? fade.setValue(1)
+        : Animated.timing(fade, { toValue: 1, duration: 180, useNativeDriver: true }).start()))
+      .catch(() => fade.setValue(1));
+  }, [revealed, fade]);
+
   const ownRows = ownMoneyRows(cur);
   const people = summary.counterparties.map((c) => {
     const unknown = isUnknownWallet(c.key, c.name);
@@ -300,74 +282,54 @@ function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onRecei
     };
   });
   const isEmpty = cur.movementCount === 0 && ownRows.length === 0;
-  if (isEmpty) {
-    return (
-      <View style={styles.center} testID="month-summary-empty">
-        <Text style={styles.emptyTitle}>Todavía no hay movimientos en {monthLabel}.</Text>
-        <View style={styles.emptyActions}>
-          <TouchableOpacity style={styles.pill} onPress={onSend} accessibilityRole="button">
-            <Text style={styles.pillText}>Enviar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.pill, styles.pillGhost]} onPress={onReceive} accessibilityRole="button">
-            <Text style={[styles.pillText, styles.pillGhostText]}>Recibir</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  const today = new Date();
+  const slot = insights ? dollarSlot(insights.protection, insights.savings) : null;
+  const recurring = insights?.insights?.recurring ?? [];
+  // Empty past months: no habitual-payments card (R25); B' still shows (23A).
+  const showRecurring = recurring.length > 0 && (!isEmpty || isCurrent);
+  const pace = insights ? paceLine(summary, insights.insights?.previousMonthSpendingUsd, today, business) : null;
 
-  const hasComparison = summary.previous.movementCount > 0;
-  const comparison = summary.previousIsPartial ? `Mismo período de ${prevLabel}` : `vs ${prevLabel}`;
-  const total = income + spending;
+  if (isEmpty && !insights) {
+    return <SkeletonState />;     // ≤800ms: the reveal decides what a quiet month shows
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.body}>
-      {/* In vs out (design A): the two totals, then one proportion bar;
-          emerald for money in, sky blue for money out, a faint mint wash. */}
-      <View style={styles.card}>
-        <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Defs>
-            <SvgLinearGradient id="tuMesWash" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={colors.primarySoft} stopOpacity="1" />
-              <Stop offset="0.65" stopColor={colors.white} stopOpacity="1" />
-            </SvgLinearGradient>
-          </Defs>
-          <Rect width="100%" height="100%" fill="url(#tuMesWash)" />
-        </Svg>
-        <View style={styles.totals}>
-          <TouchableOpacity onPress={() => onOpen('income', 'Entró')} accessibilityRole="button" style={styles.totalBlock}
-            accessibilityLabel={masked ? 'Entró, oculto' : `Entró ${formatUsd(income, { whole: true })}`} testID="total-income">
-            <Text style={[styles.totalLabel, styles.totalLabelIn]}>Entró</Text>
-            <Text style={[styles.totalAmount, styles.totalIn]} numberOfLines={1} adjustsFontSizeToFit>
-              {money(shownIncome, masked)}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => onOpen('spending', 'Salió')} accessibilityRole="button"
-            style={[styles.totalBlock, styles.totalBlockEnd]}
-            accessibilityLabel={masked ? 'Salió, oculto' : `Salió ${formatUsd(spending, { whole: true })}`} testID="total-spending">
-            <Text style={[styles.totalLabel, styles.totalLabelOut]}>Salió</Text>
-            <Text style={[styles.totalAmount, styles.totalOut]} numberOfLines={1} adjustsFontSizeToFit>
-              {money(shownSpending, masked)}
-            </Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.ratioTrack} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          {/* Normalized weights (Yoga floors flex sums below 1) and no
-              zero-width segments. */}
-          {income > 0 && <View style={[styles.ratioIn, { flex: income / total }]} />}
-          {spending > 0 && <View style={[styles.ratioOut, { flex: spending / total }]} />}
-        </View>
-        <Text style={styles.note}>Sin contar recargas, retiros ni ahorro.</Text>
-        {hasComparison && (
-          <Text style={styles.noteMuted} testID="month-comparison">
-            {comparison}: <Text style={styles.flowOutText}>salió {money(summary.previous.spendingUsd, masked)}</Text>,{' '}
-            <Text style={styles.flowInText}>entró {money(summary.previous.incomeUsd, masked)}</Text>
-          </Text>
-        )}
-      </View>
-      {/* Protection / savings-earned slot (design 7B/7C): renders once the
-          server provides real values (DT8, protection flag); nothing until then. */}
+      {!isEmpty && (
+        <SummaryCard summary={summary} masked={masked} runKey={runKey} pace={pace}
+          onOpenIncome={() => onOpen('income', 'Entró')} onOpenSpending={() => onOpen('spending', 'Salió')} />
+      )}
+      {insights && (
+        <Animated.View style={{ opacity: fade }} testID="tumes-revealed">
+          {slot?.kind === 'protection' && <ProtectionCard value={slot.value} masked={masked} />}
+          {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
+          {showRecurring && (
+            <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}
+              onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />
+          )}
+          {isEmpty ? (
+            <View style={[styles.emptyBelow, !slot && !showRecurring && styles.emptyAlone]} testID="month-summary-empty">
+              <Text style={styles.emptyTitle}>Todavía no hay movimientos en {monthLabel}.</Text>
+              <View style={styles.emptyActions}>
+                <TouchableOpacity style={styles.pill} onPress={onSend} accessibilityRole="button">
+                  <Text style={styles.pillText}>Enviar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.pill, styles.pillGhost]} onPress={onReceive} accessibilityRole="button">
+                  <Text style={[styles.pillText, styles.pillGhostText]}>Recibir</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            renderSections()
+          )}
+        </Animated.View>
+      )}
+    </ScrollView>
+  );
 
+  function renderSections() {
+    return (
+      <>
       {cur.spendingByCategory.length > 0 && (
         <Section
           title="En qué se fue"
@@ -466,8 +428,9 @@ function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onRecei
         </Section>
       )}
       {!isCurrent && <View style={styles.bottomPad} />}
-    </ScrollView>
-  );
+      </>
+    );
+  }
 }
 
 /** Direction-aware own-money rows (7F): positive amounts, zero rows hidden. */
@@ -510,6 +473,8 @@ const styles = StyleSheet.create({
   monthTitle: { fontSize: 16, fontWeight: '600', color: colors.text.primary, minWidth: 150, textAlign: 'center' },
   body: { paddingHorizontal: 16, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  emptyBelow: { alignItems: 'center', marginTop: 32 },
+  emptyAlone: { marginTop: 120 },
   muted: { fontSize: 15, color: colors.text.secondary, textAlign: 'center' },
   retry: { marginTop: 12, paddingHorizontal: 20, minHeight: 44, justifyContent: 'center' },
   retryText: { fontSize: 15, fontWeight: '700', color: colors.primaryDark },

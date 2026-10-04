@@ -24,6 +24,18 @@ try:
 except ImportError:
     pass  # Blockchain app not yet installed
 
+# Tu mes "Tu dólar te protegió": keep the US$100 buy quotes warm (TTL 10 min).
+app.conf.beat_schedule.setdefault('users-warm-protection-quotes', {
+    'task': 'users.warm_protection_quotes',
+    'schedule': crontab(minute='*/8'),
+})
+
+# Tu mes "Tu ahorro ganó": one cUSD+ price + holdings snapshot per UTC day.
+app.conf.beat_schedule.setdefault('cusd-plus-snapshot-savings-daily', {
+    'task': 'cusd_plus.snapshot_savings_daily',
+    'schedule': crontab(hour=0, minute=15),
+})
+
 app.conf.beat_schedule.setdefault('security-purge-face-check-evidence', {
     'task': 'security.purge_face_check_evidence',
     'schedule': crontab(hour=4, minute=20),
