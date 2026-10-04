@@ -1,6 +1,17 @@
 """System prompt for Confio Assistant. Product facts here must stay true to the app:
-no fees, rates or yields (those are quoted in-flow), no promises."""
+no fees, rates or yields (those are quoted in-flow), no promises.
+
+Order matters for cost: everything that is the same for every user (rules, the
+approved answers in faq.md, then the screen list) comes first so the provider's
+prompt cache reuses it; the per-user line goes last."""
+import re
+from pathlib import Path
+
 from .destinations import DESTINATIONS
+
+# Approved answers to product questions, reviewed by the team (assistant/faq.md).
+# HTML comments in the file are notes for reviewers, not for the model.
+FAQ = re.sub(r'<!--.*?-->', '', Path(__file__).with_name('faq.md').read_text(encoding='utf-8'), flags=re.S).strip()
 
 SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 
@@ -8,7 +19,6 @@ SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 - Confío es una billetera de dólares digitales para Latinoamérica: guardar, enviar, recibir y pagar en dólares, recargar y retirar con bancos locales, y acceder a acciones de EE.UU.
 - Confío no custodia el dinero de los usuarios: cada usuario controla su billetera.
 - Hablas español latinoamericano neutro, cálido y breve (2-4 oraciones salvo que pidan detalle). Tuteas. Sin jerga cripto si no hace falta. Si el usuario escribe en otro idioma, respóndele en ese idioma.
-- Nombre del usuario: {first_name}. Cuenta activa: {account_label}. País del teléfono: {country}. Pantalla actual: {screen}. Fecha y hora local: {local_now}.
 
 # Lo que puedes hacer
 1. Explicar cómo funciona Confío y llevar al usuario a la pantalla correcta con la herramienta `navigate`. Cuando el usuario pide abrir algo ("abre QR para pagar", "quiero recargar"), llama `navigate` de inmediato y responde en una línea.
@@ -28,9 +38,20 @@ SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 - Nunca pidas ni aceptes contraseñas, códigos de verificación, frases semilla ni claves privadas. Confío nunca los pide. Si alguien se los pidió al usuario, es una estafa: dilo claro.
 - No tienes acceso a otras cuentas ni a datos internos de la empresa. Si no sabes algo, dilo y ofrece pasar con el equipo.
 - No inventes funciones. Si no está en la lista de pantallas, no existe en la app.
+- Para preguntas sobre cómo funciona Confío (países, recargas, retiros, verificación, seguridad), usa las respuestas aprobadas de abajo. Si la respuesta no está ahí ni en tus herramientas, di que no lo sabes con certeza y ofrece pasar con el equipo; no completes con suposiciones.
 
+# Respuestas aprobadas por el equipo de Confío
+{faq}
+"""
+
+DESTINATIONS_SECTION = """
 # Pantallas que puedes abrir (`navigate`)
 {destinations}
+"""
+
+USER_SECTION = """
+# Esta conversación
+Nombre del usuario: {first_name}. Cuenta activa: {account_label}. País del teléfono: {country}. Pantalla actual: {screen}. Fecha y hora local: {local_now}.
 """
 
 
@@ -44,15 +65,16 @@ NO_NAVIGATION_NOTE = (
 
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
-    prompt = SYSTEM_PROMPT.format(
+    prompt = SYSTEM_PROMPT.replace('{faq}', FAQ) + DESTINATIONS_SECTION.format(destinations=lines)
+    if not can_navigate:
+        prompt += NO_NAVIGATION_NOTE
+    return prompt + USER_SECTION.format(
         first_name=first_name or 'sin nombre',
         account_label=account_label,
         country=country or 'desconocido',
         screen=screen or 'desconocida',
         local_now=local_now,
-        destinations=lines,
     )
-    return prompt if can_navigate else prompt + NO_NAVIGATION_NOTE
 
 
 ANALYSIS_PROMPT = """Eres el analista financiero de Confio Assistant. Recibes la pregunta de un usuario y los resúmenes mensuales de su cuenta calculados por Confío (en dólares).

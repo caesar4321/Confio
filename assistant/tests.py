@@ -943,3 +943,29 @@ class SeventeenthPassTests(TestCase):
         self.assertEqual(outcome.mode, 'HUMAN')
         self.assertIsNone(outcome.reply_message)
         self.assertFalse(SupportMessage.objects.filter(body='Abre Pagar').exists())
+
+
+from .prompts import FAQ, build_system_prompt  # noqa: E402
+
+
+class PromptTests(TestCase):
+    def _prompt(self, **kw):
+        base = dict(first_name='Ana', account_label='Personal', country='BO', screen='Home',
+                    local_now='2026-10-04 10:00', destinations=['home', 'send'])
+        base.update(kw)
+        return build_system_prompt(**base)
+
+    def test_approved_answers_are_in_the_prompt_without_reviewer_notes(self):
+        prompt = self._prompt()
+        self.assertTrue(FAQ)
+        self.assertIn(FAQ, prompt)
+        self.assertNotIn('<!--', prompt)
+
+    def test_shared_prefix_then_per_user_line_last(self):
+        a = self._prompt()
+        b = self._prompt(first_name='Luis', country='CO', screen='Send', local_now='2026-10-05 08:00')
+        # Everything up to the per-user section is identical, so it caches.
+        head = a.split('# Esta conversación')[0]
+        self.assertTrue(b.startswith(head))
+        self.assertIn(FAQ, head)
+        self.assertTrue(a.rstrip().endswith('2026-10-04 10:00.'))
