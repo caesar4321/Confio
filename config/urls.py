@@ -157,6 +157,8 @@ def retired_admin_route(request):
     return HttpResponseNotFound()
 
 
+from assistant import views as assistant_views  # noqa: E402
+
 urlpatterns = [
     re_path(r'^(?:confio-control-panel|admin)(?:/.*)?$', retired_admin_route),
     # Ensure /admin (no trailing slash) redirects to /admin/
@@ -167,6 +169,8 @@ urlpatterns = [
     path('sitemap.xml', public_sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
     path(f'{settings.ADMIN_PATH}/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
+    path('webhooks/app-store/', assistant_views.app_store_notifications, name='app_store_notifications'),
+    path('webhooks/google-play/', assistant_views.google_play_notifications, name='google_play_notifications'),
     path('v1/', include('billing.api.urls')),
     path('portal/login/', portal_login_redirect, name='portal_login'),
     path('portal/login-complete/', portal_login_complete, name='portal_login_complete'),

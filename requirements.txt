@@ -20,6 +20,7 @@ boto3==1.38.32  # >=1.38.32: Rekognition ChallengePreferences (security/face_ste
 requests==2.32.3
 Telethon>=1.36.0,<2.0
 google-api-python-client==2.167.0
+app-store-server-library==3.1.2  # Confío IA+: verify App Store signed transactions/notifications
 azure-cognitiveservices-vision-face==0.6.1
 gunicorn==20.1.0
 flask==2.0.1

@@ -45,6 +45,11 @@ type MessageChannelThreadProps = {
   loadMorePosition?: 'top' | 'bottom';
   refreshing?: boolean;
   onRefresh?: () => void;
+  // Inside the floating Confío IA box: the chat heads already say who this
+  // is, so no back button / avatar / top safe-area here.
+  embedded?: boolean;
+  // Embedded in a modal: the host closes itself, then opens the post.
+  onOpenPost?: (contentItemId: number) => void;
 };
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
@@ -219,6 +224,8 @@ export function MessageChannelThread({
   loadMorePosition = 'bottom',
   refreshing = false,
   onRefresh,
+  embedded = false,
+  onOpenPost,
 }: MessageChannelThreadProps) {
   const navigation = useNavigation<Navigation>();
   const [draftMessage, setDraftMessage] = React.useState('');
@@ -310,6 +317,10 @@ export function MessageChannelThread({
   };
 
   const openDiscoverDetail = (messageId: number) => {
+    if (onOpenPost) {
+      onOpenPost(messageId);
+      return;
+    }
     navigation.navigate('DiscoverPostDetail', { contentItemId: messageId });
   };
 
@@ -322,12 +333,14 @@ export function MessageChannelThread({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
     >
-      <SafeAreaView edges={['top']} style={styles.channelHeaderSafeArea}>
-        <View style={styles.channelHeaderRow}>
-          <Pressable onPress={onBack} style={styles.backButton}>
-            <Icon name="arrow-left" size={22} color={colors.text.primary} />
-          </Pressable>
-          <ChannelAvatar channel={channel} large />
+      <SafeAreaView edges={embedded ? [] : ['top']} style={styles.channelHeaderSafeArea}>
+        <View style={[styles.channelHeaderRow, embedded && styles.channelHeaderRowEmbedded]}>
+          {!embedded && (
+            <Pressable onPress={onBack} style={styles.backButton}>
+              <Icon name="arrow-left" size={22} color={colors.text.primary} />
+            </Pressable>
+          )}
+          {!embedded && <ChannelAvatar channel={channel} large />}
           <View style={styles.channelHeaderCopy}>
             <Text style={styles.channelHeaderName}>{channel.name}</Text>
             <Text style={styles.channelHeaderSubtitle}>{channel.subtitle}</Text>
@@ -544,6 +557,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.neutral,
+  },
+  channelHeaderRowEmbedded: {
+    minHeight: 0,
+    paddingTop: 4,
+    paddingBottom: 8,
   },
   channelHeaderCopy: {
     flex: 1,

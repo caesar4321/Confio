@@ -16,11 +16,17 @@ import {
 } from '../apollo/mutations';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
+import { useOptionalConfioIa } from '../assistant/ConfioIaContext';
 import { colors } from '../config/theme';
 
 type MessageInboxContentProps = {
   onScreenStateChange?: (state: ScreenState) => void;
   initialChannelId?: Channel['id'];
+  // Embedded in the floating Confío IA box: show only this channel's thread
+  // (no inbox list); back calls onExit.
+  embeddedChannelId?: Channel['id'];
+  onExit?: () => void;
+  onOpenPost?: (contentItemId: number) => void;
 };
 
 const SUPPORT_POLL_INTERVAL_MS = 5000;
@@ -198,12 +204,18 @@ function mapChannels(channels?: InboxChannelDto[]): Channel[] {
   });
 }
 
-export function MessageInboxContent({ onScreenStateChange, initialChannelId }: MessageInboxContentProps) {
+export function MessageInboxContent({
+  onScreenStateChange,
+  initialChannelId,
+  embeddedChannelId,
+  onExit,
+  onOpenPost,
+}: MessageInboxContentProps) {
   const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
   const { activeAccount } = useAccount();
   const [screen, setScreen] = useState<ScreenState>('inbox');
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
-  const [pendingInitialChannelId, setPendingInitialChannelId] = useState(initialChannelId);
+  const [pendingInitialChannelId, setPendingInitialChannelId] = useState(embeddedChannelId ?? initialChannelId);
   const [channels, setChannels] = useState<Channel[]>([]);
   const threadPageGeneration = useRef(0);
   const [hasMoreThreadMessages, setHasMoreThreadMessages] = useState<boolean | null>(null);
@@ -213,6 +225,7 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
     soporte: 0,
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const confioIa = useOptionalConfioIa();
   const canQuery = isAuthenticated && !authLoading;
   const contextKey = activeAccount?.id || 'no-account';
   const shouldPollInbox =
@@ -314,6 +327,17 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
     }
   }, [pendingInitialChannelId, channels, activeChannel, screen]);
 
+  // Embedded: switching chat heads swaps the channel in place.
+  useEffect(() => {
+    if (!embeddedChannelId) {
+      return;
+    }
+    threadPageGeneration.current += 1;
+    setActiveChannel(null);
+    setScreen('inbox');
+    setPendingInitialChannelId(embeddedChannelId);
+  }, [embeddedChannelId]);
+
   useEffect(() => {
     if (Platform.OS !== 'android' || screen !== 'channel') {
       return;
@@ -323,6 +347,9 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
       threadPageGeneration.current += 1;
       setActiveChannel(null);
       setScreen('inbox');
+      if (embeddedChannelId) {
+        onExit?.();
+      }
       return true;
     });
 
@@ -330,6 +357,11 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   }, [screen]);
 
   const openChannel = (channel: Channel) => {
+    // The support thread is Confío IA's chat: open it where the AI's actions work.
+    if (channel.id === 'soporte' && confioIa?.available) {
+      confioIa.open();
+      return;
+    }
     threadPageGeneration.current += 1;
     setActiveChannel(channel);
     setUnreadCounts((prev) => ({ ...prev, [channel.id]: 0 }));
@@ -346,6 +378,9 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
     setActiveChannel(null);
     setScreen('inbox');
     setHasMoreThreadMessages(false);
+    if (embeddedChannelId) {
+      onExit?.();
+    }
   };
 
   const canLoadMoreThreadMessages = hasMoreThreadMessages ?? Boolean(
@@ -493,11 +528,23 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
           void handleLoadOlderMessages();
         }}
         loadMorePosition={activeChannel.id === 'soporte' ? 'top' : 'bottom'}
+        embedded={!!embeddedChannelId}
+        onOpenPost={onOpenPost}
         refreshing={isRefreshing}
         onRefresh={() => {
           void handleRefresh();
         }}
       />
+    );
+  }
+
+  if (embeddedChannelId) {
+    // Embedded never shows the inbox list; the thread opens as soon as the
+    // channels arrive.
+    return (
+      <View style={styles.stateWrap}>
+        <ActivityIndicator size="small" color={colors.primary} />
+      </View>
     );
   }
 

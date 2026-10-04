@@ -233,6 +233,12 @@ const requestLifetimeLink = new ApolloLink((operation, forward) =>
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
   // Sensitive location evidence must never enter error/telemetry logs.
   const isMembershipClaim = ['ClaimInstitutionMembership', 'ApplyCobreBreb', 'BrebLocationChallenge', 'VerifyBrebLocation'].includes(operation.operationName);
+  // Confío IA traffic carries message text, voice notes, pet photos,
+  // transcripts and store receipts: never log its variables.
+  const redactVariables = isMembershipClaim || [
+    'AskConfioIa', 'SendSupportMessage', 'CreateConfioIaPet', 'VerifyConfioIaPurchase',
+    'StartConfioIaVoice', 'ConnectConfioIaVoice', 'RunConfioIaVoiceTool', 'LogConfioIaVoice',
+  ].includes(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {
       console.error('[GraphQL error]:', {
@@ -241,7 +247,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
         path: err.path,
         extensions: isMembershipClaim ? undefined : err.extensions,
         operation: operation.operationName,
-        variables: isMembershipClaim ? '[REDACTED]' : operation.variables
+        variables: redactVariables ? '[REDACTED]' : operation.variables
       });
 
       // Handle specific error codes
@@ -304,7 +310,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       stack: isMembershipClaim ? undefined : networkError.stack,
       statusCode: ne.statusCode,
       operation: operation.operationName,
-      variables: isMembershipClaim ? '[REDACTED]' : operation.variables
+      variables: redactVariables ? '[REDACTED]' : operation.variables
     });
 
     // Ban detection. Real-device ground truth (2026-07-22): the middleware's
