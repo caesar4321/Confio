@@ -125,6 +125,10 @@ export const fontFamily = {
   medium: 'InstrumentSans-Medium',
   semibold: 'InstrumentSans-SemiBold',
   bold: 'InstrumentSans-Bold',
+  italic: 'InstrumentSans-Italic',
+  mediumItalic: 'InstrumentSans-MediumItalic',
+  semiboldItalic: 'InstrumentSans-SemiBoldItalic',
+  boldItalic: 'InstrumentSans-BoldItalic',
 } as const;
 
 // Legacy export for backwards compatibility

@@ -96,6 +96,10 @@
 		<string>InstrumentSans-Medium.ttf</string>
 		<string>InstrumentSans-SemiBold.ttf</string>
 		<string>InstrumentSans-Bold.ttf</string>
+		<string>InstrumentSans-Italic.ttf</string>
+		<string>InstrumentSans-MediumItalic.ttf</string>
+		<string>InstrumentSans-SemiBoldItalic.ttf</string>
+		<string>InstrumentSans-BoldItalic.ttf</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
