@@ -2454,6 +2454,19 @@ export const AccountDetailScreen = () => {
 
             {/* Enhanced Transactions Section */}
             <View style={styles.transactionsSection}>
+              {/* "Tu mes" entry (design 1C): only on the dollar history, owners
+                  only — keeps the month reachable when the Home line is hidden. */}
+              {isCusd && !activeAccount?.isEmployee && (
+                <TouchableOpacity
+                  style={styles.monthRow}
+                  onPress={() => navigation.navigate('MonthSummary', { masked: !showBalance || !canViewBalance })}
+                  accessibilityRole="button"
+                  testID="tu-mes-row"
+                >
+                  <Text style={styles.monthRowText}>Tu mes</Text>
+                  <Icon name="chevron-right" size={18} color={colors.text.secondary} />
+                </TouchableOpacity>
+              )}
               <View style={styles.transactionsHeader}>
                 <Text style={styles.transactionsTitle}>Historial de transacciones</Text>
                 <View style={styles.transactionsFilters}>
@@ -3049,6 +3062,20 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     marginTop: 8,
+  },
+  monthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 48,
+    marginBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  monthRowText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
   },
   transactionsSection: {
     paddingHorizontal: 16,

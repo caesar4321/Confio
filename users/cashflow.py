@@ -23,7 +23,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 USD_TOKENS = {'CUSD', 'CUSD_BSC', 'CUSD_PLUS', 'USDT', 'USDC'}
@@ -81,6 +81,9 @@ def comparison_window(year: int, month: int, now: datetime, tz: ZoneInfo) -> tup
     day = min(local_now.day, calendar.monthrange(py, pm)[1])
     cutoff = datetime.combine(date(py, pm, day), local_now.timetz().replace(tzinfo=None), tzinfo=tz)
     return p_start, min(cutoff, p_end), True
+
+
+CENT = Decimal('0.01')
 
 
 def _viewer_amount(row, direction: str) -> Decimal | None:
@@ -336,7 +339,9 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
             key, name = _payout_counterparty(row)
         else:
             key, name = _counterparty(row, direction)
-    movement = Movement(kind=kind, direction=direction, amount=amount,
+    # Cents once, here: every total, group and list then adds the same
+    # numbers, so a drill-down always sums to the figure it was opened from.
+    movement = Movement(kind=kind, direction=direction, amount=amount.quantize(CENT, rounding=ROUND_HALF_UP),
                         counterparty_key=key, counterparty_name=name,
                         when=row.transaction_date, row_id=getattr(row, 'pk', None))
     movement.category = category_for(movement, ctx)
@@ -531,3 +536,51 @@ def summarize(user, account, account_type, business_id, year, month, tz, now=Non
     top = sorted(people.values(), key=lambda c: c.received + c.sent, reverse=True)[:5]
     return MonthSummary(year=year, month=month, current=current, previous=previous,
                         previous_is_partial=partial, counterparties=top)
+
+
+OWN_MONEY_KINDS = {'top_up', 'withdrawal', 'savings_in', 'savings_out', 'investment_in', 'investment_out'}
+MOVEMENT_FILTERS = {'income', 'spending', 'category', 'uncategorized', 'counterparty', 'counterparties',
+                    'own_money'}
+# "Entre tus cuentas" rows: each opens only the movements behind its own line
+# (savings/investment are nets, so both directions are listed).
+OWN_MONEY_BUCKETS = {
+    'top_up': {'top_up'},
+    'withdrawal': {'withdrawal'},
+    'savings': {'savings_in', 'savings_out'},
+    'investment': {'investment_in', 'investment_out'},
+}
+
+
+def month_movements(user, account, account_type, business_id, year, month, tz,
+                    filter_by: str, value: str | None = None) -> list:
+    """The movements behind one number on the month screen, newest first.
+
+    Same rows and the same classify() as summarize(), so a list always adds
+    up to the total it was opened from (Salió, a category, "Sin categoría",
+    a person in "Con quién", or "Entre tus cuentas")."""
+    from users.graphql_views import account_unified_queryset
+    if filter_by not in MOVEMENT_FILTERS:
+        return []
+    start, end = month_window(year, month, tz)
+    scope = account_unified_queryset(user, account, account_type, business_id)
+    rows = list(scope.filter(transaction_date__gte=start, transaction_date__lt=end).select_related(*ROW_RELATIONS))
+    ctx = prepare_context(user, account, account_type, business_id, scope, rows)
+    out = []
+    for row in rows:
+        _stamp_viewer(row, account, account_type, business_id)
+        m = classify(row, ctx)
+        if m is None:
+            continue
+        keep = (
+            (filter_by == 'income' and m.kind in INCOME_KINDS)
+            or (filter_by == 'spending' and m.kind in SPENDING_KINDS)
+            or (filter_by == 'category' and m.kind in SPENDING_KINDS and m.category == value)
+            or (filter_by == 'uncategorized' and m.kind in SPENDING_KINDS and m.category is None)
+            or (filter_by == 'counterparty' and m.kind in COUNTERPARTY_KINDS and m.counterparty_key == value)
+            or (filter_by == 'counterparties' and m.kind in COUNTERPARTY_KINDS and m.counterparty_key)
+            or (filter_by == 'own_money' and m.kind in OWN_MONEY_BUCKETS.get(value, OWN_MONEY_KINDS if value is None else ()))
+        )
+        if keep:
+            out.append(m)
+    out.sort(key=lambda m: m.when, reverse=True)
+    return out

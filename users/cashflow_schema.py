@@ -73,6 +73,51 @@ def _categories(by_category):
     return [CategoryAmountType(category=k, amount_usd=_usd(v)) for k, v in named]
 
 
+class MonthMovementType(graphene.ObjectType):
+    id = graphene.ID(required=True, description='Unified ledger row id (use for categorizeMovement)')
+    kind = graphene.String(required=True)
+    direction = graphene.String(required=True)
+    amount_usd = graphene.String(required=True)
+    category = graphene.String()
+    counterparty_key = graphene.String()
+    counterparty_name = graphene.String()
+    date = graphene.DateTime(required=True)
+
+
+def _summary_context(info, year, month, timezone):
+    """(user, account, account_type, business_id, tz) for the month views, or
+    None: owners only (employees never see the month), no future months."""
+    from django.utils import timezone as dj_tz
+    from users.cashflow import resolve_timezone
+    from users.graphql_views import jwt_account
+    from users.jwt_context import get_jwt_business_context_with_validation
+    from users.models import Account
+
+    user = info.context.user
+    if not user or not user.is_authenticated:
+        return None
+    if not (1 <= int(month) <= 12) or not (2020 <= int(year) <= 2100):
+        return None
+    jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_transactions')
+    if not jwt_context:
+        return None
+    account_type = jwt_context['account_type']
+    business_id = jwt_context.get('business_id')
+    if account_type == 'business':
+        if not business_id or not Account.objects.filter(
+                user=user, business_id=business_id, account_type='business',
+                deleted_at__isnull=True).exists():
+            return None
+    account = jwt_account(user, jwt_context)
+    if account is None:
+        return None
+    tz = resolve_timezone(timezone, getattr(user, 'phone_country', None))
+    local_now = dj_tz.now().astimezone(tz)
+    if (int(year), int(month)) > (local_now.year, local_now.month):
+        return None
+    return user, account, account_type, business_id, tz
+
+
 class MonthSummaryQuery(graphene.ObjectType):
     month_summary = graphene.Field(
         MonthSummaryType,
@@ -82,38 +127,45 @@ class MonthSummaryQuery(graphene.ObjectType):
         description='Month cash-flow summary for the active (JWT) account. Null for employees.',
     )
 
+    month_movements = graphene.List(
+        graphene.NonNull(MonthMovementType),
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True),
+        timezone=graphene.String(),
+        filter_by=graphene.String(required=True,
+                                  description='income | spending | category | uncategorized | counterparty | counterparties | own_money'),
+        value=graphene.String(description='category key, or counterparty key'),
+        description='The movements behind one number of monthSummary, newest first. Empty for employees.',
+    )
+
+    def resolve_month_movements(self, info, year, month, filter_by, timezone=None, value=None):
+        from users.cashflow import month_movements
+        context = _summary_context(info, year, month, timezone)
+        if context is None:
+            return []
+        user, account, account_type, business_id, tz = context
+        try:
+            movements = month_movements(user, account, account_type, business_id, int(year), int(month), tz,
+                                        filter_by, value)
+        except SummaryUnavailable as exc:
+            logger.error('month movements unavailable for account %s: %s', account.id, exc)
+            raise GraphQLError('El resumen del mes no está disponible.') from exc
+        return [MonthMovementType(
+            id=m.row_id, kind=m.kind, direction=m.direction, amount_usd=_usd(m.amount), category=m.category,
+            counterparty_key=m.counterparty_key, counterparty_name=m.counterparty_name or None, date=m.when)
+            for m in movements]
+
     def resolve_month_summary(self, info, year, month, timezone=None):
         from django.utils import timezone as dj_tz
-        from users.cashflow import resolve_timezone, summarize
-        from users.graphql_views import jwt_account
-        from users.jwt_context import get_jwt_business_context_with_validation
-        from users.models import Account
+        from users.cashflow import summarize
 
-        user = info.context.user
-        if not user or not user.is_authenticated:
+        # Employees never see the month view (design scope rules); only the
+        # Account owner of a business does.
+        context = _summary_context(info, year, month, timezone)
+        if context is None:
             return None
-        if not (1 <= int(month) <= 12) or not (2020 <= int(year) <= 2100):
-            return None
-        jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_transactions')
-        if not jwt_context:
-            return None
-        account_type = jwt_context['account_type']
-        business_id = jwt_context.get('business_id')
-        if account_type == 'business':
-            # Employees never see the month view (design scope rules); only
-            # the Account owner of the business does.
-            if not business_id or not Account.objects.filter(
-                    user=user, business_id=business_id, account_type='business',
-                    deleted_at__isnull=True).exists():
-                return None
-        account = jwt_account(user, jwt_context)
-        if account is None:
-            return None
-        tz = resolve_timezone(timezone, getattr(user, 'phone_country', None))
+        user, account, account_type, business_id, tz = context
         now = dj_tz.now()
-        local_now = now.astimezone(tz)
-        if (int(year), int(month)) > (local_now.year, local_now.month):
-            return None  # no future months
         try:
             result = summarize(user, account, account_type, business_id, int(year), int(month), tz, now=now)
         except SummaryUnavailable as exc:

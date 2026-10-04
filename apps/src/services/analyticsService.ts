@@ -29,7 +29,15 @@ export type ClientFunnelEvent =
     // refused by the provider's eligibility policy). How many ask to be told
     // when it opens is the demand estimate for that corridor; the server adds
     // the country of their IP, so "Venezuelans in Colombia" is countable.
-    | 'local_rail_blocked_interest';
+    | 'local_rail_blocked_interest'
+    // "Tu mes" (design R15): chips shown is the denominator for the answer and
+    // skip rates; dismissed = left without answering (counts toward its own limit).
+    | 'tu_mes_opened'
+    | 'hero_cashflow_tapped'
+    | 'category_chip_shown'
+    | 'category_chip_answered'
+    | 'category_chip_skipped'
+    | 'category_chip_dismissed';
 
 export const AnalyticsService = {
     /**
