@@ -88,6 +88,13 @@ class NotificationType(models.TextChoices):
     PRESALE_PURCHASE_CONFIRMED = 'PRESALE_PURCHASE_CONFIRMED', 'Presale Purchase Confirmed'
     PRESALE_AVAILABLE = 'PRESALE_AVAILABLE', 'Presale Available'
 
+    # Comunidad
+    COMMUNITY_POST_APPROVED = 'COMMUNITY_POST_APPROVED', 'Community Post Approved'
+    COMMUNITY_POST_REJECTED = 'COMMUNITY_POST_REJECTED', 'Community Post Rejected'
+    COMMUNITY_COMMENT = 'COMMUNITY_COMMENT', 'Community Comment'
+    COMMUNITY_REPLY = 'COMMUNITY_REPLY', 'Community Reply'
+    COMMUNITY_MENTION = 'COMMUNITY_MENTION', 'Community Mention'
+
 
 class Notification(models.Model):
     # For personalized notifications (1:1)

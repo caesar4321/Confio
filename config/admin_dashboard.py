@@ -1851,6 +1851,13 @@ from payroll.models import PayrollRun, PayrollItem, PayrollRecipient
 from inbox.models import (
     Channel,
     ChannelMembership,
+    CommunityComment,
+    CommunityCommentReaction,
+    CommunityCommentReport,
+    CommunityPostReport,
+    CommunityPostReview,
+    ProfilePictureSubmission,
+    PublicObject,
     ContentItem,
     ContentPlatformClick,
     ContentPlatformClickDailyStat,
@@ -1865,12 +1872,19 @@ from inbox.models import (
 from inbox.admin import (
     ChannelAdmin,
     ChannelMembershipAdmin,
+    CommunityCommentAdmin,
+    CommunityCommentReactionAdmin,
+    CommunityCommentReportAdmin,
+    CommunityPostReportAdmin,
+    CommunityPostReviewAdmin,
     ContentItemAdmin,
     ContentPlatformClickAdmin,
     ContentPlatformClickDailyStatAdmin,
     ContentReadStateAdmin,
     ContentReactionAdmin,
     ContentSurfaceAdmin,
+    ProfilePictureSubmissionAdmin,
+    PublicObjectAdmin,
     ReactionTypeAdmin,
     SupportConversationAdmin,
     SupportConversationStateAdmin,
@@ -2117,6 +2131,13 @@ confio_admin_site.register(ChannelMembership, ChannelMembershipAdmin)
 confio_admin_site.register(ContentReadState, ContentReadStateAdmin)
 confio_admin_site.register(ReactionType, ReactionTypeAdmin)
 confio_admin_site.register(ContentReaction, ContentReactionAdmin)
+confio_admin_site.register(CommunityPostReview, CommunityPostReviewAdmin)
+confio_admin_site.register(CommunityPostReport, CommunityPostReportAdmin)
+confio_admin_site.register(CommunityComment, CommunityCommentAdmin)
+confio_admin_site.register(CommunityCommentReport, CommunityCommentReportAdmin)
+confio_admin_site.register(CommunityCommentReaction, CommunityCommentReactionAdmin)
+confio_admin_site.register(ProfilePictureSubmission, ProfilePictureSubmissionAdmin)
+confio_admin_site.register(PublicObject, PublicObjectAdmin)
 confio_admin_site.register(ContentPlatformClick, ContentPlatformClickAdmin)
 confio_admin_site.register(ContentPlatformClickDailyStat, ContentPlatformClickDailyStatAdmin)
 confio_admin_site.register(SupportConversation, SupportConversationAdmin)
