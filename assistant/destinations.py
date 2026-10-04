@@ -21,7 +21,10 @@ DESTINATIONS = {
     'messages': 'Mensajes: Julian, Confío News y Confio Assistant.',
     'notifications': 'Notificaciones.',
     'achievements': 'Logros y recompensas.',
+    'pending_incoming': 'Dinero por recibir: transferencias a tu cuenta local que esperan tu confirmación con Confío Face.',
 }
 
 # Screens only the account owner sees (employees never get bank rails).
-OWNER_ONLY = {'receive', 'top_up', 'withdraw'}
+OWNER_ONLY = {'receive', 'top_up', 'withdraw', 'pending_incoming'}
+# Screens that only exist for personal accounts.
+PERSONAL_ONLY = {'pending_incoming'}

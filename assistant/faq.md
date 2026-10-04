@@ -28,7 +28,8 @@
 
 ## Cuentas locales a tu nombre
 - En Brasil (Pix), Colombia (Llave Bre-B) y México (CLABE) puedes tener una cuenta local a tu nombre para recibir y pagar en moneda local desde tus dólares. En Argentina llegará pronto.
-- Brasil: recibes Pix con el QR o los datos bancarios de tu cuenta. Todavía no puedes registrar tu propia clave Pix.
+- Brasil: puedes tener tu propia chave Pix para recibir de cualquier persona, y enviar Pix a la chave de otra persona. También puedes recibir con el QR o los datos bancarios de tu cuenta.
+- En cuentas personales, cuando otra persona te envía dinero a tu cuenta local, llega a tu saldo cuando confirmas con Confío Face que eres tú. Una sola confirmación recibe todo lo pendiente. Si no lo confirmas en 24 horas, se devuelve automáticamente a quien lo envió.
 
 - Necesitas verificar tu identidad. Por ahora no podemos abrirlas con documento o nacionalidad venezolana.
 - Bre-B verifica desde dónde estás (dispositivo y conexión) y no funciona desde Venezuela.
