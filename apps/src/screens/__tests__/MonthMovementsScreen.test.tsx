@@ -61,7 +61,7 @@ describe('MonthMovementsScreen (Sin categoría)', () => {
     // the post-save refetch is a new request, never one sent before the save
     expect(mockQueryOpts.context).toEqual({ queryDeduplication: false });
     // the mounted Tu mes summary is refetched by name, even if the user left mid-save
-    expect(mockMutationOpts.refetchQueries).toEqual(['MonthSummary']);
+    expect(mockMutationOpts.refetchQueries).toEqual(['MonthSummary', 'MonthMovements']);
     expect(chip(tree, 'family').props.disabled).toBe(false);
   });
 });

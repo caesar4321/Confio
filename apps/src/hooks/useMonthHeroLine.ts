@@ -1,23 +1,25 @@
-// Data for the Home hero line "Octubre · Entró US$420 · Salió US$310 ›".
+// Data for the Home month row (owners only).
 //
-// Layout stability (design 2A / D8): the line sits ABOVE Enviar/Recibir, so
-// a late network answer must never insert it while the user may be reaching
-// for those buttons. On every Home focus we render only what is already in
-// the Apollo cache, then refresh the cache in the background for the NEXT
-// focus. Exception (eng C7): if the account or the month changed, the shown
-// data belongs to the wrong context, so it is replaced as soon as fresh data
-// arrives (the hero is re-rendering for the switch anyway).
+// The row is ALWAYS present for owners (amendment 2026-10-04: hiding it
+// silently made the feature undiscoverable). It has a fixed footprint (see
+// HeroMonthLine), so its content can change at any time without moving
+// Enviar/Recibir:
+//   - loading: a quiet placeholder,
+//   - a month with >= 3 Entró/Salió movements: "Octubre · Entró … · Salió …"
+//     (this month, or last month early in the month),
+//   - otherwise: the invitation "Tu mes · Mira lo que entra y sale".
 //
 // Account switches: some switch paths update activeAccount BEFORE the new
 // JWT exists and the cache is cleared, so during `switching` the cache and
-// any request still answer for the previous account. The line hides on the
-// account change, reads/fetches nothing until the switch settles, and drops
-// any answer that was requested for an earlier account or month.
+// any request still answer for the previous account. The row goes back to
+// loading on the account change, reads/fetches nothing until the switch
+// settles, and drops any answer that was requested for an earlier account
+// or month.
 //
-// Cache: the hero only shows totals (which categories never change) and
-// keeps its own per-account/month answers, fetched with 'no-cache'. It must
-// not write the shared summary cache: a hero request finishing after a
-// category save would put the pre-save category split back for Tu mes.
+// Cache: answers are fetched with 'no-cache' and kept per account/month in
+// this hook: the hero must not write the shared summary cache (a hero request
+// finishing after a category save would put the pre-save split back for Tu
+// mes). It only READS that cache as a fast first paint.
 //
 // Month rollover: Home can stay focused across midnight on the 1st, so the
 // month is re-checked when the app returns to the foreground and at the
@@ -28,7 +30,6 @@ import { useApolloClient } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 import { GET_MONTH_SUMMARY, type MonthSummary } from '../apollo/monthSummary';
 import { currentYearMonth, deviceTimezone, previousMonth } from '../utils/monthSummary';
-import { hadHeroLine, isHeroLineHintLoaded, setHadHeroLine } from '../utils/heroLineHint';
 
 export const HERO_LINE_MIN_MOVEMENTS = 3;
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
@@ -44,27 +45,29 @@ const hasLine = (s: MonthSummary | null | undefined): s is MonthSummary =>
   Boolean(s && s.current.movementCount >= HERO_LINE_MIN_MOVEMENTS);
 
 /** Early in the month (< 3 movements) the line shows last month instead,
- *  until this month reaches 3 (amendment 2026-10-04). */
+ *  until this month reaches 3. Neither -> null (the invitation). */
 const pickMonth = (current: MonthSummary | null, previous: MonthSummary | null) =>
   hasLine(current) ? current : hasLine(previous) ? previous : null;
 
-export function useMonthHeroLine(accountKey: string | null | undefined, enabled: boolean, switching = false) {
+/** What the row shows. */
+export type HeroMonthState =
+  | { kind: 'hidden' }
+  | { kind: 'loading' }
+  | { kind: 'invite' }
+  | { kind: 'month'; summary: MonthSummary };
+
+export function useMonthHeroLine(
+  accountKey: string | null | undefined,
+  enabled: boolean,
+  switching = false,
+): HeroMonthState {
   const client = useApolloClient();
-  const [summary, setSummary] = useState<MonthSummary | null>(null);
-  // Cold launch with a hint that this account had a line: its row is held
-  // (placeholder) until the first answer fills or collapses it.
-  const [reserved, setReserved] = useState(false);
-  const shownKey = useRef<string | null>(null);
-  // The context whose fresh answer may replace the line as soon as it lands.
-  // Kept until that answer arrives, so a repeated load cannot lose it.
-  const replaceKey = useRef<string | null>(null);
+  // undefined = not known yet (loading); null = known: no month to show.
+  const [chosen, setChosen] = useState<MonthSummary | null | undefined>(undefined);
   const request = useRef(0);
   const focused = useRef(false);
-  // Chosen line (this or last month) per account + current month.
+  // Chosen month (this or last, or null) per account + current month.
   const fresh = useRef(new Map<string, MonthSummary | null>());
-  // Only the very first eligible load of this Home is a cold start; later
-  // context changes (incl. returning from an employee account) replace.
-  const started = useRef(false);
 
   // Another account's numbers must never stay on screen, even for a frame
   // while the switch is still in flight.
@@ -72,17 +75,13 @@ export function useMonthHeroLine(accountKey: string | null | undefined, enabled:
   if (lastAccount.current !== accountKey) {
     lastAccount.current = accountKey;
     request.current += 1;
-    if (summary !== null) setSummary(null);
-    if (reserved) setReserved(false);
+    if (chosen !== undefined) setChosen(undefined);
   }
 
   const load = useCallback(() => {
     if (!enabled || !accountKey) {
       request.current += 1;
-      setSummary(null);
-      setReserved(false);
-      shownKey.current = null;
-      replaceKey.current = null;
+      setChosen(undefined);
       return;
     }
     if (switching) return; // cache + JWT may still be the previous account's
@@ -90,15 +89,6 @@ export function useMonthHeroLine(accountKey: string | null | undefined, enabled:
     const prev = previousMonth(year, month);
     const timezone = deviceTimezone();
     const key = `${accountKey}:${year}-${month}`;
-    const coldStart = !started.current;
-    // A cold start never inserts the line late (cold cache) unless its row
-    // was reserved from the device hint, so nothing moves either way.
-    if (!coldStart && shownKey.current !== key) replaceKey.current = key;
-    // The hint is read at app start; if it is somehow not ready yet, this
-    // cold start reserves nothing (a late reservation would move the verbs).
-    const canReserve = coldStart && isHeroLineHintLoaded() && hadHeroLine(accountKey);
-    if (canReserve) replaceKey.current = key;
-    started.current = true;
 
     const readCached = (y: number, m: number) => {
       try {
@@ -108,18 +98,14 @@ export function useMonthHeroLine(accountKey: string | null | undefined, enabled:
         return null;
       }
     };
-    // Own answers first; else whatever Tu mes already cached.
-    let cached: MonthSummary | null = fresh.current.get(key) ?? null;
-    if (!cached) cached = pickMonth(readCached(year, month), readCached(prev.year, prev.month));
-    if (cached || shownKey.current !== key) {
-      setSummary(cached);
-      shownKey.current = key;
+    // Own answers first; else a month Tu mes already cached; otherwise keep
+    // what is on screen until the answer lands.
+    if (fresh.current.has(key)) {
+      setChosen(fresh.current.get(key) ?? null);
+    } else {
+      const cached = pickMonth(readCached(year, month), readCached(prev.year, prev.month));
+      if (cached) setChosen(cached);
     }
-    if (cached && replaceKey.current === key) replaceKey.current = null;
-    // Only the cold start reserves; a later load never un-reserves a row that
-    // is still waiting for its answer (that collapse would move the verbs).
-    if (cached) setReserved(false);
-    else if (canReserve) setReserved(true);
 
     const fetchMonth = (y: number, m: number) => client
       .query<Summary>({ query: GET_MONTH_SUMMARY, variables: { year: y, month: m, timezone }, fetchPolicy: 'no-cache' })
@@ -128,26 +114,17 @@ export function useMonthHeroLine(accountKey: string | null | undefined, enabled:
     const id = ++request.current;
     fetchMonth(year, month)
       .then(async (current) => (hasLine(current) ? current : pickMonth(current, await fetchMonth(prev.year, prev.month))))
-      .then((chosen) => {
+      .then((answer) => {
         if (id !== request.current) return; // asked for an earlier account/month
-        fresh.current.set(key, chosen);
-        setHadHeroLine(accountKey, chosen !== null);
-        // Fresh data waits for the next focus, unless the line had to be
-        // cleared for a new account/month or its row is reserved.
-        if (replaceKey.current === key) {
-          replaceKey.current = null;
-          setSummary(chosen);
-          setReserved(false);
-        }
+        fresh.current.set(key, answer);
+        setChosen(answer);
       })
       .catch(() => {
-        // The hero line is optional: on error it stays as it was, and a
-        // reserved row collapses rather than waiting forever. The collapse is
-        // final for this context: a later answer waits for the next focus
-        // instead of re-reserving and moving the verbs again.
+        // Optional row: on error keep what is shown; if nothing was known
+        // yet, fall back to the invitation (it still opens Tu mes, which has
+        // its own retry) rather than a placeholder forever.
         if (id !== request.current) return;
-        if (replaceKey.current === key) replaceKey.current = null;
-        setReserved(false);
+        setChosen((shown) => (shown === undefined ? null : shown));
       });
   }, [client, accountKey, enabled, switching]);
 
@@ -177,6 +154,7 @@ export function useMonthHeroLine(accountKey: string | null | undefined, enabled:
     };
   }, [load]);
 
-  const shown = hasLine(summary) ? summary : null;
-  return { summary: shown, reserved: !shown && reserved };
+  if (!enabled || !accountKey) return { kind: 'hidden' };
+  if (chosen === undefined) return { kind: 'loading' };
+  return chosen ? { kind: 'month', summary: chosen } : { kind: 'invite' };
 }

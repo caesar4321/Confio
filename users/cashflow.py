@@ -402,6 +402,33 @@ class CounterpartyTotal:
     sent: Decimal = Decimal('0')
 
 
+EXTERNAL_KEY = 'external'
+UNKNOWN_WALLET_NAME = 'Depósito externo'
+
+
+def _is_unknown_wallet(key: str | None, name: str) -> bool:
+    """An outside wallet with no known identity (each address has its own key,
+    so rules stay per address, but "Con quién" reads them as one line)."""
+    return bool(key and key.startswith('addr:') and (not name or name == UNKNOWN_WALLET_NAME))
+
+
+def _merge_unknown_wallets(people: dict) -> dict:
+    """Two or more unknown wallets become one 'external' entry, merged BEFORE
+    the top-N cut so its total and count cover the whole month."""
+    unknown = [c for c in people.values() if _is_unknown_wallet(c.key, c.name)]
+    if len(unknown) < 2:
+        return people
+    received = sum((c.received for c in unknown), Decimal('0'))
+    sent = sum((c.sent for c in unknown), Decimal('0'))
+    # "Depósitos" only when every movement came IN; sends to outside wallets
+    # (unnamed recipients) read neutrally, never as deposits.
+    label = 'Depósitos externos' if sent == 0 else 'Billeteras externas'
+    merged = CounterpartyTotal(key=EXTERNAL_KEY, name=f'{label} ({len(unknown)})', received=received, sent=sent)
+    kept = {k: c for k, c in people.items() if not _is_unknown_wallet(c.key, c.name)}
+    kept[EXTERNAL_KEY] = merged
+    return kept
+
+
 @dataclass
 class MonthSummary:
     year: int
@@ -533,6 +560,7 @@ def summarize(user, account, account_type, business_id, year, month, tz, now=Non
         if in_previous:
             previous.add(movement)
 
+    people = _merge_unknown_wallets(people)
     top = sorted(people.values(), key=lambda c: c.received + c.sent, reverse=True)[:5]
     return MonthSummary(year=year, month=month, current=current, previous=previous,
                         previous_is_partial=partial, counterparties=top)
@@ -576,7 +604,9 @@ def month_movements(user, account, account_type, business_id, year, month, tz,
             or (filter_by == 'spending' and m.kind in SPENDING_KINDS)
             or (filter_by == 'category' and m.kind in SPENDING_KINDS and m.category == value)
             or (filter_by == 'uncategorized' and m.kind in SPENDING_KINDS and m.category is None)
-            or (filter_by == 'counterparty' and m.kind in COUNTERPARTY_KINDS and m.counterparty_key == value)
+            or (filter_by == 'counterparty' and m.kind in COUNTERPARTY_KINDS and (
+                m.counterparty_key == value
+                or (value == EXTERNAL_KEY and _is_unknown_wallet(m.counterparty_key, m.counterparty_name))))
             or (filter_by == 'counterparties' and m.kind in COUNTERPARTY_KINDS and m.counterparty_key)
             or (filter_by == 'own_money' and m.kind in OWN_MONEY_BUCKETS.get(value, OWN_MONEY_KINDS if value is None else ()))
         )

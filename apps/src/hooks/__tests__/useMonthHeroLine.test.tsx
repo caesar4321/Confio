@@ -1,7 +1,9 @@
 /**
- * The hero line sits above Enviar/Recibir, so it must never pop in from a late
- * network answer while the user may be reaching for those buttons (design 2A).
- * It shows only from cache, only at >= 3 movements, and never for employees.
+ * The Home month row is always present for owners (fixed footprint), so its
+ * content may change whenever data lands. What must hold: never another
+ * account's numbers, employees see nothing, last month early in the month,
+ * the invitation when there is nothing to show, and the hero never writes the
+ * shared summary cache.
  */
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
@@ -15,27 +17,20 @@ const mockReadQuery = jest.fn((opts: any) => {
   const v = per(mockCached, opts.variables);
   return v ? { monthSummary: v } : null;
 });
-let mockHints: Record<string, boolean> = {};
+// Stable like the real client (a new object per render would re-run load).
 const mockClient = { readQuery: (o: any) => mockReadQuery(o), query: (o: any) => mockQuery(o) };
 
 jest.mock('@apollo/client', () => ({
   gql: (s: TemplateStringsArray) => s.join(''),
-  // Stable like the real client (a new object per render would re-run load).
   useApolloClient: () => mockClient,
 }));
 // Focus behaves like the real hook on an always-focused screen: runs on
 // mount and again whenever the callback identity changes.
-jest.mock('../../utils/heroLineHint', () => ({
-  heroLineHintReady: Promise.resolve(),
-  isHeroLineHintLoaded: () => true,
-  hadHeroLine: (k: string) => mockHints[k] === true,
-  setHadHeroLine: (k: string, v: boolean) => { mockHints[k] = v; },
-}));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (cb: () => void | (() => void)) => require('react').useEffect(cb, [cb]),
 }));
 
-import { useMonthHeroLine } from '../useMonthHeroLine';
+import { useMonthHeroLine, type HeroMonthState } from '../useMonthHeroLine';
 
 const summary = (movementCount: number, month = 10) => ({
   year: 2026, month, timezone: 'UTC', previousIsPartial: true,
@@ -43,8 +38,11 @@ const summary = (movementCount: number, month = 10) => ({
   previous: null, counterparties: [],
 });
 
+const count = (s: HeroMonthState) => (s.kind === 'month' ? s.summary.current.movementCount : s.kind);
+
+const mounted: renderer.ReactTestRenderer[] = [];
 const mount = (accountKey: string | null, enabled = true, switching = false) => {
-  let api!: ReturnType<typeof useMonthHeroLine>;
+  let api!: HeroMonthState;
   const Probe = ({ k, e, w }: { k: string | null; e: boolean; w: boolean }) => {
     api = useMonthHeroLine(k, e, w);
     return null;
@@ -53,84 +51,83 @@ const mount = (accountKey: string | null, enabled = true, switching = false) => 
   act(() => { tree = renderer.create(<Probe k={accountKey} e={enabled} w={switching} />); });
   mounted.push(tree);
   return {
-    hook: () => api,
+    state: () => api,
     rerender: (k: string | null, e = true, w = false) => act(() => tree.update(<Probe k={k} e={e} w={w} />)),
   };
 };
 
 const flush = () => act(async () => {});
 
-// The hook keeps a month-boundary timer; unmount so it cannot outlive a test.
-const mounted: renderer.ReactTestRenderer[] = [];
-afterEach(() => {
-  while (mounted.length) act(() => mounted.pop()!.unmount());
-});
-
 beforeEach(() => {
-  mockHints = {};
   mockCached = null;
   mockNetwork = null;
   mockQuery.mockClear();
   mockReadQuery.mockClear();
 });
+// The hook keeps a month-boundary timer; unmount so it cannot outlive a test.
+afterEach(() => {
+  while (mounted.length) act(() => mounted.pop()!.unmount());
+});
 
 describe('useMonthHeroLine', () => {
-  it('shows a cached month with 3+ movements immediately', async () => {
-    mockCached = summary(3);
-    const { hook } = mount('acc-1');
+  it('starts as loading, then shows the month once data lands', async () => {
+    mockNetwork = summary(5);
+    const { state } = mount('acc-1');
+    expect(state().kind).toBe('loading');
     await flush();
-    expect(hook().summary?.current.movementCount).toBe(3);
+    expect(count(state())).toBe(5);
   });
 
-  it('hides the line below 3 movements', async () => {
-    mockCached = summary(2);
-    const { hook } = mount('acc-1');
-    await flush();
-    expect(hook().summary).toBeNull();
+  it('shows a cached month immediately', async () => {
+    mockCached = summary(4);
+    const { state } = mount('acc-1');
+    expect(count(state())).toBe(4);
   });
 
-  it('never inserts a late network answer on a cold cache (no layout jump)', async () => {
-    mockNetwork = summary(10);
-    const { hook } = mount('acc-1');
+  it('invites (never hides) when neither this nor last month has 3 movements', async () => {
+    mockNetwork = summary(1);
+    const { state } = mount('acc-1');
     await flush();
-    expect(mockQuery).toHaveBeenCalled();
-    expect(hook().summary).toBeNull();
+    expect(state().kind).toBe('invite');
   });
 
-  it('is disabled for employees: no reads, no requests, nothing shown', async () => {
+  it('early in the month shows last month until this one has 3 movements', async () => {
+    const now = new Date();
+    const thisMonth = now.getMonth() + 1;
+    mockNetwork = (v: any) => (v.month === thisMonth ? summary(1, thisMonth) : summary(12, v.month));
+    const { state } = mount('acc-1');
+    await flush();
+    const s = state();
+    expect(s.kind).toBe('month');
+    expect(s.kind === 'month' && s.summary.month).not.toBe(thisMonth);
+  });
+
+  it('is hidden for employees: no reads, no requests', async () => {
     mockCached = summary(10);
-    const { hook } = mount('acc-1', false);
+    const { state } = mount('acc-1', false);
     await flush();
-    expect(hook().summary).toBeNull();
+    expect(state().kind).toBe('hidden');
     expect(mockReadQuery).not.toHaveBeenCalled();
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it('replaces the previous account\'s month after an account switch', async () => {
-    mockCached = summary(5);
-    const { hook, rerender } = mount('acc-1');
+  it('never writes the shared summary cache (no-cache)', async () => {
+    mockNetwork = summary(4);
+    mount('acc-1');
     await flush();
-    expect(hook().summary?.current.movementCount).toBe(5);
-
-    mockCached = null; // Apollo store is cleared on account switch
-    mockNetwork = summary(7);
-    rerender('acc-2');
-    expect(hook().summary).toBeNull(); // never the other account's numbers
-    await flush();
-    expect(hook().summary?.current.movementCount).toBe(7);
+    expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({ fetchPolicy: 'no-cache' }));
   });
 
-  it('mid-switch, never shows or fetches with the previous account\'s cache and token', async () => {
-    mockCached = summary(5);
-    const { hook, rerender } = mount('acc-1');
+  it('mid-switch: never shows or fetches with the previous account\'s cache and token', async () => {
+    mockNetwork = summary(5);
+    const { state, rerender } = mount('acc-1');
     await flush();
     mockQuery.mockClear();
     mockReadQuery.mockClear();
-
-    // activeAccount already says acc-2, but the JWT/cache are still acc-1's
+    mockCached = summary(5); // still acc-1's cache
     rerender('acc-2', true, true);
     await flush();
-    expect(hook().summary).toBeNull();
+    expect(state().kind).toBe('loading');
     expect(mockReadQuery).not.toHaveBeenCalled();
     expect(mockQuery).not.toHaveBeenCalled();
 
@@ -138,113 +135,38 @@ describe('useMonthHeroLine', () => {
     mockNetwork = summary(8);
     rerender('acc-2', true, false); // switch settled: new token, empty cache
     await flush();
-    expect(hook().summary?.current.movementCount).toBe(8);
+    expect(count(state())).toBe(8);
   });
 
   it('drops an answer that was requested for an earlier account', async () => {
-    mockCached = summary(5);
-    const { hook, rerender } = mount('acc-1');
+    mockNetwork = summary(5);
+    const { state, rerender } = mount('acc-1');
     await flush();
     let release!: (v: any) => void;
-    mockCached = null;
     mockQuery.mockImplementationOnce(() => new Promise(r => { release = r; }));
     rerender('acc-2'); // request for acc-2 in flight...
     mockNetwork = summary(4);
     rerender('acc-3'); // ...superseded by acc-3
     await flush();
     await act(async () => release({ data: { monthSummary: summary(99) } }));
-    expect(hook().summary?.current.movementCount).toBe(4);
+    expect(count(state())).toBe(4);
   });
 
-  it('a repeated load for the new account still lets its answer replace the line', async () => {
-    mockCached = summary(5);
-    const { hook, rerender } = mount('acc-1');
+  it('a failed first load falls back to the invitation, not a placeholder forever', async () => {
+    mockQuery.mockImplementationOnce(() => Promise.reject(new Error('offline')));
+    const { state } = mount('acc-1');
     await flush();
-    mockCached = null;
+    expect(state().kind).toBe('invite');
+  });
+
+  it('a failed refresh keeps the month already shown', async () => {
     mockNetwork = summary(6);
-    rerender('acc-2', true, true);
-    rerender('acc-2', true, false); // load #1 marks acc-2 for replacement
-    rerender('acc-2', true, true);
-    rerender('acc-2', true, false); // load #2 supersedes #1 before it answers
+    const { state, rerender } = mount('acc-1');
     await flush();
-    expect(hook().summary?.current.movementCount).toBe(6);
-  });
-
-  it('returning from an employee account still replaces the line', async () => {
-    mockCached = summary(5);
-    const { hook, rerender } = mount('personal');
-    await flush();
-    rerender('employee', false); // employees: disabled
-    await flush();
-    expect(hook().summary).toBeNull();
-    mockCached = null;
-    mockNetwork = summary(9);
-    rerender('personal', true);
-    await flush();
-    expect(hook().summary?.current.movementCount).toBe(9);
-  });
-
-  it('never writes the shared summary cache (no-cache) and reuses its own answer next focus', async () => {
-    mockNetwork = summary(4);
-    const { hook, rerender } = mount('acc-1');
-    await flush();
-    expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({ fetchPolicy: 'no-cache' }));
-    expect(hook().summary).toBeNull(); // cold start: no late insert
-    rerender('acc-1', true, true); // any re-load (stands in for the next focus)
-    rerender('acc-1', true, false);
-    await flush();
-    expect(hook().summary?.current.movementCount).toBe(4);
-  });
-
-  it('early in the month shows last month until this one has 3 movements', async () => {
-    const { year, month } = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
-    mockCached = (v: any) => (v.month === month && v.year === year ? summary(1, month) : summary(12, v.month));
-    const { hook } = mount('acc-1');
-    await flush();
-    expect(hook().summary?.current.movementCount).toBe(12);
-    expect(hook().summary?.month).not.toBe(month);
-  });
-
-  it('cold launch with a hint reserves the row, then fills it when data lands', async () => {
-    mockHints = { 'acc-1': true };
-    let release!: (v: any) => void;
-    mockQuery.mockImplementationOnce(() => new Promise(r => { release = r; }));
-    const { hook } = mount('acc-1');
-    expect(hook().reserved).toBe(true);
-    expect(hook().summary).toBeNull();
-    await act(async () => release({ data: { monthSummary: summary(7) } }));
-    expect(hook().reserved).toBe(false);
-    expect(hook().summary?.current.movementCount).toBe(7);
-  });
-
-  it('cold launch without a hint reserves nothing and never inserts late', async () => {
-    mockNetwork = summary(7);
-    const { hook } = mount('acc-1');
-    expect(hook().reserved).toBe(false);
-    await flush();
-    expect(hook().summary).toBeNull();
-    expect(mockHints['acc-1']).toBe(true); // next launch reserves the row
-  });
-
-  it('a reserved row collapses if the request fails', async () => {
-    mockHints = { 'acc-1': true };
     mockQuery.mockImplementationOnce(() => Promise.reject(new Error('offline')));
-    const { hook } = mount('acc-1');
-    expect(hook().reserved).toBe(true);
-    await flush();
-    expect(hook().reserved).toBe(false);
-  });
-
-  it('after a failed reserved load, a foreground re-load does not reserve the row again', async () => {
-    mockHints = { 'acc-1': true };
-    mockQuery.mockImplementationOnce(() => Promise.reject(new Error('offline')));
-    const { hook, rerender } = mount('acc-1');
-    await flush();
-    expect(hook().reserved).toBe(false);
-    mockQuery.mockImplementationOnce(() => new Promise(() => undefined)); // still in flight
     rerender('acc-1', true, true);
-    rerender('acc-1', true, false); // re-load (stands in for app foreground)
-    expect(hook().reserved).toBe(false);
+    rerender('acc-1', true, false); // re-load (stands in for foreground)
+    await flush();
+    expect(count(state())).toBe(6);
   });
 });
-

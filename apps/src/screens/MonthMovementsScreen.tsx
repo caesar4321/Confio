@@ -11,7 +11,7 @@ import { Alert, FlatList, StyleSheet, TouchableOpacity, View } from 'react-nativ
 import { useMutation, useQuery } from '@apollo/client';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import { Text } from '../components/common/AppText';
 import { ChipGrid } from '../components/CategoryChips';
 import { colors } from '../config/theme';
@@ -55,8 +55,9 @@ export function MonthMovementsScreen() {
   // The summary's category split changes too. Refetch the MOUNTED summary
   // query by name (its own request supersedes any older one of the same
   // query); this also runs if the user already went back mid-save. The
-  // summary screen additionally re-reads on every re-focus.
-  const [categorize] = useMutation(CATEGORIZE_MOVEMENT, { refetchQueries: ['MonthSummary'] });
+  // summary screen additionally re-reads on every re-focus. 'MonthMovements'
+  // also refreshes Tu mes's "Clasifica N pagos" count, even mid-navigation.
+  const [categorize] = useMutation(CATEGORIZE_MOVEMENT, { refetchQueries: ['MonthSummary', 'MonthMovements'] });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
   // One save at a time (mutation + refetch): two quick taps must not race
@@ -112,13 +113,9 @@ export function MonthMovementsScreen() {
     );
   };
 
+  // The app's shared screen header (same as Tu mes / Notificaciones).
   const header = (
-    <View style={styles.header}>
-      <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Volver">
-        <Icon name="arrow-left" size={24} color={colors.text.primary} />
-      </TouchableOpacity>
-      <Text style={styles.title} numberOfLines={1}>{params.title}</Text>
-    </View>
+    <Header navigation={navigation as any} title={params.title} backgroundColor={colors.heroField} isLight showBackButton />
   );
 
   const empty = loading ? null : error ? (
@@ -138,7 +135,7 @@ export function MonthMovementsScreen() {
 
   if (params.filterBy === 'uncategorized') {
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <View style={styles.safe}>
         {header}
         <FlatList
           data={groups}
@@ -166,12 +163,12 @@ export function MonthMovementsScreen() {
             </View>
           )}
         />
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <View style={styles.safe}>
       {header}
       <FlatList
         data={movements}
@@ -213,7 +210,7 @@ export function MonthMovementsScreen() {
           );
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

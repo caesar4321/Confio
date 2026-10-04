@@ -512,3 +512,41 @@ class MonthMovementsTests(CategoryLabelTests):
         self.pay('3.00')
         self.assertEqual(self._movements('own_money', 'savings'), [])
         self.assertEqual(self._movements('own_money', 'nonsense'), [])
+
+    def _external_deposit(self, amount, address):
+        from django.utils import timezone
+        from users.models_unified import UnifiedTransactionTable
+        return UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount=amount, token_type='USDT', status='CONFIRMED',
+            sender_type='external', from_address=address, to_address=self.account.bsc_address,
+            counterparty_user=self.user, counterparty_type='user',
+            sender_display_name='Depósito externo', transaction_date=timezone.now())
+
+    def test_unknown_wallets_merge_into_one_line_before_the_top_five(self):
+        from decimal import Decimal
+        for i in range(6):
+            self._external_deposit('10.00', '0x' + f'{i + 1:02x}' * 20)
+        people = self._summary().counterparties
+        external = [p for p in people if p.key == 'external']
+        self.assertEqual(len(external), 1)
+        self.assertEqual(external[0].name, 'Depósitos externos (6)')
+        self.assertEqual(Decimal(external[0].received_usd), Decimal('60.00'))
+        listed = self._movements('counterparty', 'external')
+        self.assertEqual(len(listed), 6)
+
+    def test_a_single_unknown_wallet_keeps_its_own_key(self):
+        self._external_deposit('5.00', '0x' + '07' * 20)
+        keys = [p.key for p in self._summary().counterparties]
+        self.assertTrue(any(k.startswith('addr:') for k in keys))
+        self.assertNotIn('external', keys)
+
+    def test_unnamed_outgoing_wallets_are_never_called_deposits(self):
+        from django.utils import timezone
+        from users.models_unified import UnifiedTransactionTable
+        for i, amount in enumerate(('20.00', '30.00')):
+            UnifiedTransactionTable.objects.create(
+                transaction_type='send', amount=amount, token_type='USDT', status='CONFIRMED',
+                sender_user=self.user, sender_type='user', from_address=self.account.bsc_address,
+                to_address='0x' + f'{i + 0x40:02x}' * 20, transaction_date=timezone.now())
+        names = [p.name for p in self._summary().counterparties if p.key == 'external']
+        self.assertEqual(names, ['Billeteras externas (2)'])
