@@ -6,9 +6,9 @@ back with the passport), which no document-number match catches. Didit's 1:N
 face search checks every new verification against its face blocklist and
 declines a match (FACE_IN_BLOCKLIST), whatever document is presented.
 
-So each verified personal Didit session of a permanently banned user goes on
-the face blocklist (Lists API, reference_session_id), and comes off when the
-ban is lifted. Only the face: a reused document is already a review hold
+So each verified personal Didit session of a permanently banned user (and each
+rejected one whose liveness Didit approved) goes on the face blocklist
+(Lists API, reference_session_id), and comes off when the ban is lifted. Only the face: a reused document is already a review hold
 (security/identity_reuse.py), not a decline. Temporary and partial bans
 (trading, withdrawal) are not blocklisted.
 
@@ -99,11 +99,29 @@ def blocks_face(user_id) -> bool:
 
 
 def _verified_sessions(user_id) -> set[str]:
-    """Didit sessions of the user's verified personal documents, primary or extra."""
-    rows = IdentityVerification.all_objects.filter(user_id=user_id, status='verified').filter(
+    """Didit sessions of the user's personal documents whose face can be blocked:
+    verified ones, and rejected ones whose liveness Didit approved (e.g. a
+    session Confío rejected after the fact because someone else held the phone).
+    Without that, a banned ring member whose KYC was rejected could come back
+    with another document. Approved liveness only: a failed or unreviewed one
+    may be a photo of someone else, whose face must never be blocked."""
+    rows = IdentityVerification.all_objects.filter(user_id=user_id, status__in=('verified', 'rejected')).filter(
         Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'),
-    ).values_list('risk_factors__didit__session_id', flat=True)
-    return {str(session_id) for session_id in rows if session_id}
+    ).values_list('status', 'risk_factors')
+    sessions = set()
+    for status, factors in rows:
+        didit = (factors or {}).get('didit') or {}
+        session_id = didit.get('session_id')
+        if not session_id:
+            continue
+        if status == 'rejected':
+            checks = (didit.get('session') or {}).get('liveness_checks')
+            if not isinstance(checks, list) or not checks or not all(
+                    isinstance(check, dict) and str(check.get('status') or '').strip().lower() == 'approved'
+                    for check in checks):
+                continue
+        sessions.add(str(session_id))
+    return sessions
 
 
 def _label(user_id) -> str:
