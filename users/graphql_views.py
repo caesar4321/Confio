@@ -335,61 +335,9 @@ class UnifiedTransactionType(DjangoObjectType):
 
     def resolve_direction(self, info):
         """Resolve transaction direction based on current user's address"""
-        if self.transaction_type == 'local_transfer':
-            return 'received' if self.sender_type == 'external' else 'sent'
-        # Conversions are always "self" transactions
-        if self.transaction_type == 'conversion':
-            return 'conversion'
-        if self.transaction_type == 'ramp':
-            if getattr(self, 'ramp_transaction', None):
-                return 'received' if self.ramp_transaction.direction == 'on_ramp' else 'sent'
-            return 'unknown'
-
-        # Payroll: derive from user identity first (addresses may be missing)
-        if self.transaction_type == 'payroll':
-            user = info.context.user if info.context else None
-            if user and user.is_authenticated:
-                if self.counterparty_user_id == user.id:
-                    return 'received'
-                if self.sender_user_id == user.id:
-                    return 'sent'
-            # If viewing as business context, sender is the business
-            acct_type = getattr(self, '_account_type', None)
-            acct_biz_id = getattr(self, '_account_business_id', None)
-            if acct_type == 'business' and acct_biz_id:
-                if self.sender_business_id == acct_biz_id:
-                    return 'sent'
-                if self.counterparty_business_id == acct_biz_id:
-                    return 'received'
-		
-        # P2P exchanges need special handling: derive from the viewer's active account context first
-        if self.transaction_type == 'exchange':
-            user = info.context.user if info.context else None
-            acct_type = getattr(self, '_account_type', None)
-            acct_biz_id = getattr(self, '_account_business_id', None)
-            if acct_type == 'business' and acct_biz_id:
-                if self.sender_business and self.sender_business.id == acct_biz_id:
-                    return 'sent'
-                if self.counterparty_business and self.counterparty_business.id == acct_biz_id:
-                    return 'received'
-            elif user and user.is_authenticated:
-                # Fall back to user identity when personal account
-                if self.sender_user and self.sender_user.id == user.id:
-                    return 'sent'
-                if self.counterparty_user and self.counterparty_user.id == user.id:
-                    return 'received'
-            return 'unknown'
-			
-        # Get the user's address from the transaction context
-        user_address = getattr(self, '_user_address', None)
-        
-        if user_address and hasattr(self, 'get_direction_for_address'):
-            try:
-                return self.get_direction_for_address(user_address)
-            except Exception as e:
-                print(f"Error in resolve_direction: {e}")
-                return 'unknown'
-        return 'unknown'
+        context = getattr(info, 'context', None)
+        user = getattr(context, 'user', None) if context else None
+        return row_direction(self, user)
     
     def resolve_display_amount(self, info):
         """Legacy signed gross amount.
@@ -649,6 +597,68 @@ def _short_addr(addr):
     return f'{a[:6]}…{a[-4:]}' if len(a) > 12 else a
 
 
+def row_direction(row, user):
+    """'sent' | 'received' | 'conversion' | 'unknown' for the viewer.
+
+    The viewer is `user` plus the hints the resolvers stamp on each row
+    (_account_type, _account_business_id, _user_address). Shared by the
+    GraphQL type and the month summary so both read direction identically.
+    """
+    if row.transaction_type == 'local_transfer':
+        return 'received' if row.sender_type == 'external' else 'sent'
+    # Conversions are always "self" transactions
+    if row.transaction_type == 'conversion':
+        return 'conversion'
+    if row.transaction_type == 'ramp':
+        if getattr(row, 'ramp_transaction', None):
+            return 'received' if row.ramp_transaction.direction == 'on_ramp' else 'sent'
+        return 'unknown'
+
+    # Payroll: derive from user identity first (addresses may be missing)
+    if row.transaction_type == 'payroll':
+        if user and user.is_authenticated:
+            if row.counterparty_user_id == user.id:
+                return 'received'
+            if row.sender_user_id == user.id:
+                return 'sent'
+        # If viewing as business context, sender is the business
+        acct_type = getattr(row, '_account_type', None)
+        acct_biz_id = getattr(row, '_account_business_id', None)
+        if acct_type == 'business' and acct_biz_id:
+            if row.sender_business_id == acct_biz_id:
+                return 'sent'
+            if row.counterparty_business_id == acct_biz_id:
+                return 'received'
+
+    # P2P exchanges need special handling: derive from the viewer's active account context first
+    if row.transaction_type == 'exchange':
+        acct_type = getattr(row, '_account_type', None)
+        acct_biz_id = getattr(row, '_account_business_id', None)
+        if acct_type == 'business' and acct_biz_id:
+            if row.sender_business and row.sender_business.id == acct_biz_id:
+                return 'sent'
+            if row.counterparty_business and row.counterparty_business.id == acct_biz_id:
+                return 'received'
+        elif user and user.is_authenticated:
+            # Fall back to user identity when personal account
+            if row.sender_user and row.sender_user.id == user.id:
+                return 'sent'
+            if row.counterparty_user and row.counterparty_user.id == user.id:
+                return 'received'
+        return 'unknown'
+
+    # Get the user's address from the transaction context
+    user_address = getattr(row, '_user_address', None)
+
+    if user_address and hasattr(row, 'get_direction_for_address'):
+        try:
+            return row.get_direction_for_address(user_address)
+        except Exception as e:
+            print(f"Error in resolve_direction: {e}")
+            return 'unknown'
+    return 'unknown'
+
+
 def _viewer_address_for(transaction, account):
     """The account address on the SAME CHAIN as this transaction.
 
@@ -677,6 +687,72 @@ def _viewer_address_for(transaction, account):
         if value.startswith('0x'):
             return getattr(account, 'bsc_address', None) or ''
     return account.algorand_address
+
+
+def jwt_account(user, jwt_context):
+    """The Account named by a validated JWT context, or None."""
+    from users.models import Account
+    account_type = jwt_context['account_type']
+    account_index = jwt_context['account_index']
+    business_id = jwt_context.get('business_id')
+    try:
+        if account_type == 'business' and business_id:
+            # For business accounts, find the account by business_id (normalize index if needed)
+            try:
+                return Account.objects.get(
+                    business_id=business_id,
+                    account_type='business',
+                    account_index=account_index
+                )
+            except Account.DoesNotExist:
+                return Account.objects.filter(
+                    business_id=business_id,
+                    account_type='business'
+                ).order_by('account_index').first()
+        # For personal accounts
+        return Account.objects.get(
+            user=user,
+            account_type=account_type,
+            account_index=account_index
+        )
+    except Account.DoesNotExist:
+        return None
+
+
+def account_unified_queryset(user, account, account_type, business_id):
+    """Every ledger row the active (JWT) account may see — the one scope
+    shared by the history list and the month summary ("Tu mes"), so the two
+    can never disagree about which movements exist.
+    """
+    if account_type == 'business' and business_id:
+        # For business accounts, filter by business relationships using JWT business_id
+        from users.models import Business
+        business = Business.objects.get(id=business_id)
+        queryset = _visible_unified().filter(
+            Q(sender_business=business) |
+            Q(counterparty_business=business)
+        )
+    else:
+        # For personal accounts, filter by user relationships
+        # Include:
+        # 1. Personal-to-personal transactions (no business involved)
+        # 2. Payroll transactions where user is the recipient
+        queryset = _visible_unified().filter(
+            Q(
+                Q(sender_user=user) & Q(sender_business__isnull=True)
+            ) |
+            Q(
+                Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+            ) |
+            Q(
+                Q(counterparty_user=user) & Q(transaction_type='payroll')
+            )
+        )
+    queryset = queryset.filter(Q(local_money_flow__isnull=True) | Q(local_money_flow__confio_account=account))
+    # A ramp's own conversion is shown as part of the ramp row, never twice.
+    return queryset.exclude(
+        Q(transaction_type='conversion') & Q(conversion__ramp_transactions__isnull=False)
+    )
 
 
 class UnifiedTransactionQuery(graphene.ObjectType):
@@ -823,67 +899,17 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         print(f"Transaction resolver - JWT context: user_id={user.id}, account_type={account_type}, account_index={account_index}, business_id={business_id}")
         
-        # Get the account
-        from users.models import Account
-        try:
-            if account_type == 'business' and business_id:
-                # For business accounts, find the account by business_id (normalize index if needed)
-                try:
-                    account = Account.objects.get(
-                        business_id=business_id,
-                        account_type='business',
-                        account_index=account_index
-                    )
-                except Account.DoesNotExist:
-                    account = Account.objects.filter(
-                        business_id=business_id,
-                        account_type='business'
-                    ).order_by('account_index').first()
-                    if not account:
-                        raise
-            else:
-                # For personal accounts
-                account = Account.objects.get(
-                    user=user,
-                    account_type=account_type,
-                    account_index=account_index
-                )
-        except Account.DoesNotExist:
+        account = jwt_account(user, jwt_context)
+        if account is None:
             print(f"Account not found for type {account_type}, index {account_index}, business_id {business_id}")
             return []
-        
+
         print(f"Found account: {account.id}, business: {account.business.id if account.business else None}")
         print(f"Transaction resolver - DEBUG: Using JWT business_id={business_id} for query")
         
-        # Base query - all transactions involving this account
-        if account_type == 'business' and business_id:
-            # For business accounts, filter by business relationships using JWT business_id
-            from users.models import Business
-            business = Business.objects.get(id=business_id)
-            print(f"Transaction resolver - Filtering transactions for business id={business.id}, name={business.name}")
-            queryset = _visible_unified().filter(
-                Q(sender_business=business) | 
-                Q(counterparty_business=business)
-            )
-        else:
-            # For personal accounts, filter by user relationships
-            # Include:
-            # 1. Personal-to-personal transactions (no business involved)
-            # 2. Payroll transactions where user is the recipient
-            queryset = _visible_unified().filter(
-                Q(
-                    Q(sender_user=user) & Q(sender_business__isnull=True)
-                ) | 
-                Q(
-                    Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
-                ) |
-                Q(
-                    Q(counterparty_user=user) & Q(transaction_type='payroll')
-                )
-            )
-        
+        queryset = account_unified_queryset(user, account, account_type, business_id)
+
         # Filter by token types if provided (case-insensitive)
-        queryset = queryset.filter(Q(local_money_flow__isnull=True) | Q(local_money_flow__confio_account=account))
         if token_types:
             from django.db.models.functions import Upper
             wanted = [t.upper() for t in token_types]
@@ -918,14 +944,10 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             'humanitarian_donation',
             'humanitarian_release',
         )
-        
-        queryset = queryset.exclude(
-            Q(transaction_type='conversion') & Q(conversion__ramp_transactions__isnull=False)
-        )
 
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
-        
+
         # Apply pagination and add viewer context hints to each transaction for resolvers
         transactions = list(queryset[offset:offset + limit])
         _preload_external_deposit_conversions(transactions)
