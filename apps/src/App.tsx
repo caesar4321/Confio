@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar, StyleSheet, View, ActivityIndicator } from 'react-native';
+import { StatusBar, StyleSheet, View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Text } from './components/common/AppText';
 import { getAnalytics, logScreenView } from '@react-native-firebase/analytics';
 import { colors } from './config/theme';
@@ -91,17 +91,47 @@ const Navigation: React.FC = () => {
         )}
       </Stack.Navigator>
       {/* Loading overlay — covers navigator while auth resolves, then disappears */}
-      {isLoading && !recoveryOnly && (
-        <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', zIndex: 10 }]}>
-          <ActivityIndicator size="large" />
-          <Text onPress={() => setRecoveryOnly(true)} style={{ marginTop: 24 }}>Salida de emergencia</Text>
-        </View>
-      )}
+      {isLoading && !recoveryOnly && <LoadingOverlay onEmergencyExit={() => setRecoveryOnly(true)} />}
       <AppLockScreen visible={isLocked && !recoveryOnly} onUnlock={unlockApp} onSignOut={signOut}
         onEmergencyExit={() => setRecoveryOnly(true)} />
     </View>
   );
 };
+
+// The emergency exit must stay reachable when loading never finishes
+// (servers down, hung network), but a normal start or biometric unlock
+// should show only the spinner. The exit appears once loading is slow.
+const EMERGENCY_EXIT_AFTER_MS = 8000;
+
+const LoadingOverlay: React.FC<{ onEmergencyExit: () => void }> = ({ onEmergencyExit }) => {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), EMERGENCY_EXIT_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <View style={loadingStyles.overlay}>
+      <ActivityIndicator size="large" color={colors.primaryDark} />
+      {slow && (
+        <TouchableOpacity onPress={onEmergencyExit} accessibilityRole="button" style={loadingStyles.exitButton}>
+          <Text style={loadingStyles.exitText}>Salida de emergencia</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+};
+
+const loadingStyles = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    zIndex: 10,
+  },
+  exitButton: { marginTop: 32, paddingVertical: 12, paddingHorizontal: 20 },
+  exitText: { color: colors.textSecondary, fontSize: 15, fontWeight: '500' },
+});
 
 const AppContent: React.FC = () => {
   const previousScreenRef = useRef<string | undefined>(undefined);
