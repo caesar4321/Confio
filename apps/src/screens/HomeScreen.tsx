@@ -268,9 +268,13 @@ export const HomeScreen = () => {
   const isPersonalAccount = (activeAccount?.type || '').toLowerCase() === 'personal';
   const isEmployeeDelegate = !!activeAccount?.isEmployee;
   // "Tu mes" hero line — owners only (employees never see the month view).
-  const { summary: heroMonth, reserved: heroMonthReserved } = useMonthHeroLine(
+  // Owners only, and only CONFIRMED owners: a personal account is always the
+  // user's own; a business one only once its role is known (a fallback
+  // account without role data must not count as owner access).
+  const isConfirmedOwner = activeAccount?.type === 'personal' || activeAccount?.isEmployee === false;
+  const heroMonth = useMonthHeroLine(
     activeAccount?.id,
-    !activeAccount?.isEmployee,
+    Boolean(isConfirmedOwner),
     accountLoading || switchState.isLoading,
   );
   const { data: billingSummaryData, refetch: refetchBillingSummary } = useQuery(GET_MY_BILLING_SUMMARY, {
@@ -1253,23 +1257,24 @@ export const HomeScreen = () => {
             </Text>
           </Animated.View>
 
-          {/* Month line: always in US$ whatever the balance toggle shows (5A),
-              masked with the balance (6A), rendered from cache only so the
-              verbs below never jump (2A). */}
-          <HeroMonthSlot
-            summary={heroMonth}
-            reserved={heroMonthReserved}
-            masked={!showBalance || !canViewBalance}
-            onPress={(month) => {
-              AnalyticsService.logFunnelEvent('hero_cashflow_tapped');
-              // Early in the month the line can be last month's: open that one.
-              navigation.navigate('MonthSummary', {
-                year: month.year,
-                month: month.month,
-                masked: !showBalance || !canViewBalance,
-              });
-            }}
-          />
+          {/* Month strip (design C): always in US$ whatever the balance
+              toggle shows, masked with the balance; one fixed footprint for
+              every state so the verbs below never jump. Owners only. */}
+          {heroMonth.kind !== 'hidden' && (
+            <View style={styles.heroMonthWrap}>
+              <HeroMonthSlot
+                state={heroMonth}
+                masked={!showBalance || !canViewBalance}
+                onPress={(month) => {
+                  AnalyticsService.logFunnelEvent('hero_cashflow_tapped', { state: month ? 'month' : 'invite' });
+                  // Early in the month the line can be last month's: open that one.
+                  navigation.navigate('MonthSummary', month
+                    ? { year: month.year, month: month.month, masked: !showBalance || !canViewBalance }
+                    : { masked: !showBalance || !canViewBalance });
+                }}
+              />
+            </View>
+          )}
 
           {/* The two verbs sit ON the brand field, where the coin ring runs
               behind them — part of the hero, not a white slab under it. The
@@ -1876,6 +1881,10 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
   },
   // Quick actions styles
+  heroMonthWrap: {
+    marginTop: 14,
+    marginBottom: 10,
+  },
   heroActions: {
     flexDirection: 'row',
     gap: 12,

@@ -21,15 +21,17 @@ import { useQuery } from '@apollo/client';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import { Text } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import { useAccount } from '../contexts/AccountContext';
 import type { MainStackParamList } from '../types/navigation';
-import { GET_MONTH_SUMMARY, type MonthSummary, type MonthTotals } from '../apollo/monthSummary';
+import {
+  GET_MONTH_MOVEMENTS, GET_MONTH_SUMMARY, type CategoryKey, type MonthSummary, type MonthTotals,
+} from '../apollo/monthSummary';
 import { AnalyticsService } from '../services/analyticsService';
 import {
-  capitalize, categoryLabel, currentYearMonth, deviceTimezone, formatUsd, MASK,
+  CATEGORY_META, capitalize, categoryLabel, currentYearMonth, deviceTimezone, formatUsd, MASK,
   monthName, nextMonth, previousMonth,
 } from '../utils/monthSummary';
 
@@ -138,36 +140,32 @@ export function MonthSummaryScreen() {
     navigation.navigate('MonthMovements', { year: period.year, month: period.month, filterBy, value, title: listTitle, masked });
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Volver">
-          <Icon name="arrow-left" size={24} color={colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{title}</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+    <View style={styles.safe}>
+      {/* The app's shared screen header on the brand field (same as
+          Notificaciones and the dollar account you arrive from). */}
+      <Header navigation={navigation as any} title={title} backgroundColor={colors.heroField} isLight showBackButton />
 
       <View style={styles.monthNav}>
         <TouchableOpacity
           disabled={!canGoBack}
           onPress={() => setPeriod(previousMonth(period.year, period.month))}
-          hitSlop={12}
+          style={[styles.navBtn, !canGoBack && styles.navBtnDisabled]}
           accessibilityRole="button"
           accessibilityLabel="Mes anterior"
           accessibilityState={{ disabled: !canGoBack }}
         >
-          <Icon name="chevron-left" size={22} color={canGoBack ? colors.text.secondary : colors.border} />
+          <Icon name="chevron-left" size={20} color={canGoBack ? colors.text.primary : colors.text.light} />
         </TouchableOpacity>
         <Text style={styles.monthTitle} accessibilityRole="header">{monthTitle}</Text>
         <TouchableOpacity
           disabled={isCurrent}
           onPress={() => setPeriod(nextMonth(period.year, period.month))}
-          hitSlop={12}
+          style={[styles.navBtn, isCurrent && styles.navBtnDisabled]}
           accessibilityRole="button"
           accessibilityLabel="Mes siguiente"
           accessibilityState={{ disabled: isCurrent }}
         >
-          <Icon name="chevron-right" size={22} color={isCurrent ? colors.border : colors.text.secondary} />
+          <Icon name="chevron-right" size={20} color={isCurrent ? colors.text.light : colors.text.primary} />
         </TouchableOpacity>
       </View>
 
@@ -195,7 +193,7 @@ export function MonthSummaryScreen() {
           onReceive={() => navigation.navigate('Receive')}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -220,9 +218,40 @@ type BodyProps = {
   onReceive: () => void;
 };
 
-function money(value: string | number, masked: boolean, whole = false) {
-  return masked ? MASK : formatUsd(value, { whole });
+/** One precision on this screen: whole dollars (design C, 2026-10-04). */
+function money(value: string | number, masked: boolean) {
+  return masked ? MASK : formatUsd(value, { whole: true });
 }
+
+const OWN_ICON: Record<OwnMoneyBucket, string> = {
+  top_up: 'arrow-down-circle',
+  withdrawal: 'arrow-up-circle',
+  savings: 'archive',
+  investment: 'trending-up',
+};
+
+// Avatar tints (never violet: that hue belongs to $CONFIO only, DESIGN.md).
+const AVATAR_TINTS = [
+  { bg: '#D1FAE5', fg: '#065F46' },
+  { bg: '#DBEAFE', fg: '#1E40AF' },
+  { bg: '#FEF3C7', fg: '#92400E' },
+  { bg: '#FFE4E6', fg: '#9F1239' },
+];
+function tintFor(key: string) {
+  let h = 0;
+  for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return AVATAR_TINTS[h % AVATAR_TINTS.length];
+}
+
+// Unknown wallets: the server merges two or more into one 'external' line
+// ("Depósitos externos (N)") before its top-5 cut; a single one keeps its
+// own address key and the name "Depósito externo".
+/** Unknown outside wallet, judged on the RAW server key/name (before any
+ *  relabeling), so the flag survives for the icon. */
+const isUnknownWallet = (key: string, name: string) =>
+  key === 'external' || (key.startsWith('addr:') && (!name || name === 'Depósito externo'));
+/** A single unknown wallet is a deposit only if no money went out to it. */
+const externalName = (sent: number) => (sent > 0 ? 'Billetera externa' : 'Depósito externo');
 
 function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onReceive }: BodyProps) {
   const cur = summary.current;
@@ -233,7 +262,39 @@ function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onRecei
   const monthLabel = monthName(summary.month);
   const prevLabel = monthName(previousMonth(summary.year, summary.month).month);
 
+  const uncategorized = cur.spendingByCategory.find((c) => c.category === 'uncategorized');
+  const categorized = cur.spendingByCategory.filter((c) => c.category !== 'uncategorized');
+  // How many payments still need a label: the same list the CTA opens.
+  const { data: uncategorizedData, refetch: refetchPending } = useQuery<{ monthMovements: { id: string }[] }>(GET_MONTH_MOVEMENTS, {
+    variables: { year: summary.year, month: summary.month, timezone: summary.timezone, filterBy: 'uncategorized', value: null },
+    skip: !uncategorized,
+    fetchPolicy: 'cache-and-network',
+    context: { queryDeduplication: false },
+  });
+  // Back from a list where payments were labeled: the count must follow
+  // the refreshed summary (a stale "Clasifica 3 pagos" after labeling one).
+  const refetchPendingRef = useRef(refetchPending);
+  refetchPendingRef.current = refetchPending;
+  const pendingFocused = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (pendingFocused.current) refetchPendingRef.current?.().catch(() => undefined);
+    pendingFocused.current = true;
+  }, []));
+  const pendingCount = uncategorized ? uncategorizedData?.monthMovements.length : 0;
+
   const ownRows = ownMoneyRows(cur);
+  const people = summary.counterparties.map((c) => {
+    const unknown = isUnknownWallet(c.key, c.name);
+    const sentUsd = Number(c.sentUsd);
+    return {
+      key: c.key,
+      unknown,
+      // The server's merged plural label stays; a singleton is named by direction.
+      name: c.key === 'external' ? c.name : unknown ? externalName(sentUsd) : c.name || 'Sin nombre',
+      receivedUsd: Number(c.receivedUsd),
+      sentUsd,
+    };
+  });
   const isEmpty = cur.movementCount === 0 && ownRows.length === 0;
   if (isEmpty) {
     return (
@@ -252,96 +313,140 @@ function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onRecei
   }
 
   const hasComparison = summary.previous.movementCount > 0;
-  const comparison = summary.previousIsPartial
-    ? `Mismo período de ${prevLabel}`
-    : `vs ${prevLabel} completo`;
-  const maxCategory = Math.max(1, ...cur.spendingByCategory.map((c) => Number(c.amountUsd)));
+  const comparison = summary.previousIsPartial ? `Mismo período de ${prevLabel}` : `vs ${prevLabel}`;
+  const total = income + spending;
 
   return (
     <ScrollView contentContainerStyle={styles.body}>
-      <View style={styles.totals}>
-        <TouchableOpacity onPress={() => onOpen('spending', 'Salió')} accessibilityRole="button"
-          accessibilityLabel={masked ? 'Salió, oculto' : `Salió ${formatUsd(spending)}`} testID="total-spending">
-          <Text style={styles.totalLabel}>Salió</Text>
-          <Text style={styles.totalBig}>{money(shownSpending, masked, true)}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => onOpen('income', 'Entró')} accessibilityRole="button"
-          accessibilityLabel={masked ? 'Entró, oculto' : `Entró ${formatUsd(income)}`} testID="total-income">
-          <Text style={styles.totalLabel}>Entró</Text>
-          <Text style={styles.totalSmall}>{money(shownIncome, masked, true)}</Text>
-        </TouchableOpacity>
+      {/* In vs out: one proportion bar, the two totals under it. */}
+      <View style={styles.card}>
+        <View style={styles.ratioTrack} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {/* Normalized weights (Yoga floors flex sums below 1) and no
+              zero-width segments. */}
+          {income > 0 && <View style={[styles.ratioIn, { flex: income / total }]} />}
+          {spending > 0 && <View style={[styles.ratioOut, { flex: spending / total }]} />}
+        </View>
+        <View style={styles.totals}>
+          <TouchableOpacity onPress={() => onOpen('income', 'Entró')} accessibilityRole="button" style={styles.totalBlock}
+            accessibilityLabel={masked ? 'Entró, oculto' : `Entró ${formatUsd(income, { whole: true })}`} testID="total-income">
+            <Text style={styles.totalLabel}>Entró</Text>
+            <Text style={[styles.totalAmount, styles.totalIn]} numberOfLines={1} adjustsFontSizeToFit>
+              {money(shownIncome, masked)}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => onOpen('spending', 'Salió')} accessibilityRole="button"
+            style={[styles.totalBlock, styles.totalBlockEnd]}
+            accessibilityLabel={masked ? 'Salió, oculto' : `Salió ${formatUsd(spending, { whole: true })}`} testID="total-spending">
+            <Text style={styles.totalLabel}>Salió</Text>
+            <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>{money(shownSpending, masked)}</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.note}>Sin contar recargas, retiros ni ahorro.</Text>
+        {hasComparison && (
+          <Text style={styles.noteMuted} testID="month-comparison">
+            {comparison}: salió {money(summary.previous.spendingUsd, masked)}, entró{' '}
+            {money(summary.previous.incomeUsd, masked)}
+          </Text>
+        )}
       </View>
-      <Text style={styles.note}>Sin contar recargas, retiros ni ahorro.</Text>
-      {hasComparison && (
-        <Text style={styles.note} testID="month-comparison">
-          {comparison}: salió {money(summary.previous.spendingUsd, masked, true)} · entró{' '}
-          {money(summary.previous.incomeUsd, masked, true)}
-        </Text>
-      )}
       {/* Protection / savings-earned slot (design 7B/7C): renders once the
           server provides real values (DT8, protection flag); nothing until then. */}
 
       {cur.spendingByCategory.length > 0 && (
-        <Section title="En qué se fue">
-          {cur.spendingByCategory.map((c) => {
-            const uncategorized = c.category === 'uncategorized';
-            const width = `${Math.max(2, (Number(c.amountUsd) / maxCategory) * 100)}%` as const;
-            return (
-              <TouchableOpacity
-                key={c.category}
-                style={styles.categoryRow}
-                onPress={() => uncategorized
-                  ? onOpen('uncategorized', 'Sin categoría')
-                  : onOpen('category', categoryLabel(c.category), c.category)}
-                accessibilityRole="button"
-                accessibilityLabel={`${categoryLabel(c.category)}, ${masked ? 'oculto' : formatUsd(c.amountUsd)}`}
-              >
-                <View style={styles.rowBetween}>
-                  <Text style={uncategorized ? styles.rowMuted : styles.rowText}>{categoryLabel(c.category)}</Text>
-                  <Text style={uncategorized ? styles.rowMuted : styles.rowAmount}>
-                    {money(c.amountUsd, masked)}{uncategorized ? ' ›' : ''}
-                  </Text>
-                </View>
-                <View style={styles.barTrack}>
-                  <View style={[styles.barFill, uncategorized && styles.barUncategorized, { width }]} />
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+        <Section
+          title="En qué se fue"
+          aside={uncategorized
+            ? `${money(uncategorized.amountUsd, masked)} sin categorizar${pendingCount ? ` (${pendingCount} ${pendingCount === 1 ? 'pago' : 'pagos'})` : ''}`
+            : undefined}
+        >
+          {uncategorized && (
+            <TouchableOpacity style={styles.cta} onPress={() => onOpen('uncategorized', 'Sin categoría')}
+              accessibilityRole="button" testID="categorize-cta">
+              <View style={styles.ctaIcon}><Icon name="tag" size={18} color={colors.successText} /></View>
+              <View style={styles.ctaText}>
+                <Text style={styles.ctaTitle}>
+                  {pendingCount ? `Clasifica ${pendingCount} ${pendingCount === 1 ? 'pago' : 'pagos'}` : 'Clasifica tus pagos'}
+                </Text>
+                <Text style={styles.ctaSub}>Así podrás ver en qué estás gastando.</Text>
+              </View>
+              <Icon name="chevron-right" size={20} color={colors.successText} />
+            </TouchableOpacity>
+          )}
+          {categorized.length > 0 && (
+            <View style={styles.chips}>
+              {categorized.map((c) => {
+                const meta = CATEGORY_META[c.category as CategoryKey];
+                return (
+                  <TouchableOpacity key={c.category} style={styles.chip}
+                    onPress={() => onOpen('category', categoryLabel(c.category), c.category)} accessibilityRole="button"
+                    accessibilityLabel={`${categoryLabel(c.category)}, ${masked ? 'oculto' : formatUsd(c.amountUsd, { whole: true })}`}>
+                    {meta && <Icon name={meta.icon} size={15} color={colors.text.secondary} />}
+                    <Text style={styles.chipText}>{categoryLabel(c.category)}</Text>
+                    <Text style={styles.chipAmount}>{money(c.amountUsd, masked)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </Section>
       )}
 
       {ownRows.length > 0 && (
         <Section title="Entre tus cuentas">
-          {ownRows.map((r) => (
-            <TouchableOpacity key={r.label} style={styles.rowBetween} onPress={() => onOpen('own_money', r.label, r.bucket)}
-              accessibilityRole="button">
-              <Text style={styles.rowMuted}>{r.label}</Text>
-              <Text style={styles.rowMuted}>{money(r.amount, masked)}</Text>
-            </TouchableOpacity>
-          ))}
+          <View style={styles.listCard}>
+            {ownRows.map((r, i) => (
+              <TouchableOpacity key={r.label} style={[styles.listRow, i > 0 && styles.listRowDivider]}
+                onPress={() => onOpen('own_money', r.label, r.bucket)} accessibilityRole="button">
+                <View style={[styles.avatar, { backgroundColor: colors.primarySoft }]}>
+                  <Icon name={OWN_ICON[r.bucket]} size={18} color={colors.successText} />
+                </View>
+                <Text style={styles.listName} numberOfLines={1}>{r.label}</Text>
+                <Text style={styles.listAmount}>{money(r.amount, masked)}</Text>
+                <Icon name="chevron-right" size={18} color={colors.text.light} />
+              </TouchableOpacity>
+            ))}
+          </View>
         </Section>
       )}
 
-      {summary.counterparties.length > 0 && (
+      {people.length > 0 && (
         <Section title="Con quién">
-          {summary.counterparties.map((c) => (
-            <TouchableOpacity key={c.key} style={styles.personRow} onPress={() => onOpen('counterparty', c.name || 'Movimientos', c.key)}
+          <View style={styles.listCard}>
+            {people.map((p, i) => {
+              const tint = tintFor(p.key);
+              const both = p.receivedUsd > 0 && p.sentUsd > 0;
+              // Both directions: one line each (a single line truncates on
+              // narrow phones and would hide the second amount).
+              const subs = both
+                ? [`Recibiste ${money(p.receivedUsd, masked)}`, `Enviaste ${money(p.sentUsd, masked)}`]
+                : [p.receivedUsd > 0 ? 'Recibiste' : 'Enviaste'];
+              const amount = both ? null : money(p.receivedUsd > 0 ? p.receivedUsd : p.sentUsd, masked);
+              return (
+                <TouchableOpacity key={p.key} style={[styles.listRow, i > 0 && styles.listRowDivider]}
+                  onPress={() => onOpen('counterparty', p.name, p.key)}
+                  accessibilityRole="button">
+                  <View style={[styles.avatar, { backgroundColor: p.unknown ? colors.primarySoft : tint.bg }]}>
+                    {p.unknown
+                      ? <Icon name={p.sentUsd > 0 ? 'globe' : 'download'} size={17} color={colors.successText} />
+                      : <Text style={[styles.avatarText, { color: tint.fg }]}>{p.name.trim().charAt(0).toUpperCase() || '?'}</Text>}
+                  </View>
+                  <View style={styles.listMain}>
+                    <Text style={styles.listName} numberOfLines={1}>{p.name}</Text>
+                    {subs.map((line) => (
+                      <Text key={line} style={styles.listSub}>{line}</Text>
+                    ))}
+                  </View>
+                  {amount && <Text style={styles.listAmount}>{amount}</Text>}
+                  <Icon name="chevron-right" size={18} color={colors.text.light} />
+                </TouchableOpacity>
+              );
+            })}
+            <TouchableOpacity style={[styles.listRow, styles.listRowDivider]} onPress={() => onOpen('counterparties', 'Con quién')}
               accessibilityRole="button">
-              <Text style={styles.rowText} numberOfLines={1}>{c.name || 'Sin nombre'}</Text>
-              <View style={styles.personAmounts}>
-                {Number(c.receivedUsd) > 0 && (
-                  <Text style={styles.personAmount}>Recibiste <Text style={styles.rowAmount}>{money(c.receivedUsd, masked)}</Text></Text>
-                )}
-                {Number(c.sentUsd) > 0 && (
-                  <Text style={styles.personAmount}>Enviaste <Text style={styles.rowAmount}>{money(c.sentUsd, masked)}</Text></Text>
-                )}
-              </View>
+              <Text style={styles.link}>Ver todos</Text>
+              <Icon name="chevron-right" size={18} color={colors.successText} />
             </TouchableOpacity>
-          ))}
-          <TouchableOpacity onPress={() => onOpen('counterparties', 'Con quién')} accessibilityRole="button">
-            <Text style={styles.link}>Ver todos</Text>
-          </TouchableOpacity>
+          </View>
         </Section>
       )}
       {!isCurrent && <View style={styles.bottomPad} />}
@@ -367,23 +472,27 @@ export function ownMoneyRows(t: MonthTotals): { label: string; amount: number; b
   return rows;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, aside, children }: { title: string; aside?: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle} accessibilityRole="header">{title.toUpperCase()}</Text>
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle} accessibilityRole="header">{title}</Text>
+        {aside ? <Text style={styles.sectionAside} numberOfLines={1}>{aside}</Text> : null}
+      </View>
       {children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.white },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4, gap: 12 },
-  title: { flex: 1, fontSize: 20, fontWeight: '700', color: colors.text.primary },
-  headerSpacer: { width: 24 },
-  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, paddingVertical: 10 },
-  monthTitle: { fontSize: 16, fontWeight: '600', color: colors.text.primary, minWidth: 140, textAlign: 'center' },
-  body: { paddingHorizontal: 20, paddingBottom: 32 },
+  safe: { flex: 1, backgroundColor: colors.surface },
+  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, paddingTop: 14, paddingBottom: 14 },
+  // Round 40pt icon buttons, the same shape as the header's own buttons.
+  navBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.white, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  navBtnDisabled: { backgroundColor: colors.surface },
+  monthTitle: { fontSize: 16, fontWeight: '600', color: colors.text.primary, minWidth: 150, textAlign: 'center' },
+  body: { paddingHorizontal: 16, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   muted: { fontSize: 15, color: colors.text.secondary, textAlign: 'center' },
   retry: { marginTop: 12, paddingHorizontal: 20, minHeight: 44, justifyContent: 'center' },
@@ -394,28 +503,46 @@ const styles = StyleSheet.create({
   pillGhost: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
   pillText: { color: colors.white, fontWeight: '700', fontSize: 15 },
   pillGhostText: { color: colors.text.primary },
-  totals: { flexDirection: 'row', alignItems: 'flex-end', gap: 20, marginTop: 4 },
+  card: { backgroundColor: colors.white, borderRadius: 20, padding: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  ratioTrack: { flexDirection: 'row', height: 10, borderRadius: 999, overflow: 'hidden', backgroundColor: colors.surfaceMuted, gap: 3 },
+  ratioIn: { backgroundColor: colors.success, borderRadius: 999 },
+  ratioOut: { backgroundColor: '#374151', borderRadius: 999 },
+  totals: { flexDirection: 'row', marginTop: 14, gap: 16 },
+  totalBlock: { flex: 1, minHeight: 44 },
+  totalBlockEnd: { alignItems: 'flex-end' },
   totalLabel: { fontSize: 13, color: colors.text.secondary },
-  totalBig: { fontSize: 34, fontWeight: '700', color: colors.text.primary, fontVariant: ['tabular-nums'] },
-  totalSmall: { fontSize: 22, fontWeight: '700', color: colors.text.primary, fontVariant: ['tabular-nums'] },
-  note: { fontSize: 12, color: colors.text.secondary, marginTop: 6, fontVariant: ['tabular-nums'] },
-  section: { marginTop: 24 },
-  sectionTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.6, color: colors.text.secondary, marginBottom: 8 },
-  categoryRow: { paddingVertical: 6, minHeight: 44, justifyContent: 'center' },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 40 },
-  rowText: { fontSize: 15, color: colors.text.primary, flexShrink: 1 },
-  rowMuted: { fontSize: 15, color: colors.text.secondary, fontVariant: ['tabular-nums'] },
-  rowAmount: { fontSize: 15, fontWeight: '600', color: colors.text.primary, fontVariant: ['tabular-nums'] },
-  barTrack: { height: 6, borderRadius: 999, backgroundColor: colors.surface, overflow: 'hidden', marginTop: 4 },
-  barFill: { height: '100%', backgroundColor: colors.primary, borderRadius: 999 },
-  barUncategorized: { backgroundColor: colors.border },
-  personRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, gap: 12, minHeight: 44 },
-  personAmounts: { alignItems: 'flex-end' },
-  personAmount: { fontSize: 12, color: colors.text.secondary },
-  link: { fontSize: 14, fontWeight: '600', color: colors.primaryDark, paddingVertical: 12 },
-  skeletonRow: { height: 18, borderRadius: 8, backgroundColor: colors.surface, marginTop: 16 },
-  skeletonHero: { height: 44, width: '60%' },
+  totalAmount: { fontSize: 26, fontWeight: '700', color: colors.text.primary, fontVariant: ['tabular-nums'], marginTop: 2 },
+  totalIn: { color: colors.successText },
+  note: { fontSize: 13, color: colors.text.primary, marginTop: 12 },
+  noteMuted: { fontSize: 13, color: colors.text.secondary, marginTop: 2, fontVariant: ['tabular-nums'] },
+  section: { marginTop: 22 },
+  sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10, gap: 12 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
+  sectionAside: { fontSize: 12, color: colors.text.secondary, flexShrink: 1, fontVariant: ['tabular-nums'] },
+  cta: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 16,
+    backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: colors.primaryMuted, minHeight: 56 },
+  ctaIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  ctaText: { flex: 1 },
+  ctaTitle: { fontSize: 15, fontWeight: '700', color: colors.successText },
+  ctaSub: { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: 12, borderRadius: 999,
+    backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
+  chipText: { fontSize: 14, color: colors.text.primary },
+  chipAmount: { fontSize: 14, fontWeight: '700', color: colors.text.primary, fontVariant: ['tabular-nums'] },
+  listCard: { backgroundColor: colors.white, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+    paddingHorizontal: 14 },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingVertical: 8 },
+  listRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 15, fontWeight: '700' },
+  listMain: { flex: 1 },
+  listName: { flex: 1, fontSize: 15, color: colors.text.primary },
+  listSub: { fontSize: 12, color: colors.text.secondary, marginTop: 1, fontVariant: ['tabular-nums'] },
+  listAmount: { fontSize: 15, fontWeight: '700', color: colors.text.primary, fontVariant: ['tabular-nums'] },
+  link: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.successText },
+  skeletonRow: { height: 18, borderRadius: 8, backgroundColor: colors.surfaceMuted, marginTop: 16 },
+  skeletonHero: { height: 120, borderRadius: 20 },
   spinner: { marginTop: 24 },
   bottomPad: { height: 16 },
 });
