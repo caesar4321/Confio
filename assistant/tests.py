@@ -1108,3 +1108,17 @@ class MarketToolTests(TestCase):
         turn = AssistantTurn.objects.create(user=self.user, conversation=conv)
         self.assertIn('cost_usd', service._meter_partial(turn, caught.exception.partial))
         self.assertEqual(turn.cost_usd, Decimal('0.01'))
+
+
+class PendingIncomingDestinationTests(TestCase):
+    def test_only_personal_accounts_are_offered_pending_incoming(self):
+        from .engine import allowed_destinations
+
+        user = User.objects.create_user(username='pend', password='x')
+        personal = Viewer(user=user, account=None, account_type='personal', business_id=None,
+                          is_business_owner=False, tz=ZoneInfo('UTC'))
+        owner = Viewer(user=user, account=None, account_type='business', business_id=1,
+                       is_business_owner=True, tz=ZoneInfo('UTC'))
+        self.assertIn('pending_incoming', allowed_destinations(personal))
+        self.assertNotIn('pending_incoming', allowed_destinations(owner))
+        self.assertIn('receive', allowed_destinations(owner))

@@ -22,7 +22,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from . import conf, market
-from .destinations import DESTINATIONS, OWNER_ONLY
+from .destinations import DESTINATIONS, OWNER_ONLY, PERSONAL_ONLY
 from .prompts import ANALYSIS_PROMPT, build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,9 @@ def allowed_destinations(viewer: Viewer):
     keys = list(DESTINATIONS)
     if viewer.is_employee:
         keys = [k for k in keys if k not in OWNER_ONLY]
+    if viewer.account_type == 'business':
+        # Business pay-ins are never held for Confío Face (payin_hold.needs_face).
+        keys = [k for k in keys if k not in PERSONAL_ONLY]
     return keys
 
 

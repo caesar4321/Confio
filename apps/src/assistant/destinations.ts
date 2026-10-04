@@ -29,6 +29,7 @@ export const DESTINATION_TARGETS: Record<string, Target> = {
   messages: { screen: 'HomeMessages' },
   notifications: { screen: 'Notification' },
   achievements: { screen: 'Achievements' },
+  pending_incoming: { screen: 'PendingIncoming' },
 };
 
 export const DESTINATION_LABELS: Record<string, string> = {
@@ -48,6 +49,7 @@ export const DESTINATION_LABELS: Record<string, string> = {
   messages: 'Abrir Mensajes',
   notifications: 'Ver notificaciones',
   achievements: 'Ver logros',
+  pending_incoming: 'Ver dinero por recibir',
 };
 
 export function isKnownDestination(key?: string | null): key is string {

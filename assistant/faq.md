@@ -47,8 +47,9 @@ percentages or per-order caps from support threads.
 
 ## Cuentas locales a tu nombre
 - En Brasil (Pix), Colombia (Llave Bre-B) y México (CLABE) puedes tener una cuenta local a tu nombre para recibir y pagar en moneda local desde tus dólares. En Argentina llegará pronto.
-- Brasil: recibes Pix con el QR o los datos bancarios de tu cuenta. Todavía no puedes registrar tu propia clave Pix.
-<!-- prod 2026-10-04: BRA FinancialAccounts active with qr + bank_details instructions, no pix-key kind; team said "own Pix key not enabled" 2026-10-03. -->
+- Brasil: puedes tener tu propia chave Pix para recibir de cualquier persona, y enviar Pix a la chave de otra persona. También puedes recibir con el QR o los datos bancarios de tu cuenta.
+- En cuentas personales, cuando otra persona te envía dinero a tu cuenta local, llega a tu saldo cuando confirmas con Confío Face que eres tú. Una sola confirmación recibe todo lo pendiente. Si no lo confirmas en 24 horas, se devuelve automáticamente a quien lo envió.
+<!-- Julian 2026-10-04: own chave Pix for third-party send/receive enabled, gated by Confío Face (earlier caution was fraud-driven; the team's 2026-10-03 "not enabled" is superseded). Code: LocalReceiveScreen pix_key, LocalSendScreen br_pix, payin_hold.needs_face (personal accounts, 24h return), PendingIncomingScreen copy. Prod: explicit-grant countries empty, BR switches enabled. -->
 - Necesitas verificar tu identidad. Por ahora no podemos abrirlas con documento o nacionalidad venezolana.
 - Bre-B verifica desde dónde estás (dispositivo y conexión) y no funciona desde Venezuela.
 <!-- Infinia: INFINIA_PAYMENT_ACCOUNTS_ENABLED/INFINIA_JOURNEYS_ENABLED True on prod; active EligibilityPolicy blocks AR (credentials pending) and VEN nationality. BREB_LOCATION_ENABLED True. -->
