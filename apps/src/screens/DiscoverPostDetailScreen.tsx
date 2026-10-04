@@ -7,10 +7,10 @@ import {
   ScrollView,
   StyleProp,
   StyleSheet,
-  Text,
   TextStyle,
   View,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';

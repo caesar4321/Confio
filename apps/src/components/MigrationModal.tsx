@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, Modal, Alert, AppState } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Modal, Alert, AppState } from 'react-native';
+import { Text } from './common/AppText';
 import { migrationService, DriveAuthorizationRequiredError } from '../services/migrationService';
 import { oauthStorage } from '../services/oauthStorageService';
 import { GOOGLE_CLIENT_IDS } from '../config/env';

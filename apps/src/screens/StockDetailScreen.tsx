@@ -10,13 +10,13 @@
 import React, { useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
   StatusBar,
   Image,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Svg, { Polyline } from 'react-native-svg';
 import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';

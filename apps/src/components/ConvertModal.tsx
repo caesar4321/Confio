@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Modal, Dimensions } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, Modal, Dimensions } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { BlurView } from '@react-native-community/blur';
 

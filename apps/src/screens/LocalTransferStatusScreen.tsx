@@ -5,10 +5,10 @@ import {
   SafeAreaView,
   ScrollView,
   StatusBar,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

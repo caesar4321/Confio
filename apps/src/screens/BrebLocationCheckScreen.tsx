@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, SafeAreaView, Text, View } from 'react-native';
+import { ActivityIndicator, SafeAreaView, View } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { useNavigation } from '@react-navigation/native';
 
 import { BrebLocationGate } from '../components/breb/BrebLocationGate';

@@ -1,7 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
@@ -10,6 +9,7 @@ import {
   ActivityIndicator,
   Vibration,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@apollo/client';
 import { GET_CONVERSIONS, GET_UNIFIED_USDC_TRANSACTIONS } from '../apollo/mutations';

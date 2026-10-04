@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Modal,
-  TextInput,
   TouchableOpacity,
   Alert,
   KeyboardAvoidingView,
@@ -12,6 +10,7 @@ import {
   ScrollView,
   FlatList,
 } from 'react-native';
+import { Text, TextInput } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useMutation } from '@apollo/client';
 import { INVITE_EMPLOYEE } from '../apollo/queries';

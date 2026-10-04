@@ -1,7 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   SafeAreaView,
@@ -9,6 +8,7 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';

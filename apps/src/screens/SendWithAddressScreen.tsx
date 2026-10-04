@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, ActivityIndicator } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, ScrollView, Image, ActivityIndicator } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';

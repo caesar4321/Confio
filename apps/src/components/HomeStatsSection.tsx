@@ -3,10 +3,10 @@ import {
   AppState,
   type AppStateStatus,
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { gql, useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';

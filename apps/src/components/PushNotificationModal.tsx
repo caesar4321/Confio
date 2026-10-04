@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import {
   View,
-  Text,
   TouchableOpacity,
   StyleSheet,
   Modal,
@@ -10,6 +9,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { LinearGradient, Defs, Stop, Rect } from 'react-native-svg';
 import { colors } from '../config/theme';

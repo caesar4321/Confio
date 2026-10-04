@@ -1,13 +1,13 @@
 import React, { useRef, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   PanResponder,
   Animated,
   Vibration,
   Platform,
 } from 'react-native';
+import { Text } from './common/AppText';
 
 interface AlphabetIndexProps {
   letters: string[];

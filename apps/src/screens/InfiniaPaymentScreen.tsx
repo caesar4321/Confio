@@ -2,12 +2,11 @@ import React, {useRef, useState} from 'react';
 import {
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
   ActivityIndicator,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {useQuery} from '@apollo/client';

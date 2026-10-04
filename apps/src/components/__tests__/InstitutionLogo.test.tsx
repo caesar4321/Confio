@@ -4,6 +4,7 @@ import { Image, Text } from 'react-native';
 
 jest.mock('../../config/theme', () => ({
   colors: { primaryDark: '#10B981', white: '#FFFFFF' },
+  fontFamily: jest.requireActual('../../config/theme').fontFamily,
 }));
 
 import { InstitutionLogo, institutionMonogram } from '../InstitutionLogo';

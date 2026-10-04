@@ -7,9 +7,9 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { ResponsiveImage } from './ResponsiveImage';
 import { EmptyState } from './EmptyState';

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal, ActivityIndicator, Alert } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, ScrollView, Image, Modal, ActivityIndicator, Alert } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';

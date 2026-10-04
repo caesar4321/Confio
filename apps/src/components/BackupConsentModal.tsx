@@ -1,6 +1,7 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, Modal, ScrollView, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, Modal, ScrollView, useWindowDimensions } from 'react-native';
+import { Text } from './common/AppText';
 // MaterialCommunityIcons for the cloud-lock mark (linked in iOS Info.plist)
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

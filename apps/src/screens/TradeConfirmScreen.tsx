@@ -2,17 +2,16 @@ import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
   StatusBar,
   SafeAreaView,
-  TextInput,
   Alert,
   Modal,
   Platform,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

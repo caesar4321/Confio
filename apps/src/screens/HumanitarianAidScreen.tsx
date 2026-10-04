@@ -8,11 +8,10 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';

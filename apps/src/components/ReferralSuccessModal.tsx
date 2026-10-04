@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { View, Text, Modal, StyleSheet, TouchableOpacity, TouchableWithoutFeedback } from 'react-native';
+import { View, Modal, StyleSheet, TouchableOpacity, TouchableWithoutFeedback } from 'react-native';
+import { Text } from './common/AppText';
 
 interface ReferralSuccessModalProps {
     visible: boolean;

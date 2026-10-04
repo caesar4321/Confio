@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, Modal, ScrollView, Linking, Alert } from 'react-native';
+import { View, StyleSheet, Modal, ScrollView, Linking, Alert } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Button } from './common/Button';
 import { colors } from '../config/theme';

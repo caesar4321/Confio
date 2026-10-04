@@ -1,18 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    TextInput,
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    Platform,
-    Linking,
-    Image,
-    StatusBar,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  Platform,
+  Linking,
+  Image,
+  StatusBar,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';

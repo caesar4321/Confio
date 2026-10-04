@@ -1,6 +1,7 @@
 import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, Alert, ScrollView, Image, Platform, StatusBar } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, FlatList, Alert, ScrollView, Image, Platform, StatusBar } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';

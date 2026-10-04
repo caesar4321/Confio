@@ -82,5 +82,6 @@ aesthetics (no dark-noir, no neon, no monospace money, no terminal vibes).
 | 2026-07-07 | «Radicalmente Normal» approved | Revolutionary = radical normalcy; site inherits app tokens 1:1 |
 | 2026-07-07 | Hero must use real app screenshots | Founder request; the product is the proof |
 | 2026-07-07 | Two-tone wordmark ("Conf"+green "ío") rejected | Not the brand — lockup is the CONFIO.png mark + single-color "Confío" text |
+| 2026-10-04 | Instrument Sans adopted in the mobile app too (founder decision, "Tu mes" design review D20) | App and site share one typeface. App renders through `components/common/AppText` (React 19 has no global Text default); static Regular/Medium/SemiBold/Bold files, 800/900 → Bold, explicit families (monospace) kept |
 
 Preview artifact: `~/.gstack/projects/caesar4321-Confio/designs/design-system-20260707/radicalmente-normal-preview.html`

@@ -6,7 +6,8 @@
 // never shows a broken-image glyph.
 
 import React, { useState } from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Image, StyleSheet } from 'react-native';
+import { Text } from './common/AppText';
 
 export const TickerLogo = ({
   ticker,

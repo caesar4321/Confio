@@ -2,10 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ReferralSuccessModal } from './ReferralSuccessModal';
 import {
   View,
-  Text,
   Modal,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,6 +11,7 @@ import {
   FlatList,
   Alert,
 } from 'react-native';
+import { Text, TextInput } from './common/AppText';
 import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';

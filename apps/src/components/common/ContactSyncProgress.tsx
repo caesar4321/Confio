@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { Text } from './AppText';
 import { colors } from '../../config/theme';
 import type { ContactSyncProgress as ContactSyncProgressState } from '../../services/contactService';
 

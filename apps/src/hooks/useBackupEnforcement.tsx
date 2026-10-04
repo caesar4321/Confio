@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Platform, Alert, ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
+import { Platform, Alert, ActivityIndicator, Modal, StyleSheet, View } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { useAuth } from '../contexts/AuthContext';
 import { AuthService } from '../services/authService';
 import { gql, useApolloClient, useQuery } from '@apollo/client';

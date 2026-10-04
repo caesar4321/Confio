@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   Pressable,
@@ -15,6 +14,7 @@ import {
   AppState,
   AppStateStatus,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import ConvertModal from '../components/ConvertModal';
 import { AuthService } from '../services/authService';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';

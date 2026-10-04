@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
@@ -9,7 +8,6 @@ import {
   Alert,
   Animated,
   Modal,
-  TextInput,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
@@ -19,6 +17,7 @@ import {
   Linking,
   Dimensions,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

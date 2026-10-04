@@ -1,6 +1,7 @@
 import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, ActivityIndicator, Modal, Image, Platform, StatusBar } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, FlatList, Alert, ActivityIndicator, Modal, Image, Platform, StatusBar } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

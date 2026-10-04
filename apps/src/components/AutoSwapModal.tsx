@@ -1,13 +1,13 @@
 import React from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    Modal,
-    ActivityIndicator,
-    Platform,
-    TouchableOpacity,
+  View,
+  StyleSheet,
+  Modal,
+  ActivityIndicator,
+  Platform,
+  TouchableOpacity,
 } from 'react-native';
+import { Text } from './common/AppText';
 
 interface AutoSwapModalProps {
     visible: boolean;

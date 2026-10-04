@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Linking, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './common/AppText';
 import { Camera, type CameraDevice, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
 import { launchImageLibrary } from 'react-native-image-picker';
 import RNQRGenerator from 'rn-qr-generator';

@@ -1,11 +1,11 @@
 import React from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   Alert,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_MY_INVITATIONS, ACCEPT_INVITATION } from '../apollo/queries';

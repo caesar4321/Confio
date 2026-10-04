@@ -1,17 +1,16 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    Modal,
-    TouchableOpacity,
-    ScrollView,
-    TextInput,
-    ActivityIndicator,
-    Keyboard,
-    Platform,
-    useWindowDimensions,
+  View,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  Keyboard,
+  Platform,
+  useWindowDimensions,
 } from 'react-native';
+import { Text, TextInput } from './common/AppText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useMutation } from '@apollo/client';

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { AccessibilityInfo, View, Text, StyleSheet, Modal, ScrollView } from 'react-native';
+import { AccessibilityInfo, View, StyleSheet, Modal, ScrollView } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Button } from './common/Button';
 import { colors } from '../config/theme';
