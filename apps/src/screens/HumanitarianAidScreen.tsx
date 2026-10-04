@@ -35,6 +35,7 @@ import { HumanitarianWsSession } from '../services/humanitarianWs';
 import { countryInfo } from '../utils/humanitarianCountry';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { useRampCountry } from '../hooks/useRampCountry';
+import { formatDecimal, sanitizeAmountInput } from '../utils/numberLocale';
 
 const DEFAULT_CAMPAIGN_SLUG = 'venezuela-2026-earthquake';
 const SUGGESTED_AMOUNTS = ['5', '10', '25', '50'];
@@ -48,12 +49,12 @@ function toNumber(value?: string | number | null) {
 
 function formatAmount(value?: string | number | null) {
   const n = toNumber(value);
-  return `${n.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} cUSD`;
+  return `${formatDecimal(n)} cUSD`;
 }
 
 function formatCompact(value?: string | number | null) {
   const n = toNumber(value);
-  return `${n.toLocaleString('es-VE', { maximumFractionDigits: 0 })} cUSD`;
+  return `${formatDecimal(n, { decimals: 0 })} cUSD`;
 }
 
 function shortHash(hash?: string | null) {
@@ -302,7 +303,7 @@ export const HumanitarianAidScreen = () => {
     }
     Alert.alert(
       'Confirmar donación',
-      `¿Donar ${parsedDonationAmount.toFixed(2)} cUSD a esta campaña de ayuda humanitaria?`,
+      `¿Donar ${formatDecimal(parsedDonationAmount)} cUSD a esta campaña de ayuda humanitaria?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         { text: 'Donar', onPress: executeDonation },
@@ -368,7 +369,7 @@ export const HumanitarianAidScreen = () => {
   const donateLabel = donating
     ? 'Donando...'
     : parsedDonationAmount > 0
-      ? `Donar ${parsedDonationAmount.toFixed(2)} cUSD`
+      ? `Donar ${formatDecimal(parsedDonationAmount)} cUSD`
       : 'Donar cUSD';
 
   return (
@@ -459,7 +460,7 @@ export const HumanitarianAidScreen = () => {
           <TextInput
             value={customAmount}
             onChangeText={(value) => {
-              setCustomAmount(value);
+              setCustomAmount((prev) => sanitizeAmountInput(value, 2, undefined, prev));
               setSelectedAmount(null);
             }}
             placeholder="Otro monto"
@@ -470,7 +471,7 @@ export const HumanitarianAidScreen = () => {
           <Text style={styles.customAmountSuffix}>cUSD</Text>
         </View>
         <Text style={[styles.balanceHint, exceedsBalance && styles.balanceError]}>
-          Saldo disponible: {balancesLoading ? 'Cargando...' : `${availableCusd.toFixed(2)} cUSD`} · Mínimo: 1 cUSD
+          Saldo disponible: {balancesLoading ? 'Cargando...' : `${formatDecimal(availableCusd)} cUSD`} · Mínimo: 1 cUSD
         </Text>
         {needsTopUp ? (
           <>

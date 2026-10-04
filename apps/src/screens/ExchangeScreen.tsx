@@ -37,6 +37,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { EmptyState } from '../components/EmptyState';
 import { OfferCardSkeleton, TradeCardSkeleton } from '../components/SkeletonLoader';
 import { colors } from '../config/theme';
+import { formatAmountString, formatDecimal, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 // Colors from the design
 const { width } = Dimensions.get('window');
@@ -747,7 +748,7 @@ export const ExchangeScreen = () => {
     return offers.filter((offer: any) => {
       // 1. Filter by amount within operation limits
       if (amount && amount.trim() !== '') {
-        const searchAmount = parseFloat(amount.replace(/,/g, ''));
+        const searchAmount = parseAmountInput(amount);
         if (!isNaN(searchAmount) && searchAmount > 0) {
           const minAmount = parseFloat(offer.minAmount?.toString().replace(/,/g, '') || '0');
           const maxAmount = parseFloat(offer.maxAmount?.toString().replace(/,/g, '') || '0');
@@ -780,7 +781,7 @@ export const ExchangeScreen = () => {
 
         // Apply minimum rate filter (if provided)
         if (hasMinRate) {
-          const minRateValue = parseFloat(minRate.replace(/,/g, ''));
+          const minRateValue = parseAmountInput(minRate);
           if (!isNaN(minRateValue) && offerRate < minRateValue) {
             return false;
           }
@@ -788,7 +789,7 @@ export const ExchangeScreen = () => {
 
         // Apply maximum rate filter (if provided) 
         if (hasMaxRate) {
-          const maxRateValue = parseFloat(maxRate.replace(/,/g, ''));
+          const maxRateValue = parseAmountInput(maxRate);
           if (!isNaN(maxRateValue) && offerRate > maxRateValue) {
             return false;
           }
@@ -972,24 +973,20 @@ export const ExchangeScreen = () => {
 
   // Calculate local amount based on crypto amount and rate - memoized to prevent re-creation
   const calculateLocalAmount = React.useCallback((cryptoAmount: string, rate: string) => {
-    const numAmount = parseFloat(cryptoAmount.replace(/,/g, ''));
+    const numAmount = parseAmountInput(cryptoAmount);
     const numRate = parseFloat(rate);
     if (isNaN(numAmount) || isNaN(numRate)) return '';
-    return formatNumber(numAmount * numRate, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    // Goes INTO an amount field: no grouping, the user's decimal mark.
+    return toAmountInput(numAmount * numRate);
   }, [formatNumber]);
 
   // Calculate crypto amount based on local amount and rate - memoized to prevent re-creation
   const calculateCryptoAmount = React.useCallback((localAmount: string, rate: string) => {
-    const numAmount = parseFloat(localAmount.replace(/,/g, ''));
+    const numAmount = parseAmountInput(localAmount);
     const numRate = parseFloat(rate);
     if (isNaN(numAmount) || isNaN(numRate)) return '';
-    return formatNumber(numAmount / numRate, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    // Goes INTO an amount field: no grouping, the user's decimal mark.
+    return toAmountInput(numAmount / numRate);
   }, [formatNumber]);
 
   // Removed handleAmountChange - now handled inside AmountInputSection
@@ -1512,7 +1509,7 @@ export const ExchangeScreen = () => {
                 </Text>
               )}
               <Text style={styles.successRate}>
-                {completedTrades === 0 ? 'Sin historial' : `${Number(successRate).toFixed(1)}% completado`}
+                {completedTrades === 0 ? 'Sin historial' : `${formatDecimal(Number(successRate), { decimals: 1 })}% completado`}
               </Text>
               <Text style={[styles.activityStatus, activityStatus.isActive && styles.activeStatus]}>
                 {activityStatus.text}
@@ -1972,7 +1969,7 @@ export const ExchangeScreen = () => {
             <View style={{ flex: 1 }}>
               <Text style={styles.userName} numberOfLines={1}>{trade.trader.name}</Text>
               <Text style={styles.tradeDetails} numberOfLines={1}>
-                {trade.amount} {trade.crypto} por {trade.totalBs}
+                {formatAmountString(trade.amount)} {trade.crypto} por {formatAmountString(trade.totalBs)}
               </Text>
             </View>
           </TouchableOpacity>
@@ -2202,7 +2199,7 @@ export const ExchangeScreen = () => {
 
     // Update local state when typing
     const handleLocalChange = React.useCallback((value: string) => {
-      setLocalAmount(value);
+      setLocalAmount((prev) => sanitizeAmountInput(value, 2, undefined, prev));
     }, []);
 
     // Sync when search is pressed
@@ -2298,9 +2295,10 @@ export const ExchangeScreen = () => {
 
     // Update local state when typing and schedule debounced sync
     const handleLocalChange = React.useCallback((text: string) => {
-      setLocalValue(text);
-      debouncedSync(text);
-    }, [debouncedSync]);
+      const clean = sanitizeAmountInput(text, 2, undefined, localValue);
+      setLocalValue(clean);
+      debouncedSync(clean);
+    }, [debouncedSync, localValue]);
 
     // Update local state if parent value changes externally
     useEffect(() => {
@@ -2663,13 +2661,13 @@ export const ExchangeScreen = () => {
                       ref={minRateInputRef}
                       placeholder="Tasa min."
                       value={minRate}
-                      onChangeText={setMinRate}
+                      onChangeText={(text) => setMinRate((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                     />
                     <FilterInput
                       ref={maxRateInputRef}
                       placeholder="Tasa max."
                       value={maxRate}
-                      onChangeText={setMaxRate}
+                      onChangeText={(text) => setMaxRate((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                     />
                   </View>
 
@@ -2836,14 +2834,14 @@ export const ExchangeScreen = () => {
                         // For buying, we want the lowest rate
                         const bestRate = Math.min(...rates);
                         const maxAcceptableRate = bestRate * 1.05; // 5% above best rate
-                        setMaxRate(maxAcceptableRate.toFixed(2));
-                        maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
+                        setMaxRate(toAmountInput(maxAcceptableRate));
+                        maxRateInputRef.current?.setNativeProps({ text: toAmountInput(maxAcceptableRate) });
                       } else {
                         // For selling, we want the highest rate
                         const bestRate = Math.max(...rates);
                         const minAcceptableRate = bestRate * 0.95; // 5% below best rate
-                        setMinRate(minAcceptableRate.toFixed(2));
-                        minRateInputRef.current?.setNativeProps({ text: minAcceptableRate.toFixed(2) });
+                        setMinRate(toAmountInput(minAcceptableRate));
+                        minRateInputRef.current?.setNativeProps({ text: toAmountInput(minAcceptableRate) });
                       }
                     }
                   }

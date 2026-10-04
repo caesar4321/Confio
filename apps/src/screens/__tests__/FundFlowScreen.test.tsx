@@ -1,4 +1,9 @@
 import React from 'react';
+import { setNumberLocaleCountry } from '../../utils/numberLocale';
+
+// A Venezuelan user's screen (one number format app-wide): 141.709.
+beforeAll(() => setNumberLocaleCountry('VE'));
+afterAll(() => setNumberLocaleCountry(null));
 import renderer, {act, ReactTestRenderer} from 'react-test-renderer';
 
 let mockResult: any;

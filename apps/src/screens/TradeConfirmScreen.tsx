@@ -25,6 +25,7 @@ import { CREATE_P2P_TRADE, GET_USER_BANK_ACCOUNTS, GET_MY_P2P_TRADES } from '../
 import { useCurrency } from '../hooks/useCurrency';
 import { useAccount } from '../contexts/AccountContext';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import { normalizeAmountInput, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 type TradeConfirmRouteProp = RouteProp<MainStackParamList, 'TradeConfirm'>;
 type TradeConfirmNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeConfirm'>;
@@ -134,7 +135,7 @@ export const TradeConfirmScreen: React.FC = () => {
       return;
     }
 
-    const cryptoAmount = parseFloat(amount);
+    const cryptoAmount = parseAmountInput(amount);
     if (isNaN(cryptoAmount) || cryptoAmount <= 0) {
       setBanner({ variant: 'error', message: 'Por favor ingresa un monto válido' });
       return;
@@ -181,7 +182,7 @@ export const TradeConfirmScreen: React.FC = () => {
         try {
           if (tradeType === 'sell') {
             const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
-            const amt = parseFloat(amount);
+            const amt = parseAmountInput(amount);
             if (!isNaN(amt) && amt > 0) {
               // Show blocking overlay during escrow enable for better UX
               const res = await withBusy('Habilitando intercambio…', async () =>
@@ -197,7 +198,8 @@ export const TradeConfirmScreen: React.FC = () => {
         navigation.navigate('TradeChat', {
           offer: offer,
           crypto: crypto,
-          amount: amount,
+          // TradeChat and the server get the canonical "12.5".
+          amount: normalizeAmountInput(amount) ?? '',
           tradeType: tradeType,
           tradeId: createdTrade.id, // Pass the actual trade ID
           selectedPaymentMethodId: selectedPaymentMethod.id, // Pass the selected payment method ID
@@ -219,7 +221,7 @@ export const TradeConfirmScreen: React.FC = () => {
   };
 
   const calculateTotal = () => {
-    const numAmount = parseFloat(amount) || 0;
+    const numAmount = parseAmountInput(amount) || 0;
     const rate = parseFloat(offer.rate) || 0;
     return formatAmount.withCode(numAmount * rate);
   };
@@ -266,7 +268,7 @@ export const TradeConfirmScreen: React.FC = () => {
                 <TextInput
                   style={styles.amountInput}
                   value={amount}
-                  onChangeText={setAmount}
+                  onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
                   keyboardType="numeric"
                   placeholder="0.00"
                   placeholderTextColor="#9CA3AF"

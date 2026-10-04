@@ -22,6 +22,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { MainStackParamList } from '../types/navigation';
 import { RampHero } from '../components/ramps/RampHero';
 import { colors } from '../config/theme';
+import { formatDecimal } from '../utils/numberLocale';
 
 moment.locale('es');
 
@@ -136,9 +137,9 @@ const formatAmount = (raw: string | number, currency?: string): string => {
   if (isNaN(num)) return String(raw);
   const isCrypto = !currency || ['CUSD', 'CUSD+', 'CUSD_BSC', 'CUSD_PLUS', 'USDC', 'USDT', 'ALGO', 'BNB'].includes(currency.toUpperCase());
   if (isCrypto) {
-    return num.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    return formatDecimal(num, { decimals: 4, minDecimals: 2 });
   }
-  return num.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatDecimal(num);
 };
 
 const formatPrimaryRampAmount = (item: any, isOffRamp: boolean): { amount: string; currency: string } => {

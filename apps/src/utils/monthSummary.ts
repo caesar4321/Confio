@@ -1,3 +1,4 @@
+import { formatUsdAmount } from './numberLocale';
 // Shared helpers for "Tu mes" (month summary): labels, money formatting,
 // timezone. Copy is Spanish (user-facing); identifiers are English.
 import type { CategoryKey } from '../apollo/monthSummary';
@@ -45,24 +46,38 @@ export function currentYearMonth(now: Date = new Date()): { year: number; month:
 export function formatUsd(amount: string | number, { whole = false }: { whole?: boolean } = {}): string {
   const value = typeof amount === 'number' ? amount : Number(amount);
   if (!Number.isFinite(value)) return 'US$—';
-  const abs = Math.abs(value);
-  const digits = whole && abs >= 1 ? 0 : 2;
-  const text = abs.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-  return `${value < 0 ? '-' : ''}US$${text}`;
+  const digits = whole && Math.abs(value) >= 1 ? 0 : 2;
+  // The user's country separators (utils/numberLocale): US$1.234 in VE.
+  return formatUsdAmount(value, { decimals: digits });
 }
 
 export const MASK = '••••';
 
+// Same keys and order as the server (users/models_cashflow.py).
 export const CATEGORY_META: Record<CategoryKey, { label: string; icon: string }> = {
   food: { label: 'Comida', icon: 'coffee' },
   transport: { label: 'Transporte', icon: 'truck' },
   home: { label: 'Casa', icon: 'home' },
+  bills: { label: 'Servicios', icon: 'zap' },
   family: { label: 'Familia', icon: 'users' },
+  // Not shopping-bag / heart: the money-list vocabulary already uses those
+  // for a merchant payment and a donation (components/icons/vocabulary.ts).
+  shopping: { label: 'Compras', icon: 'shopping-cart' },
+  health: { label: 'Salud', icon: 'activity' },
+  education: { label: 'Educación', icon: 'book-open' },
+  leisure: { label: 'Salidas', icon: 'film' },
+  debt: { label: 'Deudas', icon: 'credit-card' },
   work: { label: 'Trabajo', icon: 'briefcase' },
   other: { label: 'Otro', icon: 'more-horizontal' },
 };
 
-export const CATEGORY_ORDER: CategoryKey[] = ['food', 'transport', 'home', 'family', 'work', 'other'];
+export const CATEGORY_ORDER: CategoryKey[] = [
+  'food', 'transport', 'home', 'bills', 'family', 'shopping',
+  'health', 'education', 'leisure', 'debt', 'work', 'other',
+];
+
+/** The success-screen prompt shows these first; "Más" reveals the rest. */
+export const QUICK_CATEGORY_COUNT = 6;
 
 export function categoryLabel(category: string | null | undefined): string {
   if (!category || category === 'uncategorized') return 'Sin categoría';

@@ -13,6 +13,7 @@ import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
+import { formatDecimal } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -209,7 +210,7 @@ export const PayrollHomeScreen = () => {
                     beside the amount instead of denominating it. */}
                 <View style={styles.balanceRow}>
                   <Text style={styles.vaultBalance}>
-                    {vaultBalance === null ? '—' : `$${vaultBalance.toFixed(2)}`}
+                    {vaultBalance === null ? '—' : `$${formatDecimal(vaultBalance)}`}
                   </Text>
                 </View>
                 {instrument.known ? (

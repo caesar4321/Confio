@@ -24,6 +24,7 @@ import { GET_INVOICE } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { formatTokenLabel, explorerFor } from '../utils/tokenDisplay';
+import { formatAmountString, formatDecimal, formatPercent } from '../utils/numberLocale';
 
 const { width } = Dimensions.get('window');
 
@@ -227,7 +228,7 @@ export const BusinessPaymentSuccessScreen = () => {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <SuccessHero
           title="¡Pago recibido!"
-          amount={`+$${netAmount.toFixed(2)} ${currentCurrency}`}
+          amount={`+$${formatDecimal(netAmount)} ${currentCurrency}`}
           hint={`De ${displayCustomerName} · ya disponible en tu cuenta`}
           tint={isCUSD ? undefined : colors.secondary}
           amountColor={isCUSD ? undefined : colors.secondary}
@@ -237,11 +238,11 @@ export const BusinessPaymentSuccessScreen = () => {
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Recibido del cliente</Text>
-            <Text style={styles.rowValue}>${paymentData.amount}</Text>
+            <Text style={styles.rowValue}>${formatAmountString(paymentData.amount)}</Text>
           </View>
           <View style={styles.row}>
-            <Text style={styles.rowLabel}>Comisión Confío (0.9%)</Text>
-            <Text style={styles.rowValue}>-${merchantFee.toFixed(2)}</Text>
+            <Text style={styles.rowLabel}>Comisión Confío ({formatPercent(0.9)}%)</Text>
+            <Text style={styles.rowValue}>-${formatDecimal(merchantFee)}</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Comisión de red</Text>
@@ -252,7 +253,7 @@ export const BusinessPaymentSuccessScreen = () => {
           <View style={[styles.row, styles.rowLast]}>
             <Text style={styles.netLabel}>Ingreso neto</Text>
             <Text style={[styles.netAmount, !isCUSD && { color: colors.secondary }]}>
-              +${netAmount.toFixed(2)}
+              +${formatDecimal(netAmount)}
             </Text>
           </View>
         </View>

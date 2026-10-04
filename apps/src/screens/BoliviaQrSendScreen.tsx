@@ -8,6 +8,7 @@ import {colors} from '../config/theme';
 import {requestRampCriticalAuth} from '../utils/rampFlow';
 import {STEREUM_QR_AVAILABILITY, DECODE_STEREUM_QR, PAY_STEREUM_QR, STEREUM_QR_PAYMENT,
   QrPreview, QrPayment, qrRequestId, readPendingQr, savePendingQr, clearPendingQr, validBobAmount} from '../services/stereumQr';
+import { formatAmountString, getSeparators, sanitizeAmountInput } from '../utils/numberLocale';
 
 export default function BoliviaQrSendScreen({accountId, initialQr, onBack}: {accountId: string; initialQr?: string; onBack: () => void}) {
   const client = useApolloClient();
@@ -144,9 +145,9 @@ export default function BoliviaQrSendScreen({accountId, initialQr, onBack}: {acc
         <Text>Vigente hasta {preview.expiresOn}</Text>
         <Text style={styles.note}>Estos datos vienen del QR. No constituyen una verificación independiente del titular.</Text>
         <Text style={styles.heading}>Monto en bolivianos (BOB)</Text>
-        {review || preview.fixedAmount ? <Text style={styles.recipient}>{amount} BOB</Text> :
+        {review || preview.fixedAmount ? <Text style={styles.recipient}>{formatAmountString(amount)} BOB</Text> :
           <TextInput accessibilityLabel="Monto en bolivianos" value={amount} keyboardType="decimal-pad" editable={!loading}
-            onChangeText={setAmount} placeholder="0,00" style={styles.input} />}
+            onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 2, undefined, prev))} placeholder={`0${getSeparators().decimal}00`} style={styles.input} />}
         {preview.fixedAmount && <Text>El QR tiene un monto fijo.</Text>}
         {!availability.canPay && <Text style={styles.note}>Puedes revisar el QR. Para el pago de prueba faltan configuración o verificación de identidad.</Text>}
         {review ? <>

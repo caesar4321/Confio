@@ -33,6 +33,7 @@ import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { formatTokenLabel, isDollarToken } from '../utils/tokenDisplay';
+import { formatAmountString, normalizeAmountInput, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 // Import currency icons
 const cUSDPlusIcon = require('../assets/png/cUSDPlus.png');
@@ -175,7 +176,7 @@ const ChargeScreen = () => {
 
   const handleGenerateQR = async () => {
 
-    if (!amount || parseFloat(amount) <= 0) {
+    if (!amount || !(parseAmountInput(amount) > 0)) {
       setBanner({ variant: 'error', message: 'Ingresa un monto válido para generar el código QR.' });
       return;
     }
@@ -210,7 +211,8 @@ const ChargeScreen = () => {
       const { data } = await createInvoice({
         variables: {
           input: {
-            amount: amount,
+            // Canonical "12.5", never what was typed ("12,5" in VE).
+            amount: normalizeAmountInput(amount) ?? '',
             tokenType: selectedCurrency,
             // Name the rail explicitly. The server cannot infer it from
             // 'CONFIO' alone (same wire value before and after the
@@ -282,8 +284,8 @@ const ChargeScreen = () => {
       try {
         await Share.open({
           message: Platform.OS === 'ios'
-            ? `Paga mi factura de ${invoice.amount} ${formatTokenLabel(invoice.tokenType)} usando este enlace: https://confio.lat/pay/${id}`
-            : `Paga mi factura de ${invoice.amount} ${formatTokenLabel(invoice.tokenType)} usando este enlace:`, // Android concatenates 'url' automatically
+            ? `Paga mi factura de ${formatAmountString(invoice.amount)} ${formatTokenLabel(invoice.tokenType)} usando este enlace: https://confio.lat/pay/${id}`
+            : `Paga mi factura de ${formatAmountString(invoice.amount)} ${formatTokenLabel(invoice.tokenType)} usando este enlace:`, // Android concatenates 'url' automatically
           url: `https://confio.lat/pay/${id}`,
           title: 'Pago'
         });
@@ -315,7 +317,7 @@ const ChargeScreen = () => {
 
       await Share.open({
         title: 'Código QR de Pago',
-        message: `Paga mi factura de ${invoice?.amount || amount} ${invoice?.tokenType || selectedCurrency}`,
+        message: `Paga mi factura de ${invoice?.amount ? formatAmountString(invoice.amount) : amount} ${invoice?.tokenType || selectedCurrency}`,
         url: uri,
         type: 'image/jpeg',
       });
@@ -526,7 +528,7 @@ const ChargeScreen = () => {
                         <TextInput
                           style={styles.amountInput}
                           value={amount}
-                          onChangeText={setAmount}
+                          onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
                           placeholder="0.00"
                           keyboardType="numeric"
                           placeholderTextColor={colors.text.light}
@@ -624,7 +626,7 @@ const ChargeScreen = () => {
 
                       <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
                         <Text style={[styles.paymentAmount, { color: currentCurrency.color }]}>
-                          {isDollarToken(invoice?.tokenType || selectedCurrency) ? '$' : ''}{invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
+                          {isDollarToken(invoice?.tokenType || selectedCurrency) ? '$' : ''}{invoice?.amount ? formatAmountString(invoice.amount) : amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
                         </Text>
                         <Text style={styles.paymentDescription}>
                           {invoice?.description || description || 'Sin descripción'}

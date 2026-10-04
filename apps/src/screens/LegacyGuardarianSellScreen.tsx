@@ -41,6 +41,7 @@ import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
 import { microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import algorandService from '../services/algorandService';
+import { formatDecimal, formatPercent, normalizeAmountInput, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -289,7 +290,7 @@ export const SellScreen = ({
             );
             return;
         }
-        const amountMicros = parseUsdMicros(amount);
+        const amountMicros = parseUsdMicros(normalizeAmountInput(amount));
         if (!amountMicros) {
             Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
             return;
@@ -297,7 +298,7 @@ export const SellScreen = ({
         if (isSavings && microsToNumber(amountMicros) > withdrawableUsd) {
             Alert.alert(
                 'Saldo insuficiente',
-                `Tu saldo disponible es $${withdrawableUsd.toFixed(2)}.`,
+                `Tu saldo disponible es $${formatDecimal(withdrawableUsd)}.`,
             );
             return;
         }
@@ -316,7 +317,7 @@ export const SellScreen = ({
             );
             return;
         }
-        const amountMicros = parseUsdMicros(amount);
+        const amountMicros = parseUsdMicros(normalizeAmountInput(amount));
         if (!amountMicros) {
             Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
             return;
@@ -389,7 +390,7 @@ export const SellScreen = ({
     // deposit address and burns cUSD→USDC→sends it in one atomic group; the
     // user only confirms with biometrics — the destination stays server-side.
     const handleAutoSendToGuardarian = async () => {
-        const parsedAmount = parseFloat(amount);
+        const parsedAmount = parseAmountInput(amount);
         const authenticated = await requestRampCriticalAuth({
             amount: Number.isFinite(parsedAmount) ? parsedAmount : 0,
             assetUnit: 'USDC',
@@ -431,7 +432,7 @@ export const SellScreen = ({
         // The SAME canonical micro-unit amount the order was created with —
         // re-deriving it from a float here is how the funded amount could
         // differ from the ordered one (audit [P1] #7).
-        const amountMicros = parseUsdMicros(amount);
+        const amountMicros = parseUsdMicros(normalizeAmountInput(amount));
         if (!depositAddress || !amountMicros) {
             return;
         }
@@ -458,8 +459,8 @@ export const SellScreen = ({
             // payment to Guardarian ride the same transaction. Atomicity
             // prevents a failure between calls from leaving the shares burned
             // while the provider order remains unfunded (audit [P1] #1).
-            const providerMicros = parseUsdMicros(confioNetAmount || amount);
-            const grossMicros = parseUsdMicros(confioGrossAmount || amount);
+            const providerMicros = parseUsdMicros(confioNetAmount || normalizeAmountInput(amount));
+            const grossMicros = parseUsdMicros(confioGrossAmount || normalizeAmountInput(amount));
             if (!providerMicros || !grossMicros) {
                 throw new Error('No pudimos verificar los montos de la orden.');
             }
@@ -498,7 +499,7 @@ export const SellScreen = ({
                 const availableUsd = Number(err.availableWei / 10n ** 12n) / 1e6;
                 Alert.alert(
                     'Saldo insuficiente',
-                    `Tu ${balanceNoun} disponible para retirar es $${availableUsd.toFixed(2)}.`,
+                    `Tu ${balanceNoun} disponible para retirar es $${formatDecimal(availableUsd)}.`,
                 );
                 return;
             }
@@ -709,7 +710,7 @@ export const SellScreen = ({
                             placeholderTextColor={colors.text.light}
                             keyboardType="decimal-pad"
                             value={amount}
-                            onChangeText={setAmount}
+                            onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
                         />
                         <View style={styles.currencyBadge}>
                             <Text style={styles.currencyCodeText}>{isSavings ? 'US$' : 'USDC'}</Text>
@@ -724,13 +725,13 @@ export const SellScreen = ({
                                     ? 'La preparación se detuvo. Reinténtala para continuar.'
                                     : 'Preparando tu cUSD en BNB Smart Chain…'
                                 : isSavings
-                                ? `Disponible para retirar: $${withdrawableUsd.toFixed(2)}`
+                                ? `Disponible para retirar: $${formatDecimal(withdrawableUsd)}`
                                 : 'Recibirás moneda local en tu banco'}
                         </Text>
                     </View>
-                    {isSavings && Number(amount) > 0 ? (
+                    {isSavings && parseAmountInput(amount) > 0 ? (
                         <Text style={styles.infoCardTextSecondary}>
-                            Comisión de Confío: hasta ${(Number(amount) * conversionFeeBps / 10_000).toFixed(2)} ({(conversionFeeBps / 100).toLocaleString('es-PE')}%). Guardarian recibirá aproximadamente ${(Number(amount) * (1 - conversionFeeBps / 10_000)).toFixed(2)} USDT.
+                            Comisión de Confío: hasta ${formatDecimal(parseAmountInput(amount) * conversionFeeBps / 10_000)} ({formatPercent(conversionFeeBps / 100)}%). Guardarian recibirá aproximadamente ${formatDecimal(parseAmountInput(amount) * (1 - conversionFeeBps / 10_000))} USDT.
                         </Text>
                     ) : null}
                 </View>

@@ -32,6 +32,7 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { APP_LAYOUT } from '../config/layout';
 import { formatTokenLabel } from '../utils/tokenDisplay';
 import { useRampCountry } from '../hooks/useRampCountry';
+import { formatDecimal } from '../utils/numberLocale';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -198,7 +199,7 @@ export const PaymentConfirmationScreen = () => {
   // Helper function to format amount with 2 decimal places
   const formatAmount = (amount: string | number): string => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-    return numAmount.toFixed(2);
+    return formatDecimal(numAmount);
   };
 
   // Function to translate business categories to user-friendly Spanish labels
@@ -438,12 +439,12 @@ export const PaymentConfirmationScreen = () => {
   };
   const formatFixedFloor = (value: number, decimals = 2) => {
     const floored = floorToDecimals(value, decimals);
-    return floored.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    return formatDecimal(floored, { decimals });
   };
   const formatBalanceDisplay = (valueStr: string | number) => {
     const v = typeof valueStr === 'string' ? parseFloat(valueStr) : valueStr;
-    if (!isFinite(v) || v <= 0) return '0.00';
-    if (v < 0.01) return '< 0.01';
+    if (!isFinite(v) || v <= 0) return formatDecimal(0);
+    if (v < 0.01) return `< ${formatDecimal(0.01)}`;
     return formatFixedFloor(v, 2);
   };
 

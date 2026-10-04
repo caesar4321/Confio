@@ -30,6 +30,7 @@ import { BrandSplash } from './components/BrandSplash';
 import { AppLockScreen } from './components/AppLockScreen';
 import { biometricAuthService } from './services/biometricAuthService';
 import { logBreadcrumb } from './services/crashLog';
+import { NumberLocaleProvider } from './contexts/NumberLocaleProvider';
 // Dev: attach derivation verifier helper
 if (__DEV__) {
   import('./dev/derivationVerifier').catch(() => { });
@@ -228,6 +229,7 @@ const AppContent: React.FC = () => {
           >
             <AccountProvider>
               <CountryProvider>
+                <NumberLocaleProvider>
                 <HeaderProvider>
                   <ScanProvider>
                     <PushNotificationProvider>
@@ -241,6 +243,7 @@ const AppContent: React.FC = () => {
                     </PushNotificationProvider>
                   </ScanProvider>
                 </HeaderProvider>
+                </NumberLocaleProvider>
               </CountryProvider>
             </AccountProvider>
           </AuthProvider>

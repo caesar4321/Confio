@@ -23,6 +23,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { ProcessingHero } from '../components/common/ProcessingHero';
+import { formatAmountString } from '../utils/numberLocale';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -982,7 +983,7 @@ export const TransactionProcessingScreen = () => {
     <View style={styles.container}>
       <ProcessingHero
         title={isComplete ? '¡Casi listo!' : transactionData.action}
-        amount={`$${transactionData.amount} ${transactionData.currency}`}
+        amount={`$${formatAmountString(transactionData.amount)} ${transactionData.currency}`}
         hint={transactionData.type === 'sent'
           ? `Para ${transactionData.recipient}`
           : `En ${transactionData.merchant}`}

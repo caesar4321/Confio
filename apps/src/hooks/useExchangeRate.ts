@@ -5,6 +5,7 @@ import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getCurrencyForCountry } from '../utils/currencyMapping';
 import { getCountryByIso } from '../utils/countries';
+import { formatDecimal } from '../utils/numberLocale';
 
 interface ExchangeRateResult {
   rate: number | null;
@@ -37,7 +38,7 @@ export const useExchangeRate = (
 
   const formatRate = (decimals: number = 2): string => {
     if (rate === null) return 'N/A';
-    return rate.toFixed(decimals);
+    return formatDecimal(rate, { decimals });
   };
 
   return {
@@ -72,7 +73,7 @@ export const useSpecificExchangeRate = (
 
   const formatRate = (decimals: number = 2): string => {
     if (rate === null) return 'N/A';
-    return rate.toFixed(decimals);
+    return formatDecimal(rate, { decimals });
   };
 
   return {
@@ -133,13 +134,10 @@ export const useCryptoToFiatCalculator = (
     
     if (fiatCurrency === 'VES') {
       // Format Venezuelan bolívars
-      return `${fiatAmount.toLocaleString('es-VE', { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
-      })} ${fiatCurrency}`;
+      return `${formatDecimal(fiatAmount)} ${fiatCurrency}`;
     }
     
-    return `${fiatAmount.toFixed(2)} ${fiatCurrency}`;
+    return `${formatDecimal(fiatAmount)} ${fiatCurrency}`;
   };
 
   return {

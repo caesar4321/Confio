@@ -60,6 +60,7 @@ import {
 import { useSavingsResume } from '../hooks/useSavingsResume';
 import { resumeSavingsMints } from '../services/savingsLegC';
 import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
+import { formatPercent, getSeparators, normalizeAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -433,7 +434,7 @@ export const SellScreen = () => {
     // Canonicalize BEFORE the biometric prompt: the user must approve the
     // exact number that will be ordered and transferred, not a float that
     // still has sub-micro precision on it (re-audit [P2] #10).
-    const requestedMicros = parseUsdMicros(amount);
+    const requestedMicros = parseUsdMicros(normalizeAmountInput(amount));
     if (!requestedMicros) {
       Alert.alert('Monto inválido', 'Revisa el monto que quieres retirar.');
       return;
@@ -719,7 +720,7 @@ export const SellScreen = () => {
                     style={styles.amountInput}
                     value={amount}
                     onChangeText={(value) => {
-                      setAmount(value);
+                      setAmount((prev) => sanitizeAmountInput(value, 6, undefined, prev));
                       setStep('form');
                     }}
                     onFocus={() => setAmountFocused(true)}
@@ -735,7 +736,7 @@ export const SellScreen = () => {
                     style={[styles.maxPill, (!effectiveSellMax || balancesLoading) && styles.maxPillDisabled]}
                     onPress={() => {
                       if (effectiveSellMax > 0) {
-                        setAmount(formatExactTokenAmount(effectiveSellMax));
+                        setAmount(formatExactTokenAmount(effectiveSellMax).replace('.', getSeparators().decimal));
                         setStep('form');
                       }
                     }}
@@ -885,7 +886,7 @@ export const SellScreen = () => {
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
                       {isSavingsSell ? (
                         <Text style={styles.quoteValue}>
-                          {`− ${formatRampMoney(quote.confioFeeAmount || 0, sellUnitLabel)} (${Number(quote.confioFeeBps ?? 0) / 100}%)`}
+                          {`− ${formatRampMoney(quote.confioFeeAmount || 0, sellUnitLabel)} (${formatPercent(Number(quote.confioFeeBps ?? 0) / 100)}%)`}
                         </Text>
                       ) : (
                         <View style={styles.gratisBadge}>

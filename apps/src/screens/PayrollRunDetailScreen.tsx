@@ -21,6 +21,7 @@ import { TransactionReceiptView } from '../components/TransactionReceiptView';
 import { PayrollRunReceiptView } from '../components/PayrollRunReceiptView';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { formatDecimal } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRunDetail'>;
 type RouteProps = RouteProp<MainStackParamList, 'PayrollRunDetail'>;
@@ -64,12 +65,7 @@ const businessCost = (items: any[]): number =>
   items.filter(isPaid).reduce(
     (acc, it) => acc + Number(it.grossAmount ?? it.netAmount ?? 0), 0);
 
-const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('es', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-};
+const formatCurrency = (amount: number) => formatDecimal(amount);
 
 const statusLabel = (status: string) => {
   const key = (status || '').toLowerCase();

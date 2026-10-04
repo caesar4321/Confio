@@ -16,6 +16,7 @@ import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { EmptyState } from '../components/EmptyState';
 import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
+import { formatDecimal, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRun'>;
 
@@ -50,7 +51,7 @@ export const PayrollRunScreen = () => {
     let total = 0;
     let count = 0;
     recipients.forEach((r: any) => {
-      const parsed = parseFloat((amounts[r.id] || '').replace(',', '.'));
+      const parsed = parseAmountInput(amounts[r.id] || '');
       if (isFinite(parsed) && parsed > 0) {
         total += parsed;
         count += 1;
@@ -60,7 +61,7 @@ export const PayrollRunScreen = () => {
   }, [recipients, amounts]);
 
   const handleAmountChange = (id: string, value: string) => {
-    setAmounts((prev) => ({ ...prev, [id]: value }));
+    setAmounts((prev) => ({ ...prev, [id]: sanitizeAmountInput(value, 6, undefined, prev[id] ?? '') }));
   };
 
   const handleSubmit = async () => {
@@ -73,7 +74,7 @@ export const PayrollRunScreen = () => {
     const items = recipients
       .map((r: any) => {
         const amountStr = amounts[r.id] || '0';
-        const parsed = parseFloat(amountStr.replace(',', '.'));
+        const parsed = parseAmountInput(amountStr);
         return {
           recipientAccountId: r.recipientAccount.id,
           netAmount: parsed > 0 ? parsed.toString() : null, // Convert back to string for backend
@@ -261,7 +262,7 @@ export const PayrollRunScreen = () => {
           <Text style={styles.totalLabel}>
             Total · {payeeCount} {payeeCount === 1 ? 'persona' : 'personas'}
           </Text>
-          <Text style={styles.totalValue}>${totalAmount.toFixed(2)}</Text>
+          <Text style={styles.totalValue}>${formatDecimal(totalAmount)}</Text>
         </View>
       )}
 

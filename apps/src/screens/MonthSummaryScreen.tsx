@@ -34,6 +34,8 @@ import {
   CATEGORY_META, capitalize, categoryLabel, currentYearMonth, deviceTimezone, formatUsd, MASK,
   monthName, nextMonth, previousMonth,
 } from '../utils/monthSummary';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Route = RouteProp<MainStackParamList, 'MonthSummary'>;
@@ -89,6 +91,8 @@ function monthsBetween(a: { year: number; month: number }, b: { year: number; mo
 }
 
 export function MonthSummaryScreen() {
+  // Re-render when the user's country (number format) resolves after mount.
+  useNumberLocale();
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { activeAccount } = useAccount();
@@ -318,18 +322,22 @@ function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onRecei
 
   return (
     <ScrollView contentContainerStyle={styles.body}>
-      {/* In vs out: one proportion bar, the two totals under it. */}
+      {/* In vs out (design A): the two totals, then one proportion bar;
+          emerald for money in, sky blue for money out, a faint mint wash. */}
       <View style={styles.card}>
-        <View style={styles.ratioTrack} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          {/* Normalized weights (Yoga floors flex sums below 1) and no
-              zero-width segments. */}
-          {income > 0 && <View style={[styles.ratioIn, { flex: income / total }]} />}
-          {spending > 0 && <View style={[styles.ratioOut, { flex: spending / total }]} />}
-        </View>
+        <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Defs>
+            <SvgLinearGradient id="tuMesWash" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={colors.primarySoft} stopOpacity="1" />
+              <Stop offset="0.65" stopColor={colors.white} stopOpacity="1" />
+            </SvgLinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#tuMesWash)" />
+        </Svg>
         <View style={styles.totals}>
           <TouchableOpacity onPress={() => onOpen('income', 'Entró')} accessibilityRole="button" style={styles.totalBlock}
             accessibilityLabel={masked ? 'Entró, oculto' : `Entró ${formatUsd(income, { whole: true })}`} testID="total-income">
-            <Text style={styles.totalLabel}>Entró</Text>
+            <Text style={[styles.totalLabel, styles.totalLabelIn]}>Entró</Text>
             <Text style={[styles.totalAmount, styles.totalIn]} numberOfLines={1} adjustsFontSizeToFit>
               {money(shownIncome, masked)}
             </Text>
@@ -337,15 +345,23 @@ function MonthBody({ summary, masked, isCurrent, runKey, onOpen, onSend, onRecei
           <TouchableOpacity onPress={() => onOpen('spending', 'Salió')} accessibilityRole="button"
             style={[styles.totalBlock, styles.totalBlockEnd]}
             accessibilityLabel={masked ? 'Salió, oculto' : `Salió ${formatUsd(spending, { whole: true })}`} testID="total-spending">
-            <Text style={styles.totalLabel}>Salió</Text>
-            <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>{money(shownSpending, masked)}</Text>
+            <Text style={[styles.totalLabel, styles.totalLabelOut]}>Salió</Text>
+            <Text style={[styles.totalAmount, styles.totalOut]} numberOfLines={1} adjustsFontSizeToFit>
+              {money(shownSpending, masked)}
+            </Text>
           </TouchableOpacity>
+        </View>
+        <View style={styles.ratioTrack} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {/* Normalized weights (Yoga floors flex sums below 1) and no
+              zero-width segments. */}
+          {income > 0 && <View style={[styles.ratioIn, { flex: income / total }]} />}
+          {spending > 0 && <View style={[styles.ratioOut, { flex: spending / total }]} />}
         </View>
         <Text style={styles.note}>Sin contar recargas, retiros ni ahorro.</Text>
         {hasComparison && (
           <Text style={styles.noteMuted} testID="month-comparison">
-            {comparison}: salió {money(summary.previous.spendingUsd, masked)}, entró{' '}
-            {money(summary.previous.incomeUsd, masked)}
+            {comparison}: <Text style={styles.flowOutText}>salió {money(summary.previous.spendingUsd, masked)}</Text>,{' '}
+            <Text style={styles.flowInText}>entró {money(summary.previous.incomeUsd, masked)}</Text>
           </Text>
         )}
       </View>
@@ -503,16 +519,24 @@ const styles = StyleSheet.create({
   pillGhost: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
   pillText: { color: colors.white, fontWeight: '700', fontSize: 15 },
   pillGhostText: { color: colors.text.primary },
-  card: { backgroundColor: colors.white, borderRadius: 20, padding: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-  ratioTrack: { flexDirection: 'row', height: 10, borderRadius: 999, overflow: 'hidden', backgroundColor: colors.surfaceMuted, gap: 3 },
-  ratioIn: { backgroundColor: colors.success, borderRadius: 999 },
-  ratioOut: { backgroundColor: '#374151', borderRadius: 999 },
-  totals: { flexDirection: 'row', marginTop: 14, gap: 16 },
+  card: { backgroundColor: colors.white, borderRadius: 20, padding: 18, borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.primaryMuted, overflow: 'hidden' },
+  ratioTrack: { flexDirection: 'row', height: 10, borderRadius: 999, overflow: 'hidden', backgroundColor: colors.surfaceMuted,
+    gap: 3, marginTop: 14 },
+  ratioIn: { backgroundColor: colors.flowIn.bar, borderRadius: 999 },
+  ratioOut: { backgroundColor: colors.flowOut.bar, borderRadius: 999 },
+  totals: { flexDirection: 'row', gap: 16 },
   totalBlock: { flex: 1, minHeight: 44 },
   totalBlockEnd: { alignItems: 'flex-end' },
-  totalLabel: { fontSize: 13, color: colors.text.secondary },
+  totalLabel: { fontSize: 14, fontWeight: '600', color: colors.text.secondary },
+  totalLabelIn: { color: colors.flowIn.textSmall },
+  totalLabelOut: { color: colors.flowOut.text },
   totalAmount: { fontSize: 26, fontWeight: '700', color: colors.text.primary, fontVariant: ['tabular-nums'], marginTop: 2 },
-  totalIn: { color: colors.successText },
+  // Shrink-to-fit can drop below large-text size: use the AA small-text tone.
+  totalIn: { color: colors.flowIn.textSmall },
+  totalOut: { color: colors.flowOut.text },
+  flowInText: { color: colors.flowIn.textSmall },
+  flowOutText: { color: colors.flowOut.text },
   note: { fontSize: 13, color: colors.text.primary, marginTop: 12 },
   noteMuted: { fontSize: 13, color: colors.text.secondary, marginTop: 2, fontVariant: ['tabular-nums'] },
   section: { marginTop: 22 },

@@ -12,6 +12,13 @@ export const lightColors = {
   // white is 1.9:1 there. 5.1:1 at the field top, 3.8:1 at the bottom, so it
   // is set >= 19 bold (WCAG large text, 3:1) to pass everywhere.
   onHeroField: '#064E3B', // emerald-900
+  // Money in / money out (Tu mes, Home month card; design A 2026-10-04).
+  // Sky blue for "out" reads neutral, never alarming, and stays clear of
+  // the violet reserved for $CONFIO. Text values pass AA on white
+  // (#059669 = 3.8:1 only at >= 19 bold; small text uses textSmall
+  // #047857 = 5.5:1; #2563EB = 5.2:1).
+  flowIn: { text: '#059669', textSmall: '#047857', bar: '#34D399', chip: '#D1FAE5' },
+  flowOut: { text: '#2563EB', textSmall: '#2563EB', bar: '#60A5FA', chip: '#DBEAFE' },
   secondary: '#8B5CF6', // violet-500
   secondaryDark: '#7C3AED', // violet-600 — gradient partner of secondary (mirrors primary/primaryDark)
   secondaryText: '#8B5CF6',

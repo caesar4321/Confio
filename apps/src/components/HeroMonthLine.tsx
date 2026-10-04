@@ -1,13 +1,12 @@
-// Home month strip (design C, approved 2026-10-04): two stat blocks on a
-// translucent band inside the hero, like a bank statement header:
-//   ENTRÓ EN SEPTIEMBRE  US$215  |  SALIÓ  US$176  ›
+// Home month card (design A, approved 2026-10-04): a crisp white card inside
+// the mint hero with two stat blocks, like a fresh fintech summary:
+//   ↓ ENTRÓ EN SEPTIEMBRE  US$215  |  ↑ SALIÓ  US$176  ›
 // Each amount lives in its own block, so a bigger number only fits its own
 // box (it shrinks to fit, never wraps a sentence).
 //
 // Fixed footprint: every state (month, invitation, loading) is the same two
-// single-line rows, so the strip's height never changes and Enviar/Recibir
-// below never move. Deep text-on-mint on white 25% over the field reads at
-// >= 5:1 everywhere on the gradient (WCAG AA at any size).
+// single-line rows, so the card's height never changes and Enviar/Recibir
+// below never move. Dark text on white: full contrast, any size.
 import React from 'react';
 import { StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -38,10 +37,26 @@ function useStripMetrics() {
 
 type Metrics = ReturnType<typeof useStripMetrics>;
 
-function Block({ label, value, m }: { label: string; value: string; m: Metrics }) {
+type Flow = 'in' | 'out';
+
+/** Tiny arrow chip, sized to the label's line so rows keep their height. */
+function FlowChip({ flow, size }: { flow: Flow; size: number }) {
+  const tone = flow === 'in' ? colors.flowIn : colors.flowOut;
+  return (
+    <View style={[styles.chip, { width: size, height: size, borderRadius: size / 2, backgroundColor: tone.chip }]}>
+      <Icon name={flow === 'in' ? 'arrow-down' : 'arrow-up'} size={Math.round(size * 0.7)} color={tone.text} />
+    </View>
+  );
+}
+
+function Block({ label, value, m, flow }: { label: string; value: string; m: Metrics; flow?: Flow }) {
   return (
     <View style={styles.block}>
-      <Text style={[styles.label, m.label]} numberOfLines={1} adjustsFontSizeToFit allowFontScaling={false}>{label}</Text>
+      <View style={styles.labelRow}>
+        <Text style={[styles.label, m.label, styles.labelText]} numberOfLines={1} adjustsFontSizeToFit
+          allowFontScaling={false}>{label}</Text>
+        {flow ? <FlowChip flow={flow} size={m.label.lineHeight} /> : null}
+      </View>
       <Text style={[styles.value, m.value]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
         allowFontScaling={false}>{value}</Text>
     </View>
@@ -73,10 +88,10 @@ export function HeroMonthLine({ summary, masked, onPress }: Props) {
       accessibilityLabel={label}
       testID="hero-month-line"
     >
-      <Block m={m} label={`ENTRÓ EN ${month.toUpperCase()}`} value={masked ? MASK : income} />
+      <Block m={m} flow="in" label={`ENTRÓ EN ${month.toUpperCase()}`} value={masked ? MASK : income} />
       <View style={styles.divider} />
-      <Block m={m} label="SALIÓ" value={masked ? MASK : spending} />
-      <Icon name="chevron-right" size={20} color={colors.onHeroField} />
+      <Block m={m} flow="out" label="SALIÓ" value={masked ? MASK : spending} />
+      <Icon name="chevron-right" size={20} color={colors.text.light} />
     </TouchableOpacity>
   );
 }
@@ -94,7 +109,7 @@ export function HeroMonthInvite({ onPress }: { onPress: () => void }) {
       testID="hero-month-invite"
     >
       <Block m={m} label="TU MES" value="Mira lo que entra y sale" />
-      <Icon name="chevron-right" size={20} color={colors.onHeroField} />
+      <Icon name="chevron-right" size={20} color={colors.text.light} />
     </TouchableOpacity>
   );
 }
@@ -143,23 +158,31 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 16,
     paddingVertical: PAD_V,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 16,
+    backgroundColor: colors.white,
+    shadowColor: '#065F46',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 3,
   },
   block: { flex: 1 },
-  divider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: 'rgba(6,78,59,0.25)' },
+  divider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: colors.border },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  labelText: { flexShrink: 1 },
+  chip: { alignItems: 'center', justifyContent: 'center' },
   label: {
-    fontWeight: '700',
+    fontWeight: '600',
     letterSpacing: 0.6,
-    color: colors.onHeroField,
+    color: colors.text.secondary,
   },
   value: {
     fontWeight: '700',
-    color: colors.onHeroField,
+    color: colors.textFlat,
     fontVariant: ['tabular-nums'],
     marginTop: 1,
   },
   placeholderBars: { flex: 1, justifyContent: 'center', gap: 6 },
-  bar: { height: 12, width: '70%', borderRadius: 6, backgroundColor: 'rgba(6,78,59,0.12)' },
+  bar: { height: 12, width: '70%', borderRadius: 6, backgroundColor: colors.surfaceMuted },
   barShort: { height: 8, width: '40%' },
 });

@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
+import { formatDecimal } from '../utils/numberLocale';
 
 type Props = {
   amountMicros: number;
@@ -79,7 +80,7 @@ export const InviteClaimBanner: React.FC<Props> = ({ amountMicros, assetId, onPr
           <Text style={[styles.title, { color: token.fg }]}>¡Sorpresa! Recibiste una invitación</Text>
           <View style={styles.row}>            
             <Text style={[styles.amount, { color: token.fg }]}>
-              {amount.toFixed(2)}
+              {formatDecimal(amount)}
             </Text>
             <View style={[styles.chip, { borderColor: token.fg }]}>              
               <Text style={[styles.chipText, { color: token.fg }]}>{token.symbol}</Text>

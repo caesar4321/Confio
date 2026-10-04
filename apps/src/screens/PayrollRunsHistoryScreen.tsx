@@ -10,6 +10,7 @@ import { useQuery } from '@apollo/client';
 import { GET_PAYROLL_RUNS } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { APP_LAYOUT } from '../config/layout';
+import { formatDecimal } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRunsHistory'>;
 
@@ -60,12 +61,7 @@ const formatDate = (iso?: string | null) => {
   });
 };
 
-const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('es', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-};
+const formatCurrency = (amount: number) => formatDecimal(amount);
 
 const PayrollRunsHistoryScreen = () => {
   const navigation = useNavigation<NavigationProp>();

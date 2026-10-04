@@ -42,6 +42,7 @@ import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -64,7 +65,7 @@ export const ConvertSavingsScreen = () => {
   const [phase, setPhase] = useState<Phase>('input');
 
   const amount = useMemo(() => {
-    const v = parseFloat(raw.replace(',', '.'));
+    const v = parseAmountInput(raw);
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
@@ -114,7 +115,7 @@ export const ConvertSavingsScreen = () => {
             style={{ marginTop: 4 }}
             items={[
               { label: 'Convertiste', value: `${fmtUsd(amount)} cUSD` },
-              { label: 'Costo de conversión', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
+              { label: 'Costo de conversión', value: `${fmtUsd(quote.costUsd)} (${formatDecimal(quote.costPct)}%)` },
               { label: 'Recibido en tu ahorro', value: fmtUsd(quote.receiveUsd), color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
               { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
@@ -165,7 +166,7 @@ export const ConvertSavingsScreen = () => {
               <TextInput
                 style={styles.amountInput}
                 value={raw}
-                onChangeText={setRaw}
+                onChangeText={(text) => setRaw((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor={colors.text.light}
@@ -178,7 +179,7 @@ export const ConvertSavingsScreen = () => {
                 Disponible: {fmtUsd(available)} cUSD
               </Text>
               <TouchableOpacity
-                onPress={() => setRaw(available > 0 ? String(available) : '')}
+                onPress={() => setRaw(available > 0 ? toAmountInput(available) : '')}
                 disabled={phase !== 'input' || available <= 0}
               >
                 <Text style={styles.maxBtn}>MAX</Text>
@@ -223,7 +224,7 @@ export const ConvertSavingsScreen = () => {
                   </Text>
                   <TouchableOpacity
                     style={styles.partialCta}
-                    onPress={() => setRaw(String(quote.partialMaxUsd))}
+                    onPress={() => setRaw(toAmountInput(quote.partialMaxUsd ?? 0))}
                     activeOpacity={0.85}
                   >
                     <Text style={styles.partialCtaText}>

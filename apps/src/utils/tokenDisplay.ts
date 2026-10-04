@@ -1,3 +1,4 @@
+import { formatAmountString } from './numberLocale';
 // Display names for the tokens that appear on receipts, success screens and
 // transaction details.
 //
@@ -41,7 +42,7 @@ export const formatTokenAmount = (
   currency?: string | null,
 ): string => {
   const label = formatTokenLabel(currency);
-  const value = String(amount ?? '').trim();
+  const value = formatAmountString(amount);
   return isDollarToken(currency) ? `$${value} ${label}`.trim() : `${value} ${label}`.trim();
 };
 

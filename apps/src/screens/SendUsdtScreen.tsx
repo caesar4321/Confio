@@ -45,6 +45,7 @@ import USDTLogo from '../assets/png/USDT.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { isAddressForNetwork, wrongNetworkMessage } from '../utils/addressNetwork';
+import { formatDecimal, formatPercent, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 type BscToken = 'usdt' | 'cusd_plus' | 'confio';
 
@@ -196,10 +197,7 @@ export const SendUsdtScreen = () => {
   const formatFixedFloor = (value: number, decimals = 2) => {
     const m = Math.pow(10, decimals);
     const floored = Math.floor(value * m) / m;
-    return floored.toLocaleString('es-ES', {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals,
-    });
+    return formatDecimal(floored, { decimals });
   };
 
   const handlePaste = async () => {
@@ -210,8 +208,7 @@ export const SendUsdtScreen = () => {
   };
 
   const handleMax = () => {
-    const floored = Math.floor(available * 100) / 100;
-    if (floored > 0) setAmount(String(floored));
+    if (available > 0) setAmount(toAmountInput(available, 2));
   };
 
   const handleSend = async () => {
@@ -369,7 +366,7 @@ export const SendUsdtScreen = () => {
               <TextInput
                 style={[styles.amountField, { flex: 1 }]}
                 value={amount}
-                onChangeText={setAmount}
+                onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
                 placeholder="0.00"
                 keyboardType="numeric"
               />
@@ -461,13 +458,13 @@ export const SendUsdtScreen = () => {
             <View style={styles.feeAmountContainer}>
               <Text style={styles.feeAmount}>
                 {token === 'usdt'
-                  ? `Billetera externa: hasta $${conversionFeeUsd.toFixed(2)} (${(conversionFeeBps / 100).toLocaleString('es-PE')}%)`
+                  ? `Billetera externa: hasta $${formatDecimal(conversionFeeUsd)} (${formatPercent(conversionFeeBps / 100)}%)`
                   : 'Gratis'}
               </Text>
               {token === 'usdt' && amountNum > 0 ? (
                 <Text style={styles.netAmount}>
-                  Usuario Confío: recibe ${amountNum.toFixed(2)} gratis{`\n`}
-                  Billetera externa: recibe al menos ${recipientNetUsd.toFixed(2)}
+                  Usuario Confío: recibe ${formatDecimal(amountNum)} gratis{`\n`}
+                  Billetera externa: recibe al menos ${formatDecimal(recipientNetUsd)}
                 </Text>
               ) : null}
               <Text style={styles.sponsoredBadge}>Red cubierta por Confío</Text>

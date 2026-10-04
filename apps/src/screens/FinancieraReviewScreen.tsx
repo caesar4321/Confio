@@ -26,6 +26,7 @@ import {
   GET_MY_REVIEWABLE_USDC_SENDS,
   SUBMIT_FINANCIERA_REVIEW,
 } from '../apollo/queries';
+import { parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type ReviewRoute = RouteProp<MainStackParamList, 'FinancieraReview'>;
@@ -52,7 +53,7 @@ const ratingText: Record<number, string> = {
 
 // Decimal-pad keyboards show a comma in most LATAM locales; accept both
 // separators rather than silently truncating "98,5" to 98.
-const parseAmount = (value: string) => parseFloat(value.replace(',', '.'));
+const parseAmount = (value: string) => parseAmountInput(value);
 
 const shortAddress = (addr: string) =>
   addr.length > 14 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
@@ -303,7 +304,7 @@ export const FinancieraReviewScreen = () => {
                 placeholderTextColor={colors.text.light}
                 keyboardType="decimal-pad"
                 value={receivedUsd}
-                onChangeText={setReceivedUsd}
+                onChangeText={(text) => setReceivedUsd((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
               />
             </View>
 

@@ -40,6 +40,7 @@ import { STOCKS_TRADING_UI_ENABLED } from '../config/features';
 import { getSoftStockQuote, sellStockToSavings } from '../services/ondoStocks';
 import { createSponsoredRequestId } from '../services/sponsored7702';
 import { isOutcomeUnknown } from '../services/evmWallet';
+import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type SellRoute = RouteProp<MainStackParamList, 'SellStock'>;
@@ -84,11 +85,11 @@ export const SellStockScreen = () => {
   const changeAmount = (value: string, isMax = false) => {
     requestIdRef.current = null;
     setSellAll(isMax && available > 0);
-    setRaw(value);
+    setRaw((prev) => (isMax ? value : sanitizeAmountInput(value, 2, undefined, prev)));
   };
 
   const amount = useMemo(() => {
-    const v = parseFloat(raw.replace(',', '.'));
+    const v = parseAmountInput(raw);
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
@@ -188,7 +189,7 @@ export const SellStockScreen = () => {
             style={{ marginTop: 4 }}
             items={[
               { label: 'Vendiste', value: fmtUsd(amount) },
-              { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
+              { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${formatDecimal(quote.costPct)}%)` },
               { label: 'Recibido en tu ahorro', value: fmtUsd(settledReceiveUsd), color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
               { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
@@ -248,7 +249,7 @@ export const SellStockScreen = () => {
               </Text>
               <TouchableOpacity
                 onPress={() => {
-                  changeAmount(available > 0 ? String(available) : '', true);
+                  changeAmount(available > 0 ? toAmountInput(available) : '', true);
                 }}
                 disabled={phase !== 'input' || available <= 0}
               >

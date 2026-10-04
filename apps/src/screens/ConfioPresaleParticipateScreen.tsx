@@ -20,6 +20,8 @@ import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
+import { formatAmountString, formatDecimal, formatPercent, getNumberLocaleCountry, normalizeAmountInput, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 type ConfioPresaleParticipateScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -33,8 +35,9 @@ export const ConfioPresaleParticipateScreen = () => {
   const [hasAttestedNotUs, setHasAttestedNotUs] = useState(false);
   const [showTelegramModal, setShowTelegramModal] = useState(false);
 
-  // Use the app's selected country for formatting
-  const countryCode = selectedCountry?.[2] || 'VE';
+  // One number format app-wide: the user's phone country (utils/numberLocale).
+  const countryCode = getNumberLocaleCountry() || 'US';
+  useNumberLocale();
   const formatWithLocale = (num: number, options = {}) =>
     formatNumber(num, countryCode, { minimumFractionDigits: 2, maximumFractionDigits: 2, ...options });
 
@@ -129,7 +132,9 @@ export const ConfioPresaleParticipateScreen = () => {
     return cUsdAmount / presalePrice;
   };
 
-  const parsedAmount = parseFloat(amount) || 0;
+  const parsedAmount = (() => { const v = parseAmountInput(amount); return Number.isFinite(v) ? v : 0; })();
+  // What leaves the screen: canonical "12.5", never the typed "12,5".
+  const amountCanonical = normalizeAmountInput(amount) ?? '';
   const conversionFeeBps = isBscFlow
     ? Number(bscBalanceData?.cusdPlusSummary?.conversionFeeBps ?? 90)
     : 0;
@@ -227,7 +232,7 @@ export const ConfioPresaleParticipateScreen = () => {
       // ── BSC flow: sponsored 7702 batch against the curve vault ──
       if (isBscFlow) {
         const { buyPresaleBsc } = await import('../services/presaleBsc');
-        await buyPresaleBsc(amount);
+        await buyPresaleBsc(amountCanonical);
         setBusy(false);
         setAmount('');
         refetch();
@@ -255,13 +260,13 @@ export const ConfioPresaleParticipateScreen = () => {
       // 1) Prepare purchase
       let pack: any;
       try {
-        pack = await session.preparePurchase(amount);
+        pack = await session.preparePurchase(amountCanonical);
       } catch (e: any) {
         // If the server requires opt-in, perform it silently, then retry
         if (String(e?.message || '').includes('requires_presale_app_optin')) {
           await ensureOptedIn(session);
           // Retry purchase prepare after opt-in
-          pack = await session.preparePurchase(amount);
+          pack = await session.preparePurchase(amountCanonical);
         } else {
           throw e;
         }
@@ -288,7 +293,7 @@ export const ConfioPresaleParticipateScreen = () => {
           // Ensure opt-in
           await ensureOptedIn(session);
           // Rebuild group and resubmit
-          const retryPack = await session.preparePurchase(amount);
+          const retryPack = await session.preparePurchase(amountCanonical);
           const retryTxns = Array.isArray(retryPack?.transactions) ? retryPack.transactions : [];
           const retrySponsorTxns = (retryPack?.sponsor_transactions || []).slice();
           const retryUserToSign = retryTxns.find((t: any) => t?.index === 1 && (t?.needs_signature || !t?.signed));
@@ -363,7 +368,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
     Alert.alert(
       'Confirmar compra',
-      `¿Comprar ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO por $${amount}?${isBscFlow ? `\nComisión de Confío: $${formatWithLocale(confioFee, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}`,
+      `¿Comprar ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO por $${formatAmountString(amountCanonical)}?${isBscFlow ? `\nComisión de Confío: $${formatWithLocale(confioFee, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}`,
       [
         {
           text: 'Cancelar',
@@ -513,7 +518,7 @@ export const ConfioPresaleParticipateScreen = () => {
                 <TextInput
                   style={styles.textInput}
                   value={amount}
-                  onChangeText={setAmount}
+                  onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                   placeholder="Ej: 100"
                   keyboardType="numeric"
                   placeholderTextColor={colors.text.light}
@@ -548,7 +553,7 @@ export const ConfioPresaleParticipateScreen = () => {
                 </View>
                 {isBscFlow && (
                   <View style={styles.resultRow}>
-                    <Text style={styles.resultLabel}>Comisión de Confío ({(conversionFeeBps / 100).toLocaleString('es-PE')}%):</Text>
+                    <Text style={styles.resultLabel}>Comisión de Confío ({formatPercent(conversionFeeBps / 100)}%):</Text>
                     <Text style={styles.resultValue}>${formatWithLocale(confioFee, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                   </View>
                 )}

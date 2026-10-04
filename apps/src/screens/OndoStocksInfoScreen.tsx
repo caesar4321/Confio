@@ -24,6 +24,7 @@ import {TickerLogo} from '../components/TickerLogo';
 import {bscscanTokenHoldingsUrl} from '../utils/bscscan';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import { formatDecimal } from '../utils/numberLocale';
 
 const ONDO_STOCKS_URL = 'https://ondo.finance/ondo-stocks';
 
@@ -64,22 +65,14 @@ const STOCK_WALLET_ADDRESS = gql`
   }
 `;
 
-// 30 bps -> "0,30". Comma is the decimal mark in the app's Spanish copy.
-const formatFeePercent = (bps: number) =>
-  (bps / 100).toFixed(2).replace('.', ',');
+// 30 bps -> "0,30" / "0.30" (the user's country decimal mark).
+const formatFeePercent = (bps: number) => formatDecimal(bps / 100);
 
 // Same shape as ProtectedSavingsScreen's, so the two hero pills that quote a
 // Home stat read identically. null stays "—": unknown is not zero.
 const formatWhole = (n: number | null | undefined, sep: string) => {
   if (n == null) return '—';
-  const r = Math.round(n);
-  try {
-    return new Intl.NumberFormat('en-US', {maximumFractionDigits: 0})
-      .format(r)
-      .replace(/,/g, sep);
-  } catch {
-    return `${r}`;
-  }
+  return formatDecimal(n, { decimals: 0 });
 };
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
@@ -171,14 +164,7 @@ export const OndoStocksInfoScreen = () => {
     marketAssets.map(asset => [asset.ticker, asset]),
   );
   const formatUsd = (value: number) => {
-    const rendered = new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-    return rendered
-      .replace(/,/g, '__THOUSANDS__')
-      .replace('.', currency.decimalSeparator)
-      .replace(/__THOUSANDS__/g, currency.thousandsSeparator);
+    return formatDecimal(value);
   };
 
   // Same rule for the fee: assert a rate only once the server has told us one.
@@ -340,9 +326,7 @@ export const OndoStocksInfoScreen = () => {
                       US${formatUsd(asset.valueUsd)}
                     </Text>
                     <Text style={styles.communityShare}>
-                      {asset.sharePct
-                        .toFixed(1)
-                        .replace('.', currency.decimalSeparator)}
+                      {formatDecimal(asset.sharePct, { decimals: 1 })}
                       %
                     </Text>
                   </View>

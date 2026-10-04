@@ -18,7 +18,7 @@ import { colors } from '../config/theme';
 import {
   CATEGORIZE_MOVEMENT, GET_CATEGORY_PROMPT, RECORD_CATEGORY_PROMPT, type CategoryKey,
 } from '../apollo/monthSummary';
-import { CATEGORY_META, CATEGORY_ORDER } from '../utils/monthSummary';
+import { CATEGORY_META, CATEGORY_ORDER, QUICK_CATEGORY_COUNT } from '../utils/monthSummary';
 import { AnalyticsService } from '../services/analyticsService';
 
 type Ref = {
@@ -35,12 +35,18 @@ type ChipGridProps = {
   selected: CategoryKey | null;
   onPick: (category: CategoryKey) => void;
   disabled?: boolean;
+  /** Show the quick six plus "Más" (success prompt); lists show all. */
+  compact?: boolean;
 };
 
-export function ChipGrid({ selected, onPick, disabled = false }: ChipGridProps) {
+export function ChipGrid({ selected, onPick, disabled = false, compact = false }: ChipGridProps) {
+  // A selection outside the quick set opens the full list so it stays visible.
+  const selectedIsExtra = selected ? CATEGORY_ORDER.indexOf(selected) >= QUICK_CATEGORY_COUNT : false;
+  const [expanded, setExpanded] = useState(!compact || selectedIsExtra);
+  const keys = expanded ? CATEGORY_ORDER : CATEGORY_ORDER.slice(0, QUICK_CATEGORY_COUNT);
   return (
     <View style={styles.chips}>
-      {CATEGORY_ORDER.map((key) => {
+      {keys.map((key) => {
         const isSelected = selected === key;
         return (
           <TouchableOpacity
@@ -58,6 +64,19 @@ export function ChipGrid({ selected, onPick, disabled = false }: ChipGridProps) 
           </TouchableOpacity>
         );
       })}
+      {!expanded && (
+        <TouchableOpacity
+          style={styles.chip}
+          onPress={() => setExpanded(true)}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Más categorías"
+          testID="category-chip-more"
+        >
+          <Icon name="plus" size={15} color={colors.text.secondary} />
+          <Text style={styles.chipText}>Más</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -152,7 +171,7 @@ export function CategoryPrompt({ movementId, internalId, status }: Ref) {
     <View style={styles.card} testID="category-prompt">
       <Text style={styles.question}>¿Qué fue este pago?</Text>
       <Text style={styles.hint}>Lo recordamos para los pagos a {name}.</Text>
-      <ChipGrid selected={chosen} onPick={pick} disabled={saving} />
+      <ChipGrid selected={chosen} onPick={pick} disabled={saving} compact />
       {failed && <Text style={styles.failed}>No se guardó</Text>}
       {!chosen && (
         <TouchableOpacity onPress={skip} style={styles.skip} accessibilityRole="button" testID="category-skip">

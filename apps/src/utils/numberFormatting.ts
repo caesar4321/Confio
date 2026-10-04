@@ -3,7 +3,10 @@
  * Handles different number formatting conventions across countries
  */
 
-import { useAuth } from '../contexts/AuthContext';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
+import {
+  formatDecimal, getNumberLocaleCountry, getSeparators, parseAmountInput, sanitizeAmountInput, separatorsForCountry,
+} from './numberLocale';
 
 // Country code to locale mapping
 const COUNTRY_TO_LOCALE: { [key: string]: string } = {
@@ -80,40 +83,34 @@ export function getLocaleForCountry(countryCode: string): string {
 }
 
 /**
- * Format a number based on country conventions
+ * Format a number based on country conventions.
+ *
+ * Deterministic (utils/numberLocale): no Intl, whose output varies by device
+ * (Hermes/Android use the phone's locale data) and which does not group
+ * 4-digit numbers in some locales.
  */
 export function formatNumber(
   value: number,
   countryCode: string,
   options: NumberFormatOptions = {}
 ): string {
-  const locale = getLocaleForCountry(countryCode);
-  
   // Defaults are 2 decimals, but a caller that only caps the maximum (counts:
-  // `{ maximumFractionDigits: 0 }`) must not keep the default minimum of 2 —
-  // Intl throws on max < min and the fallback below printed "312.00" people.
+  // `{ maximumFractionDigits: 0 }`) must not keep the default minimum of 2.
   const minimumFractionDigits =
     options.minimumFractionDigits ?? Math.min(2, options.maximumFractionDigits ?? 2);
   const maximumFractionDigits =
     options.maximumFractionDigits ?? Math.max(2, minimumFractionDigits);
-  const formatOptions: Intl.NumberFormatOptions = {
-    style: options.style || 'decimal',
-    minimumFractionDigits,
-    maximumFractionDigits,
-    useGrouping: options.useGrouping ?? true,
-  };
-  
+  const text = formatDecimal(value, {
+    decimals: maximumFractionDigits,
+    minDecimals: minimumFractionDigits,
+    grouping: options.useGrouping ?? true,
+    separators: separatorsForCountry(countryCode),
+  });
   if (options.style === 'currency' && options.currency) {
-    formatOptions.currency = options.currency;
+    const prefix = options.currency === 'USD' ? 'US$' : `${options.currency} `;
+    return text.startsWith('-') ? `-${prefix}${text.slice(1)}` : `${prefix}${text}`;
   }
-  
-  try {
-    return new Intl.NumberFormat(locale, formatOptions).format(value);
-  } catch (error) {
-    console.error('Number formatting error:', error);
-    // Fallback to basic formatting
-    return value.toFixed(maximumFractionDigits);
-  }
+  return text;
 }
 
 /**
@@ -133,63 +130,33 @@ export function formatCurrency(
 }
 
 /**
- * Hook to use number formatting based on user's country
+ * Hook to use number formatting based on the user's country (the app-wide
+ * setting kept by NumberLocaleProvider; re-renders when it changes).
  */
 export function useNumberFormat() {
-  const { userProfile } = useAuth();
-  const userCountryCode = userProfile?.phoneCountry || 'US';
-  
+  useNumberLocale();
+  const userCountryCode = getNumberLocaleCountry() || 'US';
+  const separators = getSeparators();
+
   return {
-    /**
-     * Format a number using user's country conventions
-     */
-    formatNumber: (value: number, options?: NumberFormatOptions) => 
+    /** Format a number using the user's country conventions */
+    formatNumber: (value: number, options?: NumberFormatOptions) =>
       formatNumber(value, userCountryCode, options),
-    
-    /**
-     * Format currency using user's country conventions
-     */
+
+    /** Format currency using the user's country conventions */
     formatCurrency: (value: number, currencyCode: string, options?: Omit<NumberFormatOptions, 'style' | 'currency'>) =>
       formatCurrency(value, userCountryCode, currencyCode, options),
-    
-    /**
-     * Format a number for a specific country (useful for trades)
-     */
+
+    /** Format a number for a specific country (useful for trades) */
     formatNumberForCountry: (value: number, countryCode: string, options?: NumberFormatOptions) =>
       formatNumber(value, countryCode, options),
-    
-    /**
-     * Get the decimal separator for user's country
-     */
-    getDecimalSeparator: () => {
-      const formatted = formatNumber(1.1, userCountryCode, { minimumFractionDigits: 1 });
-      return formatted.charAt(1);
-    },
-    
-    /**
-     * Get the thousands separator for user's country
-     */
-    getThousandsSeparator: () => {
-      const formatted = formatNumber(1000, userCountryCode, { minimumFractionDigits: 0 });
-      return formatted.charAt(1);
-    },
-    
-    /**
-     * Parse a localized number string back to number
-     */
-    parseLocalizedNumber: (value: string) => {
-      const decimalSeparator = formatNumber(1.1, userCountryCode, { minimumFractionDigits: 1 }).charAt(1);
-      const thousandsSeparator = formatNumber(1000, userCountryCode, { minimumFractionDigits: 0 }).charAt(1);
-      
-      // Remove thousands separators and normalize decimal separator
-      let normalized = value.replace(new RegExp(`\\${thousandsSeparator}`, 'g'), '');
-      if (decimalSeparator !== '.') {
-        normalized = normalized.replace(decimalSeparator, '.');
-      }
-      
-      return parseFloat(normalized);
-    },
-    
+
+    getDecimalSeparator: () => separators.decimal,
+    getThousandsSeparator: () => separators.group,
+
+    /** Parse what the user typed (either decimal key) back to a number. */
+    parseLocalizedNumber: (value: string) => parseAmountInput(value, separators),
+
     userCountryCode,
     locale: getLocaleForCountry(userCountryCode),
   };
@@ -204,41 +171,9 @@ export function formatNumberInput(
   countryCode: string,
   options: { decimals?: number } = {}
 ): { formatted: string; raw: number } {
-  const decimalSeparator = formatNumber(1.1, countryCode, { minimumFractionDigits: 1 }).charAt(1);
-  const thousandsSeparator = formatNumber(1000, countryCode, { minimumFractionDigits: 0 }).charAt(1);
-  
-  // Remove all non-numeric characters except decimal separator
-  let cleaned = value.replace(new RegExp(`[^0-9\\${decimalSeparator}]`, 'g'), '');
-  
-  // Ensure only one decimal separator
-  const parts = cleaned.split(decimalSeparator);
-  if (parts.length > 2) {
-    cleaned = parts[0] + decimalSeparator + parts.slice(1).join('');
-  }
-  
-  // Limit decimal places
-  if (parts.length === 2 && options.decimals !== undefined) {
-    parts[1] = parts[1].slice(0, options.decimals);
-    cleaned = parts.join(decimalSeparator);
-  }
-  
-  // Parse to number
-  let normalized = cleaned.replace(new RegExp(`\\${thousandsSeparator}`, 'g'), '');
-  if (decimalSeparator !== '.') {
-    normalized = normalized.replace(decimalSeparator, '.');
-  }
-  const raw = parseFloat(normalized) || 0;
-  
-  // Format with thousands separators
-  if (cleaned) {
-    const [integerPart, decimalPart] = cleaned.split(decimalSeparator);
-    const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, thousandsSeparator);
-    const formatted = decimalPart !== undefined 
-      ? `${formattedInteger}${decimalSeparator}${decimalPart}`
-      : formattedInteger;
-    
-    return { formatted, raw };
-  }
-  
-  return { formatted: '', raw: 0 };
+  const separators = separatorsForCountry(countryCode);
+  const formatted = sanitizeAmountInput(value, options.decimals ?? 2, separators);
+  if (!formatted) return { formatted: '', raw: 0 };
+  const raw = parseAmountInput(formatted, separators);
+  return { formatted, raw: Number.isFinite(raw) ? raw : 0 };
 }

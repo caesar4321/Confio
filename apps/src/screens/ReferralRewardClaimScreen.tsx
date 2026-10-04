@@ -19,6 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { EmptyState } from '../components/EmptyState';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { colors } from '../config/theme';
+import { formatDecimal } from '../utils/numberLocale';
 
 type UserInfo = {
   id: string;
@@ -286,7 +287,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
               </View>
               <View style={styles.rewardHeaderText}>
                 <Text style={styles.rewardTitle}>
-                  {amount.toFixed(2)} $CONFIO
+                  {formatDecimal(amount)} $CONFIO
                 </Text>
                 <Text style={styles.rewardSubtitle} numberOfLines={1}>
                   {isReferrer ? 'Invitaste a' : 'Te invitó'}{' '}
@@ -337,7 +338,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
               </View>
               <View style={styles.rewardHeaderText}>
                 <Text style={styles.rewardTitle}>
-                  {amount.toFixed(2)} $CONFIO
+                  {formatDecimal(amount)} $CONFIO
                 </Text>
                 <Text style={styles.rewardSubtitle} numberOfLines={1}>
                   {isReferrer ? 'Invitaste a' : 'Te invitó'}{' '}
@@ -404,7 +405,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         </Svg>
         <View style={styles.fieldInner}>
           <Text style={styles.fieldLabel}>GANADO EN BONOS</Text>
-          <Text style={styles.fieldValue}>{totalEarned.toFixed(2)} $CONFIO</Text>
+          <Text style={styles.fieldValue}>{formatDecimal(totalEarned)} $CONFIO</Text>
           <Text style={styles.fieldSubtext}>
             Guardados en tu cuenta. Se podrán retirar cuando $CONFIO se lance al
             mercado.

@@ -47,6 +47,7 @@ const USDY_ATTESTATION_MONTHLY_URL =
   'https://www.dropbox.com/scl/fo/fk5t99zyihshuak3u1u9v/AMYiYSUwvoL6osa2FX_G_M8?rlkey=0ttmb4ifhdg4ebvhbh8aa3juc&st=fyoof4cu&dl=0';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
+import { formatDecimal } from '../utils/numberLocale';
 
 // Live yield split (design law: no hardcoded rates in copy). Both sides are
 // SERVER-derived from Ondo's on-chain oracle; when the rate isn't live yet
@@ -64,14 +65,7 @@ const GET_APY_SPLIT = gql`
 
 const formatWhole = (n: number | null | undefined, sep: string) => {
   if (n == null) return '—';
-  const r = Math.round(n);
-  try {
-    return new Intl.NumberFormat('en-US', {maximumFractionDigits: 0})
-      .format(r)
-      .replace(/,/g, sep);
-  } catch {
-    return `${r}`;
-  }
+  return formatDecimal(n, { decimals: 0 });
 };
 
 export const ProtectedSavingsScreen = () => {

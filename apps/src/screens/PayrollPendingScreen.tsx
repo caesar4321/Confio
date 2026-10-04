@@ -19,6 +19,7 @@ import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
+import { formatAmountString, formatDecimal } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollPending'>;
 
@@ -135,7 +136,7 @@ export const PayrollPendingScreen = () => {
 
     // Require biometric authentication for approving payroll payment
     const recipientName = item.recipientUser?.firstName || item.recipientUser?.username || 'destinatario';
-    const authMessage = `Autoriza pagar $${item.netAmount} a ${recipientName}`;
+    const authMessage = `Autoriza pagar $${formatAmountString(item.netAmount)} a ${recipientName}`;
 
     let authenticated = await authenticateWithFace();
     if (!authenticated) {
@@ -267,7 +268,7 @@ export const PayrollPendingScreen = () => {
             {vaultLoading && !railStatus
               ? '...'
               : canViewVault
-                ? (vaultBalance === null ? '—' : `$${vaultBalance.toFixed(2)}`)
+                ? (vaultBalance === null ? '—' : `$${formatDecimal(vaultBalance)}`)
                 : '••••'}
           </Text>
           {instrument.known && canViewVault ? (
@@ -325,9 +326,9 @@ export const PayrollPendingScreen = () => {
                   <Text style={[styles.statusText, badge.fg]}>{badge.label}</Text>
                 </View>
               </View>
-              <Text style={styles.amount}>${item.netAmount}</Text>
+              <Text style={styles.amount}>${formatAmountString(item.netAmount)}</Text>
               <Text style={styles.subtext}>Recibe: {item.recipientUser?.firstName} {item.recipientUser?.lastName}</Text>
-              <Text style={styles.subtext}>Bruto: {item.grossAmount} · Comisión: {item.feeAmount}</Text>
+              <Text style={styles.subtext}>Bruto: {formatAmountString(item.grossAmount)} · Comisión: {formatAmountString(item.feeAmount)}</Text>
               <View style={styles.ctaRow}>
                 {payingItemId === item.internalId ? (
                   <View style={styles.payButtonDisabled}>

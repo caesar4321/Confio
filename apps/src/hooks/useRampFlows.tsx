@@ -3,13 +3,11 @@ import React, { useCallback, useRef, useState } from 'react';
 import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { useRampCountry } from './useRampCountry';
 import { useSavingsPortfolio } from './useSavingsPortfolio';
+import { formatDecimal } from '../utils/numberLocale';
 
 const formatFixedFloor = (value: number, decimals = 2) => {
   const m = 10 ** decimals;
-  return (Math.floor(value * m) / m).toLocaleString('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
+  return formatDecimal(Math.floor(value * m) / m, { decimals });
 };
 
 /**

@@ -39,6 +39,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { exitToDiscover } from '../navigation/exitToDiscover';
+import { formatDecimal } from '../utils/numberLocale';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -1800,7 +1801,7 @@ export const TradeChatScreen: React.FC = () => {
           const have = parseFloat(insuffMatch[3] || '0');
           Alert.alert(
             'Saldo insuficiente',
-            `No tienes suficiente saldo en ${readableToken} para habilitar el intercambio.\n\nNecesitas: ${need.toFixed(6)} ${readableToken}\nDisponible: ${have.toFixed(6)} ${readableToken}\n\nRecarga tu saldo o intenta con un monto menor.`
+            `No tienes suficiente saldo en ${readableToken} para habilitar el intercambio.\n\nNecesitas: ${formatDecimal(need, { decimals: 6, minDecimals: 2 })} ${readableToken}\nDisponible: ${formatDecimal(have, { decimals: 6, minDecimals: 2 })} ${readableToken}\n\nRecarga tu saldo o intenta con un monto menor.`
           );
         } else {
           Alert.alert('No se pudo habilitar', 'Ocurrió un problema al habilitar el intercambio. Intenta de nuevo en unos segundos.');
@@ -1818,7 +1819,7 @@ export const TradeChatScreen: React.FC = () => {
         const have = parseFloat(insuffMatch[3] || '0');
         Alert.alert(
           'Saldo insuficiente',
-          `No tienes suficiente saldo en ${readableToken} para habilitar el intercambio.\n\nNecesitas: ${need.toFixed(6)} ${readableToken}\nDisponible: ${have.toFixed(6)} ${readableToken}\n\nRecarga tu saldo o intenta con un monto menor.`
+          `No tienes suficiente saldo en ${readableToken} para habilitar el intercambio.\n\nNecesitas: ${formatDecimal(need, { decimals: 6, minDecimals: 2 })} ${readableToken}\nDisponible: ${formatDecimal(have, { decimals: 6, minDecimals: 2 })} ${readableToken}\n\nRecarga tu saldo o intenta con un monto menor.`
         );
       } else {
         Alert.alert('No se pudo habilitar', 'Ocurrió un problema al habilitar el intercambio. Intenta de nuevo.');

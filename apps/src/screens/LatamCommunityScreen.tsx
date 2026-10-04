@@ -14,12 +14,12 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
-import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { EmptyState } from '../components/EmptyState';
+import { formatDecimal } from '../utils/numberLocale';
 
 type CountryStat = {
   countryIso: string;
@@ -38,7 +38,6 @@ const isoToFlag = (iso?: string | null) => {
 
 export const LatamCommunityScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-  const { currency } = useCurrency();
   const { userProfile } = useAuth();
   const { data, loading, error, refetch } = useQuery(GET_STATS_SUMMARY, {
     fetchPolicy: 'cache-and-network',
@@ -48,13 +47,7 @@ export const LatamCommunityScreen = () => {
   const userCountryIso = (userProfile?.phoneCountry || '').toUpperCase();
 
   const formatWhole = (n: number) => {
-    try {
-      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
-        .format(Math.round(n))
-        .replace(/,/g, currency.thousandsSeparator);
-    } catch {
-      return `${Math.round(n)}`;
-    }
+    return formatDecimal(n, { decimals: 0 });
   };
 
   const { rows, maxCount, userInList } = useMemo(() => {
@@ -66,13 +59,7 @@ export const LatamCommunityScreen = () => {
 
   const diditVerified = data?.statsSummary?.diditVerifiedUsers ?? 0;
   const formatVerifiedCount = (n: number) => {
-    try {
-      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
-        .format(Math.round(n))
-        .replace(/,/g, currency.thousandsSeparator);
-    } catch {
-      return `${Math.round(n)}`;
-    }
+    return formatDecimal(n, { decimals: 0 });
   };
 
   const renderItem = ({ item, index }: { item: CountryStat; index: number }) => {

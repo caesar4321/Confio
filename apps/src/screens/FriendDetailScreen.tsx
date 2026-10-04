@@ -34,6 +34,7 @@ import 'moment/locale/es';
 import { colors } from '../config/theme';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { formatTokenLabel } from '../utils/tokenDisplay';
+import { parseAmountInput } from '../utils/numberLocale';
 
 // Color palette
 type FriendDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -353,8 +354,10 @@ export function FriendDetailScreen() {
     if (transactionFilters.amountRange && (transactionFilters.amountRange.min || transactionFilters.amountRange.max)) {
       filtered = filtered.filter(tx => {
         const amount = Math.abs(parseFloat(tx.amount.replace(/[^0-9.-]/g, '')));
-        const min = transactionFilters.amountRange.min ? parseFloat(transactionFilters.amountRange.min) : 0;
-        const max = transactionFilters.amountRange.max ? parseFloat(transactionFilters.amountRange.max) : Infinity;
+        const parsedMin = parseAmountInput(transactionFilters.amountRange.min);
+        const parsedMax = parseAmountInput(transactionFilters.amountRange.max);
+        const min = Number.isFinite(parsedMin) ? parsedMin : 0;
+        const max = Number.isFinite(parsedMax) ? parsedMax : Infinity;
         return amount >= min && amount <= max;
       });
     }

@@ -25,6 +25,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { EmptyState } from '../components/EmptyState';
+import { formatDecimal } from '../utils/numberLocale';
 
 // Its own query (not the Home tile's): an older server without the detail
 // fields fails only this screen, never the stats strip. Read with no-cache:
@@ -82,7 +83,6 @@ export const withdrawalTimeLabel = (medianMinutes: number): string => {
 
 export const FundFlowScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-  const { currency } = useCurrency();
   const { data, loading, error, refetch } = useQuery(FUND_FLOW_DETAIL, {
     fetchPolicy: 'no-cache',
     errorPolicy: 'all',
@@ -96,8 +96,7 @@ export const FundFlowScreen = () => {
 
   const whole = (n: number | null | undefined) => {
     if (n == null) return '—';
-    const digits = `${Math.round(n)}`;
-    return digits.replace(/\B(?=(\d{3})+(?!\d))/g, currency.thousandsSeparator);
+    return formatDecimal(n, { decimals: 0 });
   };
 
   const since = flow?.since ? new Date(flow.since) : null;

@@ -19,6 +19,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { useContactNameSync } from '../hooks/useContactName';
 import { colors } from '../config/theme';
+import { formatAmountString, formatDecimal } from '../utils/numberLocale';
 
 moment.locale('es');
 
@@ -247,19 +248,19 @@ export const USDCHistoryScreen = () => {
               <>
                 {/* Primary (USDC) with sign from backend */}
                 <Text style={(item.signedAmount || '').trim().startsWith('-') ? styles.fromAmount : styles.toAmount}>
-                  {(item.signedAmount || `${item.amount}`).trim()} {item.currency}
+                  {formatAmountString((item.signedAmount || `${item.amount}`).trim())} {item.currency}
                 </Text>
                 {/* Secondary (cUSD) with sign from backend */}
                 {item.secondaryCurrency ? (
                   <Text style={(item.signedSecondaryAmount || '').trim().startsWith('-') ? styles.fromAmount : styles.toAmount}>
-                    {(item.signedSecondaryAmount || `${item.secondaryAmount || ''}`).trim()} {item.secondaryCurrency}
+                    {formatAmountString((item.signedSecondaryAmount || `${item.secondaryAmount || ''}`).trim())} {item.secondaryCurrency}
                   </Text>
                 ) : null}
               </>
             ) : item.transactionType.toLowerCase() === 'deposit' ? (
-              <Text style={styles.toAmount}>+{item.amount} {item.currency}</Text>
+              <Text style={styles.toAmount}>+{formatAmountString(item.amount)} {item.currency}</Text>
             ) : (
-              <Text style={styles.fromAmount}>-{item.amount} {item.currency}</Text>
+              <Text style={styles.fromAmount}>-{formatAmountString(item.amount)} {item.currency}</Text>
             )}
           </View>
         </View>
@@ -295,7 +296,7 @@ export const USDCHistoryScreen = () => {
               </View>
             ) : (
               <Text style={styles.detailValue}>
-                {(parseFloat(item.serviceFee) + parseFloat(item.networkFee)).toFixed(6)} {item.currency}
+                {formatDecimal(parseFloat(item.serviceFee) + parseFloat(item.networkFee), { decimals: 6 })} {item.currency}
               </Text>
             )}
           </View>

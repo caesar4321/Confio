@@ -1,3 +1,4 @@
+import { formatDecimal, parseAmountInput } from './numberLocale';
 // Comprehensive currency data system for P2P trading
 // Maps countries to their local currencies with full metadata
 
@@ -475,21 +476,10 @@ export const formatCurrencyAmount = (
   
   const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (isNaN(numAmount)) return '0';
-  
-  // Format number with proper decimal places
-  const formattedNumber = numAmount.toFixed(currency.decimals);
-  
-  // Split into integer and decimal parts
-  const [integerPart, decimalPart] = formattedNumber.split('.');
-  
-  // Add thousands separators
-  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, currency.thousandsSeparator);
-  
-  // Combine parts
-  let result = formattedInteger;
-  if (currency.decimals > 0 && decimalPart) {
-    result += currency.decimalSeparator + decimalPart;
-  }
+
+  // Separators follow the USER's country (one format app-wide), decimals
+  // follow the currency.
+  let result = formatDecimal(numAmount, { decimals: currency.decimals });
   
   // Add symbol/code - prefer code for clarity when preferCode is true
   if (preferCode && showSymbol) {
@@ -518,20 +508,14 @@ export const parseCurrencyAmount = (
   currency: Currency
 ): number => {
   // Remove currency symbol and code
-  let cleanString = amountString
+  const cleanString = amountString
     .replace(currency.symbol, '')
     .replace(currency.code, '')
     .trim();
-  
-  // Handle thousands separators and decimal separators
-  if (currency.thousandsSeparator !== currency.decimalSeparator) {
-    // Remove thousands separators
-    cleanString = cleanString.replace(new RegExp('\\' + currency.thousandsSeparator, 'g'), '');
-    // Replace decimal separator with dot
-    cleanString = cleanString.replace(currency.decimalSeparator, '.');
-  }
-  
-  return parseFloat(cleanString) || 0;
+
+  // Either decimal key, the user's country grouping (utils/numberLocale).
+  const value = parseAmountInput(cleanString);
+  return Number.isFinite(value) ? value : 0;
 };
 
 /**
@@ -599,3 +583,13 @@ export const getMinimumAmount = (currency: Currency): number => {
 // Export types
 export type CurrencyCode = keyof typeof currencies;
 export type CountryIso = keyof typeof countryToCurrency;
+
+/** Minor units (cents) of any currency, the user's separators and the
+ *  currency's own symbol and decimals: "S/ 12,50", "Bs. 1.234,00". */
+export const formatMinorMoney = (minor: number, currencyCode: string): string => {
+  const currency = currencies[currencyCode];
+  const amount = Number(minor) / 100;
+  return currency
+    ? formatCurrencyAmount(amount, currency, { showSymbol: true })
+    : `${currencyCode} ${formatDecimal(amount)}`;
+};
