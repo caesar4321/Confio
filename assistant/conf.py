@@ -22,6 +22,10 @@ DEFAULTS = {
     # Fair use on the free tier, counted per user per rolling 24h.
     'CONFIO_ASSISTANT_DAILY_TURNS': 40,
     'CONFIO_ASSISTANT_DAILY_ANALYSES': 3,
+    # Cited news lookups ("¿por qué bajó Apple?"): one hosted web search each.
+    'CONFIO_ASSISTANT_DAILY_NEWS_SEARCHES': 5,
+    # USD per hosted web_search call (billed by the provider outside tokens).
+    'CONFIO_ASSISTANT_WEB_SEARCH_PRICE': Decimal('0.01'),
     'CONFIO_ASSISTANT_HUMAN_MODE_HOURS': 24,
     'CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS': 25,
     # USD per 1M tokens: (input, cached input, output); transcription per minute.
@@ -43,6 +47,7 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_PLUS_PRODUCT_ID': 'confio_ia_plus_monthly',
     'CONFIO_ASSISTANT_PLUS_DAILY_TURNS': 300,
     'CONFIO_ASSISTANT_PLUS_DAILY_ANALYSES': 30,
+    'CONFIO_ASSISTANT_PLUS_DAILY_NEWS_SEARCHES': 30,
     'CONFIO_ASSISTANT_PLUS_VOICE_MINUTES': 100,  # realtime minutes per calendar month
     # Apple: bundle id + numeric App Store id (required to verify production).
     'CONFIO_ASSISTANT_IOS_BUNDLE_ID': 'com.Confio.Confio',

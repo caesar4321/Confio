@@ -21,7 +21,7 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 
-from . import conf
+from . import conf, market
 from .destinations import DESTINATIONS, OWNER_ONLY
 from .prompts import ANALYSIS_PROMPT, build_system_prompt
 
@@ -283,12 +283,16 @@ class Toolbelt:
     """The model's tools for one turn, bound to one viewer."""
 
     def __init__(self, viewer: Viewer, result: TurnResult, *, analyses_left: int, can_navigate: bool = True,
-                 reserve_analysis=None):
+                 reserve_analysis=None, reserve_news=None):
         self.viewer = viewer
         self.result = result
         self.analyses_left = analyses_left
         # When given, claims a slot under the caller's quota lock (preferred).
         self.reserve_analysis = reserve_analysis
+        # Market tools only where the caller meters news searches (text turns;
+        # realtime voice has its own server-tool list).
+        self.reserve_news = reserve_news
+        self.saw_web = False
         self.can_navigate = can_navigate
         self.destinations = allowed_destinations(viewer)
 
@@ -400,6 +404,45 @@ class Toolbelt:
                     'strict': True,
                 },
             ]
+        if self.reserve_news is not None:
+            specs += [
+                {
+                    'type': 'function',
+                    'name': 'get_stock_quote',
+                    'description': (
+                        'Precio actual, cambio de 24 horas y de 1 mes de una acción o ETF de EE.UU. que muestra '
+                        'Confío (fuente: Ondo Global Markets). query = ticker o nombre, p. ej. "AAPL" o "Apple".'
+                    ),
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {'query': {'type': 'string'}},
+                        'required': ['query'],
+                        'additionalProperties': False,
+                    },
+                    'strict': True,
+                },
+                {
+                    'type': 'function',
+                    'name': 'search_market_news',
+                    'description': (
+                        'Busca en la web, con fuentes, qué se informó sobre por qué se movió una acción, un índice '
+                        'o el mercado. Solo hechos ya ocurridos. Después de usarla respondes sin más herramientas. '
+                        'topic = una acción que muestra Confío (nombre o ticker, p. ej. "Apple", "TSLA") o un mercado ("S&P 500", '
+                        '"Nasdaq", "Dow Jones", "bolsa", "oro", "petróleo"); language = idioma del usuario.'
+                    ),
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'topic': {'type': 'string'},
+                            'timeframe': {'type': 'string', 'enum': list(market.TIMEFRAMES)},
+                            'language': {'type': 'string', 'enum': list(market.LANGUAGES)},
+                        },
+                        'required': ['topic', 'timeframe', 'language'],
+                        'additionalProperties': False,
+                    },
+                    'strict': True,
+                },
+            ]
         return specs
 
     def call(self, name, args):
@@ -410,7 +453,11 @@ class Toolbelt:
             'get_transactions': self.get_transactions,
             'categorize_transactions': self.categorize_transactions,
             'analyze_finances': self.analyze_finances,
+            'get_stock_quote': self.get_stock_quote,
+            'search_market_news': self.search_market_news,
         }.get(name)
+        if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
+            handler = None
         if handler is None:
             return {'error': f'herramienta desconocida: {name}'}
         return handler(**args)
@@ -453,7 +500,8 @@ class Toolbelt:
             allowed = self.analyses_left > 0
             self.analyses_left -= 1
         if not allowed:
-            return {'disponible': False, 'motivo': 'Llegaste al límite de análisis de hoy. Mañana puedes pedir otro.'}
+            return {'disponible': False, '_denied': True,
+                    'motivo': 'Llegaste al límite de análisis de hoy. Mañana puedes pedir otro.'}
         months = [month_summary_data(self.viewer, back) for back in range(3)]
         if not any(m.get('disponible') for m in months):
             return months[0]
@@ -481,6 +529,29 @@ class Toolbelt:
         self.result.add_usage(model, data.get('usage'))
         return {'analisis': _output_text(data) or 'Sin análisis.'}
 
+    def get_stock_quote(self, query):
+        return market.stock_quote(query, user=self.viewer.user)
+
+    def search_market_news(self, topic, timeframe='esta semana', language='español'):
+        if market.resolve_topic(topic) is None:
+            return {'encontrado': False, '_denied': True,
+                    'motivo': 'Solo puedo buscar noticias de una empresa, ticker o índice.'}
+        if not self.reserve_news():
+            return {'disponible': False, '_denied': True,
+                    'motivo': 'Llegaste al límite de búsquedas de noticias de hoy.'}
+        try:
+            found = market.market_news(topic, timeframe=timeframe, language=language)
+        except AssistantUnavailable:
+            # A search outage must not sink the whole answer.
+            logger.warning('Confio Assistant: market news search failed', exc_info=True)
+            return {'error': 'No pude buscar noticias ahora.'}
+        self.result.add_usage(conf.get('CONFIO_ASSISTANT_MODEL'), found.get('_usage'))
+        self.result.cost_usd += market.search_cost(found.get('_search_calls') or 0)
+        if found.get('encontrado'):
+            # Web text is untrusted: the answer that follows gets no tools.
+            self.saw_web = True
+        return found
+
 
 # --------------------------------------------------------------------------- #
 # Turn
@@ -506,16 +577,19 @@ def history_items(messages):
 
 
 def run_turn(viewer: Viewer, history, *, first_name, account_label, country, analyses_left, can_navigate=True,
-             reserve_analysis=None):
+             reserve_analysis=None, reserve_news=None):
     """Answer the last user message in `history`. Raises AssistantUnavailable,
     except after the model already escalated: the handoff is kept."""
     result = TurnResult(reply='')
     belt = Toolbelt(viewer, result, analyses_left=analyses_left, can_navigate=can_navigate,
-                    reserve_analysis=reserve_analysis)
+                    reserve_analysis=reserve_analysis, reserve_news=reserve_news)
     try:
         return _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                          country=country)
-    except AssistantUnavailable:
+    except AssistantUnavailable as exc:
+        # Usage already spent (a search, an analysis) is still billed: the
+        # caller meters it from here even though the turn failed.
+        exc.partial = result
         # Work already done (an escalation, saved categories) must survive a
         # failed follow-up generation, so the caller still routes/refreshes.
         if result.handoff_reason:
@@ -580,8 +654,10 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             except Exception:  # noqa: BLE001 - a broken tool must read as broken, not as "no data"
                 logger.exception('Confio Assistant tool %s failed', name)
                 tool_output = {'error': 'La herramienta falló. Dile al usuario que no pudiste consultarlo ahora.'}
+            denied = bool(tool_output.get('_denied'))
             result.tools.append({
-                'name': name,
+                # Quotas count tool names; a refused call must not use a slot.
+                'name': f'{name}:denied' if denied else name,
                 'args': args,
                 'ok': 'error' not in tool_output,
                 'ms': int((time.monotonic() - started) * 1000),
@@ -589,9 +665,12 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             input_items.append({
                 'type': 'function_call_output',
                 'call_id': call.get('call_id'),
-                'output': json.dumps(tool_output, ensure_ascii=False)[:12000],
+                'output': json.dumps({k: v for k, v in tool_output.items() if not str(k).startswith('_')},
+                                     ensure_ascii=False)[:12000],
             })
         payload = {**payload, 'input': input_items}
+        if belt.saw_web:
+            payload['tool_choice'] = 'none'
     else:
         payload = {**payload, 'input': input_items, 'tool_choice': 'none'}
         data = _openai_post(payload)
