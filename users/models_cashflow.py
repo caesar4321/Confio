@@ -15,11 +15,19 @@ a business and its owner's personal account keep separate labels.
 """
 from django.db import models
 
+# Keys are English and stable (stored); labels are the app's Spanish copy.
+# Order = how the app lists them (the first six are the prompt's quick set).
 CATEGORY_CHOICES = [
     ('food', 'Comida'),
     ('transport', 'Transporte'),
     ('home', 'Casa'),
+    ('bills', 'Servicios'),
     ('family', 'Familia'),
+    ('shopping', 'Compras'),
+    ('health', 'Salud'),
+    ('education', 'Educación'),
+    ('leisure', 'Salidas'),
+    ('debt', 'Deudas'),
     ('work', 'Trabajo'),
     ('other', 'Otro'),
 ]
