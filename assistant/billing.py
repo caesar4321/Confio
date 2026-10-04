@@ -1,4 +1,4 @@
-"""IA+ subscriptions, verified with Apple and Google directly.
+"""Assistant+ subscriptions, verified with Apple and Google directly.
 
 The app's word is never trusted: every purchase, restore and store
 notification is re-read from the store (Apple: a JWS signed by Apple and
@@ -45,7 +45,7 @@ def active_subscription(user):
     return None
 
 
-def has_ia_plus(user):
+def has_plus(user):
     return active_subscription(user) is not None
 
 
@@ -114,12 +114,12 @@ def _apple_verifiers():
     from appstoreserverlibrary.signed_data_verifier import SignedDataVerifier
 
     roots = [p.read_bytes() for p in sorted(CERT_DIR.glob('*.cer'))]
-    bundle_id = conf.get('CONFIO_IA_IOS_BUNDLE_ID')
-    app_id = conf.get('CONFIO_IA_APPLE_APP_ID')
+    bundle_id = conf.get('CONFIO_ASSISTANT_IOS_BUNDLE_ID')
+    app_id = conf.get('CONFIO_ASSISTANT_APPLE_APP_ID')
     verifiers = []
     if app_id:
         verifiers.append(SignedDataVerifier(roots, True, Environment.PRODUCTION, bundle_id, int(app_id)))
-    if conf.get('CONFIO_IA_ACCEPT_APPLE_SANDBOX'):
+    if conf.get('CONFIO_ASSISTANT_ACCEPT_APPLE_SANDBOX'):
         verifiers.append(SignedDataVerifier(roots, True, Environment.SANDBOX, bundle_id))
     if not verifiers:
         raise BillingError('Las compras en iPhone aún no están disponibles.')
@@ -154,8 +154,8 @@ def _apple_status(tx, renewal=None, now=None):
 
 
 def _apple_apply(tx, *, renewal=None, expected_user=None):
-    if tx.productId != conf.get('CONFIO_IA_PLUS_PRODUCT_ID'):
-        raise BillingError('Este producto no es Confío IA+.')
+    if tx.productId != conf.get('CONFIO_ASSISTANT_PLUS_PRODUCT_ID'):
+        raise BillingError('Este producto no es Confio Assistant+.')
     owner = user_for_token(tx.appAccountToken)
     if expected_user is not None and owner is not None and owner.id != expected_user.id:
         raise BillingError('Esta suscripción ya está vinculada a otra cuenta de Confío.')
@@ -241,7 +241,7 @@ GOOGLE_STATES = {
 
 
 def _play_service():
-    creds = conf.get('CONFIO_IA_GOOGLE_PLAY_CREDENTIALS')
+    creds = conf.get('CONFIO_ASSISTANT_GOOGLE_PLAY_CREDENTIALS')
     if not creds:
         raise BillingError('Las compras en Android aún no están disponibles.')
     from google.oauth2 import service_account
@@ -255,7 +255,7 @@ def _play_service():
 
 def _play_apply(token, *, expected_user=None, strict_ack=False):
     service = _play_service()
-    package = conf.get('CONFIO_IA_ANDROID_PACKAGE')
+    package = conf.get('CONFIO_ASSISTANT_ANDROID_PACKAGE')
     try:
         purchase = service.purchases().subscriptionsv2().get(packageName=package, token=token).execute()
     except Exception as exc:  # noqa: BLE001 - HttpError / transport
@@ -263,9 +263,9 @@ def _play_apply(token, *, expected_user=None, strict_ack=False):
         raise BillingTransient('No pudimos verificar la compra con Google Play.') from exc
 
     items = purchase.get('lineItems') or []
-    item = next((i for i in items if i.get('productId') == conf.get('CONFIO_IA_PLUS_PRODUCT_ID')), None)
+    item = next((i for i in items if i.get('productId') == conf.get('CONFIO_ASSISTANT_PLUS_PRODUCT_ID')), None)
     if item is None:
-        raise BillingError('Este producto no es Confío IA+.')
+        raise BillingError('Este producto no es Confio Assistant+.')
     owner = user_for_token((purchase.get('externalAccountIdentifiers') or {}).get('obfuscatedExternalAccountId'))
     if expected_user is not None and owner is not None and owner.id != expected_user.id:
         raise BillingError('Esta suscripción ya está vinculada a otra cuenta de Confío.')
@@ -335,8 +335,8 @@ def verify_google_purchase(user, purchase_token):
 
 def verify_rtdn_push(authorization_header):
     """Pub/Sub push carries a Google-signed OIDC token; check it is ours."""
-    audience = conf.get('CONFIO_IA_RTDN_AUDIENCE')
-    email = conf.get('CONFIO_IA_RTDN_SERVICE_ACCOUNT')
+    audience = conf.get('CONFIO_ASSISTANT_RTDN_AUDIENCE')
+    email = conf.get('CONFIO_ASSISTANT_RTDN_SERVICE_ACCOUNT')
     if not (audience and email):
         return False
     if not (authorization_header or '').startswith('Bearer '):
@@ -366,7 +366,7 @@ def handle_google_rtdn(envelope):
     )
     if not created and record.processed:
         return record
-    if data.get('packageName') and data['packageName'] != conf.get('CONFIO_IA_ANDROID_PACKAGE'):
+    if data.get('packageName') and data['packageName'] != conf.get('CONFIO_ASSISTANT_ANDROID_PACKAGE'):
         record.error = 'other package'
     elif token:
         try:

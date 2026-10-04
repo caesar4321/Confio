@@ -1,10 +1,10 @@
-// IA+ purchases through our own native module (ConfioBilling: StoreKit 2 on
+// Assistant+ purchases through our own native module (ConfioBilling: StoreKit 2 on
 // iOS, Play Billing 8 on Android). The store result is only a claim: the
 // server verifies it with Apple/Google and decides entitlement. On iOS the
 // transaction is finished only after the server has it.
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import type { ApolloClient } from '@apollo/client';
-import { VERIFY_CONFIO_IA_PURCHASE, type ConfioIaPlan } from './api';
+import { VERIFY_ASSISTANT_PURCHASE, type AssistantPlan } from './api';
 
 const Native = NativeModules.ConfioBilling;
 export const isBillingAvailable = !!Native;
@@ -29,7 +29,7 @@ type StorePurchase = {
 };
 
 export type PurchaseOutcome =
-  | { ok: true; plan: ConfioIaPlan }
+  | { ok: true; plan: AssistantPlan }
   | { ok: false; reason: 'cancelled' | 'pending' | 'error'; message?: string };
 
 export async function loadProduct(productId: string): Promise<StoreProduct | null> {
@@ -42,18 +42,18 @@ export async function loadProduct(productId: string): Promise<StoreProduct | nul
 
 async function verifyWithServer(client: ApolloClient<any>, purchase: StorePurchase) {
   const { data } = await client.mutate({
-    mutation: VERIFY_CONFIO_IA_PURCHASE,
+    mutation: VERIFY_ASSISTANT_PURCHASE,
     variables: {
       platform: purchase.platform,
       signedTransaction: purchase.signedTransaction ?? null,
       purchaseToken: purchase.purchaseToken ?? null,
     },
   });
-  const result = data?.verifyConfioIaPurchase;
+  const result = data?.verifyAssistantPurchase;
   if (result?.success && purchase.transactionId) {
     await Native.finish(purchase.transactionId);
   }
-  return result as { success: boolean; error?: string; plan?: ConfioIaPlan };
+  return result as { success: boolean; error?: string; plan?: AssistantPlan };
 }
 
 export async function buy(client: ApolloClient<any>, productId: string, billingToken: string): Promise<PurchaseOutcome> {
@@ -84,7 +84,7 @@ export async function restore(client: ApolloClient<any>): Promise<PurchaseOutcom
     return { ok: false, reason: 'error', message: 'Las compras no están disponibles en esta versión.' };
   }
   const purchases: StorePurchase[] = await Native.currentEntitlements();
-  let last: { success: boolean; error?: string; plan?: ConfioIaPlan } | undefined;
+  let last: { success: boolean; error?: string; plan?: AssistantPlan } | undefined;
   for (const purchase of purchases) {
     last = await verifyWithServer(client, { ...purchase, platform: Platform.OS as 'ios' | 'android' });
     if (last?.plan?.isPlus) {
@@ -100,7 +100,7 @@ export function manageSubscriptions() {
 
 // Renewals, purchases finished while the app was closed, and unfinished
 // transactions: hand each to the server as it arrives.
-export function listenForStoreTransactions(client: ApolloClient<any>, onPlan: (plan: ConfioIaPlan) => void) {
+export function listenForStoreTransactions(client: ApolloClient<any>, onPlan: (plan: AssistantPlan) => void) {
   if (!Native) {
     return () => {};
   }

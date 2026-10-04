@@ -1,10 +1,10 @@
-// "Confío" wake word (IA+), on-device with Picovoice Porcupine. Audio never
+// "Confío" wake word (Assistant+), on-device with Picovoice Porcupine. Audio never
 // leaves the phone until the keyword is heard; then a voice call starts.
 // Only while the app is in the foreground (no background listening).
 //
 // Needs two things before it can run (both from the Picovoice Console):
-//   - the AccessKey, served by the server only to IA+ users
-//     (Secrets Manager prod/confio-ia → picovoice_access_key)
+//   - the AccessKey, served by the server only to Assistant+ users
+//     (Secrets Manager prod/confio-assistant → picovoice_access_key)
 //   - the trained Spanish keyword + model, bundled as app assets:
 //       iOS:     ios/Confio/WakeWord/confio_es_ios.ppn, porcupine_params_es.pv
 //       Android: android/app/src/main/assets/confio_es_android.ppn, porcupine_params_es.pv

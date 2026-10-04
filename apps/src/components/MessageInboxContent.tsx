@@ -16,13 +16,13 @@ import {
 } from '../apollo/mutations';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
-import { useOptionalConfioIa } from '../assistant/ConfioIaContext';
+import { useOptionalAssistant } from '../assistant/AssistantContext';
 import { colors } from '../config/theme';
 
 type MessageInboxContentProps = {
   onScreenStateChange?: (state: ScreenState) => void;
   initialChannelId?: Channel['id'];
-  // Embedded in the floating Confío IA box: show only this channel's thread
+  // Embedded in the floating Confio Assistant box: show only this channel's thread
   // (no inbox list); back calls onExit.
   embeddedChannelId?: Channel['id'];
   onExit?: () => void;
@@ -225,7 +225,7 @@ export function MessageInboxContent({
     soporte: 0,
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const confioIa = useOptionalConfioIa();
+  const assistant = useOptionalAssistant();
   const canQuery = isAuthenticated && !authLoading;
   const contextKey = activeAccount?.id || 'no-account';
   const shouldPollInbox =
@@ -357,9 +357,9 @@ export function MessageInboxContent({
   }, [screen]);
 
   const openChannel = (channel: Channel) => {
-    // The support thread is Confío IA's chat: open it where the AI's actions work.
-    if (channel.id === 'soporte' && confioIa?.available) {
-      confioIa.open();
+    // The support thread is Confio Assistant's chat: open it where the AI's actions work.
+    if (channel.id === 'soporte' && assistant?.available) {
+      assistant.open();
       return;
     }
     threadPageGeneration.current += 1;

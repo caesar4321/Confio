@@ -9,7 +9,7 @@ import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.*
 import com.facebook.react.uimanager.ViewManager
 
-// Routes Confío IA voice calls to the loudspeaker (WebRTC uses the
+// Routes Confio Assistant voice calls to the loudspeaker (WebRTC uses the
 // communication stream, which defaults to the earpiece).
 class ConfioAudioRoutePackage : ReactPackage {
     override fun createNativeModules(context: ReactApplicationContext): List<NativeModule> = listOf(ConfioAudioRouteModule(context))

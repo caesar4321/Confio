@@ -1,4 +1,4 @@
-"""Confío IA turn engine.
+"""Confio Assistant turn engine.
 
 One turn = the user's message (typed, or a transcribed voice note) answered by
 the everyday model with a small tool belt. Tools are scoped to the JWT account
@@ -77,7 +77,7 @@ class TurnResult:
             self.models_used.append(model)
         price = conf.price_for(model)
         if price is None:
-            logger.warning('Confío IA: no price configured for %s; turn cost under-reported', model)
+            logger.warning('Confio Assistant: no price configured for %s; turn cost under-reported', model)
             return
         per_input, per_cached, per_output = price
         million = Decimal(1_000_000)
@@ -108,7 +108,7 @@ def _openai_post(payload):
             OPENAI_RESPONSES_URL,
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
             json=payload,
-            timeout=conf.get('CONFIO_IA_REQUEST_TIMEOUT_SECONDS'),
+            timeout=conf.get('CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS'),
         )
     except requests.RequestException as exc:
         raise AssistantUnavailable(f'OpenAI request failed: {exc}') from exc
@@ -461,7 +461,7 @@ class Toolbelt:
         # what changed (earlier months go in as totals only: half the input
         # tokens, measured ~US$0.019 → ~0.01 per analysis).
         detail = [movements_data(self.viewer, 0, 'all', '', 50)]
-        model = conf.get('CONFIO_IA_ANALYSIS_MODEL')
+        model = conf.get('CONFIO_ASSISTANT_ANALYSIS_MODEL')
         payload = {
             'model': model,
             'instructions': ANALYSIS_PROMPT,
@@ -474,7 +474,7 @@ class Toolbelt:
             # Financial details: never retained by the provider.
             'store': False,
         }
-        effort = conf.get('CONFIO_IA_ANALYSIS_REASONING_EFFORT')
+        effort = conf.get('CONFIO_ASSISTANT_ANALYSIS_REASONING_EFFORT')
         if effort:
             payload['reasoning'] = {'effort': effort}
         data = _openai_post(payload)
@@ -538,8 +538,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         destinations=belt.destinations,
         can_navigate=belt.can_navigate,
     )
-    model = conf.get('CONFIO_IA_MODEL')
-    effort = conf.get('CONFIO_IA_REASONING_EFFORT')
+    model = conf.get('CONFIO_ASSISTANT_MODEL')
+    effort = conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')
     specs = belt.specs()
     payload = {
         'model': model,
@@ -556,7 +556,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         payload['reasoning'] = {'effort': effort}
 
     input_items = list(payload['input'])
-    for _ in range(conf.get('CONFIO_IA_MAX_TOOL_STEPS')):
+    for _ in range(conf.get('CONFIO_ASSISTANT_MAX_TOOL_STEPS')):
         data = _openai_post(payload)
         result.add_usage(model, data.get('usage'))
         output = data.get('output') or []
@@ -578,7 +578,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             except AssistantUnavailable:
                 raise
             except Exception:  # noqa: BLE001 - a broken tool must read as broken, not as "no data"
-                logger.exception('Confío IA tool %s failed', name)
+                logger.exception('Confio Assistant tool %s failed', name)
                 tool_output = {'error': 'La herramienta falló. Dile al usuario que no pudiste consultarlo ahora.'}
             result.tools.append({
                 'name': name,
@@ -611,7 +611,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
 def human_mode_active(state, last_staff_reply_at, now=None):
     """True while the human team owns the thread (see AssistantThreadState)."""
     now = now or timezone.now()
-    window = timedelta(hours=conf.get('CONFIO_IA_HUMAN_MODE_HOURS'))
+    window = timedelta(hours=conf.get('CONFIO_ASSISTANT_HUMAN_MODE_HOURS'))
     signals = [t for t in (getattr(state, 'handoff_at', None), last_staff_reply_at) if t]
     if not signals:
         return False

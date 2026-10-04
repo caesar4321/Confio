@@ -1,4 +1,4 @@
-// Screens Confío IA may open. Keys are a contract with the server
+// Screens Confio Assistant may open. Keys are a contract with the server
 // (assistant/destinations.py): never rename, only add. Unknown keys are
 // ignored, so an older build never breaks on a newer server.
 //

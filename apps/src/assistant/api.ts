@@ -1,4 +1,4 @@
-// Confío IA operations. Kept out of the shared queries/mutations files and
+// Confio Assistant operations. Kept out of the shared queries/mutations files and
 // never merged into another query: an older server rejects only these.
 import { gql } from '@apollo/client';
 
@@ -32,21 +32,21 @@ const PLAN_FIELDS = `
   plusSalesEnabled
 `;
 
-export const GET_CONFIO_IA_PLAN = gql`
-  query GetConfioIaPlan {
-    confioIaPlan { ${PLAN_FIELDS} }
+export const GET_ASSISTANT_PLAN = gql`
+  query GetAssistantPlan {
+    assistantPlan { ${PLAN_FIELDS} }
   }
 `;
 
-export const GET_CONFIO_IA_WAKE_WORD = gql`
-  query GetConfioIaWakeWord {
-    confioIaWakeWord { accessKey }
+export const GET_ASSISTANT_WAKE_WORD = gql`
+  query GetAssistantWakeWord {
+    assistantWakeWord { accessKey }
   }
 `;
 
-export const VERIFY_CONFIO_IA_PURCHASE = gql`
-  mutation VerifyConfioIaPurchase($platform: String!, $signedTransaction: String, $purchaseToken: String) {
-    verifyConfioIaPurchase(platform: $platform, signedTransaction: $signedTransaction, purchaseToken: $purchaseToken) {
+export const VERIFY_ASSISTANT_PURCHASE = gql`
+  mutation VerifyAssistantPurchase($platform: String!, $signedTransaction: String, $purchaseToken: String) {
+    verifyAssistantPurchase(platform: $platform, signedTransaction: $signedTransaction, purchaseToken: $purchaseToken) {
       success
       error
       plan { ${PLAN_FIELDS} }
@@ -54,9 +54,9 @@ export const VERIFY_CONFIO_IA_PURCHASE = gql`
   }
 `;
 
-export const START_CONFIO_IA_VOICE = gql`
-  mutation StartConfioIaVoice($screen: String, $timezone: String) {
-    startConfioIaVoice(screen: $screen, timezone: $timezone) {
+export const START_ASSISTANT_VOICE = gql`
+  mutation StartAssistantVoice($screen: String, $timezone: String) {
+    startAssistantVoice(screen: $screen, timezone: $timezone) {
       success
       error
       sessionId
@@ -66,9 +66,9 @@ export const START_CONFIO_IA_VOICE = gql`
   }
 `;
 
-export const CONNECT_CONFIO_IA_VOICE = gql`
-  mutation ConnectConfioIaVoice($sessionId: ID!, $offerSdp: String!) {
-    connectConfioIaVoice(sessionId: $sessionId, offerSdp: $offerSdp) {
+export const CONNECT_ASSISTANT_VOICE = gql`
+  mutation ConnectAssistantVoice($sessionId: ID!, $offerSdp: String!) {
+    connectAssistantVoice(sessionId: $sessionId, offerSdp: $offerSdp) {
       success
       error
       answerSdp
@@ -76,9 +76,9 @@ export const CONNECT_CONFIO_IA_VOICE = gql`
   }
 `;
 
-export const RUN_CONFIO_IA_VOICE_TOOL = gql`
-  mutation RunConfioIaVoiceTool($sessionId: ID!, $name: String!, $arguments: String) {
-    runConfioIaVoiceTool(sessionId: $sessionId, name: $name, arguments: $arguments) {
+export const RUN_ASSISTANT_VOICE_TOOL = gql`
+  mutation RunAssistantVoiceTool($sessionId: ID!, $name: String!, $arguments: String) {
+    runAssistantVoiceTool(sessionId: $sessionId, name: $name, arguments: $arguments) {
       output
       handedOff
       keepGoing
@@ -86,21 +86,21 @@ export const RUN_CONFIO_IA_VOICE_TOOL = gql`
   }
 `;
 
-export const LOG_CONFIO_IA_VOICE = gql`
-  mutation LogConfioIaVoice(
+export const LOG_ASSISTANT_VOICE = gql`
+  mutation LogAssistantVoice(
     $sessionId: ID!
-    $transcript: [ConfioIaTranscriptInput!]
+    $transcript: [AssistantTranscriptInput!]
     $usageJson: String
     $ended: Boolean
   ) {
-    logConfioIaVoice(sessionId: $sessionId, transcript: $transcript, usageJson: $usageJson, ended: $ended) {
+    logAssistantVoice(sessionId: $sessionId, transcript: $transcript, usageJson: $usageJson, ended: $ended) {
       keepGoing
       minutesLeft
     }
   }
 `;
 
-export type ConfioIaPlan = {
+export type AssistantPlan = {
   isPlus: boolean;
   productId: string;
   billingToken: string;
@@ -113,14 +113,14 @@ export type ConfioIaPlan = {
   voiceMinutes: number;
   voiceMinutesLeft: number;
   wakeWordAvailable: boolean;
-  // Launch switches: when off, the app shows no call button / no IA+ at all.
+  // Launch switches: when off, the app shows no call button / no Assistant+ at all.
   voiceCallsEnabled: boolean;
   plusSalesEnabled: boolean;
 };
 
-export const GET_CONFIO_IA_THREAD = gql`
-  query GetConfioIaThread($limit: Int, $beforeId: ID, $contextKey: String) {
-    confioIaThread(limit: $limit, beforeId: $beforeId, contextKey: $contextKey) {
+export const GET_ASSISTANT_THREAD = gql`
+  query GetAssistantThread($limit: Int, $beforeId: ID, $contextKey: String) {
+    assistantThread(limit: $limit, beforeId: $beforeId, contextKey: $contextKey) {
       messages { ${MESSAGE_FIELDS} }
       hasMore
       mode
@@ -131,8 +131,8 @@ export const GET_CONFIO_IA_THREAD = gql`
   }
 `;
 
-export const ASK_CONFIO_IA = gql`
-  mutation AskConfioIa(
+export const ASK_ASSISTANT = gql`
+  mutation AskAssistant(
     $body: String
     $audioBase64: String
     $audioMimeType: String
@@ -140,7 +140,7 @@ export const ASK_CONFIO_IA = gql`
     $screen: String
     $timezone: String
   ) {
-    askConfioIa(
+    askAssistant(
       body: $body
       audioBase64: $audioBase64
       audioMimeType: $audioMimeType
@@ -161,14 +161,14 @@ export const ASK_CONFIO_IA = gql`
   }
 `;
 
-export const RETURN_TO_CONFIO_IA = gql`
-  mutation ReturnToConfioIa {
-    returnToConfioIa { success mode }
+export const RETURN_TO_ASSISTANT = gql`
+  mutation ReturnToAssistant {
+    returnToAssistant { success mode }
   }
 `;
 
-export const UPDATE_CONFIO_IA_PROFILE = gql`
-  mutation UpdateConfioIaProfile(
+export const UPDATE_ASSISTANT_PROFILE = gql`
+  mutation UpdateAssistantProfile(
     $mascot: String
     $mascotName: String
     $mascotColor: String
@@ -176,7 +176,7 @@ export const UPDATE_CONFIO_IA_PROFILE = gql`
     $bubbleHeight: Float
     $wakeWordEnabled: Boolean
   ) {
-    updateConfioIaProfile(
+    updateAssistantProfile(
       mascot: $mascot
       mascotName: $mascotName
       mascotColor: $mascotColor
@@ -190,20 +190,20 @@ export const UPDATE_CONFIO_IA_PROFILE = gql`
   }
 `;
 
-export type ConfioIaAction = { type: string; destination?: string | null };
+export type AssistantAction = { type: string; destination?: string | null };
 
-export type ConfioIaMessage = {
+export type AssistantMessage = {
   id: string;
   role: 'user' | 'assistant' | 'team' | 'system';
   body: string;
   createdAt: string;
   senderName: string;
   modality?: string | null;
-  actions: ConfioIaAction[];
+  actions: AssistantAction[];
   pending?: boolean;
 };
 
-export type ConfioIaProfile = {
+export type AssistantProfile = {
   mascot: string;
   mascotName: string;
   mascotColor: string;
@@ -217,19 +217,19 @@ export type ConfioIaProfile = {
   petCreationsPeriod: 'week' | 'day' | string;
 };
 
-export type ConfioIaPet = { id: string; imageUrl?: string | null; idea: string; source: string };
+export type AssistantPet = { id: string; imageUrl?: string | null; idea: string; source: string };
 
 const PET_FIELDS = 'id imageUrl idea source';
 
-export const GET_CONFIO_IA_PETS = gql`
-  query GetConfioIaPets {
-    confioIaPets { ${PET_FIELDS} }
+export const GET_ASSISTANT_PETS = gql`
+  query GetAssistantPets {
+    assistantPets { ${PET_FIELDS} }
   }
 `;
 
-export const CREATE_CONFIO_IA_PET = gql`
-  mutation CreateConfioIaPet($idea: String, $photoBase64: String, $photoMimeType: String) {
-    createConfioIaPet(idea: $idea, photoBase64: $photoBase64, photoMimeType: $photoMimeType) {
+export const CREATE_ASSISTANT_PET = gql`
+  mutation CreateAssistantPet($idea: String, $photoBase64: String, $photoMimeType: String) {
+    createAssistantPet(idea: $idea, photoBase64: $photoBase64, photoMimeType: $photoMimeType) {
       success
       error
       creationsLeft
@@ -238,9 +238,9 @@ export const CREATE_CONFIO_IA_PET = gql`
   }
 `;
 
-export const USE_CONFIO_IA_PET = gql`
-  mutation UseConfioIaPet($petId: ID) {
-    useConfioIaPet(petId: $petId) {
+export const USE_ASSISTANT_PET = gql`
+  mutation UseAssistantPet($petId: ID) {
+    useAssistantPet(petId: $petId) {
       success
       error
       profile { ${PROFILE_FIELDS} }
@@ -248,8 +248,8 @@ export const USE_CONFIO_IA_PET = gql`
   }
 `;
 
-export const DELETE_CONFIO_IA_PET = gql`
-  mutation DeleteConfioIaPet($petId: ID!) {
-    deleteConfioIaPet(petId: $petId) { success }
+export const DELETE_ASSISTANT_PET = gql`
+  mutation DeleteAssistantPet($petId: ID!) {
+    deleteAssistantPet(petId: $petId) { success }
   }
 `;

@@ -1,4 +1,4 @@
-// Confío IA+: US$9.99/month, priced per country by the stores. The price
+// Confio Assistant+: US$9.99/month, priced per country by the stores. The price
 // shown is the store's own localized price (never hardcoded), and the
 // server decides entitlement after verifying the purchase with the store.
 import React, { useEffect, useState } from 'react';
@@ -6,24 +6,24 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View } 
 import { useApolloClient } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from '../components/common/AppText';
-import type { ConfioIaPlan } from './api';
+import type { AssistantPlan } from './api';
 import { buy, isBillingAvailable, loadProduct, manageSubscriptions, restore, type StoreProduct } from './billingClient';
-import ConfioIaMascot from './ConfioIaMascot';
+import AssistantMascot from './AssistantMascot';
 import { navigationRef } from '../navigation/RootNavigation';
 
 const EMERALD = '#047857';
 
 const PERKS: { icon: string; title: string; body: string }[] = [
-  { icon: 'phone-call', title: 'Habla con Confío IA', body: 'Conversación por voz en tiempo real, como una llamada.' },
+  { icon: 'phone-call', title: 'Habla con Confio Assistant', body: 'Conversación por voz en tiempo real, como una llamada.' },
   { icon: 'bar-chart-2', title: 'Más análisis', body: 'Análisis de tus movimientos y muchos más mensajes al día.' },
 ];
 
 type Props = {
-  plan: ConfioIaPlan | null;
+  plan: AssistantPlan | null;
   profile: { mascot?: string; mascotColor?: string; customPetUrl?: string | null } | null;
-  onPlan: (plan: ConfioIaPlan) => void;
+  onPlan: (plan: AssistantPlan) => void;
   onClose: () => void;
-  // Close the whole Confío IA box (before navigating elsewhere).
+  // Close the whole Confio Assistant box (before navigating elsewhere).
   onLeave: () => void;
 };
 
@@ -38,7 +38,7 @@ function formatDate(iso?: string | null) {
   }
 }
 
-export default function IaPlusPanel({ plan, profile, onPlan, onClose, onLeave }: Props) {
+export default function AssistantPlusPanel({ plan, profile, onPlan, onClose, onLeave }: Props) {
   const client = useApolloClient();
   const [product, setProduct] = useState<StoreProduct | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,12 +107,12 @@ export default function IaPlusPanel({ plan, profile, onPlan, onClose, onLeave }:
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.hero}>
-        <ConfioIaMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor} size={84} mood="happy" />
-        <Text style={styles.title}>Confío IA+</Text>
+        <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor} size={84} mood="happy" />
+        <Text style={styles.title}>Confio Assistant+</Text>
         {plan?.isPlus ? (
           <Text style={styles.subtitle}>
             {plan.inGrace
-              ? `Tu pago está pendiente en ${store}. Mantienes IA+ mientras se resuelve.`
+              ? `Tu pago está pendiente en ${store}. Mantienes Assistant+ mientras se resuelve.`
               : plan.autoRenew === false
                 ? `Activo hasta el ${formatDate(plan.expiresAt)}. No se renovará.`
                 : `Activo. Se renueva el ${formatDate(plan.expiresAt)}.`}
@@ -151,7 +151,7 @@ export default function IaPlusPanel({ plan, profile, onPlan, onClose, onLeave }:
       ) : loading ? (
         <ActivityIndicator color={EMERALD} style={styles.loader} />
       ) : !product ? (
-        <Text style={styles.message}>IA+ todavía no está disponible en tu tienda.</Text>
+        <Text style={styles.message}>Assistant+ todavía no está disponible en tu tienda.</Text>
       ) : (
         <>
           <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={subscribe} disabled={!!busy}>

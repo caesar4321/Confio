@@ -1,7 +1,7 @@
-"""User-created pets for Confío IA (like OpenAI's dots or Meta's Muse):
+"""User-created pets for Confio Assistant (like OpenAI's dots or Meta's Muse):
 describe an idea, or start from a photo of your own pet, and get a character
 drawn in Confío's style. Private to the user; limited per week (free) or per
-day (IA+). One image per creation (~US$0.01); moods are animated in the app.
+day (Assistant+). One image per creation (~US$0.01); moods are animated in the app.
 """
 from __future__ import annotations
 
@@ -52,11 +52,11 @@ def _headers():
 def creations_left(user):
     now = timezone.now()
     recent = CustomPet.objects.filter(user=user)
-    if billing.has_ia_plus(user):
+    if billing.has_plus(user):
         used = recent.filter(created_at__gte=now - timedelta(days=1)).count()
-        return max(conf.get('CONFIO_IA_PET_PLUS_PER_DAY') - used, 0), 'day'
+        return max(conf.get('CONFIO_ASSISTANT_PET_PLUS_PER_DAY') - used, 0), 'day'
     used = recent.filter(created_at__gte=now - timedelta(days=7)).count()
-    return max(conf.get('CONFIO_IA_PET_FREE_PER_WEEK') - used, 0), 'week'
+    return max(conf.get('CONFIO_ASSISTANT_PET_FREE_PER_WEEK') - used, 0), 'week'
 
 
 def _moderate(text=None, image_data_url=None):
@@ -86,7 +86,7 @@ def _moderate(text=None, image_data_url=None):
 def _photo_is_a_pet(data_url):
     """Refuse photos of people: a pet must never become someone's likeness."""
     payload = {
-        'model': conf.get('CONFIO_IA_MODEL'),
+        'model': conf.get('CONFIO_ASSISTANT_MODEL'),
         'input': [{'role': 'user', 'content': [
             {'type': 'input_text', 'text': (
                 'Responde solo JSON {"persona": bool, "animal_o_objeto": bool}. '
@@ -132,7 +132,7 @@ def create_pet(user, *, idea='', photo_base64=None, photo_mime=None):
                            else 'Ya creaste tus personajes de hoy. Mañana puedes crear más.')
         # Holds the slot (counted by creations_left) while the image is drawn.
         slot = CustomPet.objects.create(user=user, source='photo' if photo_base64 else 'idea', image_key='',
-                                        model=conf.get('CONFIO_IA_PET_IMAGE_MODEL'))
+                                        model=conf.get('CONFIO_ASSISTANT_PET_IMAGE_MODEL'))
     try:
         return _create_pet(user, slot, idea=idea, photo_base64=photo_base64, photo_mime=photo_mime)
     except PetRejected:
@@ -149,8 +149,8 @@ def create_pet(user, *, idea='', photo_base64=None, photo_mime=None):
 
 def _create_pet(user, slot, *, idea='', photo_base64=None, photo_mime=None):
     idea = ' '.join((idea or '').split())[:300]
-    model = conf.get('CONFIO_IA_PET_IMAGE_MODEL')
-    quality = conf.get('CONFIO_IA_PET_IMAGE_QUALITY')
+    model = conf.get('CONFIO_ASSISTANT_PET_IMAGE_MODEL')
+    quality = conf.get('CONFIO_ASSISTANT_PET_IMAGE_QUALITY')
 
     if photo_base64:
         extension = PHOTO_TYPES.get((photo_mime or '').lower())
@@ -201,10 +201,10 @@ def _create_pet(user, slot, *, idea='', photo_base64=None, photo_mime=None):
     data = response.json()
     image = base64.b64decode(data['data'][0]['b64_json'])
     tokens = int(((data.get('usage') or {}).get('output_tokens')) or 0)
-    cost = Decimal(tokens) * Decimal(str(conf.get('CONFIO_IA_PET_IMAGE_OUTPUT_PRICE'))) / Decimal(1_000_000)
+    cost = Decimal(tokens) * Decimal(str(conf.get('CONFIO_ASSISTANT_PET_IMAGE_OUTPUT_PRICE'))) / Decimal(1_000_000)
 
     from security.s3_utils import build_s3_key, upload_object
-    key = build_s3_key(conf.get('CONFIO_IA_PET_PREFIX') + str(user.id), 'pet.png')
+    key = build_s3_key(conf.get('CONFIO_ASSISTANT_PET_PREFIX') + str(user.id), 'pet.png')
     upload_object(key=key, body=image, content_type='image/png')
     slot.source, slot.idea, slot.image_key, slot.model, slot.cost_usd = source, idea, key, model, cost
     slot.save(update_fields=['source', 'idea', 'image_key', 'model', 'cost_usd'])
@@ -216,7 +216,7 @@ def pet_url(pet):
         return None
     from security.s3_utils import generate_presigned_get
     try:
-        return generate_presigned_get(key=pet.image_key, expires_in_seconds=conf.get('CONFIO_IA_PET_URL_SECONDS'))
+        return generate_presigned_get(key=pet.image_key, expires_in_seconds=conf.get('CONFIO_ASSISTANT_PET_URL_SECONDS'))
     except Exception:  # noqa: BLE001 - a missing image falls back to Confi
         logger.exception('Pet URL failed for %s', pet.id)
         return None

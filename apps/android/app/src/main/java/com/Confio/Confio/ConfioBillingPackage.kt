@@ -17,7 +17,7 @@ import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.uimanager.ViewManager
 
-// ConfioBilling (Android): Play Billing 8 for the Confío IA+ subscription.
+// ConfioBilling (Android): Play Billing 8 for the Confio Assistant+ subscription.
 //
 // The app never decides entitlement and never acknowledges: every purchase
 // token goes to Django, which reads it from the Play Developer API, checks the

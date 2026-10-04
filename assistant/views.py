@@ -1,4 +1,4 @@
-"""Store server notifications for IA+ (no auth cookies; verified per store)."""
+"""Store server notifications for Assistant+ (no auth cookies; verified per store)."""
 import json
 import logging
 

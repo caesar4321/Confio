@@ -4,7 +4,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from '../components/common/AppText';
-import ConfioIaMascot, { type MascotMood } from './ConfioIaMascot';
+import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { hangUp, toggleMute, useCall } from './callStore';
 
 const STATUS: Record<string, string> = {
@@ -28,7 +28,7 @@ export default function VoiceCallPanel({ profile }: { profile: { mascot?: string
   return (
     <View style={styles.wrap}>
       <View style={styles.hero}>
-        <ConfioIaMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor} size={140} mood={MOOD[call.state] ?? 'idle'} />
+        <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor} size={140} mood={MOOD[call.state] ?? 'idle'} />
         <Text style={styles.status}>{call.muted ? 'Micrófono apagado' : STATUS[call.state]}</Text>
         {call.minutesLeft !== null ? (
           <Text style={styles.minutes}>Te quedan {call.minutesLeft} min este mes</Text>

@@ -1,4 +1,4 @@
-"""Realtime voice calls with Confío IA (IA+).
+"""Realtime voice calls with Confio Assistant (Assistant+).
 
 The phone talks to OpenAI directly over WebRTC with a short-lived client
 secret minted here. Everything that touches the user's data stays on the
@@ -52,7 +52,7 @@ def month_start(now=None):
 
 def minutes_used(user, now=None):
     now = now or timezone.now()
-    idle = timedelta(seconds=conf.get('CONFIO_IA_VOICE_IDLE_SECONDS'))
+    idle = timedelta(seconds=conf.get('CONFIO_ASSISTANT_VOICE_IDLE_SECONDS'))
     total = 0.0
     for session in VoiceSession.objects.filter(user=user, started_at__gte=month_start(now)):
         end = session.ended_at or min(session.last_seen_at + idle, now)
@@ -61,7 +61,7 @@ def minutes_used(user, now=None):
 
 
 def minutes_left(user):
-    return max(conf.get('CONFIO_IA_PLUS_VOICE_MINUTES') - minutes_used(user), 0.0)
+    return max(conf.get('CONFIO_ASSISTANT_PLUS_VOICE_MINUTES') - minutes_used(user), 0.0)
 
 
 def _realtime_tools(belt):
@@ -78,10 +78,10 @@ def _realtime_tools(belt):
 
 def start_session(viewer, conversation, *, first_name, account_label, country):
     user = viewer.user
-    if not conf.get('CONFIO_IA_REALTIME_ENABLED'):
-        raise VoiceUnavailable('Las llamadas con Confío IA todavía no están disponibles.')
-    if not billing.has_ia_plus(user):
-        raise VoiceUnavailable('Las llamadas con Confío IA son parte de IA+.')
+    if not conf.get('CONFIO_ASSISTANT_REALTIME_ENABLED'):
+        raise VoiceUnavailable('Las llamadas con Confio Assistant todavía no están disponibles.')
+    if not billing.has_plus(user):
+        raise VoiceUnavailable('Las llamadas con Confio Assistant son parte de Assistant+.')
     left = minutes_left(user)
     if left < 0.5:
         raise VoiceUnavailable('Usaste tus minutos de voz de este mes. Puedes seguir por texto o con audios.')
@@ -97,7 +97,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         screen=viewer.screen, local_now=f'{local_now:%Y-%m-%d %H:%M} ({viewer.tz})',
         destinations=allowed_destinations(viewer),
     ) + VOICE_NOTE
-    model = conf.get('CONFIO_IA_REALTIME_MODEL')
+    model = conf.get('CONFIO_ASSISTANT_REALTIME_MODEL')
     # The secret only has to live until the call connects.
     body = {
         'expires_after': {'anchor': 'created_at', 'seconds': 120},
@@ -107,10 +107,10 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
             'instructions': instructions,
             'audio': {
                 'input': {
-                    'transcription': {'model': conf.get('CONFIO_IA_REALTIME_TRANSCRIBE_MODEL')},
+                    'transcription': {'model': conf.get('CONFIO_ASSISTANT_REALTIME_TRANSCRIBE_MODEL')},
                     'turn_detection': {'type': 'semantic_vad'},
                 },
-                'output': {'voice': conf.get('CONFIO_IA_REALTIME_VOICE')},
+                'output': {'voice': conf.get('CONFIO_ASSISTANT_REALTIME_VOICE')},
             },
             'tools': _realtime_tools(belt),
             'tool_choice': 'auto',
@@ -121,7 +121,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         response = requests.post(
             'https://api.openai.com/v1/realtime/client_secrets',
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-            json=body, timeout=conf.get('CONFIO_IA_REQUEST_TIMEOUT_SECONDS'),
+            json=body, timeout=conf.get('CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS'),
         )
     except requests.RequestException as exc:
         raise VoiceUnavailable('La voz no está disponible ahora.') from exc
@@ -148,7 +148,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
 
 
 def _secret_key(session_id):
-    return f'confio-ia:voice-secret:{session_id}'
+    return f'assistant:voice-secret:{session_id}'
 
 
 def connect(session, offer_sdp):
@@ -165,7 +165,7 @@ def connect(session, offer_sdp):
     try:
         response = requests.post('https://api.openai.com/v1/realtime/calls', data=(offer_sdp or '').encode(),
                                  headers={'Authorization': f'Bearer {secret}', 'Content-Type': 'application/sdp'},
-                                 timeout=conf.get('CONFIO_IA_REQUEST_TIMEOUT_SECONDS'))
+                                 timeout=conf.get('CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS'))
     except requests.RequestException as exc:
         raise VoiceUnavailable('No pudimos conectar la llamada.') from exc
     location = response.headers.get('Location', '')
@@ -204,12 +204,12 @@ def session_belongs(session, account, business):
 
 def session_allowed(session, account, business):
     """A call may keep using tools only while it is live, on the account it
-    started from, with realtime on, IA+ active and minutes left."""
-    if session.ended_at is not None or not conf.get('CONFIO_IA_REALTIME_ENABLED'):
+    started from, with realtime on, Assistant+ active and minutes left."""
+    if session.ended_at is not None or not conf.get('CONFIO_ASSISTANT_REALTIME_ENABLED'):
         return False
     if not session_belongs(session, account, business):
         return False
-    return billing.has_ia_plus(session.user) and minutes_left(session.user) > 0
+    return billing.has_plus(session.user) and minutes_left(session.user) > 0
 
 
 def hang_up(session):
@@ -251,11 +251,11 @@ def enforce_sessions(now=None):
     """Hang up calls whose app stopped heartbeating or whose minutes ran out:
     the WebRTC link runs straight to OpenAI, so only the server can cut it."""
     now = now or timezone.now()
-    idle = timedelta(seconds=conf.get('CONFIO_IA_VOICE_IDLE_SECONDS'))
+    idle = timedelta(seconds=conf.get('CONFIO_ASSISTANT_VOICE_IDLE_SECONDS'))
     ended = 0
     for session in VoiceSession.objects.filter(ended_at__isnull=True).select_related('user'):
         stale = session.last_seen_at + idle < now
-        if (stale or not conf.get('CONFIO_IA_REALTIME_ENABLED') or not billing.has_ia_plus(session.user)
+        if (stale or not conf.get('CONFIO_ASSISTANT_REALTIME_ENABLED') or not billing.has_plus(session.user)
                 or minutes_left(session.user) <= 0):
             hang_up(session)
             ended += 1
@@ -309,7 +309,7 @@ def run_tool(session, viewer, name, arguments, analyses_left=0):
     except AssistantUnavailable:
         output = {'error': 'No pude consultarlo ahora.'}
     except Exception:  # noqa: BLE001 - a broken tool must read as broken
-        logger.exception('Confío IA voice tool %s failed', name)
+        logger.exception('Confio Assistant voice tool %s failed', name)
         output = {'error': 'La herramienta falló.'}
     from django.db import transaction
     with transaction.atomic():
@@ -343,7 +343,7 @@ def record_usage(session, usage):
     for key, value in counts.items():
         totals[key] = int(totals.get(key, 0)) + max(value, 0)
     session.usage = totals
-    prices = (conf.get('CONFIO_IA_REALTIME_PRICES') or {}).get(session.model)
+    prices = (conf.get('CONFIO_ASSISTANT_REALTIME_PRICES') or {}).get(session.model)
     if prices:
         audio_in, audio_out, text_in, text_out, cached_in = (Decimal(str(p)) for p in prices)
         million = Decimal(1_000_000)

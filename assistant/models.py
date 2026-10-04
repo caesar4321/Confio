@@ -1,4 +1,4 @@
-"""Confío IA: the customer assistant that answers in the support thread.
+"""Confio Assistant: the customer assistant that answers in the support thread.
 
 Conversation text lives in inbox.SupportMessage (one history for typed text,
 voice notes, realtime transcripts and staff replies). This app only keeps what
@@ -24,7 +24,7 @@ class Mascot(models.TextChoices):
 class AssistantProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_profile')
     mascot = models.CharField(max_length=16, choices=Mascot.choices, default=Mascot.CONFI)
-    # What the user calls their pet; the assistant still introduces itself as Confío IA.
+    # What the user calls their pet; the assistant still introduces itself as Confio Assistant.
     mascot_name = models.CharField(max_length=24, blank=True, default='')
     mascot_color = models.CharField(max_length=7, blank=True, default='')
     bubble_hidden = models.BooleanField(default=False)
@@ -48,10 +48,10 @@ class AssistantProfile(models.Model):
 
 
 class AssistantThreadState(models.Model):
-    """Who answers a support thread: Confío IA, or the human team after a handoff.
+    """Who answers a support thread: Confio Assistant, or the human team after a handoff.
 
     Human mode is never permanent: it lapses on its own once the team has been
-    quiet for CONFIO_IA_HUMAN_MODE_HOURS, so a user is never left waiting on a
+    quiet for CONFIO_ASSISTANT_HUMAN_MODE_HOURS, so a user is never left waiting on a
     flag nobody clears.
     """
     conversation = models.OneToOneField(
@@ -115,7 +115,7 @@ ENTITLED_STATUSES = (SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE)
 
 
 class AssistantSubscription(models.Model):
-    """One store subscription (IA+), as last verified with Apple or Google.
+    """One store subscription (Assistant+), as last verified with Apple or Google.
 
     store_key is the stable store identity: Apple originalTransactionId, or
     the Google purchase token (a resubscribe gets a new token; the old one is
@@ -176,7 +176,7 @@ class StoreNotification(models.Model):
 
 
 class VoiceSession(models.Model):
-    """One realtime voice call (IA+). Duration is measured by the server
+    """One realtime voice call (Assistant+). Duration is measured by the server
     (started_at → last_seen_at), never taken from the client."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_voice_sessions')

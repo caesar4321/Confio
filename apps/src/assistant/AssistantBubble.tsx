@@ -1,4 +1,4 @@
-// The floating entry to Confío IA and the message box, on every screen.
+// The floating entry to Confio Assistant and the message box, on every screen.
 // It indicates (unread badge, live call), suggests (one hint per screen,
 // sparingly) and opens the chat. Drag it to either edge if it covers
 // something; it snaps there and remembers the spot.
@@ -21,9 +21,9 @@ import { Text } from '../components/common/AppText';
 import { GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
-import { GET_CONFIO_IA_THREAD, UPDATE_CONFIO_IA_PROFILE } from './api';
-import ConfioIaMascot from './ConfioIaMascot';
-import { useConfioIa } from './ConfioIaContext';
+import { GET_ASSISTANT_THREAD, UPDATE_ASSISTANT_PROFILE } from './api';
+import AssistantMascot from './AssistantMascot';
+import { useAssistant } from './AssistantContext';
 import { DOCK_ROUTES, TAB_ROUTES, hintFor, type ScreenHint } from './suggestions';
 import { MAX_VOICE_NOTE_MS, cancelVoiceNote, isVoiceNoteAvailable, startVoiceNote, stopVoiceNote } from './voiceNote';
 
@@ -42,10 +42,10 @@ const MAX_HINTS_PER_SESSION = 4;
 
 type Hint = ScreenHint & { kind: 'screen' | 'unread' };
 
-export default function ConfioIaBubble() {
+export default function AssistantBubble() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy } = useConfioIa();
+  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy } = useAssistant();
   const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
   const { activeAccount } = useAccount();
   const [keyboardUp, setKeyboardUp] = useState(false);
@@ -68,18 +68,18 @@ export default function ConfioIaBubble() {
     nextFetchPolicy: 'cache-first',
     skip: !enabled,
   });
-  // Profile only (mascot, color, position). Fails quietly on servers without Confío IA.
-  const { data: threadData } = useQuery(GET_CONFIO_IA_THREAD, {
+  // Profile only (mascot, color, position). Fails quietly on servers without Confio Assistant.
+  const { data: threadData } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: 1, contextKey },
     fetchPolicy: 'cache-and-network',
     skip: !enabled,
     errorPolicy: 'ignore',
   });
-  const [saveProfile] = useMutation(UPDATE_CONFIO_IA_PROFILE);
-  const profile = threadData?.confioIaThread?.profile;
-  // The support chat exists (server knows it) / is answered by Confío IA.
-  const chatAvailable = !!threadData?.confioIaThread;
-  const iaAvailable = !!threadData?.confioIaThread?.enabled;
+  const [saveProfile] = useMutation(UPDATE_ASSISTANT_PROFILE);
+  const profile = threadData?.assistantThread?.profile;
+  // The support chat exists (server knows it) / is answered by Confio Assistant.
+  const chatAvailable = !!threadData?.assistantThread;
+  const iaAvailable = !!threadData?.assistantThread?.enabled;
   const unread = unreadData?.messageInboxUnreadCount || 0;
 
   useEffect(() => {
@@ -137,7 +137,7 @@ export default function ConfioIaBubble() {
   }, [restX, restY, dragging, pan]);
 
   // Hold to talk: press and hold still → record a voice note; release →
-  // send it to Confío IA; slide away → cancel.
+  // send it to Confio Assistant; slide away → cancel.
   const talkingRef = useRef(false);
   const cancelledRef = useRef(false);
   const talkAccount = useRef<string | undefined>(undefined);
@@ -310,7 +310,7 @@ export default function ConfioIaBubble() {
   }
 
   const onPress = () => {
-    // Without Confío IA the box shows the classic support thread instead.
+    // Without Confio Assistant the box shows the classic support thread instead.
     open();
   };
 
@@ -374,11 +374,11 @@ export default function ConfioIaBubble() {
           delayLongPress={HOLD_TO_TALK_MS}
           style={[styles.button, inCall && styles.buttonInCall, talking && styles.buttonTalking]}
           accessibilityRole="button"
-          accessibilityLabel={unread > 0 ? `Confío IA y mensajes, ${unread} sin leer` : 'Confío IA y mensajes'}
+          accessibilityLabel={unread > 0 ? `Confio Assistant y mensajes, ${unread} sin leer` : 'Confio Assistant y mensajes'}
           accessibilityHint="Mantén presionado para hablar. Arrastra para moverlo."
         >
           {iaAvailable ? (
-            <ConfioIaMascot
+            <AssistantMascot
               kind={profile?.mascot}
               imageUrl={profile?.customPetUrl}
               color={profile?.mascotColor}

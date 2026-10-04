@@ -29,7 +29,7 @@ UNAVAILABLE_REPLY = (
     'o escribe "hablar con una persona" y te atiende el equipo de Confío.'
 )
 LIMIT_REPLY = (
-    'Llegaste al límite de mensajes con Confío IA por hoy. Mañana seguimos. '
+    'Llegaste al límite de mensajes con Confio Assistant por hoy. Mañana seguimos. '
     'Si es urgente, escribe "hablar con una persona".'
 )
 HANDOFF_NOTICE = 'Te pasé con el equipo de Confío. Te responderán aquí mismo, normalmente en unas horas.'
@@ -109,7 +109,7 @@ def awaiting_team(conversation, recent_messages_desc):
 
     Queries the whole thread (not the portal's 50-message window): a long AI
     conversation after a handoff must not hide it. Threads from before
-    Confío IA (no AI message at all) keep the old rule.
+    Confio Assistant (no AI message at all) keep the old rule.
     """
     last_staff = (conversation.messages.filter(sender_type='AGENT', sender_user__isnull=False)
                   .order_by('-created_at').values_list('created_at', flat=True).first())
@@ -137,12 +137,12 @@ def turns_today(user):
 
 
 def _plus(user):
-    from .billing import has_ia_plus
-    return has_ia_plus(user)
+    from .billing import has_plus
+    return has_plus(user)
 
 
 def daily_turn_cap(user):
-    return conf.get('CONFIO_IA_PLUS_DAILY_TURNS' if _plus(user) else 'CONFIO_IA_DAILY_TURNS')
+    return conf.get('CONFIO_ASSISTANT_PLUS_DAILY_TURNS' if _plus(user) else 'CONFIO_ASSISTANT_DAILY_TURNS')
 
 
 def remaining_turns(user):
@@ -156,7 +156,7 @@ def analyses_left(user):
     tool_lists = list(turns_today(user).values_list('tools', flat=True)) + list(
         VoiceSession.objects.filter(user=user, started_at__gte=since).values_list('tools', flat=True))
     used = sum(1 for tools in tool_lists for tool in (tools or []) if tool.get('name') == 'analyze_finances')
-    cap = conf.get('CONFIO_IA_PLUS_DAILY_ANALYSES' if _plus(user) else 'CONFIO_IA_DAILY_ANALYSES')
+    cap = conf.get('CONFIO_ASSISTANT_PLUS_DAILY_ANALYSES' if _plus(user) else 'CONFIO_ASSISTANT_DAILY_ANALYSES')
     return max(cap - used, 0)
 
 
@@ -182,7 +182,7 @@ def _route_to_team(message):
         try:
             send_support_staff_push(message.id)
         except Exception:
-            logger.exception('Confío IA: staff push failed', extra={'message_id': message.id})
+            logger.exception('Confio Assistant: staff push failed', extra={'message_id': message.id})
 
     # After commit: the push must never point at a message that rolled back.
     transaction.on_commit(push)
@@ -197,7 +197,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     counts at once); transcription and model calls run outside the lock, so a
     slow model never blocks the user's other requests.
 
-    can_navigate=False for app builds that predate Confío IA: they can't
+    can_navigate=False for app builds that predate Confio Assistant: they can't
     open screens, so the model must not claim it did.
     Raises ValueError (bad input) / AssistantUnavailable (transcription down).
     """
@@ -207,7 +207,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         lock_user(user)
         conversation = get_or_create_support_conversation(user, account, business)
         state = thread_state(conversation)
-        human = is_human_mode(conversation, state) or not conf.get('CONFIO_IA_ENABLED')
+        human = is_human_mode(conversation, state) or not conf.get('CONFIO_ASSISTANT_ENABLED')
         remaining = remaining_turns(user)
         turn = None
         if audio:
@@ -236,7 +236,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             raise ValueError('No escuché nada en el audio.')
         body, modality = transcript, TurnModality.VOICE_NOTE
 
-    clean = (body or '').strip()[:conf.get('CONFIO_IA_MAX_INPUT_CHARS')]
+    clean = (body or '').strip()[:conf.get('CONFIO_ASSISTANT_MAX_INPUT_CHARS')]
     if not clean:
         raise ValueError('Message body is required')
     wants_human = any(k in clean.lower() for k in HUMAN_KEYWORDS)
@@ -246,7 +246,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     with transaction.atomic():
         lock_user(user)
         state = thread_state(conversation)
-        human = is_human_mode(conversation, state) or not conf.get('CONFIO_IA_ENABLED')
+        human = is_human_mode(conversation, state) or not conf.get('CONFIO_ASSISTANT_ENABLED')
         user_message = _append(conversation, sender_type='USER', sender_user=user, body=clean,
                                metadata={'modality': modality, 'screen': screen})
         if turn is not None:
@@ -271,7 +271,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     # 4. Answer (no lock; analyses reserve their own slot).
     viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name)
-    history = list(conversation.messages.order_by('-created_at')[:conf.get('CONFIO_IA_HISTORY_MESSAGES')])
+    history = list(conversation.messages.order_by('-created_at')[:conf.get('CONFIO_ASSISTANT_HISTORY_MESSAGES')])
     history.reverse()
     started = time.monotonic()
     try:
@@ -285,7 +285,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             can_navigate=can_navigate,
         )
     except AssistantUnavailable as exc:
-        logger.warning('Confío IA unavailable: %s', exc)
+        logger.warning('Confio Assistant unavailable: %s', exc)
         if _team_took_over(user, conversation, user_message):
             turn.error = f'superseded by human handoff ({str(exc)[:200]})'
             turn.latency_ms = int((time.monotonic() - started) * 1000)
@@ -386,7 +386,7 @@ def append_voice_transcript(conversation, user, entries):
     """Realtime turns land in the same thread as text, marked REALTIME."""
     saved = []
     for entry in entries[:40]:
-        text = (entry.get('text') or '').strip()[:conf.get('CONFIO_IA_MAX_INPUT_CHARS')]
+        text = (entry.get('text') or '').strip()[:conf.get('CONFIO_ASSISTANT_MAX_INPUT_CHARS')]
         if not text:
             continue
         if entry.get('role') == 'user':
@@ -402,10 +402,10 @@ def handoff_from_voice(conversation, reason):
     """escalate_to_human during a call: same handoff as text turns."""
     state = thread_state(conversation)
     state.handoff_at = timezone.now()
-    state.handoff_reason = (reason or 'Llamada con Confío IA')[:280]
+    state.handoff_reason = (reason or 'Llamada con Confio Assistant')[:280]
     state.save(update_fields=['handoff_at', 'handoff_reason', 'updated_at'])
     note = _append(conversation, sender_type='USER', sender_user=conversation.user,
-                   body=f'(Desde una llamada con Confío IA) {state.handoff_reason}',
+                   body=f'(Desde una llamada con Confio Assistant) {state.handoff_reason}',
                    metadata={'modality': TurnModality.REALTIME})
     _route_to_team(note)
 
@@ -506,7 +506,7 @@ def mp4_duration_seconds(data):
 def transcription_cost(seconds):
     if not seconds:
         return Decimal('0')
-    per_minute = Decimal(str(conf.get('CONFIO_IA_TRANSCRIBE_PRICE_PER_MINUTE')))
+    per_minute = Decimal(str(conf.get('CONFIO_ASSISTANT_TRANSCRIBE_PRICE_PER_MINUTE')))
     return Decimal(str(seconds)) / Decimal(60) * per_minute
 
 
@@ -516,7 +516,7 @@ def transcribe(audio_base64, mime_type, duration_ms):
     if extension is None:
         raise ValueError('Formato de audio no soportado')
     seconds = max(float(duration_ms or 0) / 1000.0, 0)
-    if seconds > conf.get('CONFIO_IA_MAX_AUDIO_SECONDS') + 1:
+    if seconds > conf.get('CONFIO_ASSISTANT_MAX_AUDIO_SECONDS') + 1:
         raise ValueError('El audio es demasiado largo')
     try:
         audio = base64.b64decode(audio_base64 or '', validate=True)
@@ -524,7 +524,7 @@ def transcribe(audio_base64, mime_type, duration_ms):
         raise ValueError('Audio inválido') from exc
     if not audio:
         raise ValueError('Audio vacío')
-    if len(audio) > conf.get('CONFIO_IA_MAX_AUDIO_BYTES'):
+    if len(audio) > conf.get('CONFIO_ASSISTANT_MAX_AUDIO_BYTES'):
         raise ValueError('El audio es demasiado grande')
     # The file's own header decides the length; the reported value can only
     # raise it. No readable duration, no transcription.
@@ -534,7 +534,7 @@ def transcribe(audio_base64, mime_type, duration_ms):
         raise ValueError('Audio inválido')
     # The decoded length decides; the byte cap above bounds size separately.
     seconds = max(seconds, actual)
-    if seconds > conf.get('CONFIO_IA_MAX_AUDIO_SECONDS') + 1:
+    if seconds > conf.get('CONFIO_ASSISTANT_MAX_AUDIO_SECONDS') + 1:
         raise ValueError('El audio es demasiado largo')
     api_key = getattr(settings, 'OPENAI_API_KEY', '')
     if not api_key:
@@ -544,8 +544,8 @@ def transcribe(audio_base64, mime_type, duration_ms):
             'https://api.openai.com/v1/audio/transcriptions',
             headers={'Authorization': f'Bearer {api_key}'},
             files={'file': (f'nota.{extension}', audio, mime_type)},
-            data={'model': conf.get('CONFIO_IA_TRANSCRIBE_MODEL'), 'response_format': 'json'},
-            timeout=conf.get('CONFIO_IA_REQUEST_TIMEOUT_SECONDS'),
+            data={'model': conf.get('CONFIO_ASSISTANT_TRANSCRIBE_MODEL'), 'response_format': 'json'},
+            timeout=conf.get('CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS'),
         )
     except requests.RequestException as exc:
         raise AssistantUnavailable(f'transcription failed: {exc}') from exc
