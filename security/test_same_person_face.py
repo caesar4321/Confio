@@ -358,7 +358,8 @@ class DuplicatedFaceHoldTests(TestCase):
                 mock.patch('security.didit.other_users_with_face', return_value=others) as search:
             didit.sync_didit_session(session_id=f's-{number}', expected_user=self.user)
             didit.sync_didit_session(session_id=f's-{number}', expected_user=self.user)
-        self.assertEqual(search.call_count, 1)  # once per session
+        # Once per session when the search ran; again on each sync while it can't.
+        self.assertEqual(search.call_count, 2 if others is None else 1)
         row.refresh_from_db()
         return row
 
@@ -376,10 +377,44 @@ class DuplicatedFaceHoldTests(TestCase):
         case = SuspiciousActivity.objects.get(user=self.user, detection_data__trigger='didit_duplicated_face')
         self.assertEqual(list(case.related_users.values_list('pk', flat=True)), [other.pk])
 
-    def test_a_face_search_that_cannot_run_still_holds(self):
+    def test_a_face_search_that_cannot_run_never_holds_and_is_retried(self):
+        # An outage is "don't know": no hold that only support could lift.
         row = self.sync_with_duplicate(None)
-        self.assertIn('duplicated_face', row.risk_factors)
+        self.assertNotIn('duplicated_face', row.risk_factors)
+        self.assertNotIn('duplicated_face_checked', row.risk_factors)
+        self.assertIn(didit.DUPLICATED_FACE_RETRY_KEY, row.risk_factors)
+        self.assertEqual(self.check(), '')
+
+    def test_a_retried_search_that_finds_another_user_holds(self):
+        other = get_user_model().objects.create(username='dup-other-2', firebase_uid='dup-other-2')
+        row = self.sync_with_duplicate(None, number='P-12')
+        with mock.patch('security.didit.retrieve_didit_decision', return_value={
+                    'session_id': 's-P-12', 'status': 'Approved',
+                    'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
+                    'first_name': 'Ana', 'last_name': 'Perez', 'date_of_birth': '1990-01-01',
+                    'id_verifications': [{'nationality': 'VEN', 'document_type': 'Passport', 'document_number': 'P-12',
+                                          'issuing_state': 'VEN', 'expiration_date': '2030-12-31'}],
+                    'liveness_checks': [{'warnings': [{'risk': 'DUPLICATED_FACE', 'log_type': 'information'}]}]}), \
+                mock.patch('security.didit._notify_verification_status_change'), \
+                mock.patch('security.didit._store_face_reference'), \
+                mock.patch('security.didit.other_users_with_face', return_value=[other.pk]):
+            self.assertEqual(didit.retry_duplicated_face_search(), 1)
+        row.refresh_from_db()
+        self.assertEqual(row.risk_factors['duplicated_face']['matched_user_ids'], [other.pk])
+        self.assertNotIn(didit.DUPLICATED_FACE_RETRY_KEY, row.risk_factors)
         self.assertEqual(self.check(), MESSAGE)
+
+    def test_a_search_that_never_runs_is_given_up_without_a_hold(self):
+        from datetime import timedelta
+        row = self.sync_with_duplicate(None, number='P-13')
+        factors = dict(row.risk_factors)
+        factors[didit.DUPLICATED_FACE_RETRY_KEY] = (timezone.now() - timedelta(days=8)).isoformat()
+        IdentityVerification.all_documents.filter(pk=row.pk).update(risk_factors=factors)
+        didit.retry_duplicated_face_search()
+        row.refresh_from_db()
+        self.assertTrue(row.risk_factors[didit.DUPLICATED_FACE_UNVERIFIED_KEY])
+        self.assertNotIn('duplicated_face', row.risk_factors)
+        self.assertEqual(self.check(), '')
 
     def test_face_search_leaves_out_the_persons_own_sessions_and_weak_matches(self):
         body = {'face_search': {'matches': [

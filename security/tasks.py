@@ -24,8 +24,14 @@ def reconcile_face_blocklist():
 def retry_pending_same_face():
     """Hourly: documents left pending because their face comparison could not
     run (AWS or Didit unreachable); Didit sends the decision webhook once."""
-    from .didit import retry_pending_same_face as retry
-    return retry()
+    from .didit import retry_duplicated_face_search, retry_pending_same_face as retry
+    synced = retry()
+    try:
+        synced += retry_duplicated_face_search()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('Duplicate-face search retries failed')
+    return synced
 
 
 @shared_task(name='security.purge_face_check_evidence')

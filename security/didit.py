@@ -1306,6 +1306,10 @@ FACE_UNCONFIRMED_MESSAGE = 'No pudimos confirmar que el documento sea tuyo. Veri
 SAME_FACE_RETRY_KEY = 'same_face_retry_since'
 SAME_FACE_EXHAUSTED_KEY = 'same_face_retry_exhausted'
 SAME_FACE_RETRY_WINDOW_DAYS = 7
+# Didit duplicate-face warning whose face search could not run: retried by
+# re-syncing the session; "don't know" never holds the user.
+DUPLICATED_FACE_RETRY_KEY = 'duplicated_face_search_retry_since'
+DUPLICATED_FACE_UNVERIFIED_KEY = 'duplicated_face_unverified'
 
 
 class _NoSelfie(Exception):
@@ -1409,6 +1413,43 @@ def _same_face(anchor: IdentityVerification, response_payload: dict[str, Any]) -
     similarity = max((Decimal(str(m.get('Similarity') or 0)) for m in matches), default=Decimal('0'))
     threshold = Decimal(str(_setting('FACE_MIN_SIMILARITY', FACE_MIN_SIMILARITY)))
     return FACE_MATCH if similarity >= threshold else FACE_MISMATCH
+
+
+def retry_duplicated_face_search() -> int:
+    """Hourly: re-sync sessions whose duplicate-face search could not run,
+    for SAME_FACE_RETRY_WINDOW_DAYS. Past the window the search is given up
+    WITHOUT a hold (noted for review): an outage never gates a user."""
+    from datetime import timedelta
+    from django.contrib.auth import get_user_model
+    from django.db import transaction
+    users = get_user_model().all_objects
+    cutoff = (timezone.now() - timedelta(days=SAME_FACE_RETRY_WINDOW_DAYS)).isoformat()
+    key = f'risk_factors__{DUPLICATED_FACE_RETRY_KEY}'
+    for verification_id in list(IdentityVerification.all_documents.filter(
+            **{f'{key}__lt': cutoff}).values_list('pk', flat=True)):
+        with transaction.atomic():
+            row = IdentityVerification.all_documents.select_for_update().filter(
+                pk=verification_id, **{f'{key}__lt': cutoff}).first()
+            if row is None:
+                continue
+            factors = dict(row.risk_factors or {})
+            factors.pop(DUPLICATED_FACE_RETRY_KEY, None)
+            factors['duplicated_face_checked'] = True
+            factors[DUPLICATED_FACE_UNVERIFIED_KEY] = True
+            row.risk_factors = factors
+            row.save(update_fields=['risk_factors', 'updated_at'])
+        logger.warning('Duplicate-face search gave up, no hold (review): verification=%s', verification_id)
+    synced = 0
+    for user_id, session_id in IdentityVerification.all_documents.filter(
+            **{f'{key}__gte': cutoff}).values_list('user_id', 'risk_factors__didit__session_id'):
+        if not session_id:
+            continue
+        try:
+            sync_didit_session(session_id=session_id, expected_user=users.get(pk=user_id))
+            synced += 1
+        except Exception:
+            logger.exception('Duplicate-face search retry failed: session=%s', session_id)
+    return synced
 
 
 def retry_pending_same_face() -> int:
@@ -1654,12 +1695,20 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
     if account_type != 'business' and 'duplicated_face_checked' not in risk_factors:
         duplicated = duplicated_face_risks(response_payload)
         if duplicated:
-            # Once per session. Sticky: a later sync never clears the hold
-            # (security/identity_reuse.py); support releases it.
-            risk_factors['duplicated_face_checked'] = True
             others = other_users_with_face(user, response_payload)
-            if others is None or others:
-                risk_factors['duplicated_face'] = {'risks': duplicated, 'matched_user_ids': others or []}
+            if others is None:
+                # Face search unavailable: no hold on "don't know". The next
+                # sync (webhook or hourly retry_duplicated_face_search) runs it
+                # again; Didit media links are short-lived, so it re-fetches.
+                risk_factors.setdefault(DUPLICATED_FACE_RETRY_KEY, timezone.now().isoformat())
+            else:
+                # Once per session. Sticky: a later sync never clears the hold
+                # (security/identity_reuse.py); support releases it. Only a
+                # confirmed match with another user holds.
+                risk_factors['duplicated_face_checked'] = True
+                risk_factors.pop(DUPLICATED_FACE_RETRY_KEY, None)
+                if others:
+                    risk_factors['duplicated_face'] = {'risks': duplicated, 'matched_user_ids': others}
 
     verification.verified_first_name = extracted['verified_first_name']
     verification.verified_last_name = extracted['verified_last_name']
