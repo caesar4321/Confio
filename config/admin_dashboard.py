@@ -1964,6 +1964,13 @@ from users.models_unified import UnifiedTransactionTable
 from usdc_transactions.models_unified import UnifiedUSDCTransactionTable
 from usdc_transactions.admin import UnifiedUSDCTransactionAdmin
 confio_admin_site.register(UnifiedTransactionTable, UnifiedTransactionAdmin)
+
+# Month summary ("Tu mes") spending categories
+from users.models_cashflow import CounterpartyRule, MovementOverride, CounterpartyPromptState
+from users.admin_cashflow import CounterpartyRuleAdmin, MovementOverrideAdmin, CounterpartyPromptStateAdmin
+confio_admin_site.register(CounterpartyRule, CounterpartyRuleAdmin)
+confio_admin_site.register(MovementOverride, MovementOverrideAdmin)
+confio_admin_site.register(CounterpartyPromptState, CounterpartyPromptStateAdmin)
 confio_admin_site.register(UnifiedUSDCTransactionTable, UnifiedUSDCTransactionAdmin)
 
 # Analytics models

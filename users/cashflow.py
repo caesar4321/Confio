@@ -141,10 +141,13 @@ class ViewerContext:
     account: object
     account_type: str
     business_id: int | None
+    owner_id: int | None = None   # the account owner's user id (not the caller's)
     owned_business_ids: set = field(default_factory=set)
     kyc_document: tuple[str, str] | None = None   # (type, number), normalized
     ramp_arrival_hashes: set = field(default_factory=set)
     destination_ids: dict = field(default_factory=dict)  # internal_id -> (type, number), normalized
+    category_rules: dict = field(default_factory=dict)   # counterparty_key -> category
+    category_overrides: dict = field(default_factory=dict)  # unified row id -> category
 
 
 @dataclass
@@ -155,6 +158,8 @@ class Movement:
     counterparty_key: str | None = None
     counterparty_name: str = ''
     when: datetime | None = None
+    row_id: int | None = None
+    category: str | None = None   # spending only; None = uncategorized
 
 
 class SummaryUnavailable(Exception):
@@ -236,8 +241,12 @@ def _counterparty(row, direction: str) -> tuple[str | None, str]:
 
 
 def _is_own_transfer(row, ctx: ViewerContext, direction: str) -> bool:
-    """Money between the owner's personal account and a business they own."""
-    user_id = getattr(ctx.user, 'id', None)
+    """Money between the owner's personal account and a business they own.
+
+    Ownership comes from the ACCOUNT's owner, never the caller: an employee
+    viewing or labeling a business account must classify exactly as the
+    owner would."""
+    user_id = ctx.owner_id
     if ctx.account_type == 'business':
         other_user = row.counterparty_user_id if direction == 'sent' else row.sender_user_id
         other_biz = row.counterparty_business_id if direction == 'sent' else row.sender_business_id
@@ -246,12 +255,16 @@ def _is_own_transfer(row, ctx: ViewerContext, direction: str) -> bool:
     return bool(other_biz and other_biz in ctx.owned_business_ids)
 
 
-def classify(row, ctx: ViewerContext) -> Movement | None:
+def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movement | None:
     """Kind + viewer-side USD amount for one ledger row, or None when the row
-    is not a counted movement (non-USD, unconfirmed, ramp landing, …)."""
+    is not a counted movement (non-USD, unconfirmed, ramp landing, …).
+
+    require_confirmed=False classifies a still-pending payment (the success
+    screen asks for a category before the ledger confirms it); totals always
+    use the default."""
     from users.graphql_views import row_direction
 
-    if row.status != 'CONFIRMED':
+    if row.status == 'FAILED' or (require_confirmed and row.status != 'CONFIRMED'):
         return None
     if (row.token_type or '').upper() not in USD_TOKENS:
         return None
@@ -323,9 +336,23 @@ def classify(row, ctx: ViewerContext) -> Movement | None:
             key, name = _payout_counterparty(row)
         else:
             key, name = _counterparty(row, direction)
-    return Movement(kind=kind, direction=direction, amount=amount,
-                    counterparty_key=key, counterparty_name=name,
-                    when=row.transaction_date)
+    movement = Movement(kind=kind, direction=direction, amount=amount,
+                        counterparty_key=key, counterparty_name=name,
+                        when=row.transaction_date, row_id=getattr(row, 'pk', None))
+    movement.category = category_for(movement, ctx)
+    return movement
+
+
+def category_for(movement: Movement, ctx: ViewerContext) -> str | None:
+    """Read-time category (R20): this row's override > its counterparty's
+    rule > uncategorized. Only spending movements carry a category."""
+    if movement.kind not in SPENDING_KINDS:
+        return None
+    if movement.row_id is not None and movement.row_id in ctx.category_overrides:
+        return ctx.category_overrides[movement.row_id]
+    if movement.counterparty_key:
+        return ctx.category_rules.get(movement.counterparty_key)
+    return None
 
 
 @dataclass
@@ -337,6 +364,7 @@ class Totals:
     savings_net: Decimal = Decimal('0')      # + = moved into savings
     investment_net: Decimal = Decimal('0')   # + = bought
     movement_count: int = 0                  # Entró + Salió movements only
+    spending_by_category: dict = field(default_factory=dict)  # category | 'uncategorized' -> Decimal
 
     def add(self, m: Movement) -> None:
         if m.kind in INCOME_KINDS:
@@ -345,6 +373,8 @@ class Totals:
         elif m.kind in SPENDING_KINDS:
             self.spending += m.amount
             self.movement_count += 1
+            bucket = m.category or 'uncategorized'
+            self.spending_by_category[bucket] = self.spending_by_category.get(bucket, Decimal('0')) + m.amount
         elif m.kind == 'top_up':
             self.top_ups += m.amount
         elif m.kind == 'withdrawal':
@@ -379,8 +409,9 @@ class MonthSummary:
 
 def build_context(user, account, account_type, business_id) -> ViewerContext:
     from users.models import Account
+    owner_id = getattr(account, 'user_id', None) or getattr(user, 'id', None)
     owned = set(Account.objects.filter(
-        user=user, account_type='business', deleted_at__isnull=True,
+        user_id=owner_id, account_type='business', deleted_at__isnull=True,
         business_id__isnull=False).values_list('business_id', flat=True))
     from payment_accounts.models import ProviderProfile
     kyc = None
@@ -391,7 +422,7 @@ def build_context(user, account, account_type, business_id) -> ViewerContext:
     if number:
         kyc = (_doc_family(snap.get('document_type')), number)
     return ViewerContext(user=user, account=account, account_type=account_type,
-                         business_id=business_id, owned_business_ids=owned,
+                         business_id=business_id, owner_id=owner_id, owned_business_ids=owned,
                          kyc_document=kyc)
 
 
@@ -408,21 +439,14 @@ def _ramp_arrival_hashes(scope) -> set:
     return hashes
 
 
-def summarize(user, account, account_type, business_id, year, month, tz, now=None) -> MonthSummary:
-    from django.utils import timezone as dj_tz
-    from users.graphql_views import account_unified_queryset, _viewer_address_for
+ROW_RELATIONS = ('ramp_transaction', 'conversion', 'sponsored_batch',
+                 'sender_user', 'counterparty_user', 'sender_business', 'counterparty_business',
+                 'local_money_flow__infinia_journey__funding_credit__payin_admission')
 
-    now = now or dj_tz.now()
-    start, end = month_window(year, month, tz)
-    p_start, p_end, partial = comparison_window(year, month, now, tz)
-    # Landings can trail their on-ramp across a month edge: look a week wider.
-    scope = account_unified_queryset(user, account, account_type, business_id)
-    rows = list(
-        scope.filter(transaction_date__gte=p_start, transaction_date__lt=end)
-        .select_related('ramp_transaction', 'conversion', 'sponsored_batch',
-                        'sender_user', 'counterparty_user', 'sender_business', 'counterparty_business',
-                        'local_money_flow__infinia_journey__funding_credit__payin_admission')
-    )
+
+def prepare_context(user, account, account_type, business_id, scope, rows) -> ViewerContext:
+    """Everything classify() needs for these rows, loaded in bulk."""
+    from users.models_cashflow import CounterpartyRule, MovementOverride
     ctx = build_context(user, account, account_type, business_id)
     ctx.ramp_arrival_hashes = _ramp_arrival_hashes(scope)
     dest_ids = {d for d in (_destination_id(r) for r in rows if r.transaction_type == 'local_transfer') if d}
@@ -433,6 +457,50 @@ def summarize(user, account, account_type, business_id, year, month, tz, now=Non
             for internal_id, id_type, id_number in PayoutDestination.objects.filter(
                 internal_id__in=dest_ids).values_list('internal_id', 'holder_id_type', 'holder_id_number')
         }
+    ctx.category_rules = dict(CounterpartyRule.objects.filter(account=account).values_list('counterparty_key', 'category'))
+    ctx.category_overrides = dict(MovementOverride.objects.filter(
+        account=account, movement_id__in=[r.pk for r in rows]).values_list('movement_id', 'category'))
+    return ctx
+
+
+def _stamp_viewer(row, account, account_type, business_id):
+    from users.graphql_views import _viewer_address_for
+    row._user_address = _viewer_address_for(row, account)
+    row._account_type = account_type
+    row._account_business_id = business_id if account_type == 'business' else None
+
+
+def resolve_movement(user, account, account_type, business_id, movement_id=None, internal_id=None):
+    """(row, movement) for one ledger row INSIDE the active account's scope,
+    found by unified id or by the send/payment internal_id the success screens
+    hold; (None, None) when it isn't this account's or isn't a movement."""
+    from django.db.models import Q
+    from users.graphql_views import account_unified_queryset
+    scope = account_unified_queryset(user, account, account_type, business_id)
+    if movement_id:
+        lookup = Q(pk=movement_id)
+    elif internal_id:
+        lookup = Q(send_transaction__internal_id=internal_id) | Q(payment_transaction__internal_id=internal_id)
+    else:
+        return None, None
+    row = scope.filter(lookup).select_related(*ROW_RELATIONS).first()
+    if row is None:
+        return None, None
+    _stamp_viewer(row, account, account_type, business_id)
+    ctx = prepare_context(user, account, account_type, business_id, scope, [row])
+    return row, classify(row, ctx, require_confirmed=False)
+
+
+def summarize(user, account, account_type, business_id, year, month, tz, now=None) -> MonthSummary:
+    from django.utils import timezone as dj_tz
+    from users.graphql_views import account_unified_queryset
+
+    now = now or dj_tz.now()
+    start, end = month_window(year, month, tz)
+    p_start, p_end, partial = comparison_window(year, month, now, tz)
+    scope = account_unified_queryset(user, account, account_type, business_id)
+    rows = list(scope.filter(transaction_date__gte=p_start, transaction_date__lt=end).select_related(*ROW_RELATIONS))
+    ctx = prepare_context(user, account, account_type, business_id, scope, rows)
 
     current, previous = Totals(), Totals()
     people: dict[str, CounterpartyTotal] = {}
@@ -442,9 +510,7 @@ def summarize(user, account, account_type, business_id, year, month, tz, now=Non
         in_previous = p_start <= when < p_end
         if not (in_current or in_previous):
             continue
-        row._user_address = _viewer_address_for(row, account)
-        row._account_type = account_type
-        row._account_business_id = business_id if account_type == 'business' else None
+        _stamp_viewer(row, account, account_type, business_id)
         movement = classify(row, ctx)
         if movement is None:
             continue

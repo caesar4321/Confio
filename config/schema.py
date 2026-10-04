@@ -1,6 +1,6 @@
 from users import schema as users_schema
 from users.graphql_views import UnifiedTransactionQuery
-from users.cashflow_schema import MonthSummaryQuery
+from users.cashflow_schema import MonthSummaryQuery, CategoryPromptQuery, CategoryMutations
 from users import web3auth_schema
 from telegram_verification import schema as telegram_verification_schema
 from sms_verification import schema as sms_verification_schema
@@ -29,7 +29,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(stereum_schema.Query, users_schema.Query, UnifiedTransactionQuery, MonthSummaryQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payment_accounts_schema.Query, pending_payin_schema.PendingPayinQuery, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, cusd_plus_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, blockchain_schema.Query, billing_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
+class Query(stereum_schema.Query, users_schema.Query, UnifiedTransactionQuery, MonthSummaryQuery, CategoryPromptQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payment_accounts_schema.Query, pending_payin_schema.PendingPayinQuery, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, cusd_plus_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, blockchain_schema.Query, billing_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -37,6 +37,7 @@ class Query(stereum_schema.Query, users_schema.Query, UnifiedTransactionQuery, M
 
 class Mutation(
 	users_schema.Mutation,
+	CategoryMutations,
 	telegram_verification_schema.Mutation,
 	sms_verification_schema.Mutation,
 	send_schema.Mutation,
