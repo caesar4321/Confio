@@ -19,6 +19,30 @@ class BiometricAuthService {
   private lastError: string | null = null;
   private lastLockout: boolean = false;
   private emergencyAuthenticationPending = false;
+  // System prompts on screen right now, so waiting on the user is never
+  // mistaken for a slow start (see LoadingOverlay in App.tsx).
+  private openPrompts = 0;
+  private promptListeners = new Set<() => void>();
+
+  isPromptOpen(): boolean {
+    return this.openPrompts > 0;
+  }
+
+  onPromptChange(listener: () => void): () => void {
+    this.promptListeners.add(listener);
+    return () => { this.promptListeners.delete(listener); };
+  }
+
+  private async withPrompt<T>(prompt: () => Promise<T>): Promise<T> {
+    this.openPrompts += 1;
+    this.promptListeners.forEach(listener => listener());
+    try {
+      return await prompt();
+    } finally {
+      this.openPrompts -= 1;
+      this.promptListeners.forEach(listener => listener());
+    }
+  }
 
   /**
    * Use a pure passcode policy when the device has no enrolled biometrics.
@@ -174,6 +198,10 @@ class BiometricAuthService {
   async enable(): Promise<boolean> {
     const supported = await this.isSupported();
     if (!supported) return false;
+    return this.withPrompt(() => this.enableSupported());
+  }
+
+  private async enableSupported(): Promise<boolean> {
 
     const biometryType = await Keychain.getSupportedBiometryType();
     const primaryAccessControl = this.getAccessControlForCurrentDevice(biometryType);
@@ -282,7 +310,7 @@ class BiometricAuthService {
       // passcode-fallback gate would never be unlocked by a fingerprint scan.
       const accessControl = accessControlOverride ?? await this.getConfiguredAccessControl();
 
-      const authResult = await Keychain.getGenericPassword({
+      const authResult = await this.withPrompt(() => Keychain.getGenericPassword({
         service: BIOMETRIC_SECRET_SERVICE,
         authenticationPrompt: {
           title: 'Confirma tu identidad',
@@ -295,7 +323,7 @@ class BiometricAuthService {
         accessControl,
         authenticationType: Keychain.AUTHENTICATION_TYPE.DEVICE_PASSCODE_OR_BIOMETRICS,
         storage: Keychain.STORAGE_TYPE.AUTOMATIC,
-      });
+      }));
 
       const success = !!authResult && authResult.username === BIOMETRIC_SECRET_USERNAME;
       if (success) {

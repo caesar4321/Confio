@@ -129,3 +129,30 @@ describe('biometricAuthService invalidation classification', () => {
     expect(service.isPermanentInvalidation()).toBe(false);
   });
 });
+
+/**
+ * The loading screen's emergency exit only appears once loading is slow; time
+ * spent on the phone's unlock prompt must not count, or a normal start shows
+ * a bare "Salida de emergencia" under the prompt.
+ */
+describe('biometricAuthService prompt signal', () => {
+  beforeEach(() => {
+    mockStore.clear();
+    mockState.allGuardReadsFail = true;
+    jest.clearAllMocks();
+  });
+
+  it('reports the prompt open while it is on screen, and closed after, even when it fails', async () => {
+    mockStore.set(PREFS_SERVICE, { username: 'biometric_pref', password: 'enabled' });
+    mockStore.set(GUARD_SERVICE, { username: 'biometric_unlock', password: 'guard-secret' });
+    const service = freshService();
+    const seen: boolean[] = [];
+    const unsubscribe = service.onPromptChange(() => seen.push(service.isPromptOpen()));
+    expect(await service.authenticate('Desbloquea Confío', true, true)).toBe(false);
+    expect(seen).toEqual([true, false]);
+    expect(service.isPromptOpen()).toBe(false);
+    unsubscribe();
+    await service.authenticate('Desbloquea Confío', true, true);
+    expect(seen).toEqual([true, false]);
+  });
+});
