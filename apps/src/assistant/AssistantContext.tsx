@@ -1,7 +1,7 @@
-// Open/close state for Confío IA, the screen the user is on, and the IA+ plan.
+// Open/close state for Confio Assistant, the screen the user is on, and the Assistant+ plan.
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { navigationRef } from '../navigation/RootNavigation';
-import type { ConfioIaPlan } from './api';
+import type { AssistantPlan } from './api';
 import type { VoiceNote } from './voiceNote';
 
 export type BoxChannel = 'ia' | 'julian' | 'confio';
@@ -12,14 +12,14 @@ type OpenOptions = {
   plus?: boolean;
   call?: boolean;
   channel?: BoxChannel;
-  // "Confío" was heard: open on Confío IA and start recording a voice note.
+  // "Confío" was heard: open on Confio Assistant and start recording a voice note.
   voiceNote?: boolean;
   // Hold-to-talk on the bubble already recorded this note (under accountId):
   // send it, unless the account changed.
   voiceNoteData?: VoiceNote & { accountId?: string };
 };
 
-type ConfioIaState = {
+type AssistantState = {
   isOpen: boolean;
   route?: string;
   open: (opts?: OpenOptions) => void;
@@ -38,16 +38,16 @@ type ConfioIaState = {
   // Someone (hold-to-talk) owns the microphone: the wake word pauses.
   micBusy: boolean;
   setMicBusy: (busy: boolean) => void;
-  // The server answers Confío IA (false on older servers: the bubble then
+  // The server answers Confio Assistant (false on older servers: the bubble then
   // opens Mensajes with the classic support thread).
   available: boolean;
   setAvailable: (available: boolean) => void;
-  // The support chat is answered by Confío IA (false: by people — launch
+  // The support chat is answered by Confio Assistant (false: by people — launch
   // control group or kill switch; the chat itself still works).
   aiEnabled: boolean;
   setAiEnabled: (aiEnabled: boolean) => void;
-  plan: ConfioIaPlan | null;
-  setPlan: (plan: ConfioIaPlan | null) => void;
+  plan: AssistantPlan | null;
+  setPlan: (plan: AssistantPlan | null) => void;
   // Where the bubble rests, so the open box can grow out of it and point at it.
   bubbleAnchor: { x: number; y: number; size: number } | null;
   setBubbleAnchor: (anchor: { x: number; y: number; size: number } | null) => void;
@@ -56,16 +56,16 @@ type ConfioIaState = {
   setInCall: (inCall: boolean) => void;
 };
 
-const ConfioIaContext = createContext<ConfioIaState | null>(null);
+const AssistantContext = createContext<AssistantState | null>(null);
 
-export function ConfioIaProvider({ children }: { children: React.ReactNode }) {
+export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [route, setRoute] = useState<string | undefined>(() => navigationRef.getCurrentRoute?.()?.name);
   const [request, setRequest] = useState<OpenOptions>({});
   const [available, setAvailable] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [bubbleAnchor, setBubbleAnchor] = useState<{ x: number; y: number; size: number } | null>(null);
-  const [plan, setPlan] = useState<ConfioIaPlan | null>(null);
+  const [plan, setPlan] = useState<AssistantPlan | null>(null);
   const [inCall, setInCall] = useState(false);
   const [micBusy, setMicBusy] = useState(false);
   const [openSeq, setOpenSeq] = useState(0);
@@ -144,18 +144,18 @@ export function ConfioIaProvider({ children }: { children: React.ReactNode }) {
       consumeVoiceNote, consumeVoiceNoteData, available,
       aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq],
   );
-  return <ConfioIaContext.Provider value={value}>{children}</ConfioIaContext.Provider>;
+  return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }
 
-export function useConfioIa() {
-  const value = useContext(ConfioIaContext);
+export function useAssistant() {
+  const value = useContext(AssistantContext);
   if (!value) {
-    throw new Error('useConfioIa must be used inside ConfioIaProvider');
+    throw new Error('useAssistant must be used inside AssistantProvider');
   }
   return value;
 }
 
 // For callers that may render outside the provider (e.g. the inbox before login).
-export function useOptionalConfioIa() {
-  return useContext(ConfioIaContext);
+export function useOptionalAssistant() {
+  return useContext(AssistantContext);
 }

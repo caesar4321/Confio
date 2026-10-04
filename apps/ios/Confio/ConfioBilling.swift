@@ -1,4 +1,4 @@
-// ConfioBilling (iOS): StoreKit 2 for the Confío IA+ subscription.
+// ConfioBilling (iOS): StoreKit 2 for the Confio Assistant+ subscription.
 //
 // The app never decides entitlement. Every purchase hands its signed
 // transaction (JWS) to Django, which verifies it against Apple's root CA and

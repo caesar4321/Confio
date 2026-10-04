@@ -1,4 +1,4 @@
-// Confío IA's face: Confi (the default) or the pet the user picked.
+// Confio Assistant's face: Confi (the default) or the pet the user picked.
 // Drawn in SVG on a 100x100 canvas so it stays crisp from the 56pt bubble
 // to the picker; the body color is the user's choice, features stay fixed.
 import React, { useEffect, useState } from 'react';
@@ -182,7 +182,7 @@ type Props = {
   animated?: boolean;
 };
 
-export default function ConfioIaMascot(props: Props) {
+export default function AssistantMascot(props: Props) {
   if (props.kind === 'CUSTOM' && props.imageUrl) {
     return (
       <CustomPetMascot imageUrl={props.imageUrl} size={props.size ?? 56} mood={props.mood ?? 'idle'}

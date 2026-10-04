@@ -233,11 +233,11 @@ const requestLifetimeLink = new ApolloLink((operation, forward) =>
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
   // Sensitive location evidence must never enter error/telemetry logs.
   const isMembershipClaim = ['ClaimInstitutionMembership', 'ApplyCobreBreb', 'BrebLocationChallenge', 'VerifyBrebLocation'].includes(operation.operationName);
-  // Confío IA traffic carries message text, voice notes, pet photos,
+  // Confio Assistant traffic carries message text, voice notes, pet photos,
   // transcripts and store receipts: never log its variables.
   const redactVariables = isMembershipClaim || [
-    'AskConfioIa', 'SendSupportMessage', 'CreateConfioIaPet', 'VerifyConfioIaPurchase',
-    'StartConfioIaVoice', 'ConnectConfioIaVoice', 'RunConfioIaVoiceTool', 'LogConfioIaVoice',
+    'AskAssistant', 'SendSupportMessage', 'CreateAssistantPet', 'VerifyAssistantPurchase',
+    'StartAssistantVoice', 'ConnectAssistantVoice', 'RunAssistantVoiceTool', 'LogAssistantVoice',
   ].includes(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {

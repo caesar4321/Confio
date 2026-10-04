@@ -133,7 +133,7 @@ class AskTests(TestCase):
         self.assertTrue(human_mode_active(state, None, now=now))
         self.assertFalse(human_mode_active(SimpleNamespace(handoff_at=None, returned_to_ai_at=None), None, now=now))
 
-    @override_settings(CONFIO_IA_DAILY_TURNS=1)
+    @override_settings(CONFIO_ASSISTANT_DAILY_TURNS=1)
     @patch('assistant.engine._openai_post')
     def test_daily_limit(self, post):
         post.side_effect = [text_response('Hola')]
@@ -256,7 +256,7 @@ class DestinationContractTests(TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# IA+ billing
+# Assistant+ billing
 # --------------------------------------------------------------------------- #
 
 from datetime import datetime, timezone as dt_timezone  # noqa: E402
@@ -295,16 +295,16 @@ class BillingTests(TestCase):
             return billing.verify_apple_purchase(user or self.user, 'jws')
 
     def test_apple_purchase_unlocks_plus(self):
-        self.assertFalse(billing.has_ia_plus(self.user))
+        self.assertFalse(billing.has_plus(self.user))
         sub = self.verify(apple_tx(self.token))
         self.assertEqual(sub.status, 'ACTIVE')
-        self.assertTrue(billing.has_ia_plus(self.user))
+        self.assertTrue(billing.has_plus(self.user))
         self.assertEqual(service.daily_turn_cap(self.user), 300)
 
     def test_purchase_bound_to_another_user_is_refused(self):
         with self.assertRaises(billing.BillingError):
             self.verify(apple_tx(self.token), user=self.other)
-        self.assertFalse(billing.has_ia_plus(self.other))
+        self.assertFalse(billing.has_plus(self.other))
 
     def test_purchase_without_our_token_is_refused(self):
         with self.assertRaises(billing.BillingError):
@@ -316,11 +316,11 @@ class BillingTests(TestCase):
 
     def test_expired_and_refunded_lose_access(self):
         self.verify(apple_tx(self.token, expires_in=-timedelta(minutes=1)))
-        self.assertFalse(billing.has_ia_plus(self.user))
+        self.assertFalse(billing.has_plus(self.user))
         self.verify(apple_tx(self.token, tx='2001'))
-        self.assertTrue(billing.has_ia_plus(self.user))
+        self.assertTrue(billing.has_plus(self.user))
         self.verify(apple_tx(self.token, revoked=True, tx='2002'))
-        self.assertFalse(billing.has_ia_plus(self.user))
+        self.assertFalse(billing.has_plus(self.user))
         self.assertEqual(AssistantSubscription.objects.count(), 1)
 
     def test_notification_renews_and_is_idempotent(self):
@@ -355,7 +355,7 @@ class BillingTests(TestCase):
         with patch('assistant.billing._play_service', return_value=service_mock):
             sub = billing.verify_google_purchase(self.user, 'tok-1')
         self.assertTrue(sub.acknowledged)
-        self.assertTrue(billing.has_ia_plus(self.user))
+        self.assertTrue(billing.has_plus(self.user))
         service_mock.purchases().subscriptions().acknowledge.assert_called_once()
 
         with patch('assistant.billing._play_service', return_value=unittest_mock_play(purchase)):
@@ -363,10 +363,10 @@ class BillingTests(TestCase):
                 billing.verify_google_purchase(self.other, 'tok-1')
 
     def test_purchases_are_refused_while_sales_are_dark(self):
-        from .schema import VerifyConfioIaPurchase
+        from .schema import VerifyAssistantPurchase
         info = SimpleNamespace(context=SimpleNamespace(user=self.user))
         with patch('assistant.billing.verify_apple_purchase') as verify:
-            result = VerifyConfioIaPurchase.mutate.__wrapped__(VerifyConfioIaPurchase, None, info,
+            result = VerifyAssistantPurchase.mutate.__wrapped__(VerifyAssistantPurchase, None, info,
                                                                platform='ios', signed_transaction='jws')
         verify.assert_not_called()
         self.assertFalse(result.success)
@@ -381,8 +381,8 @@ class BillingTests(TestCase):
         self.assertEqual(google_play_notifications(request).status_code, 403)
         request = RequestFactory().post('/webhooks/google-play/', data='{}', content_type='application/json',
                                         HTTP_AUTHORIZATION='Bearer forged')
-        with override_settings(CONFIO_IA_RTDN_AUDIENCE='https://confio.lat/webhooks/google-play/',
-                               CONFIO_IA_RTDN_SERVICE_ACCOUNT='rtdn@confio.iam.gserviceaccount.com'):
+        with override_settings(CONFIO_ASSISTANT_RTDN_AUDIENCE='https://confio.lat/webhooks/google-play/',
+                               CONFIO_ASSISTANT_RTDN_SERVICE_ACCOUNT='rtdn@confio.iam.gserviceaccount.com'):
             self.assertEqual(google_play_notifications(request).status_code, 403)
 
 
@@ -404,19 +404,19 @@ class VoiceTests(TestCase):
     def start(self):
         return voice.start_session(self.viewer, self.conversation, first_name='V', account_label='personal', country='BO')
 
-    @override_settings(CONFIO_IA_REALTIME_ENABLED=True)
+    @override_settings(CONFIO_ASSISTANT_REALTIME_ENABLED=True)
     def test_voice_needs_ia_plus(self):
         with self.assertRaises(voice.VoiceUnavailable):
             self.start()
 
     def test_voice_is_off_at_launch_even_for_plus(self):
-        with patch('assistant.billing.has_ia_plus', return_value=True):
+        with patch('assistant.billing.has_plus', return_value=True):
             with self.assertRaises(voice.VoiceUnavailable):
                 self.start()
 
-    @override_settings(OPENAI_API_KEY='k', CONFIO_IA_PLUS_VOICE_MINUTES=10, CONFIO_IA_REALTIME_ENABLED=True)
+    @override_settings(OPENAI_API_KEY='k', CONFIO_ASSISTANT_PLUS_VOICE_MINUTES=10, CONFIO_ASSISTANT_REALTIME_ENABLED=True)
     def test_minutes_come_from_server_clock_and_cap_calls(self):
-        with patch('assistant.billing.has_ia_plus', return_value=True), \
+        with patch('assistant.billing.has_plus', return_value=True), \
                 patch('assistant.voice.requests.post') as post:
             post.return_value = SimpleNamespace(status_code=200, json=lambda: {'value': 'ek_test'})
             session, left = self.start()
@@ -492,7 +492,7 @@ class PetTests(TestCase):
         return SimpleNamespace(status_code=status, json=lambda: payload, text=json.dumps(payload),
                                raise_for_status=lambda: None)
 
-    @override_settings(OPENAI_API_KEY='k', CONFIO_IA_PET_FREE_PER_WEEK=1)
+    @override_settings(OPENAI_API_KEY='k', CONFIO_ASSISTANT_PET_FREE_PER_WEEK=1)
     def test_idea_creates_a_private_pet_within_the_weekly_limit(self):
         from . import pets
         image = base64.b64encode(b'png').decode()
@@ -506,7 +506,7 @@ class PetTests(TestCase):
                 patch('security.s3_utils.upload_object') as upload:
             pet = pets.create_pet(self.user, idea='una llama con poncho')
             self.assertEqual(pet.source, 'idea')
-            self.assertTrue(pet.image_key.startswith(f'confio-ia/pets/{self.user.id}/'))
+            self.assertTrue(pet.image_key.startswith(f'assistant/pets/{self.user.id}/'))
             upload.assert_called_once()
             with self.assertRaises(pets.PetError):
                 pets.create_pet(self.user, idea='otra')
@@ -559,7 +559,7 @@ class AuditFixTests(TestCase):
         self.account = Account.objects.create(user=self.user, account_type='personal', account_index=0)
         self.jwt = {'account_type': 'personal', 'account_index': 0, 'business_id': None}
 
-    @override_settings(CONFIO_IA_DAILY_TURNS=0, OPENAI_API_KEY='k')
+    @override_settings(CONFIO_ASSISTANT_DAILY_TURNS=0, OPENAI_API_KEY='k')
     def test_voice_notes_over_quota_are_not_transcribed(self):
         with patch('assistant.service.requests.post') as post:
             outcome = service.ask(self.user, self.account, None, self.jwt, audio=('aGVsbG8=', 'audio/mp4', 3000))
@@ -601,11 +601,11 @@ class AuditFixTests(TestCase):
             billing.verify_apple_purchase(self.user, 'jws')
         with patch('assistant.billing._apple_decode', return_value=apple_tx(token, revoked=True, signed_ms=9_000)):
             billing.verify_apple_purchase(self.user, 'jws')
-        self.assertFalse(billing.has_ia_plus(self.user))
+        self.assertFalse(billing.has_plus(self.user))
         # The original purchase JWS, replayed after the refund.
         with patch('assistant.billing._apple_decode', return_value=apple_tx(token, signed_ms=5_000)):
             billing.verify_apple_purchase(self.user, 'jws')
-        self.assertFalse(billing.has_ia_plus(self.user))
+        self.assertFalse(billing.has_plus(self.user))
 
     @override_settings(OPENAI_API_KEY='k')
     def test_malformed_moderation_verdicts_are_not_clean(self):
@@ -629,19 +629,19 @@ class AuditFixTests(TestCase):
                 patch('assistant.billing._play_apply', side_effect=billing.BillingTransient('down')):
             self.assertEqual(google_play_notifications(request).status_code, 503)
 
-    @override_settings(CONFIO_IA_REALTIME_ENABLED=True)
+    @override_settings(CONFIO_ASSISTANT_REALTIME_ENABLED=True)
     def test_voice_tools_stay_on_the_account_the_call_started_on(self):
         other = Account.objects.create(user=self.user, account_type='personal', account_index=1)
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
         session = VoiceSession.objects.create(user=self.user, conversation=conversation, model='m',
                                               account_id=self.account.id)
-        with patch('assistant.billing.has_ia_plus', return_value=True):
+        with patch('assistant.billing.has_plus', return_value=True):
             self.assertTrue(voice.session_allowed(session, self.account, None))
             self.assertFalse(voice.session_allowed(session, other, None))
             voice.hang_up(session)
             self.assertFalse(voice.session_allowed(session, self.account, None))
 
-    @override_settings(CONFIO_IA_REALTIME_ENABLED=True, OPENAI_API_KEY='k')
+    @override_settings(CONFIO_ASSISTANT_REALTIME_ENABLED=True, OPENAI_API_KEY='k')
     def test_server_hangs_up_silent_calls(self):
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
         session = VoiceSession.objects.create(user=self.user, conversation=conversation, model='m',
@@ -649,7 +649,7 @@ class AuditFixTests(TestCase):
         VoiceSession.objects.filter(pk=session.pk).update(last_seen_at=timezone.now() - timedelta(minutes=5))
         failing = SimpleNamespace(status_code=500)
         ok = SimpleNamespace(status_code=200)
-        with patch('assistant.billing.has_ia_plus', return_value=True), \
+        with patch('assistant.billing.has_plus', return_value=True), \
                 patch('assistant.voice.requests.post', return_value=failing) as post:
             self.assertEqual(voice.enforce_sessions(), 1)
         self.assertIn('/realtime/calls/rtc_123/hangup', post.call_args.args[0])
@@ -705,7 +705,7 @@ class SecondPassTests(TestCase):
         self.assertGreaterEqual(float(turn.audio_seconds), 19)
         self.assertGreater(turn.cost_usd, 0)
 
-    @override_settings(OPENAI_API_KEY='k', CONFIO_IA_DAILY_ANALYSES=1)
+    @override_settings(OPENAI_API_KEY='k', CONFIO_ASSISTANT_DAILY_ANALYSES=1)
     def test_analysis_slots_are_reserved(self):
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
         turn = AssistantTurn.objects.create(user=self.user, conversation=conversation, error='pending')
@@ -723,7 +723,7 @@ class SecondPassTests(TestCase):
         self.assertEqual(outcome.mode, 'HUMAN')
         self.assertTrue(AssistantThreadState.objects.get().handoff_at)
 
-    @override_settings(OPENAI_API_KEY='k', CONFIO_IA_PET_FREE_PER_WEEK=1)
+    @override_settings(OPENAI_API_KEY='k', CONFIO_ASSISTANT_PET_FREE_PER_WEEK=1)
     def test_failed_pet_creation_gives_the_slot_back(self):
         from . import pets
         with patch('assistant.pets._create_pet', side_effect=pets.PetError('boom')):
@@ -731,7 +731,7 @@ class SecondPassTests(TestCase):
                 pets.create_pet(self.user, idea='una llama')
         self.assertEqual(pets.creations_left(self.user)[0], 1)
 
-    @override_settings(CONFIO_IA_REALTIME_ENABLED=True, OPENAI_API_KEY='k')
+    @override_settings(CONFIO_ASSISTANT_REALTIME_ENABLED=True, OPENAI_API_KEY='k')
     def test_connect_records_the_call_and_never_reuses_the_secret(self):
         from django.core.cache import cache
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
@@ -746,16 +746,16 @@ class SecondPassTests(TestCase):
         with self.assertRaises(voice.VoiceUnavailable):
             voice.connect(session, 'v=0 offer')
 
-    @override_settings(CONFIO_IA_REALTIME_ENABLED=True)
+    @override_settings(CONFIO_ASSISTANT_REALTIME_ENABLED=True)
     def test_ended_calls_accept_no_more_transcripts(self):
-        from .schema import LogConfioIaVoice
+        from .schema import LogAssistantVoice
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
         session = VoiceSession.objects.create(user=self.user, conversation=conversation, model='m',
                                               account_id=self.account.id, ended_at=timezone.now(), remote_ended=True)
         info = SimpleNamespace(context=SimpleNamespace(user=self.user))
         with patch('assistant.schema.get_context_models', return_value=(self.user, self.account, None, self.jwt)):
-            result = LogConfioIaVoice.mutate.__wrapped__(
-                LogConfioIaVoice, None, info, session_id=str(session.id),
+            result = LogAssistantVoice.mutate.__wrapped__(
+                LogAssistantVoice, None, info, session_id=str(session.id),
                 transcript=[SimpleNamespace(role='user', text='replay')], ended=True)
         self.assertFalse(result.keep_going)
         self.assertFalse(conversation.messages.filter(body='replay').exists())
@@ -812,7 +812,7 @@ class ThirdPassTests(TestCase):
         self.assertTrue(any('/rtc_7/hangup' in c.args[0] for c in post.call_args_list))
         self.assertTrue(VoiceSession.objects.get(pk=session.pk).remote_ended)
 
-    @override_settings(OPENAI_API_KEY='k', CONFIO_IA_PET_FREE_PER_WEEK=1)
+    @override_settings(OPENAI_API_KEY='k', CONFIO_ASSISTANT_PET_FREE_PER_WEEK=1)
     def test_rejected_pets_use_the_slot_but_outages_do_not(self):
         from . import pets
         with patch('assistant.pets._create_pet', side_effect=pets.PetError('outage')):
@@ -876,11 +876,11 @@ class FourthPassTests(TestCase):
         renewal = SimpleNamespace(gracePeriodExpiresDate=int((timezone.now() + timedelta(days=3)).timestamp() * 1000),
                                   autoRenewStatus=1, isInBillingRetryPeriod=True)
         billing._apple_apply(expired, renewal=renewal)
-        self.assertTrue(billing.has_ia_plus(self.user))
+        self.assertTrue(billing.has_plus(self.user))
         newer = apple_tx(token, expires_in=-timedelta(hours=1), signed_ms=2_000)
         with patch('assistant.billing._apple_decode', return_value=newer):
             billing.verify_apple_purchase(self.user, 'jws')
-        self.assertTrue(billing.has_ia_plus(self.user))
+        self.assertTrue(billing.has_plus(self.user))
 
 
 

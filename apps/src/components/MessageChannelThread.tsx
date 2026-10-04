@@ -45,7 +45,7 @@ type MessageChannelThreadProps = {
   loadMorePosition?: 'top' | 'bottom';
   refreshing?: boolean;
   onRefresh?: () => void;
-  // Inside the floating Confío IA box: the chat heads already say who this
+  // Inside the floating Confio Assistant box: the chat heads already say who this
   // is, so no back button / avatar / top safe-area here.
   embedded?: boolean;
   // Embedded in a modal: the host closes itself, then opens the post.

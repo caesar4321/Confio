@@ -148,13 +148,13 @@ def get_visible_content_queryset(membership: ChannelMembership):
     return queryset.order_by('pinned_rank', '-published_at', '-created_at')
 
 
-# The support thread is answered by Confío IA first; the team takes over on
+# The support thread is answered by Confio Assistant first; the team takes over on
 # handoff (assistant/service.py). Same thread, same history.
-SUPPORT_CHANNEL_NAME = 'Confío IA'
+SUPPORT_CHANNEL_NAME = 'Confio Assistant'
 SUPPORT_CHANNEL_SUBTITLE = 'Tu asistente · Disponible 24/7'
 SUPPORT_CHANNEL_PREVIEW = '¿En qué te ayudo hoy?'
 SUPPORT_GREETING = (
-    'Hola, soy Confío IA. Pregúntame sobre tu dinero o sobre la app, por escrito o con un audio. '
+    'Hola, soy Confio Assistant. Pregúntame sobre tu dinero o sobre la app, por escrito o con un audio. '
     'Si hace falta, te paso con el equipo de Confío.'
 )
 
@@ -386,7 +386,7 @@ def get_support_sender_name(message: SupportMessage):
         return full_name or user.username or 'Usuario'
     if message.sender_type == 'AGENT':
         if (message.metadata or {}).get('ai'):
-            return 'Confío IA'
+            return 'Confio Assistant'
         if message.sender_user_id:
             full_name = f'{message.sender_user.first_name or ""} {message.sender_user.last_name or ""}'.strip()
             return full_name or message.sender_user.username or 'Agente Confío'
@@ -412,7 +412,7 @@ def build_portal_support_conversation_payload(conversation: SupportConversation)
             or conversation.assigned_to.username
         )
 
-    # Awaiting the team: Confío IA answers first, so only threads handed to
+    # Awaiting the team: Confio Assistant answers first, so only threads handed to
     # people count, and the AI's own replies never mark a thread as answered.
     from assistant.service import awaiting_team
     unread_count = 1 if awaiting_team(conversation, recent_messages_desc) else 0
@@ -1996,7 +1996,7 @@ class SendSupportMessage(graphene.Mutation):
         if not clean_body:
             raise GraphQLError('Message body is required')
 
-        # Older builds send here and poll the thread: Confío IA answers inline
+        # Older builds send here and poll the thread: Confio Assistant answers inline
         # (or the team is pushed when the thread is in human mode).
         outcome = assistant_service.ask(user, account, business, jwt_context, clean_body, can_navigate=False)
         message = outcome.user_message

@@ -1,4 +1,4 @@
-// Pick the pet Confío IA wears: create your own (from an idea or a photo of
+// Pick the pet Confio Assistant wears: create your own (from an idea or a photo of
 // your pet, like dots/Muse), or a built-in one with your color. Plus a name.
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -7,24 +7,24 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text, TextInput } from '../components/common/AppText';
 import {
-  CREATE_CONFIO_IA_PET,
-  DELETE_CONFIO_IA_PET,
-  GET_CONFIO_IA_PETS,
-  UPDATE_CONFIO_IA_PROFILE,
-  USE_CONFIO_IA_PET,
-  type ConfioIaPet,
-  type ConfioIaProfile,
+  CREATE_ASSISTANT_PET,
+  DELETE_ASSISTANT_PET,
+  GET_ASSISTANT_PETS,
+  UPDATE_ASSISTANT_PROFILE,
+  USE_ASSISTANT_PET,
+  type AssistantPet,
+  type AssistantProfile,
 } from './api';
-import { useConfioIa } from './ConfioIaContext';
-import ConfioIaMascot, { MASCOTS, MASCOT_COLORS, defaultMascotColor, type MascotKind } from './ConfioIaMascot';
+import { useAssistant } from './AssistantContext';
+import AssistantMascot, { MASCOTS, MASCOT_COLORS, defaultMascotColor, type MascotKind } from './AssistantMascot';
 
 const EMERALD = '#047857';
 
 type Props = {
   visible: boolean;
-  profile: ConfioIaProfile | null;
+  profile: AssistantProfile | null;
   onClose: () => void;
-  onSaved: (profile: ConfioIaProfile) => void;
+  onSaved: (profile: AssistantProfile) => void;
 };
 
 export default function MascotPicker({ visible, profile, onClose, onSaved }: Props) {
@@ -32,20 +32,20 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
   const [color, setColor] = useState('');
   const [name, setName] = useState('');
   const [wakeWord, setWakeWord] = useState(false);
-  const { plan } = useConfioIa();
+  const { plan } = useAssistant();
   const [error, setError] = useState<string | null>(null);
   // Refetch every live thread query (bubble, sheet, wake-word listener) so a
   // changed setting, like turning the wake word off, applies everywhere.
-  const [save, { loading }] = useMutation(UPDATE_CONFIO_IA_PROFILE, { refetchQueries: ['GetConfioIaThread'] });
-  const [usePet] = useMutation(USE_CONFIO_IA_PET, { refetchQueries: ['GetConfioIaThread'] });
-  const [createPet] = useMutation(CREATE_CONFIO_IA_PET);
-  const [deletePet] = useMutation(DELETE_CONFIO_IA_PET);
-  const { data: petsData, refetch: refetchPets } = useQuery(GET_CONFIO_IA_PETS, {
+  const [save, { loading }] = useMutation(UPDATE_ASSISTANT_PROFILE, { refetchQueries: ['GetAssistantThread'] });
+  const [usePet] = useMutation(USE_ASSISTANT_PET, { refetchQueries: ['GetAssistantThread'] });
+  const [createPet] = useMutation(CREATE_ASSISTANT_PET);
+  const [deletePet] = useMutation(DELETE_ASSISTANT_PET);
+  const { data: petsData, refetch: refetchPets } = useQuery(GET_ASSISTANT_PETS, {
     skip: !visible,
     fetchPolicy: 'network-only',
     errorPolicy: 'ignore',
   });
-  const myPets: ConfioIaPet[] = petsData?.confioIaPets ?? [];
+  const myPets: AssistantPet[] = petsData?.assistantPets ?? [];
   // A created pet being worn (or picked), else null for a built-in one.
   const [petId, setPetId] = useState<string | null>(null);
   const [idea, setIdea] = useState('');
@@ -103,7 +103,7 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
           photoMimeType: photo?.type ?? null,
         },
       });
-      const result = data?.createConfioIaPet;
+      const result = data?.createAssistantPet;
       if (typeof result?.creationsLeft === 'number') {
         setLeft(result.creationsLeft);
       }
@@ -121,7 +121,7 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
     }
   };
 
-  const removePet = (pet: ConfioIaPet) => {
+  const removePet = (pet: AssistantPet) => {
     Alert.alert('¿Borrar este personaje?', undefined, [
       { text: 'Cancelar', style: 'cancel' },
       {
@@ -142,8 +142,8 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
     try {
       if (petId) {
         const worn = await usePet({ variables: { petId } });
-        if (!worn.data?.useConfioIaPet?.success) {
-          setError(worn.data?.useConfioIaPet?.error || 'No pude usar ese personaje.');
+        if (!worn.data?.useAssistantPet?.success) {
+          setError(worn.data?.useAssistantPet?.error || 'No pude usar ese personaje.');
           return;
         }
       }
@@ -154,7 +154,7 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
           ...(plan?.wakeWordAvailable ? { wakeWordEnabled: wakeWord } : {}),
         },
       });
-      const next = data?.updateConfioIaProfile?.profile;
+      const next = data?.updateAssistantProfile?.profile;
       if (next) {
         onSaved(next);
       }
@@ -176,9 +176,9 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
                   <Text style={styles.creatingText}>Dibujando a tu asistente…</Text>
                 </View>
               ) : selectedPet ? (
-                <ConfioIaMascot kind="CUSTOM" imageUrl={selectedPet.imageUrl} size={96} mood="happy" />
+                <AssistantMascot kind="CUSTOM" imageUrl={selectedPet.imageUrl} size={96} mood="happy" />
               ) : (
-                <ConfioIaMascot kind={kind} color={shownColor} size={96} mood="happy" />
+                <AssistantMascot kind={kind} color={shownColor} size={96} mood="happy" />
               )}
               <Text style={styles.previewName}>
                 {name.trim() || (selectedPet ? 'Tu asistente' : MASCOTS.find((m) => m.kind === kind)?.label)}
@@ -219,7 +219,7 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
                   ? profile?.petCreationsPeriod === 'day'
                     ? 'Ya creaste tus personajes de hoy.'
                     : plan?.plusSalesEnabled
-                      ? 'Ya creaste tus personajes de esta semana. Con IA+ puedes crear más.'
+                      ? 'Ya creaste tus personajes de esta semana. Con Assistant+ puedes crear más.'
                       : 'Ya creaste tus personajes de esta semana. La próxima semana puedes crear más.'
                   : `Te quedan ${left} ${profile?.petCreationsPeriod === 'day' ? 'hoy' : 'esta semana'}.`}
               </Text>
@@ -258,7 +258,7 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
                   accessibilityState={{ selected: kind === m.kind }}
                   accessibilityLabel={m.label}
                 >
-                  <ConfioIaMascot kind={m.kind} size={48} animated={false} />
+                  <AssistantMascot kind={m.kind} size={48} animated={false} />
                   <Text style={styles.optionText}>{m.label}</Text>
                 </Pressable>
               ))}

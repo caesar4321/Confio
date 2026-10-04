@@ -1,4 +1,4 @@
-// Routes Confío IA voice calls to the loudspeaker. WebRTC's voice-chat audio
+// Routes Confio Assistant voice calls to the loudspeaker. WebRTC's voice-chat audio
 // session defaults to the earpiece; an assistant you talk to on screen
 // should be heard without holding the phone to your ear.
 import AVFoundation

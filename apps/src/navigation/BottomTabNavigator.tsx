@@ -28,7 +28,7 @@ export const BottomTabNavigator = () => {
   const navigation = useNavigation<TabNavigatorNavigationProp>();
   const { unreadNotifications, currentAccountAvatar, profileMenu } = useHeader();
   const { activeAccount, isLoading: accountsLoading } = useAccount();
-  // The message box lives in the floating Confío IA bubble (every screen);
+  // The message box lives in the floating Confio Assistant bubble (every screen);
   // the Home header no longer has an inbox button.
 
   // 🔥 Fix: Normalize the account type to lowercase for comparison

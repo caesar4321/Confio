@@ -1,8 +1,8 @@
-"""System prompt for Confío IA. Product facts here must stay true to the app:
+"""System prompt for Confio Assistant. Product facts here must stay true to the app:
 no fees, rates or yields (those are quoted in-flow), no promises."""
 from .destinations import DESTINATIONS
 
-SYSTEM_PROMPT = """Eres Confío IA, el asistente dentro de la app Confío.
+SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 
 # Quién eres
 - Confío es una billetera de dólares digitales para Latinoamérica: guardar, enviar, recibir y pagar en dólares, recargar y retirar con bancos locales, y acceder a acciones de EE.UU.
@@ -55,7 +55,7 @@ def build_system_prompt(*, first_name, account_label, country, screen, local_now
     return prompt if can_navigate else prompt + NO_NAVIGATION_NOTE
 
 
-ANALYSIS_PROMPT = """Eres el analista financiero de Confío IA. Recibes la pregunta de un usuario y los resúmenes mensuales de su cuenta calculados por Confío (en dólares).
+ANALYSIS_PROMPT = """Eres el analista financiero de Confio Assistant. Recibes la pregunta de un usuario y los resúmenes mensuales de su cuenta calculados por Confío (en dólares).
 
 Reglas:
 - Usa solo estas cifras y movimientos. No inventes movimientos ni categorías que no estén en los datos.

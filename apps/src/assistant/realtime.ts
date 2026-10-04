@@ -1,8 +1,8 @@
-// Realtime voice calls with Confío IA (IA+), over WebRTC straight to OpenAI.
+// Realtime voice calls with Confio Assistant (Assistant+), over WebRTC straight to OpenAI.
 //
 // The server mints a short-lived client secret and owns every tool that
 // touches the user's data: when the model calls one, we relay it to
-// runConfioIaVoiceTool and hand the server's answer back. `navigate` is the
+// runAssistantVoiceTool and hand the server's answer back. `navigate` is the
 // only tool the app runs itself. Transcripts and a heartbeat go to the server
 // every few seconds; the server measures minutes from its own clock and tells
 // us to hang up when the month's minutes run out.
@@ -10,10 +10,10 @@ import { NativeModules } from 'react-native';
 import type { ApolloClient } from '@apollo/client';
 import { RTCPeerConnection, mediaDevices, type MediaStream } from 'react-native-webrtc';
 import {
-  CONNECT_CONFIO_IA_VOICE,
-  LOG_CONFIO_IA_VOICE,
-  RUN_CONFIO_IA_VOICE_TOOL,
-  START_CONFIO_IA_VOICE,
+  CONNECT_ASSISTANT_VOICE,
+  LOG_ASSISTANT_VOICE,
+  RUN_ASSISTANT_VOICE_TOOL,
+  START_ASSISTANT_VOICE,
 } from './api';
 import { openDestination } from './destinations';
 
@@ -52,10 +52,10 @@ export class VoiceCall {
     let start: any;
     try {
       const { data } = await this.client.mutate({
-        mutation: START_CONFIO_IA_VOICE,
+        mutation: START_ASSISTANT_VOICE,
         variables: { screen: this.opts.screen ?? null, timezone: this.opts.timezone ?? null },
       });
-      start = data?.startConfioIaVoice;
+      start = data?.startAssistantVoice;
     } catch {
       this.finish('No pudimos iniciar la llamada. Revisa tu conexión.');
       return;
@@ -108,10 +108,10 @@ export class VoiceCall {
       // The server does the handshake with OpenAI: it holds the session
       // secret and records the call id, so it can always hang up.
       const { data: connected } = await this.client.mutate({
-        mutation: CONNECT_CONFIO_IA_VOICE,
+        mutation: CONNECT_ASSISTANT_VOICE,
         variables: { sessionId: this.sessionId, offerSdp: offer.sdp },
       });
-      const connect = connected?.connectConfioIaVoice;
+      const connect = connected?.connectAssistantVoice;
       if (!connect?.success || !connect.answerSdp) {
         throw new Error(connect?.error || 'connect failed');
       }
@@ -228,10 +228,10 @@ export class VoiceCall {
     } else if (this.sessionId) {
       try {
         const { data } = await this.client.mutate({
-          mutation: RUN_CONFIO_IA_VOICE_TOOL,
+          mutation: RUN_ASSISTANT_VOICE_TOOL,
           variables: { sessionId: this.sessionId, name, arguments: args },
         });
-        const tool = data?.runConfioIaVoiceTool;
+        const tool = data?.runAssistantVoiceTool;
         output = tool?.output ?? '{"error": "sin respuesta"}';
         if (tool && tool.keepGoing === false) {
           this.finish('La llamada terminó.');
@@ -266,7 +266,7 @@ export class VoiceCall {
     }, {});
     try {
       const { data } = await this.client.mutate({
-        mutation: LOG_CONFIO_IA_VOICE,
+        mutation: LOG_ASSISTANT_VOICE,
         variables: {
           sessionId: this.sessionId,
           transcript,
@@ -274,7 +274,7 @@ export class VoiceCall {
           ended,
         },
       });
-      const log = data?.logConfioIaVoice;
+      const log = data?.logAssistantVoice;
       if (log) {
         this.cb.onMinutesLeft?.(log.minutesLeft);
         if (!log.keepGoing && !ended) {

@@ -1,4 +1,4 @@
-// Push-to-talk voice notes for Confío IA: record → base64 → server
+// Push-to-talk voice notes for Confio Assistant: record → base64 → server
 // transcribes (gpt-transcribe) and answers. The audio is never stored.
 //
 // On a build without the native recorder, `isVoiceNoteAvailable` is false
@@ -47,7 +47,7 @@ async function ensureMicPermission(): Promise<boolean> {
   }
   const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, {
     title: 'Micrófono',
-    message: 'Confío IA necesita el micrófono para escuchar tus audios.',
+    message: 'Confio Assistant necesita el micrófono para escuchar tus audios.',
     buttonPositive: 'Permitir',
     buttonNegative: 'Ahora no',
   });

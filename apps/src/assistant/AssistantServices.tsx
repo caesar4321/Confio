@@ -1,42 +1,42 @@
-// Background duties of Confío IA while the user is signed in:
-//  - load the IA+ plan,
+// Background duties of Confio Assistant while the user is signed in:
+//  - load the Assistant+ plan,
 //  - hand store transactions (renewals, purchases finished later) to the
 //    server for verification,
-//  - run the "Confío" wake word (IA+, opted in, app in foreground, no call,
+//  - run the "Confío" wake word (Assistant+, opted in, app in foreground, no call,
 //    chat closed so the mic is free for voice notes).
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { useApolloClient, useQuery } from '@apollo/client';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
-import { GET_CONFIO_IA_PLAN, GET_CONFIO_IA_THREAD, GET_CONFIO_IA_WAKE_WORD } from './api';
+import { GET_ASSISTANT_PLAN, GET_ASSISTANT_THREAD, GET_ASSISTANT_WAKE_WORD } from './api';
 import { listenForStoreTransactions } from './billingClient';
 import { hangUp, useCall } from './callStore';
-import { useConfioIa } from './ConfioIaContext';
+import { useAssistant } from './AssistantContext';
 import { WakeWordListener } from './wakeWord';
 
-export default function ConfioIaServices() {
+export default function AssistantServices() {
   const client = useApolloClient();
   const { isAuthenticated, isLoading } = useAuth();
-  const { plan, setPlan, isOpen, open, setInCall, aiEnabled, micBusy } = useConfioIa();
+  const { plan, setPlan, isOpen, open, setInCall, aiEnabled, micBusy } = useAssistant();
   const call = useCall();
   const enabled = isAuthenticated && !isLoading && aiEnabled;
   const { activeAccount } = useAccount();
   const accountId = activeAccount?.id;
   const listener = useRef<WakeWordListener | null>(null);
 
-  const { data: planData } = useQuery(GET_CONFIO_IA_PLAN, {
+  const { data: planData } = useQuery(GET_ASSISTANT_PLAN, {
     skip: !enabled,
     fetchPolicy: 'network-only',
     errorPolicy: 'ignore',
   });
   useEffect(() => {
-    if (planData?.confioIaPlan) {
-      setPlan(planData.confioIaPlan);
+    if (planData?.assistantPlan) {
+      setPlan(planData.assistantPlan);
     }
   }, [planData, setPlan]);
 
-  // Store transactions only matter while IA+ is on sale.
+  // Store transactions only matter while Assistant+ is on sale.
   const salesOn = !!plan?.plusSalesEnabled;
   useEffect(() => {
     if (!enabled || !salesOn) {
@@ -67,19 +67,19 @@ export default function ConfioIaServices() {
     setInCall(live);
   }, [live, setInCall]);
 
-  const { data: profileData } = useQuery(GET_CONFIO_IA_THREAD, {
+  const { data: profileData } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: 1, contextKey: accountId || 'no-account' },
     fetchPolicy: 'cache-only',
     skip: !enabled,
   });
   const wakeWordWanted =
-    enabled && !!plan?.wakeWordAvailable && !!profileData?.confioIaThread?.profile?.wakeWordEnabled;
-  const { data: keyData } = useQuery(GET_CONFIO_IA_WAKE_WORD, {
+    enabled && !!plan?.wakeWordAvailable && !!profileData?.assistantThread?.profile?.wakeWordEnabled;
+  const { data: keyData } = useQuery(GET_ASSISTANT_WAKE_WORD, {
     skip: !wakeWordWanted,
     fetchPolicy: 'network-only',
     errorPolicy: 'ignore',
   });
-  const accessKey = keyData?.confioIaWakeWord?.accessKey as string | undefined;
+  const accessKey = keyData?.assistantWakeWord?.accessKey as string | undefined;
 
   useEffect(() => {
     if (!wakeWordWanted || !accessKey) {
@@ -87,7 +87,7 @@ export default function ConfioIaServices() {
       listener.current = null;
       return undefined;
     }
-    // "Confío" → the box opens on Confío IA and records a voice note (cheap;
+    // "Confío" → the box opens on Confio Assistant and records a voice note (cheap;
     // realtime calls stay dark).
     listener.current = new WakeWordListener(accessKey, () => open({ channel: 'ia', voiceNote: true }));
     return () => {

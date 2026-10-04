@@ -1,4 +1,4 @@
-"""GraphQL for Confío IA.
+"""GraphQL for Confio Assistant.
 
 All new operations, no new fields on shared types: the app asks for these in
 their own requests so an older server fails only the assistant, never the
@@ -22,22 +22,22 @@ logger = logging.getLogger(__name__)
 HEX_COLOR = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
 
-class ConfioIaActionType(graphene.ObjectType):
+class AssistantActionType(graphene.ObjectType):
     type = graphene.String(required=True)
     destination = graphene.String()
 
 
-class ConfioIaMessageType(graphene.ObjectType):
+class AssistantMessageType(graphene.ObjectType):
     id = graphene.ID(required=True)
     role = graphene.String(required=True, description='user | assistant | team | system')
     body = graphene.String(required=True)
     created_at = graphene.DateTime(required=True)
     sender_name = graphene.String(required=True)
     modality = graphene.String()
-    actions = graphene.List(graphene.NonNull(ConfioIaActionType), required=True)
+    actions = graphene.List(graphene.NonNull(AssistantActionType), required=True)
 
 
-class ConfioIaProfileType(graphene.ObjectType):
+class AssistantProfileType(graphene.ObjectType):
     mascot = graphene.String(required=True)
     mascot_name = graphene.String(required=True)
     mascot_color = graphene.String(required=True)
@@ -48,17 +48,17 @@ class ConfioIaProfileType(graphene.ObjectType):
     custom_pet_id = graphene.ID()
     custom_pet_url = graphene.String(description='Signed, short-lived; refetch when it expires')
     pet_creations_left = graphene.Int(required=True)
-    pet_creations_period = graphene.String(required=True, description='week (free) | day (IA+)')
+    pet_creations_period = graphene.String(required=True, description='week (free) | day (Assistant+)')
 
 
-class ConfioIaPetType(graphene.ObjectType):
+class AssistantPetType(graphene.ObjectType):
     id = graphene.ID(required=True)
     image_url = graphene.String()
     idea = graphene.String(required=True)
     source = graphene.String(required=True)
 
 
-class ConfioIaPlanType(graphene.ObjectType):
+class AssistantPlanType(graphene.ObjectType):
     is_plus = graphene.Boolean(required=True)
     product_id = graphene.String(required=True, description='Store product to sell (same id on both stores)')
     billing_token = graphene.String(required=True, description='Pass to the store: appAccountToken / obfuscatedAccountId')
@@ -72,20 +72,20 @@ class ConfioIaPlanType(graphene.ObjectType):
     voice_minutes_left = graphene.Int(required=True)
     wake_word_available = graphene.Boolean(required=True)
     voice_calls_enabled = graphene.Boolean(required=True, description='Realtime calls offered at all')
-    plus_sales_enabled = graphene.Boolean(required=True, description='Show IA+ / purchase UI at all')
+    plus_sales_enabled = graphene.Boolean(required=True, description='Show Assistant+ / purchase UI at all')
 
 
-class ConfioIaWakeWordType(graphene.ObjectType):
+class AssistantWakeWordType(graphene.ObjectType):
     access_key = graphene.String(required=True)
 
 
-class ConfioIaThreadType(graphene.ObjectType):
-    messages = graphene.List(graphene.NonNull(ConfioIaMessageType), required=True)
+class AssistantThreadType(graphene.ObjectType):
+    messages = graphene.List(graphene.NonNull(AssistantMessageType), required=True)
     has_more = graphene.Boolean(required=True)
     mode = graphene.String(required=True, description='AI | HUMAN')
     remaining_turns = graphene.Int(required=True)
     enabled = graphene.Boolean(required=True)
-    profile = graphene.Field(ConfioIaProfileType, required=True)
+    profile = graphene.Field(AssistantProfileType, required=True)
 
 
 def message_payload(message):
@@ -93,7 +93,7 @@ def message_payload(message):
     if message.sender_type == 'USER':
         role, name = 'user', 'Tú'
     elif message.sender_type == 'AGENT' and metadata.get('ai'):
-        role, name = 'assistant', 'Confío IA'
+        role, name = 'assistant', 'Confio Assistant'
     elif message.sender_type == 'AGENT':
         role = 'team'
         staff = message.sender_user
@@ -101,7 +101,7 @@ def message_payload(message):
         name = f'{name} · Equipo Confío' if name else 'Equipo Confío'
     else:
         role, name = 'system', 'Confío'
-    return ConfioIaMessageType(
+    return AssistantMessageType(
         id=str(message.id),
         role=role,
         body=message.body,
@@ -109,7 +109,7 @@ def message_payload(message):
         sender_name=name,
         modality=metadata.get('modality'),
         actions=[
-            ConfioIaActionType(type=a.get('type', ''), destination=a.get('destination'))
+            AssistantActionType(type=a.get('type', ''), destination=a.get('destination'))
             for a in (metadata.get('actions') or []) if isinstance(a, dict)
         ],
     )
@@ -117,7 +117,7 @@ def message_payload(message):
 
 def profile_payload(profile):
     left, period = pets.creations_left(profile.user)
-    return ConfioIaProfileType(
+    return AssistantProfileType(
         custom_pet_id=str(profile.custom_pet_id) if profile.custom_pet_id else None,
         custom_pet_url=pets.pet_url(profile.custom_pet) if profile.mascot == Mascot.CUSTOM else None,
         pet_creations_left=left,
@@ -136,9 +136,9 @@ def profile_payload(profile):
 def plan_payload(user):
     sub = billing.active_subscription(user)
     plus = sub is not None
-    return ConfioIaPlanType(
+    return AssistantPlanType(
         is_plus=plus,
-        product_id=conf.get('CONFIO_IA_PLUS_PRODUCT_ID'),
+        product_id=conf.get('CONFIO_ASSISTANT_PLUS_PRODUCT_ID'),
         billing_token=str(billing.billing_token_for(user)),
         platform=sub.platform if sub else None,
         expires_at=sub.expires_at if sub else None,
@@ -146,51 +146,51 @@ def plan_payload(user):
         in_grace=bool(sub and sub.status == 'GRACE'),
         daily_turns=service.daily_turn_cap(user),
         remaining_turns=service.remaining_turns(user),
-        voice_minutes=conf.get('CONFIO_IA_PLUS_VOICE_MINUTES') if plus else 0,
+        voice_minutes=conf.get('CONFIO_ASSISTANT_PLUS_VOICE_MINUTES') if plus else 0,
         voice_minutes_left=int(voice.minutes_left(user)) if plus else 0,
         # Free for everyone: "Confío" opens a voice note (cheap), never a call.
-        wake_word_available=bool(conf.get('CONFIO_IA_ENABLED')) and bool(conf.get('CONFIO_IA_PICOVOICE_ACCESS_KEY')),
-        voice_calls_enabled=bool(conf.get('CONFIO_IA_REALTIME_ENABLED')),
-        plus_sales_enabled=bool(conf.get('CONFIO_IA_PLUS_SALES_ENABLED')),
+        wake_word_available=bool(conf.get('CONFIO_ASSISTANT_ENABLED')) and bool(conf.get('CONFIO_ASSISTANT_PICOVOICE_ACCESS_KEY')),
+        voice_calls_enabled=bool(conf.get('CONFIO_ASSISTANT_REALTIME_ENABLED')),
+        plus_sales_enabled=bool(conf.get('CONFIO_ASSISTANT_PLUS_SALES_ENABLED')),
     )
 
 
 def pet_payload(pet):
-    return ConfioIaPetType(id=str(pet.id), image_url=pets.pet_url(pet), idea=pet.idea, source=pet.source)
+    return AssistantPetType(id=str(pet.id), image_url=pets.pet_url(pet), idea=pet.idea, source=pet.source)
 
 
 class Query(graphene.ObjectType):
-    confio_ia_pets = graphene.List(graphene.NonNull(ConfioIaPetType), required=True)
+    assistant_pets = graphene.List(graphene.NonNull(AssistantPetType), required=True)
 
     @login_required
-    def resolve_confio_ia_pets(self, info):
+    def resolve_assistant_pets(self, info):
         from .models import CustomPet
         return [pet_payload(p) for p in CustomPet.objects.filter(
             user=info.context.user, deleted_at__isnull=True).exclude(image_key='').order_by('-created_at')[:12]]
 
-    confio_ia_plan = graphene.Field(ConfioIaPlanType)
-    confio_ia_wake_word = graphene.Field(ConfioIaWakeWordType, description='Null until the key is configured')
+    assistant_plan = graphene.Field(AssistantPlanType)
+    assistant_wake_word = graphene.Field(AssistantWakeWordType, description='Null until the key is configured')
 
     @login_required
-    def resolve_confio_ia_plan(self, info):
+    def resolve_assistant_plan(self, info):
         return plan_payload(info.context.user)
 
     @login_required
-    def resolve_confio_ia_wake_word(self, info):
-        key = conf.get('CONFIO_IA_PICOVOICE_ACCESS_KEY')
-        if not key or not conf.get('CONFIO_IA_ENABLED'):
+    def resolve_assistant_wake_word(self, info):
+        key = conf.get('CONFIO_ASSISTANT_PICOVOICE_ACCESS_KEY')
+        if not key or not conf.get('CONFIO_ASSISTANT_ENABLED'):
             return None
-        return ConfioIaWakeWordType(access_key=key)
+        return AssistantWakeWordType(access_key=key)
 
-    confio_ia_thread = graphene.Field(
-        ConfioIaThreadType,
+    assistant_thread = graphene.Field(
+        AssistantThreadType,
         limit=graphene.Int(default_value=30),
         before_id=graphene.ID(),
         context_key=graphene.String(description='Active account id; only keys the client cache per account'),
     )
 
     @login_required
-    def resolve_confio_ia_thread(self, info, limit=30, before_id=None, context_key=None):
+    def resolve_assistant_thread(self, info, limit=30, before_id=None, context_key=None):
         user, account, business, _ = get_context_models(info)
         conversation = get_or_create_support_conversation(user, account, business)
         limit = min(max(int(limit or 30), 1), 50)
@@ -200,18 +200,18 @@ class Query(graphene.ObjectType):
         page = list(queryset[:limit + 1])
         has_more = len(page) > limit
         page = list(reversed(page[:limit]))
-        return ConfioIaThreadType(
+        return AssistantThreadType(
             messages=[message_payload(m) for m in page],
             has_more=has_more,
             mode='HUMAN' if service.is_human_mode(conversation) else 'AI',
             remaining_turns=service.remaining_turns(user),
             # False = support answered by people (kill switch).
-            enabled=bool(conf.get('CONFIO_IA_ENABLED')),
+            enabled=bool(conf.get('CONFIO_ASSISTANT_ENABLED')),
             profile=profile_payload(service.profile_for(user)),
         )
 
 
-class AskConfioIa(graphene.Mutation):
+class AskAssistant(graphene.Mutation):
     class Arguments:
         body = graphene.String(description='Typed text. Ignored when audio is sent.')
         audio_base64 = graphene.String(description='Voice note, base64. Transcribed, never stored.')
@@ -223,9 +223,9 @@ class AskConfioIa(graphene.Mutation):
     success = graphene.Boolean(required=True)
     error = graphene.String()
     transcript = graphene.String()
-    user_message = graphene.Field(ConfioIaMessageType)
-    reply = graphene.Field(ConfioIaMessageType)
-    actions = graphene.List(graphene.NonNull(ConfioIaActionType), required=True)
+    user_message = graphene.Field(AssistantMessageType)
+    reply = graphene.Field(AssistantMessageType)
+    actions = graphene.List(graphene.NonNull(AssistantActionType), required=True)
     mode = graphene.String(required=True)
     remaining_turns = graphene.Int()
     data_changed = graphene.Boolean(description='The reply changed the user\'s data: refresh money views')
@@ -243,24 +243,24 @@ class AskConfioIa(graphene.Mutation):
             outcome = service.ask(user, account, business, jwt_context, None if audio else body, audio=audio,
                                   screen=screen or '', tz_name=timezone)
         except ValueError as exc:
-            return AskConfioIa(success=False, error=str(exc), actions=[], mode='AI')
+            return AskAssistant(success=False, error=str(exc), actions=[], mode='AI')
         except AssistantUnavailable as exc:
-            logger.warning('Confío IA transcription unavailable: %s', exc)
-            return AskConfioIa(success=False, error='No pude escuchar el audio. Inténtalo de nuevo o escríbeme.',
+            logger.warning('Confio Assistant transcription unavailable: %s', exc)
+            return AskAssistant(success=False, error='No pude escuchar el audio. Inténtalo de nuevo o escríbeme.',
                                actions=[], mode='AI')
-        return AskConfioIa(
+        return AskAssistant(
             success=True,
             transcript=outcome.transcript,
             user_message=message_payload(outcome.user_message),
             reply=message_payload(outcome.reply_message) if outcome.reply_message else None,
-            actions=[ConfioIaActionType(type=a['type'], destination=a.get('destination')) for a in outcome.actions],
+            actions=[AssistantActionType(type=a['type'], destination=a.get('destination')) for a in outcome.actions],
             mode=outcome.mode,
             remaining_turns=outcome.remaining_turns,
             data_changed=outcome.data_changed,
         )
 
 
-class ReturnToConfioIa(graphene.Mutation):
+class ReturnToAssistant(graphene.Mutation):
     success = graphene.Boolean(required=True)
     mode = graphene.String(required=True)
 
@@ -269,10 +269,10 @@ class ReturnToConfioIa(graphene.Mutation):
     def mutate(cls, root, info):
         user, account, business, _ = get_context_models(info)
         service.return_to_ai(user, account, business)
-        return ReturnToConfioIa(success=True, mode='AI')
+        return ReturnToAssistant(success=True, mode='AI')
 
 
-class UpdateConfioIaProfile(graphene.Mutation):
+class UpdateAssistantProfile(graphene.Mutation):
     class Arguments:
         mascot = graphene.String()
         mascot_name = graphene.String()
@@ -283,7 +283,7 @@ class UpdateConfioIaProfile(graphene.Mutation):
         wake_word_enabled = graphene.Boolean()
 
     success = graphene.Boolean(required=True)
-    profile = graphene.Field(ConfioIaProfileType, required=True)
+    profile = graphene.Field(AssistantProfileType, required=True)
 
     @classmethod
     @login_required
@@ -320,11 +320,11 @@ class UpdateConfioIaProfile(graphene.Mutation):
             fields.append('wake_word_enabled')
         if fields:
             profile.save(update_fields=fields + ['updated_at'])
-        return UpdateConfioIaProfile(success=True, profile=profile_payload(profile))
+        return UpdateAssistantProfile(success=True, profile=profile_payload(profile))
 
 
-class VerifyConfioIaPurchase(graphene.Mutation):
-    """Hand a store purchase to the server; IA+ unlocks only if the store confirms it."""
+class VerifyAssistantPurchase(graphene.Mutation):
+    """Hand a store purchase to the server; Assistant+ unlocks only if the store confirms it."""
 
     class Arguments:
         platform = graphene.String(required=True, description='ios | android')
@@ -333,14 +333,14 @@ class VerifyConfioIaPurchase(graphene.Mutation):
 
     success = graphene.Boolean(required=True)
     error = graphene.String()
-    plan = graphene.Field(ConfioIaPlanType)
+    plan = graphene.Field(AssistantPlanType)
 
     @classmethod
     @login_required
     def mutate(cls, root, info, platform, signed_transaction=None, purchase_token=None):
         user = info.context.user
-        if not conf.get('CONFIO_IA_PLUS_SALES_ENABLED'):
-            return cls(success=False, error='IA+ no está disponible.', plan=plan_payload(user))
+        if not conf.get('CONFIO_ASSISTANT_PLUS_SALES_ENABLED'):
+            return cls(success=False, error='Assistant+ no está disponible.', plan=plan_payload(user))
         try:
             if platform == 'ios' and signed_transaction:
                 billing.verify_apple_purchase(user, signed_transaction)
@@ -353,12 +353,12 @@ class VerifyConfioIaPurchase(graphene.Mutation):
         return cls(success=True, plan=plan_payload(user))
 
 
-class ConfioIaTranscriptInput(graphene.InputObjectType):
+class AssistantTranscriptInput(graphene.InputObjectType):
     role = graphene.String(required=True, description='user | assistant')
     text = graphene.String(required=True)
 
 
-class StartConfioIaVoice(graphene.Mutation):
+class StartAssistantVoice(graphene.Mutation):
     class Arguments:
         screen = graphene.String()
         timezone = graphene.String()
@@ -386,7 +386,7 @@ class StartConfioIaVoice(graphene.Mutation):
         return cls(success=True, session_id=str(session.id), model=session.model, minutes_left=left)
 
 
-class ConnectConfioIaVoice(graphene.Mutation):
+class ConnectAssistantVoice(graphene.Mutation):
     """WebRTC handshake done by the server (it holds the session secret and
     learns the call id, so it can always hang up)."""
 
@@ -413,7 +413,7 @@ class ConnectConfioIaVoice(graphene.Mutation):
         return cls(success=True, answer_sdp=answer)
 
 
-class RunConfioIaVoiceTool(graphene.Mutation):
+class RunAssistantVoiceTool(graphene.Mutation):
     class Arguments:
         session_id = graphene.ID(required=True)
         name = graphene.String(required=True)
@@ -449,12 +449,12 @@ class RunConfioIaVoiceTool(graphene.Mutation):
         return cls(output=output, handed_off=bool(result.handoff_reason), keep_going=True)
 
 
-class LogConfioIaVoice(graphene.Mutation):
+class LogAssistantVoice(graphene.Mutation):
     """Transcripts + heartbeat. Returns whether the call may continue."""
 
     class Arguments:
         session_id = graphene.ID(required=True)
-        transcript = graphene.List(graphene.NonNull(ConfioIaTranscriptInput))
+        transcript = graphene.List(graphene.NonNull(AssistantTranscriptInput))
         usage_json = graphene.String()
         ended = graphene.Boolean()
 
@@ -492,7 +492,7 @@ class LogConfioIaVoice(graphene.Mutation):
         return cls(keep_going=keep_going, minutes_left=int(voice.minutes_left(user)))
 
 
-class CreateConfioIaPet(graphene.Mutation):
+class CreateAssistantPet(graphene.Mutation):
     class Arguments:
         idea = graphene.String()
         photo_base64 = graphene.String(description='A photo of the user\'s own pet (no people)')
@@ -500,7 +500,7 @@ class CreateConfioIaPet(graphene.Mutation):
 
     success = graphene.Boolean(required=True)
     error = graphene.String()
-    pet = graphene.Field(ConfioIaPetType)
+    pet = graphene.Field(AssistantPetType)
     creations_left = graphene.Int()
 
     @classmethod
@@ -514,7 +514,7 @@ class CreateConfioIaPet(graphene.Mutation):
         return cls(success=True, pet=pet_payload(pet), creations_left=pets.creations_left(user)[0])
 
 
-class UseConfioIaPet(graphene.Mutation):
+class UseAssistantPet(graphene.Mutation):
     """Wear a created pet (pet_id), or go back to the built-in mascot (null)."""
 
     class Arguments:
@@ -522,7 +522,7 @@ class UseConfioIaPet(graphene.Mutation):
 
     success = graphene.Boolean(required=True)
     error = graphene.String()
-    profile = graphene.Field(ConfioIaProfileType)
+    profile = graphene.Field(AssistantProfileType)
 
     @classmethod
     @login_required
@@ -534,7 +534,7 @@ class UseConfioIaPet(graphene.Mutation):
         return cls(success=True, profile=profile_payload(profile))
 
 
-class DeleteConfioIaPet(graphene.Mutation):
+class DeleteAssistantPet(graphene.Mutation):
     class Arguments:
         pet_id = graphene.ID(required=True)
 
@@ -548,14 +548,14 @@ class DeleteConfioIaPet(graphene.Mutation):
 
 
 class Mutation(graphene.ObjectType):
-    create_confio_ia_pet = CreateConfioIaPet.Field()
-    use_confio_ia_pet = UseConfioIaPet.Field()
-    delete_confio_ia_pet = DeleteConfioIaPet.Field()
-    verify_confio_ia_purchase = VerifyConfioIaPurchase.Field()
-    start_confio_ia_voice = StartConfioIaVoice.Field()
-    connect_confio_ia_voice = ConnectConfioIaVoice.Field()
-    run_confio_ia_voice_tool = RunConfioIaVoiceTool.Field()
-    log_confio_ia_voice = LogConfioIaVoice.Field()
-    ask_confio_ia = AskConfioIa.Field()
-    return_to_confio_ia = ReturnToConfioIa.Field()
-    update_confio_ia_profile = UpdateConfioIaProfile.Field()
+    create_assistant_pet = CreateAssistantPet.Field()
+    use_assistant_pet = UseAssistantPet.Field()
+    delete_assistant_pet = DeleteAssistantPet.Field()
+    verify_assistant_purchase = VerifyAssistantPurchase.Field()
+    start_assistant_voice = StartAssistantVoice.Field()
+    connect_assistant_voice = ConnectAssistantVoice.Field()
+    run_assistant_voice_tool = RunAssistantVoiceTool.Field()
+    log_assistant_voice = LogAssistantVoice.Field()
+    ask_assistant = AskAssistant.Field()
+    return_to_assistant = ReturnToAssistant.Field()
+    update_assistant_profile = UpdateAssistantProfile.Field()

@@ -1,4 +1,4 @@
-// The Confío IA chat: typed text or voice notes in, answers plus screen
+// The Confio Assistant chat: typed text or voice notes in, answers plus screen
 // actions out. The same thread the team answers in after a handoff.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -25,19 +25,19 @@ import { GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/que
 import { MessageInboxContent } from '../components/MessageInboxContent';
 import { ChannelAvatar } from '../components/MessageInboxShared';
 import {
-  ASK_CONFIO_IA,
-  GET_CONFIO_IA_PLAN,
-  GET_CONFIO_IA_THREAD,
-  RETURN_TO_CONFIO_IA,
-  type ConfioIaAction,
-  type ConfioIaMessage,
-  type ConfioIaProfile,
+  ASK_ASSISTANT,
+  GET_ASSISTANT_PLAN,
+  GET_ASSISTANT_THREAD,
+  RETURN_TO_ASSISTANT,
+  type AssistantAction,
+  type AssistantMessage,
+  type AssistantProfile,
 } from './api';
-import ConfioIaMascot, { type MascotMood } from './ConfioIaMascot';
-import { useConfioIa, type BoxChannel } from './ConfioIaContext';
+import AssistantMascot, { type MascotMood } from './AssistantMascot';
+import { useAssistant, type BoxChannel } from './AssistantContext';
 import { DESTINATION_LABELS, isKnownDestination, openDestination } from './destinations';
 import MascotPicker from './MascotPicker';
-import IaPlusPanel from './IaPlusPanel';
+import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
 import { clearCallError, startCall, useCall } from './callStore';
 import {
@@ -72,7 +72,7 @@ function formatClock(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function ActionChips({ actions, onPress }: { actions: ConfioIaAction[]; onPress: (key: string) => void }) {
+function ActionChips({ actions, onPress }: { actions: AssistantAction[]; onPress: (key: string) => void }) {
   const known = actions.filter((a) => a.type === 'navigate' && isKnownDestination(a.destination));
   if (!known.length) {
     return null;
@@ -96,7 +96,7 @@ function ActionChips({ actions, onPress }: { actions: ConfioIaAction[]; onPress:
 
 type PetFace = { mascot?: string; customPetUrl?: string | null; mascotColor?: string } | null;
 
-// Three dots that hop while Confío IA thinks.
+// Three dots that hop while Confio Assistant thinks.
 function TypingDots() {
   const dots = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
   useEffect(() => {
@@ -125,7 +125,7 @@ function TypingDots() {
   );
 }
 
-function Bubble({ message, onAction, pet }: { message: ConfioIaMessage; onAction: (key: string) => void; pet: PetFace }) {
+function Bubble({ message, onAction, pet }: { message: AssistantMessage; onAction: (key: string) => void; pet: PetFace }) {
   const mine = message.role === 'user';
   const team = message.role === 'team';
   const ai = message.role === 'assistant';
@@ -133,7 +133,7 @@ function Bubble({ message, onAction, pet }: { message: ConfioIaMessage; onAction
     <View style={[styles.messageRow, mine && styles.messageRowMine]}>
       {ai ? (
         <View style={styles.msgAvatar}>
-          <ConfioIaMascot kind={pet?.mascot} imageUrl={pet?.customPetUrl} color={pet?.mascotColor} size={26} animated={false} />
+          <AssistantMascot kind={pet?.mascot} imageUrl={pet?.customPetUrl} color={pet?.mascotColor} size={26} animated={false} />
         </View>
       ) : null}
     <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs]}>
@@ -156,15 +156,15 @@ function Bubble({ message, onAction, pet }: { message: ConfioIaMessage; onAction
   );
 }
 
-export default function ConfioIaSheet() {
+export default function AssistantSheet() {
   const insets = useSafeAreaInsets();
   const {
     isOpen, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel, consumeVoiceNote,
     consumeVoiceNoteData, openSeq, route, plan,
     setPlan, available,
     aiEnabled, bubbleAnchor,
-  } = useConfioIa();
-  // Which chat head is open: Confío IA, Julian or Confío News.
+  } = useAssistant();
+  // Which chat head is open: Confio Assistant, Julian or Confío News.
   const [channel, setChannel] = useState<BoxChannel>('ia');
   // False until the open request's channel is applied, so nothing acts on
   // the previous visit's channel.
@@ -176,7 +176,7 @@ export default function ConfioIaSheet() {
   const [showPlus, setShowPlus] = useState(false);
   const { activeAccount } = useAccount();
   const isBusiness = (activeAccount?.type || '').toLowerCase() === 'business';
-  const [messages, setMessages] = useState<ConfioIaMessage[]>([]);
+  const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [mode, setMode] = useState<'AI' | 'HUMAN'>('AI');
@@ -186,7 +186,7 @@ export default function ConfioIaSheet() {
   const [recordingMs, setRecordingMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [profile, setProfile] = useState<ConfioIaProfile | null>(null);
+  const [profile, setProfile] = useState<AssistantProfile | null>(null);
   const autoStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const client = useApolloClient();
@@ -195,7 +195,7 @@ export default function ConfioIaSheet() {
   // Keyed by account: a poll answered for the previous account lands in that
   // account's cache entry, never in this one.
   const contextKey = activeAccount?.id || 'no-account';
-  const { data, loading, refetch } = useQuery(GET_CONFIO_IA_THREAD, {
+  const { data, loading, refetch } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: PAGE_SIZE, contextKey },
     skip: !isOpen,
     fetchPolicy: 'network-only',
@@ -214,18 +214,18 @@ export default function ConfioIaSheet() {
     const id = c.id === 'confio-news' ? 'confio' : c.id;
     unreadByChannel[id] = c.unreadCount || 0;
   }
-  const { data: planData } = useQuery(GET_CONFIO_IA_PLAN, {
+  const { data: planData } = useQuery(GET_ASSISTANT_PLAN, {
     skip: !isOpen,
     fetchPolicy: 'network-only',
     errorPolicy: 'ignore',
   });
   useEffect(() => {
-    if (planData?.confioIaPlan) {
-      setPlan(planData.confioIaPlan);
+    if (planData?.assistantPlan) {
+      setPlan(planData.assistantPlan);
     }
   }, [planData, setPlan]);
-  const [ask] = useMutation(ASK_CONFIO_IA);
-  const [returnToAi] = useMutation(RETURN_TO_CONFIO_IA);
+  const [ask] = useMutation(ASK_ASSISTANT);
+  const [returnToAi] = useMutation(RETURN_TO_ASSISTANT);
   const [markSeen] = useMutation(MARK_MESSAGE_CHANNEL_SEEN, {
     refetchQueries: [GET_MESSAGE_INBOX_UNREAD_COUNT],
   });
@@ -241,7 +241,7 @@ export default function ConfioIaSheet() {
   }, [isOpen, channelReady, channel, lastMessageId, markSeen]);
 
   useEffect(() => {
-    const thread = data?.confioIaThread;
+    const thread = data?.assistantThread;
     if (!thread) {
       return;
     }
@@ -250,7 +250,7 @@ export default function ConfioIaSheet() {
     setMessages((prev) => {
       const pending = prev.filter((m) => m.pending);
       const firstId = Number(thread.messages[0]?.id ?? Infinity);
-      const polled = new Set(thread.messages.map((m: ConfioIaMessage) => m.id));
+      const polled = new Set(thread.messages.map((m: AssistantMessage) => m.id));
       const older = prev.filter((m) => !m.pending && Number(m.id) < firstId);
       // Messages a mutation added that this poll predates stay, once.
       const newer = prev.filter((m) => !m.pending && Number(m.id) >= firstId && !polled.has(m.id));
@@ -289,7 +289,7 @@ export default function ConfioIaSheet() {
     }
     if (consumeVoiceNote() && aiEnabled && isVoiceNoteAvailable) {
       // Give the wake-word engine a moment to release the microphone; only
-      // record if Confío IA is still the visible channel by then.
+      // record if Confio Assistant is still the visible channel by then.
       wakeTimer.current = setTimeout(() => {
         wakeTimer.current = null;
         if (recordingMs === null && channelRef.current === 'ia') {
@@ -406,7 +406,7 @@ export default function ConfioIaSheet() {
         if (gen !== accountGen.current) {
           return; // the user switched accounts while this was answering
         }
-        const payload = result?.askConfioIa;
+        const payload = result?.askAssistant;
         if (!payload?.success) {
           setMessages((prev) => prev.filter((m) => m.id !== tempId));
           setError(payload?.error || 'No pude enviar tu mensaje.');
@@ -414,7 +414,7 @@ export default function ConfioIaSheet() {
         }
         setMessages((prev) => {
           // A poll may already have brought these in: merge by server id.
-          const fresh = [payload.userMessage, payload.reply].filter(Boolean) as ConfioIaMessage[];
+          const fresh = [payload.userMessage, payload.reply].filter(Boolean) as AssistantMessage[];
           const known = new Set(prev.map((m) => m.id));
           return [...prev.filter((m) => m.id !== tempId), ...fresh.filter((m) => !known.has(m.id))];
         });
@@ -429,7 +429,7 @@ export default function ConfioIaSheet() {
           setTimeout(() => setSpeaking(false), 1600);
         }
         // "Confío, abre QR para pagar": the answer moves the app.
-        const navigateTo = (payload.actions as ConfioIaAction[]).find(
+        const navigateTo = (payload.actions as AssistantAction[]).find(
           (a) => a.type === 'navigate' && isKnownDestination(a.destination),
         );
         if (navigateTo?.destination) {
@@ -441,7 +441,7 @@ export default function ConfioIaSheet() {
         }
       } catch (e) {
         setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        setError('Sin conexión con Confío IA. Inténtalo de nuevo.');
+        setError('Sin conexión con Confio Assistant. Inténtalo de nuevo.');
       } finally {
         setThinking(false);
       }
@@ -476,7 +476,7 @@ export default function ConfioIaSheet() {
   };
 
   const recordGen = useRef(0);
-  // Leaving the Confío IA channel stops (and never sends) a recording,
+  // Leaving the Confio Assistant channel stops (and never sends) a recording,
   // including one the wake word was about to start.
   useEffect(() => {
     channelRef.current = channel;
@@ -578,17 +578,17 @@ export default function ConfioIaSheet() {
       // overwritten in the cache by an older one.
       const gen = accountGen.current;
       const { data: page } = await client.query({
-        query: GET_CONFIO_IA_THREAD,
+        query: GET_ASSISTANT_THREAD,
         variables: { limit: PAGE_SIZE, beforeId: oldest.id, contextKey },
         fetchPolicy: 'no-cache',
       });
       if (gen !== accountGen.current) {
         return;
       }
-      const thread = page?.confioIaThread;
+      const thread = page?.assistantThread;
       if (thread) {
         olderLoaded.current = true;
-        setMessages((prev) => [...thread.messages.filter((m: ConfioIaMessage) => !prev.some((p) => p.id === m.id)), ...prev]);
+        setMessages((prev) => [...thread.messages.filter((m: AssistantMessage) => !prev.some((p) => p.id === m.id)), ...prev]);
         setHasMore(thread.hasMore);
       }
     } finally {
@@ -657,13 +657,13 @@ export default function ConfioIaSheet() {
                 style={styles.head}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: channel === id }}
-                accessibilityLabel={id === 'ia' ? (aiEnabled ? 'Confío IA' : 'Soporte') : id === 'julian' ? 'Julian Moon' : 'Confío News'}
+                accessibilityLabel={id === 'ia' ? (aiEnabled ? 'Confio Assistant' : 'Soporte') : id === 'julian' ? 'Julian Moon' : 'Confío News'}
               >
                 <View style={[styles.headCircle, channel === id && styles.headCircleActive]}>
                   {id === 'ia' && !aiEnabled ? (
                     <ChannelAvatar channel={{ id: 'soporte' } as any} large />
                   ) : id === 'ia' ? (
-                    <ConfioIaMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
+                    <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
                       size={36} mood={channel === 'ia' ? mood : 'idle'} animated={channel === 'ia'} />
                   ) : (
                     <ChannelAvatar channel={{ id } as any} large />
@@ -671,7 +671,7 @@ export default function ConfioIaSheet() {
                   {id !== 'ia' && unreadByChannel[id] > 0 && channel !== id ? <View style={styles.headDot} /> : null}
                 </View>
                 <Text style={[styles.headLabel, channel === id && styles.headLabelActive]} numberOfLines={1}>
-                  {id === 'ia' ? (aiEnabled ? petName || 'Confío IA' : 'Soporte') : id === 'julian' ? 'Julian' : 'News'}
+                  {id === 'ia' ? (aiEnabled ? petName || 'Confio Assistant' : 'Soporte') : id === 'julian' ? 'Julian' : 'News'}
                 </Text>
               </Pressable>
             ))}
@@ -686,7 +686,7 @@ export default function ConfioIaSheet() {
             <MessageInboxContent embeddedChannelId={channel} onExit={() => setChannel('ia')} onOpenPost={openPost} />
           </View>
         ) : !available ? (
-          // No Confío IA chat (older server, or it failed to load): the classic
+          // No Confio Assistant chat (older server, or it failed to load): the classic
           // support thread, so people can always reach the team from here.
           <View style={styles.channelBody}>
             <MessageInboxContent embeddedChannelId="soporte" onExit={() => setChannel('julian')} />
@@ -696,7 +696,7 @@ export default function ConfioIaSheet() {
         <View style={styles.header}>
           <View style={styles.headerText}>
             <Text style={styles.title}>
-              {!aiEnabled ? 'Soporte' : petName ? `${petName} · Confío IA` : 'Confío IA'}
+              {!aiEnabled ? 'Soporte' : petName ? `${petName} · Confio Assistant` : 'Confio Assistant'}
             </Text>
             <Text style={styles.subtitle}>
               {!aiEnabled
@@ -719,20 +719,20 @@ export default function ConfioIaSheet() {
             <Pressable
               onPress={() => setShowPlus((v) => !v)}
               style={[styles.plusChip, plan.isPlus && styles.plusChipActive]}
-              accessibilityLabel="Confío IA+"
+              accessibilityLabel="Confio Assistant+"
             >
-              <Text style={[styles.plusChipText, plan.isPlus && styles.plusChipTextActive]}>IA+</Text>
+              <Text style={[styles.plusChipText, plan.isPlus && styles.plusChipTextActive]}>Assistant+</Text>
             </Pressable>
           ) : null}
           {aiEnabled && plan?.voiceCallsEnabled && !callLive && mode === 'AI' ? (
-            <Pressable onPress={beginCall} style={styles.iconButton} accessibilityLabel="Llamar a Confío IA">
+            <Pressable onPress={beginCall} style={styles.iconButton} accessibilityLabel="Llamar a Confio Assistant">
               <Icon name="phone" size={20} color={EMERALD} />
             </Pressable>
           ) : null}
         </View>
 
         {showPlus && plan?.plusSalesEnabled ? (
-          <IaPlusPanel
+          <AssistantPlusPanel
             plan={plan}
             profile={profile}
             onPlan={(next) => {
@@ -751,7 +751,7 @@ export default function ConfioIaSheet() {
               <Icon name="users" size={14} color={EMERALD_DARK} />
               <Text style={styles.humanBannerText}>El equipo verá tus mensajes y te responderá aquí.</Text>
               <Pressable onPress={backToAi} accessibilityRole="button">
-                <Text style={styles.humanBannerLink}>Volver a Confío IA</Text>
+                <Text style={styles.humanBannerLink}>Volver a Confio Assistant</Text>
               </Pressable>
             </View>
           ) : null}
@@ -772,7 +772,7 @@ export default function ConfioIaSheet() {
               thinking ? (
                 <View style={styles.messageRow}>
                   <View style={styles.msgAvatar}>
-                    <ConfioIaMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
+                    <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
                       size={26} mood="thinking" />
                   </View>
                   <View style={[styles.bubble, styles.bubbleTheirs, styles.typing]}>
@@ -853,7 +853,7 @@ export default function ConfioIaSheet() {
           )}
           <Text style={styles.disclaimer}>
             {aiEnabled
-            ? 'Confío IA puede equivocarse. No da asesoría de inversión y nunca mueve tu dinero sin tu confirmación.'
+            ? 'Confio Assistant puede equivocarse. No da asesoría de inversión y nunca mueve tu dinero sin tu confirmación.'
             : 'Te responde una persona del equipo de Confío.'}
           </Text>
           </>
@@ -873,7 +873,7 @@ export default function ConfioIaSheet() {
       >
         <Pressable onPress={close} style={styles.anchorButton} accessibilityLabel="Cerrar mensajes">
           {aiEnabled ? (
-            <ConfioIaMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
+            <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
               size={50} mood={mood} />
           ) : (
             <Icon name="message-circle" size={28} color={EMERALD} />

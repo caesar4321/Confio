@@ -1,4 +1,4 @@
-"""Screens Confío IA may open. The app maps each key to its own route.
+"""Screens Confio Assistant may open. The app maps each key to its own route.
 
 Keys are a contract with the client (apps/src/assistant/destinations.ts):
 add new ones freely, never rename. Old clients ignore keys they don't know.
@@ -18,7 +18,7 @@ DESTINATIONS = {
     'profile': 'Perfil y configuración.',
     'verification': 'Verificación de identidad (KYC).',
     'cash_directory': 'Directorio de efectivo (casas de cambio y agentes).',
-    'messages': 'Mensajes: Julian, Confío News y Confío IA.',
+    'messages': 'Mensajes: Julian, Confío News y Confio Assistant.',
     'notifications': 'Notificaciones.',
     'achievements': 'Logros y recompensas.',
 }

@@ -1,4 +1,4 @@
-"""Confío IA economics: what the assistant costs vs. the boundary fees users pay.
+"""Confio Assistant economics: what the assistant costs vs. the boundary fees users pay.
 
 Two modes, both read-only:
 
@@ -41,7 +41,7 @@ def money(value):
 
 
 class Command(BaseCommand):
-    help = 'Confío IA cost vs. boundary-fee revenue (simulation or real shadow billing).'
+    help = 'Confio Assistant cost vs. boundary-fee revenue (simulation or real shadow billing).'
 
     def add_arguments(self, parser):
         parser.add_argument('--simulate', action='store_true')
@@ -123,7 +123,7 @@ class Command(BaseCommand):
             realtime_costs.append(minutes * o['realtime_per_min'])
         fee = o['fee_rate']
         w = self.stdout.write
-        w('Confío IA — simulated monthly cost per IA user\n')
+        w('Confio Assistant — simulated monthly cost per IA user\n')
         w(f"  users simulated: {o['runs']:,}  verified share: {o['verified_share']:.0%}  realtime ${o['realtime_per_min']}/min\n")
         for label, p in (('mean', None), ('median', 50), ('p90', 90), ('p99', 99), ('max seen', 100)):
             value = statistics.fmean(costs) if p is None else pct(costs, p)
@@ -194,7 +194,7 @@ class Command(BaseCommand):
             'realtime users': [u for u in ia_users if ai[u]['minutes'] > 0],
         }
         w = self.stdout.write
-        w(f'Confío IA shadow billing — {year}-{month:02d} (boundary fee only; payments/payroll fees excluded)\n')
+        w(f'Confio Assistant shadow billing — {year}-{month:02d} (boundary fee only; payments/payroll fees excluded)\n')
         w(f'  active users (IA or fee-paying): {len(active):,}   IA users: {len(ia_users):,}\n')
         w(f'  total AI cost: {money(sum(float(v["cost"]) for v in ai.values()))}   '
           f'total boundary fees: {money(float(sum(fees.values())))}\n\n')
