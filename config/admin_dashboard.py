@@ -2036,10 +2036,11 @@ from conversion.models import Conversion
 confio_admin_site.register(Conversion, ConversionAdmin)
 
 # Exchange rate models
-from exchange_rates.models import ExchangeRate, RateFetchLog
-from exchange_rates.admin import ExchangeRateAdmin, RateFetchLogAdmin
+from exchange_rates.models import DailyRateSnapshot, ExchangeRate, RateFetchLog
+from exchange_rates.admin import DailyRateSnapshotAdmin, ExchangeRateAdmin, RateFetchLogAdmin
 confio_admin_site.register(ExchangeRate, ExchangeRateAdmin)
 confio_admin_site.register(RateFetchLog, RateFetchLogAdmin)
+confio_admin_site.register(DailyRateSnapshot, DailyRateSnapshotAdmin)
 
 # Ramp models
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress, RampWebhookEvent

@@ -110,7 +110,7 @@ export function shortDate(month: number, day: number): string {
   return `${day} ${MONTH_SHORT[(month - 1 + 12) % 12]}`;
 }
 
-const LOCAL_SYMBOL: Record<string, string> = { BOB: 'Bs', VES: 'Bs' };
+const LOCAL_SYMBOL: Record<string, string> = { BOB: 'Bs', VES: 'Bs', ARS: '$' };
 
 /** "Bs 3.990" (whole) or "Bs 36,50" (rates): the user's separators. */
 export function formatLocal(amount: string | number, currency: string, decimals = 0): string {

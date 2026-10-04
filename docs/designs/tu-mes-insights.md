@@ -852,6 +852,24 @@ Accepted scope: Each holder batch retries 3× at the same pinned block within th
 Approval readiness (delta, final): PASS. R26 (D1), R27 (D2), R28 (D3); corrections 1-7 carry approved behavior.
 Delta completion: scope unchanged (D1 arrangement minus PaceCard.tsx); 5 delta findings + 7 outside-voice findings (6 corrections, 1 decision); 0 critical gaps; 0 unresolved.
 
+## Implementation decisions (2026-10-04, after the independent Claude review)
+
+### R29: "Hoy" is the Binance P2P rate everywhere (founder decision, supersedes R7/R14/R27 for the "today" side)
+- Independent review P1: the Koywe buy quote came from the unauthenticated preview (retail pricing), so every gain was overstated; it also only existed where Koywe sells (no VES).
+- Founder: "compare with the Binance P2P rate we fetch … it also goes with Argentina" (AR on-ramp is live).
+- **Bolivia, Argentina (basis `purchase`):** "Pagaste" = what the user paid in Confío for the dollars still held (R13 replay, cap FIFO oldest-first); "Hoy" = those dollars at today's Binance P2P rate (fetched every 30 min; older than 2 h = unknown → hidden). Conservative: purchase prices include Koywe fees, P2P doesn't.
+- **Venezuela (basis `month_start`):** "1 {mes}" = dollars held since the 1st at the Binance P2P rate kept for the 1st (new `exchange_rates.DailyRateSnapshot`, hourly idempotent task); "Hoy" = same dollars at today's rate. Dollars held since the 1st = balance − this month's net inflow (ledger), capped at the balance.
+- Threshold: gain ≥ US$1 at today's rate (replaces "Bs 10", which meant nothing in ARS).
+- Removed: Koywe preview quote, its warm task and the 2 s timeout. Kill switch `TU_MES_PROTECTION_COUNTRIES` default `BO,AR,VE`.
+- First Venezuela figure: the 1st of the first full month after deploy (needs the kept month-start rate).
+
+### Other review fixes
+- Cap trims the OLDEST lots first (same rule as spending).
+- Savings snapshot: block pinned 5 behind the head, rotating RPC pool, retries with backoff, hourly 00:15–06:15 UTC (idempotent), analytics queue.
+- protectionValue uses the user's local month (no null at month-end evenings in UTC−4).
+- Migration 0050: dropped the index duplicated by the unique constraint; admin list_select_related.
+- useMonthInsights: no account → reveal empty (never a skeleton forever).
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |

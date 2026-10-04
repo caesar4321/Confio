@@ -81,7 +81,8 @@ class SnapshotDayTests(TestCase):
 
     def _run(self, balances_side_effect):
         with mock.patch.object(snaps.vault, 'vault_address', return_value='0x' + '11' * 20), \
-             mock.patch.object(snaps.vault, '_rpc', return_value=hex(1234)), \
+             mock.patch.object(snaps, '_rpc', return_value=hex(1234)), \
+             mock.patch('time.sleep'), \
              mock.patch.object(snaps, '_pps_at', return_value=WAD), \
              mock.patch.object(snaps, '_balances_at', side_effect=balances_side_effect), \
              mock.patch.object(snaps, 'CHUNK', 2):
@@ -89,12 +90,12 @@ class SnapshotDayTests(TestCase):
 
     def test_writes_nonzero_holdings_at_the_pinned_block(self):
         def balances(_token, addresses, block):
-            self.assertEqual(block, 1234)
+            self.assertEqual(block, 1234 - snaps.PIN_LAG_BLOCKS)   # pinned behind the head
             return {a: (0 if a.endswith('1') else 5 * WAD) for a in addresses}
         self.assertTrue(self._run(balances).startswith('ok holders=2 failed=0'))
         from users.models_cashflow import CusdPlusHoldingSnapshot, CusdPlusPriceSnapshot
         price = CusdPlusPriceSnapshot.objects.get(date=date(2026, 9, 5))
-        self.assertEqual((price.block_number, price.complete, price.failed_account_ids), (1234, True, []))
+        self.assertEqual((price.block_number, price.complete, price.failed_account_ids), (1229, True, []))
         self.assertEqual(CusdPlusHoldingSnapshot.objects.filter(date=date(2026, 9, 5)).count(), 2)
         self.assertEqual(self._run(balances), 'exists')                 # idempotent
 

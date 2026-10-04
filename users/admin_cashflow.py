@@ -35,6 +35,7 @@ class CusdPlusPriceSnapshotAdmin(admin.ModelAdmin):
 
 class CusdPlusHoldingSnapshotAdmin(admin.ModelAdmin):
     list_display = ('account', 'date', 'shares_raw', 'block_number')
+    list_select_related = ('account',)
     search_fields = ('account__id',)
     raw_id_fields = ('account',)
     readonly_fields = ('account', 'date', 'shares_raw', 'block_number')

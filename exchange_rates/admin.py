@@ -207,3 +207,9 @@ class RateFetchLogAdmin(admin.ModelAdmin):
             return format_html('<pre style="background: #fef2f2; padding: 10px; border-radius: 4px; color: #dc2626;">{}</pre>', obj.error_message)
         return "No error message"
     error_message_display.short_description = "Full Error Message"
+
+class DailyRateSnapshotAdmin(admin.ModelAdmin):
+    """One kept Binance P2P rate per UTC day (Tu mes month-start baseline). Read-only."""
+    list_display = ('date', 'currency', 'rate', 'source', 'fetched_at')
+    list_filter = ('currency', 'source')
+    readonly_fields = ('date', 'currency', 'source', 'rate', 'fetched_at', 'created_at')

@@ -126,7 +126,6 @@ class CusdPlusHoldingSnapshot(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['account', 'date'], name='uniq_cusd_plus_holding_day')]
-        indexes = [models.Index(fields=['account', 'date'])]
 
     def __str__(self):
         return f'{self.account_id} {self.date} {self.shares_raw}'

@@ -1,9 +1,12 @@
-"""'Tu dólar te protegió' replay, cap and fail-closed rules (Decision 3, R13, R14, R27)."""
+"""'Tu dólar te protegió': replay, cap, the two bases and fail-closed rules
+(Decision 3, R13; founder decision 2026-10-04: Binance P2P "today" everywhere)."""
+from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 
 from users.cashflow import Movement
 from users import protection as p
@@ -11,19 +14,19 @@ from users import protection as p
 D = Decimal
 
 
-def onramp(usd, bob):
-    rt = SimpleNamespace(direction='on_ramp', status='COMPLETED', provider='koywe', fiat_currency='BOB',
-                         fiat_amount=D(bob))
-    return SimpleNamespace(ramp_transaction=rt), Movement(kind='top_up', direction='received', amount=D(usd))
+def onramp(usd, local, currency='BOB'):
+    rt = SimpleNamespace(direction='on_ramp', status='COMPLETED', provider='koywe', fiat_currency=currency,
+                         fiat_amount=D(local))
+    return SimpleNamespace(ramp_transaction=rt, transaction_date=None), \
+        Movement(kind='top_up', direction='received', amount=D(usd))
 
 
-def ev(kind, usd, direction='sent'):
-    return SimpleNamespace(ramp_transaction=None), Movement(kind=kind, direction=direction, amount=D(usd))
+def ev(kind, usd, direction='sent', **row):
+    return SimpleNamespace(ramp_transaction=None, **row), Movement(kind=kind, direction=direction, amount=D(usd))
 
 
 class ReplayTests(SimpleTestCase):
     def test_codex_counterexample_protects_nothing(self):
-        # on-ramp $100 → own business → unrelated $100 in  ⇒  $0 protected
         lots = p.replay([onramp(100, 700), ev('own_transfer', 100, 'sent'),
                          ev('income_person', 100, 'received')], 'BOB')
         self.assertEqual(lots, [])
@@ -31,60 +34,120 @@ class ReplayTests(SimpleTestCase):
     def test_plain_dollars_are_spent_before_lots_then_oldest_lot_first(self):
         lots = p.replay([onramp(100, 690), ev('income_person', 30, 'received'), onramp(50, 360),
                          ev('p2p_send', 80)], 'BOB')
-        # 30 plain spent, then 50 from the oldest lot (half of it: Bs 345 left)
         self.assertEqual([(l.usd, l.local) for l in lots], [(D('50'), D('345')), (D('50'), D('360'))])
 
-    def test_savings_and_conversions_are_neutral_and_other_currencies_are_plain(self):
-        other = onramp(40, 500); other[0].ramp_transaction.fiat_currency = 'PEN'
-        lots = p.replay([onramp(100, 700), ev('savings_in', 100), ev('conversion', 100), other,
-                         ev('withdrawal', 40)], 'BOB')
+    def test_own_conversion_fees_spend_dollars_but_the_ramp_conversion_does_not(self):
+        lots = p.replay([onramp(100, 700),
+                         ev('savings_in', 100, fee_amount='0.90', conversion=SimpleNamespace(source='user')),
+                         ev('conversion', 100, fee_amount='0.90', conversion=SimpleNamespace(source='ramp'))], 'BOB')
+        self.assertEqual([l.usd for l in lots], [D('99.10')])
+
+    def test_other_currencies_are_plain_dollars(self):
+        lots = p.replay([onramp(100, 700), onramp(40, 500, currency='PEN'), ev('withdrawal', 40)], 'BOB')
         self.assertEqual([(l.usd, l.local) for l in lots], [(D('100'), D('700'))])
 
-    def test_cap_trims_newest_lots_to_the_wallet_balance(self):
-        lots = [p.Lot(D('100'), D('690')), p.Lot(D('50'), D('360'))]
-        capped = p._cap(lots, D('120'))
-        self.assertEqual([(l.usd, l.local) for l in capped], [(D('100'), D('690')), (D('20'), D('144'))])
+    def test_cap_trims_the_oldest_lots_first_like_spending(self):
+        lots = [p.Lot(D('100'), D('800')), p.Lot(D('100'), D('1200'))]
+        capped = p._cap(lots, D('100'))
+        self.assertEqual([(l.usd, l.local) for l in capped], [(D('100'), D('1200'))])
 
 
 class ProtectionValueTests(SimpleTestCase):
-    def _value(self, *, quote, lots, balance='150', country='BO', account_type='personal'):
+    def _value(self, *, country='BO', rate=('12.50', 0), lots=(), start_rate=None, net_in=D('0'),
+               balance='150', account_type='personal'):
         user = SimpleNamespace(phone_country=country)
         account = SimpleNamespace(id=7, bsc_address='0xabc')
-        scope = mock.MagicMock()
-        scope.aggregate.return_value = {'n': 3, 'last': 9, 'touched': None}
-        with mock.patch('users.graphql_views.account_unified_queryset', return_value=scope), \
-             mock.patch.object(p, 'protection_countries', return_value={'BO', 'VE'}), \
-             mock.patch.object(p, 'cached_quote', return_value=quote), \
-             mock.patch.object(p.cache, 'get', side_effect=lambda k, *a: lots if not k.endswith(':balance') else None), \
-             mock.patch.object(p.cache, 'set'), \
-             mock.patch('cusd_plus.vault.withdrawable_usdt_wei', return_value=int(D(balance) * 10 ** 18)):
-            return p.protection_value(user, account, account_type, None)
+        now = None if rate is None else (D(rate[0]), timezone.now() - timedelta(minutes=rate[1]))
 
-    def test_gain_is_today_minus_paid_on_held_lots(self):
-        result = self._value(quote={'rate': '7.40', 'quoted_at': 't'}, lots=[p.Lot(D('100'), D('690'))])
-        self.assertEqual((result.protected_usd, result.paid_local, result.today_local, result.gain_local),
-                         (D('100'), D('690'), D('740.00'), D('50.00')))
+        def cache_get(key, *a):
+            if key.endswith(':balance'):
+                return D(balance)
+            if ':lots:' in key:
+                return list(lots)
+            if ':held:' in key:
+                return net_in
+            return None
+        with mock.patch.object(p, 'protection_countries', return_value={'BO', 'AR', 'VE'}), \
+             mock.patch.object(p, 'current_rate', return_value=now), \
+             mock.patch.object(p, 'month_start_rate', return_value=None if start_rate is None else D(start_rate)), \
+             mock.patch.object(p, '_ledger', return_value=('v1', lambda: [])), \
+             mock.patch.object(p.cache, 'get', side_effect=cache_get), \
+             mock.patch.object(p.cache, 'set'):
+            return p.protection_value(user, account, account_type, None, 2026, 10)
+
+    def test_purchase_basis_paid_in_confio_vs_binance_p2p_today(self):
+        r = self._value(lots=[p.Lot(D('100'), D('1150'))])
+        self.assertEqual((r.basis, r.protected_usd, r.paid_local, r.today_local, r.gain_local),
+                         ('purchase', D('100'), D('1150'), D('1250.00'), D('100.00')))
+
+    def test_month_start_basis_counts_only_dollars_held_all_month(self):
+        # 100 held since the 1st (cached "held" figure)
+        r = self._value(country='VE', rate=('40', 0), start_rate='36', net_in=D('100'))
+        self.assertEqual((r.basis, r.protected_usd, r.paid_local, r.today_local), ('month_start', D('100'), D('3600'), D('4000')))
 
     def test_every_unknown_hides_the_card(self):
-        lots = [p.Lot(D('100'), D('690'))]
-        self.assertIsNone(self._value(quote=None, lots=lots))                                    # no quote
-        self.assertIsNone(self._value(quote={'rate': '7.40', 'quoted_at': 't'}, lots=[]))         # no lots
-        self.assertIsNone(self._value(quote={'rate': '7.40', 'quoted_at': 't'}, lots=lots, country='PE'))
-        self.assertIsNone(self._value(quote={'rate': '7.40', 'quoted_at': 't'}, lots=lots, account_type='business'))
-        self.assertIsNone(self._value(quote={'rate': '6.95', 'quoted_at': 't'}, lots=lots))       # gain Bs 5 < 10
-        self.assertIsNone(self._value(quote={'rate': '6.00', 'quoted_at': 't'}, lots=lots))       # a loss: never shown
-
-
-class ReplayFeeAndSwitchTests(SimpleTestCase):
-    def test_own_conversion_fees_spend_dollars_but_the_ramp_conversion_does_not(self):
-        conv = SimpleNamespace(ramp_transaction=None, fee_amount='0.90', conversion=SimpleNamespace(source='user'))
-        ramp_conv = SimpleNamespace(ramp_transaction=None, fee_amount='0.90', conversion=SimpleNamespace(source='ramp'))
-        lots = p.replay([onramp(100, 700), (conv, Movement(kind='savings_in', direction='sent', amount=D('100'))),
-                         (ramp_conv, Movement(kind='conversion', direction='sent', amount=D('100')))], 'BOB')
-        self.assertEqual([l.usd for l in lots], [D('99.10')])
+        lots = [p.Lot(D('100'), D('1150'))]
+        self.assertIsNone(self._value(rate=None, lots=lots))                          # stale / no P2P rate
+        self.assertIsNone(self._value(lots=[]))                                       # no lots (BO/AR)
+        self.assertIsNone(self._value(country='VE', rate=('40', 0), start_rate=None))  # no rate kept for the 1st
+        self.assertIsNone(self._value(country='PE', lots=lots))
+        self.assertIsNone(self._value(lots=lots, account_type='business'))
+        self.assertIsNone(self._value(rate=('11.55', 0), lots=lots))                  # gain Bs 5 < US$1 (Bs 11.55)
+        self.assertIsNone(self._value(rate=('10.00', 0), lots=lots))                  # a loss: never shown
+        self.assertIsNone(self._value(country='VE', rate=('40', 0), start_rate='36', net_in=D('0')))    # nothing held all month
 
     def test_country_switch_comes_from_settings(self):
         with self.settings(TU_MES_PROTECTION_COUNTRIES=['BO']):
             self.assertEqual(p.protection_countries(), {'BO'})
         with self.settings(TU_MES_PROTECTION_COUNTRIES=[]):
             self.assertEqual(p.protection_countries(), set())
+
+
+class RatesTests(TestCase):
+    def _rate(self, currency, rate, minutes_ago):
+        from exchange_rates.models import ExchangeRate
+        return ExchangeRate.objects.create(source_currency=currency, target_currency='USD', rate=rate,
+                                           rate_type='parallel', source='binance_p2p',
+                                           fetched_at=timezone.now() - timedelta(minutes=minutes_ago))
+
+    def test_current_rate_is_the_freshest_and_refuses_stale_rows(self):
+        self._rate('VES', '39.00', 90)
+        self._rate('VES', '40.00', 10)
+        self.assertEqual(p.current_rate('VES')[0], D('40.00'))
+        self.assertIsNone(p.current_rate('ARS'))
+        self._rate('ARS', '1200', 180)
+        self.assertIsNone(p.current_rate('ARS'))                                       # older than 2 h
+
+    def test_daily_snapshot_keeps_one_fresh_rate_per_day(self):
+        from exchange_rates.models import DailyRateSnapshot
+        from exchange_rates.tasks import snapshot_daily_rates
+        self._rate('VES', '40.00', 10)
+        self._rate('ARS', '1200', 300)                                                 # stale: skipped
+        with mock.patch('exchange_rates.tasks.connection'):                          # the task closes its DB connection
+            self.assertEqual(snapshot_daily_rates(), 'VES')
+            self.assertEqual(snapshot_daily_rates(), 'none')                           # idempotent
+        today = timezone.now().date()
+        self.assertEqual(p.month_start_rate('VES', today.year, today.month),
+                         D('40.00') if today.day == 1 else None)
+        self.assertEqual(DailyRateSnapshot.objects.filter(date=today).count(), 1)
+
+
+class HeldSinceTests(SimpleTestCase):
+    """Venezuela's month_start basis: the LOWEST running balance since the 1st."""
+
+    def test_spend_everything_then_get_paid_holds_nothing(self):
+        # $300 on the 1st, spent by the 5th, salary $300 on the 28th: balance $300, held $0
+        events = [ev('p2p_send', 300), ev('income_person', 300, 'received')]
+        self.assertEqual(p.held_since(D('300'), events), D('0'))
+
+    def test_money_received_this_month_is_not_held_since_the_1st(self):
+        events = [ev('income_person', 50, 'received')]
+        self.assertEqual(p.held_since(D('150'), events), D('100'))
+
+    def test_spending_part_keeps_the_rest(self):
+        events = [ev('p2p_send', 40)]
+        self.assertEqual(p.held_since(D('60'), events), D('60'))
+
+    def test_never_above_the_balance(self):
+        events = [ev('p2p_send', 500)]
+        self.assertEqual(p.held_since(D('20'), events), D('20'))

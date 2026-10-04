@@ -45,7 +45,7 @@ describe('pace (tu-mes-insights §6, 12B)', () => {
 });
 
 describe('dollar slot (R21)', () => {
-  const protection = { currency: 'BOB', protectedUsd: '100.00', paidLocal: '690', todayLocal: '740', gainLocal: '50',
+  const protection = { currency: 'BOB', basis: 'purchase' as const, source: 'binance_p2p', protectedUsd: '100.00', paidLocal: '690', todayLocal: '740', gainLocal: '50',
     avgRate: '6.90', todayRate: '7.40', quotedAt: '2026-10-04T10:42:00Z' };
   it('prefers protection, then savings of at least a cent, else nothing', () => {
     expect(dollarSlot(protection, { earnedUsd: '0.42', daily: [] })?.kind).toBe('protection');
