@@ -1336,3 +1336,32 @@ class CodexAuditRound8Tests(CodexAuditRound4Tests):
             )
         CommunityPostReview.objects.filter(id=lost.id).update(rereviewed_at=two_hours_ago)
         self.assertEqual(community.lost_rereview_ids(CommunityPostReview), [lost.id])
+
+
+class AdditionalDocumentVerificationTests(CommunityTestBase):
+    """2026-10-04: a member verified only with another country's ID (primary
+    phone-country document still pending) was told to verify again."""
+
+    def member_verified_by_additional_document(self):
+        user = make_user(verified=False)
+        common = dict(
+            user=user, verified_first_name='Julian', verified_last_name='M', verified_date_of_birth=date(1990, 1, 1),
+            verified_nationality='PRY', verified_address='x', verified_city='Asunción', verified_state='C',
+            verified_country='PRY', document_type='national_id', document_issuing_country='PRY',
+        )
+        IdentityVerification.all_documents.create(document_number=f'P-{user.id}', status='pending', **common)
+        IdentityVerification.all_documents.create(
+            document_number=f'A-{user.id}', status='verified', is_additional_document=True, **common,
+        )
+        return user
+
+    def test_additional_verified_document_lets_a_member_post(self):
+        user = self.member_verified_by_additional_document()
+        self.assertFalse(user.is_identity_verified)  # the rail-specific check
+        self.assertIsNone(community.posting_block(user, None))
+        self.assertIsNone(community.author_block(user))
+        self.post(user)
+
+    def test_additional_verified_document_counts_as_a_verified_reporter(self):
+        user = self.member_verified_by_additional_document()
+        self.assertEqual(community.personally_verified_count([user.id]), 1)
