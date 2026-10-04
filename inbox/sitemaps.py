@@ -1,6 +1,8 @@
 from django.contrib.sitemaps import Sitemap
 from django.utils.text import slugify
 
+# Member (Comunidad) posts are app-only: never on the public web, RSS or sitemap.
+from . import community
 from .models import ContentItem, ContentStatus, ContentSurfaceType
 
 
@@ -12,6 +14,7 @@ class DiscoverSitemap(Sitemap):
     def items(self):
         return (
             ContentItem.objects.filter(
+                community.EDITORIAL,
                 status=ContentStatus.PUBLISHED,
                 published_at__isnull=False,
                 surfaces__surface=ContentSurfaceType.DISCOVER,

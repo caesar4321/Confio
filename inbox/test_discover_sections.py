@@ -9,7 +9,7 @@ from graphql import GraphQLError, GraphQLResolveInfo
 from security.models import IdentityVerification
 from users.models import Account, Business, User
 from .admin import ChannelAdminForm
-from .models import Channel, ContentItem, ContentSurface
+from .models import Channel, CommunityPostReview, ContentItem, ContentSurface
 from .official import (
     NOT_GRANTED, OFFICIAL, OWNER_NOT_ELIGIBLE, OWNER_NOT_VERIFIED, official_channel_ids, official_status,
 )
@@ -80,6 +80,9 @@ class DiscoverSectionTests(TestCase):
         item = self.publish(self.founder, 'Member post')
         item.owner_type, item.owner_user = 'USER', member
         item.save()
+        # Member content is readable only once its AI review approved it.
+        self.assertNotIn('Member post', self.titles(section='community'))
+        CommunityPostReview.objects.create(content_item=item, status='APPROVED')
         self.assertNotIn('Member post', self.titles(section='official'))
         self.assertIn('Member post', self.titles(section='community'))
         by_title = {entry.title: entry for entry in self.feed().items}

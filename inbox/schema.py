@@ -3,7 +3,8 @@ import logging
 import os
 from django.db import transaction
 from .polls import validate_poll_metadata
-from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models import Case, Count, F, IntegerField, Q, Value, When, Window
+from django.db.models.functions import RowNumber
 from django.conf import settings
 from django.utils import timezone
 from graphql import GraphQLError
@@ -27,12 +28,18 @@ from .models import (
     ContentSurfaceType,
     OwnerType,
     ContentStatus,
+    CommunityComment,
+    CommunityCommentReport,
+    CommunityPostReport,
+    CommunityReviewStatus,
     ReactionType,
     SupportConversation,
     SupportConversationState,
     SupportMessage,
     VisibilityPolicy,
 )
+from . import community, profile_pictures
+from .community import author_display_name
 from .official import all_official_channel_ids, official_channel_ids
 from .push_service import send_support_reply_push, send_support_staff_push
 
@@ -126,6 +133,7 @@ def require_staff_user(info):
 
 def get_visible_content_queryset(membership: ChannelMembership):
     queryset = membership.channel.content_items.filter(
+        community.READABLE,
         Q(published_at__gte=membership.joined_at)
         | Q(visibility_policy__in=[VisibilityPolicy.BACKLOG, VisibilityPolicy.PINNED]),
         status=ContentStatus.PUBLISHED,
@@ -438,7 +446,9 @@ def build_portal_content_payload(item: ContentItem, poll_payloads=None):
     )
 
 
-def build_discover_feed_item_payload(item: ContentItem, user, account, business, poll_payloads=None, official_ids=None):
+def build_discover_feed_item_payload(
+    item: ContentItem, user, account, business, poll_payloads=None, official_ids=None, avatar_urls=None,
+):
     if official_ids is None:
         official_ids = official_channel_ids([item.channel])
     metadata = item.metadata or {}
@@ -480,6 +490,27 @@ def build_discover_feed_item_payload(item: ContentItem, user, account, business,
     elif item.item_type == 'NEWS':
         item_type = 'news'
 
+    if item.owner_type == OwnerType.USER:
+        # A member speaks as themselves, never as the channel that hosts the
+        # post; the app draws their initial.
+        byline = {
+            'source_name': author_display_name(item.owner_user),
+            'source_section': 'community',
+            'is_official': False,
+            'source_avatar_url': (
+                avatar_urls if avatar_urls is not None else profile_pictures.picture_urls([item.owner_user_id])
+            ).get(item.owner_user_id),
+            'source_avatar_emoji': None,
+        }
+    else:
+        byline = {
+            'source_name': item.channel.title or '',
+            'source_section': DISCOVER_KIND_SECTION.get(item.channel.kind, 'confio'),
+            'is_official': item.channel_id in official_ids,
+            'source_avatar_url': item.channel.avatar_value if item.channel.avatar_type == AvatarType.IMAGE_URL else None,
+            'source_avatar_emoji': item.channel.avatar_value if item.channel.avatar_type == AvatarType.EMOJI else None,
+        }
+
     return DiscoverFeedItemType(
         id=str(item.id),
         type=item_type,
@@ -503,17 +534,14 @@ def build_discover_feed_item_payload(item: ContentItem, user, account, business,
         ],
         viewer_reaction=viewer_reaction,
         can_react=True,
-        source_name=item.channel.title or '',
-        source_section=DISCOVER_KIND_SECTION.get(item.channel.kind, 'confio'),
-        is_official=item.channel_id in official_ids and item.owner_type != OwnerType.USER,
-        source_avatar_url=item.channel.avatar_value if item.channel.avatar_type == AvatarType.IMAGE_URL else None,
-        source_avatar_emoji=item.channel.avatar_value if item.channel.avatar_type == AvatarType.EMOJI else None,
+        **byline,
         published_at=item.published_at or item.created_at,
     )
 
 
 def published_discover_items():
     return ContentItem.objects.filter(
+        community.READABLE,
         status=ContentStatus.PUBLISHED,
         published_at__isnull=False,
         surfaces__surface=ContentSurfaceType.DISCOVER,
@@ -525,7 +553,7 @@ def get_accessible_content_item(info, content_item_id):
     item = (
         ContentItem.objects.select_related('channel')
         .prefetch_related('reactions__reaction_type', 'surfaces')
-        .filter(id=content_item_id, status=ContentStatus.PUBLISHED, published_at__isnull=False)
+        .filter(community.READABLE, id=content_item_id, status=ContentStatus.PUBLISHED, published_at__isnull=False)
         .first()
     )
     if item is None:
@@ -846,6 +874,495 @@ def build_message_inbox_payload(info):
     return MessageInboxType(total_unread_count=total_unread_count, channels=channels)
 
 
+class CommunityPostingStatusType(graphene.ObjectType):
+    can_post = graphene.Boolean(required=True)
+    # disabled | business_context | banned | not_verified | daily_limit
+    block_code = graphene.String()
+    block_message = graphene.String()
+    max_chars = graphene.Int(required=True)
+
+
+class CommunityPostType(graphene.ObjectType):
+    """The author's own view of a post, including its review outcome."""
+    id = graphene.ID(required=True)
+    body = graphene.String(required=True)
+    image_url = graphene.String()
+    has_image = graphene.Boolean(required=True)
+    # PENDING | APPROVED | REJECTED | FAILED | REMOVED
+    status = graphene.String(required=True)
+    reason = graphene.String()
+    created_at = graphene.DateTime(required=True)
+    published_at = graphene.DateTime()
+    comment_count = graphene.Int(required=True)
+
+
+class CommunityPostViewerType(graphene.ObjectType):
+    is_community = graphene.Boolean(required=True)
+    is_own = graphene.Boolean(required=True)
+    can_report = graphene.Boolean(required=True)
+    viewer_reported = graphene.Boolean(required=True)
+    can_comment = graphene.Boolean(required=True)
+    # Why not, when can_comment is false (e.g. "Verifica tu identidad…").
+    comment_block_message = graphene.String()
+    comment_max_chars = graphene.Int(required=True)
+
+
+class CommunityParticipantType(graphene.ObjectType):
+    id = graphene.ID(required=True)
+    name = graphene.String(required=True)
+    is_post_author = graphene.Boolean(required=True)
+    avatar_url = graphene.String()
+
+
+class CommunityCommentType(graphene.ObjectType):
+    id = graphene.ID(required=True)
+    parent_id = graphene.ID()
+    body = graphene.String(required=True)
+    author_id = graphene.ID(required=True)
+    author_name = graphene.String(required=True)
+    is_post_author = graphene.Boolean(required=True)
+    is_own = graphene.Boolean(required=True)
+    can_delete = graphene.Boolean(required=True)
+    can_report = graphene.Boolean(required=True)
+    # Others only ever see APPROVED; the author also sees their own
+    # PENDING / REJECTED / FAILED comments.
+    status = graphene.String(required=True)
+    reason = graphene.String()
+    time = graphene.String(required=True)
+    created_at = graphene.DateTime(required=True)
+    mentions = graphene.List(graphene.NonNull(CommunityParticipantType), required=True)
+    replies = graphene.List(graphene.NonNull(lambda: CommunityCommentType), required=True)
+    # Visible replies in the thread; more than `replies` holds means the app
+    # can expand it (expandedThreadIds).
+    reply_count = graphene.Int(required=True)
+    author_avatar_url = graphene.String()
+    reaction_summary = graphene.List(graphene.NonNull(MessageReactionType), required=True)
+    viewer_reaction = graphene.String()
+
+
+class CommunityCommentPageType(graphene.ObjectType):
+    items = graphene.List(graphene.NonNull(CommunityCommentType), required=True)
+    has_more = graphene.Boolean(required=True)
+    total_count = graphene.Int(required=True)
+
+
+class CommunityCommentCountType(graphene.ObjectType):
+    content_item_id = graphene.ID(required=True)
+    count = graphene.Int(required=True)
+
+
+def reaction_maps(comment_ids, viewer):
+    """Reaction counts per comment, aggregated in SQL, plus the viewer's own
+    reaction: never one row per reaction, however popular a comment is."""
+    from .models import CommunityCommentReaction
+
+    ids = list(comment_ids)
+    counts = {}
+    for row in (
+        CommunityCommentReaction.objects.filter(comment_id__in=ids)
+        .values('comment_id', 'reaction_type__emoji')
+        .annotate(total=Count('id'))
+    ):
+        counts.setdefault(row['comment_id'], []).append((row['reaction_type__emoji'], row['total']))
+    viewer_reactions = dict(
+        CommunityCommentReaction.objects.filter(comment_id__in=ids, user=viewer)
+        .values_list('comment_id', 'reaction_type__emoji')
+    )
+    return counts, viewer_reactions
+
+
+def reaction_payload(comment_id, maps):
+    counts, viewer_reactions = maps
+    summary = [
+        MessageReactionType(emoji=emoji, count=count)
+        for emoji, count in sorted(counts.get(comment_id, []), key=lambda entry: entry[1], reverse=True)
+    ]
+    return summary, viewer_reactions.get(comment_id)
+
+
+def build_community_comment_payload(
+    comment, viewer, post_author_id, reported_ids, replies=None, avatars=None, reactions=None, reply_count=0,
+):
+    is_own = comment.author_id == viewer.id
+    avatars = avatars if avatars is not None else profile_pictures.picture_urls(
+        [comment.author_id, *[user.id for user in comment.mentions.all()]]
+    )
+    reaction_summary, viewer_reaction = reaction_payload(
+        comment.id, reactions if reactions is not None else reaction_maps([comment.id], viewer),
+    )
+    return CommunityCommentType(
+        id=str(comment.id),
+        parent_id=str(comment.parent_id) if comment.parent_id else None,
+        body=comment.body,
+        author_id=str(comment.author_id),
+        author_name=community.author_display_name(comment.author),
+        is_post_author=comment.author_id == post_author_id,
+        is_own=is_own,
+        can_delete=is_own or viewer.id == post_author_id,
+        can_report=(
+            not is_own
+            and comment.status == CommunityReviewStatus.APPROVED
+            and comment.id not in reported_ids
+        ),
+        status=comment.status,
+        reason=(comment.reason or None) if is_own else None,
+        time=humanize_relative(comment.created_at),
+        created_at=comment.created_at,
+        mentions=[
+            CommunityParticipantType(
+                id=str(user.id),
+                name=community.author_display_name(user),
+                is_post_author=user.id == post_author_id,
+                avatar_url=avatars.get(user.id),
+            )
+            for user in comment.mentions.all()
+        ],
+        replies=replies or [],
+        reply_count=reply_count,
+        author_avatar_url=avatars.get(comment.author_id),
+        reaction_summary=reaction_summary,
+        viewer_reaction=viewer_reaction,
+    )
+
+
+COMMENT_THREADS_MAX = 100
+REPLIES_PER_THREAD = 50
+# An expanded thread (the app's "Ver todas las respuestas").
+REPLIES_EXPANDED_MAX = 500
+UNREVIEWED = [CommunityReviewStatus.PENDING, CommunityReviewStatus.REJECTED, CommunityReviewStatus.FAILED]
+
+
+def first_replies(queryset, cap):
+    """The first `cap` replies of each thread in one bounded query."""
+    return queryset.annotate(
+        thread_rank=Window(RowNumber(), partition_by=F('parent_id'), order_by=[F('created_at').asc(), F('id').asc()]),
+    ).filter(thread_rank__lte=cap)
+
+
+def comments_seen_by(viewer, content_item_id):
+    """Approved comments plus the viewer's own, still-standing ones."""
+    return (
+        CommunityComment.objects.filter(content_item_id=content_item_id)
+        .filter(
+            Q(status=CommunityReviewStatus.APPROVED)
+            | (
+                Q(author=viewer)
+                & Q(status__in=[
+                    CommunityReviewStatus.PENDING,
+                    CommunityReviewStatus.REJECTED,
+                    CommunityReviewStatus.FAILED,
+                ])
+            )
+        )
+        .exclude(parent__status=CommunityReviewStatus.REMOVED)
+        .select_related('author')
+        .prefetch_related('mentions')
+        .order_by('created_at', 'id')
+    )
+
+
+def build_community_post_payload(item: ContentItem, comment_count=None):
+    review = item.community_review
+    return CommunityPostType(
+        id=str(item.id),
+        body=item.body or '',
+        image_url=(item.metadata or {}).get('image', {}).get('url') or None,
+        has_image=bool(review.pending_image_key),
+        status=review.status,
+        reason=review.reason or None,
+        created_at=item.created_at,
+        published_at=item.published_at,
+        comment_count=(
+            0 if review.status != CommunityReviewStatus.APPROVED
+            else comment_count if comment_count is not None
+            else community.visible_comments(item.id).count()
+        ),
+    )
+
+
+def own_community_items(user):
+    return (
+        ContentItem.objects.filter(owner_user=user, community_review__isnull=False)
+        .select_related('community_review')
+        .order_by('-created_at')
+    )
+
+
+class RequestCommunityImageUpload(graphene.Mutation):
+    class Arguments:
+        content_type = graphene.String(required=False)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    upload = graphene.Field(PublicationImageUploadType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, content_type='image/jpeg'):
+        user, account, business, _ = get_context_models(info)
+        block = community.posting_block(user, business)
+        if block:
+            return RequestCommunityImageUpload(success=False, error=community.BLOCK_MESSAGES[block], upload=None)
+        if content_type not in community.ALLOWED_IMAGE_TYPES:
+            return RequestCommunityImageUpload(success=False, error='Formato de imagen no permitido.', upload=None)
+        if not community.take_upload_ticket(user, 'community-post'):
+            return RequestCommunityImageUpload(success=False, error=community.TICKET_LIMIT_MESSAGE, upload=None)
+        extension = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp'}[content_type]
+        key = build_s3_key(community.pending_image_prefix(user), f'upload{extension}')
+        try:
+            presigned = generate_presigned_post(
+                key=key,
+                content_type=content_type,
+                metadata={'uploaded-by': str(user.id), 'uploaded-for': 'community'},
+                conditions=[['content-length-range', 1, settings.COMMUNITY_IMAGE_MAX_BYTES]],
+                expires_in_seconds=600,
+                bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET,
+            )
+        except Exception:
+            logger.exception('Failed to presign community image upload', extra={'user_id': user.id})
+            return RequestCommunityImageUpload(success=False, error='No pudimos preparar la subida. Inténtalo de nuevo.', upload=None)
+        return RequestCommunityImageUpload(
+            success=True,
+            error=None,
+            upload=PublicationImageUploadType(
+                url=presigned['url'],
+                key=presigned['key'],
+                method=presigned['method'],
+                fields=presigned.get('fields'),
+                expires_in=presigned['expires_in'],
+                # Private until approved; there is nothing public to show yet.
+                public_url='',
+            ),
+        )
+
+
+class CreateCommunityPost(graphene.Mutation):
+    class Arguments:
+        body = graphene.String(required=True)
+        image_key = graphene.String(required=False)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    error_code = graphene.String()
+    post = graphene.Field(CommunityPostType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, body, image_key=None):
+        user, account, business, _ = get_context_models(info)
+        try:
+            item = community.create_community_post(user, business, body, image_key)
+        except community.CommunityPostError as error:
+            return CreateCommunityPost(success=False, error=error.message, error_code=error.code, post=None)
+        item = own_community_items(user).get(id=item.id)
+        return CreateCommunityPost(success=True, error=None, error_code=None, post=build_community_post_payload(item))
+
+
+class DeleteCommunityPost(graphene.Mutation):
+    class Arguments:
+        content_item_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, content_item_id):
+        user = info.context.user
+        return DeleteCommunityPost(success=community.delete_own_post(user, content_item_id))
+
+
+class ReportCommunityPost(graphene.Mutation):
+    class Arguments:
+        content_item_id = graphene.ID(required=True)
+        reason = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, content_item_id, reason):
+        user = info.context.user
+        try:
+            community.report_post(user, content_item_id, reason)
+        except community.CommunityPostError as error:
+            return ReportCommunityPost(success=False, error=error.message)
+        return ReportCommunityPost(success=True, error=None)
+
+
+class CreateCommunityComment(graphene.Mutation):
+    class Arguments:
+        content_item_id = graphene.ID(required=True)
+        body = graphene.String(required=True)
+        parent_id = graphene.ID(required=False)
+        mention_user_ids = graphene.List(graphene.NonNull(graphene.ID), required=False)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    error_code = graphene.String()
+    comment = graphene.Field(CommunityCommentType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, content_item_id, body, parent_id=None, mention_user_ids=None):
+        user, account, business, _ = get_context_models(info)
+        try:
+            comment = community.create_comment(user, business, content_item_id, body, parent_id, mention_user_ids)
+        except community.CommunityPostError as error:
+            return CreateCommunityComment(success=False, error=error.message, error_code=error.code, comment=None)
+        comment = CommunityComment.objects.select_related('author', 'content_item').prefetch_related('mentions').get(id=comment.id)
+        return CreateCommunityComment(
+            success=True,
+            error=None,
+            error_code=None,
+            comment=build_community_comment_payload(comment, user, comment.content_item.owner_user_id, set()),
+        )
+
+
+class DeleteCommunityComment(graphene.Mutation):
+    class Arguments:
+        comment_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, comment_id):
+        return DeleteCommunityComment(success=community.delete_comment(info.context.user, comment_id))
+
+
+class ReportCommunityComment(graphene.Mutation):
+    class Arguments:
+        comment_id = graphene.ID(required=True)
+        reason = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, comment_id, reason):
+        try:
+            community.report_comment(info.context.user, comment_id, reason)
+        except community.CommunityPostError as error:
+            return ReportCommunityComment(success=False, error=error.message)
+        return ReportCommunityComment(success=True, error=None)
+
+
+class ReactToCommunityComment(graphene.Mutation):
+    class Arguments:
+        comment_id = graphene.ID(required=True)
+        emoji = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    reaction_summary = graphene.List(graphene.NonNull(MessageReactionType), required=True)
+    viewer_reaction = graphene.String()
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, comment_id, emoji):
+        user = info.context.user
+        try:
+            comment = community.react_to_comment(user, comment_id, emoji)
+        except community.CommunityPostError as error:
+            return ReactToCommunityComment(success=False, error=error.message, reaction_summary=[], viewer_reaction=None)
+        summary, viewer_reaction = reaction_payload(comment.id, reaction_maps([comment.id], user))
+        return ReactToCommunityComment(
+            success=True, error=None, reaction_summary=summary, viewer_reaction=viewer_reaction,
+        )
+
+
+class MyProfilePictureType(graphene.ObjectType):
+    # The picture everyone sees now (None: the initial is shown).
+    url = graphene.String()
+    # The latest change: PENDING while being reviewed, REJECTED / FAILED with
+    # a reason, or the same ACTIVE / REMOVED as the current picture.
+    latest_status = graphene.String()
+    latest_reason = graphene.String()
+    # Why this context cannot change it right now, if so.
+    block_message = graphene.String()
+
+
+def build_my_profile_picture(user, business):
+    current = profile_pictures.picture_urls([user.id]).get(user.id)
+    latest = profile_pictures.latest_submission(user)
+    return MyProfilePictureType(
+        url=current or None,
+        latest_status=latest.status if latest else None,
+        latest_reason=(latest.reason or None) if latest else None,
+        block_message=profile_pictures.upload_block(user, business),
+    )
+
+
+class RequestProfilePictureUpload(graphene.Mutation):
+    class Arguments:
+        content_type = graphene.String(required=False)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    upload = graphene.Field(PublicationImageUploadType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, content_type='image/jpeg'):
+        user, account, business, _ = get_context_models(info)
+        try:
+            presigned = profile_pictures.request_upload(user, business, content_type)
+        except community.CommunityPostError as error:
+            return RequestProfilePictureUpload(success=False, error=error.message, upload=None)
+        except Exception:
+            logger.exception('Failed to presign profile picture upload', extra={'user_id': user.id})
+            return RequestProfilePictureUpload(
+                success=False, error='No pudimos preparar la subida. Inténtalo de nuevo.', upload=None,
+            )
+        return RequestProfilePictureUpload(
+            success=True,
+            error=None,
+            upload=PublicationImageUploadType(
+                url=presigned['url'],
+                key=presigned['key'],
+                method=presigned['method'],
+                fields=presigned.get('fields'),
+                expires_in=presigned['expires_in'],
+                public_url='',
+            ),
+        )
+
+
+class SubmitProfilePicture(graphene.Mutation):
+    class Arguments:
+        image_key = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    picture = graphene.Field(MyProfilePictureType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, image_key):
+        user, account, business, _ = get_context_models(info)
+        try:
+            profile_pictures.submit_picture(user, business, image_key)
+        except community.CommunityPostError as error:
+            return SubmitProfilePicture(success=False, error=error.message, picture=None)
+        return SubmitProfilePicture(success=True, error=None, picture=build_my_profile_picture(user, business))
+
+
+class RemoveProfilePicture(graphene.Mutation):
+    success = graphene.Boolean(required=True)
+    picture = graphene.Field(MyProfilePictureType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info):
+        user, account, business, _ = get_context_models(info)
+        if business is not None:
+            return RemoveProfilePicture(success=False, picture=build_my_profile_picture(user, business))
+        removed = profile_pictures.remove_picture(user, removed_by=user)
+        return RemoveProfilePicture(success=removed, picture=build_my_profile_picture(user, business))
+
+
 class Query(graphene.ObjectType):
     message_inbox = graphene.Field(MessageInboxType, context_key=graphene.String(required=False))
     message_inbox_unread_count = graphene.Int(context_key=graphene.String(required=False))
@@ -873,6 +1390,40 @@ class Query(graphene.ObjectType):
         graphene.NonNull(DiscoverSectionType),
         required=True,
         deprecation_reason='Descubrir feeds are fixed: for_you, official, community.',
+    )
+    # Comunidad fields are their own queries in the app (an older server
+    # rejects an unknown field and would fail any query that carries it).
+    community_posting_status = graphene.Field(CommunityPostingStatusType, required=True)
+    my_community_posts = graphene.List(
+        graphene.NonNull(CommunityPostType),
+        required=True,
+        offset=graphene.Int(required=False),
+        limit=graphene.Int(required=False),
+    )
+    my_community_post = graphene.Field(CommunityPostType, content_item_id=graphene.ID(required=True))
+    community_post_viewer = graphene.Field(
+        CommunityPostViewerType,
+        required=True,
+        content_item_id=graphene.ID(required=True),
+    )
+    community_comments = graphene.Field(
+        CommunityCommentPageType,
+        required=True,
+        content_item_id=graphene.ID(required=True),
+        offset=graphene.Int(required=False),
+        limit=graphene.Int(required=False),
+        expanded_thread_ids=graphene.List(graphene.NonNull(graphene.ID), required=False),
+    )
+    community_post_participants = graphene.List(
+        graphene.NonNull(CommunityParticipantType),
+        required=True,
+        content_item_id=graphene.ID(required=True),
+    )
+    my_profile_picture = graphene.Field(MyProfilePictureType, required=True)
+    community_comment_counts = graphene.List(
+        graphene.NonNull(CommunityCommentCountType),
+        required=True,
+        content_item_ids=graphene.List(graphene.NonNull(graphene.ID), required=True),
     )
     portal_support_conversations = graphene.List(
         PortalSupportConversationType,
@@ -935,7 +1486,7 @@ class Query(graphene.ObjectType):
 
         queryset = (
             published_discover_items()
-            .select_related('channel')
+            .select_related('channel', 'owner_user')
             .prefetch_related('reactions__reaction_type', 'surfaces')
             .distinct()
             .order_by('-surfaces__is_pinned', 'surfaces__rank', '-published_at', '-created_at')
@@ -956,9 +1507,14 @@ class Query(graphene.ObjectType):
 
         poll_payloads = build_poll_payloads(page_items, user.id)
         official_ids = official_channel_ids(item.channel for item in page_items)
+        avatar_urls = profile_pictures.picture_urls(
+            item.owner_user_id for item in page_items if item.owner_type == OwnerType.USER
+        )
         return DiscoverFeedPageType(
             items=[
-                build_discover_feed_item_payload(item, user, account, business, poll_payloads, official_ids)
+                build_discover_feed_item_payload(
+                    item, user, account, business, poll_payloads, official_ids, avatar_urls,
+                )
                 for item in page_items
             ],
             has_more=has_more,
@@ -967,6 +1523,183 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_discover_sections(self, info):
         return []
+
+    @login_required
+    def resolve_community_posting_status(self, info):
+        user, account, business, _ = get_context_models(info)
+        block = community.posting_block(user, business)
+        return CommunityPostingStatusType(
+            can_post=block is None,
+            block_code=block,
+            block_message=community.BLOCK_MESSAGES.get(block) if block else None,
+            max_chars=settings.COMMUNITY_POST_MAX_CHARS,
+        )
+
+    @login_required
+    def resolve_my_community_posts(self, info, offset=0, limit=20):
+        offset = max(offset or 0, 0)
+        # The app re-reads its whole loaded range (offset 0, growing limit).
+        limit = min(max(limit or 20, 1), 500)
+        items = list(own_community_items(info.context.user)[offset:offset + limit])
+        counts = dict(
+            community.visible_comments_any_post()
+            .filter(content_item_id__in=[item.id for item in items])
+            .values('content_item_id')
+            .annotate(total=Count('id'))
+            .values_list('content_item_id', 'total')
+        )
+        return [build_community_post_payload(item, counts.get(item.id, 0)) for item in items]
+
+    @login_required
+    def resolve_my_community_post(self, info, content_item_id):
+        item = own_community_items(info.context.user).filter(id=content_item_id).first()
+        return build_community_post_payload(item) if item else None
+
+    @login_required
+    def resolve_community_post_viewer(self, info, content_item_id):
+        user = info.context.user
+        item = ContentItem.objects.filter(id=content_item_id).select_related('community_review').first()
+        review = getattr(item, 'community_review', None) if item else None
+        max_chars = settings.COMMUNITY_COMMENT_MAX_CHARS
+        if review is None:
+            return CommunityPostViewerType(
+                is_community=False, is_own=False, can_report=False, viewer_reported=False,
+                can_comment=False, comment_block_message=None, comment_max_chars=max_chars,
+            )
+        is_own = item.owner_user_id == user.id
+        reported = CommunityPostReport.objects.filter(content_item=item, reporter=user).exists()
+        live = review.status == CommunityReviewStatus.APPROVED and item.status == ContentStatus.PUBLISHED
+        _, _, business, _ = get_context_models(info)
+        block = community.commenting_block(user, business) if live else None
+        return CommunityPostViewerType(
+            is_community=True,
+            is_own=is_own,
+            can_report=not is_own and not reported and live,
+            viewer_reported=reported,
+            can_comment=live and block is None,
+            comment_block_message=community.BLOCK_MESSAGES.get(block) if block else None,
+            comment_max_chars=max_chars,
+        )
+
+    @login_required
+    def resolve_community_comments(self, info, content_item_id, offset=0, limit=20, expanded_thread_ids=None):
+        user = info.context.user
+        item = community.published_community_post(content_item_id)
+        if item is None:
+            return CommunityCommentPageType(items=[], has_more=False, total_count=0)
+        offset = max(offset or 0, 0)
+        # The app re-reads everything it has loaded (offset 0, growing limit)
+        # so polling and deletes never leave a stale later page.
+        limit = min(max(limit or 20, 1), COMMENT_THREADS_MAX)
+        seen = comments_seen_by(user, item.id)
+        top_level = list(seen.filter(parent__isnull=True)[offset:offset + limit + 1])
+        has_more = len(top_level) > limit
+        top_level = top_level[:limit]
+        # The author always sees the outcome of their own comment, even past
+        # the loaded window.
+        shown = {c.id for c in top_level}
+        top_level += list(
+            seen.filter(parent__isnull=True, author=user, status__in=UNREVIEWED).exclude(id__in=shown)
+            .order_by('-created_at', '-id')[:20]
+        )
+        thread_ids = [c.id for c in top_level]
+        expanded = set()
+        for raw in (expanded_thread_ids or [])[:5]:
+            try:
+                expanded.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+        expanded &= set(thread_ids)
+        # Bounded however long a thread grows: the first replies of each
+        # thread, more for an expanded one, plus the viewer's own unreviewed.
+        replies = list(first_replies(seen.filter(parent_id__in=set(thread_ids) - expanded), REPLIES_PER_THREAD))
+        if expanded:
+            replies += list(first_replies(seen.filter(parent_id__in=expanded), REPLIES_EXPANDED_MAX))
+        reply_ids = {r.id for r in replies}
+        replies += [
+            r for r in seen.filter(parent_id__in=thread_ids, author=user, status__in=UNREVIEWED)
+            .order_by('-created_at', '-id')[:20]
+            if r.id not in reply_ids
+        ]
+        replies.sort(key=lambda r: (r.created_at, r.id))
+        replies_by_parent = {}
+        for reply in replies:
+            replies_by_parent.setdefault(reply.parent_id, []).append(reply)
+        reply_counts = dict(
+            community.visible_comments(item.id).filter(parent_id__in=thread_ids)
+            .values('parent_id').annotate(total=Count('id')).values_list('parent_id', 'total')
+        )
+        page_ids = thread_ids + [r.id for r in replies]
+        reactions = reaction_maps(page_ids, user)
+        reported_ids = set(
+            CommunityCommentReport.objects.filter(reporter=user, comment_id__in=page_ids)
+            .values_list('comment_id', flat=True)
+        )
+        post_author_id = item.owner_user_id
+        everyone = top_level + [r for rs in replies_by_parent.values() for r in rs]
+        avatars = profile_pictures.picture_urls(
+            {c.author_id for c in everyone} | {u.id for c in everyone for u in c.mentions.all()}
+        )
+        items = [
+            build_community_comment_payload(
+                comment, user, post_author_id, reported_ids,
+                replies=[
+                    build_community_comment_payload(
+                        reply, user, post_author_id, reported_ids, avatars=avatars, reactions=reactions,
+                    )
+                    for reply in replies_by_parent.get(comment.id, [])
+                ],
+                avatars=avatars,
+                reactions=reactions,
+                reply_count=reply_counts.get(comment.id, 0),
+            )
+            for comment in top_level
+        ]
+        return CommunityCommentPageType(
+            items=items,
+            has_more=has_more,
+            total_count=community.visible_comments(item.id).count(),
+        )
+
+    @login_required
+    def resolve_community_post_participants(self, info, content_item_id):
+        item = community.published_community_post(content_item_id)
+        if item is None:
+            return []
+        participants = community.post_participants(item.id, exclude_user=info.context.user)
+        avatars = profile_pictures.picture_urls([user.id for user in participants])
+        return [
+            CommunityParticipantType(
+                id=str(user.id),
+                name=community.author_display_name(user),
+                is_post_author=user.id == item.owner_user_id,
+                avatar_url=avatars.get(user.id),
+            )
+            for user in participants
+        ]
+
+    @login_required
+    def resolve_my_profile_picture(self, info):
+        user, account, business, _ = get_context_models(info)
+        return build_my_profile_picture(user, business)
+
+    @login_required
+    def resolve_community_comment_counts(self, info, content_item_ids):
+        ids = []
+        # One aggregate query; enough for every card a feed session loads.
+        for raw in content_item_ids[:200]:
+            try:
+                ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        counts = dict(
+            community.visible_comments_any_post()
+            .filter(content_item_id__in=ids)
+            .values('content_item_id')
+            .annotate(total=Count('id'))
+            .values_list('content_item_id', 'total')
+        )
+        return [CommunityCommentCountType(content_item_id=str(i), count=counts.get(i, 0)) for i in ids]
 
     @login_required
     def resolve_portal_support_conversations(self, info, status=None, search=None):
@@ -1011,7 +1744,10 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_portal_content_items(self, info, channel_slug=None, status=None):
         require_staff_user(info)
-        queryset = ContentItem.objects.select_related('channel').prefetch_related('surfaces').order_by('-published_at', '-created_at')
+        queryset = (
+            ContentItem.objects.filter(community.EDITORIAL)
+            .select_related('channel').prefetch_related('surfaces').order_by('-published_at', '-created_at')
+        )
         if channel_slug:
             queryset = queryset.filter(channel__slug=channel_slug)
         if status:
@@ -1128,19 +1864,10 @@ class ReactToMessageContent(graphene.Mutation):
         if reaction_type is None:
             raise GraphQLError('Reaction type not found')
 
-        item = ContentItem.objects.filter(id=content_item_id, status=ContentStatus.PUBLISHED).first()
-        if item is None:
-            raise GraphQLError('Content item not found')
-
-        membership_filter = {'channel': item.channel, 'user': user, 'is_subscribed': True}
-        if business is not None:
-            membership_filter.update({'business': business, 'account__isnull': True})
-        else:
-            membership_filter.update({'account': account, 'business__isnull': True})
-
-        membership = ChannelMembership.objects.filter(**membership_filter).first()
-        if membership is None or not get_visible_content_queryset(membership).filter(id=item.id).exists():
-            raise GraphQLError('Content item not available in this context')
+        # Same reach as reading it: anything on Descubrir, otherwise only
+        # through a channel this context follows. Comunidad posts live in a
+        # channel nobody subscribes to.
+        item, user, account, business = get_accessible_content_item(info, content_item_id)
 
         reaction_filter = {'content_item': item, 'user': user}
         if business is not None:
@@ -1453,10 +2180,16 @@ class PortalSaveContentItem(graphene.Mutation):
         }:
             raise GraphQLError('Invalid visibility policy')
 
+        # Member posts are never edited or published editorially: each
+        # revision would skip the AI review. Staff moderate them in the admin.
+        if channel.slug == community.COMMUNITY_CHANNEL_SLUG:
+            raise GraphQLError('Comunidad posts are moderated in the admin, not written here')
         if content_item_id:
             item = ContentItem.objects.select_for_update().filter(id=content_item_id).first()
             if item is None:
                 raise GraphQLError('Content item not found')
+            if community.is_member_content(item):
+                raise GraphQLError('Comunidad posts are moderated in the admin, not edited here')
         else:
             item = ContentItem(channel=channel, author_user=staff_user)
 
@@ -1504,6 +2237,8 @@ class PortalDeleteContentItem(graphene.Mutation):
         item = ContentItem.objects.filter(id=content_item_id).first()
         if item is None:
             raise GraphQLError('Content item not found')
+        if community.is_member_content(item):
+            raise GraphQLError('Comunidad posts are taken down in the admin, not deleted here')
 
         deleted_content_item_id = str(item.id)
         item.delete()
@@ -1595,3 +2330,14 @@ class Mutation(graphene.ObjectType):
     portal_save_content_item = PortalSaveContentItem.Field()
     portal_delete_content_item = PortalDeleteContentItem.Field()
     request_publication_image_upload = RequestPublicationImageUpload.Field()
+    request_community_image_upload = RequestCommunityImageUpload.Field()
+    create_community_post = CreateCommunityPost.Field()
+    delete_community_post = DeleteCommunityPost.Field()
+    report_community_post = ReportCommunityPost.Field()
+    create_community_comment = CreateCommunityComment.Field()
+    delete_community_comment = DeleteCommunityComment.Field()
+    report_community_comment = ReportCommunityComment.Field()
+    react_to_community_comment = ReactToCommunityComment.Field()
+    request_profile_picture_upload = RequestProfilePictureUpload.Field()
+    submit_profile_picture = SubmitProfilePicture.Field()
+    remove_profile_picture = RemoveProfilePicture.Field()

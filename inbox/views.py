@@ -7,6 +7,8 @@ from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from django.utils.text import slugify
 
+# Member (Comunidad) posts are app-only: never on the public web, RSS or sitemap.
+from . import community
 from .models import ContentItem, ContentStatus, ContentSurfaceType
 
 TOP_REACTIONS_LIMIT = 3
@@ -98,6 +100,7 @@ def _get_discover_queryset():
         ContentItem.objects.select_related('channel', 'author_user')
         .prefetch_related('surfaces', 'reactions__reaction_type')
         .filter(
+            community.EDITORIAL,
             status=ContentStatus.PUBLISHED,
             published_at__isnull=False,
             surfaces__surface=ContentSurfaceType.DISCOVER,
@@ -192,6 +195,7 @@ def discover_post_detail(request, post_id, slug=None):
             ContentItem.objects.select_related('channel', 'author_user')
             .prefetch_related('surfaces', 'reactions__reaction_type')
             .filter(
+                community.EDITORIAL,
                 id=post_id,
                 status=ContentStatus.PUBLISHED,
                 published_at__isnull=False,

@@ -242,3 +242,29 @@ def head_object(*, key: str, bucket: Optional[str] = None) -> Dict[str, any]:
         'etag': (resp.get('ETag') or '').strip('"'),
         'metadata': resp.get('Metadata') or {},
     }
+
+
+def get_object_bytes(*, key: str, max_bytes: int, bucket: Optional[str] = None) -> Dict[str, object]:
+    """Download an object, refusing anything larger than max_bytes.
+
+    Returns {'body': bytes, 'content_type': str}.
+    """
+    _ensure_bucket(bucket)
+    region = settings.AWS_S3_REGION or 'eu-central-2'
+    s3 = boto3.client('s3', **_build_s3_client_params(region))
+    resp = s3.get_object(Bucket=_resolve_bucket(bucket), Key=key)
+    length = resp.get('ContentLength') or 0
+    if length > max_bytes:
+        raise ValueError(f'S3 object {key} is {length} bytes, over the {max_bytes} limit')
+    body = resp['Body'].read(max_bytes + 1)
+    if len(body) > max_bytes:
+        raise ValueError(f'S3 object {key} exceeds the {max_bytes} byte limit')
+    return {'body': body, 'content_type': resp.get('ContentType') or ''}
+
+
+def delete_object(*, key: str, bucket: Optional[str] = None) -> None:
+    """Delete one object. Deleting a key that does not exist is not an error."""
+    _ensure_bucket(bucket)
+    region = settings.AWS_S3_REGION or 'eu-central-2'
+    s3 = boto3.client('s3', **_build_s3_client_params(region))
+    s3.delete_object(Bucket=_resolve_bucket(bucket), Key=key)

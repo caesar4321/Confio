@@ -17,12 +17,19 @@ from .models import (
     AvatarType,
     Channel,
     ChannelMembership,
+    CommunityComment,
+    CommunityCommentReaction,
+    CommunityCommentReport,
+    CommunityPostReport,
+    CommunityPostReview,
     ContentItem,
     ContentPlatformClick,
     ContentPlatformClickDailyStat,
     ContentReadState,
     ContentReaction,
     ContentSurface,
+    ProfilePictureSubmission,
+    PublicObject,
     ReactionType,
     SupportConversation,
     SupportConversationState,
@@ -36,6 +43,19 @@ from .official import (
     official_status,
     owner_status,
 )
+from .community import (
+    COMMUNITY_CHANNEL_SLUG as community_channel_slug,
+    EDITORIAL as community_editorial_q,
+    is_member_content as community_is_member_content,
+    NotRestorable as CommunityNotRestorable,
+    rereview as community_rereview,
+    rereview_comment as community_rereview_comment,
+    restore as community_restore,
+    restore_comment as community_restore_comment,
+    take_down as community_take_down,
+    take_down_comment as community_take_down_comment,
+)
+from .profile_pictures import take_down as profile_picture_take_down
 from .tasks import send_content_item_push_task
 
 
@@ -132,6 +152,13 @@ class ContentItemAdminForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
+        # Member content only ever enters through the app and its AI review;
+        # writing it here would publish it unreviewed.
+        channel = cleaned_data.get('channel')
+        if cleaned_data.get('owner_type') == 'USER' or (
+            channel is not None and channel.slug == community_channel_slug
+        ):
+            raise forms.ValidationError('Comunidad (member) content is moderated in Community post reviews, not here.')
         metadata = dict((self.instance.metadata or {}).copy())
 
         tag_color = cleaned_data.get('tag_color')
@@ -207,6 +234,16 @@ class ContentItemInline(admin.TabularInline):
     readonly_fields = ('created_at', 'updated_at')
     show_change_link = True
     ordering = ('-published_at', '-created_at')
+
+    # Member posts are moderated in CommunityPostReviewAdmin only: editing one
+    # here would change approved text without a new AI review.
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(community_editorial_q)
+
+    def has_add_permission(self, request, obj=None):
+        if obj is not None and obj.slug == community_channel_slug:
+            return False
+        return super().has_add_permission(request, obj)
 
 
 
@@ -369,6 +406,13 @@ class ChannelAdmin(admin.ModelAdmin):
         self.message_user(request, f'Oficial revocado en {revoked} canal(es).', level=messages.SUCCESS)
 
     @transaction.atomic
+    def has_delete_permission(self, request, obj=None):
+        # Deleting the Comunidad channel would cascade every member post past
+        # the takedown path.
+        if obj is not None and obj.slug == community_channel_slug:
+            return False
+        return super().has_delete_permission(request, obj)
+
     def save_formset(self, request, form, formset, change):
         if formset.model is not ContentItem:
             return super().save_formset(request, form, formset, change)
@@ -376,6 +420,9 @@ class ChannelAdmin(admin.ModelAdmin):
         for instance in formset.deleted_objects:
             instance.delete()
         for instance in instances:
+            if community_is_member_content(instance):
+                messages.error(request, 'Comunidad (member) posts cannot be edited here; nothing was saved for them.')
+                continue
             save_content_item_preserving_poll(instance)
         formset.save_m2m()
 
@@ -589,7 +636,9 @@ class ContentItemAdmin(admin.ModelAdmin):
     )
 
     def get_queryset(self, request):
-        queryset = super().get_queryset(request)
+        # Member posts live in CommunityPostReviewAdmin; editing one here
+        # would publish or rewrite it without an AI review.
+        queryset = super().get_queryset(request).filter(community_editorial_q)
         today = timezone.localdate()
         seven_days_ago = today - timedelta(days=6)
         start_of_today = timezone.make_aware(datetime.combine(today, datetime.min.time()))
@@ -880,3 +929,236 @@ class SupportConversationStateAdmin(admin.ModelAdmin):
     search_fields = ('conversation__user__username', 'user__username', 'user__email')
     autocomplete_fields = ('conversation', 'user', 'last_seen_message')
     list_select_related = ('conversation', 'user', 'last_seen_message')
+
+
+class CommunityPostReportInline(admin.TabularInline):
+    model = CommunityPostReport
+    fk_name = 'content_item'
+    extra = 0
+    fields = ('reporter', 'reason', 'created_at')
+    readonly_fields = ('reporter', 'reason', 'created_at')
+    can_delete = False
+
+
+@admin.register(CommunityPostReview)
+class CommunityPostReviewAdmin(admin.ModelAdmin):
+    """Comunidad's AI gate. Staff act after the fact: take down or restore."""
+    list_display = (
+        'content_item_id', 'author', 'status', 'category', 'decided_by_model', 'escalated',
+        'report_count', 'post_preview', 'created_at',
+    )
+    list_filter = ('status', 'category', 'escalated', 'decided_by_model')
+    search_fields = ('content_item__body', 'content_item__owner_user__username', 'content_item__owner_user__email')
+    list_select_related = ('content_item', 'content_item__owner_user')
+    readonly_fields = (
+        'content_item', 'status', 'pending_image_key', 'decided_by_model', 'escalated', 'category', 'reason',
+        'verdicts', 'attempts', 'reviewed_at', 'removed_at', 'removed_by', 'rereviewed_at',
+        'created_at', 'updated_at', 'post_body', 'post_image',
+    )
+    actions = ('take_down_posts', 'restore_posts', 'rereview_posts')
+
+    def has_add_permission(self, request):
+        return False
+
+    # No plain deletion: it would skip the takedown path (which hides public
+    # images) and erase the moderation record. Take down instead.
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_report_count=Count('content_item__community_reports'))
+
+    @admin.display(description='Author')
+    def author(self, obj):
+        return obj.content_item.owner_user
+
+    @admin.display(description='Reports', ordering='_report_count')
+    def report_count(self, obj):
+        return obj._report_count
+
+    @admin.display(description='Post')
+    def post_preview(self, obj):
+        body = obj.content_item.body or ''
+        return body[:80] + ('…' if len(body) > 80 else '')
+
+    @admin.display(description='Body')
+    def post_body(self, obj):
+        return obj.content_item.body
+
+    @admin.display(description='Published image')
+    def post_image(self, obj):
+        url = (obj.content_item.metadata or {}).get('image', {}).get('url')
+        return format_html('<img src="{}" style="max-width:320px">', url) if url else '—'
+
+    @admin.action(description='Take down selected posts')
+    def take_down_posts(self, request, queryset):
+        for review in queryset:
+            community_take_down(review.id, removed_by=request.user, category='staff',
+                                reason='Retirada por el equipo de Confío.')
+        messages.success(request, f'Took down {queryset.count()} post(s).')
+
+    @admin.action(description='Restore (publish) selected posts')
+    def restore_posts(self, request, queryset):
+        restored = skipped = 0
+        for review in queryset:
+            try:
+                community_restore(review.id)
+                restored += 1
+            except CommunityNotRestorable:
+                skipped += 1
+        messages.success(request, f'Published {restored} post(s).')
+        if skipped:
+            messages.warning(request, f'Skipped {skipped}: never approved by the AI review. Use "Re-review" instead.')
+
+    @admin.action(description='Re-review selected rejected/failed posts with the AI')
+    def rereview_posts(self, request, queryset):
+        sent = sum(1 for review in queryset if community_rereview(review.id))
+        messages.success(request, f'Sent {sent} post(s) back to review.')
+
+
+@admin.register(CommunityPostReport)
+class CommunityPostReportAdmin(admin.ModelAdmin):
+    list_display = ('content_item', 'reporter', 'reason', 'created_at')
+    list_filter = ('reason',)
+    search_fields = ('content_item__body', 'reporter__username', 'reporter__email')
+    list_select_related = ('content_item', 'reporter')
+    readonly_fields = ('content_item', 'reporter', 'reason', 'created_at')
+
+
+@admin.register(CommunityComment)
+class CommunityCommentAdmin(admin.ModelAdmin):
+    list_display = ('id', 'content_item_id', 'author', 'parent_id', 'status', 'category', 'decided_by_model',
+                    'escalated', 'report_count', 'body_preview', 'created_at')
+    list_filter = ('status', 'category', 'escalated', 'decided_by_model')
+    search_fields = ('body', 'author__username', 'author__email')
+    list_select_related = ('author',)
+    readonly_fields = ('content_item', 'author', 'parent', 'body', 'mentions', 'status', 'decided_by_model',
+                       'escalated', 'category', 'reason', 'verdicts', 'attempts', 'reviewed_at', 'removed_at',
+                       'removed_by', 'rereviewed_at', 'created_at', 'updated_at')
+    actions = ('take_down_comments', 'restore_comments', 'rereview_comments')
+
+    def has_add_permission(self, request):
+        return False
+
+    # No plain deletion: it would skip the takedown path (which hides public
+    # images) and erase the moderation record. Take down instead.
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_report_count=Count('reports'))
+
+    @admin.display(description='Reports', ordering='_report_count')
+    def report_count(self, obj):
+        return obj._report_count
+
+    @admin.display(description='Comment')
+    def body_preview(self, obj):
+        return obj.body[:80] + ('…' if len(obj.body) > 80 else '')
+
+    @admin.action(description='Take down selected comments')
+    def take_down_comments(self, request, queryset):
+        for comment in queryset:
+            community_take_down_comment(comment.id, removed_by=request.user, category='staff',
+                                        reason='Retirado por el equipo de Confío.')
+        messages.success(request, f'Took down {queryset.count()} comment(s).')
+
+    @admin.action(description='Restore (show) selected comments')
+    def restore_comments(self, request, queryset):
+        restored = skipped = 0
+        for comment in queryset:
+            try:
+                community_restore_comment(comment.id)
+                restored += 1
+            except CommunityNotRestorable:
+                skipped += 1
+        messages.success(request, f'Restored {restored} comment(s).')
+        if skipped:
+            messages.warning(request, f'Skipped {skipped}: never approved by the AI review. Use "Re-review" instead.')
+
+    @admin.action(description='Re-review selected rejected/failed comments with the AI')
+    def rereview_comments(self, request, queryset):
+        sent = sum(1 for comment in queryset if community_rereview_comment(comment.id))
+        messages.success(request, f'Sent {sent} comment(s) back to review.')
+
+
+@admin.register(CommunityCommentReport)
+class CommunityCommentReportAdmin(admin.ModelAdmin):
+    list_display = ('comment', 'reporter', 'reason', 'created_at')
+    list_filter = ('reason',)
+    search_fields = ('comment__body', 'reporter__username', 'reporter__email')
+    list_select_related = ('comment', 'reporter')
+    readonly_fields = ('comment', 'reporter', 'reason', 'created_at')
+
+
+@admin.register(CommunityCommentReaction)
+class CommunityCommentReactionAdmin(admin.ModelAdmin):
+    list_display = ('comment', 'user', 'reaction_type', 'created_at')
+    list_select_related = ('comment', 'user', 'reaction_type')
+    search_fields = ('user__username', 'user__email')
+    readonly_fields = ('comment', 'user', 'reaction_type', 'created_at')
+
+
+@admin.register(ProfilePictureSubmission)
+class ProfilePictureSubmissionAdmin(admin.ModelAdmin):
+    """AI-screened profile pictures. Staff act after the fact: take one down."""
+    list_display = ('id', 'thumbnail', 'user', 'status', 'category', 'decided_by_model', 'escalated', 'created_at')
+    list_filter = ('status', 'category', 'escalated', 'decided_by_model')
+    search_fields = ('user__username', 'user__email')
+    list_select_related = ('user',)
+    readonly_fields = ('user', 'status', 'pending_key', 'public_url', 'preview', 'decided_by_model', 'escalated',
+                       'category', 'reason', 'verdicts', 'attempts', 'reviewed_at', 'removed_by',
+                       'created_at', 'updated_at')
+    actions = ('take_down_pictures',)
+
+    def has_add_permission(self, request):
+        return False
+
+    # No plain deletion: it would skip the takedown path (which hides public
+    # images) and erase the moderation record. Take down instead.
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
+    @admin.display(description='')
+    def thumbnail(self, obj):
+        return format_html('<img src="{}" style="width:40px;height:40px;border-radius:20px">', obj.public_url) \
+            if obj.public_url else '—'
+
+    @admin.display(description='Picture')
+    def preview(self, obj):
+        return format_html('<img src="{}" style="max-width:256px">', obj.public_url) if obj.public_url else '—'
+
+    @admin.action(description='Take down selected pictures')
+    def take_down_pictures(self, request, queryset):
+        removed = sum(1 for submission in queryset if profile_picture_take_down(submission.id, removed_by=request.user))
+        messages.success(request, f'Took down {removed} picture(s) (live or still in review).')
+
+
+@admin.register(PublicObject)
+class PublicObjectAdmin(admin.ModelAdmin):
+    """Read-only ledger of public Comunidad objects; the sweeper owns it."""
+    list_display = ('bucket', 'key', 'state', 'created_at', 'updated_at')
+    list_filter = ('state', 'bucket')
+    search_fields = ('key',)
+    readonly_fields = ('bucket', 'key', 'state', 'created_at', 'updated_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

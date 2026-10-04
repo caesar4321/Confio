@@ -4,6 +4,8 @@ from django.utils.feedgenerator import Rss201rev2Feed
 from django.utils.html import strip_tags
 from django.utils.text import slugify
 
+# Member (Comunidad) posts are app-only: never on the public web, RSS or sitemap.
+from . import community
 from .models import ContentItem, ContentStatus, ContentSurfaceType
 
 
@@ -17,6 +19,7 @@ class DiscoverFeed(Feed):
     def items(self):
         return (
             ContentItem.objects.filter(
+                community.EDITORIAL,
                 status=ContentStatus.PUBLISHED,
                 published_at__isnull=False,
                 surfaces__surface=ContentSurfaceType.DISCOVER,

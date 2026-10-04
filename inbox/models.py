@@ -535,3 +535,248 @@ class ContentPollVote(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['content_item', 'user'], name='inbox_poll_item_user_uniq'),
         ]
+
+
+class CommunityReviewStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    APPROVED = 'APPROVED', 'Approved'
+    REJECTED = 'REJECTED', 'Rejected'
+    # The AI could not decide (outage, unparseable output) after every retry.
+    # Never published: the author is told to try again.
+    FAILED = 'FAILED', 'Failed'
+    # Taken down after publishing: by reports, a re-review, staff, or the author.
+    REMOVED = 'REMOVED', 'Removed'
+
+
+class CommunityPostReview(models.Model):
+    """The AI gate in front of a member's Comunidad post.
+
+    A post is a ContentItem owned by its author; it stays unpublished until a
+    review approves it. Only APPROVED posts are ever PUBLISHED.
+    """
+    content_item = models.OneToOneField(ContentItem, on_delete=models.CASCADE, related_name='community_review')
+    status = models.CharField(max_length=16, choices=CommunityReviewStatus.choices, default=CommunityReviewStatus.PENDING)
+    # Private upload awaiting review; copied to the public bucket only on approval.
+    pending_image_key = models.CharField(max_length=512, null=True, blank=True, unique=True)
+    # Which model made the final call ('' while pending).
+    decided_by_model = models.CharField(max_length=64, blank=True, default='')
+    escalated = models.BooleanField(default=False)
+    category = models.CharField(max_length=32, blank=True, default='')
+    # Shown to the author, in Spanish.
+    reason = models.CharField(max_length=280, blank=True, default='')
+    # Every model verdict, in order, for audit.
+    verdicts = models.JSONField(default=list, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    # Set per attempt; only the worker holding the latest one may decide.
+    claim_token = models.CharField(max_length=32, blank=True, default='')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    removed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='removed_community_posts',
+    )
+    rereviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', '-created_at'], name='inbox_cpr_status_idx'),
+        ]
+
+    def __str__(self):
+        return f'Review {self.content_item_id}: {self.status}'
+
+
+class CommunityReportReason(models.TextChoices):
+    SCAM = 'SCAM', 'Estafa o fraude'
+    SPAM = 'SPAM', 'Spam o publicidad'
+    OFFENSIVE = 'OFFENSIVE', 'Ofensivo o acoso'
+    PERSONAL_DATA = 'PERSONAL_DATA', 'Datos personales'
+    OTHER = 'OTHER', 'Otro'
+
+
+class CommunityPostReport(models.Model):
+    content_item = models.ForeignKey(ContentItem, on_delete=models.CASCADE, related_name='community_reports')
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_reports')
+    reason = models.CharField(max_length=16, choices=CommunityReportReason.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['content_item', 'reporter'], name='inbox_community_report_uniq'),
+        ]
+
+    def __str__(self):
+        return f'{self.reporter_id} reported {self.content_item_id}: {self.reason}'
+
+
+class CommunityComment(models.Model):
+    """A comment on a Comunidad post, one level deep.
+
+    Top-level comments have no parent; replies point at a top-level comment
+    (a reply to a reply is filed under the same top-level comment). Gated by
+    the same AI review as posts: only APPROVED comments are shown to others.
+    """
+    content_item = models.ForeignKey(ContentItem, on_delete=models.CASCADE, related_name='community_comments')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_comments')
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
+    body = models.TextField()
+    # Post participants tagged in this comment, validated at creation.
+    mentions = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='community_mentions')
+    status = models.CharField(max_length=16, choices=CommunityReviewStatus.choices, default=CommunityReviewStatus.PENDING)
+    decided_by_model = models.CharField(max_length=64, blank=True, default='')
+    escalated = models.BooleanField(default=False)
+    category = models.CharField(max_length=32, blank=True, default='')
+    reason = models.CharField(max_length=280, blank=True, default='')
+    verdicts = models.JSONField(default=list, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    # Set per attempt; only the worker holding the latest one may decide.
+    claim_token = models.CharField(max_length=32, blank=True, default='')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    removed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='removed_community_comments',
+    )
+    rereviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['content_item', 'parent', 'status', 'created_at'], name='inbox_cc_thread_idx'),
+            models.Index(fields=['author', '-created_at'], name='inbox_cc_author_idx'),
+            models.Index(fields=['status', '-updated_at'], name='inbox_cc_status_idx'),
+        ]
+
+    def __str__(self):
+        return f'Comment {self.id} on {self.content_item_id}: {self.status}'
+
+
+class CommunityCommentReport(models.Model):
+    comment = models.ForeignKey(CommunityComment, on_delete=models.CASCADE, related_name='reports')
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_comment_reports')
+    reason = models.CharField(max_length=16, choices=CommunityReportReason.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['comment', 'reporter'], name='inbox_comment_report_uniq'),
+        ]
+
+
+class CommunityCommentReaction(models.Model):
+    """One reaction per person per comment, from the same set as posts."""
+    comment = models.ForeignKey(CommunityComment, on_delete=models.CASCADE, related_name='reactions')
+    reaction_type = models.ForeignKey(ReactionType, on_delete=models.PROTECT, related_name='community_comment_reactions')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_comment_reactions')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['comment', 'user'], name='inbox_comment_reaction_uniq'),
+        ]
+
+
+class ProfilePictureStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    # The picture people see. At most one per person.
+    ACTIVE = 'ACTIVE', 'Active'
+    REJECTED = 'REJECTED', 'Rejected'
+    FAILED = 'FAILED', 'Failed'
+    # An approved picture the person later swapped out.
+    REPLACED = 'REPLACED', 'Replaced'
+    # Taken down by the person or staff.
+    REMOVED = 'REMOVED', 'Removed'
+
+
+class ProfilePictureSubmission(models.Model):
+    """A member's profile picture, AI-screened before anyone else sees it.
+
+    Uploads wait in the private ``pending/`` prefix of the profile-pictures
+    bucket; only an approved, re-encoded copy is written to ``public/``.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile_pictures')
+    status = models.CharField(max_length=16, choices=ProfilePictureStatus.choices, default=ProfilePictureStatus.PENDING)
+    pending_key = models.CharField(max_length=512, unique=True)
+    public_url = models.CharField(max_length=512, blank=True, default='')
+    # Set once the public copy of a removed/replaced picture is confirmed
+    # deleted. REMOVED/REPLACED with a public_url and no stamp = cleanup owed;
+    # the sweeper keeps retrying until it lands.
+    public_deleted_at = models.DateTimeField(null=True, blank=True)
+    decided_by_model = models.CharField(max_length=64, blank=True, default='')
+    escalated = models.BooleanField(default=False)
+    category = models.CharField(max_length=32, blank=True, default='')
+    reason = models.CharField(max_length=280, blank=True, default='')
+    verdicts = models.JSONField(default=list, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    # Set per attempt; only the worker holding the latest one may decide.
+    claim_token = models.CharField(max_length=32, blank=True, default='')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    removed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='removed_profile_pictures',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'status'], name='inbox_pp_user_status_idx'),
+            models.Index(fields=['status', '-updated_at'], name='inbox_pp_status_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user'],
+                condition=Q(status='ACTIVE'),
+                name='inbox_pp_one_active_per_user',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Profile picture {self.id} of {self.user_id}: {self.status}'
+
+
+class PublicObjectState(models.TextChoices):
+    # Key chosen and committed BEFORE the upload; becomes LIVE in the same
+    # transaction that references it. Still RESERVED after a grace period =
+    # the publish never completed, so whatever was uploaded is deleted.
+    RESERVED = 'RESERVED', 'Reserved'
+    LIVE = 'LIVE', 'Live'
+    # No longer referenced; deleted by the sweeper until S3 confirms.
+    DOOMED = 'DOOMED', 'Doomed'
+    DELETED = 'DELETED', 'Deleted'
+
+
+class PublicObject(models.Model):
+    """Ledger of every public object Comunidad writes (post images, profile
+    pictures), so no crash, rollback or failed delete can leave public bytes
+    nothing points at."""
+    bucket = models.CharField(max_length=128)
+    key = models.CharField(max_length=512)
+    state = models.CharField(max_length=16, choices=PublicObjectState.choices, default=PublicObjectState.RESERVED)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['bucket', 'key'], name='inbox_public_object_uniq'),
+        ]
+        indexes = [
+            models.Index(fields=['state', 'updated_at'], name='inbox_public_object_state_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.bucket}/{self.key}: {self.state}'
