@@ -10,7 +10,7 @@ jest.mock('react-native-svg', () => {
 });
 
 import { SummaryCard, comparisonText, resultLabel, resultText } from '../SummaryCard';
-import { ProtectionCard, SavingsCard } from '../ProtectionCard';
+import { ProtectionCard, SavingsCard, StableCard } from '../ProtectionCard';
 import { RecurringCard } from '../RecurringCard';
 import { colors } from '../../../config/theme';
 import type { MonthSummary } from '../../../apollo/monthSummary';
@@ -74,7 +74,7 @@ describe('Card A', () => {
 });
 
 describe('dollar slot cards', () => {
-  const protection = { currency: 'BOB', basis: 'purchase' as const, source: 'binance_p2p', protectedUsd: '100.00', paidLocal: '690.00', todayLocal: '740.00',
+  const protection = { currency: 'BOB', basis: 'purchase' as const, state: 'gained' as const, source: 'binance_p2p', protectedUsd: '100.00', paidLocal: '690.00', todayLocal: '740.00',
     gainLocal: '50.00', avgRate: '6.90', todayRate: '7.40', quotedAt: new Date().toISOString() };
 
   it('protection: sentence, two bars, and the explainer sheet from the same quote', () => {
@@ -107,6 +107,15 @@ describe('dollar slot cards', () => {
     expect(all).not.toContain('Pagaste');
     act(() => { tree.root.findByProps({ testID: 'tumes-protection-how' }).props.onPress(); });
     expect(texts(tree).join(' ')).toContain('El 1 de octubre (Binance P2P)');
+  });
+
+  it('stable: the dollars kept their dollar value, no local amounts, no loss', () => {
+    const tree = mount(<StableCard value={{ ...protection, state: 'stable', gainLocal: '-150' }} masked={false} />);
+    const all = texts(tree).join(' ');
+    expect(all).toContain('Tu dólar se mantuvo');
+    expect(all).not.toMatch(/Bs|-150|perd/);
+    const masked = mount(<StableCard value={{ ...protection, state: 'stable' }} masked />);
+    expect(texts(masked).join(' ')).not.toContain('US$');
   });
 
   it('savings: cents, and bars only from the third day', () => {

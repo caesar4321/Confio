@@ -31,7 +31,7 @@ import {
   GET_MONTH_MOVEMENTS, GET_MONTH_SUMMARY, type CategoryKey, type MonthSummary, type MonthTotals,
 } from '../apollo/monthSummary';
 import { SummaryCard } from '../components/tuMes/SummaryCard';
-import { ProtectionCard, SavingsCard } from '../components/tuMes/ProtectionCard';
+import { ProtectionCard, SavingsCard, StableCard } from '../components/tuMes/ProtectionCard';
 import { RecurringCard } from '../components/tuMes/RecurringCard';
 import { useMonthInsights, type InsightData } from '../hooks/useMonthInsights';
 import { dollarSlot, paceLine } from '../utils/monthInsights';
@@ -303,6 +303,7 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
         <Animated.View style={{ opacity: fade }} testID="tumes-revealed">
           {slot?.kind === 'protection' && <ProtectionCard value={slot.value} month={summary.month} masked={masked} />}
           {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
+          {slot?.kind === 'stable' && <StableCard value={slot.value} masked={masked} />}
           {showRecurring && (
             <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}
               onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />

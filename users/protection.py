@@ -19,9 +19,12 @@ Two bases, by country:
     paid      = those dollars at the Binance P2P rate kept for the 1st;
     today     = those dollars at today's Binance P2P rate.
 
-Shown only when the gain is worth at least US$1 at today's rate. Every
-unknown hides the card (fail closed): no lots, no fresh rate, no month-start
-rate, a failed balance read, any error.
+A gain worth at least US$1 at today's rate is state 'gained'. Anything
+less (including a reversal when the local currency strengthens) is state
+'stable': the card says the dollars kept their dollar value and never shows
+a loss (founder decision 2026-10-04). Every unknown hides the card (fail
+closed): no lots, no fresh rate, no month-start rate, a failed balance
+read, any error.
 """
 from __future__ import annotations
 
@@ -182,6 +185,7 @@ class Protection:
     avg_rate: Decimal           # purchase: average paid per USD; month_start: rate on the 1st
     today_rate: Decimal
     quoted_at: str
+    state: str = 'gained'       # 'gained' | 'stable' (gain under US$1, or a reversal)
 
     @property
     def gain_local(self) -> Decimal:
@@ -277,5 +281,5 @@ def protection_value(user, account, account_type, business_id, year: int, month:
                             today_local=protected * today_rate, avg_rate=paid / protected,
                             today_rate=today_rate, quoted_at=fetched_at.isoformat())
     if result.gain_local < MIN_GAIN_USD * today_rate:
-        return None
+        result.state = 'stable'     # never a loss: "tus dólares siguen valiendo lo mismo"
     return result

@@ -147,6 +147,7 @@ class SavingsEarnedType(graphene.ObjectType):
 class ProtectionValueType(graphene.ObjectType):
     currency = graphene.String(required=True, description='Local currency, e.g. BOB')
     basis = graphene.String(required=True, description="'purchase' (paid in Confío) | 'month_start' (value on the 1st)")
+    state = graphene.String(required=True, description="'gained' (≥ US$1) | 'stable' (less, or reversed: never shown as a loss)")
     source = graphene.String(required=True, description='Rate source for "today" (binance_p2p)')
     protected_usd = graphene.String(required=True, description='Dollars bought in Confío still held (R13 replay, capped)')
     paid_local = graphene.String(required=True, description='purchase: what was paid; month_start: value on the 1st')
@@ -197,11 +198,14 @@ class MonthSummaryQuery(graphene.ObjectType):
     protection_value = graphene.Field(
         ProtectionValueType,
         timezone=graphene.String(description='Device IANA timezone; falls back to the phone country'),
+        include_stable=graphene.Boolean(default_value=False,
+                                        description="Return 'stable' results too. Off by default: an app that "
+                                                    "doesn't know `state` would draw a stable result as a loss."),
         description='"Tu dólar te protegió" for the active personal account (current month, Binance P2P '
                     'today). Null whenever anything is unknown (fail closed). Own query.',
     )
 
-    def resolve_protection_value(self, info, timezone=None):
+    def resolve_protection_value(self, info, timezone=None, include_stable=False):
         from django.utils import timezone as dj_tz
         from users.cashflow import resolve_timezone
         from users.protection import protection_value
@@ -220,11 +224,11 @@ class MonthSummaryQuery(graphene.ObjectType):
         except Exception:  # noqa: BLE001 — an unknown hides the card, never a guess
             logger.warning('protection value unavailable for account %s', account.id, exc_info=True)
             return None
-        if p is None:
+        if p is None or (p.state == 'stable' and not include_stable):
             return None
         two = lambda v: format(v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), 'f')  # noqa: E731
         return ProtectionValueType(
-            currency=p.currency, basis=p.basis, source='binance_p2p', protected_usd=_usd(p.protected_usd), paid_local=two(p.paid_local),
+            currency=p.currency, basis=p.basis, state=p.state, source='binance_p2p', protected_usd=_usd(p.protected_usd), paid_local=two(p.paid_local),
             today_local=two(p.today_local), gain_local=two(p.gain_local), avg_rate=two(p.avg_rate),
             today_rate=two(p.today_rate), quoted_at=p.quoted_at)
 

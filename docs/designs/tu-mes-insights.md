@@ -863,6 +863,12 @@ Delta completion: scope unchanged (D1 arrangement minus PaceCard.tsx); 5 delta f
 - Removed: Koywe preview quote, its warm task and the 2 s timeout. Kill switch `TU_MES_PROTECTION_COUNTRIES` default `BO,AR,VE`.
 - First Venezuela figure: the 1st of the first full month after deploy (needs the kept month-start rate).
 
+### R30: When the gain shrinks or reverses — "Tu dólar se mantuvo" (founder decision 2026-10-04)
+- Concern: inflation slows (AR now) or the local currency strengthens, so the protection gain falls under US$1 or turns negative.
+- The server returns `state`: `gained` (≥ US$1 at today's rate) or `stable` (less, or a reversal). A loss is never shown.
+- Slot order: a `gained` protection card → else savings earned (≥ 1¢) → else the stable card "Tu dólar se mantuvo: tus US$X siguen valiendo US$X" (no local amounts, no bars, no sheet) → else nothing. The slot no longer vanishes for someone holding dollars.
+- Refocus keeps the state revealed for the view (a gained↔stable flip never swaps the card mid-view).
+
 ### Other review fixes
 - Cap trims the OLDEST lots first (same rule as spending).
 - Savings snapshot: block pinned 5 behind the head, rotating RPC pool, retries with backoff, hourly 00:15–06:15 UTC (idempotent), analytics queue.

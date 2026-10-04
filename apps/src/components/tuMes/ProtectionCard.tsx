@@ -102,6 +102,23 @@ function HowSheet({ visible, onClose, value, month, masked }: {
   );
 }
 
+/** The dollar slot when the gain shrank or reversed (founder decision
+ *  2026-10-04): never a loss, never local amounts; the dollars kept their
+ *  dollar value. */
+export function StableCard({ value, masked }: { value: ProtectionValue; masked: boolean }) {
+  const usd = formatUsd(value.protectedUsd, { whole: true });
+  return (
+    <CardShell testID="tumes-stable-card">
+      <CardTitle icon="shield" title="Tu dólar se mantuvo" />
+      <Text style={styles.sentence} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}
+        accessibilityLabel={masked ? 'Tu dólar se mantuvo. Monto oculto.'
+          : `Tu dólar se mantuvo: tus ${Math.round(Number(value.protectedUsd))} dólares siguen valiendo lo mismo.`}>
+        {masked ? 'Tus dólares siguen valiendo lo mismo.' : <>Tus {usd} siguen valiendo {usd}.</>}
+      </Text>
+    </CardShell>
+  );
+}
+
 /** Card B' — savings earned, an estimate (R23) with cents (6A). */
 export function SavingsCard({ value, month, masked }: { value: SavingsEarned; month: number; masked: boolean }) {
   const amount = `~${formatUsdAmount(Number(value.earnedUsd), { decimals: 2 })}`;
