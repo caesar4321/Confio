@@ -149,15 +149,24 @@ def remaining_turns(user):
     return max(daily_turn_cap(user) - turns_today(user).count(), 0)
 
 
-def analyses_left(user):
+def _tool_uses_today(user, name):
     from .models import VoiceSession
 
     since = timezone.now() - timedelta(hours=24)
     tool_lists = list(turns_today(user).values_list('tools', flat=True)) + list(
         VoiceSession.objects.filter(user=user, started_at__gte=since).values_list('tools', flat=True))
-    used = sum(1 for tools in tool_lists for tool in (tools or []) if tool.get('name') == 'analyze_finances')
+    return sum(1 for tools in tool_lists for tool in (tools or []) if tool.get('name') == name)
+
+
+def analyses_left(user):
     cap = conf.get('CONFIO_ASSISTANT_PLUS_DAILY_ANALYSES' if _plus(user) else 'CONFIO_ASSISTANT_DAILY_ANALYSES')
-    return max(cap - used, 0)
+    return max(cap - _tool_uses_today(user, 'analyze_finances'), 0)
+
+
+def news_searches_left(user):
+    cap = conf.get('CONFIO_ASSISTANT_PLUS_DAILY_NEWS_SEARCHES' if _plus(user)
+                   else 'CONFIO_ASSISTANT_DAILY_NEWS_SEARCHES')
+    return max(cap - _tool_uses_today(user, 'search_market_news'), 0)
 
 
 def _account_label(viewer, business):
@@ -282,14 +291,16 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             country=getattr(user, 'phone_country', ''),
             analyses_left=0,
             reserve_analysis=_analysis_reserver(user, turn),
+            reserve_news=_tool_reserver(user, turn, 'search_market_news', news_searches_left),
             can_navigate=can_navigate,
         )
     except AssistantUnavailable as exc:
         logger.warning('Confio Assistant unavailable: %s', exc)
+        metered = _meter_partial(turn, getattr(exc, 'partial', None))
         if _team_took_over(user, conversation, user_message):
             turn.error = f'superseded by human handoff ({str(exc)[:200]})'
             turn.latency_ms = int((time.monotonic() - started) * 1000)
-            turn.save(update_fields=['error', 'latency_ms'])
+            turn.save(update_fields=['error', 'latency_ms', *metered])
             return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
                               remaining_turns=remaining - 1, transcript=transcript)
         reply = _append(conversation, sender_type='AGENT', body=UNAVAILABLE_REPLY, metadata={'ai': True, 'error': True})
@@ -357,18 +368,36 @@ def _team_took_over(user, conversation, user_message):
     return False
 
 
-def _analysis_reserver(user, turn):
-    """Claim one analysis slot (short lock) before the model calls Sol."""
+def _meter_partial(turn, partial):
+    """Add usage a failed turn already spent (tokens, searches) to its row.
+    Returns the fields to save."""
+    if partial is None:
+        return []
+    turn.models_used = list(dict.fromkeys([*(turn.models_used or []), *partial.models_used]))
+    turn.input_tokens += partial.input_tokens
+    turn.cached_input_tokens += partial.cached_input_tokens
+    turn.output_tokens += partial.output_tokens
+    turn.cost_usd = (turn.cost_usd or 0) + partial.cost_usd
+    return ['models_used', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'cost_usd']
+
+
+def _tool_reserver(user, turn, name, left):
+    """Claim one metered slot (short lock) before an expensive tool runs."""
     def reserve():
         with transaction.atomic():
             lock_user(user)
-            if analyses_left(user) <= 0:
+            if left(user) <= 0:
                 return False
             row = AssistantTurn.objects.select_for_update().get(pk=turn.pk)
-            row.tools = (row.tools or []) + [{'name': 'analyze_finances', 'reserved': True}]
+            row.tools = (row.tools or []) + [{'name': name, 'reserved': True}]
             row.save(update_fields=['tools'])
             return True
     return reserve
+
+
+def _analysis_reserver(user, turn):
+    """Claim one analysis slot before the model calls Sol."""
+    return _tool_reserver(user, turn, 'analyze_finances', analyses_left)
 
 
 def _handoff(conversation, state, user_message, reason, ai_reply=None):
