@@ -44,6 +44,7 @@ import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { buyStockWithSavings, getSoftStockQuote } from '../services/ondoStocks';
 import { createSponsoredRequestId } from '../services/sponsored7702';
 import { isOutcomeUnknown } from '../services/evmWallet';
+import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type BuyRoute = RouteProp<MainStackParamList, 'BuyStock'>;
@@ -74,11 +75,11 @@ export const BuyStockScreen = () => {
 
   const changeAmount = (value: string) => {
     requestIdRef.current = null;
-    setRaw(value);
+    setRaw((prev) => sanitizeAmountInput(value, 2, undefined, prev));
   };
 
   const amount = useMemo(() => {
-    const v = parseFloat(raw.replace(',', '.'));
+    const v = parseAmountInput(raw);
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
@@ -184,7 +185,7 @@ export const BuyStockScreen = () => {
             style={{ marginTop: 4 }}
             items={[
               { label: 'Invertiste desde tu ahorro', value: fmtUsd(amount) },
-              { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
+              { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${formatDecimal(quote.costPct)}%)` },
               { label: 'Recibiste', value: `≈ ${formatNumber(settledTokens, { maximumFractionDigits: 4 })} ${stock.ticker}`, color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
               { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },

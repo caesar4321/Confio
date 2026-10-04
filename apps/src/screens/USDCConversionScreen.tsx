@@ -31,6 +31,7 @@ import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import { migrationService } from '../services/migrationService';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { formatDecimal, normalizeAmountInput, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 // GraphQL mutation for USDC opt-in (reused from DepositScreen)
 const OPT_IN_TO_USDC = gql`
@@ -142,21 +143,13 @@ export const USDCConversionScreen = () => {
   const targetCurrency = conversionDirection === 'usdc_to_cusd' ? 'cUSD' : 'USDC';
 
   const handleAmountChange = (value: string) => {
-    // Allow only numbers and decimal point
-    const numericValue = value.replace(/[^0-9.]/g, '');
-
-    // Prevent multiple decimal points
-    const parts = numericValue.split('.');
-    if (parts.length > 2) return;
-
-    // Limit to 2 decimal places
-    if (parts[1] && parts[1].length > 2) return;
-
-    setAmount(numericValue);
+    // Digits + one decimal mark (either key; a comma keypad used to lose
+    // its decimals here), token precision, shown with the user's mark.
+    setAmount((prev) => sanitizeAmountInput(value, 6, undefined, prev));
   };
 
   const handleMaxAmount = () => {
-    setAmount(sourceBalance.toString());
+    setAmount(toAmountInput(sourceBalance, 6));
   };
 
   const switchDirection = () => {
@@ -167,7 +160,7 @@ export const USDCConversionScreen = () => {
   };
 
   const validateAmount = () => {
-    const numAmount = parseFloat(amount);
+    const numAmount = parseAmountInput(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
       setBanner({ variant: 'error', message: 'Por favor ingresa un monto válido' });
       return false;
@@ -299,7 +292,7 @@ export const USDCConversionScreen = () => {
         try {
           pack = await ws.prepare({
             direction: conversionDirection,
-            amount: amount,
+            amount: normalizeAmountInput(amount) ?? '',
             rampProvider,
             providerOrderId,
           });
@@ -400,7 +393,7 @@ export const USDCConversionScreen = () => {
     }
   };
 
-  const isValidAmount = amount && parseFloat(amount) > 0 && parseFloat(amount) <= sourceBalance;
+  const isValidAmount = amount && parseAmountInput(amount) > 0 && parseAmountInput(amount) <= sourceBalance;
 
   return (
     <View style={styles.container}>
@@ -439,7 +432,7 @@ export const USDCConversionScreen = () => {
                     <ActivityIndicator size="small" color={colors.primary} />
                   ) : (
                     <Text style={styles.balanceText}>
-                      Saldo: ${sourceBalance.toFixed(2)}
+                      Saldo: ${formatDecimal(sourceBalance)}
                     </Text>
                   )}
                 </View>

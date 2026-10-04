@@ -4,6 +4,44 @@ Project-level deferred work captured by /plan-eng-review. Each entry includes co
 
 ## Open
 
+### App-wide header contrast (white title on mint)
+**Source:** plan-design-review on 2026-10-04 (Tu mes insights, design review 17A)
+
+**What:** Switch the shared Header's `isLight` title and back icon on `colors.heroField` (#34D399) from white to `colors.onHeroField` (#064E3B) across all 47 screens that use it.
+
+**Why:** White on #34D399 is 1.9:1 (DESIGN.md "Hero field"), below the 3:1 large-text minimum. Hard to read outdoors and for low-vision users.
+
+**Pros:**
+- One change fixes every mint header consistently
+- Matches the status-bar rule already in DESIGN.md (dark icons on the field)
+
+**Cons:**
+- Visible change on 47 screens; needs a quick visual pass (screenshots) before release
+- Website screenshots showing the header may need refreshing
+
+**Context:** Tu mes kept the convention on purpose so it doesn't differ from the other screens. Start in `apps/src/components/` Header (`isLight` prop) and grep `isLight` under `apps/src/screens`.
+
+**Depends on / blocked by:** nothing; a /design-review screenshot pass after the change.
+
+### "Ingresos fijos": detect recurring income in Tu mes
+**Source:** plan-eng-review on 2026-10-04 (Tu mes insights, D8)
+
+**What:** Run the Pagos fijos detector (`month_insights()` in `users/cashflow.py`: ≥2 of the 3 previous months, ±25% amount, ≤6-day circular spread) on inbound Entró rows to find a salary or a family remittance ("Tu sueldo llega cada día 1").
+
+**Why:** Pagos fijos answers "when does money leave". The matching question, "when does my money arrive", matters most to remittance receivers in VE/BO.
+
+**Pros:**
+- Reuses the detector and its tests; small server change
+- Pairs with Card A ("Entró") naturally
+
+**Cons:**
+- Needs its own small design pass (where it lives: Card A line vs. a Card C section)
+- Same partial-transfer ambiguity Pagos fijos avoided by dropping "paid" status (R24)
+
+**Context:** Spec `docs/designs/tu-mes-insights.md` open question 2. Start from the detector's test table and add inbound cases.
+
+**Depends on / blocked by:** Tu mes insights (month_insights detector) shipped; a /plan-design-review pass for placement.
+
 ### Negative-feedback Slack alert (admin notification)
 **Source:** plan-eng-review on 2026-05-15 (ICP + Rating modal feature)
 

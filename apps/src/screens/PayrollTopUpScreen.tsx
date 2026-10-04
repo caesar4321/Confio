@@ -35,6 +35,7 @@ import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
+import { formatDecimal, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollTopUp'>;
 
@@ -146,7 +147,7 @@ const PayrollTopUpScreen = () => {
       const current = parseInt(match[1], 10);
       const required = parseInt(match[2], 10);
       const deficit = Math.max(required - current, 0);
-      const toAlgo = (n: number) => (n / 1_000_000).toFixed(3);
+      const toAlgo = (n: number) => formatDecimal(n / 1_000_000, { decimals: 3 });
       return `Tu cuenta de negocio no tiene suficiente ALGO para la reserva mínima en Algorand. Necesitas ~${toAlgo(required)} ALGO, tienes ~${toAlgo(current)} ALGO. Agrega al menos ${toAlgo(deficit)} ALGO y reintenta.`;
     }
     return 'Saldo ALGO insuficiente para la reserva mínima en Algorand. Agrega ALGO y reintenta.';
@@ -158,7 +159,7 @@ const PayrollTopUpScreen = () => {
       return;
     }
     if (processing) return;
-    const parsed = parseFloat((amount || '').replace(',', '.'));
+    const parsed = parseAmountInput(amount || '');
     if (!isFinite(parsed) || parsed <= 0) {
       setBanner({ variant: 'error', message: 'Ingresa un monto mayor a 0.' });
       return;
@@ -172,7 +173,7 @@ const PayrollTopUpScreen = () => {
     }
 
     // Require biometric authentication for funding the vault
-    const authMessage = `Autoriza fondear $${parsed.toFixed(2)} a la bóveda`;
+    const authMessage = `Autoriza fondear $${formatDecimal(parsed)} a la bóveda`;
 
     let authenticated = await authenticateWithFace();
     if (!authenticated) {
@@ -321,7 +322,7 @@ const PayrollTopUpScreen = () => {
       return;
     }
     if (processing) return;
-    const parsed = parseFloat((withdrawAmount || '').replace(',', '.'));
+    const parsed = parseAmountInput(withdrawAmount || '');
     if (!isFinite(parsed) || parsed <= 0) {
       setBanner({ variant: 'error', message: 'Ingresa un monto mayor a 0.' });
       return;
@@ -331,7 +332,7 @@ const PayrollTopUpScreen = () => {
       return;
     }
 
-    const authMessage = `Autoriza retirar $${parsed.toFixed(2)} de la bóveda`;
+    const authMessage = `Autoriza retirar $${formatDecimal(parsed)} de la bóveda`;
     let authenticated = await authenticateWithFace();
     if (!authenticated) {
       const shouldRetry = await new Promise<boolean>((resolve) => {
@@ -481,7 +482,7 @@ const PayrollTopUpScreen = () => {
               <Text style={styles.vaultHeroBalance}>
                 {vaultLoading && !railStatus
                   ? '...'
-                  : totalVaultBalance === null ? '—' : `$${totalVaultBalance.toFixed(2)}`}
+                  : totalVaultBalance === null ? '—' : `$${formatDecimal(totalVaultBalance)}`}
               </Text>
               {vaultInstrument.known ? (
                 <View style={styles.instrumentRow}>
@@ -498,15 +499,15 @@ const PayrollTopUpScreen = () => {
                   hero total already IS the one pool. */}
               {showPoolPicker ? (
                 <Text style={styles.vaultHeroHint}>
-                  {`Confío Dollar+ $${(railStatus?.escrowCusdPlusUsd ?? 0).toFixed(2)}`}
+                  {`Confío Dollar+ $${formatDecimal(railStatus?.escrowCusdPlusUsd ?? 0)}`}
                   {'  ·  '}
-                  {`Confío Dollar $${(railStatus?.escrowUsdtUsd ?? 0).toFixed(2)}`}
+                  {`Confío Dollar $${formatDecimal(railStatus?.escrowUsdtUsd ?? 0)}`}
                 </Text>
               ) : null}
               <Text style={styles.vaultHeroHint}>
                 Disponible en tu cuenta de negocio: {balanceLoading && !railStatus
                   ? '...'
-                  : availableBalance === null ? '—' : `$${availableBalance.toFixed(2)}`}
+                  : availableBalance === null ? '—' : `$${formatDecimal(availableBalance)}`}
               </Text>
             </View>
           </View>
@@ -533,7 +534,7 @@ const PayrollTopUpScreen = () => {
                         {label}
                       </Text>
                       <Text style={[styles.poolChipAmount, selected && styles.poolChipTextSelected]}>
-                        {`$${(escrowOf(p) ?? 0).toFixed(2)}`}
+                        {`$${formatDecimal(escrowOf(p) ?? 0)}`}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -560,13 +561,13 @@ const PayrollTopUpScreen = () => {
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 value={amount}
-                onChangeText={setAmount}
+                onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
                 returnKeyType="done"
               />
               {availableBalance !== null && availableBalance > 0 && (
                 <TouchableOpacity
                   style={styles.maxChip}
-                  onPress={() => setAmount(availableBalance.toFixed(2))}
+                  onPress={() => setAmount(toAmountInput(availableBalance, 6))}
                   accessibilityRole="button"
                   accessibilityLabel="Usar todo el saldo disponible"
                 >
@@ -620,13 +621,13 @@ const PayrollTopUpScreen = () => {
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 value={withdrawAmount}
-                onChangeText={setWithdrawAmount}
+                onChangeText={(text) => setWithdrawAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
                 returnKeyType="done"
               />
               {vaultBalance !== null && vaultBalance > 0 && (
                 <TouchableOpacity
                   style={styles.maxChip}
-                  onPress={() => setWithdrawAmount(vaultBalance.toFixed(2))}
+                  onPress={() => setWithdrawAmount(toAmountInput(vaultBalance, 6))}
                   accessibilityRole="button"
                   accessibilityLabel="Retirar todo el saldo de la bóveda"
                 >

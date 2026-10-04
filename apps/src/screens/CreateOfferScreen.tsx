@@ -28,6 +28,7 @@ import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { exitToDiscover } from '../navigation/exitToDiscover';
+import { parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 // Colors from the design
 type PaymentMethod = {
@@ -153,19 +154,19 @@ export const CreateOfferScreen = () => {
   };
 
   const validateForm = () => {
-    if (!rate || parseFloat(rate) <= 0) {
+    if (!rate || parseAmountInput(rate) <= 0) {
       setBanner({ variant: 'error', message: 'Por favor ingresa una tasa válida' });
       return false;
     }
-    if (!minAmount || parseFloat(minAmount) <= 0) {
+    if (!minAmount || parseAmountInput(minAmount) <= 0) {
       setBanner({ variant: 'error', message: 'Por favor ingresa un monto mínimo válido' });
       return false;
     }
-    if (!maxAmount || parseFloat(maxAmount) <= 0) {
+    if (!maxAmount || parseAmountInput(maxAmount) <= 0) {
       setBanner({ variant: 'error', message: 'Por favor ingresa un monto máximo válido' });
       return false;
     }
-    if (parseFloat(minAmount) > parseFloat(maxAmount)) {
+    if (parseAmountInput(minAmount) > parseAmountInput(maxAmount)) {
       setBanner({ variant: 'error', message: 'El monto mínimo no puede ser mayor al máximo' });
       return false;
     }
@@ -201,9 +202,9 @@ export const CreateOfferScreen = () => {
         const { data } = await updateOffer({
           variables: {
             offerId: offerId,
-            rate: parseFloat(rate),
-            minAmount: parseFloat(minAmount),
-            maxAmount: parseFloat(maxAmount),
+            rate: parseAmountInput(rate),
+            minAmount: parseAmountInput(minAmount),
+            maxAmount: parseAmountInput(maxAmount),
             paymentMethodIds: selectedPaymentMethods,
             terms: terms.trim(),
           },
@@ -233,9 +234,9 @@ export const CreateOfferScreen = () => {
             input: {
               exchangeType,
               tokenType,
-              rate: parseFloat(rate),
-              minAmount: parseFloat(minAmount),
-              maxAmount: parseFloat(maxAmount),
+              rate: parseAmountInput(rate),
+              minAmount: parseAmountInput(minAmount),
+              maxAmount: parseAmountInput(maxAmount),
               paymentMethodIds: selectedPaymentMethods,
               countryCode: selectedCountry?.[2], // Pass the country code
               terms: terms.trim(),
@@ -423,7 +424,7 @@ export const CreateOfferScreen = () => {
             <TextInput
               style={styles.textInput}
               value={rate}
-              onChangeText={setRate}
+              onChangeText={(text) => setRate((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
               placeholder={inputFormatting.getPlaceholder(35.50)}
               keyboardType="decimal-pad"
             />
@@ -441,7 +442,7 @@ export const CreateOfferScreen = () => {
                 <TextInput
                   style={styles.textInput}
                   value={minAmount}
-                  onChangeText={setMinAmount}
+                  onChangeText={(text) => setMinAmount((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                   placeholder="100.00"
                   keyboardType="decimal-pad"
                 />
@@ -454,7 +455,7 @@ export const CreateOfferScreen = () => {
                 <TextInput
                   style={styles.textInput}
                   value={maxAmount}
-                  onChangeText={setMaxAmount}
+                  onChangeText={(text) => setMaxAmount((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                   placeholder="1,000.00"
                   keyboardType="decimal-pad"
                 />

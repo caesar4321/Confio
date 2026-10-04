@@ -24,6 +24,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { formatTokenLabel } from '../utils/tokenDisplay';
 import { FACE_STEP_UP_MESSAGE } from '../services/faceStepUp';
+import { formatAmountString } from '../utils/numberLocale';
 
 type PaymentProcessingRouteProp = RouteProp<{
   PaymentProcessing: {
@@ -791,7 +792,7 @@ export const PaymentProcessingScreen = () => {
     <SafeAreaView style={styles.container}>
       <ProcessingHero
         title={isComplete ? '¡Casi listo!' : transactionData.action}
-        amount={`$${transactionData.amount} ${formatCurrency(transactionData.currency)}`}
+        amount={`$${formatAmountString(transactionData.amount)} ${formatCurrency(transactionData.currency)}`}
         hint={`En ${transactionData.merchant}`}
         complete={isComplete}
       />

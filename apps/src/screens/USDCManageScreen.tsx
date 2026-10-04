@@ -7,6 +7,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
 import { colors } from '../config/theme';
+import { formatDecimal, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 const USDCManageScreen = () => {
   const navigation = useNavigation();
@@ -43,10 +44,10 @@ const USDCManageScreen = () => {
 
   const calculateReceiveAmount = () => {
     const amount = activeTab === 'exchange' ? exchangeAmount : withdrawalAmount;
-    if (!amount) return '0.00';
-    const numAmount = parseFloat(amount);
+    if (!amount) return formatDecimal(0);
+    const numAmount = parseAmountInput(amount);
     const fees = activeTab === 'exchange' ? networkFee : (networkFee + 0.50);
-    return (numAmount - fees).toFixed(2);
+    return formatDecimal(numAmount - fees);
   };
 
   const [showConfirm, setShowConfirm] = useState(false);
@@ -57,7 +58,7 @@ const USDCManageScreen = () => {
 
   const handleExchange = () => {
     const amount = activeTab === 'exchange' ? exchangeAmount : withdrawalAmount;
-    if (!amount || parseFloat(amount) <= 0) {
+    if (!amount || !(parseAmountInput(amount) > 0)) {
       setErrorMessage('Por favor ingresa un monto válido');
       setShowError(true);
       return;
@@ -856,7 +857,7 @@ const styles = StyleSheet.create({
                   <TextInput
                     style={[styles.amountField, { flex: 1 }]}
                     value={exchangeAmount}
-                    onChangeText={setExchangeAmount}
+                    onChangeText={(text) => setExchangeAmount((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                     placeholder="0.00"
                     keyboardType="numeric"
                   />
@@ -927,7 +928,7 @@ const styles = StyleSheet.create({
                 <View style={styles.feeRow}>
                   <Text style={styles.feeTotalLabel}>Total a recibir</Text>
                   <Text style={styles.feeTotalValue}>
-                    {exchangeAmount ? (parseFloat(exchangeAmount) - 0.27).toFixed(2) : '0.00'} USDC
+                    {formatDecimal(exchangeAmount ? parseAmountInput(exchangeAmount) - 0.27 : 0)} USDC
                   </Text>
                 </View>
               </View>
@@ -935,9 +936,9 @@ const styles = StyleSheet.create({
               <TouchableOpacity 
                 style={[
                   styles.confirmButton,
-                  (!exchangeAmount || !withdrawalAddress || parseFloat(exchangeAmount) < parseFloat(minWithdraw)) && styles.confirmButtonDisabled
+                  (!exchangeAmount || !withdrawalAddress || parseAmountInput(exchangeAmount) < parseFloat(minWithdraw)) && styles.confirmButtonDisabled
                 ]}
-                disabled={!exchangeAmount || !withdrawalAddress || parseFloat(exchangeAmount) < parseFloat(minWithdraw)}
+                disabled={!exchangeAmount || !withdrawalAddress || parseAmountInput(exchangeAmount) < parseFloat(minWithdraw)}
               >
                 <Text style={styles.confirmButtonText}>Confirmar Retiro</Text>
               </TouchableOpacity>
@@ -980,7 +981,7 @@ const styles = StyleSheet.create({
                   <TextInput
                     style={[styles.amountField, { flex: 1 }]}
                     value={exchangeAmount}
-                    onChangeText={setExchangeAmount}
+                    onChangeText={(text) => setExchangeAmount((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                     placeholder="0.00"
                     keyboardType="numeric"
                   />
@@ -1076,7 +1077,7 @@ const styles = StyleSheet.create({
                 {!isUSDCToCUSD && (
                   <View style={styles.feeRow}>
                     <Text style={styles.feeLabel}>Comisión de retiro</Text>
-                    <Text style={styles.feeValue}>${withdrawalFee.toFixed(2)}</Text>
+                    <Text style={styles.feeValue}>${formatDecimal(withdrawalFee)}</Text>
                   </View>
                 )}
                 <View style={styles.feeRow}>
@@ -1109,16 +1110,16 @@ const styles = StyleSheet.create({
                   styles.confirmButton,
                   isUSDCToCUSD ? styles.confirmButtonGreen : styles.confirmButtonBlue,
                   (!exchangeAmount || 
-                   parseFloat(exchangeAmount) <= 0 || 
+                   parseAmountInput(exchangeAmount) <= 0 || 
                    (!isUSDCToCUSD && !withdrawalAddress) ||
-                   (!isUSDCToCUSD && parseFloat(exchangeAmount) < parseFloat(minCashOut))) && 
+                   (!isUSDCToCUSD && parseAmountInput(exchangeAmount) < parseFloat(minCashOut))) && 
                   styles.confirmButtonDisabled
                 ]}
                 disabled={
                   !exchangeAmount || 
-                  parseFloat(exchangeAmount) <= 0 || 
+                  parseAmountInput(exchangeAmount) <= 0 || 
                   (!isUSDCToCUSD && !withdrawalAddress) ||
-                  (!isUSDCToCUSD && parseFloat(exchangeAmount) < parseFloat(minCashOut))
+                  (!isUSDCToCUSD && parseAmountInput(exchangeAmount) < parseFloat(minCashOut))
                 }
               >
                 <Text style={styles.confirmButtonText}>

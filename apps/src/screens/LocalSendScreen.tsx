@@ -55,6 +55,7 @@ import {
   recheckLocalDestination,
   resolveLocalDestination,
 } from '../services/localMoney';
+import { sanitizeAmountInput } from '../utils/numberLocale';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'LocalSend'>;
 type Route = RouteProp<MainStackParamList, 'LocalSend'>;
@@ -910,7 +911,7 @@ function InfiniaLocalSendScreen() {
                       style={styles.amountInput}
                       value={amount}
                       editable={!locked}
-                      onChangeText={next => { setAmount(next); resetReview(); }}
+                      onChangeText={next => { setAmount((prev) => sanitizeAmountInput(next, 2, undefined, prev)); resetReview(); }}
                       onFocus={() => setAmountFocused(true)}
                       onBlur={() => setAmountFocused(false)}
                       keyboardType="decimal-pad"

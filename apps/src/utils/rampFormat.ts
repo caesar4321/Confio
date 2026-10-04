@@ -1,3 +1,4 @@
+import { formatDecimal } from './numberLocale';
 // Money grammar for the ramp screens.
 //
 // The dollar leg gets written two different ways depending on the slot it
@@ -33,10 +34,7 @@ export const formatRampMoney = (value?: string | number | null, unit?: string | 
     return '--';
   }
   const normalized = normalizeUnit(unit);
-  const amount = parsed.toLocaleString('es-AR', {
-    minimumFractionDigits: parsed >= 100 ? 0 : 2,
-    maximumFractionDigits: 2,
-  });
+  const amount = formatDecimal(parsed, { decimals: 2, minDecimals: parsed >= 100 ? 0 : 2 });
   return isSymbolUnit(normalized) ? `${normalized}${amount}` : `${amount} ${normalized}`.trim();
 };
 
@@ -45,10 +43,7 @@ export const formatRampRate = (value?: string | number | null, unit?: string | n
   if (!Number.isFinite(parsed)) {
     return '--';
   }
-  const amount = parsed.toLocaleString('es-AR', {
-    minimumFractionDigits: parsed >= 100 ? 2 : 4,
-    maximumFractionDigits: 4,
-  });
+  const amount = formatDecimal(parsed, { decimals: 4, minDecimals: parsed >= 100 ? 2 : 4 });
   // A rate is always read as "<amount> <fiat code>", so the unit stays a code.
   return `${amount} ${rampUnitCode(unit)}`.trim();
 };

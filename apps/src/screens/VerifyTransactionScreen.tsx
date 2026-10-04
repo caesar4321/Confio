@@ -9,6 +9,7 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { formatTokenLabel } from '../utils/tokenDisplay';
+import { formatAmountString } from '../utils/numberLocale';
 
 type VerifyScreenRouteProp = RouteProp<MainStackParamList, 'VerifyTransaction'>;
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'VerifyTransaction'>;
@@ -168,7 +169,7 @@ export const VerifyTransactionScreen = () => {
                             <View style={styles.amountContainer}>
                                 <Text style={styles.amountLabel}>Monto</Text>
                                 <Text style={styles.amountValue}>
-                                    {result.amount} <Text style={styles.currency}>
+                                    {formatAmountString(result.amount)} <Text style={styles.currency}>
                                         {formatTokenLabel(result.currency)}
                                     </Text>
                                 </Text>

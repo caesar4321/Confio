@@ -20,6 +20,8 @@ import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { CONFIO_DOCUMENTS, TrustPillars, openConfioDocument } from '../components/ConfioNarrative';
+import { getNumberLocaleCountry } from '../utils/numberLocale';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -61,7 +63,9 @@ export const ConfioPresaleScreen = () => {
   const participants = curve?.participants || 0;
   const milestoneProgress = nextMilestone > 0 ? Math.min((totalRaised / nextMilestone) * 100, 100) : 0;
 
-  const countryCode = selectedCountry?.[2] || 'VE';
+  // One number format app-wide: the user's phone country (utils/numberLocale).
+  const countryCode = getNumberLocaleCountry() || 'US';
+  useNumberLocale();
   // Early on the curve moves in the 4th decimal — users must SEE it move.
   const formatPrice = (value: number) =>
     formatNumber(value, countryCode, value < 1
@@ -237,7 +241,7 @@ export const ConfioPresaleScreen = () => {
               </View>
               <View style={styles.claimInfoCard}>
                 <Text style={styles.claimInfoTitle}>Listos para reclamar</Text>
-                <Text style={styles.claimInfoAmount}>{formatNumber(claimable, (selectedCountry?.[2] || 'VE'), { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $CONFIO</Text>
+                <Text style={styles.claimInfoAmount}>{formatNumber(claimable, countryCode, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $CONFIO</Text>
               </View>
             </>
           ) : (

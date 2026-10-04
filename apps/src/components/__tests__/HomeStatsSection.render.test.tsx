@@ -38,8 +38,8 @@ jest.mock('@apollo/client', () => ({
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate }),
 }));
-jest.mock('../../hooks/useCurrency', () => ({
-  useCurrency: () => ({ currency: { thousandsSeparator: '.', decimalSeparator: ',' } }),
+jest.mock('../../contexts/NumberLocaleProvider', () => ({
+  useNumberLocale: () => ({ separators: { group: '.', decimal: ',' } }),
 }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../../apollo/queries', () => ({ GET_STATS_SUMMARY: 'GET_STATS_SUMMARY' }));
@@ -76,25 +76,46 @@ describe('HomeStatsSection layout', () => {
     appStateHandler = undefined;
   });
 
-  it('lays 5 tiles out as a proof row of 3 over an offers row of 2', () => {
+  it('lays all 5 tiles out in one row: icon, number, one word', () => {
     const tree = render();
     // Every tile is really in the tree — nothing clipped or scrolled away.
     const labels = tileLabels(tree.root);
     expect(labels.map(l => l.split(':')[0])).toEqual(
       ['Usuarios', 'Ahorros', 'Movido', 'Acciones', 'Preventa']);
     expect(labels[3]).toContain('Acciones: 458.');
-    // Third-width proof cells split label and descriptor onto two lines;
-    // the half-width offers row keeps them merged on one.
+    // Design A: the detail lives in the accessibility label and the detail
+    // screen, never as a visible subline on Home.
+    expect(labels[2]).toContain('337 depósitos y retiros');
     const texts = tree.root.findAllByType('Text' as any).map(t => [].concat(t.props.children).join(''));
     expect(texts).toContain('Movido');
-    expect(texts).toContain('337 depósitos y retiros');
-    expect(texts.some(t => t.startsWith('Preventa'))).toBe(true);
-    // Chevrons only in the half-width offers row: in third-width cells they
-    // cost the room that kept "6.789 USD" from truncating to "6.789…".
+    expect(texts).toContain('Preventa');
+    expect(texts).not.toContain('337 depósitos y retiros');
+    // Every tile is tappable; no chevrons.
     const chevrons = tree.root.findAll(n => n.type === ('Icon' as any) && n.props.name === 'chevron-right');
-    expect(chevrons).toHaveLength(2);
+    expect(chevrons).toHaveLength(0);
+    // Design A hues: emerald, emerald, blue, indigo, amber. Never the
+    // $CONFIO violet (DESIGN.md).
+    const icons = tree.root.findAll(n => n.type === ('Icon' as any));
+    const { colors } = require('../../config/theme');
+    expect(icons.map(i => i.props.color)).toEqual(
+      [colors.primaryDark, colors.primaryDark, colors.accent, '#6366F1', '#F59E0B']);
 
-    // No horizontally scrolling container anywhere in the grid.
+    // One row of equal tiles.
+    const flat = (st: any) => Object.assign({}, ...[].concat(st ?? []).flat(Infinity));
+    const { TouchableOpacity } = require('react-native');
+    const tileNodes = tree.root.findAllByType(TouchableOpacity)
+      .filter(n => !!n.props.accessibilityLabel && flat(n.props.style).flex === 1);
+    expect(tileNodes).toHaveLength(5);
+    const row = tree.root.findAll(n => n.type === ('View' as any) && flat(n.props.style).flexDirection === 'row'
+      && n.findAll(m => tileNodes.includes(m)).length === 5);
+    expect(row.length).toBeGreaterThan(0);
+    // Every tile opens its detail screen.
+    mockNavigate.mockClear();
+    tileNodes.forEach(n => n.props.onPress());
+    expect(mockNavigate.mock.calls.map(c => c[0])).toEqual(
+      ['LatamCommunity', 'ProtectedSavings', 'FundFlow', 'StocksList', 'ConfioPresale']);
+
+    // No horizontally scrolling container anywhere in the row.
     expect(tree.root.findAll(n => n.props?.horizontal === true)).toHaveLength(0);
   });
 
@@ -105,7 +126,7 @@ describe('HomeStatsSection layout', () => {
     mockStocksEnabled = true;
   });
 
-  it('drops Acciones (back to 2x2) for users outside stock eligibility', () => {
+  it('drops Acciones (4 tiles, same row) for users outside stock eligibility', () => {
     mockStockTile = null;
     const labels = tileLabels(render().root);
     expect(labels.map(l => l.split(':')[0])).toEqual(['Usuarios', 'Ahorros', 'Movido', 'Preventa']);

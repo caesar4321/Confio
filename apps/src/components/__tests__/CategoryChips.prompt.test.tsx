@@ -112,5 +112,19 @@ describe('CategoryPrompt', () => {
     expect(mockCategorize).toHaveBeenCalledTimes(1);
     expect(has(tree, 'category-prompt')).toBe(true);
   });
+
+  it('the prompt shows the quick six plus "Más", which reveals all 12 categories', async () => {
+    const tree = mount();
+    const chipIds = () => tree.root.findAll(n => typeof n.props.testID === 'string'
+      && n.props.testID.startsWith('category-chip-') && typeof n.props.onPress === 'function')
+      .map(n => n.props.testID);
+    const before = [...new Set(chipIds())];
+    expect(before).toEqual(expect.arrayContaining(['category-chip-food', 'category-chip-bills', 'category-chip-more']));
+    expect(before).not.toContain('category-chip-health');
+    await press(tree, 'category-chip-more');
+    const after = [...new Set(chipIds())];
+    expect(after).toEqual(expect.arrayContaining(['category-chip-health', 'category-chip-debt', 'category-chip-other']));
+    expect(after).not.toContain('category-chip-more');
+  });
 });
 

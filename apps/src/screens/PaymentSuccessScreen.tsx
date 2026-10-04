@@ -25,6 +25,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { formatTokenLabel } from '../utils/tokenDisplay';
 import { CategoryPrompt } from '../components/CategoryChips';
 import { useSettlementStatus } from '../hooks/useSettlementStatus';
+import { formatAmountString } from '../utils/numberLocale';
 
 type PaymentSuccessRouteProp = RouteProp<{
   PaymentSuccess: {
@@ -162,7 +163,7 @@ export const PaymentSuccessScreen = () => {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <SuccessHero
           title="¡Pago realizado!"
-          amount={`$${transactionData.amount} ${formatCurrency(transactionData.currency)}`}
+          amount={`$${formatAmountString(transactionData.amount)} ${formatCurrency(transactionData.currency)}`}
           hint={`Pagado en ${transactionData.merchant}`}
         />
 

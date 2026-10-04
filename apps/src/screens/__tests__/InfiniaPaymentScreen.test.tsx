@@ -169,13 +169,13 @@ it.each(['to_bank', 'to_wallet'])('shows immutable approval details when resumin
   const resume = tree.root.findAllByType(TouchableOpacity).find(b => b.findAllByType(Text).some(t => t.props.children === 'Revisar envío pendiente'))!;
   await act(async () => { await resume.props.onPress(); });
   const texts = tree.root.findAllByType(Text).map(t => React.Children.toArray(t.props.children).join(''));
-  expect(texts.some(t => t.includes('10000000'))).toBe(true);
-  expect(texts.some(t => t.includes('Costo de conversión adicional: 1000 dólares.'))).toBe(true);
+  expect(texts.some(t => t.includes('10,000,000'))).toBe(true);
+  expect(texts.some(t => t.includes('Costo de conversión adicional: 1,000 dólares.'))).toBe(true);
   if (direction === 'to_bank') {
     expect(texts).toContain('Destino del pago: Saved bank · Alice · 1234');
     expect(texts.some(t => t.includes('35.50 PEN'))).toBe(true);
   } else {
-    expect(texts).toContain('Dólares a traer a Confío: 10000000');
+    expect(texts).toContain('Dólares a traer a Confío: 10,000,000'); // shown with the user's grouping
   }
   expect(mockAuthorize).not.toHaveBeenCalled();
   await act(async () => tree.unmount());

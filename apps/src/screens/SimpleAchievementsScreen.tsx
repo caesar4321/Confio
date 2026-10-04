@@ -11,6 +11,7 @@ import { NavigationProp } from '@react-navigation/native';
 import { useQuery } from '@apollo/client';
 import { gql } from '@apollo/client';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
+import { formatDecimal } from '../utils/numberLocale';
 
 const GET_CORE_ACHIEVEMENTS = gql`
   query GetCoreAchievements {
@@ -79,7 +80,7 @@ export const SimpleAchievementsScreen: React.FC<SimpleAchievementsScreenProps> =
           <Rect width="100%" height="100%" fill="url(#headerGradient)" />
         </Svg>
         <Text style={styles.headerTitle}>Gana $CONFIO</Text>
-        <Text style={styles.balance}>{balance.toFixed(0)} $CONFIO</Text>
+        <Text style={styles.balance}>{formatDecimal(balance, { decimals: 0 })} $CONFIO</Text>
         <Text style={styles.balanceSubtext}>ganados hasta ahora</Text>
       </View>
 

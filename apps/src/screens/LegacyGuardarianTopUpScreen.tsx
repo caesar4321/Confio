@@ -40,6 +40,7 @@ import PreFlightModal from '../components/PreFlightModal';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { Button } from '../components/common/Button';
 import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
+import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 
 // GraphQL mutation for USDC opt-in
@@ -207,11 +208,8 @@ const TopUpScreen = () => {
   }, []);
 
 
-  const parseAmount = (value: string) => {
-    const normalized = value.replace(/,/g, '.').replace(/[^0-9.]/g, '');
-    const parsed = parseFloat(normalized);
-    return isFinite(parsed) ? parsed : NaN;
-  };
+  // Either decimal key, the user's country grouping (utils/numberLocale).
+  const parseAmount = (value: string) => parseAmountInput(value);
 
   const translateGuardarianError = (errorMessage: string): string => {
     // Pattern matching for dynamic amount messages
@@ -495,7 +493,7 @@ const TopUpScreen = () => {
               placeholderTextColor={colors.text.light}
               keyboardType="decimal-pad"
               value={amount}
-              onChangeText={setAmount}
+              onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
             />
           </View>
 
@@ -509,7 +507,7 @@ const TopUpScreen = () => {
                 <Text style={styles.confioFeeLabel}>Comisión de Confío</Text>
                 <Text style={styles.confioFeeHint}>Se descuenta del USDT que entrega Guardarian.</Text>
               </View>
-              <Text style={styles.confioFeeValue}>{(conversionFeeBps / 100).toLocaleString('es-PE')}%</Text>
+              <Text style={styles.confioFeeValue}>{formatPercent(conversionFeeBps / 100)}%</Text>
             </View>
           ) : null}
         </View>
@@ -644,8 +642,8 @@ const TopUpScreen = () => {
                 {Number(pendingCheckout?.feeBps ?? 0) === 0
                   ? 'Gratis'
                   : pendingCheckout?.fee
-                  ? `${formatRampMoney(pendingCheckout.fee, USD_UNIT)} (${(pendingCheckout.feeBps / 100).toLocaleString('es-PE')}%)`
-                  : `${(Number(pendingCheckout?.feeBps ?? 0) / 100).toLocaleString('es-PE')}%`}
+                  ? `${formatRampMoney(pendingCheckout.fee, USD_UNIT)} (${formatPercent(pendingCheckout.feeBps / 100)}%)`
+                  : `${formatPercent(Number(pendingCheckout?.feeBps ?? 0) / 100)}%`}
               </Text>
             </View>
             {pendingCheckout?.net ? (
@@ -656,7 +654,7 @@ const TopUpScreen = () => {
             ) : (
               <Text style={styles.checkoutReviewFootnote}>
                 {Number(pendingCheckout?.feeBps ?? 0) > 0
-                  ? `Recibirás el ${(100 - Number(pendingCheckout?.feeBps ?? 0) / 100).toLocaleString('es-PE')}% del USDT que Guardarian entregue finalmente.`
+                  ? `Recibirás el ${formatPercent(100 - Number(pendingCheckout?.feeBps ?? 0) / 100)}% del USDT que Guardarian entregue finalmente.`
                   : 'Recibirás el USDT que Guardarian entregue finalmente.'}
               </Text>
             )}

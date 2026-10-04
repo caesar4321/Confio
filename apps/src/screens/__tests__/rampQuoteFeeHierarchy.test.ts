@@ -46,7 +46,7 @@ describe('ramp quote fee hierarchy', () => {
     expect(source).toContain('if (isRampReceipt)');
     expect(source).toContain('label: confioFeeLabel(currentTx)');
     expect(source).toContain('const serverFeeBps = (tx: any): number | null =>');
-    expect(source).toContain('`Comisión de Confío (${(bps / 100).toLocaleString(\'es-PE\')}%)`');
+    expect(source).toContain('`Comisión de Confío (${formatPercent(bps / 100)}%)`');
     expect(source).toContain("label: currentTx.type === 'received' ? 'Monto acreditado' : 'Recibe la billetera'");
     expect(source).toContain('const fee = serverFee(currentTx)');
     expect(source).not.toContain('computeConfioFee(currentTx.amount);\n          items.push({\n            label: currentTx.type');

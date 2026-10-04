@@ -46,6 +46,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
 import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
+import { formatPercent, sanitizeAmountInput } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
@@ -584,7 +585,7 @@ const TopUpScreen = () => {
                     style={styles.amountInput}
                     value={amount}
                     onChangeText={(value) => {
-                      setAmount(value);
+                      setAmount((prev) => sanitizeAmountInput(value, 2, undefined, prev));
                       setStep('form');
                     }}
                     onFocus={() => setAmountFocused(true)}
@@ -666,7 +667,7 @@ const TopUpScreen = () => {
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
                       <Text style={styles.quoteValue}>
-                        {`− ${formatRampMoney(quote.confioFeeAmount || 0, USD_UNIT)} (${Number(quote.confioFeeBps ?? 0) / 100}%)`}
+                        {`− ${formatRampMoney(quote.confioFeeAmount || 0, USD_UNIT)} (${formatPercent(Number(quote.confioFeeBps ?? 0) / 100)}%)`}
                       </Text>
                     </View>
                     <View style={styles.quoteFinalDivider} />

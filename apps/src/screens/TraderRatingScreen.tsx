@@ -18,6 +18,7 @@ import { InlineBanner } from '../components/common/InlineBanner';
 import { useMutation } from '@apollo/client';
 import { RATE_P2P_TRADE, GET_MY_P2P_TRADES } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
+import { formatAmountString, formatDecimal } from '../utils/numberLocale';
 
 type TraderRatingRouteProp = RouteProp<MainStackParamList, 'TraderRating'>;
 
@@ -242,15 +243,15 @@ export const TraderRatingScreen: React.FC = () => {
               </View>
               <Text style={styles.traderStats}>
                 {trader.completedTrades > 0 
-                  ? `${trader.completedTrades} operaciones • ${Number(trader.successRate).toFixed(1)}% éxito`
+                  ? `${trader.completedTrades} operaciones • ${formatDecimal(Number(trader.successRate), { decimals: 1 })}% éxito`
                   : 'Nuevo usuario'}
               </Text>
             </View>
           </View>
           <View style={styles.tradeSummaryCard}>
             <Text style={styles.tradeSummaryTitle}>Resumen del intercambio</Text>
-            <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Cantidad:</Text><Text>{tradeDetails.amount} {tradeDetails.crypto}</Text></View>
-            <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Total pagado:</Text><Text>{tradeDetails.totalPaid}</Text></View>
+            <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Cantidad:</Text><Text>{formatAmountString(tradeDetails.amount)} {tradeDetails.crypto}</Text></View>
+            <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Total pagado:</Text><Text>{formatAmountString(tradeDetails.totalPaid)}</Text></View>
             <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Método:</Text><Text>{tradeDetails.method}</Text></View>
             <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Duración:</Text><Text style={{ color: colors.success }}>{tradeDetails.duration}</Text></View>
           </View>

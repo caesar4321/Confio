@@ -81,7 +81,9 @@ export const RECORD_CATEGORY_PROMPT = gql`
   }
 `;
 
-export type CategoryKey = 'food' | 'transport' | 'home' | 'family' | 'work' | 'other';
+export type CategoryKey =
+  | 'food' | 'transport' | 'home' | 'bills' | 'family' | 'shopping'
+  | 'health' | 'education' | 'leisure' | 'debt' | 'work' | 'other';
 
 export type MonthTotals = {
   incomeUsd: string;

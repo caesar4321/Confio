@@ -60,6 +60,8 @@ import { useSavingsResume } from '../hooks/useSavingsResume';
 import { colors } from '../config/theme';
 import { getTierMeta } from '../components/StatusTierBadge';
 import { formatTokenLabel, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
+import { formatDecimal, formatPercent, parseAmountInput } from '../utils/numberLocale';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 // Color palette
 // Keychain constants for storing balance visibility
@@ -157,6 +159,8 @@ const normalizePhoneLookupKey = (value?: string | null): string => {
 };
 
 export const AccountDetailScreen = () => {
+  // Re-render when the user's country (number format) resolves after mount.
+  useNumberLocale();
   const navigation = useNavigation<AccountDetailScreenNavigationProp>();
   const route = useRoute<AccountDetailScreenRouteProp>();
   const { formatNumber, formatCurrency } = useNumberFormat();
@@ -172,13 +176,13 @@ export const AccountDetailScreen = () => {
 
   const formatFixedFloor = useCallback((value: number, decimals = 2) => {
     const floored = floorToDecimals(value, decimals);
-    return floored.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    return formatDecimal(floored, { decimals });
   }, [floorToDecimals]);
 
   const formatBalanceDisplay = useCallback((valueStr: string | number) => {
     const v = typeof valueStr === 'string' ? parseFloat(valueStr) : valueStr;
-    if (!isFinite(v) || v <= 0) return '0.00';
-    if (v < 0.01) return '< 0.01';
+    if (!isFinite(v) || v <= 0) return formatDecimal(0);
+    if (v < 0.01) return `< ${formatDecimal(0.01)}`;
     return formatFixedFloor(v, 2);
   }, [formatFixedFloor]);
 
@@ -190,7 +194,7 @@ export const AccountDetailScreen = () => {
 
     // Parse and format to 2 decimal places
     const parsedAmount = parseFloat(numericAmount);
-    const formattedAmount = parsedAmount.toFixed(2);
+    const formattedAmount = formatDecimal(parsedAmount);
 
     // Return with sign
     return sign + formattedAmount;
@@ -1213,8 +1217,11 @@ export const AccountDetailScreen = () => {
     if (transactionFilters.amountRange.min || transactionFilters.amountRange.max) {
       filtered = filtered.filter(tx => {
         const amount = Math.abs(parseFloat(tx.amount.replace(/[^0-9.-]/g, '')));
-        const min = transactionFilters.amountRange.min ? parseFloat(transactionFilters.amountRange.min) : 0;
-        const max = transactionFilters.amountRange.max ? parseFloat(transactionFilters.amountRange.max) : Infinity;
+        // Typed with the user's decimal mark (either key works).
+        const parsedMin = parseAmountInput(transactionFilters.amountRange.min);
+        const parsedMax = parseAmountInput(transactionFilters.amountRange.max);
+        const min = Number.isFinite(parsedMin) ? parsedMin : 0;
+        const max = Number.isFinite(parsedMax) ? parsedMax : Infinity;
         return amount >= min && amount <= max;
       });
     }
@@ -2083,7 +2090,7 @@ export const AccountDetailScreen = () => {
           <>
             {savingsIsYield && ahorrosSavings.netApyPct > 0 && savingsAccountTotal > 0 && (
               <Text style={styles.savingsRateLine}>
-                Rindiendo ~{ahorrosSavings.netApyPct.toFixed(1)}% anual
+                Rindiendo ~{formatDecimal(ahorrosSavings.netApyPct, { decimals: 1 })}% anual
               </Text>
             )}
             {savingsIsYield && savingsTickerParts.length > 0 && (

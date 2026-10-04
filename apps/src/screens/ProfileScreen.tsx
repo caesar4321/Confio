@@ -24,6 +24,7 @@ import { colors } from '../config/theme';
 import DeviceInfo from 'react-native-device-info';
 import { Button } from '../components/common/Button';
 import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
+import { formatDecimal } from '../utils/numberLocale';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -560,9 +561,9 @@ export const ProfileScreen = () => {
                   {/* Earned, not withdrawable: the bonus is held in the
                       account until $CONFIO launches. */}
                   {referralStats.earned > 0
-                    ? `${referralStats.earned.toFixed(2)} $CONFIO ganados`
+                    ? `${formatDecimal(referralStats.earned)} $CONFIO ganados`
                     : referralStats.pending > 0
-                      ? `${referralStats.pending.toFixed(2)} $CONFIO pendientes`
+                      ? `${formatDecimal(referralStats.pending)} $CONFIO pendientes`
                       : 'Ver mis bonos ($CONFIO)'}
                 </Text>
               </View>

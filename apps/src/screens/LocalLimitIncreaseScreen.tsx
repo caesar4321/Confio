@@ -33,6 +33,7 @@ import {
   startLimitIncreaseVerification,
   syncLimitIncreaseVerification,
 } from '../services/localMoney';
+import { sanitizeAmountInput } from '../utils/numberLocale';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'LocalLimitIncrease'>;
 
@@ -304,7 +305,7 @@ export default function LocalLimitIncreaseScreen() {
                   </View>
                   <Text style={[styles.inputLabel, { marginTop: 16 }]}>Cuánto esperas mover al mes</Text>
                   <View style={[styles.amountInputRow, styles.amountInputRowFocused]}>
-                    <TextInput style={styles.amountInput} value={expected} onChangeText={setExpected}
+                    <TextInput style={styles.amountInput} value={expected} onChangeText={(text) => setExpected((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                       keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textSecondary} />
                     <View style={styles.currencyBadge}>
                       <Text style={styles.currencyBadgeText}>USD</Text>

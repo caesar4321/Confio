@@ -1,3 +1,5 @@
+import { formatDecimal } from './numberLocale';
+
 // Adaptive precision for savings-accrual amounts ("hoy +$X", daily
 // estimates, yield rows). Small savers earn sub-cent days and must still
 // SEE growth — the daily tick IS the product promise, and hiding it from
@@ -13,6 +15,6 @@
 export const formatUsdDeltaAbs = (v: number): string | null => {
   const abs = Math.abs(v);
   if (abs < 0.00005) return null;
-  if (abs >= 0.005) return `$${abs.toFixed(2)}`;
-  return `$${abs.toFixed(abs >= 0.0005 ? 3 : 4)}`;
+  if (abs >= 0.005) return `$${formatDecimal(abs, { decimals: 2 })}`;
+  return `$${formatDecimal(abs, { decimals: abs >= 0.0005 ? 3 : 4 })}`;
 };

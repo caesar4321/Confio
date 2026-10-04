@@ -1,3 +1,4 @@
+import { parseAmountInput } from '../utils/numberLocale';
 import { useMemo } from 'react';
 import { useQuery } from '@apollo/client';
 
@@ -30,7 +31,8 @@ export const useRampQuoteFlow = ({
   assetUnit = 'cUSD',
   destination = 'cusd',
 }: UseRampQuoteFlowParams) => {
-  const parsedAmount = useMemo(() => Number((amount || '').replace(',', '.')), [amount]);
+  // Either decimal key, the user's country grouping (utils/numberLocale).
+  const parsedAmount = useMemo(() => parseAmountInput(amount || ''), [amount]);
   const amountReady = Number.isFinite(parsedAmount) && parsedAmount > 0 && !!countryCode;
   const quoteReady = enabled && amountReady && (direction === 'OFF_RAMP' || !!paymentMethodCode);
 

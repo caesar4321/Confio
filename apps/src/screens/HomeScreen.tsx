@@ -75,6 +75,9 @@ import { PendingIncomingCard, usePendingIncoming } from '../components/PendingIn
 import { HeroMonthSlot } from '../components/HeroMonthLine';
 import { useMonthHeroLine } from '../hooks/useMonthHeroLine';
 import { AnalyticsService } from '../services/analyticsService';
+import { formatDecimal } from '../utils/numberLocale';
+import { formatMinorMoney } from '../utils/currencies';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const BALANCE_VISIBILITY_KEY = 'balance_visibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
@@ -127,6 +130,8 @@ interface QuickAction {
 }
 
 export const HomeScreen = () => {
+  // Re-render when the user's country (number format) resolves after mount.
+  useNumberLocale();
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const route = useRoute<any>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
@@ -562,7 +567,7 @@ export const HomeScreen = () => {
   const formatFixedFloor = React.useCallback((value: number, decimals = 2) => {
     const floored = floorToDecimals(value, decimals);
     // Use toLocaleString for grouping but preserve exact decimals
-    return floored.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    return formatDecimal(floored, { decimals });
   }, [floorToDecimals]);
 
   // Calculate portfolio value including CONFIO marked to current presale
@@ -1381,7 +1386,7 @@ export const HomeScreen = () => {
                   ? 'Pago confirmado · Actualización de tu institución pendiente. No necesitas pagar nuevamente.'
                   : billingSummaryData.myBillingSummary.entry.status === 'payment_pending'
                     ? 'Pago en proceso · Revisa su estado antes de intentar nuevamente.'
-                    : `${new Intl.NumberFormat('es-PE', { style: 'currency', currency: billingSummaryData.myBillingSummary.entry.currency }).format(Number(billingSummaryData.myBillingSummary.entry.amountRemainingMinor) / 100)} · Vence ${new Date(billingSummaryData.myBillingSummary.entry.dueAt).toLocaleDateString('es-PE')}`}
+                    : `${formatMinorMoney(Number(billingSummaryData.myBillingSummary.entry.amountRemainingMinor), billingSummaryData.myBillingSummary.entry.currency)} · Vence ${new Date(billingSummaryData.myBillingSummary.entry.dueAt).toLocaleDateString('es-PE')}`}
               </Text>
               <Text style={styles.payrollSubtitle}>{billingSummaryData.myBillingSummary.entry.status === 'paid' || billingSummaryData.myBillingSummary.entry.status === 'payment_pending' ? 'Ver estado' : 'Ver cuota'}</Text>
             </View>

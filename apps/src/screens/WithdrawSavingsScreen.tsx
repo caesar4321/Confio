@@ -32,6 +32,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -57,7 +58,7 @@ export const WithdrawSavingsScreen = () => {
   const [phase, setPhase] = useState<Phase>('input');
 
   const amount = useMemo(() => {
-    const v = parseFloat(raw.replace(',', '.'));
+    const v = parseAmountInput(raw);
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
@@ -91,7 +92,7 @@ export const WithdrawSavingsScreen = () => {
             style={{ marginTop: 4 }}
             items={[
               { label: 'Retiraste de tu ahorro', value: fmtUsd(amount) },
-              { label: 'Costo de conversión', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
+              { label: 'Costo de conversión', value: `${fmtUsd(quote.costUsd)} (${formatDecimal(quote.costPct)}%)` },
               { label: 'Recibido en cUSD', value: fmtUsd(quote.receiveUsd), color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
               { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
@@ -141,7 +142,7 @@ export const WithdrawSavingsScreen = () => {
               <TextInput
                 style={styles.amountInput}
                 value={raw}
-                onChangeText={setRaw}
+                onChangeText={(text) => setRaw((prev) => sanitizeAmountInput(text, 2, undefined, prev))}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor={colors.text.light}
@@ -154,7 +155,7 @@ export const WithdrawSavingsScreen = () => {
                 En tu ahorro: {fmtUsd(available)}
               </Text>
               <TouchableOpacity
-                onPress={() => setRaw(available > 0 ? String(available) : '')}
+                onPress={() => setRaw(available > 0 ? toAmountInput(available) : '')}
                 disabled={phase !== 'input' || available <= 0}
               >
                 <Text style={styles.maxBtn}>MAX</Text>

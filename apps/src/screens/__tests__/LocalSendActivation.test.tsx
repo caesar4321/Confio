@@ -1,4 +1,10 @@
 import React from 'react';
+import { setNumberLocaleCountry } from '../../utils/numberLocale';
+
+// Figures follow the user's country (one format app-wide); these tests read
+// a Venezuelan user's screen: 1.234,56.
+beforeAll(() => setNumberLocaleCountry('VE'));
+afterAll(() => setNumberLocaleCountry(null));
 import renderer, {act} from 'react-test-renderer';
 import {Text, TextInput, TouchableOpacity} from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';

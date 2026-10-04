@@ -17,6 +17,7 @@ import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { AddressScannerModal } from '../components/AddressScannerModal';
 import { isAddressForNetwork, wrongNetworkMessage } from '../utils/addressNetwork';
+import { formatDecimal, normalizeAmountInput, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 type TokenType = 'cusd' | 'confio' | 'usdc';
 
@@ -63,7 +64,14 @@ export const SendWithAddressScreen = () => {
   const prefilledAmount = (route.params as any)?.prefilledAmount || '';
   const config = tokenConfig[tokenType];
 
-  const [amount, setAmount] = useState(prefilledAmount);
+  const [amount, setAmount] = useState(() => {
+    const canonical = normalizeAmountInput(String(prefilledAmount));
+    return canonical ? toAmountInput(Number(canonical), 6) : '';
+  });
+  // Typed with the user's decimal mark; parsed / canonical for everything
+  // that computes or leaves the screen (utils/numberLocale).
+  const amountValue = (() => { const v = parseAmountInput(amount); return Number.isFinite(v) ? v : 0; })();
+  const amountCanonical = normalizeAmountInput(amount) ?? '';
   const [destination, setDestination] = useState(prefilledAddress);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -131,10 +139,11 @@ export const SendWithAddressScreen = () => {
 
   const formatFixedFloor = React.useCallback((value: number, decimals = 2) => {
     const floored = floorToDecimals(value, decimals);
-    return floored.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    return formatDecimal(floored, { decimals });
   }, [floorToDecimals]);
 
-  const handleQuickAmount = (val: string) => setAmount(val);
+  // Quick chips are canonical ("10.00"): show them with the user's mark.
+  const handleQuickAmount = (val: string) => setAmount(toAmountInput(Number(val), 6));
 
   const maxSendable = tokenType === 'usdc'
     ? Math.max(availableBalance, availableCusdBalance)
@@ -142,7 +151,7 @@ export const SendWithAddressScreen = () => {
 
   const handleMax = () => {
     const floored = floorToDecimals(maxSendable, 2);
-    if (floored > 0) setAmount(String(floored));
+    if (floored > 0) setAmount(toAmountInput(floored, 6));
   };
 
   const handlePaste = async () => {
@@ -165,7 +174,7 @@ export const SendWithAddressScreen = () => {
       return;
     }
 
-    if (!amount || parseFloat(amount) < config.minSend) {
+    if (!amount || amountValue < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
       setShowError(true);
       return;
@@ -202,7 +211,7 @@ export const SendWithAddressScreen = () => {
 
     // Determine if we need to swap cUSD to USDC
     let needsCusdSwap = false;
-    const amountNumFloat = parseFloat(amount || '0');
+    const amountNumFloat = amountValue;
 
     if (tokenType === 'usdc' && availableBalance < amountNumFloat) {
       if (availableCusdBalance >= amountNumFloat) {
@@ -226,14 +235,14 @@ export const SendWithAddressScreen = () => {
       // Generate idempotency key to prevent double-spending
       const minuteTimestamp = Math.floor(Date.now() / 60000);
       const recipientSuffix = destination.slice(-8);
-      const amountStr = amount.replace('.', '');
+      const amountStr = amountCanonical.replace('.', '');
       const idempotencyKey = `send_${recipientSuffix}_${amountStr}_${config.name}_${minuteTimestamp}`;
 
       // Navigate to processing screen with transaction data
       (navigation as any).replace('TransactionProcessing', {
         transactionData: {
           type: 'sent',
-          amount: amount,
+          amount: amountCanonical,
           currency: config.name,
           recipient: destination.substring(0, 10) + '...',
           action: 'Enviando',
@@ -314,7 +323,7 @@ export const SendWithAddressScreen = () => {
               <TextInput
                 style={[styles.amountField, { flex: 1 }]}
                 value={amount}
-                onChangeText={setAmount}
+                onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
                 placeholder="0.00"
                 keyboardType="numeric"
               />
@@ -413,10 +422,10 @@ export const SendWithAddressScreen = () => {
       {/* Send Button */}
       <View style={[styles.footer, { paddingBottom: 20 }]}>
         <Button
-          title={balanceSnapshot == null ? 'Cargando saldo…' : parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance) ? 'Saldo insuficiente' : 'Enviar'}
+          title={balanceSnapshot == null ? 'Cargando saldo…' : amountValue > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance) ? 'Saldo insuficiente' : 'Enviar'}
           onPress={handleSend}
           loading={isProcessing}
-          disabled={!amount || !destination || parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance)}
+          disabled={!amount || !destination || amountValue > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance)}
           accessibilityLabel="Enviar"
           icon={<Icon name="send" size={20} color="#ffffff" />}
           style={{ backgroundColor: config.color }}

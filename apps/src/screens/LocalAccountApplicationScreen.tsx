@@ -30,6 +30,7 @@ import {
   payLocalActivation,
   quoteLocalActivation,
 } from '../services/localMoney';
+import { formatAmountString } from '../utils/numberLocale';
 
 // One application screen for every country's local account. It replaces the
 // fee alerts: what you get, what you still need, what it costs (quoted by the
@@ -215,7 +216,7 @@ function Application({ methodId }: { methodId: string }) {
     if (shownFee !== null && sameAmount(shownFee, amount)) return true;
     if (alive.current) {
       setFee({ amount });
-      if (shownFee !== null) setError(`El costo de apertura ahora es US$${amount}. Revísalo y confirma de nuevo.`);
+      if (shownFee !== null) setError(`El costo de apertura ahora es US$${formatAmountString(amount)}. Revísalo y confirma de nuevo.`);
     }
     return false;
   };
@@ -419,11 +420,11 @@ function Application({ methodId }: { methodId: string }) {
     ]
     : status === 'awaiting_payment'
       ? [fee?.amount
-        ? ['credit-card', `Apertura: US$${fee.amount}`, 'Tu cuenta está lista. Paga con tu saldo Confío para ver tus datos y usarla.']
+        ? ['credit-card', `Apertura: US$${formatAmountString(fee.amount)}`, 'Tu cuenta está lista. Paga con tu saldo Confío para ver tus datos y usarla.']
         : ['credit-card', 'Tu cuenta está lista', 'Toca abajo para ver el monto antes de pagar.']]
       : fee?.amount
         ? [
-          ['credit-card', `Apertura: US$${fee.amount}`, 'Al confirmar, verificamos tu saldo, abrimos la cuenta y cobramos automáticamente cuando esté lista.'],
+          ['credit-card', `Apertura: US$${formatAmountString(fee.amount)}`, 'Al confirmar, verificamos tu saldo, abrimos la cuenta y cobramos automáticamente cuando esté lista.'],
           ['check-circle', 'Pagas cuando esté lista', 'Si no se puede abrir, no se cobra nada.'],
         ]
         : [];
@@ -445,14 +446,14 @@ function Application({ methodId }: { methodId: string }) {
     action = { label: 'Ir a mi cuenta', onPress: goToAccount, icon: 'chevron-right' };
   } else if (status === 'awaiting_payment') {
     action = {
-      label: fee?.amount ? `Pagar US$${fee.amount} y activar` : 'Ver el monto a pagar',
+      label: fee?.amount ? `Pagar US$${formatAmountString(fee.amount)} y activar` : 'Ver el monto a pagar',
       onPress: runOpening, disabled: busy, icon: 'check',
     };
   } else if (status === 'provisioning') {
-    action = { label: fee?.amount ? `Abrir y pagar · US$${fee.amount}` : 'Revisar la apertura', onPress: runOpening, disabled: busy };
+    action = { label: fee?.amount ? `Abrir y pagar · US$${formatAmountString(fee.amount)}` : 'Revisar la apertura', onPress: runOpening, disabled: busy };
   } else {
     action = {
-      label: fee?.amount ? `Abrir y pagar · US$${fee.amount}` : 'Solicitar cuenta',
+      label: fee?.amount ? `Abrir y pagar · US$${formatAmountString(fee.amount)}` : 'Solicitar cuenta',
       onPress: runOpening,
       disabled: !ready || !fee?.amount || busy,
       icon: 'check',

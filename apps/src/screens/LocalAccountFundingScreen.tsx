@@ -7,6 +7,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { useNavigation } from '@react-navigation/native';
 import { BRIDGE_AVAILABILITY, BRIDGE_HISTORY, BridgeTransfer, authorizePaymentBridge, bridgeRequestId, preparePaymentBridge } from '../services/paymentBridge';
+import { formatAmountString, sanitizeAmountInput } from '../utils/numberLocale';
 
 export function bridgeAmount(units: string, decimals: number): string {
   const n = BigInt(units || '0'), base = 10n ** BigInt(decimals);
@@ -21,6 +22,12 @@ export function bridgeStatus(t: BridgeTransfer): string {
     expired: 'Cotización vencida', failed: 'El envío no se completó', refunded: 'Fondos devueltos',
     needs_review: 'Estamos revisando el envío. No lo repitas.' } as Record<string, string>)[t.status] || 'Consultando estado';
 }
+
+// Canonical bridge amount for display: no trailing zeros ("1234.560000" -> "1234.56").
+const trimZeros = (canonical?: string | null) => {
+  const text = String(canonical ?? '');
+  return text.includes('.') ? text.replace(/\.?0+$/, '') : text;
+};
 
 export default function LocalAccountFundingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -67,9 +74,9 @@ export default function LocalAccountFundingScreen() {
     {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
     {current ? <View style={styles.card}>
       <Text style={styles.heading}>{bridgeStatus(current)}</Text>
-      <Text style={styles.text}>Monto: {bridgeAmount(current.amountUnits, current.sourceTokenId === 'BSC:USDT' ? 18 : 6)} dólares</Text>
-      <Text style={styles.text}>Recibirás al menos: {bridgeAmount(current.amountOutMin, current.sourceTokenId === 'BSC:USDT' ? 6 : 18)} dólares</Text>
-      {BigInt(current.feeUnits) > 0n && <Text style={styles.text}>Costo de conversión adicional: {bridgeAmount(current.feeUnits, 18)} dólares</Text>}
+      <Text style={styles.text}>Monto: {formatAmountString(trimZeros(bridgeAmount(current.amountUnits, current.sourceTokenId === 'BSC:USDT' ? 18 : 6)))} dólares</Text>
+      <Text style={styles.text}>Recibirás al menos: {formatAmountString(trimZeros(bridgeAmount(current.amountOutMin, current.sourceTokenId === 'BSC:USDT' ? 6 : 18)))} dólares</Text>
+      {BigInt(current.feeUnits) > 0n && <Text style={styles.text}>Costo de conversión adicional: {formatAmountString(trimZeros(bridgeAmount(current.feeUnits, 18)))} dólares</Text>}
       {current.sourceTokenId === 'BSC:USDT' && <Text style={styles.text}>El monto recibido ya incluye los costos del envío. La conversión a moneda local y el pago a un banco son pasos separados.</Text>}
       <Text selectable style={styles.reference}>Referencia: {current.internalId}</Text>
       {current.status === 'prepared' && button('Confirmar envío', confirm, !availability.data?.paymentBridgeAvailability?.[current.sourceTokenId === 'BSC:USDT' ? 'toProvider' : 'toWallet'] || BigInt(current.deadline) <= BigInt(Math.floor(Date.now() / 1000) + 30))}
@@ -80,7 +87,7 @@ export default function LocalAccountFundingScreen() {
       {direction === 'to_wallet' && <Text style={styles.text}>Disponible cuando los dólares retirados de tu cuenta local ya llegaron a tu billetera.</Text>}
       {instructions.map((i: any) => button(`${instruction === i.internalId ? '✓ ' : ''}${i.holderName || 'Mi cuenta'} · ${i.country}`, () => { setInstruction(i.internalId); request.current = null; }))}
       {!enabled && <Text style={styles.text}>Este servicio todavía no está disponible para tu cuenta.</Text>}
-      <TextInput accessibilityLabel="Monto en dólares" placeholder="Monto en dólares" keyboardType="decimal-pad" value={amount} onChangeText={value => { setAmount(value); request.current = null; }} style={styles.input} editable={!busy} />
+      <TextInput accessibilityLabel="Monto en dólares" placeholder="Monto en dólares" keyboardType="decimal-pad" value={amount} onChangeText={value => { setAmount((prev) => sanitizeAmountInput(value, 6, undefined, prev)); request.current = null; }} style={styles.input} editable={!busy} />
       {button('Revisar envío', prepare, !enabled || !instruction || !/^\d+([.,]\d+)?$/.test(amount))}
     </>}
     <Text style={styles.heading}>Historial</Text>
@@ -88,7 +95,7 @@ export default function LocalAccountFundingScreen() {
     {history.error && <Text style={styles.error}>No se pudo consultar el historial.</Text>}
     {rows.map(t => <TouchableOpacity accessibilityRole="button" key={t.internalId} onPress={() => setReview(t)} style={styles.card}>
       <Text style={styles.heading}>{bridgeStatus(t)}</Text>
-      <Text style={styles.text}>{t.sourceTokenId === 'BSC:USDT' ? 'Hacia cuenta local' : 'Hacia Confío'} · {bridgeAmount(t.amountUnits, t.sourceTokenId === 'BSC:USDT' ? 18 : 6)} dólares</Text>
+      <Text style={styles.text}>{t.sourceTokenId === 'BSC:USDT' ? 'Hacia cuenta local' : 'Hacia Confío'} · {formatAmountString(trimZeros(bridgeAmount(t.amountUnits, t.sourceTokenId === 'BSC:USDT' ? 18 : 6)))} dólares</Text>
       <Text style={styles.reference}>{t.internalId}</Text>
     </TouchableOpacity>)}
     {rows.length >= limit && limit < 100 && button('Ver más', () => setLimit(Math.min(100, limit + 20)))}

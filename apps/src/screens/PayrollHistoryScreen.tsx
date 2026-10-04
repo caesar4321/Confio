@@ -10,6 +10,8 @@ import { useQuery } from '@apollo/client';
 import { GET_PAYROLL_RUNS } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
+import { formatAmountString } from '../utils/numberLocale';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 type RouteProps = RouteProp<MainStackParamList, 'PayrollHistory'>;
 type NavigationProps = NativeStackNavigationProp<MainStackParamList, 'PayrollHistory'>;
@@ -31,6 +33,7 @@ const statusLabel = (s: string) => {
 };
 
 const PayrollHistoryScreen = () => {
+  const { separators } = useNumberLocale();
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<RouteProps>();
   const { accountId, displayName, username } = route.params;
@@ -59,7 +62,7 @@ const PayrollHistoryScreen = () => {
     return (
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.amount}>${item.amount}</Text>
+          <Text style={styles.amount}>${formatAmountString(item.amount)}</Text>
           <Text style={styles.date}>{new Date(item.when).toLocaleDateString('es-ES')}</Text>
         </View>
         <View style={styles.badges}>
@@ -72,7 +75,7 @@ const PayrollHistoryScreen = () => {
         </View>
       </View>
     );
-  }, []);
+  }, [separators]);
 
   return (
     <View style={styles.safeArea}>

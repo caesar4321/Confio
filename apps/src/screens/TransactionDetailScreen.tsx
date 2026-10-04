@@ -48,6 +48,8 @@ import { technicalFontFamily } from '../utils/fontFamily';
 import { inviteSendService } from '../services/inviteSendService';
 import { formatTokenLabel, explorerFor, conversionPair, isConversionIncoming, sendTokenParamFor } from '../utils/tokenDisplay';
 import { phoneKeyToE164, parsePhoneKey } from '../utils/phoneKey';
+import { formatDecimal, formatPercent } from '../utils/numberLocale';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -69,14 +71,14 @@ const readStatedFlag = (value: any): boolean | undefined => {
 // Color palette from the original design
 // Helper function to format amount with proper decimals
 const formatAmount = (amount: string | number | undefined): string => {
-  if (!amount) return '0.00';
+  if (!amount) return formatDecimal(0);
   const numericAmount = typeof amount === 'string' ? parseFloat(amount.replace(/[+-]/g, '')) : amount;
-  return numericAmount.toFixed(2);
+  return formatDecimal(numericAmount);
 };
 
 // Helper function to format amount with sign
 const formatAmountWithSign = (amount: string | undefined): string => {
-  if (!amount) return '0.00';
+  if (!amount) return formatDecimal(0);
   const sign = amount.startsWith('-') ? '-' : amount.startsWith('+') ? '+' : '';
   const numericPart = formatAmount(amount);
   return sign + numericPart;
@@ -193,7 +195,7 @@ const confioFeeLabel = (tx: any): string => {
   const bps = serverFeeBps(tx);
   return bps === null
     ? 'Comisión de Confío'
-    : `Comisión de Confío (${(bps / 100).toLocaleString('es-PE')}%)`;
+    : `Comisión de Confío (${formatPercent(bps / 100)}%)`;
 };
 
 // Legacy fallback for rows written before feeAmount existed.
@@ -296,6 +298,8 @@ const tokenLogo = (label?: string | null) =>
   TOKEN_LOGOS[String(label ?? '').trim().toUpperCase()] || cUSDLogo;
 
 export const TransactionDetailScreen = () => {
+  // Re-render when the user's country (number format) resolves after mount.
+  useNumberLocale();
   const navigation = useNavigation<TransactionDetailScreenNavigationProp>();
   const route = useRoute<TransactionDetailScreenRouteProp>();
   const insets = useSafeAreaInsets();
@@ -1698,7 +1702,7 @@ export const TransactionDetailScreen = () => {
         if (fee !== null && fee > 0) {
           items.push({
             label: confioFeeLabel(currentTx),
-            value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} USD`,
+            value: `- ${(fee < 0.01) ? `< ${formatDecimal(0.01)}` : formatDecimal(fee)} USD`,
           });
         }
         if (walletAmount !== undefined && walletAmount !== null && walletAmount !== '') {
@@ -1713,7 +1717,7 @@ export const TransactionDetailScreen = () => {
         if (fee !== null && fee > 0) {
           items.push({
             label: confioFeeLabel(currentTx),
-            value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
+            value: `- ${(fee < 0.01) ? `< ${formatDecimal(0.01)}` : formatDecimal(fee)} ${currency}`,
           });
         }
         const fiatAmount = currentTx.rampFiatAmount || currentTx.ramp_fiat_amount;
@@ -1737,7 +1741,7 @@ export const TransactionDetailScreen = () => {
       if (fee !== null && fee > 0) {
         items.push({
           label: confioFeeLabel(currentTx),
-          value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${formatTokenLabel(conversionFromCurrencyLabel) || currency}`,
+          value: `- ${(fee < 0.01) ? `< ${formatDecimal(0.01)}` : formatDecimal(fee)} ${formatTokenLabel(conversionFromCurrencyLabel) || currency}`,
         });
       }
       if (net !== undefined && net !== null && net !== '') {
@@ -1764,7 +1768,7 @@ export const TransactionDetailScreen = () => {
         if (fee !== null && fee > 0) {
           items.push({
             label: confioFeeLabel(currentTx),
-            value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
+            value: `- ${(fee < 0.01) ? `< ${formatDecimal(0.01)}` : formatDecimal(fee)} ${currency}`,
           });
           const net = currentTx.netAmount ?? currentTx.net_amount;
           if (net !== undefined && net !== null && net !== '') {
@@ -1787,7 +1791,7 @@ export const TransactionDetailScreen = () => {
       if (fee > 0) {
         items.push({
           label: confioFeeLabel(currentTx),
-          value: `- ${(fee < 0.01 && fee > 0) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
+          value: `- ${(fee < 0.01 && fee > 0) ? `< ${formatDecimal(0.01)}` : formatDecimal(fee)} ${currency}`,
         });
       }
     }
@@ -1807,7 +1811,7 @@ export const TransactionDetailScreen = () => {
       }
       items.push({
         label: totalLabel,
-        value: `${sign}${totalAbs.toFixed(2)} ${currency}`,
+        value: `${sign}${formatDecimal(totalAbs)} ${currency}`,
         color: colors.text.primary,
       });
     }

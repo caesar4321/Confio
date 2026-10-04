@@ -26,6 +26,7 @@ import {
   recipientConfirmationService,
   recipientNeedsConfirmation,
 } from '../services/recipientConfirmationService';
+import { formatDecimal, normalizeAmountInput, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 type TokenType = 'cusd' | 'confio' | 'cusd_plus';
 
@@ -195,6 +196,11 @@ export const SendToFriendScreen = () => {
   const bscTokenType = tokenType === 'confio' ? 'CONFIO' as const : undefined;
 
   const [amount, setAmount] = useState('');
+  // `amount` is what the user typed, with their country's decimal mark
+  // ("12,5" in VE). Everything that computes or leaves the screen uses the
+  // parsed value / canonical "12.5" string (utils/numberLocale).
+  const amountValue = (() => { const v = parseAmountInput(amount); return Number.isFinite(v) ? v : 0; })();
+  const amountCanonical = normalizeAmountInput(amount) ?? '';
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -292,12 +298,13 @@ export const SendToFriendScreen = () => {
 
   const formatFixedFloor = React.useCallback((value: number, decimals = 2) => {
     const floored = floorToDecimals(value, decimals);
-    return floored.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    return formatDecimal(floored, { decimals });
   }, [floorToDecimals]);
 
   // Mutations are now handled in TransactionProcessingScreen
 
-  const handleQuickAmount = (val: string) => setAmount(val);
+  // Quick chips are canonical ("10.00"): show them with the user's mark.
+  const handleQuickAmount = (val: string) => setAmount(toAmountInput(Number(val), 6));
 
   const handleSend = async () => {
 
@@ -306,7 +313,7 @@ export const SendToFriendScreen = () => {
       return;
     }
 
-    if (!amount || parseFloat(amount) < config.minSend) {
+    if (!amount || amountValue < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
       setShowError(true);
       return;
@@ -350,13 +357,13 @@ export const SendToFriendScreen = () => {
         // back, and the server's own invite id is the retry key. Fall through
         // with a local key; the processing screen overwrites it with the
         // inviteId once prepare answers.
-        idempotencyKey = `bscinvite_${friendInternationalPhone}_${amount.replace('.', '')}_${config.name}`;
+        idempotencyKey = `bscinvite_${friendInternationalPhone}_${amountCanonical.replace('.', '')}_${config.name}`;
       } else if (friend.isOnConfio === false && friend.phone) {
         const invitePhone = friend.normalizedPhones?.find(phone => phone.startsWith('+')) || friend.phone;
         const prep = await inviteSendService.prepareInvite(
           invitePhone,
           undefined,
-          parseFloat(amount),
+          amountValue,
           (tokenType.toUpperCase() === 'CUSD' ? 'CUSD' : 'CONFIO'),
           '',
         );
@@ -368,7 +375,7 @@ export const SendToFriendScreen = () => {
       } else {
         const recipientIdentifier = friend.userId || friend.id || 'unknown';
         const timestamp = Date.now();
-        const amountStr = amount.replace('.', '');
+        const amountStr = amountCanonical.replace('.', '');
         idempotencyKey = `send_${recipientIdentifier}_${amountStr}_${config.name}_${timestamp}`;
       }
 
@@ -383,7 +390,7 @@ export const SendToFriendScreen = () => {
           bscInvite: isBscInvite,
           bscTokenType,
           bscInviteToken: isBscInvite ? bscEscrowToken : undefined,
-          amount: amount,
+          amount: amountCanonical,
           currency: config.name,
           recipient: friend.name,
           recipientPhone: friendInternationalPhone,
@@ -479,7 +486,7 @@ export const SendToFriendScreen = () => {
               <TextInput
                 style={[styles.amountField, { flex: 1 }]}
                 value={amount}
-                onChangeText={setAmount}
+                onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
                 placeholder="0.00"
                 keyboardType="numeric"
               />
@@ -526,18 +533,18 @@ export const SendToFriendScreen = () => {
             <View style={styles.feeRow}>
               <Text style={styles.feeTotalLabel}>Total a enviar</Text>
               <Text style={styles.feeTotalValue}>
-                {amount ? formatNumber(parseFloat(amount)) : formatNumber(0)} {config.name}
+                {formatNumber(amountValue)} {config.name}
               </Text>
             </View>
           </View>
 
           <Button
             title={!balanceReady ? 'Cargando saldo…' :
-              parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' :
+              amountValue > availableBalance ? 'Saldo insuficiente' :
                 `Enviar a ${friend.name}`}
             onPress={handleSend}
             loading={isProcessing}
-            disabled={!balanceReady || !amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance}
+            disabled={!balanceReady || !amount || amountValue < config.minSend || amountValue > availableBalance}
             accessibilityLabel={`Enviar ${amount || ''} a ${friend.name}`}
             style={{ backgroundColor: config.color }}
           />

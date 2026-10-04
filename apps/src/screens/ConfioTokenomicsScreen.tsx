@@ -12,6 +12,8 @@ import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { CONFIO_DOCUMENTS, DocumentLink, openConfioDocument } from '../components/ConfioNarrative';
+import { getNumberLocaleCountry } from '../utils/numberLocale';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 type ConfioTokenomicsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -22,8 +24,9 @@ export const ConfioTokenomicsScreen = () => {
   const navigation = useNavigation<ConfioTokenomicsScreenNavigationProp>();
   const { selectedCountry } = useCountry();
 
-  // Use the app's selected country for formatting, fallback to Venezuela
-  const countryCode = selectedCountry?.[2] || 'VE';
+  // One number format app-wide: the user's phone country (utils/numberLocale).
+  const countryCode = getNumberLocaleCountry() || 'US';
+  useNumberLocale();
   const formatWithLocale = (num: number, options = {}) =>
     formatNumber(num, countryCode, { minimumFractionDigits: 0, maximumFractionDigits: 0, ...options });
 

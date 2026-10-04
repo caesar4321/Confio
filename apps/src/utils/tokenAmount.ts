@@ -34,6 +34,10 @@ const MICRO_DIGITS = 6;
  */
 export const parseUsdMicros = (input: string | number | null | undefined): bigint | null => {
   if (input === null || input === undefined) return null;
+  // CANONICAL input only ("1234.5"; a lone "," is accepted as the decimal
+  // mark). Never route a user-typed localized string here directly: in VE
+  // "1.234" means 1234, while a server "1.234" means 1.234. Callers convert
+  // what the user typed with normalizeAmountInput first.
   const raw = String(input).trim().replace(',', '.');
   if (!/^\d*\.?\d*$/.test(raw) || raw === '' || raw === '.') return null;
 

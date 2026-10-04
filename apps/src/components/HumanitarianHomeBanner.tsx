@@ -3,6 +3,7 @@ import { StyleSheet, TouchableOpacity, View, ViewStyle } from 'react-native';
 import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { countryInfo } from '../utils/humanitarianCountry';
+import { formatDecimal } from '../utils/numberLocale';
 
 type Campaign = {
   slug: string;
@@ -19,7 +20,7 @@ function toNumber(value?: string | number | null) {
 }
 
 function fmtWhole(value: number) {
-  return value.toLocaleString('es-VE', { maximumFractionDigits: 0 });
+  return formatDecimal(value, { decimals: 0 });
 }
 
 export function HumanitarianHomeBanner({

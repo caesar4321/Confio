@@ -13,6 +13,7 @@ import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { TrustPillars } from '../components/ConfioNarrative';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
+import { formatDecimal } from '../utils/numberLocale';
 
 export const ConfioTokenInfoScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -25,18 +26,7 @@ export const ConfioTokenInfoScreen = () => {
 
   const formatWholeNumber = (n: number | null | undefined) => {
     if (n == null) return '—';
-    const rounded = Math.round(n);
-    try {
-      return new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-        useGrouping: true,
-      })
-        .format(rounded)
-        .replace(/,/g, currency.thousandsSeparator);
-    } catch {
-      return `${rounded}`.replace(/\B(?=(\d{3})+(?!\d))/g, currency.thousandsSeparator);
-    }
+    return formatDecimal(n, { decimals: 0 });
   };
 
   const s = data?.statsSummary;

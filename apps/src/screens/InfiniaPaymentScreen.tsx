@@ -29,6 +29,13 @@ import {
 import * as cobre from '../services/cobreJourney';
 import {isBrebLocationFailure} from '../services/brebLocationFailure';
 import {bridgeAmount} from './LocalAccountFundingScreen';
+import { formatAmountString, sanitizeAmountInput } from '../utils/numberLocale';
+
+// Canonical bridge amount for display: no trailing zeros ("12.500000" -> "12.5").
+const trimBridgeZeros = (canonical?: string | null) => {
+  const text = String(canonical ?? '');
+  return text.includes('.') ? text.replace(/\.?0+$/, '') : text;
+};
 
 export default function InfiniaPaymentScreen({
   provider = 'infinia',
@@ -230,26 +237,26 @@ export default function InfiniaPaymentScreen({
           <View style={styles.card}>
             <Text>
               {returnJourney.direction === 'to_bank' ? 'Dólares a enviar: ' : 'Dólares a traer a Confío: '}
-              {bridgeAmount(review.amountUnits, review.sourceTokenId === 'BSC:USDT' ? 18 : 6)}
+              {formatAmountString(trimBridgeZeros(bridgeAmount(review.amountUnits, review.sourceTokenId === 'BSC:USDT' ? 18 : 6)))}
             </Text>
             <Text>
-              Costo de conversión adicional: {bridgeAmount(review.feeUnits, 18)} dólares.
+              Costo de conversión adicional: {formatAmountString(trimBridgeZeros(bridgeAmount(review.feeUnits, 18)))} dólares.
             </Text>
             {returnJourney.direction === 'to_bank' && (
               <>
                 <Text>Destino del pago: {returnJourney.destinationSummary}</Text>
                 <Text>
-                  Mínimo aceptado en la conversión: {returnJourney.minimumFxOutput} {returnJourney.localAsset}.
+                  Mínimo aceptado en la conversión: {formatAmountString(returnJourney.minimumFxOutput)} {returnJourney.localAsset}.
                 </Text>
                 <Text>Los costos del proveedor pueden aplicarse al pago.</Text>
               </>
             )}
             <Text>
               {returnJourney.direction === 'to_bank' ? 'La cuenta local recibirá al menos ' : 'Recibirás en Confío al menos '}
-              {bridgeAmount(
+              {formatAmountString(trimBridgeZeros(bridgeAmount(
                 review.amountOutMin,
                 review.sourceTokenId === 'BSC:USDT' ? 6 : 18,
-              )}{' '}
+              )))}{' '}
               dólares{returnJourney.direction === 'to_bank' ? ' antes de convertirlos.' : '.'}
             </Text>
             {button(
@@ -319,7 +326,7 @@ export default function InfiniaPaymentScreen({
                   value={amount}
                   onChangeText={v => {
                     reset();
-                    setAmount(v);
+                    setAmount((prev) => sanitizeAmountInput(v, 6, undefined, prev));
                   }}
                   editable={!busy}
                 />
@@ -329,7 +336,7 @@ export default function InfiniaPaymentScreen({
                 {(deposits.data?.[depositsKey] || []).map((d: any) => (
                   <View key={d.internalId}>
                     {button(
-                      `${credit === d.internalId ? '✓ ' : ''}${d.amount} ${d.asset} · ${new Date(d.occurredAt).toLocaleDateString()}`,
+                      `${credit === d.internalId ? '✓ ' : ''}${formatAmountString(d.amount)} ${d.asset} · ${new Date(d.occurredAt).toLocaleDateString()}`,
                       () => {
                         reset();
                         setCredit(d.internalId);
@@ -361,7 +368,7 @@ export default function InfiniaPaymentScreen({
               value={minimum}
               onChangeText={v => {
                 reset();
-                setMinimum(v);
+                setMinimum((prev) => sanitizeAmountInput(v, 2, undefined, prev));
               }}
               editable={!busy}
             />
@@ -380,7 +387,7 @@ export default function InfiniaPaymentScreen({
                   value={walletMinimum}
                   onChangeText={v => {
                     reset();
-                    setWalletMinimum(v);
+                    setWalletMinimum((prev) => sanitizeAmountInput(v, 6, undefined, prev));
                   }}
                   editable={!busy}
                 />
@@ -392,10 +399,10 @@ export default function InfiniaPaymentScreen({
             )}
             {review && (
               <Text>
-                Envío: {bridgeAmount(review.amountUnits, 18)} dólares. Costo de
-                conversión adicional: {bridgeAmount(review.feeUnits, 18)}{' '}
+                Envío: {formatAmountString(trimBridgeZeros(bridgeAmount(review.amountUnits, 18)))} dólares. Costo de
+                conversión adicional: {formatAmountString(trimBridgeZeros(bridgeAmount(review.feeUnits, 18)))}{' '}
                 dólares. La cuenta recibirá al menos{' '}
-                {bridgeAmount(review.amountOutMin, 6)} dólares antes de
+                {formatAmountString(trimBridgeZeros(bridgeAmount(review.amountOutMin, 6)))} dólares antes de
                 convertirlos.
               </Text>
             )}

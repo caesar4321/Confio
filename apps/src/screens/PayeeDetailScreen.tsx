@@ -13,6 +13,7 @@ import { DELETE_PAYROLL_RECIPIENT } from '../apollo/mutations/payroll';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { GET_PAYROLL_RECIPIENTS, CREATE_PAYROLL_RUN, GET_PAYROLL_RUNS } from '../apollo/queries';
+import { formatAmountString, normalizeAmountInput, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 
 type PayeeDetailNavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayeeDetail'>;
 type PayeeDetailRouteProp = RouteProp<MainStackParamList, 'PayeeDetail'>;
@@ -134,7 +135,7 @@ export const PayeeDetailScreen = () => {
   };
 
   const handleCreateRun = async (mode: 'immediate' | 'scheduled') => {
-    if (!amount || parseFloat(amount) <= 0) {
+    if (!amount || !(parseAmountInput(amount) > 0)) {
       Alert.alert('Monto requerido', 'Ingresa un monto para pagar.');
       return;
     }
@@ -162,7 +163,7 @@ export const PayeeDetailScreen = () => {
           tokenType: 'CUSD',
           periodSeconds,
           scheduledAt,
-          items: [{ recipientAccountId: accountId, netAmount: amount }],
+          items: [{ recipientAccountId: accountId, netAmount: normalizeAmountInput(amount) ?? '' }],
         },
       });
       const payload = res.data?.createPayrollRun;
@@ -253,7 +254,7 @@ export const PayeeDetailScreen = () => {
               keyboardType="decimal-pad"
               placeholder="0.00"
               value={amount}
-              onChangeText={setAmount}
+              onChangeText={(text) => setAmount((prev) => sanitizeAmountInput(text, 6, undefined, prev))}
             />
           </View>
 
@@ -338,7 +339,7 @@ export const PayeeDetailScreen = () => {
                 <View key={h.id} style={styles.historyCard}>
                   <View style={styles.historyRow}>
                     <View>
-                      <Text style={styles.historyAmount}>cUSD {h.netAmount}</Text>
+                      <Text style={styles.historyAmount}>cUSD {formatAmountString(h.netAmount)}</Text>
                       <Text style={styles.historyDate}>{new Date(h.when).toLocaleDateString('es-ES')}</Text>
                     </View>
                     <View style={styles.historyBadges}>

@@ -27,6 +27,7 @@ import {
 } from '../apollo/mutations';
 import { colors } from '../config/theme';
 import { useAuthReady } from '../contexts/AuthContext';
+import { formatMinorMoney } from '../utils/currencies';
 
 type Obligation = {
   id: string;
@@ -46,8 +47,7 @@ type Obligation = {
   institutionAppliedAt?: string;
 };
 
-const money = (minor: number, currency: string) =>
-  new Intl.NumberFormat('es-PE', { style: 'currency', currency }).format(minor / 100);
+const money = (minor: number, currency: string) => formatMinorMoney(minor, currency);
 
 type DirectoryEntry = {
   id: string;

@@ -69,6 +69,7 @@ import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ensureFaceCheck, fetchFaceStepUpStatus } from '../services/faceStepUp';
 import { confirmBannedExit } from '../services/emergencyExit/emergencyFace';
 import { clearBanSignal } from '../services/emergencyExit/banSignal';
+import { formatDecimal } from '../utils/numberLocale';
 
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -117,9 +118,7 @@ const stepWait = (step: BscExitStep): string => {
 
 // USDT-BSC is 18 decimals. Two decimals is the app's dollar grammar.
 const fmtUsdt = (wei: string): string =>
-  (Number(BigInt(wei) / 10n ** 12n) / 1e6).toLocaleString('es-VE', {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  });
+  formatDecimal(Number(BigInt(wei) / 10n ** 12n) / 1e6);
 
 const fmtRemaining = (sec: number): string => {
   const h = Math.floor(sec / 3600);
@@ -673,7 +672,7 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   );
 
   const renderGasCards = () => {
-    const bsc = gasStatusLine(bscGasShortWei, (v) => `${(Number(v) / 1e18).toFixed(5)} BNB`);
+    const bsc = gasStatusLine(bscGasShortWei, (v) => `${formatDecimal(Number(v) / 1e18, { decimals: 5 })} BNB`);
     return (
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Comisión de red</Text>
