@@ -193,7 +193,7 @@ def posting_block(user, business) -> str | None:
     banned, _ = check_user_banned(user)
     if banned:
         return BLOCK_BANNED
-    if not user.is_identity_verified:
+    if not is_verified_member(user):
         return BLOCK_NOT_VERIFIED
     if _submissions_last_24h(user) >= settings.COMMUNITY_DAILY_POST_LIMIT:
         return BLOCK_DAILY_LIMIT
@@ -210,9 +210,19 @@ def author_block(user) -> str | None:
     banned, _ = check_user_banned(user)
     if banned:
         return BLOCK_BANNED
-    if not user.is_identity_verified:
+    if not is_verified_member(user):
         return BLOCK_NOT_VERIFIED
     return None
+
+
+def is_verified_member(user) -> bool:
+    """Comunidad needs a real, verified person, not a rail-specific document:
+    any verified personal identity document counts (primary or additional,
+    e.g. a passport or another country's ID), the same rule as rewards.
+    `is_identity_verified` reads only the primary phone-country document the
+    Recargar/Retirar providers require, so a member verified with another
+    country's ID was wrongly told to verify again."""
+    return user.has_verified_identity_document
 
 
 UPLOAD_TICKETS_PER_HOUR = 20
@@ -906,14 +916,15 @@ def rereview(review_id: int) -> bool:
 
 
 def personally_verified_count(user_ids) -> int:
-    """Distinct users among user_ids with a PERSONAL verified KYC, the same
-    predicate as User.is_identity_verified (a business KYB does not count)."""
+    """Distinct users among user_ids with a verified PERSONAL identity
+    document, the same predicate as is_verified_member (primary or additional;
+    a business KYB does not count)."""
     from django.db.models import Q
 
     from security.models import IdentityVerification
 
     return (
-        IdentityVerification.objects.filter(user_id__in=user_ids, status='verified')
+        IdentityVerification.all_documents.filter(user_id__in=user_ids, status='verified')
         .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
         .values('user_id')
         .distinct()
