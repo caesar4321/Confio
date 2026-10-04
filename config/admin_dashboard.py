@@ -2245,3 +2245,9 @@ confio_admin_site.register(AccountActivation, AccountActivationAdmin)
 from payment_accounts.models import BrebLocationCheck
 from payment_accounts.admin import BrebLocationCheckAdmin
 confio_admin_site.register(BrebLocationCheck, BrebLocationCheckAdmin)
+
+from assistant.models import AssistantProfile, AssistantThreadState, AssistantTurn
+from assistant.admin import AssistantProfileAdmin, AssistantThreadStateAdmin, AssistantTurnAdmin
+confio_admin_site.register(AssistantTurn, AssistantTurnAdmin)
+confio_admin_site.register(AssistantThreadState, AssistantThreadStateAdmin)
+confio_admin_site.register(AssistantProfile, AssistantProfileAdmin)

@@ -17,9 +17,6 @@ import { Header } from './Header';
 import { QrPayIcon } from '../components/QrPayIcon';
 import { useHeader } from '../contexts/HeaderContext';
 import { useAccount } from '../contexts/AccountContext';
-import { useAuth } from '../contexts/AuthContext';
-import { useQuery } from '@apollo/client';
-import { GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import { colors } from '../config/theme';
 
 // Single navigator instance
@@ -31,15 +28,8 @@ export const BottomTabNavigator = () => {
   const navigation = useNavigation<TabNavigatorNavigationProp>();
   const { unreadNotifications, currentAccountAvatar, profileMenu } = useHeader();
   const { activeAccount, isLoading: accountsLoading } = useAccount();
-  const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
-  const canQueryMessages = isAuthenticated && !authLoading;
-  const messageContextKey = activeAccount?.id || 'no-account';
-  const { data: messageUnreadData, refetch: refetchMessageUnread } = useQuery(GET_MESSAGE_INBOX_UNREAD_COUNT, {
-    variables: { contextKey: messageContextKey },
-    fetchPolicy: 'network-only',
-    nextFetchPolicy: 'cache-first',
-    skip: !canQueryMessages,
-  });
+  // The message box lives in the floating Confío IA bubble (every screen);
+  // the Home header no longer has an inbox button.
 
   // 🔥 Fix: Normalize the account type to lowercase for comparison
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
@@ -51,15 +41,6 @@ export const BottomTabNavigator = () => {
     navigation.navigate('Notification' as any);
   }, [navigation]);
 
-  const handleMessagesPress = useCallback(() => {
-    navigation.navigate('HomeMessages' as any);
-  }, [navigation]);
-  React.useEffect(() => {
-    if (!canQueryMessages) {
-      return;
-    }
-    refetchMessageUnread();
-  }, [accountContextTick, canQueryMessages, refetchMessageUnread, messageContextKey]);
 
   // Create stable header components for each screen
   const HomeHeader = useCallback(() => (
@@ -69,15 +50,13 @@ export const BottomTabNavigator = () => {
       title="Confío"
       onProfilePress={profileMenu.openProfileMenu}
       onNotificationPress={handleNotificationPress}
-      onMessagePress={handleMessagesPress}
       backgroundColor={colors.heroField}
       showBackButton={false}
       isLight={false}
       unreadNotifications={unreadNotifications}
-      unreadMessages={messageUnreadData?.messageInboxUnreadCount || 0}
       currentAccountAvatar={currentAccountAvatar}
     />
-  ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, handleMessagesPress, unreadNotifications, currentAccountAvatar, messageUnreadData?.messageInboxUnreadCount]);
+  ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, unreadNotifications, currentAccountAvatar]);
 
 
   // Charge header removed since ChargeScreen has its own header

@@ -148,6 +148,17 @@ def get_visible_content_queryset(membership: ChannelMembership):
     return queryset.order_by('pinned_rank', '-published_at', '-created_at')
 
 
+# The support thread is answered by Confío IA first; the team takes over on
+# handoff (assistant/service.py). Same thread, same history.
+SUPPORT_CHANNEL_NAME = 'Confío IA'
+SUPPORT_CHANNEL_SUBTITLE = 'Tu asistente · Disponible 24/7'
+SUPPORT_CHANNEL_PREVIEW = '¿En qué te ayudo hoy?'
+SUPPORT_GREETING = (
+    'Hola, soy Confío IA. Pregúntame sobre tu dinero o sobre la app, por escrito o con un audio. '
+    'Si hace falta, te paso con el equipo de Confío.'
+)
+
+
 def get_or_create_support_conversation(user, account, business):
     conversation_defaults = {'status': 'OPEN'}
     if business is not None:
@@ -172,7 +183,7 @@ def get_or_create_support_conversation(user, account, business):
             conversation=conversation,
             sender_type='SYSTEM',
             message_type='TEXT',
-            body='Hola, somos el equipo de Confío. ¿En qué podemos ayudarte hoy?',
+            body=SUPPORT_GREETING,
             metadata={},
         )
         conversation.last_message_at = message.created_at
@@ -374,6 +385,8 @@ def get_support_sender_name(message: SupportMessage):
         full_name = f'{user.first_name or ""} {user.last_name or ""}'.strip()
         return full_name or user.username or 'Usuario'
     if message.sender_type == 'AGENT':
+        if (message.metadata or {}).get('ai'):
+            return 'Confío IA'
         if message.sender_user_id:
             full_name = f'{message.sender_user.first_name or ""} {message.sender_user.last_name or ""}'.strip()
             return full_name or message.sender_user.username or 'Agente Confío'
@@ -399,8 +412,10 @@ def build_portal_support_conversation_payload(conversation: SupportConversation)
             or conversation.assigned_to.username
         )
 
-    # Unread if the last message is from the user (awaiting staff reply)
-    unread_count = 1 if latest_message and latest_message.sender_type == 'USER' else 0
+    # Awaiting the team: Confío IA answers first, so only threads handed to
+    # people count, and the AI's own replies never mark a thread as answered.
+    from assistant.service import awaiting_team
+    unread_count = 1 if awaiting_team(conversation, recent_messages_desc) else 0
 
     return PortalSupportConversationType(
         id=str(conversation.id),
@@ -783,9 +798,9 @@ def build_support_channel_payload(user, account, business):
 
     return MessageChannelType(
         id='soporte',
-        name='Soporte',
-        subtitle='Equipo Confío · Respuesta en ~2h',
-        preview=latest_message.body if latest_message else 'En que podemos ayudarte hoy?',
+        name=SUPPORT_CHANNEL_NAME,
+        subtitle=SUPPORT_CHANNEL_SUBTITLE,
+        preview=latest_message.body if latest_message else SUPPORT_CHANNEL_PREVIEW,
         time=humanize_relative(latest_message.created_at) if latest_message else 'Ahora',
         unread_count=unread_count,
         is_muted=False,
@@ -840,9 +855,9 @@ def build_support_channel_thread_page(user, account, business, offset=0, limit=5
     return MessageChannelThreadPageType(
         channel=MessageChannelType(
             id='soporte',
-            name='Soporte',
-            subtitle='Equipo Confío · Respuesta en ~2h',
-            preview=latest_message.body if latest_message else 'En que podemos ayudarte hoy?',
+            name=SUPPORT_CHANNEL_NAME,
+            subtitle=SUPPORT_CHANNEL_SUBTITLE,
+            preview=latest_message.body if latest_message else SUPPORT_CHANNEL_PREVIEW,
             time=humanize_relative(latest_message.created_at) if latest_message else 'Ahora',
             unread_count=unread_count,
             is_muted=False,
@@ -1973,27 +1988,18 @@ class SendSupportMessage(graphene.Mutation):
     @classmethod
     @login_required
     def mutate(cls, root, info, body):
-        user, account, business, _ = get_context_models(info)
+        # Lazy: assistant.service imports this module.
+        from assistant import service as assistant_service
+
+        user, account, business, jwt_context = get_context_models(info)
         clean_body = (body or '').strip()
         if not clean_body:
             raise GraphQLError('Message body is required')
 
-        conversation = get_or_create_support_conversation(user, account, business)
-        message = SupportMessage.objects.create(
-            conversation=conversation,
-            sender_type='USER',
-            sender_user=user,
-            message_type='TEXT',
-            body=clean_body,
-            metadata={},
-        )
-        conversation.last_message_at = message.created_at
-        conversation.save(update_fields=['last_message_at', 'updated_at'])
-
-        try:
-            send_support_staff_push(message.id)
-        except Exception:
-            logger.exception('Failed to send support staff push', extra={'conversation_id': conversation.id, 'message_id': message.id})
+        # Older builds send here and poll the thread: Confío IA answers inline
+        # (or the team is pushed when the thread is in human mode).
+        outcome = assistant_service.ask(user, account, business, jwt_context, clean_body, can_navigate=False)
+        message = outcome.user_message
 
         return SendSupportMessage(
             success=True,

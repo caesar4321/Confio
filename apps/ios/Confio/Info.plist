@@ -80,7 +80,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Confío usa tu ubicación precisa para verificar que puedes activar y usar Bre-B desde tu ubicación actual. No rastreamos tu ubicación en segundo plano.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>We need access to your microphone for video recording</string>
+	<string>Confío usa el micrófono para los audios que le mandas a Confío IA y para la verificación de identidad en video.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>We need access to save QR codes to your photo library</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

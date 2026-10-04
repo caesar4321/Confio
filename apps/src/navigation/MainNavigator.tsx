@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { BottomTabNavigator } from './BottomTabNavigator';
+import { ConfioIaProvider } from '../assistant/ConfioIaContext';
+import ConfioIaOverlay from '../assistant/ConfioIaOverlay';
 import LegalDocumentScreen from '../screens/LegalDocumentScreen';
 import VerificationScreen from '../screens/VerificationScreen';
 import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
@@ -140,7 +142,7 @@ export const MainNavigator = () => {
   }, [checkAndShowPrompt]);
 
   return (
-    <>
+    <ConfioIaProvider>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
@@ -705,8 +707,9 @@ export const MainNavigator = () => {
       />
       */}
       </Stack.Navigator>
+      <ConfioIaOverlay />
       <MigrationModal />
       <OnboardingModalCoordinator />
-    </>
+    </ConfioIaProvider>
   );
 };
