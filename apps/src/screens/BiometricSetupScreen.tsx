@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform, Alert, AppState, AppStateStatus, ScrollView, StatusBar } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Linking, Platform, Alert, AppState, AppStateStatus, ScrollView, StatusBar } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';

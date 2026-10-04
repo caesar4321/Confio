@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
-  Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   Platform,
@@ -14,6 +12,7 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

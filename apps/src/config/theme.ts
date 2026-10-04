@@ -117,5 +117,15 @@ export const fontWeight = {
   bold: '700',
 } as const;
 
+// Instrument Sans static files (apps/src/assets/fonts). Names are the
+// PostScript names, which iOS resolves directly and Android matches to the
+// file name in assets/fonts. Applied app-wide by components/common/AppText.
+export const fontFamily = {
+  regular: 'InstrumentSans-Regular',
+  medium: 'InstrumentSans-Medium',
+  semibold: 'InstrumentSans-SemiBold',
+  bold: 'InstrumentSans-Bold',
+} as const;
+
 // Legacy export for backwards compatibility
 export const colors = lightColors;

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 
 type Props = {

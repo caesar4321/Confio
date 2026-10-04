@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from './AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../../config/theme';
 

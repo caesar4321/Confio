@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   Modal,
@@ -11,6 +9,7 @@ import {
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';

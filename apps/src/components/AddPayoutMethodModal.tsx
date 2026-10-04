@@ -1,17 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  TextInput,
   Alert,
   ActivityIndicator,
   Modal,
   Platform,
   FlatList,
 } from 'react-native';
+import { Text, TextInput } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery, useMutation, useApolloClient } from '@apollo/client';
 import {

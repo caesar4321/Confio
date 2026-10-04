@@ -1,13 +1,13 @@
 import React, { useRef } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
   Alert,
   Platform,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

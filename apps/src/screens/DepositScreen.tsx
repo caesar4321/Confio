@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Image, ActivityIndicator, Share, Linking } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, ScrollView, Image, ActivityIndicator, Share, Linking } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';

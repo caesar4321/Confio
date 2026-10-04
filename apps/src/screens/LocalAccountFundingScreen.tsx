@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@apollo/client';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

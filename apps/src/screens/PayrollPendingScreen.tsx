@@ -1,6 +1,7 @@
 import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert, Image } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert, Image } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useQuery, useMutation } from '@apollo/client';

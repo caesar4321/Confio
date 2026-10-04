@@ -4,7 +4,8 @@
  * to the payer if nobody confirms within 24 hours.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../config/theme';

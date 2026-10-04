@@ -7,7 +7,8 @@
  * everything waiting.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, RefreshControl, SafeAreaView, ScrollView, StatusBar, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, RefreshControl, SafeAreaView, ScrollView, StatusBar, TouchableOpacity, View } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

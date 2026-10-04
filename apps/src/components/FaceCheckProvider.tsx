@@ -15,9 +15,9 @@ import {
   Pressable,
   SafeAreaView,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Svg, { Circle, Path } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Feather';
 import { LegalDocumentView } from './LegalDocumentView';

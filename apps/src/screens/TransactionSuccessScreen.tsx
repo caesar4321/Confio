@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Linking, Share, Modal, Vibration } from 'react-native';
+import { View, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Linking, Share, Modal, Vibration } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Clipboard from '@react-native-clipboard/clipboard';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { useNavigation, useRoute } from '@react-navigation/native';

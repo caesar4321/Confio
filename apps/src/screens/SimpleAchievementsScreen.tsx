@@ -1,12 +1,12 @@
 import React from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { NavigationProp } from '@react-navigation/native';
 import { useQuery } from '@apollo/client';
 import { gql } from '@apollo/client';

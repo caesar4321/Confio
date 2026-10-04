@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Modal, ActivityIndicator, Alert } from 'react-native';
+import { Text, TextInput } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useMutation, useApolloClient } from '@apollo/client';
 import { CHECK_USERS_BY_PHONES, CHECK_USERS_BY_USERNAMES } from '../apollo/queries';

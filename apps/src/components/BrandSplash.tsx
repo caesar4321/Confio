@@ -6,9 +6,9 @@ import {
   Easing,
   Image,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Svg, { Circle } from 'react-native-svg';
 
 import { colors } from '../config/theme';

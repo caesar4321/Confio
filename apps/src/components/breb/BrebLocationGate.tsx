@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, SafeAreaView, ScrollView, StatusBar, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, SafeAreaView, ScrollView, StatusBar, View } from 'react-native';
+import { Text } from '../common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 

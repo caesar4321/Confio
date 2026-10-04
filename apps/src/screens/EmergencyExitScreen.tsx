@@ -26,8 +26,19 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  ActivityIndicator, StatusBar, Modal, KeyboardAvoidingView, Platform, Linking, Alert } from 'react-native';
+  View,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  StatusBar,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  Linking,
+  Alert,
+} from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';

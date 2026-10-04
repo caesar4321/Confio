@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Modal, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, Linking } from 'react-native';
+import { View, Modal, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, Linking } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 

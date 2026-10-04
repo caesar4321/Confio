@@ -15,7 +15,8 @@
 //     bottom before this was capped.
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Image, ScrollView, useWindowDimensions, ImageSourcePropType } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Modal, Image, ScrollView, useWindowDimensions, ImageSourcePropType } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { useAppSafeArea } from '../hooks/useAppSafeArea';

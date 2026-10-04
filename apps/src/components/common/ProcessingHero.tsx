@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, StyleSheet, View } from 'react-native';
+import { Text } from './AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../../config/theme';
 

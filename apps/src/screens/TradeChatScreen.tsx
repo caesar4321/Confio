@@ -2,12 +2,10 @@ import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
   StatusBar,
-  TextInput,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -16,6 +14,7 @@ import {
   Keyboard,
   FlatList,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { p2pSponsoredService } from '../services/p2pSponsoredService';

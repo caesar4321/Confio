@@ -92,6 +92,10 @@
 		<string>Feather.ttf</string>
 		<string>MaterialCommunityIcons.ttf</string>
 		<string>FontAwesome.ttf</string>
+		<string>InstrumentSans-Regular.ttf</string>
+		<string>InstrumentSans-Medium.ttf</string>
+		<string>InstrumentSans-SemiBold.ttf</string>
+		<string>InstrumentSans-Bold.ttf</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

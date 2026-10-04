@@ -1,12 +1,12 @@
 import React, { useMemo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   Animated,
   Platform,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 
 interface ExchangeHeaderProps {

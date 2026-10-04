@@ -1,10 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   ScrollView,
   StatusBar,
   Modal,
@@ -13,6 +11,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';

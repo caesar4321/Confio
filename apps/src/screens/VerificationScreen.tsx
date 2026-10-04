@@ -6,10 +6,10 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { CompositeNavigationProp, NavigationProp, useFocusEffect, useNavigation } from '@react-navigation/native';
 import { gql, useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';

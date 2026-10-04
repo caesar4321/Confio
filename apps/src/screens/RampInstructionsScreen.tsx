@@ -10,11 +10,11 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
   TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';

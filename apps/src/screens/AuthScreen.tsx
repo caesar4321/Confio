@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Easing, ActivityIndicator, Alert, Platform, ScrollView, StatusBar } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Image, Animated, Easing, ActivityIndicator, Alert, Platform, ScrollView, StatusBar } from 'react-native';
+import { Text } from '../components/common/AppText';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';

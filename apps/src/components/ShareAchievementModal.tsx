@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   Modal,
-  TextInput,
   Image,
   Linking,
   Alert,
 } from 'react-native';
+import { Text, TextInput } from './common/AppText';
 import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
 import WhatsAppIcon from '../assets/svg/WhatsApp.svg';

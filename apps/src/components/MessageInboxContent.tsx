@@ -1,6 +1,7 @@
 import type { ContentPollData } from './ContentPoll';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, View } from 'react-native';
+import { Text } from './common/AppText';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
 
 import { MessageInboxList } from './MessageInboxList';

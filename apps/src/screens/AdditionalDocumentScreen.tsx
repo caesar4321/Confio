@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { SafeAreaView, ScrollView, StatusBar, Text, View } from 'react-native';
+import { SafeAreaView, ScrollView, StatusBar, View } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

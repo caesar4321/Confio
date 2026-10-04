@@ -1,12 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { Header } from '../navigation/Header';

@@ -6,10 +6,10 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { useMutation, useQuery } from '@apollo/client';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';

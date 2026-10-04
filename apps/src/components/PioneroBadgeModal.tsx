@@ -1,13 +1,13 @@
 import React from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   Modal,
   Image,
   Dimensions,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 
 const { width: screenWidth } = Dimensions.get('window');

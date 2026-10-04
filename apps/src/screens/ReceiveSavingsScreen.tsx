@@ -15,7 +15,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
@@ -24,6 +23,7 @@ import {
   Linking,
   Share,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';

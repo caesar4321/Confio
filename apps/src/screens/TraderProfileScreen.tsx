@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
@@ -23,6 +22,7 @@ import { GET_P2P_OFFERS, GET_USER_BANK_ACCOUNTS, TOGGLE_FAVORITE_TRADER } from '
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Alert } from 'react-native';
+import { Text } from '../components/common/AppText';
 
 type TraderProfileRouteProp = RouteProp<MainStackParamList, 'TraderProfile'>;
 type TraderProfileNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TraderProfile'>;

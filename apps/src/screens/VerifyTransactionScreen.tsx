@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking, TouchableOpacity, Alert, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, ActivityIndicator, Linking, TouchableOpacity, Alert, Platform } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, gql } from '@apollo/client';

@@ -2,10 +2,8 @@ import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   Alert,
   ActivityIndicator,
   TouchableWithoutFeedback,
@@ -14,6 +12,7 @@ import {
   Image,
   RefreshControl,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';

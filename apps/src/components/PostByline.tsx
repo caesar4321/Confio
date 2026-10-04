@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from './common/AppText';
 import { colors } from '../config/theme';
 import { VerifiedBadge } from './VerifiedBadge';
 

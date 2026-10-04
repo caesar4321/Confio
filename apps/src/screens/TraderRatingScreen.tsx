@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   ScrollView,
   StatusBar,
   Alert,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';

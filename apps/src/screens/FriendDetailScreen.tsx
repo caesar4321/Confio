@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
@@ -9,8 +8,8 @@ import {
   Image,
   RefreshControl,
   Modal,
-  TextInput,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

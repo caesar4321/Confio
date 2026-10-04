@@ -2,6 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
 import { View, StyleSheet, Platform } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { BottomTabParamList, RootStackParamList } from '../types/navigation';
@@ -19,7 +20,6 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useQuery } from '@apollo/client';
 import { GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
-import { Text } from 'react-native';
 
 // Single navigator instance
 const Tabs = createBottomTabNavigator<BottomTabParamList>();

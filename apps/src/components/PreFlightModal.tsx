@@ -1,13 +1,13 @@
 import React from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    Modal,
-    TouchableOpacity,
-    Platform,
-    ScrollView,
+  View,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  Platform,
+  ScrollView,
 } from 'react-native';
+import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 
 interface PreFlightModalProps {

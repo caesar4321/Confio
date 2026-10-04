@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, SafeAreaView, ScrollView, Share, StatusBar, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, SafeAreaView, ScrollView, Share, StatusBar, TouchableOpacity, View } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect, useNavigation, usePreventRemove, useRoute } from '@react-navigation/native';

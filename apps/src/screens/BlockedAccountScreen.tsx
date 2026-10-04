@@ -16,8 +16,15 @@
 
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Linking, StatusBar, ActivityIndicator, ScrollView,
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  Linking,
+  StatusBar,
+  ActivityIndicator,
+  ScrollView,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';

@@ -1,11 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  TextInput,
   Modal,
   Platform,
   Image,
@@ -20,6 +18,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
+import { Text, TextInput } from '../components/common/AppText';
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';

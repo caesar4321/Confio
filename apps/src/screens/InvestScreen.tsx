@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo } from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';

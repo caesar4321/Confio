@@ -1,10 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   ScrollView,
   Platform,
   Animated,
@@ -16,8 +14,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   StatusBar,
-  TextInput as TextInputType,
 } from 'react-native';
+import { Text, TextInput, TextInput as TextInputType } from '../components/common/AppText';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';

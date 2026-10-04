@@ -1,6 +1,7 @@
 import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Platform, Animated, ScrollView, BackHandler, Alert } from 'react-native';
+import { View, StyleSheet, Platform, Animated, ScrollView, BackHandler, Alert } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';

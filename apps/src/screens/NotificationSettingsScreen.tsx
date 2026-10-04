@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
   Switch,
@@ -10,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';

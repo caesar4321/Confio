@@ -1,12 +1,12 @@
 import React from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Modal,
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
+import { Text } from './common/AppText';
 import { colors } from '../config/theme';
 
 interface AccountSwitchOverlayProps {

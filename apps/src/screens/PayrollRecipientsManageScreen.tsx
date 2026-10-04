@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, Platform, StatusBar } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, Platform, StatusBar } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';

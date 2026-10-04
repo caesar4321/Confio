@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, Linking, TouchableOpacity } from 'react-native';
+import { View, ScrollView, StyleSheet, Linking, TouchableOpacity } from 'react-native';
+import { Text } from './common/AppText';
 import { useQuery } from '@apollo/client';
 import gql from 'graphql-tag';
 import { SkeletonLoader } from './SkeletonLoader';
