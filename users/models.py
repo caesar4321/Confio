@@ -1338,3 +1338,10 @@ from .models_analytics import (  # noqa: F401
     FunnelEvent,
     FunnelDailyRollup,
 )
+
+# Month-summary ("Tu mes") spending categories
+from .models_cashflow import (  # noqa: F401,E402
+    CounterpartyRule,
+    MovementOverride,
+    CounterpartyPromptState,
+)

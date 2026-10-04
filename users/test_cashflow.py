@@ -39,7 +39,7 @@ def row(transaction_type='send', direction='received', amount='10.00', token='US
 
 def ctx(**kw):
     defaults = dict(user=SimpleNamespace(id=1, is_authenticated=True), account=None,
-                    account_type='personal', business_id=None)
+                    account_type='personal', business_id=None, owner_id=1)
     defaults.update(kw)
     return ViewerContext(**defaults)
 
@@ -72,6 +72,17 @@ class ClassifyTests(SimpleTestCase):
     def test_business_account_to_its_owner_is_own_transfer(self):
         r = row('send', direction='sent', counterparty_user_id=1)
         self.assertEqual(classify(r, ctx(account_type='business', business_id=9)).kind, 'own_transfer')
+
+    def test_employee_and_owner_classify_business_rows_identically(self):
+        # business 9 owned by user 1; caller is employee user 5
+        to_owner = row('send', direction='sent', counterparty_user_id=1)
+        to_employee = row('send', direction='sent', counterparty_user_id=5)
+        employee = ctx(user=SimpleNamespace(id=5, is_authenticated=True), account_type='business',
+                       business_id=9, owner_id=1)
+        owner = ctx(account_type='business', business_id=9, owner_id=1)
+        for c in (owner, employee):
+            self.assertEqual(classify(to_owner, c).kind, 'own_transfer')
+            self.assertEqual(classify(to_employee, c).kind, 'p2p_send')
 
     def test_savings_and_stock_moves_are_net_lines_not_spending(self):
         to_sav = row('conversion', conversion=SimpleNamespace(conversion_type='to_savings', status='COMPLETED'),
@@ -302,3 +313,145 @@ class RampLandingAcrossWindowsTests(__import__('django.test', fromlist=['TestCas
             transaction_date=timezone.now() - timedelta(days=60))
         scope = UnifiedTransactionTable.objects.filter(counterparty_user=user)
         self.assertEqual(_ramp_arrival_hashes(scope), {'0xabcdef'})
+
+
+class CategoryLabelTests(__import__('django.test', fromlist=['TestCase']).TestCase):
+    """Chips + labels end to end (T3): scoping, permissions, rule vs override,
+    retroactive rules (R20), skip/dismiss limits (D11), summary categories."""
+
+    def setUp(self):
+        from django.utils import timezone
+        from users.models import Account, User
+        from users.models_unified import UnifiedTransactionTable
+        self.user = User.objects.create_user(username='cat-owner', email='co@example.com', password='x', firebase_uid='cat-owner')
+        self.friend = User.objects.create_user(username='cat-friend', email='cf@example.com', password='x', firebase_uid='cat-friend')
+        self.account = Account.objects.create(user=self.user, account_type='personal', account_index=0,
+                                              algorand_address='C' * 58, bsc_address='0x' + '11' * 20)
+        self.other = '0x' + '22' * 20
+
+        def pay(amount, when=None):
+            return UnifiedTransactionTable.objects.create(
+                transaction_type='send', amount=amount, token_type='USDT', status='CONFIRMED',
+                sender_user=self.user, sender_type='user', counterparty_user=self.friend, counterparty_type='user',
+                from_address=self.account.bsc_address, to_address=self.other,
+                counterparty_display_name='Doña Rosa', transaction_date=when or timezone.now())
+        self.pay = pay
+        self.jwt = {'account_type': 'personal', 'account_index': 0, 'business_id': None}
+
+    def _info(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(context=SimpleNamespace(user=self.user))
+
+    def _call(self, fn, **kw):
+        with mock.patch('users.jwt_context.get_jwt_business_context_with_validation', return_value=self.jwt):
+            return fn(**kw)
+
+    def _prompt(self, row):
+        from users.cashflow_schema import CategoryPromptQuery
+        return self._call(CategoryPromptQuery().resolve_category_prompt, info=self._info(), movement_id=row.pk)
+
+    def _categorize(self, row, category, apply_to):
+        from users.cashflow_schema import CategorizeMovement
+        return self._call(CategorizeMovement.mutate, root=None, info=self._info(), category=category,
+                          apply_to=apply_to, movement_id=row.pk)
+
+    def _record(self, row, outcome):
+        from users.cashflow_schema import RecordCategoryPrompt
+        return self._call(RecordCategoryPrompt.mutate, root=None, info=self._info(), outcome=outcome, movement_id=row.pk)
+
+    def _summary(self):
+        from django.utils import timezone
+        from users.cashflow_schema import MonthSummaryQuery
+        now = timezone.now()
+        return self._call(MonthSummaryQuery().resolve_month_summary, info=self._info(),
+                          year=now.year, month=now.month, timezone='UTC')
+
+    def test_counterparty_rule_labels_past_and_future_payments(self):
+        first, second = self.pay('10.00'), self.pay('5.00')
+        self.assertTrue(self._prompt(first).should_ask)
+        self.assertTrue(self._categorize(first, 'food', 'counterparty').success)
+        later = self.pay('7.00')
+        # every payment to her is now food, including the older and the later one
+        for row in (first, second, later):
+            p = self._prompt(row)
+            self.assertEqual((p.should_ask, p.category), (False, 'food'))
+        cats = {c.category: c.amount_usd for c in self._summary().current.spending_by_category}
+        self.assertEqual(cats, {'food': '22.00'})
+
+    def test_single_payment_override_wins_over_the_rule(self):
+        a, b = self.pay('10.00'), self.pay('4.00')
+        self._categorize(a, 'food', 'counterparty')
+        self._categorize(b, 'family', 'movement')
+        cats = [(c.category, c.amount_usd) for c in self._summary().current.spending_by_category]
+        self.assertEqual(cats, [('food', '10.00'), ('family', '4.00')])
+
+    def test_uncategorized_is_listed_last(self):
+        from users.models import User
+        self.pay('3.00')
+        stranger = User.objects.create_user(username='cat-x', email='x@example.com', password='x', firebase_uid='cat-x')
+        from users.models_unified import UnifiedTransactionTable
+        from django.utils import timezone
+        big = UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount='50.00', token_type='USDT', status='CONFIRMED',
+            sender_user=self.user, sender_type='user', counterparty_user=stranger, counterparty_type='user',
+            from_address=self.account.bsc_address, to_address='0x' + '33' * 20, transaction_date=timezone.now())
+        self._categorize(big, 'home', 'counterparty')
+        cats = [c.category for c in self._summary().current.spending_by_category]
+        self.assertEqual(cats, ['home', 'uncategorized'])
+
+    def test_two_skips_or_three_dismisses_stop_the_prompt(self):
+        r = self.pay('1.00')
+        self._record(r, 'skipped')
+        self.assertTrue(self._prompt(r).should_ask)
+        self._record(r, 'skipped')
+        self.assertFalse(self._prompt(r).should_ask)
+        r2 = self.pay('1.00')
+        from users.models_cashflow import CounterpartyPromptState
+        CounterpartyPromptState.objects.all().delete()
+        for _ in range(2):
+            self._record(r2, 'dismissed')
+        self.assertTrue(self._prompt(r2).should_ask)
+        self._record(r2, 'dismissed')
+        self.assertFalse(self._prompt(r2).should_ask)
+
+    def test_cannot_label_someone_elses_movement_or_income(self):
+        from django.utils import timezone
+        from users.models_unified import UnifiedTransactionTable
+        theirs = UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount='9.00', token_type='USDT', status='CONFIRMED',
+            sender_user=self.friend, sender_type='user', counterparty_user=None, counterparty_type='external',
+            from_address=self.other, to_address='0x' + '44' * 20, transaction_date=timezone.now())
+        self.assertEqual(self._categorize(theirs, 'food', 'counterparty').error, 'not_found')
+        income = UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount='9.00', token_type='USDT', status='CONFIRMED',
+            sender_user=self.friend, sender_type='user', counterparty_user=self.user, counterparty_type='user',
+            from_address=self.other, to_address=self.account.bsc_address, transaction_date=timezone.now())
+        self.assertEqual(self._categorize(income, 'food', 'counterparty').error, 'not_found')
+        self.assertFalse(self._prompt(income).should_ask)
+
+    def test_pending_payment_can_be_labeled_but_failed_cannot(self):
+        pending = self.pay('2.00')
+        pending.status = 'SUBMITTED'
+        pending.save(update_fields=['status'])
+        self.assertTrue(self._prompt(pending).should_ask)
+        failed = self.pay('2.00')
+        failed.status = 'FAILED'
+        failed.save(update_fields=['status'])
+        self.assertFalse(self._prompt(failed).should_ask)
+
+    def test_invalid_input_and_denied_permission(self):
+        r = self.pay('1.00')
+        self.assertEqual(self._categorize(r, 'groceries', 'counterparty').error, 'invalid_input')
+        self.assertEqual(self._categorize(r, 'food', 'everything').error, 'invalid_input')
+        self.jwt = None  # get_jwt_business_context_with_validation denied (e.g. cashier lacks view_analytics)
+        self.assertEqual(self._categorize(r, 'food', 'counterparty').error, 'not_allowed')
+        self.assertFalse(self._prompt(r).should_ask)
+
+    def test_labels_are_per_account_not_per_user(self):
+        from users.models import Account
+        from users.models_cashflow import CounterpartyRule
+        r = self.pay('1.00')
+        self._categorize(r, 'food', 'counterparty')
+        self.assertEqual(list(CounterpartyRule.objects.values_list('account_id', 'counterparty_key', 'category')),
+                         [(self.account.id, f'user:{self.friend.id}', 'food')])
+        self.assertEqual(Account.objects.filter(user=self.user).count(), 1)
