@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
@@ -22,19 +23,23 @@ export const BackupCompletionScreen = () => {
     refreshProfile('personal').catch(err => {    });
   }, [refreshProfile]);
 
-  const continueOnboardingIfSafe = useCallback(async () => {
+  const continueOnboardingIfSafe = useCallback(async (showPendingError = true): Promise<boolean> => {
     await refreshProfile('personal');
     const { data } = await apolloClient.query({
       query: GET_ME,
       fetchPolicy: 'network-only',
     });
     const me = data?.me;
-    if (me?.requiresBackupCompletion) {
-      setError('Todavia no pudimos confirmar el respaldo en el servidor. Intenta nuevamente.');
-      return;
+    if (typeof me?.requiresBackupCompletion !== 'boolean') {
+      throw new Error('No pudimos verificar el estado del respaldo. Intenta nuevamente.');
+    }
+    if (me.requiresBackupCompletion) {
+      if (showPendingError) setError('Todavia no pudimos confirmar el respaldo en el servidor. Intenta nuevamente.');
+      return false;
     }
     const phoneVerified = !!(me?.phoneNumber && me?.phoneCountry);
     await handleSuccessfulLogin(phoneVerified, false);
+    return true;
   }, [apolloClient, handleSuccessfulLogin, refreshProfile]);
 
   const handleRetryBackup = useCallback(async () => {
@@ -43,6 +48,10 @@ export const BackupCompletionScreen = () => {
     setSupportCode(null);
 
     try {
+      // The server may now route a legacy-only wallet to migration instead of
+      // V2 backup setup. Recheck before touching keys, including for sessions
+      // that were already parked here when that policy changed.
+      if (await continueOnboardingIfSafe(false)) return;
       const result = await authService.enableDriveBackup();
 
       if (result.success) {

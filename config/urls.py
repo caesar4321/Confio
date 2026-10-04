@@ -193,6 +193,7 @@ if settings.DEBUG:
 from .views import index
 from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
 from ramps.views import koywe_webhook
+from ramps.stereum_views import webhook as stereum_test_webhook
 from payment_accounts.views import cobre_webhook, infinia_webhook
 from security.views import didit_webhook
 from security.emergency_views import (
@@ -210,6 +211,7 @@ urlpatterns += [
     path('api/emergency-exit/face/start/', emergency_exit_face_start, name='emergency_exit_face_start'),
     path('api/emergency-exit/face/complete/', emergency_exit_face_complete, name='emergency_exit_face_complete'),
     path('api/koywe/webhook/', koywe_webhook, name='koywe_webhook'),
+    path('api/stereum/test/webhook/', stereum_test_webhook, name='stereum_test_webhook'),
     path('api/payment-accounts/cobre/webhook/', cobre_webhook, name='cobre_payment_webhook'),
     path('api/payment-accounts/infinia/webhook/', infinia_webhook, name='infinia_payment_webhook'),
     path('api/funnel/ingest/', funnel_ingest, name='funnel_ingest'),

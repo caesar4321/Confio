@@ -6,6 +6,7 @@ from sms_verification import schema as sms_verification_schema
 from send import schema as send_schema
 from payments import schema as payments_schema
 from ramps import schema as ramps_schema
+from ramps import stereum_schema
 from payment_accounts import schema as payment_accounts_schema
 from payment_accounts import pending_payin_schema
 from payroll import schema as payroll_schema
@@ -27,7 +28,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payment_accounts_schema.Query, pending_payin_schema.PendingPayinQuery, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, cusd_plus_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, blockchain_schema.Query, billing_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
+class Query(stereum_schema.Query, users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payment_accounts_schema.Query, pending_payin_schema.PendingPayinQuery, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, cusd_plus_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, blockchain_schema.Query, billing_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -40,6 +41,7 @@ class Mutation(
 	send_schema.Mutation,
 	payments_schema.Mutation,
 	ramps_schema.Mutation,
+	stereum_schema.Mutation,
 	payment_accounts_schema.Mutation,
 	pending_payin_schema.PendingPayinMutation,
 	payroll_schema.Mutation,

@@ -1,0 +1,15 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Stereum customer onboarding — sandbox</h1>
+<p>This registers your signed-in Confío user's verified personal identity with Stereum. Use a designated test user and provider-approved test identity.</p>
+<p>The verified identity below is reused without uploading document images:</p>
+<dl>
+  <dt>Name</dt><dd>{{ identity.verified_first_name }} {{ identity.verified_last_name }}</dd>
+  <dt>Document</dt><dd>{{ identity.document_type }} · {{ identity.document_number }}</dd>
+  <dt>Date of birth</dt><dd>{{ identity.verified_date_of_birth }}</dd>
+</dl>
+{% if record %}<p>Status: <strong>{{ record.status }}</strong></p>{% if record.error %}<p class="errornote">{{ record.error }}</p>{% endif %}{% endif %}
+<form method="post">{% csrf_token %}{{ form.as_p }}<input type="submit" value="Register with Stereum test API"></form>
+<p>Registered means a customer record exists. Provider FX eligibility is checked when requesting a customer quote. Rejected or uncertain attempts require reconciliation; resubmitting this form does not replay them.</p>
+<a href="{% url 'admin:stereum_test_console' %}">Open quote console</a>
+{% endblock %}

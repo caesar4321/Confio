@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linking, AppState, AppStateStatus, Modal, StatusBar } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linking, AppState, AppStateStatus, Modal, StatusBar } from 'react-native';
+import { Text } from '../components/common/AppText';
 import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
 import type { Code } from 'react-native-vision-camera';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -25,6 +26,7 @@ const QR_RAILS: Record<string, string> = {
   br_qr: 'Pix',
   co_qr: 'Bre-B',
   ar_qr: 'QR Argentina',
+  bo_qr: 'QR Bolivia · prueba',
 };
 
 export const ScanScreen = () => {
@@ -181,7 +183,7 @@ export const ScanScreen = () => {
           variables: {direction: 'send'}, fetchPolicy: 'network-only'});
         if (scanSession.current !== session) return;
         const method: LocalMethod | undefined = data?.localMoneyMethods?.find((m: LocalMethod) => m.id === localQr.methodId);
-        if (!['ar_qr', 'br_qr', 'co_qr'].includes(localQr.methodId) || !method
+        if (!['ar_qr', 'br_qr', 'co_qr', 'bo_qr'].includes(localQr.methodId) || !method
           || !['live', 'needs_verification', 'needs_document'].includes(method.status)) {
           showScanError('Medio no disponible', 'Este tipo de QR todavía no está habilitado para tu cuenta.');
           return;
@@ -544,6 +546,9 @@ export const ScanScreen = () => {
               Tu saldo se convierte a moneda local al pagar. Ves el tipo de cambio final antes de confirmar.
             </Text>
             <Text style={styles.sheetNote}>También lee los QR de cobro de Confío.</Text>
+            {qrRails.some(method => method.id === 'bo_qr') && <Text style={styles.sheetNote}>
+              QR Bolivia está en modo de prueba y no descuenta de tu saldo.
+            </Text>}
           </View>
         </TouchableOpacity>
       </Modal>

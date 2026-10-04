@@ -164,6 +164,12 @@ class LocalMoneyQuery(graphene.ObjectType):
         if direction not in {'send', 'receive'}:
             raise GraphQLError('Invalid direction')
         rows = local_money.methods(owner, _identity(owner, required=False), direction)
+        if direction == 'send':
+            from ramps.stereum_qr import available
+            if available(info.context.user, personal=owner.account_type == 'personal' and owner.user_id == info.context.user.pk):
+                rows.append(dict(method=local_money.Method('bo_qr', 'send', 'BOL', 'BO', 'BOB',
+                    'QR Bolivia · prueba', 'Escanea o importa un QR bancario boliviano'),
+                    status='live', reason='sandbox', requirement=None, account_status='active'))
         from . import breb_location
         if direction == 'receive':
             # Bre-B is listed wherever the person is: its application checks the

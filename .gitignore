@@ -129,3 +129,6 @@ confio.tar.gz
 
 # Signed Ondo contract — local reading copy, NEVER commit
 .ondo-contract-tmp.pdf
+
+# Local Stereum sandbox credentials
+.env.stereum-test.local
