@@ -537,27 +537,3 @@ def rollup_funnel_events(target_date_str=None):
         logger.error("Error rolling up funnel events: %s", str(e), exc_info=True)
         raise
 
-
-@shared_task(name='users.warm_protection_quotes')
-def warm_protection_quotes():
-    """Keep Confío's US$100 buy quote warm for every protection currency
-    (tu-mes-insights R27): Tu mes reads it from the shared cache only, so the
-    card never waits on the provider. Only meaningful with a shared (Redis)
-    cache; with the in-process cache the resolver fetches inline instead."""
-    import logging
-    from django.conf import settings
-    from users.protection import CURRENCY_BY_COUNTRY, protection_countries, warm_quote
-    log = logging.getLogger(__name__)
-    if not getattr(settings, 'USE_REDIS_CACHE', False):
-        return 'skipped: no shared cache'
-    done = []
-    for country in sorted(protection_countries()):
-        currency = CURRENCY_BY_COUNTRY.get(country)
-        if not currency:
-            continue
-        try:
-            if warm_quote(currency):
-                done.append(currency)
-        except Exception:  # noqa: BLE001 — the previous value stays until its TTL
-            log.warning('buy quote warm failed for %s', currency, exc_info=True)
-    return ','.join(done) or 'none'

@@ -145,14 +145,16 @@ class SavingsEarnedType(graphene.ObjectType):
 
 
 class ProtectionValueType(graphene.ObjectType):
-    currency = graphene.String(required=True, description='Ramp currency, e.g. BOB')
+    currency = graphene.String(required=True, description='Local currency, e.g. BOB')
+    basis = graphene.String(required=True, description="'purchase' (paid in Confío) | 'month_start' (value on the 1st)")
+    source = graphene.String(required=True, description='Rate source for "today" (binance_p2p)')
     protected_usd = graphene.String(required=True, description='Dollars bought in Confío still held (R13 replay, capped)')
-    paid_local = graphene.String(required=True, description='What the user paid for them, local currency')
-    today_local = graphene.String(required=True, description="What Confío's buy rate would charge today")
+    paid_local = graphene.String(required=True, description='purchase: what was paid; month_start: value on the 1st')
+    today_local = graphene.String(required=True, description="Those dollars at today's Binance P2P rate")
     gain_local = graphene.String(required=True)
-    avg_rate = graphene.String(required=True, description='Local per USD the user paid on average (2 decimals)')
-    today_rate = graphene.String(required=True, description="Confío's all-in buy rate for US$100 (2 decimals)")
-    quoted_at = graphene.String(required=True, description='ISO time of the quote the figures use')
+    avg_rate = graphene.String(required=True, description='purchase: average paid per USD; month_start: rate on the 1st')
+    today_rate = graphene.String(required=True, description='Binance P2P local per USD (2 decimals)')
+    quoted_at = graphene.String(required=True, description='ISO time the "today" rate was fetched')
 
 
 class MonthSummaryQuery(graphene.ObjectType):
@@ -194,20 +196,27 @@ class MonthSummaryQuery(graphene.ObjectType):
 
     protection_value = graphene.Field(
         ProtectionValueType,
-        description='"Tu dólar te protegió" for the active personal account (current figures). Null whenever '
-                    'anything is unknown (fail closed). Own query.',
+        timezone=graphene.String(description='Device IANA timezone; falls back to the phone country'),
+        description='"Tu dólar te protegió" for the active personal account (current month, Binance P2P '
+                    'today). Null whenever anything is unknown (fail closed). Own query.',
     )
 
-    def resolve_protection_value(self, info):
+    def resolve_protection_value(self, info, timezone=None):
         from django.utils import timezone as dj_tz
+        from users.cashflow import resolve_timezone
         from users.protection import protection_value
-        now = dj_tz.now()
-        context = _summary_context(info, now.year, now.month, None)
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return None
+        # The user's LOCAL month (a UTC month would already be next month on
+        # the last evening in La Paz or Caracas).
+        local = dj_tz.now().astimezone(resolve_timezone(timezone, getattr(user, 'phone_country', None)))
+        context = _summary_context(info, local.year, local.month, timezone)
         if context is None:
             return None
         user, account, account_type, business_id, _tz = context
         try:
-            p = protection_value(user, account, account_type, business_id)
+            p = protection_value(user, account, account_type, business_id, local.year, local.month)
         except Exception:  # noqa: BLE001 — an unknown hides the card, never a guess
             logger.warning('protection value unavailable for account %s', account.id, exc_info=True)
             return None
@@ -215,7 +224,7 @@ class MonthSummaryQuery(graphene.ObjectType):
             return None
         two = lambda v: format(v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), 'f')  # noqa: E731
         return ProtectionValueType(
-            currency=p.currency, protected_usd=_usd(p.protected_usd), paid_local=two(p.paid_local),
+            currency=p.currency, basis=p.basis, source='binance_p2p', protected_usd=_usd(p.protected_usd), paid_local=two(p.paid_local),
             today_local=two(p.today_local), gain_local=two(p.gain_local), avg_rate=two(p.avg_rate),
             today_rate=two(p.today_rate), quoted_at=p.quoted_at)
 

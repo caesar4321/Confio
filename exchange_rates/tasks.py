@@ -113,3 +113,33 @@ def cleanup_old_rates():
         'deleted_rates': deleted_rates[0],
         'deleted_logs': deleted_logs[0]
     }
+
+@shared_task(name='exchange_rates.snapshot_daily_rates')
+@ensure_db_connection_closed
+def snapshot_daily_rates():
+    """Keep one Binance P2P rate per currency per UTC day (ExchangeRate rows
+    are purged after 7 days). Tu mes compares the 1st of the month with today
+    in countries without a Confío on-ramp. Runs hourly and is idempotent: the
+    first run of the day that finds a fresh rate writes it."""
+    from datetime import timedelta
+    from django.db import IntegrityError
+    from django.utils import timezone
+    from .models import DailyRateSnapshot, ExchangeRate
+
+    today = timezone.now().date()
+    written = []
+    for currency in ('VES', 'ARS', 'BOB'):
+        if DailyRateSnapshot.objects.filter(date=today, currency=currency, source='binance_p2p').exists():
+            continue
+        row = (ExchangeRate.objects.filter(source_currency=currency, target_currency='USD', source='binance_p2p',
+                                           is_active=True, fetched_at__gte=timezone.now() - timedelta(hours=2))
+               .order_by('-fetched_at').first())
+        if row is None or row.rate <= 0:
+            continue                       # no fresh rate: the next hourly run tries again
+        try:
+            DailyRateSnapshot.objects.create(date=today, currency=currency, source='binance_p2p',
+                                             rate=row.rate, fetched_at=row.fetched_at)
+            written.append(currency)
+        except IntegrityError:
+            pass                           # another worker wrote it first
+    return ','.join(written) or 'none'

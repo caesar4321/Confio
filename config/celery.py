@@ -24,16 +24,19 @@ try:
 except ImportError:
     pass  # Blockchain app not yet installed
 
-# Tu mes "Tu dólar te protegió": keep the US$100 buy quotes warm (TTL 10 min).
-app.conf.beat_schedule.setdefault('users-warm-protection-quotes', {
-    'task': 'users.warm_protection_quotes',
-    'schedule': crontab(minute='*/8'),
-})
-
 # Tu mes "Tu ahorro ganó": one cUSD+ price + holdings snapshot per UTC day.
+# Hourly from 00:15 to 06:15: the first run that succeeds writes the day,
+# later runs see it exists, so one RPC blip no longer loses the day.
 app.conf.beat_schedule.setdefault('cusd-plus-snapshot-savings-daily', {
     'task': 'cusd_plus.snapshot_savings_daily',
-    'schedule': crontab(hour=0, minute=15),
+    'schedule': crontab(hour='0-6', minute=15),
+})
+
+# Tu mes "Tu dólar te protegió": keep one Binance P2P rate per day (the 1st
+# of the month is the baseline where there is no Confío on-ramp).
+app.conf.beat_schedule.setdefault('exchange-rates-snapshot-daily-rates', {
+    'task': 'exchange_rates.snapshot_daily_rates',
+    'schedule': crontab(minute=20),
 })
 
 app.conf.beat_schedule.setdefault('security-purge-face-check-evidence', {

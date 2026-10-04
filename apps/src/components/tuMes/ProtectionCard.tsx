@@ -8,14 +8,18 @@ import { Text } from '../common/AppText';
 import { colors } from '../../config/theme';
 import type { ProtectionValue, SavingsEarned } from '../../apollo/monthSummary';
 import { formatUsd, MASK, monthName } from '../../utils/monthSummary';
-import { formatLocal, quoteTime, SPARK_MIN_DAYS } from '../../utils/monthInsights';
+import { formatLocal, quoteTime, shortDate, SPARK_MIN_DAYS } from '../../utils/monthInsights';
 import { formatUsdAmount } from '../../utils/numberLocale';
 import { CardShell, CardTitle, CARD_FONT_MULTIPLIER } from './CardShell';
 
-const LOCAL_NAME: Record<string, string> = { BOB: 'bolivianos', VES: 'bolívares' };
+const LOCAL_NAME: Record<string, string> = { BOB: 'bolivianos', VES: 'bolívares', ARS: 'pesos' };
 
-export function ProtectionCard({ value, masked }: { value: ProtectionValue; masked: boolean }) {
+export function ProtectionCard({ value, month, masked }: { value: ProtectionValue; month: number; masked: boolean }) {
   const [sheet, setSheet] = useState(false);
+  // Bolivia/Argentina: what they paid in Confío. Venezuela (no on-ramp yet):
+  // what those dollars were worth on the 1st. "Hoy" is Binance P2P for both.
+  const monthStart = value.basis === 'month_start';
+  const startLabel = shortDate(month, 1);
   const usd = formatUsd(value.protectedUsd, { whole: true });
   const gain = formatLocal(value.gainLocal, value.currency);
   const paid = Number(value.paidLocal);
@@ -27,13 +31,17 @@ export function ProtectionCard({ value, masked }: { value: ProtectionValue; mask
       <CardTitle icon="shield" title="Tu dólar te protegió" />
       <View accessible accessibilityLabel={masked
         ? 'Tu dólar te protegió. Montos ocultos.'
-        : `Tu dólar te protegió: tus ${Math.round(Number(value.protectedUsd))} dólares hoy costarían ${Math.round(Number(value.gainLocal))} ${LOCAL_NAME[value.currency] ?? value.currency} más que lo que pagaste.`}>
+        : monthStart
+          ? `Tu dólar te protegió: tus ${Math.round(Number(value.protectedUsd))} dólares valen hoy ${Math.round(Number(value.gainLocal))} ${LOCAL_NAME[value.currency] ?? value.currency} más que el 1 de ${monthName(month)}.`
+          : `Tu dólar te protegió: tus ${Math.round(Number(value.protectedUsd))} dólares hoy valen ${Math.round(Number(value.gainLocal))} ${LOCAL_NAME[value.currency] ?? value.currency} más de lo que pagaste.`}>
         {!masked && (
           <Text style={styles.sentence} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>
-            Tus {usd} hoy costarían <Text style={styles.gain}>{gain} más</Text>.
+            {monthStart
+              ? <>Tus {usd} valen hoy <Text style={styles.gain}>{gain} más</Text> que el 1 de {monthName(month)}.</>
+              : <>Tus {usd} hoy valen <Text style={styles.gain}>{gain} más</Text> de lo que pagaste.</>}
           </Text>
         )}
-        <Bar label="Pagaste" amount={masked ? MASK : formatLocal(paid, value.currency)} share={paid / max}
+        <Bar label={monthStart ? startLabel : 'Pagaste'} amount={masked ? MASK : formatLocal(paid, value.currency)} share={paid / max}
           color={colors.compareNeutral} />
         <Bar label="Hoy" amount={masked ? MASK : formatLocal(today, value.currency)} share={today / max}
           color={colors.flowIn.bar} />
@@ -42,7 +50,7 @@ export function ProtectionCard({ value, masked }: { value: ProtectionValue; mask
         hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }} testID="tumes-protection-how">
         <Text style={styles.linkText} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>¿Cómo lo calculamos?</Text>
       </TouchableOpacity>
-      <HowSheet visible={sheet} onClose={() => setSheet(false)} value={value} masked={masked} />
+      <HowSheet visible={sheet} onClose={() => setSheet(false)} value={value} month={month} masked={masked} />
     </CardShell>
   );
 }
@@ -60,14 +68,19 @@ function Bar({ label, amount, share, color }: { label: string; amount: string; s
 }
 
 /** "¿Cómo lo calculamos?" — a snapshot of the card's own quote (9A). */
-function HowSheet({ visible, onClose, value, masked }: {
-  visible: boolean; onClose: () => void; value: ProtectionValue; masked: boolean;
+function HowSheet({ visible, onClose, value, month, masked }: {
+  visible: boolean; onClose: () => void; value: ProtectionValue; month: number; masked: boolean;
 }) {
+  const monthStart = value.basis === 'month_start';
+  const perUsd = (rate: string) => (masked ? MASK : `${formatLocal(rate, value.currency, 2)} por dólar`);
   const rows: [string, string][] = [
-    ['Pagaste en promedio', masked ? MASK : `${formatLocal(value.avgRate, value.currency, 2)} por dólar`],
-    ['Confío hoy (compra de US$100)', masked ? MASK : `${formatLocal(value.todayRate, value.currency, 2)} por dólar`],
-    ['Cotización', quoteTime(value.quotedAt)],
+    [monthStart ? `El 1 de ${monthName(month)} (Binance P2P)` : 'Pagaste en Confío, en promedio', perUsd(value.avgRate)],
+    ['Hoy (Binance P2P)', perUsd(value.todayRate)],
+    ['Tasa consultada', quoteTime(value.quotedAt)],
   ];
+  const body = monthStart
+    ? 'Comparamos lo que valían tus dólares el 1 del mes con lo que valen hoy, a la tasa de Binance P2P. Solo cuentan los dólares que tuviste todo el mes.'
+    : 'Comparamos lo que pagaste en Confío por tus dólares con lo que valen hoy a la tasa de Binance P2P.';
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Cerrar" />
@@ -80,9 +93,7 @@ function HowSheet({ visible, onClose, value, masked }: {
             <Text style={styles.sheetValue}>{v}</Text>
           </View>
         ))}
-        <Text style={styles.sheetBody}>
-          Comparamos lo que pagaste por tus dólares con lo que costaría comprarlos hoy en Confío.
-        </Text>
+        <Text style={styles.sheetBody}>{body}</Text>
         <TouchableOpacity style={styles.cta} onPress={onClose} accessibilityRole="button">
           <Text style={styles.ctaText}>Entendido</Text>
         </TouchableOpacity>

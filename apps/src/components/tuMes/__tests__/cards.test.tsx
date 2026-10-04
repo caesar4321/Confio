@@ -74,25 +74,39 @@ describe('Card A', () => {
 });
 
 describe('dollar slot cards', () => {
-  const protection = { currency: 'BOB', protectedUsd: '100.00', paidLocal: '690.00', todayLocal: '740.00',
+  const protection = { currency: 'BOB', basis: 'purchase' as const, source: 'binance_p2p', protectedUsd: '100.00', paidLocal: '690.00', todayLocal: '740.00',
     gainLocal: '50.00', avgRate: '6.90', todayRate: '7.40', quotedAt: new Date().toISOString() };
 
   it('protection: sentence, two bars, and the explainer sheet from the same quote', () => {
-    const tree = mount(<ProtectionCard value={protection} masked={false} />);
+    const tree = mount(<ProtectionCard value={protection} month={10} masked={false} />);
     const all = texts(tree).join(' ');
-    expect(all).toContain('Tus US$100 hoy costarían');
     expect(all).toContain('Bs 50 más');
+    expect(all).toContain('Pagaste');
+    const label = tree.root.find((n) => typeof n.type === 'string' && /Tu dólar te protegió:/.test(n.props.accessibilityLabel ?? ''));
+    expect(label.props.accessibilityLabel).toContain('50 bolivianos más de lo que pagaste');
     act(() => { tree.root.findByProps({ testID: 'tumes-protection-how' }).props.onPress(); });
     const sheet = texts(tree).join(' ');
     expect(sheet).toContain('Bs 6.90 por dólar');
+    expect(sheet).toContain('Hoy (Binance P2P)');
     expect(sheet).toContain('Bs 7.40 por dólar');
     expect(sheet).toMatch(/hoy, \d\d:\d\d/);
   });
 
   it('protection masked: no sentence, no amounts, sheet rates hidden', () => {
-    const tree = mount(<ProtectionCard value={protection} masked />);
+    const tree = mount(<ProtectionCard value={protection} month={10} masked />);
     act(() => { tree.root.findByProps({ testID: 'tumes-protection-how' }).props.onPress(); });
     expect(texts(tree).join(' ')).not.toMatch(/Bs \d/);
+  });
+
+  it('Venezuela compares with the 1st of the month, both at Binance P2P', () => {
+    const tree = mount(<ProtectionCard value={{ ...protection, currency: 'VES', basis: 'month_start' }} month={10} masked={false} />);
+    const all = texts(tree).join(' ');
+    expect(all).toContain('1 oct');
+    const label = tree.root.find((n) => typeof n.type === 'string' && /Tu dólar te protegió:/.test(n.props.accessibilityLabel ?? ''));
+    expect(label.props.accessibilityLabel).toContain('bolívares más que el 1 de octubre');
+    expect(all).not.toContain('Pagaste');
+    act(() => { tree.root.findByProps({ testID: 'tumes-protection-how' }).props.onPress(); });
+    expect(texts(tree).join(' ')).toContain('El 1 de octubre (Binance P2P)');
   });
 
   it('savings: cents, and bars only from the third day', () => {

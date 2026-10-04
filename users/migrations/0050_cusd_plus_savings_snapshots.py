@@ -36,7 +36,6 @@ class Migration(migrations.Migration):
                 ('account', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='cusd_plus_snapshots', to='users.account')),
             ],
             options={
-                'indexes': [models.Index(fields=['account', 'date'], name='users_cusdp_account_dd6140_idx')],
                 'constraints': [models.UniqueConstraint(fields=('account', 'date'), name='uniq_cusd_plus_holding_day')],
             },
         ),

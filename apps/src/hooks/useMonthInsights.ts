@@ -94,7 +94,7 @@ export function useMonthInsights(params: {
       { query: GET_SAVINGS_EARNED, variables: { year, month }, ...opt })).then((d) => d?.savingsEarned ?? null);
     // Protection is a "today" number: current month only (§4).
     const protection = isCurrent
-      ? safe(client.query<{ protectionValue: ProtectionValue | null }>({ query: GET_PROTECTION_VALUE, ...opt }))
+      ? safe(client.query<{ protectionValue: ProtectionValue | null }>({ query: GET_PROTECTION_VALUE, variables: { timezone }, ...opt }))
         .then((d) => d?.protectionValue ?? null)
       : Promise.resolve(null);
     return { insights, savings, protection };
@@ -109,8 +109,13 @@ export function useMonthInsights(params: {
   }
 
   useEffect(() => {
-    if (!ready || !accountKey) return undefined;
+    if (!ready) return undefined;
     const gen = generation.current;
+    if (!accountKey) {                 // nothing to fetch: reveal empty, never a skeleton forever
+      shown.current = { ...EMPTY };
+      setState({ revealed: true, ...EMPTY });
+      return undefined;
+    }
     let closed = false;
     const got: InsightData = { ...EMPTY };
     const reveal = () => {

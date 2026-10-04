@@ -148,9 +148,11 @@ export const GET_SAVINGS_EARNED = gql`
 `;
 
 export const GET_PROTECTION_VALUE = gql`
-  query ProtectionValue {
-    protectionValue {
+  query ProtectionValue($timezone: String) {
+    protectionValue(timezone: $timezone) {
       currency
+      basis
+      source
       protectedUsd
       paidLocal
       todayLocal
@@ -182,6 +184,9 @@ export type SavingsEarned = {
 
 export type ProtectionValue = {
   currency: string;
+  /** 'purchase': paid in Confío (BO, AR) · 'month_start': value on the 1st (VE) */
+  basis: 'purchase' | 'month_start';
+  source: string;
   protectedUsd: string;
   paidLocal: string;
   todayLocal: string;

@@ -301,7 +301,7 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
       )}
       {insights && (
         <Animated.View style={{ opacity: fade }} testID="tumes-revealed">
-          {slot?.kind === 'protection' && <ProtectionCard value={slot.value} masked={masked} />}
+          {slot?.kind === 'protection' && <ProtectionCard value={slot.value} month={summary.month} masked={masked} />}
           {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
           {showRecurring && (
             <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}

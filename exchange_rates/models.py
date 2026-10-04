@@ -108,3 +108,24 @@ class RateFetchLog(models.Model):
     
     def __str__(self):
         return f"{self.source} - {self.status} ({self.rates_fetched} rates) at {self.created_at}"
+
+
+class DailyRateSnapshot(models.Model):
+    """One kept rate per UTC day and currency (ExchangeRate rows are purged
+    after 7 days). Feeds Tu mes "Tu dólar te protegió" in countries without a
+    Confío on-ramp, which compare the 1st of the month with today
+    (docs/designs/tu-mes-insights.md, founder decision 2026-10-04: Binance P2P
+    everywhere)."""
+    date = models.DateField()
+    currency = models.CharField(max_length=3)
+    source = models.CharField(max_length=50, default='binance_p2p')
+    rate = models.DecimalField(max_digits=15, decimal_places=6, help_text='Units of currency per 1 USD')
+    fetched_at = models.DateTimeField(help_text='When the underlying ExchangeRate was fetched')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['date', 'currency', 'source'], name='uniq_daily_rate_snapshot')]
+        ordering = ['-date']
+
+    def __str__(self):
+        return f'{self.date} {self.currency} {self.rate} ({self.source})'

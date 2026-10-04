@@ -33,6 +33,24 @@ logger = logging.getLogger(__name__)
 
 BATCH_RETRIES = 3
 WAD = Decimal(10) ** 18
+PIN_LAG_BLOCKS = 5          # pin a few blocks behind the head: every backend has them
+
+
+def _rpc(method: str, params: list):
+    """The rail's rotating RPC pool (tasks._rpc), not the single default URL."""
+    from .tasks import _rpc as pool_rpc
+    return pool_rpc(method, params)
+
+
+def _retry(fn, attempts: int = BATCH_RETRIES):
+    import time
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001
+            if attempt == attempts:
+                raise
+            time.sleep(attempt)            # 1s, 2s backoff
 
 
 def _at(block: int) -> str:
@@ -40,7 +58,7 @@ def _at(block: int) -> str:
 
 
 def _pps_at(addr: str, block: int) -> int:
-    res = vault._rpc('eth_call', [{'to': addr, 'data': vault.SEL_PPLUS}, _at(block)])
+    res = _rpc('eth_call', [{'to': addr, 'data': vault.SEL_PPLUS}, _at(block)])
     value = int(res, 16) if res and res != '0x' else 0
     if value <= 0:
         raise RuntimeError('pPlus() returned no value at the pinned block')
@@ -52,7 +70,7 @@ def _balances_at(token: str, addresses: list[str], block: int) -> dict[str, int]
     RPC or per-call failure so the caller can retry or record the batch."""
     calls = [(token, SEL_BALANCE_OF + encode(['address'], [a])) for a in addresses]
     data = SEL_TRY_AGGREGATE + encode(['bool', '(address,bytes)[]'], [False, calls])
-    res = vault._rpc('eth_call', [{'to': MULTICALL3, 'data': '0x' + data.hex()}, _at(block)])
+    res = _rpc('eth_call', [{'to': MULTICALL3, 'data': '0x' + data.hex()}, _at(block)])
     results = decode(['(bool,bytes)[]'], bytes.fromhex(res[2:]))[0]
     if len(results) != len(addresses):
         raise RuntimeError('Multicall returned an incomplete result set')
@@ -80,8 +98,8 @@ def snapshot_day(day: date | None = None) -> str:
     if not token:
         return 'no-vault'
 
-    block = int(vault._rpc('eth_blockNumber', []), 16)
-    pps = _pps_at(token, block)          # raises: no row today → everyone's month unknown
+    block = _retry(lambda: int(_rpc('eth_blockNumber', []), 16)) - PIN_LAG_BLOCKS
+    pps = _retry(lambda: _pps_at(token, block))   # still failing → no row; the next hourly run retries
 
     # Fresh, never the 10-minute scanner cache: an account registered just
     # before the run must be read, or a complete day would record it as 0.
@@ -95,16 +113,15 @@ def snapshot_day(day: date | None = None) -> str:
     failed: list[int] = []
     for i in range(0, len(addresses), CHUNK):
         batch = addresses[i:i + CHUNK]
-        for attempt in range(1, BATCH_RETRIES + 1):
-            try:
-                for address, shares in _balances_at(token, batch, block).items():
-                    if shares:
-                        held[registered[address]] = shares
-                break
-            except Exception:  # noqa: BLE001 — retried, then recorded per account (R28)
-                if attempt == BATCH_RETRIES:
-                    logger.warning('savings snapshot batch %s failed at block %s', i // CHUNK, block, exc_info=True)
-                    failed.extend(registered[a] for a in batch)
+        try:
+            balances = _retry(lambda batch=batch: _balances_at(token, batch, block))
+        except Exception:  # noqa: BLE001 — retried, then recorded per account (R28)
+            logger.warning('savings snapshot batch %s failed at block %s', i // CHUNK, block, exc_info=True)
+            failed.extend(registered[a] for a in batch)
+            continue
+        for address, shares in balances.items():
+            if shares:
+                held[registered[address]] = shares
 
     with transaction.atomic():
         CusdPlusPriceSnapshot.objects.create(
