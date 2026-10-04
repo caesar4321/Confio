@@ -45,7 +45,7 @@ describe('pace (tu-mes-insights §6, 12B)', () => {
 });
 
 describe('dollar slot (R21)', () => {
-  const protection = { currency: 'BOB', basis: 'purchase' as const, source: 'binance_p2p', protectedUsd: '100.00', paidLocal: '690', todayLocal: '740', gainLocal: '50',
+  const protection = { currency: 'BOB', basis: 'purchase' as const, state: 'gained' as const, source: 'binance_p2p', protectedUsd: '100.00', paidLocal: '690', todayLocal: '740', gainLocal: '50',
     avgRate: '6.90', todayRate: '7.40', quotedAt: '2026-10-04T10:42:00Z' };
   it('prefers protection, then savings of at least a cent, else nothing', () => {
     expect(dollarSlot(protection, { earnedUsd: '0.42', daily: [] })?.kind).toBe('protection');
@@ -76,5 +76,18 @@ describe('dates and money', () => {
     const at = new Date(2026, 9, 4, 10, 42);
     expect(quoteTime(at.toISOString(), now)).toBe('hoy, 10:42');
     expect(quoteTime(new Date(2026, 9, 3, 9, 5).toISOString(), now)).toBe('3 oct, 09:05');
+  });
+});
+
+describe('stable state (gain shrank or reversed: never a loss)', () => {
+  const base = { currency: 'BOB', basis: 'purchase' as const, source: 'binance_p2p', protectedUsd: '100.00',
+    paidLocal: '1150', todayLocal: '1000', gainLocal: '-150', avgRate: '11.50', todayRate: '10.00', quotedAt: '' };
+  const stable = { ...base, state: 'stable' as const };
+  const gained = { ...base, state: 'gained' as const };
+  it('prefers a real gain, then savings, then the stable card, never empty when dollars are held', () => {
+    expect(dollarSlot(gained, { earnedUsd: '0.42', daily: [] })?.kind).toBe('protection');
+    expect(dollarSlot(stable, { earnedUsd: '0.42', daily: [] })?.kind).toBe('savings');
+    expect(dollarSlot(stable, null)?.kind).toBe('stable');
+    expect(dollarSlot(stable, { earnedUsd: '0.00', daily: [] })?.kind).toBe('stable');
   });
 });

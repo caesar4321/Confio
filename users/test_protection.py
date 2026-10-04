@@ -92,8 +92,7 @@ class ProtectionValueTests(SimpleTestCase):
         self.assertIsNone(self._value(country='VE', rate=('40', 0), start_rate=None))  # no rate kept for the 1st
         self.assertIsNone(self._value(country='PE', lots=lots))
         self.assertIsNone(self._value(lots=lots, account_type='business'))
-        self.assertIsNone(self._value(rate=('11.55', 0), lots=lots))                  # gain Bs 5 < US$1 (Bs 11.55)
-        self.assertIsNone(self._value(rate=('10.00', 0), lots=lots))                  # a loss: never shown
+
         self.assertIsNone(self._value(country='VE', rate=('40', 0), start_rate='36', net_in=D('0')))    # nothing held all month
 
     def test_country_switch_comes_from_settings(self):
@@ -151,3 +150,36 @@ class HeldSinceTests(SimpleTestCase):
     def test_never_above_the_balance(self):
         events = [ev('p2p_send', 500)]
         self.assertEqual(p.held_since(D('20'), events), D('20'))
+
+
+class StableStateTests(ProtectionValueTests):
+    """A small gain or a reversal is 'stable', never a loss and never hidden."""
+
+    def test_small_gain_and_reversal_are_stable(self):
+        lots = [p.Lot(D('100'), D('1150'))]
+        self.assertEqual(self._value(rate=('11.55', 0), lots=lots).state, 'stable')     # gain Bs 5 < US$1
+        self.assertEqual(self._value(rate=('10.00', 0), lots=lots).state, 'stable')     # the boliviano strengthened
+        self.assertEqual(self._value(rate=('12.50', 0), lots=lots).state, 'gained')
+        venezuela_calm_month = self._value(country='VE', rate=('35', 0), start_rate='36', net_in=D('100'))
+        self.assertEqual((venezuela_calm_month.basis, venezuela_calm_month.state), ('month_start', 'stable'))
+
+
+class StableGateTests(TestCase):
+    """Older apps (no `state`) must never receive a stable result: it would render as a loss."""
+
+    def test_stable_only_when_the_app_asks(self):
+        from users.cashflow_schema import MonthSummaryQuery
+        from users.models import Account, User
+        user = User.objects.create_user(username='gate', email='gate@example.com', password='x', firebase_uid='gate',
+                                        phone_country='BO')
+        Account.objects.create(user=user, account_type='personal', account_index=0, algorand_address='G' * 58,
+                               bsc_address='0x' + '12' * 20)
+        stable = p.Protection(currency='BOB', basis='purchase', protected_usd=D('100'), paid_local=D('1150'),
+                              today_local=D('1000'), avg_rate=D('11.5'), today_rate=D('10'), quoted_at='t',
+                              state='stable')
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        jwt = {'account_type': 'personal', 'account_index': 0, 'business_id': None}
+        with mock.patch('users.jwt_context.get_jwt_business_context_with_validation', return_value=jwt), \
+             mock.patch('users.protection.protection_value', return_value=stable):
+            self.assertIsNone(MonthSummaryQuery().resolve_protection_value(info))
+            self.assertEqual(MonthSummaryQuery().resolve_protection_value(info, include_stable=True).state, 'stable')

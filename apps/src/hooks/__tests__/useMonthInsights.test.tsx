@@ -104,3 +104,11 @@ it('an older refresh never overwrites a newer visit to the same month (audit #6)
   await act(async () => { stale.resolve({ data: { monthInsights: { ...insights(['karen']), previousMonthSpendingUsd: '1.00' } } }); });
   expect(latest.insights).toBe(fresh);
 });
+
+it('a gained↔stable flip on refocus never swaps the slot card', () => {
+  const p = (state: string) => ({ currency: 'BOB', basis: 'purchase', state, source: 'binance_p2p', protectedUsd: '100.00',
+    paidLocal: '1', todayLocal: '1', gainLocal: '0', avgRate: '1', todayRate: '1', quotedAt: '' }) as any;
+  const merged = mergeValues({ insights: null, savings: null, protection: p('gained') },
+    { insights: null, savings: null, protection: p('stable') });
+  expect(merged.protection?.state).toBe('gained');
+});

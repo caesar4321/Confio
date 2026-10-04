@@ -82,17 +82,21 @@ export function paceLine(
   };
 }
 
-/** Which card fills the dollar slot (R21): protection when the server could
- *  prove it, otherwise savings earned (≥ one cent), otherwise nothing. */
+/** Which card fills the dollar slot (R21 + the stable state, 2026-10-04):
+ *  a real protection gain first; else savings earned (≥ one cent); else, if
+ *  the user holds dollars but the gain shrank or reversed, "Tu dólar se
+ *  mantuvo" (never a loss, and the slot doesn't vanish); else nothing. */
 export type DollarSlot =
   | { kind: 'protection'; value: ProtectionValue }
   | { kind: 'savings'; value: SavingsEarned }
+  | { kind: 'stable'; value: ProtectionValue }
   | null;
 
 export function dollarSlot(protection: ProtectionValue | null | undefined,
   savings: SavingsEarned | null | undefined): DollarSlot {
-  if (protection) return { kind: 'protection', value: protection };
+  if (protection && protection.state !== 'stable') return { kind: 'protection', value: protection };
   if (savings && Number(savings.earnedUsd) >= MIN_SAVINGS_USD) return { kind: 'savings', value: savings };
+  if (protection) return { kind: 'stable', value: protection };
   return null;
 }
 

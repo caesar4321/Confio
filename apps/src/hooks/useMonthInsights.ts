@@ -37,7 +37,8 @@ const EMPTY: InsightData = { insights: null, savings: null, protection: null };
  *  savings answer behind protection are not cards, so they are not "shown"
  *  (a refocus must never turn them into one). */
 export function visibleAtReveal(data: InsightData): InsightData {
-  const savingsVisible = !data.protection && data.savings && Number(data.savings.earnedUsd) >= MIN_SAVINGS_USD;
+  const gained = data.protection && data.protection.state !== 'stable';
+  const savingsVisible = !gained && data.savings && Number(data.savings.earnedUsd) >= MIN_SAVINGS_USD;
   return { ...data, savings: savingsVisible ? data.savings : null };
 }
 
@@ -60,7 +61,10 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
     savings: shown.savings
       ? (next.savings && Number(next.savings.earnedUsd) >= MIN_SAVINGS_USD ? next.savings : shown.savings)
       : null,
-    protection: shown.protection ? (next.protection ?? shown.protection) : null,
+    // Same state only: a gained↔stable flip would swap the slot's card.
+    protection: shown.protection
+      ? (next.protection && next.protection.state === shown.protection.state ? next.protection : shown.protection)
+      : null,
   };
 }
 
