@@ -28,6 +28,7 @@ import { PushNotificationProvider } from './hooks/usePushNotificationContext';
 import { FaceCheckProvider } from './components/FaceCheckProvider';
 import { BrandSplash } from './components/BrandSplash';
 import { AppLockScreen } from './components/AppLockScreen';
+import { biometricAuthService } from './services/biometricAuthService';
 import { logBreadcrumb } from './services/crashLog';
 // Dev: attach derivation verifier helper
 if (__DEV__) {
@@ -100,14 +101,40 @@ const Navigation: React.FC = () => {
 
 // The emergency exit must stay reachable when loading never finishes
 // (servers down, hung network), but a normal start or biometric unlock
-// should show only the spinner. The exit appears once loading is slow.
+// should show only the spinner. The exit appears once loading is slow;
+// time spent on the phone's unlock prompt is the user's, not a slow start,
+// so the clock starts over when a prompt closes. A prompt that never
+// settles (some Android builds, an activity recreated mid-prompt) must not
+// hide the exit for good: past EMERGENCY_EXIT_CAP_MS it shows regardless.
 const EMERGENCY_EXIT_AFTER_MS = 8000;
+const EMERGENCY_EXIT_CAP_MS = 45000;
 
 const LoadingOverlay: React.FC<{ onEmergencyExit: () => void }> = ({ onEmergencyExit }) => {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
-    const timer = setTimeout(() => setSlow(true), EMERGENCY_EXIT_AFTER_MS);
-    return () => clearTimeout(timer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const restart = () => {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      setSlow(false);
+      if (!biometricAuthService.isPromptOpen()) {
+        timer = setTimeout(() => setSlow(true), EMERGENCY_EXIT_AFTER_MS);
+      }
+    };
+    let capped = false;
+    const cap = setTimeout(() => {
+      capped = true;
+      setSlow(true);
+    }, EMERGENCY_EXIT_CAP_MS);
+    restart();
+    const unsubscribe = biometricAuthService.onPromptChange(() => {
+      if (!capped) restart();
+    });
+    return () => {
+      unsubscribe();
+      clearTimeout(cap);
+      if (timer) clearTimeout(timer);
+    };
   }, []);
   return (
     <View style={loadingStyles.overlay}>
