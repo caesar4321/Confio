@@ -1861,9 +1861,6 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             logger.warning('7702 reverted receipt missing block metadata for %s', batch.tx_hash)
         settle_savings_mint(batch.tx_hash, 'reverted')
         batch.save(update_fields=update_fields)
-        if batch.kind in ('stock_buy', 'stock_sell'):
-            from .gm_holdings import lift_in_flight
-            lift_in_flight(batch.user_bsc_address)   # nothing will land: cache reads again
         logger.info('7702 batch %s reverted', batch.tx_hash)
         return
 
@@ -1951,9 +1948,6 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             batch.status = 'reorged'
             settle_savings_mint(batch.tx_hash, 'reorged')
             batch.save(update_fields=['status', 'updated_at'])
-            if batch.kind in ('stock_buy', 'stock_sell'):
-                from .gm_holdings import lift_in_flight
-                lift_in_flight(batch.user_bsc_address)
             logger.warning('7702 batch %s reorged out (block %s no longer canonical)',
                            batch.tx_hash, blk_num)
             return
@@ -2002,19 +1996,12 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         # would otherwise pair the confirmed ledger with a fresh scan cached
         # pre-trade ('value_only' after the user's own trade). Invalidated
         # first, any scan cached from here on read the final chain.
-        # The in-flight marker stays up to the status write (lifted below).
         from .gm_holdings import invalidate_holdings
         invalidate_holdings(batch.user_bsc_address, min_block=blk_num)
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
     batch.save(update_fields=['status', 'block_number', 'block_hash', 'updated_at'])
-    if batch.kind in ('stock_buy', 'stock_sell'):
-        # Confirmed: the floor takes over, unless another trade of this
-        # wallet is still on the wire (checked now that this row is final,
-        # so two confirming at once can't each keep it for the other).
-        from .gm_holdings import lift_in_flight
-        lift_in_flight(batch.user_bsc_address)
     settle_savings_mint(batch.tx_hash, 'confirmed', receipt=receipt, batch=batch)
     if batch.kind in ('stock_buy', 'stock_sell', 'wrap_cusd', 'unwrap_to_cusd'):
         # Internal eligibility normalization changes the same cached cUSD+

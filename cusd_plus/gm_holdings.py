@@ -19,6 +19,7 @@ and is cached server-side for one day. `gm_tokens.json` is only the deploy-time
 fallback snapshot, so an upstream outage never makes held positions vanish.
 """
 import json
+from datetime import timedelta
 import logging
 from decimal import Decimal
 from functools import lru_cache
@@ -241,55 +242,54 @@ def _scan(
 FLOOR_TTL = 10 * 60
 # From broadcast to confirmation the trade's block isn't known (the app shows
 # success on the receipt, seconds before finality sets the floor): no scan is
-# cached meanwhile, or a read from just before the trade was mined would serve
-# the receipt-triggered refetch. The confirmation lifts it; a trade that never
-# confirms just lets it expire.
-IN_FLIGHT_TTL = 2 * 60
+# cached while the wallet has a stock trade on the wire, asked of the
+# database at store time (indexed; at most once per SCAN_TTL per wallet), so
+# nothing has to be set at broadcast or lifted at each terminal status. The
+# receipt checker's own horizon: an older 'signed'/'sent' row is stuck.
+IN_FLIGHT_MAX_AGE = timedelta(minutes=15)
 
 
-def invalidate_holdings(user_bsc_address: str, min_block: int | None = None, *,
-                        in_flight: bool = False) -> None:
+def invalidate_holdings(user_bsc_address: str, min_block: int | None = None) -> None:
     """Drop the fresh scans (both modes) after a trade; last-known stays.
     Also moves the holdings generation: a scan already running read the
     pre-trade chain, and must neither be cached nor (complete mode) used.
     `min_block` (the trade's block, when known) becomes the floor below
-    which no later read is cached either; `in_flight` (a trade just
-    broadcast, block unknown) keeps every read uncached until
-    lift_in_flight sees none of the wallet's trades on the wire."""
+    which no later read is cached either."""
     from uuid import uuid4
     key = (user_bsc_address or '').lower()
-    # Floor and in-flight marker BEFORE the generation: a scan that reads the
-    # new generation always sees them.
+    # The floor BEFORE the generation: a scan that reads the new generation
+    # always sees it.
     if min_block is not None:
         _raise_floor(key, int(min_block))
-    elif in_flight:
-        cache.set(f'gm_hold_inflight:{key}', 1, IN_FLIGHT_TTL)
     cache.set(f'gm_hold_gen:{key}', uuid4().hex, SCAN_LAST_TTL)
+    drop_fresh_holdings(key)
+
+
+def drop_fresh_holdings(user_bsc_address: str) -> None:
+    """Drop the fresh scans (both modes) without moving the generation: at a
+    broadcast, scans cached before it are pre-trade, while ones running now
+    can't be stored anyway (the trade's row is on the wire)."""
+    key = (user_bsc_address or '').lower()
     cache.delete_many([f'gm_hold:{key}', f'gm_hold_full_v2:{key}'])
 
 
-def lift_in_flight(user_bsc_address: str) -> None:
-    """Drop the in-flight marker unless one of the wallet's stock trades is
-    still on the wire. Called AFTER a confirmation's status write (and after
-    the broadcast sets the marker): of two trades confirming at once, the
-    later check sees both rows final, and a confirmation that ran before the
-    broadcast set the marker is caught by the broadcast's own check. A row
-    older than the marker's TTL holds no marker (a stuck 'sent' batch must
-    not keep every later trade's reads uncached). Never raises: it runs past
-    a broadcast and after a final status write; a failure only leaves the
-    marker to expire."""
-    from datetime import timedelta
+def stock_batches_in_flight(user_bsc_address: str, max_age=IN_FLIGHT_MAX_AGE):
+    """The wallet's stock batches on the wire (signed or sent), created
+    within `max_age`: older ones are stuck, not settling. A 'signed' row
+    whose broadcast raised counts: the reconciler may still land it."""
     from django.utils import timezone
     from blockchain.models import SponsoredBatch
+    return SponsoredBatch.objects.filter(
+        user_bsc_address__iexact=user_bsc_address, kind__in=('stock_buy', 'stock_sell'),
+        status__in=('signed', 'sent'), created_at__gte=timezone.now() - max_age)
+
+
+def _wallet_in_flight(key: str) -> bool:
     try:
-        if SponsoredBatch.objects.filter(
-                user_bsc_address__iexact=user_bsc_address, kind__in=('stock_buy', 'stock_sell'),
-                status__in=('signed', 'sent'),
-                created_at__gte=timezone.now() - timedelta(seconds=IN_FLIGHT_TTL)).exists():
-            return
-        cache.delete(f'gm_hold_inflight:{(user_bsc_address or "").lower()}')
-    except Exception:  # noqa: BLE001 — best effort: the marker expires on its own
-        logger.warning('could not lift the in-flight marker for %s', user_bsc_address, exc_info=True)
+        return stock_batches_in_flight(key).exists()
+    except Exception:  # noqa: BLE001 — unknown: don't cache (the read is still served)
+        logger.warning('in-flight check failed for %s', key, exc_info=True)
+        return True
 
 
 def _raise_floor(key: str, block: int) -> None:
@@ -311,8 +311,7 @@ def _behind_floor(key: str, blocks: dict) -> bool:
     """A read older than the last trade's block (or of unknown block while a
     floor stands), or taken while a trade is on the wire: fine to use as-is
     by a caller that knows, never cached."""
-    got = cache.get_many([f'gm_hold_floor:{key}', f'gm_hold_inflight:{key}'])
-    return bool(got.get(f'gm_hold_inflight:{key}')) or reads_before(blocks, got.get(f'gm_hold_floor:{key}'))
+    return reads_before(blocks, cache.get(f'gm_hold_floor:{key}')) or _wallet_in_flight(key)
 
 
 def _generation(key: str):

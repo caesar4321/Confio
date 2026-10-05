@@ -159,12 +159,9 @@ def pending_trades(bsc_address: str) -> list[Trade]:
     signed quote; no settlement yet). The client shows success on the
     receipt, before finality marks the batch confirmed, so in that window the
     chain may or may not hold the units while the ledger does not."""
-    from django.utils import timezone as dj_tz
-    from blockchain.models import SponsoredBatch
-    return _decode_trades(SponsoredBatch.objects.filter(
-        user_bsc_address__iexact=bsc_address, kind__in=('stock_buy', 'stock_sell'),
-        status__in=('signed', 'sent'), created_at__gte=dj_tz.now() - PENDING_MAX_AGE,
-    ).select_related('unified_transaction').order_by('created_at', 'id'))
+    from .gm_holdings import stock_batches_in_flight
+    return _decode_trades(stock_batches_in_flight(bsc_address, PENDING_MAX_AGE)
+                          .select_related('unified_transaction').order_by('created_at', 'id'))
 
 
 def ledger_units(trades: list[Trade], before: datetime | None = None) -> dict:
