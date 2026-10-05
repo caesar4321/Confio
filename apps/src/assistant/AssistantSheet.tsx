@@ -6,10 +6,12 @@ import {
   Animated,
   Easing,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  StatusBar,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -162,7 +164,7 @@ export default function AssistantSheet() {
     isOpen, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel, consumeVoiceNote,
     consumeVoiceNoteData, openSeq, route, plan,
     setPlan, available,
-    aiEnabled, bubbleAnchor,
+    aiEnabled, bubbleAnchor, showNavNote,
   } = useAssistant();
   // Which chat head is open: Confio Assistant, Julian or Confío News.
   const [channel, setChannel] = useState<BoxChannel>('ia');
@@ -179,6 +181,7 @@ export default function AssistantSheet() {
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [sentThisOpen, setSentThisOpen] = useState(false);
   const [mode, setMode] = useState<'AI' | 'HUMAN'>('AI');
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
@@ -275,6 +278,8 @@ export default function AssistantSheet() {
       stopRecordingNow();
       return;
     }
+    // Suggestions come back on every opening, not only in an empty thread.
+    setSentThisOpen(false);
     const requested = consumeChannel();
     setChannel(requested ?? 'ia');
     setChannelReady(true);
@@ -376,6 +381,7 @@ export default function AssistantSheet() {
         return;
       }
       setError(null);
+      setSentThisOpen(true);
       const tempId = `pending-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
@@ -436,6 +442,10 @@ export default function AssistantSheet() {
           setTimeout(() => {
             if (gen === accountGen.current) {
               runAction(navigateTo.destination!);
+              const replyText = payload.reply?.body;
+              if (typeof replyText === 'string' && replyText.trim() && navigateTo.destination !== 'messages') {
+                showNavNote(replyText);
+              }
             }
           }, 900);
         }
@@ -446,7 +456,7 @@ export default function AssistantSheet() {
         setThinking(false);
       }
     },
-    [ask, route, runAction, thinking],
+    [ask, route, runAction, thinking, showNavNote],
   );
 
   useEffect(() => {
@@ -618,12 +628,41 @@ export default function AssistantSheet() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  const anchor = bubbleAnchor ?? { x: screenW - 62 - 12, y: screenH - insets.bottom - 62 - 76, size: 62 };
-  const below = anchor.y < screenH / 2; // bubble high on screen: open downward
+  // Android: with the keyboard up, sit right on top of it. The modal window may
+  // already have shrunk (adjustResize) and the bubble may have moved too, so
+  // anchoring to the bubble would lift the box twice; measure instead.
+  const [modalH, setModalH] = useState(0);
+  const [kbTop, setKbTop] = useState<number | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return undefined;
+    }
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setKbTop(e.endCoordinates.screenY));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbTop(null));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  // The modal is statusBarTranslucent (origin = top of the screen). Below
+  // Android 15 the app window is not edge-to-edge: it starts under the status
+  // bar, insets.top is 0 and the bubble's anchor is measured from there, so
+  // shift it into screen coordinates and keep the card clear of the bar.
+  const statusShift = Platform.OS === 'android' && Number(Platform.Version) < 35 ? (StatusBar.currentHeight ?? 0) : 0;
+  const topSafe = Math.max(insets.top, statusShift);
+  const boxH = modalH || screenH;
+  const keyboardArea = Platform.OS === 'android' && kbTop !== null && modalH > 0
+    ? { top: topSafe + 12, bottom: Math.max(8, modalH - kbTop + 8) }
+    : null;
+
+  const anchor = bubbleAnchor
+    ? { ...bubbleAnchor, y: bubbleAnchor.y + statusShift }
+    : { x: screenW - 62 - 12, y: boxH - insets.bottom - 62 - 76, size: 62 };
+  const below = anchor.y < boxH / 2; // bubble high on screen: open downward
   const gap = 14;
-  const area = below
+  const area = keyboardArea ?? (below
     ? { top: anchor.y + anchor.size + gap, bottom: Math.max(insets.bottom, 10) + 6 }
-    : { top: insets.top + 12, bottom: screenH - anchor.y + gap };
+    : { top: topSafe + 12, bottom: boxH - anchor.y + gap });
   const tailLeft = Math.min(Math.max(anchor.x + anchor.size / 2 - 9, 28), screenW - 46);
   const tailTop = below ? anchor.y + anchor.size + gap - 9 : anchor.y - gap - 9;
   const lift = progress.interpolate({ inputRange: [0, 1], outputRange: [below ? -28 : 28, 0] });
@@ -631,11 +670,15 @@ export default function AssistantSheet() {
 
   const mood: MascotMood = recordingMs !== null ? 'listening' : thinking ? 'thinking' : speaking ? 'talking' : 'idle';
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
-  const showStarters = aiEnabled && !thinking && messages.filter((m) => m.role === 'user').length === 0;
+  // AI mode only: in a handed-off thread a chip would send a canned prompt to the team.
+  const showStarters = aiEnabled && mode === 'AI' && !thinking && !sentThisOpen && !(loading && !messages.length);
   const petName = profile?.mascotName?.trim();
 
+  // statusBarTranslucent: modal coordinates = screen coordinates, so the
+  // keyboard top (screen-absolute) and insets.top line up on Android.
   return (
-    <Modal visible={shown} animationType="none" transparent onRequestClose={close}>
+    <Modal visible={shown} animationType="none" transparent statusBarTranslucent onRequestClose={close}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none" onLayout={(e) => setModalH(e.nativeEvent.layout.height)} />
       <Animated.View style={[styles.scrim, { opacity: progress }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Cerrar mensajes" />
       </Animated.View>
@@ -864,10 +907,13 @@ export default function AssistantSheet() {
       </KeyboardAvoidingView>
 
       {/* The tail and the bubble itself tie the box to where it came from. */}
+      {keyboardArea ? null : (
       <Animated.View
         pointerEvents="none"
         style={[styles.tail, below ? styles.tailUp : styles.tailDown, { left: tailLeft, top: tailTop, opacity: progress }]}
       />
+      )}
+      {keyboardArea ? null : (
       <Animated.View
         style={[styles.anchor, { left: anchor.x, top: anchor.y, opacity: progress, transform: [{ scale: grow }] }]}
       >
@@ -883,6 +929,7 @@ export default function AssistantSheet() {
           </View>
         </Pressable>
       </Animated.View>
+      )}
 
       <MascotPicker
         visible={pickerOpen}

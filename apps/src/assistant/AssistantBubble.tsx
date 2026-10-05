@@ -40,16 +40,21 @@ const HINT_VISIBLE_MS = 7000;
 const HINT_COOLDOWN_MS = 45_000;
 const MAX_HINTS_PER_SESSION = 4;
 
-type Hint = ScreenHint & { kind: 'screen' | 'unread' };
+type Hint = ScreenHint & { kind: 'screen' | 'unread' | 'note' };
+// What the chat said when it moved the app ("Abrí Recargar: …").
+const NOTE_VISIBLE_MS = 10_000;
+const NOTE_MAX_CHARS = 180;
 
 export default function AssistantBubble() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy } = useAssistant();
+  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy, navNote } = useAssistant();
   const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
   const { activeAccount } = useAccount();
   const [keyboardUp, setKeyboardUp] = useState(false);
   const [hint, setHint] = useState<Hint | null>(null);
+  const hintRef = useRef<Hint | null>(null);
+  hintRef.current = hint;
   const [side, setSide] = useState<'left' | 'right'>('right');
   const [heightFraction, setHeightFraction] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -118,7 +123,7 @@ export default function AssistantBubble() {
   const range = Math.max(bottomLimit - topLimit, 0);
   // On money screens the bubble rests mostly behind the edge (still tappable,
   // draggable and holdable); it comes fully out while dragged or recording.
-  const docked = !!route && DOCK_ROUTES.has(route) && !dragging && !talking;
+  const docked = !!route && DOCK_ROUTES.has(route) && !dragging && !talking && hint?.kind !== 'note';
   const peek = SIZE * 0.4;
   const restX = docked
     ? (side === 'right' ? width - peek : peek - SIZE)
@@ -264,14 +269,28 @@ export default function AssistantBubble() {
 
   const visible = enabled && !isOpen && !keyboardUp;
 
+  // The chat just moved the app: say here what it said there. Not a
+  // suggestion, so no cooldown or session cap, and it survives the route change.
+  useEffect(() => {
+    const text = navNote?.text.trim();
+    if (!text) {
+      return;
+    }
+    const short = text.length > NOTE_MAX_CHARS ? `${text.slice(0, NOTE_MAX_CHARS - 1).trimEnd()}…` : text;
+    setHint({ kind: 'note', hint: short, prompt: '' });
+  }, [navNote]);
+
   // Suggest at most one thing per screen visit, rarely, and never twice.
   useEffect(() => {
-    setHint(null);
+    setHint((prev) => (prev?.kind === 'note' ? prev : null));
     if (!visible || inCall || docked || hintsShown.current >= MAX_HINTS_PER_SESSION) {
       return undefined;
     }
     const timer = setTimeout(() => {
       if (Date.now() - lastHintAt.current < HINT_COOLDOWN_MS) {
+        return;
+      }
+      if (hintRef.current?.kind === 'note') {
         return;
       }
       let next: Hint | null = null;
@@ -301,7 +320,7 @@ export default function AssistantBubble() {
     if (!hint) {
       return undefined;
     }
-    const timer = setTimeout(() => setHint(null), HINT_VISIBLE_MS);
+    const timer = setTimeout(() => setHint(null), hint.kind === 'note' ? NOTE_VISIBLE_MS : HINT_VISIBLE_MS);
     return () => clearTimeout(timer);
   }, [hint]);
 
@@ -320,8 +339,9 @@ export default function AssistantBubble() {
     if (!current) {
       return;
     }
-    if (current.kind === 'unread') {
-      // The box shows a red dot on whichever chat head has news.
+    if (current.kind === 'unread' || current.kind === 'note') {
+      // Unread: the box shows a red dot on whichever chat head has news.
+      // Note: back to the conversation that moved the app.
       open();
     } else if (current.prompt) {
       open({ prompt: current.prompt });
