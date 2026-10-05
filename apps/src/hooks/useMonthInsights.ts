@@ -214,9 +214,12 @@ export function useMonthInsights(params: {
     if (!shown.current) return;
     // A stocks ask already in flight (a settling poll, cold scan) answers on
     // its own: never stack a second one on it. Ours holds the slot too.
-    // No card shown: an answer could never appear (mergeValues keeps null),
-    // so don't make the server scan and price the portfolio for nothing.
-    const askStocks = Boolean(shown.current.stocks) && stocksInFlight.current !== gen;
+    // Nothing drawn (no answer, or 'none' with nothing to offer): don't make
+    // the server scan and price the portfolio for nothing — and an answer
+    // could only add a card mid-view. Unless a trade is settling here.
+    const drawn = shown.current.stocks
+      && !(shown.current.stocks.state === 'none' && !shown.current.stocks.canBuy);
+    const askStocks = Boolean(drawn || lastStocks.current === 'settling') && stocksInFlight.current !== gen;
     const seq = askStocks ? ++stocksAsked.current : 0;
     const { insights, savings, protection, stocks } = fetchAll(askStocks);
     if (askStocks) {

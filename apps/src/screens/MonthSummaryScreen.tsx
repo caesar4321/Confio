@@ -50,7 +50,7 @@ type Route = RouteProp<MainStackParamList, 'MonthSummary'>;
 
 // A settling trade is asked about every 4s for the first minute (finality
 // is seconds), then every 30s up to the server's 15-minute pending window
-// (cusd_plus/stock_month.py PENDING_MAX_AGE); the note follows the phase.
+// (cusd_plus/gm_holdings.py IN_FLIGHT_MAX_AGE); the note follows the phase.
 export const SETTLING_POLL_MS = 4000;
 export const SETTLING_FAST_TRIES = 15;
 export const SETTLING_SLOW_MS = 30000;

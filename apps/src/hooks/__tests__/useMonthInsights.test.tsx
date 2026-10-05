@@ -249,6 +249,24 @@ it('a focus refresh does not ask stocks when no stocks card is shown (its answer
   expect(mockQuery).toHaveBeenCalled();                 // the other cards still refresh
 });
 
+it("nor for a 'none' with nothing to offer (nothing drawn), unless a trade is settling", async () => {
+  let stocks: any = { state: 'none', canBuy: false, valueUsd: '0.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  mockQuery.mockClear();
+  await act(async () => { latest.refresh(); });
+  expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(0);
+  // An invitation on screen is drawn: it is re-asked (a purchase turns it into the card).
+  stocks = { state: 'none', canBuy: true, valueUsd: '0.00' };
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Probe {...base} month={9} isCurrent={false} />); });
+  mockQuery.mockClear();
+  await act(async () => { latest.refresh(); });
+  expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
+
 it('from a trade, the reveal waits longer for a slow stocks answer (the card the user came for)', async () => {
   const slow = deferred<any>();
   mockQuery.mockImplementation(({ query }: any) => (query === GET_STOCK_MONTH ? slow.promise
