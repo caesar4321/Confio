@@ -54,6 +54,10 @@ type AssistantState = {
   // A voice call is live (the wake word pauses, the bubble shows it).
   inCall: boolean;
   setInCall: (inCall: boolean) => void;
+  // The chat closed itself to show a screen: the bubble repeats what it said
+  // there, so nobody lands on a screen without knowing why.
+  navNote: { text: string; seq: number } | null;
+  showNavNote: (text: string) => void;
 };
 
 const AssistantContext = createContext<AssistantState | null>(null);
@@ -69,6 +73,10 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [inCall, setInCall] = useState(false);
   const [micBusy, setMicBusy] = useState(false);
   const [openSeq, setOpenSeq] = useState(0);
+  const [navNote, setNavNote] = useState<{ text: string; seq: number } | null>(null);
+  const showNavNote = useCallback((text: string) => {
+    setNavNote((prev) => ({ text, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
 
   useEffect(() => {
     const update = () => setRoute(navigationRef.getCurrentRoute?.()?.name);
@@ -138,11 +146,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     () => ({
       isOpen, route, open, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel,
       consumeVoiceNote, consumeVoiceNoteData, available, setAvailable, aiEnabled, setAiEnabled, plan, setPlan, inCall, setInCall,
-      bubbleAnchor, setBubbleAnchor, micBusy, setMicBusy, openSeq,
+      bubbleAnchor, setBubbleAnchor, micBusy, setMicBusy, openSeq, navNote, showNavNote,
     }),
     [isOpen, route, open, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel,
       consumeVoiceNote, consumeVoiceNoteData, available,
-      aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq],
+      aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote],
   );
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }
