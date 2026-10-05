@@ -239,28 +239,60 @@ def _scan(
 # complete): a node behind it (the RPC pool rotates) shows the pre-trade
 # portfolio. Nodes catch up within seconds; the floor outlives that easily.
 FLOOR_TTL = 10 * 60
+# From broadcast to confirmation the trade's block isn't known (the app shows
+# success on the receipt, seconds before finality sets the floor): no scan is
+# cached meanwhile, or a read from just before the trade was mined would serve
+# the receipt-triggered refetch. The confirmation lifts it; a trade that never
+# confirms just lets it expire.
+IN_FLIGHT_TTL = 2 * 60
 
 
-def invalidate_holdings(user_bsc_address: str, min_block: int | None = None) -> None:
+def invalidate_holdings(user_bsc_address: str, min_block: int | None = None, *,
+                        in_flight: bool = False, others_in_flight: bool = False) -> None:
     """Drop the fresh scans (both modes) after a trade; last-known stays.
     Also moves the holdings generation: a scan already running read the
     pre-trade chain, and must neither be cached nor (complete mode) used.
     `min_block` (the trade's block, when known) becomes the floor below
-    which no later read is cached either."""
+    which no later read is cached either; `in_flight` (a trade just
+    broadcast, block unknown) keeps every read uncached until it confirms;
+    `others_in_flight` (another trade of this wallet still on the wire when
+    one confirms) keeps that marker standing for the other one."""
     from uuid import uuid4
     key = (user_bsc_address or '').lower()
-    cache.set(f'gm_hold_gen:{key}', uuid4().hex, SCAN_LAST_TTL)
+    stale = [f'gm_hold:{key}', f'gm_hold_full_v2:{key}']
+    # Floor and in-flight marker BEFORE the generation: a scan that reads the
+    # new generation always sees them.
     if min_block is not None:
-        floor = cache.get(f'gm_hold_floor:{key}') or 0
-        cache.set(f'gm_hold_floor:{key}', max(int(floor), int(min_block)), FLOOR_TTL)
-    cache.delete_many([f'gm_hold:{key}', f'gm_hold_full_v2:{key}'])
+        _raise_floor(key, int(min_block))
+        if not others_in_flight:
+            stale.append(f'gm_hold_inflight:{key}')    # confirmed: the floor takes over
+    elif in_flight:
+        cache.set(f'gm_hold_inflight:{key}', 1, IN_FLIGHT_TTL)
+    cache.set(f'gm_hold_gen:{key}', uuid4().hex, SCAN_LAST_TTL)
+    cache.delete_many(stale)
+
+
+def _raise_floor(key: str, block: int) -> None:
+    """floor = max(floor, block). Not atomic (the cache API has no CAS): two
+    confirmations of one wallet within the same instant can leave the lower
+    block, and a node between the two may then get one read cached for 30s.
+    Accepted: rare, and bounded by SCAN_TTL."""
+    floor_key = f'gm_hold_floor:{key}'
+    if int(cache.get(floor_key) or 0) < block:
+        cache.set(floor_key, block, FLOOR_TTL)
+
+
+def reads_before(blocks: dict, block: int | None) -> bool:
+    """Some balance in `blocks` was read before `block` (or at an unknown block)."""
+    return bool(block) and any(at is None or at < block for at in blocks.values())
 
 
 def _behind_floor(key: str, blocks: dict) -> bool:
     """A read older than the last trade's block (or of unknown block while a
-    floor stands): fine to use as-is by a caller that knows, never cached."""
-    floor = cache.get(f'gm_hold_floor:{key}')
-    return bool(floor) and any(at is None or at < floor for at in blocks.values())
+    floor stands), or taken while a trade is on the wire: fine to use as-is
+    by a caller that knows, never cached."""
+    got = cache.get_many([f'gm_hold_floor:{key}', f'gm_hold_inflight:{key}'])
+    return bool(got.get(f'gm_hold_inflight:{key}')) or reads_before(blocks, got.get(f'gm_hold_floor:{key}'))
 
 
 def _generation(key: str):

@@ -85,7 +85,7 @@ def warm_gm_holdings(self, bsc_address: str, min_block: int | None = None):
     A scan served by a node still behind `min_block` (the trade's block; the
     RPC pool rotates) isn't cached (the confirm set that floor): ask again a
     moment later, when the node has caught up."""
-    from .gm_holdings import complete_holdings
+    from .gm_holdings import complete_holdings, reads_before
 
     try:
         complete = complete_holdings(bsc_address)
@@ -94,7 +94,7 @@ def warm_gm_holdings(self, bsc_address: str, min_block: int | None = None):
         return
     if complete is None or min_block is None:
         return
-    if any(at is None or at < min_block for at in complete[1].values()):
+    if reads_before(complete[1], min_block):
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=2)
 
@@ -1997,7 +1997,11 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         # pre-trade ('value_only' after the user's own trade). Invalidated
         # first, any scan cached from here on read the final chain.
         from .gm_holdings import invalidate_holdings
-        invalidate_holdings(batch.user_bsc_address, min_block=blk_num)
+        others_in_flight = SponsoredBatch.objects.filter(
+            user_bsc_address__iexact=batch.user_bsc_address, kind__in=('stock_buy', 'stock_sell'),
+            status__in=('signed', 'sent'),
+        ).exclude(pk=batch.pk).exists()
+        invalidate_holdings(batch.user_bsc_address, min_block=blk_num, others_in_flight=others_in_flight)
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
