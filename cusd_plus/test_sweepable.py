@@ -123,9 +123,10 @@ class ReservedUsdtTests(SimpleTestCase):
 
 
 class SweepableUsdtTests(SimpleTestCase):
-    def _sweepable(self, balance, reserved):
+    def _sweepable(self, balance, reserved, arriving=False):
         with mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=balance) as bal, \
-             mock.patch('cusd_plus.vault.reserved_usdt_wei', return_value=reserved):
+             mock.patch('cusd_plus.vault.reserved_usdt_wei', return_value=reserved), \
+             mock.patch('cusd_plus.vault.incoming_local_arrival_in_flight', return_value=arriving):
             out = vault.sweepable_usdt_wei(SimpleNamespace(id=1), ADDR)
         return out, bal
 
@@ -148,6 +149,12 @@ class SweepableUsdtTests(SimpleTestCase):
 
     def test_never_negative(self):
         out, _ = self._sweepable(1 * WAD, 5 * WAD)
+        self.assertEqual(out, 0)
+
+    def test_nothing_is_swept_while_a_local_pay_in_is_still_bridging(self):
+        # Its USDT can land before delivery is recorded; a sweep then would
+        # mint it without the journey's ID and the journey never links.
+        out, _ = self._sweepable(10 * WAD, 0, arriving=True)
         self.assertEqual(out, 0)
 
     def test_balance_is_read_FRESH(self):

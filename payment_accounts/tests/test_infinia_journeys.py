@@ -586,6 +586,34 @@ class JourneyTests(TestCase):
         advance_journey(j.pk, client=self.api)
         self.assertEqual(MoneyOperation.objects.filter(money_flow=j.money_flow).count(),2)
 
+    def test_a_bridging_pay_in_holds_the_wallet_sweep_until_delivered(self):
+        # Its USDT can land before delivery is recorded (2026-10-05, swept
+        # 6-35 s early); the generic sweep must not mint it unlinked.
+        from cusd_plus.vault import incoming_local_arrival_in_flight
+        from payment_accounts.models import PaymentBridgeTransfer
+        j = self.inbound(); self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db(); j.fx_operation.status = 'succeeded'; j.fx_operation.save()
+        self.settle_fx(j, self.crypto)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertIsNotNone(j.bridge_id)
+        self.assertTrue(incoming_local_arrival_in_flight(j.wallet_address.upper().replace('0X', '0x')))
+        PaymentBridgeTransfer.objects.filter(pk=j.bridge_id).update(status='bridging')
+        self.assertTrue(incoming_local_arrival_in_flight(j.wallet_address))
+        PaymentBridgeTransfer.objects.filter(pk=j.bridge_id).update(status='delivered')
+        self.assertFalse(incoming_local_arrival_in_flight(j.wallet_address))  # now reserved by amount instead
+        PaymentBridgeTransfer.objects.filter(pk=j.bridge_id).update(
+            status='bridging', created_at=timezone.now() - timedelta(hours=7))
+        # ...unless its own deadline (+1 h settlement) is still open, up to 48 h.
+        now = int(timezone.now().timestamp())
+        PaymentBridgeTransfer.objects.filter(pk=j.bridge_id).update(deadline=now + 3600)
+        self.assertTrue(incoming_local_arrival_in_flight(j.wallet_address))
+        PaymentBridgeTransfer.objects.filter(pk=j.bridge_id).update(deadline=now - 2 * 3600)
+        self.assertFalse(incoming_local_arrival_in_flight(j.wallet_address))  # a stuck bridge never holds for good
+        PaymentBridgeTransfer.objects.filter(pk=j.bridge_id).update(
+            deadline=now + 3600, created_at=timezone.now() - timedelta(hours=49))
+        self.assertFalse(incoming_local_arrival_in_flight(j.wallet_address))
+
     def test_bank_send_leaves_monthly_limit_enforcement_to_provider(self):
         t, _ = self.prepared()
         args = dict(owner=self.owner, local_account=self.local, crypto_account=self.crypto,

@@ -117,13 +117,14 @@ class LegacyRelayGateTests(SimpleTestCase):
     def setUp(self):
         cache.clear()
 
-    def _submit(self, raw, user, info=None):
+    def _submit(self, raw, user, info=None, arriving=False):
         from cusd_plus.schema import SubmitBscTransaction
         # The relay binds the recovered signer to the active account's
         # registered address; _legacy_tx signs with SIGNER_KEY. The business
         # permission gate is left unmocked on purpose — with no real JWT the
         # context resolves to None, which is the personal-account path.
-        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=SIGNER_ADDR):
+        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=SIGNER_ADDR), \
+             mock.patch('cusd_plus.vault.incoming_local_arrival_in_flight', return_value=arriving):
             return SubmitBscTransaction.mutate(None, info or _info(user), raw)
 
     def _mint_raw(self, amount=2 * 10**18):
@@ -148,6 +149,14 @@ class LegacyRelayGateTests(SimpleTestCase):
             res = self._submit(self._mint_raw(), _user('VE', uid=13))
         self.assertTrue(res.success, res.error)
         rpc.assert_called_once()
+
+    def test_mint_waits_while_a_local_pay_in_is_still_bridging(self):
+        # An old client's generic sweep would mint it without the journey ID.
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(self._mint_raw(), _user('VE', uid=18), arriving=True)
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'local_arrival_in_flight')
+        rpc.assert_not_called()
 
     def test_exact_one_dollar_mint_stays_raw(self):
         with mock.patch('cusd_plus.tasks._rpc') as rpc, \

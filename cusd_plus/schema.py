@@ -1466,7 +1466,10 @@ class SubmitBscTransaction(graphene.Mutation):
                 # address recipient) — first word, from calldata we validated,
                 # never from the client. Recorded after broadcast.
                 mint_amount_wei = int(data_hex[8:72], 16)
-                from .vault import is_safe_mint_amount
+                from .vault import incoming_local_arrival_in_flight, is_safe_mint_amount
+                if incoming_local_arrival_in_flight(active_addr):
+                    # A local pay-in is still bridging; retried next foreground.
+                    return SubmitBscTransaction(success=False, error='local_arrival_in_flight')
                 if not is_safe_mint_amount(mint_amount_wei):
                     # The money stays transient raw USDT and remains
                     # recoverable. Close a bridge saga if one owns this
