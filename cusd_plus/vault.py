@@ -299,6 +299,36 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
     return int(total * (10 ** 18))
 
 
+# How long an incoming bridge holds the wallet's sweep: at least
+# LOCAL_ARRIVAL_HOLD, longer while its own deadline (+1 h settlement grace,
+# relay_settlement) is open, never past LOCAL_ARRIVAL_HOLD_MAX, so a stuck
+# bridge cannot keep the sweep off for good.
+LOCAL_ARRIVAL_HOLD = 6 * 60 * 60
+LOCAL_ARRIVAL_HOLD_MAX = 48 * 60 * 60
+
+
+def incoming_local_arrival_in_flight(bsc_address: str) -> bool:
+    """A local pay-in still bridging to this wallet. Its USDT can land before
+    the bridge is marked delivered (and reserved), and a sweep in that gap
+    mints it without the journey's signed ID, so the journey never links
+    (2026-10-05: two BRL pay-ins, swept 6-35 s before delivery). The amount
+    is unknown until delivery (it may exceed amount_out), so hold the whole
+    sweep for those minutes."""
+    from datetime import timedelta
+    from django.db.models import Q
+    from django.utils import timezone
+    from payment_accounts.models import InfiniaJourney
+    if not bsc_address:
+        return False
+    now = timezone.now()
+    return InfiniaJourney.objects.filter(
+        direction='to_wallet', wallet_address__iexact=bsc_address,
+        bridge__status__in=['prepared', 'submitted', 'bridging', 'needs_review'],
+        bridge__created_at__gte=now - timedelta(seconds=LOCAL_ARRIVAL_HOLD_MAX),
+    ).filter(Q(bridge__created_at__gte=now - timedelta(seconds=LOCAL_ARRIVAL_HOLD))
+             | Q(bridge__deadline__gt=int(now.timestamp()) - 3600)).exists()
+
+
 def sweepable_usdt_wei(user, bsc_address: str) -> int:
     """USDT that may be auto-minted into savings: a FRESH balance minus
     everything already committed. Never negative.
@@ -307,6 +337,8 @@ def sweepable_usdt_wei(user, bsc_address: str) -> int:
     a last-known fallback), and minting a stale figure either misses a deposit
     or reverts for insufficient funds.
     """
+    if incoming_local_arrival_in_flight(bsc_address):
+        return 0
     balance = usdt_balance_raw(bsc_address, fresh=True)
     available = max(0, balance - reserved_usdt_wei(user, bsc_address))
     # Leave exact $1 (and smaller dust) as raw USDT. It remains fully
