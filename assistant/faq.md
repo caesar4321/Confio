@@ -4,13 +4,17 @@ comments as true, so:
   - Only write what the app does TODAY on prod. If a switch or provider changes,
     update this file in the same change (notes below say which switch each fact
     depends on).
-  - Never put fee amounts, exchange rates, yields or limits here: the app quotes
-    them in the flow.
+  - Fees: only Confío's OWN published fees (whitepaper §10) belong here. Never
+    provider fees, exchange rates, yield rates or limits: the app quotes them in
+    the flow.
+  - Founder, fees and $CONFIO sections added 2026-10-05 from README, whitepaper
+    and tokenomics v3.1; the full documents are also readable by the model
+    (read_public_document), so keep docs/ current too.
   - Customer-facing Spanish, short. Reviewed by: (pending, Julian/Susy).
 Facts verified against main + prod settings on 2026-10-04.
 Left out until confirmed: invites to people without Confío (BSC_INVITE_ENABLED
 is False), which countries Guardarian serves, documents Didit accepts per
-country, P2P and humanitarian screens, presale details, $CONFIO bonus claims.
+country, P2P and humanitarian screens, $CONFIO bonus/reward claims.
 Support history (418 human threads, 2026-03-14..10-04) was mined for the top
 questions; where the team's answers changed over time the latest is used, and
 lines from it carry "support:" notes. Never copy team date promises, fee
@@ -22,6 +26,33 @@ percentages or per-order caps from support threads.
 - Confío no ofrece préstamos, créditos ni adelantos de dinero.
 - Ninguna opción de ahorro o inversión en Confío tiene ganancias garantizadas.
 <!-- support: loans ~120 threads (largest topic), latest 2026-10-04; "what is Confío" ~55 threads. -->
+
+## Quién está detrás de Confío
+- Confío fue fundada por Julian Moon, de Corea del Sur, graduado de la Universidad Yonsei. Programador autodidacta, creó en 2019 la app Duende (empresa Duende Limited) y luego la renombró Confío, que significa "yo confío".
+- Empezó al ver cómo la hiperinflación en Venezuela dejaba a la gente sin poder comprar comida ni gasolina: quiso que los dólares digitales sirvieran a las personas.
+- Julian explica Confío en español en redes sociales (en TikTok: @julianmoonluna), con una audiencia de unas 480.000 personas.
+- Confío es de código abierto: la app, el servidor y los contratos están publicados en GitHub (github.com/caesar4321/Confio) y los contratos están verificados en BscScan.
+<!-- README.md, docs/whitepaper/README.md §9.2 (480k, dated), users/Confio_Frequently_Asked_Questions.py (bio, 2019 Duende, rebrand, Venezuela motivation). -->
+
+## Comisiones de Confío
+- Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir. Es decir, 0,9% cuando tus dólares entran al sistema de Confío (recarga o depósito de USDT) y 0,9% cuando salen (retiro o envío a una billetera externa).
+- Gratis dentro de Confío: enviar a otro usuario y pasar entre Confío Dollar y Confío Dollar+. Confío paga la comisión de la red.
+- Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
+- Acciones: 0,30% de Confío en cada compra y venta.
+- Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti. El rendimiento es variable y no está garantizado.
+- El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
+<!-- docs/whitepaper/README.md §10 (pricing rule, merchant/payroll 0.9%, stocks 0.30%, 15/85 yield share). Provider fees and FX are never quoted. -->
+
+## $CONFIO
+- $CONFIO es el token de Confío en BNB Smart Chain, con suministro fijo de 1.000.000.000 (mil millones): no se pueden crear más. El único contrato oficial es 0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8; cualquier otro es falso.
+- Distribución: preventa pública 74 millones (7,4%); recompensas por referidos y uso 7,4 millones (0,74%); Fondo de Invitación Cultural 15 millones (1,5%, se libera en 90 días); co-creador creativo 10 millones (1%, en 24 meses); fundador Julian Moon 893,6 millones (89,36%, en 36 meses). Las liberaciones son lineales desde su activación.
+- Preventa: precio continuo en dólares que sube de US$0,20 a US$1,30 según cuántos tokens se han vendido (sin fases), y se paga con cUSD. Lo comprado queda bloqueado hasta el lanzamiento oficial en un exchange descentralizado (DEX); antes no se puede reclamar ni transferir.
+- La preventa no está disponible para residentes de EE.UU. ni para ciudadanos o residentes de Corea del Sur.
+- Estado en BNB Smart Chain (verificado el 5 de octubre de 2026): las bóvedas de vesting del fundador, del co-creador y del Fondo de Invitación Cultural ya tienen sus tokens depositados y sus asignaciones registradas, pero ninguna liberación ha empezado ni se ha retirado nada. Hasta que se active cada una, la tesorería multifirma de Confío todavía puede cancelarla y recuperar esos tokens; una vez activada, ya no se puede revocar.
+- $CONFIO no respalda tus dólares, no es una acción de la empresa y no da derecho a ganancias. Su precio futuro no está garantizado y puede bajar.
+- Para más detalle (vesting, riesgos, contratos), el documento de tokenomics y el whitepaper están en GitHub.
+<!-- docs/tokenomics/README.md v3.1 (2026-09-23): §2 supply/contract, §3 allocation, §4 curve, §4.7 eligibility, §8 founder vesting. Old contract 0xd57B… burned. Never say whether buying is a good idea.
+On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated 893.6M/10M/15M, claimed 0, start 0, duration 36/24/3 months on vaults 0xb873…, 0xF32A…, 0x86c2… (balances = totalOwed). Revocable before start (revokeGrant + withdrawSurplus, changeBeneficiary; audit 2026-09-28): never call it a lock. The tokenomics doc v3.1 still says "not funded, added": STALE — this file wins until docs are updated. Re-check when a GrantStarted happens. -->
 
 ## Países, recargas y retiros
 - Puedes crear tu cuenta con un teléfono de casi cualquier país. Recargar y Retirar dependen del país de tu teléfono.
