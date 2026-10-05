@@ -34,12 +34,6 @@ PRICE_LOOKBACK = timedelta(days=7)
 # Daily candles reach back one year ('1Y'); older months have no price.
 OHLC_RANGE = '1Y'
 UNITS_TOLERANCE = Decimal('0.000001')        # relative, ledger vs chain
-# The receipt checker gives up after ~9 minutes (5×3s + 35×15s retries):
-# past this a batch still 'signed'/'sent' is stuck (ops reconciles it), not
-# settling, so it can't hold every card on "se está confirmando". The SAME
-# window as the holdings cache gate (one constant): stock_month hands it its
-# in-flight answer, so the two must never disagree about what is on the wire.
-from .gm_holdings import IN_FLIGHT_MAX_AGE as PENDING_MAX_AGE  # noqa: E402
 
 
 class StockMonthUnavailable(Exception):
@@ -161,8 +155,9 @@ def pending_trades(bsc_address: str) -> list[Trade]:
     signed quote; no settlement yet). The client shows success on the
     receipt, before finality marks the batch confirmed, so in that window the
     chain may or may not hold the units while the ledger does not."""
+    # Same window as the holdings cache gate (IN_FLIGHT_MAX_AGE): one rule.
     from .gm_holdings import stock_batches_in_flight
-    return _decode_trades(stock_batches_in_flight(bsc_address, PENDING_MAX_AGE)
+    return _decode_trades(stock_batches_in_flight(bsc_address)
                           .select_related('unified_transaction').order_by('created_at', 'id'))
 
 
