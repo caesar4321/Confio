@@ -36,8 +36,10 @@ OHLC_RANGE = '1Y'
 UNITS_TOLERANCE = Decimal('0.000001')        # relative, ledger vs chain
 # The receipt checker gives up after ~9 minutes (5×3s + 35×15s retries):
 # past this a batch still 'signed'/'sent' is stuck (ops reconciles it), not
-# settling, so it can't hold every card on "se está confirmando".
-PENDING_MAX_AGE = timedelta(minutes=15)
+# settling, so it can't hold every card on "se está confirmando". The SAME
+# window as the holdings cache gate (one constant): stock_month hands it its
+# in-flight answer, so the two must never disagree about what is on the wire.
+from .gm_holdings import IN_FLIGHT_MAX_AGE as PENDING_MAX_AGE  # noqa: E402
 
 
 class StockMonthUnavailable(Exception):

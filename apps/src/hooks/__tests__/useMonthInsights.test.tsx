@@ -7,7 +7,7 @@ const mockClient = { query: (...a: any[]) => mockQuery(...a) };
 jest.mock('@apollo/client', () => ({ ...jest.requireActual('@apollo/client'), useApolloClient: () => mockClient }));
 
 import {
-  mergeValues, REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights, VALUE_ONLY_RECHECK_MS,
+  mergeValues, REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights,
 } from '../useMonthInsights';
 
 const insights = (keys: string[]) => ({
@@ -249,6 +249,24 @@ it('from a trade, the reveal waits longer for a slow stocks answer (the card the
   expect(latest.stocks.state).toBe('gain');
 });
 
+it('the answer that resolves a trade replaces the card, even a pre-trade gain (never the pre-trade value)', async () => {
+  let stocks: any = { state: 'gain', gainUsd: '5.00', valueUsd: '100.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  stocks = { state: 'settling', valueUsd: '0.00' };
+  await act(async () => { latest.refresh(); });
+  expect(latest.stocks.state).toBe('gain');            // kept while the trade settles
+  stocks = { state: 'value_only', valueUsd: '0.00' };
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocks.state).toBe('value_only');      // the answer that resolves the trade: the post-trade truth
+  expect(latest.stocks.valueUsd).toBe('0.00');
+  expect(latest.stocksSettling).toBe(false);
+  stocks = { state: 'gain', gainUsd: '1.00', valueUsd: '1.00' };
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocks.state).toBe('gain');            // value only → gain is still an upgrade
+});
+
 it('value only becomes the result once explained, and a view that saw settling keeps asking', () => {
   const base2 = { insights: null, savings: null, protection: null };
   const valueOnly = { state: 'value_only', valueUsd: '220.00' } as any;
@@ -257,7 +275,7 @@ it('value only becomes the result once explained, and a view that saw settling k
   expect(mergeValues({ ...base2, stocks: gain }, { ...base2, stocks: valueOnly }).stocks).toBe(gain);   // never a downgrade
 });
 
-it('after a trade settles, value only is re-asked for a while, then taken as the answer', async () => {
+it('only a settling answer keeps the screen polling; whatever resolves it ends the poll', async () => {
   let stocks: any = { state: 'value_only', valueUsd: '100.00' };
   mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
     query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
@@ -268,15 +286,10 @@ it('after a trade settles, value only is re-asked for a while, then taken as the
   expect(latest.stocksSettling).toBe(true);
   stocks = { state: 'value_only', valueUsd: '220.00' };
   await act(async () => { latest.refreshStocks(); });
-  expect(latest.stocksSettling).toBe(true);           // may be a passing race: keep asking
-  // Time, not a count: with polls every 30s, two answers already pass it.
-  jest.advanceTimersByTime(30000);
-  await act(async () => { latest.refreshStocks(); });
-  expect(latest.stocksSettling).toBe(true);
-  jest.advanceTimersByTime(VALUE_ONLY_RECHECK_MS - 30000 + 1);
-  await act(async () => { latest.refreshStocks(); });
-  expect(latest.stocksSettling).toBe(false);          // a real value-only answer: the poll ends
+  expect(latest.stocksSettling).toBe(false);          // the server's final answer
+  expect(latest.stocks.valueUsd).toBe('220.00');
   stocks = { state: 'settling', valueUsd: '300.00' };
   await act(async () => { latest.refresh(); });
   expect(latest.stocksSettling).toBe(true);           // a later trade starts over
 });
+
