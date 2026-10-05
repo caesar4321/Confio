@@ -169,3 +169,62 @@ describe('Pagos habituales', () => {
     expect(row.props.accessibilityLabel).toContain('monto oculto');
   });
 });
+
+describe('StocksCard', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { StocksCard, moverVerb, signedUsd } = require('../StocksCard');
+  const base = {
+    state: 'gain', canBuy: true, valueUsd: '220.00', valueStartUsd: '100.00', boughtUsd: '105.00', soldUsd: '0.00',
+    gainUsd: '15.00', gainPct: '7.32', holdings: 1, topMover: { ticker: 'NVDA', name: 'NVIDIA', changePct: '10.00' },
+  };
+  const card = (value: any, extra: any = {}) => mount(
+    <StocksCard value={value} month={10} isCurrent masked={false} onOpenStock={jest.fn()} onOpenStocks={jest.fn()} {...extra} />);
+
+  it('shows the month result net of purchases, what was put in, and the top mover', () => {
+    const all = texts(card(base)).join(' | ');
+    expect(all).toContain('+US$15.00');
+    expect(all).toContain('+7.3%');
+    expect(all).toContain('Valen hoy US$220');
+    expect(all).toContain('Pusiste US$105');
+    expect(all).toContain('subió 10% en octubre');
+  });
+
+  it('a down month is calm (text color, true minus), never red', () => {
+    const tree = card({ ...base, gainUsd: '-3.10', gainPct: '-1.50' });
+    const gain = byId(tree, 'tumes-stocks-gain')[0];
+    expect([].concat(gain.props.children).join('')).toBe('−US$3.10');
+    expect(StyleFlat(gain.props.style).color).toBe(colors.textFlat);
+  });
+
+  it('value only: no gain, and says why', () => {
+    const tree = card({ ...base, state: 'value_only', gainUsd: null, gainPct: null, valueStartUsd: null });
+    expect(byId(tree, 'tumes-stocks-gain')).toHaveLength(0);
+    expect(byId(tree, 'tumes-stocks-value-note')).toHaveLength(1);
+    expect(byId(tree, 'tumes-stocks-how')).toHaveLength(0);
+  });
+
+  it('masked hides every amount', () => {
+    const all = texts(card(base, { masked: true })).join(' | ');
+    expect(all).not.toMatch(/US\$\d/);
+  });
+
+  it('tapping the mover opens that stock', () => {
+    const onOpenStock = jest.fn();
+    const tree = card(base, { onOpenStock });
+    tree.root.findAll((n) => n.props.testID === 'tumes-stocks-mover' && typeof n.props.onPress === 'function')[0]
+      .props.onPress();
+    expect(onOpenStock).toHaveBeenCalledWith('NVDA');
+  });
+
+  it('formats', () => {
+    expect(signedUsd(4.2)).toBe('+US$4.20');
+    expect(signedUsd(-0.5)).toBe('−US$0.50');
+    expect(moverVerb(-3)).toBe('bajó 3%');
+    expect(moverVerb(0.01)).toBe('se mantuvo');
+  });
+});
+
+function StyleFlat(style: any) {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require('react-native').StyleSheet.flatten(style);
+}

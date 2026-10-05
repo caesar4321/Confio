@@ -3,7 +3,7 @@
 //
 // Top to bottom: Card A "Te quedaron" (the single 34pt anchor, with the pace
 // line on the current month) · the dollar slot (protection, else savings
-// earned) · Pagos habituales · En qué se fue · Entre tus cuentas · Con quién.
+// earned) · Tus acciones (stocks, or an invitation) · Pagos habituales · En qué se fue · Entre tus cuentas · Con quién.
 // Card A renders as soon as monthSummary answers; the insight cards and the
 // sections below are revealed together (≤800ms later), so nothing moves under
 // the user's finger. Amounts always US$, masked with the balance. A month with
@@ -33,6 +33,7 @@ import {
 import { SummaryCard } from '../components/tuMes/SummaryCard';
 import { ProtectionCard, SavingsCard, StableCard } from '../components/tuMes/ProtectionCard';
 import { RecurringCard } from '../components/tuMes/RecurringCard';
+import { StocksCard } from '../components/tuMes/StocksCard';
 import { useMonthInsights, type InsightData } from '../hooks/useMonthInsights';
 import { dollarSlot, paceLine } from '../utils/monthInsights';
 import { AnalyticsService } from '../services/analyticsService';
@@ -167,6 +168,8 @@ export function MonthSummaryScreen() {
           onReceive={() => navigation.navigate('Receive')}
           onSave={() => navigation.navigate('ProtectedSavings')}
           onTopUp={() => navigation.navigate('TopUp')}
+          onOpenStocks={() => navigation.navigate('StocksList')}
+          onOpenStock={(ticker) => navigation.navigate('StockDetail', { ticker })}
         />
       )}
     </View>
@@ -197,6 +200,8 @@ type BodyProps = {
   onReceive: () => void;
   onSave: () => void;
   onTopUp: () => void;
+  onOpenStocks: () => void;
+  onOpenStock: (ticker: string) => void;
 };
 
 /** One precision on this screen: whole dollars (design C, 2026-10-04). */
@@ -234,7 +239,7 @@ const isUnknownWallet = (key: string, name: string) =>
 /** A single unknown wallet is a deposit only if no money went out to it. */
 const externalName = (sent: number) => (sent > 0 ? 'Billetera externa' : 'Depósito externo');
 
-function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onOpen, onSend, onReceive, onSave, onTopUp }: BodyProps) {
+function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onOpen, onSend, onReceive, onSave, onTopUp, onOpenStocks, onOpenStock }: BodyProps) {
   const cur = summary.current;
 
   const uncategorized = cur.spendingByCategory.find((c) => c.category === 'uncategorized');
@@ -303,6 +308,11 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
           {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
           {slot?.kind === 'stable' && <StableCard value={slot.value} masked={masked} />}
           {!slot && <SavingsInvite onSave={onSave} />}
+          {insights.stocks && insights.stocks.state !== 'none' && (
+            <StocksCard value={insights.stocks} month={summary.month} isCurrent={isCurrent} masked={masked}
+              onOpenStocks={onOpenStocks} onOpenStock={onOpenStock} />
+          )}
+          {insights.stocks?.state === 'none' && insights.stocks.canBuy && <StocksInvite onOpen={onOpenStocks} />}
           {insights.insights && (
             <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}
               onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />
@@ -473,6 +483,19 @@ function SavingsInvite({ onSave }: { onSave: () => void }) {
       <Text style={styles.emptyText}>Tu ahorro crece cada día, y aquí verás cuánto ganó.</Text>
       <TouchableOpacity onPress={onSave} style={styles.emptyAction} accessibilityRole="button">
         <Text style={styles.emptyActionText}>Ahorrar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/** No stocks this month (and buying is offered): invite, no number. */
+function StocksInvite({ onOpen }: { onOpen: () => void }) {
+  return (
+    <View style={[styles.emptyCard, styles.slotInvite]} testID="tumes-stocks-invite">
+      <Text style={styles.inviteTitle}>Invierte en acciones de EE.UU.</Text>
+      <Text style={styles.emptyText}>Compra fracciones de Apple, NVIDIA o Tesla con tus dólares, y aquí verás cómo les fue cada mes.</Text>
+      <TouchableOpacity onPress={onOpen} style={styles.emptyAction} accessibilityRole="button">
+        <Text style={styles.emptyActionText}>Ver acciones</Text>
       </TouchableOpacity>
     </View>
   );
