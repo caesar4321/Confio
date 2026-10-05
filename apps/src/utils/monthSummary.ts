@@ -41,12 +41,14 @@ export function currentYearMonth(now: Date = new Date()): { year: number; month:
 /**
  * "US$1,234.56". Always "US$" (design 5A): a bare "$" reads as pesos in
  * AR/CO/MX. `whole` drops cents (summary screens: one precision, whole
- * dollars; amounts under US$1 keep cents so they never read as US$0).
+ * dollars; amounts under US$1 keep cents so they never read as US$0, while
+ * an exact zero is US$0).
  */
 export function formatUsd(amount: string | number, { whole = false }: { whole?: boolean } = {}): string {
   const value = typeof amount === 'number' ? amount : Number(amount);
   if (!Number.isFinite(value)) return 'US$—';
-  const digits = whole && Math.abs(value) >= 1 ? 0 : 2;
+  // Exactly zero is "US$0" (a quiet month), never "US$0.00".
+  const digits = whole && (Math.abs(value) >= 1 || value === 0) ? 0 : 2;
   // The user's country separators (utils/numberLocale): US$1.234 in VE.
   return formatUsdAmount(value, { decimals: digits });
 }

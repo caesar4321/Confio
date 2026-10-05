@@ -84,22 +84,16 @@ describe('useMonthHeroLine', () => {
     expect(count(state())).toBe(4);
   });
 
-  it('invites (never hides) when neither this nor last month has 3 movements', async () => {
-    mockNetwork = summary(1);
-    const { state } = mount('acc-1');
-    await flush();
-    expect(state().kind).toBe('invite');
-  });
-
-  it('early in the month shows last month until this one has 3 movements', async () => {
+  it('a quiet month shows the current month with its real zeros, never last month', async () => {
     const now = new Date();
     const thisMonth = now.getMonth() + 1;
-    mockNetwork = (v: any) => (v.month === thisMonth ? summary(1, thisMonth) : summary(12, v.month));
+    mockNetwork = (v: any) => (v.month === thisMonth ? summary(0, thisMonth) : summary(12, v.month));
     const { state } = mount('acc-1');
     await flush();
     const s = state();
     expect(s.kind).toBe('month');
-    expect(s.kind === 'month' && s.summary.month).not.toBe(thisMonth);
+    expect(s.kind === 'month' && [s.summary.month, s.summary.current.movementCount]).toEqual([thisMonth, 0]);
+    expect(mockQuery).toHaveBeenCalledTimes(1);          // no last-month fetch any more
   });
 
   it('is hidden for employees: no reads, no requests', async () => {

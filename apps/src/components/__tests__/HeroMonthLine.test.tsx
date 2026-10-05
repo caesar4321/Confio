@@ -96,3 +96,12 @@ describe('HeroMonthInvite', () => {
     expect(render(<HeroMonthInvite onPress={jest.fn()} />).toJSON()).not.toBeNull();
   });
 });
+
+describe('quiet month', () => {
+  it('shows real zeros as US$0, not US$0.00 (founder 2026-10-04)', () => {
+    const { formatUsd } = require('../../utils/monthSummary');
+    expect(formatUsd(0, { whole: true })).toBe('US$0');
+    expect(formatUsd('0.00', { whole: true })).toBe('US$0');
+    expect(formatUsd(0.4, { whole: true })).toBe('US$0.40');   // a real sub-dollar amount keeps its cents
+  });
+});
