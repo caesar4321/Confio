@@ -11,6 +11,7 @@ import { formatUsd, MASK, monthName } from '../../utils/monthSummary';
 import { formatLocal, quoteTime, shortDate, SPARK_MIN_DAYS } from '../../utils/monthInsights';
 import { formatUsdAmount } from '../../utils/numberLocale';
 import { CardShell, CardTitle, CARD_FONT_MULTIPLIER } from './CardShell';
+import { Grow } from './motion';
 
 /** Day of the month the comparison starts (the 1st, or the first day a
  *  rate was kept in the launch month). */
@@ -68,7 +69,9 @@ function Bar({ label, amount, share, color }: { label: string; amount: string; s
     <View style={styles.barRow}>
       <Text style={styles.barLabel} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>{label}</Text>
       <View style={styles.barTrack}>
-        <View style={[styles.barFill, { width: `${Math.max(4, Math.round(share * 100))}%`, backgroundColor: color }]} />
+        <Grow delay={150} style={{ width: `${Math.max(4, Math.round(share * 100))}%` }}>
+          <View style={[styles.barFill, { backgroundColor: color }]} />
+        </Grow>
       </View>
       <Text style={styles.barAmount} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>{amount}</Text>
     </View>
@@ -144,14 +147,16 @@ export function SavingsCard({ value, month, masked }: { value: SavingsEarned; mo
           {masked ? MASK : amount}
         </Text>
         {showBars && (
-          <View style={styles.spark} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
-            testID="tumes-savings-bars">
-            {days.map((v, i) => (
-              <View key={value.daily[i].date}
-                style={[styles.sparkBar, { height: `${Math.max(6, Math.round((v / max) * 100))}%` },
-                  i === days.length - 1 && styles.sparkLast]} />
-            ))}
-          </View>
+          <Grow axis="y" delay={150}>
+            <View style={styles.spark} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+              testID="tumes-savings-bars">
+              {days.map((v, i) => (
+                <View key={value.daily[i].date}
+                  style={[styles.sparkBar, { height: `${Math.max(6, Math.round((v / max) * 100))}%` },
+                    i === days.length - 1 && styles.sparkLast]} />
+              ))}
+            </View>
+          </Grow>
         )}
         <Text style={styles.caption} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>en {monthName(month)}</Text>
       </View>

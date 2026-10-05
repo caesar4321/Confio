@@ -13,6 +13,7 @@ import { formatUsd, MASK, monthName, previousMonth } from '../../utils/monthSumm
 import { formatUsdAmount } from '../../utils/numberLocale';
 import type { PaceLine } from '../../utils/monthInsights';
 import { CARD_FONT_MULTIPLIER } from './CardShell';
+import { Grow } from './motion';
 
 const TICK_MS = 1200;
 
@@ -164,11 +165,14 @@ export function SummaryCard({ summary, masked, runKey, pace, onOpenIncome, onOpe
         </TouchableOpacity>
       </View>
 
-      <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        {/* Normalized weights (Yoga floors flex sums below 1), no zero-width segments. */}
-        {income > 0 && <View style={[styles.barIn, { flex: income / total }]} />}
-        {spending > 0 && <View style={[styles.barOut, { flex: spending / total }]} />}
-      </View>
+      {/* The in/out bar grows in after the number starts rolling (key: once per month view). */}
+      <Grow key={runKey} delay={150}>
+        <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {/* Normalized weights (Yoga floors flex sums below 1), no zero-width segments. */}
+          {income > 0 && <View style={[styles.barIn, { flex: income / total }]} />}
+          {spending > 0 && <View style={[styles.barOut, { flex: spending / total }]} />}
+        </View>
+      </Grow>
 
       <Text style={styles.caption} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>Sin contar recargas, retiros ni ahorro.</Text>
 

@@ -2,6 +2,8 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+// Entrance motion is covered in motion.test.tsx; here the cards render in place.
+jest.mock('../../components/tuMes/motion', () => ({ Rise: ({ children }: any) => children, Grow: ({ children }: any) => children }));
 jest.mock('react-native-svg', () => {
   const R = require('react');
   const C = (p: any) => R.createElement('Svg', p, p.children);

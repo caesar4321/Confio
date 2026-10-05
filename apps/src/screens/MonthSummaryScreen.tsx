@@ -10,9 +10,7 @@
 // no movements still shows the insight cards, with the empty message below.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   ActivityIndicator,
-  Animated,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -33,6 +31,7 @@ import {
 import { SummaryCard } from '../components/tuMes/SummaryCard';
 import { ProtectionCard, SavingsCard, StableCard } from '../components/tuMes/ProtectionCard';
 import { RecurringCard } from '../components/tuMes/RecurringCard';
+import { Rise } from '../components/tuMes/motion';
 import { StocksCard } from '../components/tuMes/StocksCard';
 import {
   REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights, type InsightData,
@@ -338,19 +337,6 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, set
   }, []));
   const pendingCount = uncategorized ? uncategorizedData?.monthMovements.length : 0;
 
-  // One fade for the revealed region (design review 19A); none with Reduce Motion.
-  const fade = useRef(new Animated.Value(0)).current;
-  const revealed = Boolean(insights);
-  useEffect(() => {
-    if (!revealed) {
-      fade.setValue(0);
-      return;
-    }
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((reduce) => (reduce ? fade.setValue(1)
-        : Animated.timing(fade, { toValue: 1, duration: 180, useNativeDriver: true }).start()))
-      .catch(() => fade.setValue(1));
-  }, [revealed, fade]);
 
   const ownRows = ownMoneyRows(cur);
   const people = summary.counterparties.map((c) => {
@@ -379,11 +365,15 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, set
         onOpenIncome={() => onOpen('income', 'Entró')} onOpenSpending={() => onOpen('spending', 'Salió')}
         onSend={onSend} onReceive={onReceive} />
       {insights && (
-        <Animated.View style={{ opacity: fade }} testID="tumes-revealed">
-          {slot?.kind === 'protection' && <ProtectionCard value={slot.value} month={summary.month} masked={masked} />}
-          {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
-          {slot?.kind === 'stable' && <StableCard value={slot.value} masked={masked} />}
-          {!slot && <SavingsInvite onSave={onSave} />}
+        // Entrance (founder 2026-10-05): the cards rise in one after another,
+        // once per month view (they mount with the reveal), none with Reduce Motion.
+        <View testID="tumes-revealed">
+          <Rise index={0}>
+            {slot?.kind === 'protection' && <ProtectionCard value={slot.value} month={summary.month} masked={masked} />}
+            {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
+            {slot?.kind === 'stable' && <StableCard value={slot.value} masked={masked} />}
+            {!slot && <SavingsInvite onSave={onSave} />}
+          </Rise>
           {insights.stocks && insights.stocks.state !== 'none' && (
             // gain · value_only · settling (resolves in place)
             <StocksCard value={insights.stocks} month={summary.month} isCurrent={isCurrent} masked={masked}
@@ -391,11 +381,20 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, set
           )}
           {insights.stocks?.state === 'none' && insights.stocks.canBuy && <StocksInvite onOpen={onOpenStocks} />}
           {insights.insights && (
-            <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}
-              onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />
+            <Rise index={2}>
+              <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}
+                onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />
+            </Rise>
           )}
-          {renderSections()}
-        </Animated.View>
+          <Rise index={3}>{renderSections()}</Rise>
+        </View>
+      )}
+      {!insights && (
+        // Waiting on the insight queries (a cold stocks scan can take a
+        // couple of seconds): placeholders, never a blank screen below Card A.
+        <View testID="tumes-insights-loading">
+          {[0, 1, 2].map((i) => <View key={i} style={styles.skeletonRow} />)}
+        </View>
       )}
     </ScrollView>
   );
