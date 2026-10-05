@@ -129,7 +129,9 @@ export function useMonthInsights(params: {
   // VALUE_ONLY_RECHECK_MS: an incomplete history is a real answer).
   const sawSettling = useRef(false);
   const lastSettlingAt = useRef(0);
-  const stocksInFlight = useRef(false);
+  // The view (generation) whose stocks ask is in flight: a month switch
+  // frees the slot at once, and an old ask's cleanup never frees a new one.
+  const stocksInFlight = useRef<number | null>(null);
   // Stocks asks are numbered when sent: an answer older than one already
   // applied (a focus refresh waits for its slowest query; a poll doesn't)
   // must not land over it and restart the settling poll.
@@ -218,12 +220,12 @@ export function useMonthInsights(params: {
     if (!shown.current) return;
     // A stocks ask already in flight (a settling poll, cold scan) answers on
     // its own: never stack a second one on it. Ours holds the slot too.
-    const askStocks = !stocksInFlight.current;
+    const askStocks = stocksInFlight.current !== gen;
     const seq = askStocks ? ++stocksAsked.current : 0;
     const { insights, savings, protection, stocks } = fetchAll(askStocks);
     if (askStocks) {
-      stocksInFlight.current = true;
-      stocks.finally(() => { stocksInFlight.current = false; });
+      stocksInFlight.current = gen;
+      stocks.finally(() => { if (stocksInFlight.current === gen) stocksInFlight.current = null; });
     }
     Promise.all([insights, savings, protection, stocks]).then(([i, s, p, k]) => {
       if (generation.current !== gen || !shown.current) return;
@@ -244,10 +246,10 @@ export function useMonthInsights(params: {
    *  poll's, and an older answer can't land after a newer one. */
   const refreshStocks = useCallback(() => {
     const gen = generation.current;
-    if (!shown.current || stocksInFlight.current) return;
-    stocksInFlight.current = true;
+    if (!shown.current || stocksInFlight.current === gen) return;
+    stocksInFlight.current = gen;
     const seq = ++stocksAsked.current;
-    fetchStocks().finally(() => { stocksInFlight.current = false; }).then((k) => {
+    fetchStocks().finally(() => { if (stocksInFlight.current === gen) stocksInFlight.current = null; }).then((k) => {
       if (generation.current !== gen || !shown.current || seq <= stocksApplied.current) return;
       stocksApplied.current = seq;
       if (k) noteStocks(k.state);
