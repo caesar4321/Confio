@@ -25,7 +25,9 @@ import { selector } from '../evmWallet';
  * Empty until the proxy is deployed — the exit then stays closed.
  */
 export const BUNDLED_HEARTBEAT = {
-  address: '',
+  // ConfioHeartbeat UUPS proxy, BSC mainnet, deployed 2026-10-05
+  // (implementation 0x91D9F13869aa8072E3890Bf4A5351eEA1eC86dc0).
+  address: '0xAE49E3AD57531974CD2AEc2633b03770fF4a20FF',
 };
 
 /** How long without a beat before the screen says "Confío no responde".
