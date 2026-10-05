@@ -243,7 +243,8 @@ FLOOR_TTL = 10 * 60
 # From broadcast to confirmation the trade's block isn't known (the app shows
 # success on the receipt, seconds before finality sets the floor): no scan is
 # cached while the wallet has a stock trade on the wire, asked of the
-# database at store time (indexed; at most once per SCAN_TTL per wallet), so
+# database at store time (indexed; once per uncached scan, so every read
+# while a trade is on the wire, and at most once per SCAN_TTL otherwise), so
 # nothing has to be set at broadcast or lifted at each terminal status. The
 # receipt checker's own horizon: an older 'signed'/'sent' row is stuck.
 IN_FLIGHT_MAX_AGE = timedelta(minutes=15)
@@ -307,11 +308,13 @@ def reads_before(blocks: dict, block: int | None) -> bool:
     return bool(block) and any(at is None or at < block for at in blocks.values())
 
 
-def _behind_floor(key: str, blocks: dict) -> bool:
+def _behind_floor(key: str, blocks: dict, wallet_in_flight: bool | None = None) -> bool:
     """A read older than the last trade's block (or of unknown block while a
     floor stands), or taken while a trade is on the wire: fine to use as-is
     by a caller that knows, never cached."""
-    return reads_before(blocks, cache.get(f'gm_hold_floor:{key}')) or _wallet_in_flight(key)
+    if reads_before(blocks, cache.get(f'gm_hold_floor:{key}')):
+        return True
+    return _wallet_in_flight(key) if wallet_in_flight is None else wallet_in_flight
 
 
 def _generation(key: str):
@@ -378,17 +381,17 @@ def _store(key: str, generation, fresh: dict, last: dict) -> bool:
     return True
 
 
-def complete_holdings(user_bsc_address: str) -> tuple[dict, dict] | None:
+def complete_holdings(user_bsc_address: str, *, wallet_in_flight: bool | None = None) -> tuple[dict, dict] | None:
     """(units, blocks) from a complete scan, or None (unknown): blocks maps
     every scanned symbol to the block its balance was read at (None when
     that chunk's node didn't say), so a caller can tell which confirmed
     trades this chain has not seen yet."""
     if not user_bsc_address:
         return {}, {}
-    return _complete_holdings(user_bsc_address.lower())
+    return _complete_holdings(user_bsc_address.lower(), wallet_in_flight)
 
 
-def _complete_holdings(key: str) -> tuple[dict, dict] | None:
+def _complete_holdings(key: str, wallet_in_flight: bool | None = None) -> tuple[dict, dict] | None:
     cached = cache.get(f'gm_hold_full_v2:{key}')
     if isinstance(cached, dict) and 'held' in cached:
         return cached['held'], cached['blocks']
@@ -424,7 +427,7 @@ def _complete_holdings(key: str) -> tuple[dict, dict] | None:
         # the list scan's own token set (live only): a delisted position must
         # not appear or vanish there depending on which scan ran last.
         listed = {s: u for s, u in held.items() if s in token_registry}
-        if _behind_floor(key, blocks):
+        if _behind_floor(key, blocks, wallet_in_flight):
             # Read by a node behind the last trade: the caller can tell which
             # trades it hasn't seen (blocks), but nobody else gets it cached.
             return held, blocks
