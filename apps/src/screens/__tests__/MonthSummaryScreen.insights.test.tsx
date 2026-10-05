@@ -2,6 +2,8 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+// The full-screen intro is covered in TuMesIntro.test.tsx.
+jest.mock('../../components/tuMes/TuMesIntro', () => ({ TuMesIntro: () => null }));
 // Entrance motion is covered in motion.test.tsx; here the cards render in place.
 jest.mock('../../components/tuMes/motion', () => ({ Rise: ({ children }: any) => children, Grow: ({ children }: any) => children }));
 jest.mock('react-native-svg', () => {

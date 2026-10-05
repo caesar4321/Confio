@@ -32,6 +32,7 @@ import { SummaryCard } from '../components/tuMes/SummaryCard';
 import { ProtectionCard, SavingsCard, StableCard } from '../components/tuMes/ProtectionCard';
 import { RecurringCard } from '../components/tuMes/RecurringCard';
 import { Rise } from '../components/tuMes/motion';
+import { TuMesIntro } from '../components/tuMes/TuMesIntro';
 import { StocksCard } from '../components/tuMes/StocksCard';
 import {
   REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights, type InsightData,
@@ -99,6 +100,8 @@ export function MonthSummaryScreen() {
     context: { queryDeduplication: false },
   });
   const summary = data?.monthSummary ?? null;
+  // Once per screen entry: switching months never replays it.
+  const [showIntro, setShowIntro] = useState(true);
   const insights = useMonthInsights({
     accountKey: activeAccount?.id, year: period.year, month: period.month, timezone, isCurrent,
     ready: Boolean(summary && summary.year === period.year && summary.month === period.month),
@@ -245,6 +248,11 @@ export function MonthSummaryScreen() {
           onOpenStocks={() => navigation.navigate('StocksList', undefined, { pop: true })}
           onOpenStock={(ticker) => navigation.navigate('StockDetail', { ticker })}
         />
+      )}
+      {/* Joyful full-screen intro on every entry (founder 2026-10-05); tap to skip. */}
+      {showIntro && (
+        <TuMesIntro month={period.month} masked={masked} onDone={() => setShowIntro(false)}
+          summary={summary && summary.year === period.year && summary.month === period.month ? summary : null} />
       )}
     </View>
   );
