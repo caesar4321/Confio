@@ -12,6 +12,11 @@ on:
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
+    inputs:
+      test_alert:
+        description: 'Only send a test message to the ops Telegram group'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,4 +39,5 @@ jobs:
           OPS_ALERT_TELEGRAM_BOT_TOKEN: ${{ secrets.OPS_ALERT_TELEGRAM_BOT_TOKEN }}
           OPS_ALERT_TELEGRAM_CHAT_ID: ${{ secrets.OPS_ALERT_TELEGRAM_CHAT_ID }}
           STALE_AFTER_HOURS: '26'
+          TEST_ALERT: ${{ inputs.test_alert || 'false' }}
         run: python3 scripts/ops/heartbeat_watchdog.py
