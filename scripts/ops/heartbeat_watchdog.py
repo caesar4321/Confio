@@ -77,6 +77,10 @@ def telegram(text):
 
 
 def main() -> int:
+    if os.environ.get('TEST_ALERT', '').lower() == 'true':
+        ok = telegram('🧪 Prueba: el vigilante externo (GitHub Actions) puede alertar. Ignorar.')
+        print('test alert delivered' if ok else '::error::test alert not delivered')
+        return 0 if ok else 1
     hb = os.environ.get('CONFIO_HEARTBEAT_ADDRESS', '').strip()
     if not hb:
         print('CONFIO_HEARTBEAT_ADDRESS not set; nothing to watch.')
