@@ -6,8 +6,11 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { MainStackParamList } from '../types/navigation';
 import { GET_STOCK_MONTH, type StockMonth } from '../apollo/monthSummary';
 import { currentYearMonth, deviceTimezone } from '../utils/monthSummary';
+import { isBalanceHidden } from '../utils/balanceVisibility';
 
 export function useStockMonthNow(enabled: boolean): StockMonth | null {
   const { year, month } = currentYearMonth();
@@ -36,4 +39,12 @@ export function stockMonthGain(value: StockMonth | null): number | null {
   if (!value || value.state !== 'gain' || value.gainUsd === null) return null;
   const gain = Number(value.gainUsd);
   return Number.isFinite(gain) ? gain : null;
+}
+
+/** The stocks screens' door to this month in Tu mes: back to a Tu mes already
+ *  in the stack (pop + merge) instead of stacking copies, and masked like
+ *  Home when the user hid their balances (these screens don't pass by Home). */
+export async function openTuMesNow(navigation: NativeStackNavigationProp<MainStackParamList>): Promise<void> {
+  const masked = await isBalanceHidden();
+  navigation.navigate('MonthSummary', { ...currentYearMonth(), masked }, { pop: true, merge: true });
 }

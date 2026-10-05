@@ -34,7 +34,7 @@ import { StockTradeLoadingOverlay } from '../components/common/StockTradeLoading
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useAccount } from '../contexts/AccountContext';
-import { currentYearMonth } from '../utils/monthSummary';
+import { openTuMesNow } from '../hooks/useStockMonthNow';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
@@ -209,7 +209,7 @@ export const SellStockScreen = () => {
           {canOpenMonth && (
           <TouchableOpacity
             style={styles.successMonthLink}
-            onPress={() => navigation.navigate('MonthSummary', currentYearMonth(), { pop: true, merge: true })}
+            onPress={() => { void openTuMesNow(navigation); }}
             accessibilityRole="button"
             testID="stock-success-month-link"
           >

@@ -74,7 +74,10 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
     // (back from a trade, an invitation to buy would be wrong).
     stocks: shown.stocks
       ? (next.stocks && (next.stocks.state === shown.stocks.state
-        || (['settling', 'none'].includes(shown.stocks.state) && next.stocks.state !== 'none'))
+        || (shown.stocks.state === 'none' && next.stocks.state !== 'none')
+        // After settling the server answers 'none' only when the trade
+        // failed (a pending one is still 'settling'): never a stuck note.
+        || shown.stocks.state === 'settling')
         ? next.stocks : shown.stocks)
       : null,
   };

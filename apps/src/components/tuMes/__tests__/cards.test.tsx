@@ -204,6 +204,20 @@ describe('StocksCard', () => {
     expect(byId(tree, 'tumes-stocks-how')).toHaveLength(0);
   });
 
+  it('the percent takes the sign of the dollars beside it', () => {
+    const all = texts(card({ ...base, gainUsd: '-0.01', gainPct: '-0.00' })).join(' | ');
+    expect(all).toContain('−US$0.01');
+    expect(all).toContain('−0%');
+  });
+
+  it('a first trade still settling shows no US$0, only that it is confirming', () => {
+    const tree = card({ ...base, state: 'settling', valueUsd: '0.00', holdings: 0, gainUsd: null, gainPct: null,
+      valueStartUsd: null, boughtUsd: null, soldUsd: null, topMover: null });
+    expect(byId(tree, 'tumes-stocks-value')).toHaveLength(0);
+    expect(texts(tree).join(' | ')).not.toContain('US$0');
+    expect(byId(tree, 'tumes-stocks-settling-note')).toHaveLength(1);
+  });
+
   it('masked hides every amount', () => {
     const all = texts(card(base, { masked: true })).join(' | ');
     expect(all).not.toMatch(/US\$\d/);

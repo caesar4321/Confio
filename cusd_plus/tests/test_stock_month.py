@@ -46,6 +46,7 @@ class StockMonthTests(SimpleTestCase):
         }
         patches = [
             mock.patch.object(sm, 'confirmed_trades', side_effect=lambda _a: self.trades),
+            mock.patch('cusd_plus.gm_holdings.registry', return_value={}),
             mock.patch.object(sm, 'pending_trade_exists', side_effect=lambda _a: self.pending),
             mock.patch('cusd_plus.gm_holdings.holdings_units', side_effect=self.scan),
             mock.patch('cusd_plus.gm_api.all_market', side_effect=lambda: self.market),
@@ -221,6 +222,15 @@ class StockMonthResolverTests(SimpleTestCase):
         out = self.resolve(r)
         self.assertEqual((out.value_usd, out.value_start_usd, out.gain_usd), ('100.00', '50.01', '49.99'))
 
+    def test_percent_follows_the_cents_gain(self):
+        # Raw gain −0.0099 on ~US$1 is −0.98%, but the cents shown net to 0.00:
+        # the percent must not say "−1%" beside "+US$0.00".
+        r = sm.StockMonth(state='gain', value_end=Decimal('1.005'), value_start=Decimal('1.0149'),
+                          bought=Decimal('0'), sold=Decimal('0'), gain=Decimal('-0.0099'),
+                          gain_pct=Decimal('-0.9755'), holdings=1)
+        out = self.resolve(r)
+        self.assertEqual((out.gain_usd, out.gain_pct), ('0.00', '0.00'))
+
     def test_none_needs_buying_and_unknown_or_gated_is_null(self):
         self.assertTrue(self.resolve(sm.StockMonth(state='none')).can_buy)
         self.assertIsNone(self.resolve(sm.StockMonth(state='none'), can_buy=False))
@@ -338,3 +348,18 @@ class LiveRegistryTests(SimpleTestCase):
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 2.0}):
             self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
         self.assertTrue(gm_holdings.registry_is_live())
+
+    def test_liveness_travels_with_the_registry_entry(self):
+        # A registry cached by older code (no liveness) is refetched, never
+        # read as "not live" for a day; and liveness can't be evicted apart.
+        from cusd_plus import gm_holdings
+        rows = [{'symbol': 'TSLAon', 'addresses': [
+            {'networkChainId': 'bsc-56', 'address': '0x' + '11' * 20, 'decimals': 18}]}]
+        cache.set('gm_bsc_registry_v1', {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}, 3600)
+        with mock.patch('cusd_plus.gm_api.all_addresses', return_value=rows) as fetch:
+            self.assertIn('TSLAon', gm_holdings.registry())
+            self.assertIn('TSLAon', gm_holdings.registry())
+        fetch.assert_called_once()
+        self.assertTrue(gm_holdings.registry_is_live())
+        cache.delete(gm_holdings.REGISTRY_CACHE_KEY)
+        self.assertFalse(gm_holdings.registry_is_live())

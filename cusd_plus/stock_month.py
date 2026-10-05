@@ -253,6 +253,10 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
     try:
         # The chain scan and the market are network waits independent of the
         # ledger (a DB read, kept on this thread's connection): overlap them.
+        # Registry first, on this thread: on a cold cache the scan and the
+        # ledger decode would otherwise each fetch Ondo's address list.
+        from .gm_holdings import registry
+        registry()
         with ThreadPoolExecutor(max_workers=2) as pool:
             # Fresh (≤30s), complete, or nothing: a total is never partial or stale.
             scan = pool.submit(holdings_units, bsc_address, require_complete=True)

@@ -269,16 +269,19 @@ class MonthSummaryQuery(graphene.ObjectType):
         # Dollars and percents alike: 2 decimals, half up.
         opt = lambda v: None if v is None else _usd(v)  # noqa: E731
         top = result.top
-        gain = result.gain
+        gain, gain_pct = result.gain, result.gain_pct
         if gain is not None and None not in (result.value_start, result.bought, result.sold):
-            # From the cents shown, so "¿Cómo lo calculamos?" adds up to the cent.
+            # From the cents shown, so "¿Cómo lo calculamos?" adds up to the cent
+            # and the percent never disagrees with the dollars beside it.
             cents = lambda v: v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)  # noqa: E731
             gain = (cents(result.value_end) - cents(result.value_start)
                     - cents(result.bought) + cents(result.sold))
+            base = cents(result.value_start) + cents(result.bought)
+            gain_pct = gain / base * 100 if base > 0 else None
         return StockMonthType(
             state=result.state, can_buy=can_buy, value_usd=_usd(result.value_end),
             value_start_usd=opt(result.value_start), bought_usd=opt(result.bought), sold_usd=opt(result.sold),
-            gain_usd=opt(gain), gain_pct=opt(result.gain_pct), holdings=result.holdings,
+            gain_usd=opt(gain), gain_pct=opt(gain_pct), holdings=result.holdings,
             top_mover=StockMoverType(ticker=top.ticker, name=top.name, change_pct=_usd(top.change_pct)) if top else None)
 
     def resolve_protection_value(self, info, timezone=None, include_stable=False):
