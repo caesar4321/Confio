@@ -172,7 +172,7 @@ describe('Pagos habituales', () => {
 
 describe('StocksCard', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { StocksCard, moverVerb } = require('../StocksCard');
+  const { StocksCard, moverVerb, moverIcon } = require('../StocksCard');
   const { signedUsd } = require('../../../utils/monthSummary');
   const base = {
     state: 'gain', canBuy: true, valueUsd: '220.00', valueStartUsd: '100.00', boughtUsd: '105.00', soldUsd: '0.00',
@@ -236,6 +236,8 @@ describe('StocksCard', () => {
     expect(signedUsd(-0.5)).toBe('−US$0.50');
     expect(moverVerb(-3)).toBe('bajó 3%');
     expect(moverVerb(0.01)).toBe('se mantuvo');
+    expect(moverIcon(-0.03)).toBe('minus');          // flat is never a falling line
+    expect(moverIcon(-3)).toBe('trending-down');
   });
 });
 

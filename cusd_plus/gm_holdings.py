@@ -110,9 +110,16 @@ def _fallback_registry() -> dict:
 
 def registry() -> dict | None:
     """BSC symbol -> address metadata from Ondo, with local outage fallback."""
+    return registry_entry()[0]
+
+
+def registry_entry() -> tuple[dict | None, bool]:
+    """(registry, live) from ONE read: live is False when it is the shipped
+    snapshot, which lacks tokens listed after it (a scan over it can miss a
+    position). Read together so liveness can never disagree with the tokens."""
     cached = cache.get(REGISTRY_CACHE_KEY)
     if isinstance(cached, dict) and 'tokens' in cached:
-        return cached['tokens']
+        return cached['tokens'], cached.get('live') is True
     fallback = _fallback_registry()
     try:
         from . import gm_api
@@ -122,20 +129,13 @@ def registry() -> dict | None:
         if result:
             cache.set(REGISTRY_CACHE_KEY, {'tokens': result, 'live': bool(live)},
                       REGISTRY_TTL if live else REGISTRY_FALLBACK_TTL)
-        return result or None
+        return (result or None), bool(live)
     except Exception:  # noqa: BLE001 — portfolio degrades to shipped snapshot
         logger.warning('GM address registry unavailable; using local fallback', exc_info=True)
         if fallback:
             # Retry Ondo soon after an outage, but avoid a request stampede.
             cache.set(REGISTRY_CACHE_KEY, {'tokens': fallback, 'live': False}, REGISTRY_FALLBACK_TTL)
-        return fallback or None
-
-
-def registry_is_live() -> bool:
-    """Whether the registry in use is Ondo's live list. The shipped snapshot
-    lacks tokens listed after it, so a scan over it can miss a position."""
-    cached = cache.get(REGISTRY_CACHE_KEY)
-    return isinstance(cached, dict) and cached.get('live') is True
+        return (fallback or None), False
 
 
 def audit_registry() -> dict:
@@ -262,13 +262,22 @@ def _complete_holdings(key: str) -> dict | None:
     cached = cache.get(f'gm_hold_full:{key}')
     if cached is not None:
         return cached
-    token_registry = registry()
-    if token_registry is None or not registry_is_live():
+    token_registry, live = registry_entry()
+    if token_registry is None or not live:
         return None                        # the snapshot may lack a held token
-    if not token_registry:
+    # Delisted tokens (shipped snapshot, gone from Ondo's live list) can still
+    # hold value (see audit_registry). Scanned best-effort: a retired contract
+    # that no longer answers must not hide every portfolio; a held one it
+    # drops leaves the ledger unexplained (value only), never a wrong gain.
+    live_addresses = {str(m.get('address') or '').lower() for m in token_registry.values()}
+    delisted = {s: m for s, m in _fallback_registry().items()
+                if s not in token_registry and str(m.get('address') or '').lower() not in live_addresses}
+    if not token_registry and not delisted:
         return {}
     try:
-        held = _scan(key, token_registry, require_complete=True)
+        held = _scan(key, token_registry, require_complete=True) if token_registry else {}
+        if delisted:
+            held.update(_scan(key, delisted))
     except Exception:  # noqa: BLE001 — incomplete is unknown, never a smaller portfolio
         logger.warning('GM complete holdings scan failed for %s', key, exc_info=True)
         return None

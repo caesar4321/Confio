@@ -30,7 +30,9 @@ jest.mock('../../hooks/useMonthInsights', () => ({
   useMonthInsights: () => ({ ...mockInsights, refresh: jest.fn(), refreshStocks: mockRefreshStocks }),
 }));
 
-import { MonthSummaryScreen, SETTLING_MAX_TRIES, SETTLING_POLL_MS } from '../MonthSummaryScreen';
+import {
+  MonthSummaryScreen, SETTLING_FAST_TRIES, SETTLING_MAX_TRIES, SETTLING_POLL_MS, SETTLING_SLOW_MS,
+} from '../MonthSummaryScreen';
 
 const totals = (spending: string, count: number) => ({
   incomeUsd: '215.00', spendingUsd: spending, topUpsUsd: '0', withdrawalsUsd: '0', savingsNetUsd: '0',
@@ -135,10 +137,19 @@ it('a settling trade (arriving from a buy) shows the card and re-asks stocks unt
   const tree = mount();
   expect(has(tree, 'tumes-stocks-card')).toBe(true);
   expect(has(tree, 'tumes-stocks-settling-note')).toBe(true);
+  const note = () => tree.root.findAll((n) => typeof n.type === 'string'
+    && n.props.testID === 'tumes-stocks-settling-note')[0].props.children;
   act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 2); });
   expect(mockRefreshStocks).toHaveBeenCalledTimes(2);
-  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 100); });
+  expect(note()).toMatch(/En unos segundos/);
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * (SETTLING_FAST_TRIES - 2)); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(SETTLING_FAST_TRIES);
+  expect(note()).toMatch(/tardando/);                  // no "seconds" promise past the first minute
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(SETTLING_FAST_TRIES);   // now every 30s
+  act(() => { jest.advanceTimersByTime(SETTLING_SLOW_MS * 100); });
   expect(mockRefreshStocks).toHaveBeenCalledTimes(SETTLING_MAX_TRIES);
+  expect(note()).toMatch(/Vuelve más tarde/);
   act(() => tree.unmount());
   jest.useRealTimers();
 });

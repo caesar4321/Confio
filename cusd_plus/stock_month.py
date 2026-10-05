@@ -35,7 +35,10 @@ OHLC_RANGE = '1Y'
 UNITS_TOLERANCE = Decimal('0.000001')        # relative, ledger vs chain
 # A trade still 'signed'/'sent' after this long is stuck (dropped, never
 # reconciled), not settling: it must not hide the card forever.
-PENDING_MAX_AGE = timedelta(days=1)
+# The receipt checker gives up after ~9 minutes (5×3s + 35×15s retries):
+# past this a batch still 'signed'/'sent' is stuck (ops reconciles it), not
+# settling, so it can't hold every card on "se está confirmando".
+PENDING_MAX_AGE = timedelta(minutes=15)
 
 
 class StockMonthUnavailable(Exception):
@@ -147,15 +150,17 @@ def _decode_trades(batches) -> list[Trade]:
     return trades
 
 
-def pending_trade_exists(bsc_address: str) -> bool:
-    """A Confío trade is on the wire but not final yet. The client shows success
-    on the receipt, before finality marks the batch confirmed, so in that window
-    the chain already holds (or lost) the units while the ledger does not."""
+def pending_trades(bsc_address: str) -> list[Trade]:
+    """Confío trades on the wire but not final yet, decoded (units from the
+    signed quote; no settlement yet). The client shows success on the
+    receipt, before finality marks the batch confirmed, so in that window the
+    chain may or may not hold the units while the ledger does not."""
     from django.utils import timezone as dj_tz
     from blockchain.models import SponsoredBatch
-    return SponsoredBatch.objects.filter(
+    return _decode_trades(SponsoredBatch.objects.filter(
         user_bsc_address__iexact=bsc_address, kind__in=('stock_buy', 'stock_sell'),
-        status__in=('signed', 'sent'), created_at__gte=dj_tz.now() - PENDING_MAX_AGE).exists()
+        status__in=('signed', 'sent'), created_at__gte=dj_tz.now() - PENDING_MAX_AGE,
+    ).order_by('created_at', 'id'))
 
 
 def ledger_units(trades: list[Trade], before: datetime | None = None) -> dict:
@@ -216,16 +221,39 @@ def _close_from_candles(symbol: str, when: datetime) -> Decimal | None:
     return price if price is not None and price > 0 else None
 
 
+_POOL = None
+
+
+def _pool():
+    """One long-lived pool per process: its threads keep their thread-local
+    RPC keep-alive sessions (tasks._rpc_session) across requests, where a
+    per-call pool's fresh threads would open a new TLS connection every time.
+    Created lazily, so no thread exists before a pre-fork server forks."""
+    global _POOL
+    if _POOL is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix='stock-month')
+    return _POOL
+
+
 def _prefetch(prices: dict, pairs: set) -> None:
     """Fill `prices` for every (symbol, boundary) at once: one Ondo candle
     request per symbol in parallel instead of one after another, so a cold
-    cache still fits Tu mes's reveal window."""
-    from concurrent.futures import ThreadPoolExecutor
-    todo = [p for p in pairs if p not in prices]
-    if not todo:
+    cache still fits Tu mes's reveal window. A symbol's boundaries (a past
+    month's start and end) share one task, so its candles are fetched once
+    (the second read hits gm_api's cache) instead of twice concurrently."""
+    by_symbol: dict = {}
+    for symbol, when in pairs:
+        if (symbol, when) not in prices:
+            by_symbol.setdefault(symbol, []).append(when)
+    if not by_symbol:
         return
-    with ThreadPoolExecutor(max_workers=min(8, len(todo))) as pool:
-        for pair, price in zip(todo, pool.map(lambda p: close_before(*p), todo)):
+
+    def fetch(symbol):
+        return [((symbol, when), close_before(symbol, when)) for when in by_symbol[symbol]]
+
+    for results in _pool().map(fetch, list(by_symbol)):
+        for pair, price in results:
             prices[pair] = price
 
 
@@ -243,42 +271,43 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
 
     The current month (end > now) ends "now" at the live price; a past month
     ends at its last daily close."""
-    from . import gm_api
-    from .gm_holdings import holdings_units
+    from .gm_holdings import holdings_units, registry
+    from .gm_tvl import _market_by_symbol
 
     if not bsc_address:
         return StockMonth(state='none')
     current = end > now
-    from concurrent.futures import ThreadPoolExecutor
     try:
         # The chain scan and the market are network waits independent of the
         # ledger (a DB read, kept on this thread's connection): overlap them.
         # Registry first, on this thread: on a cold cache the scan and the
         # ledger decode would otherwise each fetch Ondo's address list.
-        from .gm_holdings import registry
         registry()
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            # Fresh (≤30s), complete, or nothing: a total is never partial or stale.
-            scan = pool.submit(holdings_units, bsc_address, require_complete=True)
-            listing = pool.submit(gm_api.all_market)
-            trades = confirmed_trades(bsc_address)
-            chain_raw = scan.result()
-            market_rows = listing.result()
+        pool = _pool()
+        # Fresh (≤30s), complete, or nothing: a total is never partial or stale.
+        scan = pool.submit(holdings_units, bsc_address, require_complete=True)
+        listing = pool.submit(_market_by_symbol)    # {symbol: price (> 0), ticker, name}
+        trades = confirmed_trades(bsc_address)
+        chain_raw = scan.result()
+        market = listing.result()
         if chain_raw is None:
             return None                     # scan unknown, never "no stocks"
         chain = {s: d for s, u in chain_raw.items() if (d := _dec(u)) is not None and d > 0}
-        exact = (ledger_explains_chain(ledger_units(trades), chain)
+        # A trade on the wire is settling even when the ledger still matches
+        # the chain: the scan can lag the receipt the app already showed (a
+        # node a block behind), and a month result from the pre-trade chain
+        # would stand as final, with nothing asking again.
+        in_flight = pending_trades(bsc_address)
+        pending = current and bool(in_flight)
+        # The chain may or may not show an in-flight trade yet: the ledger
+        # explains it either way. A past month ends before any in-flight
+        # trade (≤15 min old), so its own numbers never include one.
+        explained = (ledger_explains_chain(ledger_units(trades), chain)
+                     or (bool(in_flight) and ledger_explains_chain(ledger_units(trades + in_flight), chain)))
+        if not current and any(t.when < end for t in in_flight):
+            explained = False               # month just ended under a trade in flight
+        exact = (not pending and explained
                  and all(t.usd is not None for t in trades))
-        market = {}
-        for item in market_rows:
-            pm = item.get('primaryMarket') or {}
-            um = item.get('underlyingMarket') or {}
-            if pm.get('symbol'):
-                market[pm['symbol']] = {
-                    'price': _dec(pm.get('price')),
-                    'ticker': um.get('ticker') or pm['symbol'].removesuffix('on'),
-                    'name': um.get('name') or um.get('ticker') or pm['symbol'].removesuffix('on'),
-                }
 
         def live_price(symbol):
             p = (market.get(symbol) or {}).get('price')
@@ -290,7 +319,7 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         if not exact:
             if not current:
                 return None
-            if pending_trade_exists(bsc_address):
+            if pending:
                 # A trade on the wire but not final (the app shows success on
                 # the receipt): today's value is known, the month's result in
                 # seconds. Never "from outside Confío", never a guessed gain.
@@ -315,10 +344,8 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         units_start = ledger_units(trades, before=start)
         units_end = chain if current else ledger_units(trades, before=end)
         if not units_start and not units_end and not in_month:
-            if current and pending_trade_exists(bsc_address):
-                # A first trade on the wire that the scan doesn't show yet:
-                # never invite someone who just bought; resolves in seconds.
-                return StockMonth(state='settling')
+            # (A first trade on the wire the scan doesn't show yet is
+            # 'settling' above: never an invitation to someone who just bought.)
             # A past month before the first purchase of someone who holds
             # stocks now: no card, never an invitation to buy what they own.
             return StockMonth(state='none') if current or not chain else None
