@@ -83,9 +83,9 @@ def _change_floor_refusal_marker(key: str, delta: int) -> bool:
 def warm_gm_holdings(self, bsc_address: str, min_block: int | None = None):
     """Fill the complete holdings scan right after a stock trade confirms.
     A scan served by a node still behind `min_block` (the trade's block; the
-    RPC pool rotates) is pre-trade: never left cached for the stocks list —
-    dropped, and asked again a moment later."""
-    from .gm_holdings import complete_holdings, invalidate_holdings
+    RPC pool rotates) isn't cached (the confirm set that floor): ask again a
+    moment later, when the node has caught up."""
+    from .gm_holdings import complete_holdings
 
     try:
         complete = complete_holdings(bsc_address)
@@ -94,8 +94,7 @@ def warm_gm_holdings(self, bsc_address: str, min_block: int | None = None):
         return
     if complete is None or min_block is None:
         return
-    if any(at is not None and at < min_block for at in complete[1].values()):
-        invalidate_holdings(bsc_address)
+    if any(at is None or at < min_block for at in complete[1].values()):
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=2)
 
@@ -1998,7 +1997,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         # pre-trade ('value_only' after the user's own trade). Invalidated
         # first, any scan cached from here on read the final chain.
         from .gm_holdings import invalidate_holdings
-        invalidate_holdings(batch.user_bsc_address)
+        invalidate_holdings(batch.user_bsc_address, min_block=blk_num)
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'

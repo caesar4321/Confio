@@ -235,14 +235,32 @@ def _scan(
     return held
 
 
-def invalidate_holdings(user_bsc_address: str) -> None:
+# After a trade at block N, no scan read before N may be cached (list or
+# complete): a node behind it (the RPC pool rotates) shows the pre-trade
+# portfolio. Nodes catch up within seconds; the floor outlives that easily.
+FLOOR_TTL = 10 * 60
+
+
+def invalidate_holdings(user_bsc_address: str, min_block: int | None = None) -> None:
     """Drop the fresh scans (both modes) after a trade; last-known stays.
     Also moves the holdings generation: a scan already running read the
-    pre-trade chain, and must neither be cached nor (complete mode) used."""
+    pre-trade chain, and must neither be cached nor (complete mode) used.
+    `min_block` (the trade's block, when known) becomes the floor below
+    which no later read is cached either."""
     from uuid import uuid4
     key = (user_bsc_address or '').lower()
     cache.set(f'gm_hold_gen:{key}', uuid4().hex, SCAN_LAST_TTL)
+    if min_block is not None:
+        floor = cache.get(f'gm_hold_floor:{key}') or 0
+        cache.set(f'gm_hold_floor:{key}', max(int(floor), int(min_block)), FLOOR_TTL)
     cache.delete_many([f'gm_hold:{key}', f'gm_hold_full_v2:{key}'])
+
+
+def _behind_floor(key: str, blocks: dict) -> bool:
+    """A read older than the last trade's block (or of unknown block while a
+    floor stands): fine to use as-is by a caller that knows, never cached."""
+    floor = cache.get(f'gm_hold_floor:{key}')
+    return bool(floor) and any(at is None or at < floor for at in blocks.values())
 
 
 def _generation(key: str):
@@ -276,12 +294,14 @@ def holdings_units(user_bsc_address: str, *, require_complete: bool = False) -> 
     if not token_registry:
         return {}
     generation = _generation(key)
+    blocks: dict = {}
     try:
-        held = _scan(key, token_registry)
+        held = _scan(key, token_registry, blocks=blocks)
     except Exception:  # noqa: BLE001 — degrade to stale, never to vanished
         logger.warning('GM holdings scan failed for %s', user_bsc_address, exc_info=True)
         return cache.get(f'gm_hold_last:{key}')
-    if _generation(key) == generation:     # else a trade landed mid-scan: don't cache it
+    # Not cached if a trade landed mid-scan, or a node behind the last trade served it.
+    if _generation(key) == generation and not _behind_floor(key, blocks):
         _store(key, generation, {f'gm_hold:{key}': held}, held)
     return held
 
@@ -353,6 +373,10 @@ def _complete_holdings(key: str) -> tuple[dict, dict] | None:
         # the list scan's own token set (live only): a delisted position must
         # not appear or vanish there depending on which scan ran last.
         listed = {s: u for s, u in held.items() if s in token_registry}
+        if _behind_floor(key, blocks):
+            # Read by a node behind the last trade: the caller can tell which
+            # trades it hasn't seen (blocks), but nobody else gets it cached.
+            return held, blocks
         full = {'held': held, 'blocks': blocks}
         if _store(key, generation, {f'gm_hold_full_v2:{key}': full, f'gm_hold:{key}': listed}, listed):
             continue                           # moved during the write: pre-trade, never used
