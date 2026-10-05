@@ -135,6 +135,14 @@ it('the invitation gives way to the card after a purchase, never the reverse', (
   expect(mergeValues({ ...base, stocks: gain }, { ...base, stocks: none }).stocks).toBe(gain);
 });
 
+it('a refocus never draws or removes the invitation (canBuy flips stay for the next view)', () => {
+  const base = { insights: null, savings: null, protection: null };
+  const invite = { state: 'none', canBuy: true } as any;
+  const nothing = { state: 'none', canBuy: false } as any;
+  expect(mergeValues({ ...base, stocks: nothing }, { ...base, stocks: invite }).stocks).toBe(nothing);
+  expect(mergeValues({ ...base, stocks: invite }, { ...base, stocks: nothing }).stocks).toBe(invite);
+});
+
 it('a shown gain card that gets a settling answer keeps its value and flags the poll until final', async () => {
   const gain = { state: 'gain', valueUsd: '100.00' };
   let stocks: any = gain;
