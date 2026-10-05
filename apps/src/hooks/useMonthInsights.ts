@@ -81,9 +81,12 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
     // same card: a settling card resolves in place; value only becomes the
     // month's result once the history explains it (a passing value-only
     // right after a trade must not stick); and the invitation gives way to
-    // the card once the user has bought through it.
+    // the card once the user has bought through it. 'none' stays as shown:
+    // its only content is whether the invitation is drawn (canBuy, which
+    // follows the request's IP), and a flip would add or remove a card.
     stocks: shown.stocks
-      ? (next.stocks && (next.stocks.state === shown.stocks.state
+      ? (next.stocks && !(shown.stocks.state === 'none' && next.stocks.state === 'none')
+        && (next.stocks.state === shown.stocks.state
         || (shown.stocks.state === 'none' && next.stocks.state !== 'none')
         || (shown.stocks.state === 'value_only' && next.stocks.state === 'gain')
         // After settling the server answers 'none' only when the trade
