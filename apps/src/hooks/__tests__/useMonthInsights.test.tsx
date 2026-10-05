@@ -188,3 +188,19 @@ it("a focus refresh's older stocks answer never lands over a newer poll's (no re
   expect(latest.stocks.state).toBe('gain');
   expect(latest.stocksSettling).toBe(false);          // the stale 'settling' did not restart the poll
 });
+
+it('a focus refresh never stacks a stocks ask on a poll still in flight', async () => {
+  const settling = { state: 'settling', valueUsd: '220.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  const slow = deferred<any>();
+  mockQuery.mockReset();
+  mockQuery.mockImplementation(({ query }: any) => (query === GET_STOCK_MONTH ? slow.promise
+    : Promise.resolve({ data: {} })));
+  await act(async () => { latest.refreshStocks(); latest.refresh(); });
+  expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(1);
+  await act(async () => { slow.resolve({ data: { stockMonth: { state: 'gain', valueUsd: '221.00' } } }); });
+  expect(latest.stocks.state).toBe('gain');
+  expect(latest.stocksSettling).toBe(false);
+});

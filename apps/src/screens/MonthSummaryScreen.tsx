@@ -112,10 +112,15 @@ export function MonthSummaryScreen() {
   const settling = insights.revealed && (insights.stocks?.state === 'settling' || Boolean(insights.stocksSettling));
   const refreshStocks = useRef(insights.refreshStocks);
   refreshStocks.current = insights.refreshStocks;
-  // Not while another screen is on top (the user moved on): no wasted asks.
+  // Not while another screen is on top (the user moved on): no wasted asks
+  // and no timer left spinning; the poll pauses and resumes on refocus.
   const focused = useRef(true);
+  const resumePoll = useRef<(() => void) | null>(null);
   useFocusEffect(useCallback(() => {
     focused.current = true;
+    const resume = resumePoll.current;
+    resumePoll.current = null;
+    resume?.();
     return () => { focused.current = false; };
   }, []));
   const [settlingPhase, setSettlingPhase] = useState<SettlingPhase>('fast');
@@ -124,20 +129,28 @@ export function MonthSummaryScreen() {
     if (!settling) return undefined;
     let tries = 0;
     let id: ReturnType<typeof setTimeout>;
-    const tick = () => {
-      if (focused.current) {             // unfocused ticks don't count
-        tries += 1;
-        refreshStocks.current();
-        if (tries === SETTLING_FAST_TRIES) setSettlingPhase('slow');
-        if (tries >= SETTLING_MAX_TRIES) {
-          setSettlingPhase('stalled');
-          return;
-        }
-      }
+    const schedule = () => {
       id = setTimeout(tick, tries < SETTLING_FAST_TRIES ? SETTLING_POLL_MS : SETTLING_SLOW_MS);
     };
-    id = setTimeout(tick, SETTLING_POLL_MS);
-    return () => clearTimeout(id);
+    const tick = () => {
+      if (!focused.current) {            // paused: unfocused ticks don't count
+        resumePoll.current = schedule;
+        return;
+      }
+      tries += 1;
+      refreshStocks.current();
+      if (tries === SETTLING_FAST_TRIES) setSettlingPhase('slow');
+      if (tries >= SETTLING_MAX_TRIES) {
+        setSettlingPhase('stalled');
+        return;
+      }
+      schedule();
+    };
+    schedule();
+    return () => {
+      clearTimeout(id);
+      resumePoll.current = null;
+    };
   }, [settling]);
 
   // Back from a movement list where categories may have changed: re-read.

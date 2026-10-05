@@ -306,8 +306,11 @@ def _complete_holdings(key: str) -> dict | None:
             return None
         if _generation(key) != generation:
             continue                           # a trade confirmed mid-scan: read the chain again
-        # A complete scan is also the best answer for every other reader.
-        cache.set_many({f'gm_hold_full:{key}': held, f'gm_hold:{key}': held}, SCAN_TTL)
-        cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
+        # A complete scan is also the best answer for the list readers, over
+        # the list scan's own token set (live only): a delisted position must
+        # not appear or vanish there depending on which scan ran last.
+        listed = {s: u for s, u in held.items() if s in token_registry}
+        cache.set_many({f'gm_hold_full:{key}': held, f'gm_hold:{key}': listed}, SCAN_TTL)
+        cache.set(f'gm_hold_last:{key}', listed, SCAN_LAST_TTL)
         return held
     return None                                # trades keep landing: unknown for now

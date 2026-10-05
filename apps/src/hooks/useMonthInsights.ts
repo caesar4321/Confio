@@ -117,7 +117,7 @@ export function useMonthInsights(params: {
     { query: GET_STOCK_MONTH, variables: { year, month, timezone }, fetchPolicy: 'no-cache' })
     .then((r) => r.data?.stockMonth ?? null).catch(() => null), [client, year, month, timezone]);
 
-  const fetchAll = useCallback(() => {
+  const fetchAll = useCallback((withStocks = true) => {
     const opt = { fetchPolicy: 'no-cache' as const };
     const safe = <T,>(p: Promise<{ data?: T }>) => p.then((r) => r.data ?? null).catch(() => null);
     const insights = safe(client.query<{ monthInsights: MonthInsights | null }>(
@@ -129,7 +129,7 @@ export function useMonthInsights(params: {
       ? safe(client.query<{ protectionValue: ProtectionValue | null }>({ query: GET_PROTECTION_VALUE, variables: { timezone }, ...opt }))
         .then((d) => d?.protectionValue ?? null)
       : Promise.resolve(null);
-    return { insights, savings, protection, stocks: fetchStocks() };
+    return { insights, savings, protection, stocks: withStocks ? fetchStocks() : Promise.resolve(null) };
   }, [client, year, month, timezone, isCurrent, fetchStocks]);
 
   // A new month or account is a new view: hide, then reveal again.
@@ -177,11 +177,18 @@ export function useMonthInsights(params: {
   const refresh = useCallback(() => {
     const gen = generation.current;
     if (!shown.current) return;
-    const seq = ++stocksAsked.current;
-    const { insights, savings, protection, stocks } = fetchAll();
+    // A stocks ask already in flight (a settling poll, cold scan) answers on
+    // its own: never stack a second one on it. Ours holds the slot too.
+    const askStocks = !stocksInFlight.current;
+    const seq = askStocks ? ++stocksAsked.current : 0;
+    const { insights, savings, protection, stocks } = fetchAll(askStocks);
+    if (askStocks) {
+      stocksInFlight.current = true;
+      stocks.finally(() => { stocksInFlight.current = false; });
+    }
     Promise.all([insights, savings, protection, stocks]).then(([i, s, p, k]) => {
       if (generation.current !== gen || !shown.current) return;
-      const fresh = seq > stocksApplied.current;
+      const fresh = askStocks && seq > stocksApplied.current;
       if (fresh) {
         stocksApplied.current = seq;
         if (k) lastStocks.current = k.state;

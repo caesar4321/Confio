@@ -47,8 +47,10 @@ export function stockMonthGain(value: StockMonth | null): number | null {
 export async function openTuMesNow(navigation: NativeStackNavigationProp<MainStackParamList>): Promise<void> {
   // A Tu mes already in the stack may have been opened masked by another
   // screen's own toggle (the account detail's per-account eye): the merge
-  // must never unmask it.
-  const existing = navigation.getState?.()?.routes?.find((r) => r.name === 'MonthSummary');
+  // must never unmask it. The LAST one: navigate's pop goes back to the
+  // topmost route of that name (StackRouter findLast), not the first.
+  const routes = navigation.getState?.()?.routes ?? [];
+  const existing = [...routes].reverse().find((r) => r.name === 'MonthSummary');
   const wasMasked = Boolean((existing?.params as MainStackParamList['MonthSummary'])?.masked);
   const masked = wasMasked || await isBalanceHidden();
   navigation.navigate('MonthSummary', { ...currentYearMonth(), masked }, { pop: true, merge: true });

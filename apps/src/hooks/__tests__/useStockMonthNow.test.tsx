@@ -60,6 +60,18 @@ describe('openTuMesNow', () => {
     expect(navigate.mock.calls[0][1].masked).toBe(true);
   });
 
+  it('reads the Tu mes the pop goes back to (the topmost one)', async () => {
+    mockHidden.mockResolvedValue(false);
+    const navigate = jest.fn();
+    const navigation = {
+      navigate,
+      getState: () => ({ routes: [{ name: 'MonthSummary', params: { masked: false } }, { name: 'AccountDetail' },
+        { name: 'MonthSummary', params: { masked: true } }, { name: 'StocksList' }] }),
+    };
+    await openTuMesNow(navigation as any);
+    expect(navigate.mock.calls[0][1].masked).toBe(true);
+  });
+
   it('masks like Home when no Tu mes is in the stack', async () => {
     mockHidden.mockResolvedValue(true);
     const navigate = jest.fn();
