@@ -1319,7 +1319,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     // Resume can still be refreshing/persisting this account's tokens. Do not
     // let an account switch race that work and resurrect the old session.
     if (resumeAuthenticationRef.current) {
-      Alert.alert('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta. La salida de emergencia sigue disponible.');
+      Alert.alert('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta.');
       return;
     }
     setIsLocked(false);

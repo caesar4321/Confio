@@ -1237,6 +1237,8 @@ class IntegrityVerdict(models.Model):
         ('payment', 'Payment'),
         ('face_check_start', 'Confío Face start'),
         ('face_check_complete', 'Confío Face grading'),
+        # Legacy: the emergency-exit ban route was removed 2026-10-05 (the exit
+        # now opens only after ConfioHeartbeat goes silent). Kept for old rows.
         ('emergency_exit_face', 'Emergency exit (ban route)'),
     ]
     
@@ -1402,6 +1404,8 @@ class FaceCheck(models.Model):
         ('app_unlock', 'App unlock'),
         ('on_ramp', 'Deposit order'),
         ('withdrawal', 'Withdrawal'),
+        # Legacy: no longer started (emergency-exit ban route removed
+        # 2026-10-05). Kept for old rows; removing it needs a migration.
         ('emergency_exit', 'Emergency exit'),
         ('payin_release', 'Receive held pay-in'),
         # Granting payroll delegation / setup: someone else may then move the

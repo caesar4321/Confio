@@ -823,9 +823,11 @@ export const ProfileScreen = () => {
               <Icon name="chevron-right" size={16} color={colors.text.light} />
             </TouchableOpacity>
 
-            {/* Emergency exit — ALWAYS present, by design: its existence is
-                never server-gated (docs/plans/salida-de-emergencia-design.md).
-                Green identifies the security feature, not immediate eligibility. */}
+            {/* Emergency exit explainer. While Confío beats it only explains
+                the safeguard and how to prepare; the exit itself opens on the
+                on-chain heartbeat (docs/plans/salida-de-emergencia-design.md
+                § Phase 3). Recovery surfaces (lock, loading, suspension) show
+                it only when open. */}
             <TouchableOpacity
               style={styles.cardOption}
               onPress={() => navigation.navigate('EmergencyExit' as never)}
@@ -833,7 +835,7 @@ export const ProfileScreen = () => {
               <Icon name="life-buoy" size={18} color={colors.primaryDark} />
               <View style={styles.biometricTextContainer}>
                 <Text style={styles.biometricTitle}>Salida de emergencia</Text>
-                <Text style={styles.biometricStatusText}>Mueve tu dinero sin depender de Confío.</Text>
+                <Text style={styles.biometricStatusText}>Tu respaldo si Confío deja de operar.</Text>
               </View>
               <Icon name="chevron-right" size={16} color={colors.text.light} />
             </TouchableOpacity>

@@ -1,10 +1,14 @@
 // Blocked account — the ban flow's ANNOUNCEMENT surface
 // (docs/plans/salida-de-emergencia-design.md, "Ban work package").
 //
-// The emergency exit is this screen's CTA, not its replacement: a banned
-// user first learns WHAT happened and how to appeal, then — because we
-// enforce accounts, never funds — gets the one-tap path to withdraw.
-// Everything here is static or chain-side: the security middleware 403s
+// A suspension freezes the account's funds until the case is resolved (a
+// provider fraud report can require that hold until an authority acts).
+// Salida de emergencia opens only when Confío stops operating (on-chain
+// heartbeat, § Phase 3 of docs/plans/salida-de-emergencia-design.md), never
+// because of a ban — so its entry appears here ONLY once the chain says the
+// exit is open. That matters: after Confío dies nothing can clear a banned
+// user's flag, and this screen is where their app always opens.
+// Everything here is static: the security middleware 403s
 // every authenticated request for banned users, so this screen must not
 // depend on any server data (the ban reason lives in UserBan server-side
 // and is deliberately not fetched — there is no endpoint a banned user
@@ -33,12 +37,16 @@ import { BrandFieldBackground } from '../components/common/BrandFieldBackground'
 import { colors } from '../config/theme';
 import { emergencyStore } from '../services/emergencyExit/store';
 import { isBanSignaled } from '../services/emergencyExit/banSignal';
+import { useEmergencyExitOpen } from '../hooks/useEmergencyExitOpen';
 
 const PING = gql`query BanRetryPing { __typename }`;
 
 export const BlockedAccountScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [retrying, setRetrying] = useState(false);
+  // True only when the chain says the exit is open for everyone (re-read
+  // every 30s and on foreground while closed — see useEmergencyExitOpen).
+  const exitOpen = useEmergencyExitOpen(true);
 
   const openSupport = async () => {
     try {
@@ -87,22 +95,32 @@ export const BlockedAccountScreen: React.FC = () => {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* The regulatory core: we enforce accounts, never funds. */}
-        <View style={styles.moneyCard}>
-          <Icon name="shield" size={18} color={colors.primaryDark} />
-          <Text style={styles.moneyText}>
-            Tu dinero no está bloqueado. Está en la blockchain, sigue siendo
-            tuyo, y puedes retirarlo ahora mismo — no podemos impedirlo.
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={styles.exitBtn}
-          onPress={() => navigation.navigate('EmergencyExit')}
-        >
-          <Icon name="log-out" size={17} color={colors.white} />
-          <Text style={styles.exitBtnText}>Retirar mi dinero</Text>
-        </TouchableOpacity>
+        {exitOpen ? (
+          <>
+            <View style={styles.moneyCard}>
+              <Icon name="unlock" size={18} color={colors.primaryDark} />
+              <Text style={styles.moneyText}>
+                Confío dejó de operar y la salida de emergencia está abierta
+                para todos. Puedes mover tu dinero a una billetera tuya.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.exitBtn}
+              onPress={() => navigation.navigate('EmergencyExit')}
+            >
+              <Icon name="log-out" size={17} color={colors.white} />
+              <Text style={styles.exitBtnText}>Salida de emergencia</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={styles.moneyCard}>
+            <Icon name="lock" size={18} color={colors.primaryDark} />
+            <Text style={styles.moneyText}>
+              Tu dinero sigue registrado a tu nombre. Mientras tu cuenta esté
+              suspendida, no se puede mover.
+            </Text>
+          </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>¿Crees que es un error?</Text>

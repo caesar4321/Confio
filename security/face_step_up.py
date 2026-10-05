@@ -2,8 +2,8 @@
 
 A recruited-identity ring gets the holder in front of the camera once, for
 KYC, and then runs the account alone. Re-proving the face at the moments
-money moves (every deposit order, each outgoing operation, the
-emergency exit) forces the ring to bring the holder back each time.
+money moves (every deposit order, each outgoing operation) forces the ring
+to bring the holder back each time.
 
 Flow: start → the app streams a Rekognition Face Liveness video with
 short-lived, single-action credentials → complete → we fetch the liveness
@@ -17,9 +17,8 @@ eu-central-2 verification bucket (see _store_evidence). The video itself
 never reaches Confío's servers.
 
 Server enforcement covers the server-mediated money paths (ramp orders,
-sponsored BSC sends). The emergency exit is signed and broadcast by the app
-itself, by design without Confío's servers; there the app enforces the
-check, and no server can.
+sponsored BSC sends). The emergency exit asks for no face check: it opens
+only after the on-chain ConfioHeartbeat has gone silent (2026-10-05).
 """
 import hashlib
 import json
@@ -70,7 +69,7 @@ LIVENESS_TERMINAL_STATUSES = {'SUCCEEDED', 'FAILED', 'EXPIRED'}
 #   this movement included, stays under LIGHT_MAX_DAILY_USD;
 # - full: AWS FaceMovementAndLightChallenge, AWS's most spoof-resistant.
 #   Everything else: money leaving Confío (bank payouts, external sends),
-#   deposits, the emergency exit, payroll authority, non-dollar amounts.
+#   deposits, payroll authority, non-dollar amounts.
 # A light check is never spent where a full one is required.
 CHALLENGE_FULL = 'full'
 CHALLENGE_LIGHT = 'light'
@@ -345,7 +344,10 @@ def start_face_check(user, purpose: str, app_check_token=None, movement=None) ->
     """Open a liveness session. `app_check_token` is the request's
     X-Firebase-AppCheck value ('' when absent), recorded, never enforced.
     `movement` is an optional (amount, token_type, leaves_confio) hint."""
-    if purpose not in dict(FaceCheck.PURPOSE_CHOICES):
+    # 'emergency_exit' stays a model choice only for old rows: Salida de
+    # emergencia no longer uses Confío Face (it opens only on the on-chain
+    # heartbeat), so old builds cannot start new exit face checks.
+    if purpose not in dict(FaceCheck.PURPOSE_CHOICES) or purpose == 'emergency_exit':
         raise FaceStepUpError('Propósito no válido.')
     if not checks_available():
         raise FaceStepUpError(UNAVAILABLE_MESSAGE)

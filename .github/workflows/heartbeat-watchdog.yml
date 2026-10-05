@@ -1,0 +1,37 @@
+# Outside watchdog for the ConfioHeartbeat (Salida de emergencia trigger).
+# Runs on GitHub, not on Confío's servers, so a dead backend still pages the
+# team. Alert channel: the ops Telegram group (same bot as config/ops_alerts.py).
+#
+# Setup: repo variable CONFIO_HEARTBEAT_ADDRESS (the proxy; empty = skip) and
+# repo secrets OPS_ALERT_TELEGRAM_BOT_TOKEN, OPS_ALERT_TELEGRAM_CHAT_ID.
+# NOTE: GitHub disables scheduled workflows in public repos after 60 days
+# without repository activity.
+name: heartbeat-watchdog
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heartbeat-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ops
+      - name: Check the heartbeat on chain
+        env:
+          CONFIO_HEARTBEAT_ADDRESS: ${{ vars.CONFIO_HEARTBEAT_ADDRESS }}
+          OPS_ALERT_TELEGRAM_BOT_TOKEN: ${{ secrets.OPS_ALERT_TELEGRAM_BOT_TOKEN }}
+          OPS_ALERT_TELEGRAM_CHAT_ID: ${{ secrets.OPS_ALERT_TELEGRAM_CHAT_ID }}
+          STALE_AFTER_HOURS: '26'
+        run: python3 scripts/ops/heartbeat_watchdog.py

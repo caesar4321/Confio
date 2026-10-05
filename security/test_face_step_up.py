@@ -758,8 +758,15 @@ class FaceChallengeLevelTests(TestCase):
         self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
         self.assertEqual(FaceCheck.objects.get(liveness_session_id='sess-level').challenge, 'full')
 
+    def test_emergency_exit_face_checks_can_no_longer_start(self):
+        # Salida de emergencia opens only on the on-chain heartbeat; old
+        # builds must not be able to open exit face checks.
+        with self.assertRaises(fsu.FaceStepUpError):
+            fsu.start_face_check(self.user, 'emergency_exit')
+        self.assertFalse(FaceCheck.objects.filter(purpose='emergency_exit').exists())
+
     def test_other_purposes_always_run_the_full_challenge(self):
-        for purpose in ('on_ramp', 'emergency_exit', 'payroll_authority', 'payin_release'):
+        for purpose in ('on_ramp', 'payroll_authority', 'payin_release'):
             FaceCheck.objects.filter(liveness_session_id='sess-level').delete()
             fsu.start_face_check(self.user, purpose, movement=('20', 'cUSD', False))
             self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
