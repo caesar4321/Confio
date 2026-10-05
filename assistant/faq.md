@@ -5,6 +5,29 @@
 - Confío no ofrece préstamos, créditos ni adelantos de dinero.
 - Ninguna opción de ahorro o inversión en Confío tiene ganancias garantizadas.
 
+## Quién está detrás de Confío
+- Confío fue fundada por Julian Moon, de Corea del Sur, graduado de la Universidad Yonsei. Programador autodidacta, creó en 2019 la app Duende (empresa Duende Limited) y luego la renombró Confío, que significa "yo confío".
+- Empezó al ver cómo la hiperinflación en Venezuela dejaba a la gente sin poder comprar comida ni gasolina: quiso que los dólares digitales sirvieran a las personas.
+- Julian explica Confío en español en redes sociales (en TikTok: @julianmoonluna), con una audiencia de unas 480.000 personas.
+- Confío es de código abierto: la app, el servidor y los contratos están publicados en GitHub (github.com/caesar4321/Confio) y los contratos están verificados en BscScan.
+
+## Comisiones de Confío
+- Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir. Es decir, 0,9% cuando tus dólares entran al sistema de Confío (recarga o depósito de USDT) y 0,9% cuando salen (retiro o envío a una billetera externa).
+- Gratis dentro de Confío: enviar a otro usuario y pasar entre Confío Dollar y Confío Dollar+. Confío paga la comisión de la red.
+- Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
+- Acciones: 0,30% de Confío en cada compra y venta.
+- Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti. El rendimiento es variable y no está garantizado.
+- El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
+
+## $CONFIO
+- $CONFIO es el token de Confío en BNB Smart Chain, con suministro fijo de 1.000.000.000 (mil millones): no se pueden crear más. El único contrato oficial es 0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8; cualquier otro es falso.
+- Distribución: preventa pública 74 millones (7,4%); recompensas por referidos y uso 7,4 millones (0,74%); Fondo de Invitación Cultural 15 millones (1,5%, se libera en 90 días); co-creador creativo 10 millones (1%, en 24 meses); fundador Julian Moon 893,6 millones (89,36%, en 36 meses). Las liberaciones son lineales desde su activación.
+- Preventa: precio continuo en dólares que sube de US$0,20 a US$1,30 según cuántos tokens se han vendido (sin fases), y se paga con cUSD. Lo comprado queda bloqueado hasta el lanzamiento oficial en un exchange descentralizado (DEX); antes no se puede reclamar ni transferir.
+- La preventa no está disponible para residentes de EE.UU. ni para ciudadanos o residentes de Corea del Sur.
+- Estado en BNB Smart Chain (verificado el 5 de octubre de 2026): las bóvedas de vesting del fundador, del co-creador y del Fondo de Invitación Cultural ya tienen sus tokens depositados y sus asignaciones registradas, pero ninguna liberación ha empezado ni se ha retirado nada. Hasta que se active cada una, la tesorería multifirma de Confío todavía puede cancelarla y recuperar esos tokens; una vez activada, ya no se puede revocar.
+- $CONFIO no respalda tus dólares, no es una acción de la empresa y no da derecho a ganancias. Su precio futuro no está garantizado y puede bajar.
+- Para más detalle (vesting, riesgos, contratos), el documento de tokenomics y el whitepaper están en GitHub.
+
 ## Países, recargas y retiros
 - Puedes crear tu cuenta con un teléfono de casi cualquier país. Recargar y Retirar dependen del país de tu teléfono.
 - En Argentina, Bolivia, Brasil, Chile, Colombia, México y Perú, recargas y retiras con medios locales:

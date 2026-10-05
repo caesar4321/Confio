@@ -215,7 +215,8 @@ class EmployeeScopeTests(TestCase):
                         is_business_owner=False, tz=ZoneInfo('UTC'))
         belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=5)
         names = {spec['name'] for spec in belt.specs()}
-        self.assertEqual(names, {'navigate', 'escalate_to_human'})
+        # Public documents are public: employees may read them too.
+        self.assertEqual(names, {'navigate', 'escalate_to_human', 'read_public_document'})
         self.assertNotIn('withdraw', belt.destinations)
         self.assertFalse(belt.navigate('withdraw')['ok'])
         self.assertFalse(belt.get_month_summary(0)['disponible'])
@@ -1122,3 +1123,28 @@ class PendingIncomingDestinationTests(TestCase):
         self.assertIn('pending_incoming', allowed_destinations(personal))
         self.assertNotIn('pending_incoming', allowed_destinations(owner))
         self.assertIn('receive', allowed_destinations(owner))
+
+
+class PublicDocumentTests(TestCase):
+    def test_reads_whole_public_documents_only(self):
+        from .engine import PUBLIC_DOCUMENT_MAX_CHARS, PUBLIC_DOCUMENTS
+
+        user = User.objects.create_user(username='docs', password='x')
+        viewer = Viewer(user=user, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)
+        self.assertIn('read_public_document', {s['name'] for s in belt.specs()})
+        tok = belt.call('read_public_document', {'document': 'tokenomics'})
+        self.assertIn('893,600,000', tok['texto'])
+        self.assertIn('0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8', tok['texto'])
+        self.assertIn('nota', belt.call('read_public_document', {'document': 'tokenomics'}))  # once per turn
+        from .voice import _realtime_tools
+        self.assertNotIn('read_public_document', {tool['name'] for tool in _realtime_tools(belt)})
+        self.assertEqual(belt.call('read_public_document', {'document': '../../config/settings'}),
+                         {'error': 'Documento no disponible.'})
+        for path in PUBLIC_DOCUMENTS.values():
+            from pathlib import Path
+
+            from django.conf import settings as dj
+            self.assertLessEqual(len((Path(dj.BASE_DIR) / path).read_text()), PUBLIC_DOCUMENT_MAX_CHARS,
+                                 f'{path} outgrew the cap: raise PUBLIC_DOCUMENT_MAX_CHARS')

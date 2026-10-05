@@ -64,9 +64,15 @@ def minutes_left(user):
     return max(conf.get('CONFIO_ASSISTANT_PLUS_VOICE_MINUTES') - minutes_used(user), 0.0)
 
 
+# Text-only tools: whole documents don't fit a voice call's tool output.
+TEXT_ONLY_TOOLS = {'read_public_document'}
+
+
 def _realtime_tools(belt):
     tools = []
     for spec in belt.specs():
+        if spec['name'] in TEXT_ONLY_TOOLS:
+            continue
         tools.append({
             'type': 'function',
             'name': spec['name'],

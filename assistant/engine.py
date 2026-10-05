@@ -11,6 +11,7 @@ open a screen; every transfer is still confirmed by the user in-flow.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import logging
 import time
 from dataclasses import dataclass, field
@@ -282,6 +283,28 @@ def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
     }
 
 
+# Public documents in this repo (also on GitHub) the model may read in full.
+PUBLIC_DOCUMENTS = {
+    'tokenomics': 'docs/tokenomics/README.md',
+    'whitepaper': 'docs/whitepaper/README.md',
+}
+PUBLIC_DOCUMENT_MAX_CHARS = 60_000
+# Facts newer than a document's text, verified on-chain; returned first so the
+# model never repeats the stale passage. Remove once the document says it.
+PUBLIC_DOCUMENT_ERRATA = {
+    'tokenomics': (
+        'Corrección verificada en BNB Smart Chain el 2026-10-05 (reemplaza lo que el documento dice en §7, §8 y §9 '
+        'sobre que esas asignaciones "no están depositadas ni añadidas"): las bóvedas de vesting del fundador '
+        '(0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A, 893,6 millones, 36 meses), del co-creador '
+        '(0xF32ACF2933a51D89e4C6F3a22C432E43b518A129, 10 millones, 24 meses) y del Fondo de Invitación Cultural '
+        '(0x86c2051eb6e882888bd12417642C664D4A2fb4E7, 15 millones, 90 días) ya tienen los tokens depositados y la '
+        'asignación registrada (con la tesorería multifirma como beneficiaria temporal), pero ninguna se ha '
+        'activado: no ha empezado ninguna liberación y no se ha retirado nada. Antes de activarse, la tesorería '
+        'todavía puede cancelar una asignación y recuperar sus tokens; después de activarse es irrevocable.'
+    ),
+}
+
+
 class Toolbelt:
     """The model's tools for one turn, bound to one viewer."""
 
@@ -296,6 +319,7 @@ class Toolbelt:
         # realtime voice has its own server-tool list).
         self.reserve_news = reserve_news
         self.saw_web = False
+        self.docs_read = set()
         self.can_navigate = can_navigate
         self.destinations = allowed_destinations(viewer)
 
@@ -407,6 +431,25 @@ class Toolbelt:
                     'strict': True,
                 },
             ]
+        specs += [
+            {
+                'type': 'function',
+                'name': 'read_public_document',
+                'description': (
+                    'Lee un documento público de Confío publicado en GitHub, para detalles que no están en las '
+                    'respuestas aprobadas: "tokenomics" ($CONFIO: suministro, distribución, preventa, recompensas, '
+                    'vesting, riesgos) o "whitepaper" (la empresa, el producto, BNB Smart Chain, contratos, modelo '
+                    'de negocio, cumplimiento, hoja de ruta). Edición en inglés (la oficial).'
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {'document': {'type': 'string', 'enum': list(PUBLIC_DOCUMENTS)}},
+                    'required': ['document'],
+                    'additionalProperties': False,
+                },
+                'strict': True,
+            },
+        ]
         if self.reserve_news is not None:
             specs += [
                 {
@@ -457,6 +500,7 @@ class Toolbelt:
             'categorize_transactions': self.categorize_transactions,
             'analyze_finances': self.analyze_finances,
             'get_stock_quote': self.get_stock_quote,
+            'read_public_document': self.read_public_document,
             'search_market_news': self.search_market_news,
         }.get(name)
         if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
@@ -531,6 +575,24 @@ class Toolbelt:
         data = _openai_post(payload)
         self.result.add_usage(model, data.get('usage'))
         return {'analisis': _output_text(data) or 'Sin análisis.'}
+
+    def read_public_document(self, document):
+        path = PUBLIC_DOCUMENTS.get(document)
+        if path is None:
+            return {'error': 'Documento no disponible.'}
+        # The transcript is re-sent every step: one copy per turn is enough.
+        if document in self.docs_read:
+            return {'documento': document, 'nota': 'Ya lo leíste en este turno; usa ese texto.'}
+        self.docs_read.add(document)
+        text = (Path(settings.BASE_DIR) / path).read_text(encoding='utf-8')
+        result = {
+            'documento': document,
+            'fuente': f'https://github.com/caesar4321/Confio/blob/main/{path}',
+        }
+        if document in PUBLIC_DOCUMENT_ERRATA:
+            result['correccion_mas_reciente'] = PUBLIC_DOCUMENT_ERRATA[document]
+        result['texto'] = text[:PUBLIC_DOCUMENT_MAX_CHARS]
+        return result
 
     def get_stock_quote(self, query):
         return market.stock_quote(query, user=self.viewer.user)
@@ -668,8 +730,10 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             input_items.append({
                 'type': 'function_call_output',
                 'call_id': call.get('call_id'),
+                # Public documents are read whole; everything else stays small.
                 'output': json.dumps({k: v for k, v in tool_output.items() if not str(k).startswith('_')},
-                                     ensure_ascii=False)[:12000],
+                                     ensure_ascii=False)[:(PUBLIC_DOCUMENT_MAX_CHARS + 2000
+                                                          if name == 'read_public_document' else 12000)],
             })
         payload = {**payload, 'input': input_items}
         if belt.saw_web:
