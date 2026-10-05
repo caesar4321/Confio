@@ -253,6 +253,18 @@ class StockMonthTests(SimpleTestCase):
         self.chain = {'NVDAon': 1.0}
         self.assertEqual(self.run_month().state, 'value_only')
 
+    def test_a_scan_lagging_a_just_confirmed_trade_is_settling(self):
+        bought = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=20))
+        bought.settled_at = NOW - timedelta(seconds=10)
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), bought]
+        self.chain = {'NVDAon': 1.0}                          # a node one block behind finality
+        self.assertEqual(self.run_month().state, 'settling')
+        bought.settled_at = NOW - timedelta(minutes=5)        # long settled: the history is what's missing
+        self.assertEqual(self.run_month().state, 'value_only')
+        bought.settled_at = NOW - timedelta(seconds=10)
+        self.chain = {'NVDAon': 3.0}                          # not explained even without it: not lag
+        self.assertEqual(self.run_month().state, 'value_only')
+
     def test_ledger_tolerates_float_dust_but_not_real_differences(self):
         ledger = {'NVDAon': Decimal('0.123456789')}
         self.assertTrue(sm.ledger_explains_chain(ledger, {'NVDAon': Decimal('0.1234567890000001')}))
@@ -492,18 +504,42 @@ class LiveRegistryTests(SimpleTestCase):
         from cusd_plus import gm_holdings
         live = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
         real_set_many = cache.set_many
+        writes = []
 
         def set_many(*args, **kwargs):
-            gm_holdings.invalidate_holdings(ADDR)            # between the generation check and the write
+            if not writes:
+                gm_holdings.invalidate_holdings(ADDR)        # between the generation check and the write
+            writes.append(args)
             return real_set_many(*args, **kwargs)
 
         with mock.patch.object(gm_holdings, 'registry_entry', return_value=(live, True)), \
              mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
+             mock.patch.object(gm_holdings, '_scan', side_effect=[{'TSLAon': 1.0}, {'TSLAon': 2.0}]), \
+             mock.patch.object(gm_holdings.cache, 'set_many', side_effect=set_many):
+            # The pre-trade scan is dropped AND not used: the chain is read again.
+            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
+        self.assertEqual(cache.get(f'gm_hold_full:{ADDR.lower()}'), {'TSLAon': 2.0})
+        self.assertEqual(cache.get(f'gm_hold:{ADDR.lower()}'), {'TSLAon': 2.0})
+
+    def test_a_late_write_restores_the_previous_last_known(self):
+        from cusd_plus import gm_holdings
+        key = ADDR.lower()
+        cache.set(f'gm_hold_last:{key}', {'TSLAon': 9.0}, 60)                    # last good portfolio
+        cache.set(f'gm_hold_full:{key}', {'TSLAon': 2.0}, 30)                    # a post-trade complete scan
+        real_set_many = cache.set_many
+
+        def set_many(*args, **kwargs):
+            gm_holdings.invalidate_holdings(ADDR)
+            cache.set(f'gm_hold_full:{key}', {'TSLAon': 2.0}, 30)                # rewritten post-trade
+            return real_set_many(*args, **kwargs)
+
+        with mock.patch.object(gm_holdings, 'registry', return_value={'TSLAon': {'address': '0x' + '11' * 20}}), \
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 1.0}), \
              mock.patch.object(gm_holdings.cache, 'set_many', side_effect=set_many):
-            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0})
-        self.assertIsNone(cache.get(f'gm_hold_full:{ADDR.lower()}'))
-        self.assertIsNone(cache.get(f'gm_hold:{ADDR.lower()}'))
+            gm_holdings.holdings_units(ADDR)
+        self.assertEqual(cache.get(f'gm_hold_last:{key}'), {'TSLAon': 9.0})      # never the pre-trade scan
+        self.assertIsNone(cache.get(f'gm_hold:{key}'))
+        self.assertEqual(cache.get(f'gm_hold_full:{key}'), {'TSLAon': 2.0})      # a list write never drops it
 
     def test_a_list_scan_racing_a_trade_is_returned_but_not_cached(self):
         from cusd_plus import gm_holdings

@@ -270,17 +270,29 @@ def holdings_units(user_bsc_address: str, *, require_complete: bool = False) -> 
         logger.warning('GM holdings scan failed for %s', user_bsc_address, exc_info=True)
         return cache.get(f'gm_hold_last:{key}')
     if _generation(key) == generation:     # else a trade landed mid-scan: don't cache it
-        cache.set(f'gm_hold:{key}', held, SCAN_TTL)
-        cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
-        _drop_if_moved(key, generation)
+        _store(key, generation, {f'gm_hold:{key}': held}, held)
     return held
 
 
-def _drop_if_moved(key: str, generation) -> None:
-    """A trade invalidating between the generation check and the write must
-    not leave this (pre-trade) scan cached for SCAN_TTL: re-check and drop."""
-    if _generation(key) != generation:
-        cache.delete_many([f'gm_hold:{key}', f'gm_hold_full:{key}'])
+def _store(key: str, generation, fresh: dict, last: dict) -> bool:
+    """Cache a scan read under `generation`: `fresh` entries for SCAN_TTL and
+    `last` as the last-known. A trade invalidating between the caller's
+    check and these writes must not leave the pre-trade scan anywhere: undo
+    exactly what this call wrote (a concurrent post-trade scan's other
+    entries stay) and put the previous last-known back. True when it moved
+    (the scan read the pre-trade chain and must not be used)."""
+    last_key = f'gm_hold_last:{key}'
+    previous_last = cache.get(last_key)
+    cache.set_many(fresh, SCAN_TTL)
+    cache.set(last_key, last, SCAN_LAST_TTL)
+    if _generation(key) == generation:
+        return False
+    cache.delete_many(list(fresh))
+    if previous_last is None:
+        cache.delete(last_key)
+    else:
+        cache.set(last_key, previous_last, SCAN_LAST_TTL)
+    return True
 
 
 def _complete_holdings(key: str) -> dict | None:
@@ -318,8 +330,7 @@ def _complete_holdings(key: str) -> dict | None:
         # the list scan's own token set (live only): a delisted position must
         # not appear or vanish there depending on which scan ran last.
         listed = {s: u for s, u in held.items() if s in token_registry}
-        cache.set_many({f'gm_hold_full:{key}': held, f'gm_hold:{key}': listed}, SCAN_TTL)
-        cache.set(f'gm_hold_last:{key}', listed, SCAN_LAST_TTL)
-        _drop_if_moved(key, generation)
+        if _store(key, generation, {f'gm_hold_full:{key}': held, f'gm_hold:{key}': listed}, listed):
+            continue                           # moved during the write: pre-trade, never used
         return held
     return None                                # trades keep landing: unknown for now

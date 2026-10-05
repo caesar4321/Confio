@@ -25,6 +25,11 @@ export const REVEAL_WINDOW_MS = 800;
  *  holdings scan, and the stocks card is what the user came to see. The
  *  reveal still happens the moment every query has answered. */
 export const REVEAL_WINDOW_AFTER_TRADE_MS = 2500;
+/** Value-only answers re-asked after a trade settled (one per poll, ~4s
+ *  apart: past the server's 30s scan cache) before value only is taken as
+ *  the real answer — an incomplete history is not a race, never polled for
+ *  the whole settling window. */
+export const VALUE_ONLY_RECHECKS = 12;
 
 export type InsightData = {
   insights: MonthInsights | null;
@@ -117,8 +122,10 @@ export function useMonthInsights(params: {
   // (gain/value_only never swap to 'settling'): the screen polls on it.
   const lastStocks = useRef<StockMonth['state'] | null>(null);
   // This view saw a trade settle: a value-only answer right after it may be
-  // a passing race (scan vs finality), so it keeps being re-asked.
+  // a passing race (scan vs finality), so it keeps being re-asked (up to
+  // VALUE_ONLY_RECHECKS answers: an incomplete history is a real answer).
   const sawSettling = useRef(false);
+  const valueOnlyChecks = useRef(0);
   const stocksInFlight = useRef(false);
   // Stocks asks are numbered when sent: an answer older than one already
   // applied (a focus refresh waits for its slowest query; a poll doesn't)
@@ -126,6 +133,20 @@ export function useMonthInsights(params: {
   const stocksAsked = useRef(0);
   const stocksApplied = useRef(0);
   useEffect(() => () => { generation.current += 1; }, []);
+
+  /** Records an applied stocks answer's state (what the screen polls on). */
+  const noteStocks = useCallback((next: StockMonth['state'] | null) => {
+    lastStocks.current = next;
+    if (next === 'settling') {
+      sawSettling.current = true;
+      valueOnlyChecks.current = 0;
+    } else if (next === 'value_only' && sawSettling.current) {
+      valueOnlyChecks.current += 1;
+      if (valueOnlyChecks.current > VALUE_ONLY_RECHECKS) sawSettling.current = false;
+    } else if (next === 'gain' || next === 'none') {
+      sawSettling.current = false;               // the trade resolved
+    }
+  }, []);
 
   const fetchStocks = useCallback(() => client.query<{ stockMonth: StockMonth | null }>(
     { query: GET_STOCK_MONTH, variables: { year, month, timezone }, fetchPolicy: 'no-cache' })
@@ -153,6 +174,7 @@ export function useMonthInsights(params: {
     shown.current = null;
     lastStocks.current = null;
     sawSettling.current = false;
+    valueOnlyChecks.current = 0;
     if (state.revealed) setState({ revealed: false });
   }
 
@@ -170,7 +192,7 @@ export function useMonthInsights(params: {
       if (closed || generation.current !== gen) return;
       closed = true;
       shown.current = visibleAtReveal({ ...got });
-      lastStocks.current = got.stocks?.state ?? null;
+      noteStocks(got.stocks?.state ?? null);
       setState({ revealed: true, ...shown.current });
     };
     const { insights, savings, protection, stocks } = fetchAll();
@@ -187,7 +209,7 @@ export function useMonthInsights(params: {
       closed = true;
       clearTimeout(timer);
     };
-  }, [ready, accountKey, viewKey, fetchAll]);
+  }, [ready, accountKey, viewKey, fetchAll, noteStocks]);
 
   const refresh = useCallback(() => {
     const gen = generation.current;
@@ -206,14 +228,14 @@ export function useMonthInsights(params: {
       const fresh = askStocks && seq > stocksApplied.current;
       if (fresh) {
         stocksApplied.current = seq;
-        if (k) lastStocks.current = k.state;
+        if (k) noteStocks(k.state);
       }
       const merged = mergeValues(shown.current,
         { insights: i, savings: s, protection: p, stocks: fresh ? k : shown.current.stocks });
       shown.current = merged;
       setState({ revealed: true, ...merged });
     });
-  }, [fetchAll]);
+  }, [fetchAll, noteStocks]);
 
   /** Stocks only (a settling trade): the other cards are not re-asked. One
    *  ask at a time: a slow answer (cold scan) is not stacked with the next
@@ -226,15 +248,14 @@ export function useMonthInsights(params: {
     fetchStocks().finally(() => { stocksInFlight.current = false; }).then((k) => {
       if (generation.current !== gen || !shown.current || seq <= stocksApplied.current) return;
       stocksApplied.current = seq;
-      if (k) lastStocks.current = k.state;
+      if (k) noteStocks(k.state);
       const merged = mergeValues(shown.current, { ...shown.current, stocks: k });
       shown.current = merged;
       setState({ revealed: true, ...merged });
     });
-  }, [fetchStocks]);
+  }, [fetchStocks, noteStocks]);
 
   // Only a shown card can resolve in place (a dropped one never appears).
-  if (lastStocks.current === 'settling') sawSettling.current = true;
   const stocksSettling = Boolean(shown.current?.stocks) && (lastStocks.current === 'settling'
     || (sawSettling.current && lastStocks.current === 'value_only'));
   return { ...state, refresh, refreshStocks, stocksSettling };
