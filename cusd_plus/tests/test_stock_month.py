@@ -31,6 +31,17 @@ def trade(symbol, kind, units, usd, when):
                     usd=None if usd is None else Decimal(usd), when=when)
 
 
+class NothingOnTheWire:
+    """Caching tests: no stock trade of the wallet in flight (the real check
+    is a DB query, which SimpleTestCase refuses; that would fail closed)."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch('cusd_plus.gm_holdings._wallet_in_flight', return_value=False)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+
 class StockMonthTests(SimpleTestCase):
     def setUp(self):
         cache.clear()
@@ -404,7 +415,7 @@ class StockMonthResolverTests(SimpleTestCase):
         self.assertIsNone(self.resolve(sm.StockMonth(state='gain'), surfaces=False))
 
 
-class FreshHoldingsTests(SimpleTestCase):
+class FreshHoldingsTests(NothingOnTheWire, SimpleTestCase):
     def tearDown(self):
         cache.clear()
 
@@ -472,7 +483,7 @@ class ConfirmedTradesCacheTests(SimpleTestCase):
         self.assertEqual(self.run_read(sig, bad)[1], 1)
 
 
-class HoldingsWarmupTests(SimpleTestCase):
+class HoldingsWarmupTests(NothingOnTheWire, SimpleTestCase):
     def tearDown(self):
         cache.clear()
 
@@ -529,6 +540,7 @@ class HoldingsWarmupTests(SimpleTestCase):
         from cusd_plus import gm_holdings
         key = ADDR.lower()
         reg = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        on_wire = [True]
 
         def read(_key, _tokens, *, blocks=None, **_kw):
             blocks.update({'TSLAon': 99})
@@ -537,19 +549,26 @@ class HoldingsWarmupTests(SimpleTestCase):
         with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
              mock.patch.object(gm_holdings, 'registry_entry', return_value=(reg, True)), \
              mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
+             mock.patch.object(gm_holdings, '_wallet_in_flight', side_effect=lambda _k: on_wire[0]), \
              mock.patch.object(gm_holdings, '_scan', side_effect=read):
-            gm_holdings.invalidate_holdings(ADDR, in_flight=True)          # broadcast: block unknown
             self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})
             self.assertEqual(gm_holdings.complete_holdings(ADDR), ({'TSLAon': 1.0}, {'TSLAon': 99}))
             for k in ('gm_hold', 'gm_hold_full_v2', 'gm_hold_last'):
-                self.assertIsNone(cache.get(f'{k}:{key}'))
-            gm_holdings.invalidate_holdings(ADDR, min_block=99)            # confirmed: the floor takes over
-            with mock.patch('blockchain.models.SponsoredBatch') as model:
-                model.objects.filter.return_value.exists.return_value = False
-                gm_holdings.lift_in_flight(ADDR)                           # after the status write
-            self.assertIsNone(cache.get(f'gm_hold_inflight:{key}'))
+                self.assertIsNone(cache.get(f'{k}:{key}'))                     # served, never cached
+            on_wire[0] = False                                                  # confirmed (or failed)
             gm_holdings.holdings_units(ADDR)
             self.assertEqual(cache.get(f'gm_hold:{key}'), {'TSLAon': 1.0})
+
+    def test_a_broadcast_drops_fresh_reads_without_moving_the_generation(self):
+        from cusd_plus import gm_holdings
+        key = ADDR.lower()
+        cache.set(f'gm_hold_gen:{key}', 'g1')
+        cache.set(f'gm_hold:{key}', {'TSLAon': 1.0})
+        cache.set(f'gm_hold_full_v2:{key}', {'held': {}, 'blocks': {}})
+        gm_holdings.drop_fresh_holdings(ADDR)
+        self.assertIsNone(cache.get(f'gm_hold:{key}'))
+        self.assertIsNone(cache.get(f'gm_hold_full_v2:{key}'))
+        self.assertEqual(gm_holdings._generation(key), 'g1')                   # scans running elsewhere kept
 
     def test_dispatch_never_raises_on_a_broker_failure(self):
         from cusd_plus import tasks
@@ -558,7 +577,7 @@ class HoldingsWarmupTests(SimpleTestCase):
             tasks._dispatch_holdings_warmup(ADDR)
 
 
-class LiveRegistryTests(SimpleTestCase):
+class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
     def tearDown(self):
         cache.clear()
 
@@ -721,7 +740,7 @@ class PendingWindowTests(SimpleTestCase):
         self.assertLessEqual(sm.PENDING_MAX_AGE, timedelta(minutes=15))
 
 
-class FloorAndInFlightTests(SimpleTestCase):
+class FloorAndInFlightTests(NothingOnTheWire, SimpleTestCase):
     def tearDown(self):
         cache.clear()
 
@@ -731,30 +750,16 @@ class FloorAndInFlightTests(SimpleTestCase):
         gm_holdings.invalidate_holdings(ADDR, min_block=100)
         self.assertEqual(cache.get(f'gm_hold_floor:{ADDR.lower()}'), 105)
 
-    def test_a_confirmation_keeps_the_marker_of_another_trade_in_flight(self):
-        from cusd_plus import gm_holdings
-        key = ADDR.lower()
-        gm_holdings.invalidate_holdings(ADDR, in_flight=True)
-        gm_holdings.invalidate_holdings(ADDR, min_block=100)
-        self.assertIsNotNone(cache.get(f'gm_hold_inflight:{key}'))     # kept until the status write
-        with mock.patch('blockchain.models.SponsoredBatch') as model:
-            model.objects.filter.return_value.exists.return_value = True     # another trade on the wire
-            gm_holdings.lift_in_flight(ADDR)
-            self.assertIsNotNone(cache.get(f'gm_hold_inflight:{key}'))
-            # Only rows young enough to hold a marker count (a stuck batch doesn't).
-            since = model.objects.filter.call_args.kwargs['created_at__gte']
-            from django.utils import timezone as dj_tz
-            self.assertLessEqual(dj_tz.now() - since,
-                                 timedelta(seconds=gm_holdings.IN_FLIGHT_TTL, milliseconds=500))
-            model.objects.filter.return_value.exists.return_value = False
-            gm_holdings.lift_in_flight(ADDR)
-        self.assertIsNone(cache.get(f'gm_hold_inflight:{key}'))
 
-    def test_lifting_the_marker_never_raises(self):
+class InFlightCheckTests(SimpleTestCase):
+    def test_the_in_flight_check_fails_closed_and_ignores_stuck_rows(self):
+        from django.utils import timezone as dj_tz
         from cusd_plus import gm_holdings
-        gm_holdings.invalidate_holdings(ADDR, in_flight=True)
-        with mock.patch('blockchain.models.SponsoredBatch') as model, \
-             self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
+        with mock.patch('blockchain.models.SponsoredBatch') as model:
+            model.objects.filter.return_value.exists.return_value = False
+            self.assertFalse(gm_holdings._wallet_in_flight(ADDR.lower()))
+            since = model.objects.filter.call_args.kwargs['created_at__gte']
+            self.assertLessEqual(dj_tz.now() - since, gm_holdings.IN_FLIGHT_MAX_AGE + timedelta(seconds=1))
             model.objects.filter.side_effect = RuntimeError('db down')
-            gm_holdings.lift_in_flight(ADDR)
-        self.assertIsNotNone(cache.get(f'gm_hold_inflight:{ADDR.lower()}'))
+            with self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
+                self.assertTrue(gm_holdings._wallet_in_flight(ADDR.lower()))  # unknown: don't cache
