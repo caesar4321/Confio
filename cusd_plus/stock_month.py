@@ -161,7 +161,7 @@ def pending_trades(bsc_address: str) -> list[Trade]:
     return _decode_trades(SponsoredBatch.objects.filter(
         user_bsc_address__iexact=bsc_address, kind__in=('stock_buy', 'stock_sell'),
         status__in=('signed', 'sent'), created_at__gte=dj_tz.now() - PENDING_MAX_AGE,
-    ).order_by('created_at', 'id'))
+    ).select_related('unified_transaction').order_by('created_at', 'id'))
 
 
 def ledger_units(trades: list[Trade], before: datetime | None = None) -> dict:
@@ -316,8 +316,13 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
                      or (bool(in_flight) and ledger_explains_chain(ledger_units(trades + in_flight), chain)))
         if not current and any(t.when < end for t in in_flight):
             explained = False               # month just ended under a trade in flight
+        # Units come from each trade's signed quote, so the ledger needs every
+        # trade READABLE; dollars are needed only for this month's trades (an
+        # old trade's missing history row must not blank every later month).
+        in_month = [t for t in trades if start <= t.when < end]
         exact = (not pending and explained
-                 and all(t.usd is not None for t in trades))
+                 and not any(t.symbol.startswith('?') for t in trades)
+                 and all(t.usd is not None for t in in_month))
 
         def live_price(symbol):
             p = (market.get(symbol) or {}).get('price')
@@ -350,7 +355,6 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
                               top=_top_mover(chain, market, prices, start, live_price),
                               holdings=len(chain))
 
-        in_month = [t for t in trades if start <= t.when < end]
         units_start = ledger_units(trades, before=start)
         units_end = chain if current else ledger_units(trades, before=end)
         if not units_start and not units_end and not in_month:
