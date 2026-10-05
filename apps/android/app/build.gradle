@@ -228,6 +228,14 @@ android {
 configurations.all {
     resolutionStrategy {
         force 'androidx.browser:browser:1.8.0'
+        // Didit and AWS liveness declare CameraX 1.4.2, VisionCamera 1.5.0-alpha03;
+        // Gradle picked the alpha for all three. Pin a stable release instead.
+        eachDependency { details ->
+            if (details.requested.group == 'androidx.camera') {
+                details.useVersion '1.5.1'
+                details.because 'stable CameraX for Didit, liveness and VisionCamera'
+            }
+        }
     }
 }
 
