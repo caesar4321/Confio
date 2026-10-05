@@ -311,10 +311,14 @@ def reads_before(blocks: dict, block: int | None) -> bool:
 def _behind_floor(key: str, blocks: dict, wallet_in_flight: bool | None = None) -> bool:
     """A read older than the last trade's block (or of unknown block while a
     floor stands), or taken while a trade is on the wire: fine to use as-is
-    by a caller that knows, never cached."""
+    by a caller that knows, never cached. A caller that saw a trade on the
+    wire (before its scan) skips the query; "none" seen before the scan is
+    asked again here, at store time: a trade broadcast while the scan ran
+    (drop_fresh_holdings relies on this) must not get its pre-trade read
+    cached."""
     if reads_before(blocks, cache.get(f'gm_hold_floor:{key}')):
         return True
-    return _wallet_in_flight(key) if wallet_in_flight is None else wallet_in_flight
+    return True if wallet_in_flight else _wallet_in_flight(key)
 
 
 def _generation(key: str):

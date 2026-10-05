@@ -733,10 +733,13 @@ class PendingWindowTests(SimpleTestCase):
              mock.patch.object(sm, 'pending_trades', return_value=[
                 trade('NVDAon', 'stock_buy', '1', None, datetime(2026, 9, 30, 23, 55, tzinfo=UTC))]), \
              mock.patch('cusd_plus.gm_holdings.registry', return_value={}), \
-             mock.patch('cusd_plus.gm_holdings.holdings_units', return_value={'NVDAon': 2.0}), \
-             mock.patch('cusd_plus.gm_tvl._market_by_symbol', return_value={}):
+             mock.patch('cusd_plus.gm_holdings.complete_holdings',
+                        return_value=({'NVDAon': 2.0}, {'NVDAon': None})) as scan, \
+             mock.patch('cusd_plus.gm_tvl._market_by_symbol', return_value={}), \
+             mock.patch.object(sm, 'close_before', return_value=Decimal('100')):     # never for want of a price
             self.assertIsNone(sm.stock_month(ADDR, datetime(2026, 9, 1, tzinfo=UTC), OCT_START,
                                              datetime(2026, 10, 1, 0, 5, tzinfo=UTC)))
+        scan.assert_called_once()           # the scan answered: None is the month-end rule, not an unknown scan
 
     def test_stuck_batches_stop_counting_as_settling(self):
         self.assertLessEqual(sm.PENDING_MAX_AGE, timedelta(minutes=15))
@@ -779,9 +782,17 @@ class InFlightCheckTests(SimpleTestCase):
                 sm._in_pool_db(lambda: (_ for _ in ()).throw(RuntimeError('rpc')))
             self.assertEqual(calls, ['tidy', 'tidy'])
 
-    def test_a_caller_that_knows_skips_the_query(self):
+    def test_a_caller_that_saw_a_trade_on_the_wire_skips_the_query(self):
         from cusd_plus import gm_holdings
         with mock.patch.object(gm_holdings, '_wallet_in_flight') as query:
-            self.assertFalse(gm_holdings._behind_floor(ADDR.lower(), {'TSLAon': 5}, False))
             self.assertTrue(gm_holdings._behind_floor(ADDR.lower(), {'TSLAon': 5}, True))
         query.assert_not_called()
+
+    def test_none_on_the_wire_before_the_scan_is_asked_again_at_store_time(self):
+        # Tu mes read "nothing on the wire" before its scan; the user's trade
+        # broadcast while it ran (drop_fresh_holdings relies on the store-time
+        # check): the pre-trade read must not be cached.
+        from cusd_plus import gm_holdings
+        with mock.patch.object(gm_holdings, '_wallet_in_flight', return_value=True) as query:
+            self.assertTrue(gm_holdings._behind_floor(ADDR.lower(), {'TSLAon': 5}, False))
+        query.assert_called_once_with(ADDR.lower())
