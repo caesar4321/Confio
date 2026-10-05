@@ -36,7 +36,7 @@ class StockMonthTests(SimpleTestCase):
         cache.clear()
         self.trades = []
         self.chain = {}
-        self.pending = False
+        self.pending = []
         self.market = market(NVDA=110, AAPL=200)
         self.candles = {
             'NVDAon': [candle(datetime(2026, 9, 30, tzinfo=UTC), '100'),
@@ -47,7 +47,7 @@ class StockMonthTests(SimpleTestCase):
         patches = [
             mock.patch.object(sm, 'confirmed_trades', side_effect=lambda _a: self.trades),
             mock.patch('cusd_plus.gm_holdings.registry', return_value={}),
-            mock.patch.object(sm, 'pending_trade_exists', side_effect=lambda _a: self.pending),
+            mock.patch.object(sm, 'pending_trades', side_effect=lambda _a: list(self.pending)),
             mock.patch('cusd_plus.gm_holdings.holdings_units', side_effect=self.scan),
             mock.patch('cusd_plus.gm_api.all_market', side_effect=lambda: self.market),
             mock.patch('cusd_plus.gm_api.ohlc', side_effect=lambda s, _r: self.candles.get(s, [])),
@@ -127,17 +127,56 @@ class StockMonthTests(SimpleTestCase):
         # The receipt landed (chain has the units) but finality hasn't confirmed the batch.
         self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
         self.chain = {'NVDAon': 2.0}
-        self.pending = True
+        self.pending = [trade('NVDAon', 'stock_buy', '1', None, NOW - timedelta(minutes=1))]
         r = self.run_month()
         self.assertEqual(r.state, 'settling')
         self.assertEqual(r.value_end, Decimal('220'))
         self.assertIsNone(r.gain)
         self.assertEqual(r.top.ticker, 'NVDA')
-        # A past month can't be reconstructed while the ledger disagrees.
+        # A past month ends before the in-flight trade: the ledger plus that
+        # trade explains the chain, so September stays exact.
+        sept = self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START)
+        self.assertEqual(sept.state, 'gain')
+        self.assertEqual(sept.value_end, Decimal('100'))      # 1 NVDA at the Sept 30 close
+        # Unknown when a trade can't be explained at all (2 extra units).
+        self.chain = {'NVDAon': 4.0}
         self.assertIsNone(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START))
 
+    def test_holder_scan_lagging_a_pending_trade_is_settling_not_a_final_gain(self):
+        # The app showed the receipt, but the scan still reads the pre-trade
+        # chain, which the ledger (without the pending batch) still explains.
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
+        self.chain = {'NVDAon': 1.0}
+        self.pending = [trade('NVDAon', 'stock_buy', '1', None, NOW - timedelta(minutes=1))]
+        r = self.run_month()
+        self.assertEqual(r.state, 'settling')
+        self.assertIsNone(r.gain)
+        # A past month ends before the in-flight trade and stays exact.
+        self.assertEqual(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START).state, 'gain')
+
+    def test_past_month_boundaries_of_a_symbol_share_one_task(self):
+        # Start and end candles of one symbol are read one after the other in
+        # the same task, so the second read hits gm_api's cache instead of a
+        # concurrent duplicate request to Ondo.
+        import threading
+        threads = []
+
+        def ohlc(symbol, _range):
+            threads.append((symbol, threading.get_ident()))
+            return self.candles.get(symbol, [])
+
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
+        self.chain = {'NVDAon': 1.0}
+        with mock.patch('cusd_plus.gm_api.ohlc', side_effect=ohlc):
+            r = self.run_month(now=datetime(2026, 11, 10, tzinfo=UTC))
+        self.assertEqual(r.state, 'gain')
+        nvda = [t for s, t in threads if s == 'NVDAon']
+        self.assertEqual(len(nvda), 2)
+        self.assertEqual(len(set(nvda)), 1)
+
     def test_first_purchase_not_yet_scanned_is_settling_never_an_invite(self):
-        self.pending = True                                   # receipt shown; the scan lags the trade
+        # Receipt shown; the scan lags the trade.
+        self.pending = [trade('NVDAon', 'stock_buy', '1', None, NOW - timedelta(minutes=1))]
         self.assertEqual(self.run_month().state, 'settling')
         self.assertEqual(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START).state, 'none')
 
@@ -259,9 +298,10 @@ class FreshHoldingsTests(SimpleTestCase):
         reg = {'TSLAon': {'address': '0x' + '11' * 20}}
         cache.set(f'gm_hold:{holder}', {'TSLAon': 1.0}, 30)       # a partial scan from another screen
         cache.set(f'gm_hold_last:{holder}', {'TSLAon': 1.0}, 60)
-        live = mock.patch.object(gm_holdings, 'registry_is_live', return_value=True)
-        live.start()
-        self.addCleanup(live.stop)
+        for patch in (mock.patch.object(gm_holdings, 'registry_entry', return_value=(reg, True)),
+                      mock.patch.object(gm_holdings, '_fallback_registry', return_value={})):
+            patch.start()
+            self.addCleanup(patch.stop)
         with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
              mock.patch.object(gm_holdings, '_scan', side_effect=RuntimeError('GM balanceOf failed')) as scan, \
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
@@ -340,14 +380,15 @@ class LiveRegistryTests(SimpleTestCase):
             self.assertIsNone(gm_holdings.holdings_units(ADDR, require_complete=True))
             self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})   # lists still degrade
         scan.assert_called_once()
-        self.assertFalse(gm_holdings.registry_is_live())
+        self.assertFalse(gm_holdings.registry_entry()[1])
         rows = [{'symbol': 'TSLAon', 'addresses': [
             {'networkChainId': 'bsc-56', 'address': '0x' + '11' * 20, 'decimals': 18}]}]
         cache.clear()
         with mock.patch('cusd_plus.gm_api.all_addresses', return_value=rows), \
+             mock.patch.object(gm_holdings, '_fallback_registry', return_value=snapshot), \
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 2.0}):
             self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
-        self.assertTrue(gm_holdings.registry_is_live())
+        self.assertTrue(gm_holdings.registry_entry()[1])
 
     def test_liveness_travels_with_the_registry_entry(self):
         # A registry cached by older code (no liveness) is refetched, never
@@ -360,6 +401,37 @@ class LiveRegistryTests(SimpleTestCase):
             self.assertIn('TSLAon', gm_holdings.registry())
             self.assertIn('TSLAon', gm_holdings.registry())
         fetch.assert_called_once()
-        self.assertTrue(gm_holdings.registry_is_live())
-        cache.delete(gm_holdings.REGISTRY_CACHE_KEY)
-        self.assertFalse(gm_holdings.registry_is_live())
+        self.assertEqual(cache.get(gm_holdings.REGISTRY_CACHE_KEY)['live'], True)
+        self.assertTrue(gm_holdings.registry_entry()[1])
+
+    def test_complete_scan_includes_delisted_snapshot_tokens_best_effort(self):
+        from cusd_plus import gm_holdings
+        live = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        snapshot = {**live, 'OLDon': {'address': '0x' + '22' * 20, 'decimals': 18}}
+        calls = []
+
+        def scan(_key, tokens, *, require_complete=False, **_kw):
+            calls.append((sorted(tokens), require_complete))
+            return {'TSLAon': 1.0} if 'TSLAon' in tokens else {'OLDon': 3.0}
+
+        with mock.patch.object(gm_holdings, 'registry_entry', return_value=(live, True)), \
+             mock.patch.object(gm_holdings, '_fallback_registry', return_value=snapshot), \
+             mock.patch.object(gm_holdings, '_scan', side_effect=scan):
+            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0, 'OLDon': 3.0})
+        self.assertEqual(calls, [(['TSLAon'], True), (['OLDon'], False)])
+
+
+class PendingWindowTests(SimpleTestCase):
+    def test_a_trade_in_flight_when_the_month_ended_makes_that_month_unknown(self):
+        with mock.patch.object(sm, 'confirmed_trades', return_value=[
+                trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]), \
+             mock.patch.object(sm, 'pending_trades', return_value=[
+                trade('NVDAon', 'stock_buy', '1', None, datetime(2026, 9, 30, 23, 55, tzinfo=UTC))]), \
+             mock.patch('cusd_plus.gm_holdings.registry', return_value={}), \
+             mock.patch('cusd_plus.gm_holdings.holdings_units', return_value={'NVDAon': 2.0}), \
+             mock.patch('cusd_plus.gm_tvl._market_by_symbol', return_value={}):
+            self.assertIsNone(sm.stock_month(ADDR, datetime(2026, 9, 1, tzinfo=UTC), OCT_START,
+                                             datetime(2026, 10, 1, 0, 5, tzinfo=UTC)))
+
+    def test_stuck_batches_stop_counting_as_settling(self):
+        self.assertLessEqual(sm.PENDING_MAX_AGE, timedelta(minutes=15))

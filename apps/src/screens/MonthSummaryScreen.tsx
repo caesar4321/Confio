@@ -46,8 +46,14 @@ import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Route = RouteProp<MainStackParamList, 'MonthSummary'>;
 
+// A settling trade is asked about every 4s for the first minute (finality
+// is seconds), then every 30s up to the server's 15-minute pending window
+// (cusd_plus/stock_month.py PENDING_MAX_AGE); the note follows the phase.
 export const SETTLING_POLL_MS = 4000;
-export const SETTLING_MAX_TRIES = 15;            // ~1 minute; finality is seconds
+export const SETTLING_FAST_TRIES = 15;
+export const SETTLING_SLOW_MS = 30000;
+export const SETTLING_MAX_TRIES = SETTLING_FAST_TRIES + 28;
+export type SettlingPhase = 'fast' | 'slow' | 'stalled';
 
 function monthsBetween(a: { year: number; month: number }, b: { year: number; month: number }) {
   return (b.year - a.year) * 12 + (b.month - a.month);
@@ -112,16 +118,26 @@ export function MonthSummaryScreen() {
     focused.current = true;
     return () => { focused.current = false; };
   }, []));
+  const [settlingPhase, setSettlingPhase] = useState<SettlingPhase>('fast');
   useEffect(() => {
+    setSettlingPhase('fast');
     if (!settling) return undefined;
     let tries = 0;
-    const id = setInterval(() => {
-      if (!focused.current) return;
-      tries += 1;
-      refreshStocks.current();
-      if (tries >= SETTLING_MAX_TRIES) clearInterval(id);
-    }, SETTLING_POLL_MS);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      if (focused.current) {             // unfocused ticks don't count
+        tries += 1;
+        refreshStocks.current();
+        if (tries === SETTLING_FAST_TRIES) setSettlingPhase('slow');
+        if (tries >= SETTLING_MAX_TRIES) {
+          setSettlingPhase('stalled');
+          return;
+        }
+      }
+      id = setTimeout(tick, tries < SETTLING_FAST_TRIES ? SETTLING_POLL_MS : SETTLING_SLOW_MS);
+    };
+    id = setTimeout(tick, SETTLING_POLL_MS);
+    return () => clearTimeout(id);
   }, [settling]);
 
   // Back from a movement list where categories may have changed: re-read.
@@ -194,6 +210,7 @@ export function MonthSummaryScreen() {
         </View>
       ) : (
         <MonthBody
+          settlingPhase={settlingPhase}
           summary={summary}
           masked={masked}
           isCurrent={isCurrent}
@@ -227,6 +244,7 @@ function SkeletonState() {
 }
 
 type BodyProps = {
+  settlingPhase: SettlingPhase;
   summary: MonthSummary;
   masked: boolean;
   isCurrent: boolean;
@@ -278,7 +296,7 @@ const isUnknownWallet = (key: string, name: string) =>
 /** A single unknown wallet is a deposit only if no money went out to it. */
 const externalName = (sent: number) => (sent > 0 ? 'Billetera externa' : 'Depósito externo');
 
-function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onOpen, onSend, onReceive, onSave, onTopUp, onOpenStocks, onOpenStock }: BodyProps) {
+function MonthBody({ summary, masked, isCurrent, business, insights, runKey, settlingPhase, onOpen, onSend, onReceive, onSave, onTopUp, onOpenStocks, onOpenStock }: BodyProps) {
   const cur = summary.current;
 
   const uncategorized = cur.spendingByCategory.find((c) => c.category === 'uncategorized');
@@ -350,7 +368,7 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
           {insights.stocks && insights.stocks.state !== 'none' && (
             // gain · value_only · settling (resolves in place)
             <StocksCard value={insights.stocks} month={summary.month} isCurrent={isCurrent} masked={masked}
-              onOpenStocks={onOpenStocks} onOpenStock={onOpenStock} />
+              settlingPhase={settlingPhase} onOpenStocks={onOpenStocks} onOpenStock={onOpenStock} />
           )}
           {insights.stocks?.state === 'none' && insights.stocks.canBuy && <StocksInvite onOpen={onOpenStocks} />}
           {insights.insights && (

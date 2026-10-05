@@ -17,7 +17,16 @@ import { formatUsd, MASK, monthName, signedUsd } from '../../utils/monthSummary'
 import { formatPercent, formatUsdAmount } from '../../utils/numberLocale';
 import { CardShell, CardTitle, CARD_FONT_MULTIPLIER } from './CardShell';
 
+/** The settling note follows how long confirmation has taken (the screen polls). */
+const SETTLING_NOTE = {
+  fast: 'Tu última operación se está confirmando. En unos segundos verás el resultado del mes.',
+  slow: 'Tu última operación está tardando más de lo normal en confirmarse. Seguimos revisando.',
+  stalled: 'Tu última operación aún no se confirma. Vuelve más tarde para ver el resultado del mes.',
+} as const;
+
 type Props = {
+  /** Only read while state is 'settling'. */
+  settlingPhase?: keyof typeof SETTLING_NOTE;
   value: StockMonth;
   month: number;
   isCurrent: boolean;
@@ -26,13 +35,21 @@ type Props = {
   onOpenStocks: () => void;
 };
 
+const FLAT_PCT = 0.05;
+
 /** "subió 8,2%" / "bajó 3%" / "se mantuvo" (under 0.05%). */
 export function moverVerb(changePct: number): string {
-  if (Math.abs(changePct) < 0.05) return 'se mantuvo';
+  if (Math.abs(changePct) < FLAT_PCT) return 'se mantuvo';
   return `${changePct > 0 ? 'subió' : 'bajó'} ${formatPercent(Math.abs(changePct), 1)}%`;
 }
 
-export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpenStocks }: Props) {
+/** The mover's icon says what its verb says: flat is never a falling line. */
+export function moverIcon(changePct: number): 'minus' | 'trending-down' | 'trending-up' {
+  if (Math.abs(changePct) < FLAT_PCT) return 'minus';
+  return changePct < 0 ? 'trending-down' : 'trending-up';
+}
+
+export function StocksCard({ value, month, isCurrent, masked, settlingPhase = 'fast', onOpenStock, onOpenStocks }: Props) {
   const [sheet, setSheet] = useState(false);
   const exact = value.state === 'gain' && value.gainUsd !== null;
   const gain = Number(value.gainUsd);
@@ -58,7 +75,9 @@ export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpe
       ? `Tus acciones ${gain >= 0 ? 'ganaron' : 'perdieron'} ${Math.abs(gain).toFixed(2)} dólares en ${monthName(month)}. ${facts.join('. ')}.`
       : valueUnknown
         ? 'Tus acciones. Tu última operación se está confirmando.'
-        : `Tus acciones valen ${Math.round(Number(value.valueUsd))} dólares.`;
+        // Same precision as the number on screen: under US$1 keeps its cents.
+        : `Tus acciones valen ${Math.abs(Number(value.valueUsd)) >= 1 || Number(value.valueUsd) === 0
+          ? Math.round(Number(value.valueUsd)) : Number(value.valueUsd).toFixed(2)} dólares.`;
 
   return (
     <CardShell testID="tumes-stocks-card">
@@ -93,7 +112,7 @@ export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpe
       {value.topMover && (
         <TouchableOpacity style={styles.mover} onPress={() => onOpenStock(value.topMover!.ticker)}
           accessibilityRole="button" testID="tumes-stocks-mover">
-          <Icon name={Number(value.topMover.changePct) < 0 ? 'trending-down' : 'trending-up'} size={16}
+          <Icon name={moverIcon(Number(value.topMover.changePct))} size={16}
             color={colors.text.secondary} importantForAccessibility="no" />
           <Text style={styles.moverText} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>
             <Text style={styles.moverTicker}>{value.topMover.ticker}</Text>
@@ -110,7 +129,7 @@ export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpe
         </TouchableOpacity>
       ) : value.state === 'settling' ? (
         <Text style={styles.note} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER} testID="tumes-stocks-settling-note">
-          Tu última operación se está confirmando. En unos segundos verás el resultado del mes.
+          {SETTLING_NOTE[settlingPhase]}
         </Text>
       ) : (
         <Text style={styles.note} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER} testID="tumes-stocks-value-note">
