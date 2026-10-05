@@ -6,7 +6,9 @@ const mockQuery = jest.fn();
 const mockClient = { query: (...a: any[]) => mockQuery(...a) };
 jest.mock('@apollo/client', () => ({ ...jest.requireActual('@apollo/client'), useApolloClient: () => mockClient }));
 
-import { mergeValues, REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights } from '../useMonthInsights';
+import {
+  mergeValues, REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights, VALUE_ONLY_RECHECKS,
+} from '../useMonthInsights';
 
 const insights = (keys: string[]) => ({
   previousMonthSpendingUsd: '390.00',
@@ -223,4 +225,25 @@ it('value only becomes the result once explained, and a view that saw settling k
   const gain = { state: 'gain', gainUsd: '1.00' } as any;
   expect(mergeValues({ ...base2, stocks: valueOnly }, { ...base2, stocks: gain }).stocks).toBe(gain);
   expect(mergeValues({ ...base2, stocks: gain }, { ...base2, stocks: valueOnly }).stocks).toBe(gain);   // never a downgrade
+});
+
+it('after a trade settles, value only is re-asked for a while, then taken as the answer', async () => {
+  let stocks: any = { state: 'value_only', valueUsd: '100.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.stocksSettling).toBe(false);          // an incomplete history alone is never polled
+  stocks = { state: 'settling', valueUsd: '220.00' };
+  await act(async () => { latest.refresh(); });
+  expect(latest.stocksSettling).toBe(true);
+  stocks = { state: 'value_only', valueUsd: '220.00' };
+  for (let i = 0; i < VALUE_ONLY_RECHECKS; i += 1) {
+    await act(async () => { latest.refreshStocks(); });
+    expect(latest.stocksSettling).toBe(true);         // may be a passing race: keep asking
+  }
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocksSettling).toBe(false);          // a real value-only answer: the poll ends
+  stocks = { state: 'settling', valueUsd: '300.00' };
+  await act(async () => { latest.refresh(); });
+  expect(latest.stocksSettling).toBe(true);           // a later trade starts over
 });

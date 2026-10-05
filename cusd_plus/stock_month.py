@@ -38,6 +38,8 @@ UNITS_TOLERANCE = Decimal('0.000001')        # relative, ledger vs chain
 # past this a batch still 'signed'/'sent' is stuck (ops reconciles it), not
 # settling, so it can't hold every card on "se está confirmando".
 PENDING_MAX_AGE = timedelta(minutes=15)
+# A node behind the one that confirmed a trade catches up within blocks.
+RECENT_SETTLEMENT = timedelta(seconds=60)
 
 
 class StockMonthUnavailable(Exception):
@@ -51,6 +53,7 @@ class Trade:
     units: Decimal
     usd: Decimal | None    # exact settlement; None when its history row is missing
     when: datetime
+    settled_at: datetime | None = None   # when the batch was saved confirmed (pending: None)
 
 
 @dataclass
@@ -110,7 +113,7 @@ def confirmed_trades(bsc_address: str) -> list[Trade]:
     if not sig['n']:
         return []
     stamp = lambda v: v.timestamp() if v else 0  # noqa: E731
-    key = (f'gm_trades_v1:{bsc_address.lower()}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
+    key = (f'gm_trades_v2:{bsc_address.lower()}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
            f'{sig["rows"]}:{stamp(sig["rows_touched"])}')
     cached = cache.get(key)
     if cached is not None:
@@ -139,14 +142,18 @@ def _decode_trades(batches) -> list[Trade]:
             # ledger can no longer explain the chain (value only, never a gain).
             logger.warning('stock month: unreadable stock batch %s', batch.id)
             trades.append(Trade(symbol=f'?{batch.id}', kind=batch.kind, units=Decimal('0'), usd=None,
-                                when=batch.created_at))
+                                when=batch.created_at, settled_at=_settled_at(batch)))
             continue
         action = actions[0]
         row = getattr(batch, 'unified_transaction', None)
         usd = _dec(row.amount) if row is not None and row.deleted_at is None else None
         trades.append(Trade(symbol=symbol, kind=batch.kind, units=Decimal(action['quantity']) / WAD,
-                            usd=usd, when=batch.created_at))
+                            usd=usd, when=batch.created_at, settled_at=_settled_at(batch)))
     return trades
+
+
+def _settled_at(batch):
+    return batch.updated_at if batch.status == 'confirmed' else None
 
 
 def pending_trades(bsc_address: str) -> list[Trade]:
@@ -306,12 +313,20 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         # the chain: the scan can lag the receipt the app already showed (a
         # node a block behind), and a month result from the pre-trade chain
         # would stand as final, with nothing asking again.
-        pending = current and bool(in_flight)
         # The chain may or may not show an in-flight trade yet: the ledger
         # explains it either way. A past month ends before any in-flight
         # trade (≤15 min old), so its own numbers never include one.
         explained = (ledger_explains_chain(ledger_units(trades), chain)
                      or (bool(in_flight) and ledger_explains_chain(ledger_units(trades + in_flight), chain)))
+        # Just confirmed, but this scan came from a node still a block behind
+        # the one that saw finality (the RPC pool rotates): the chain is the
+        # ledger WITHOUT the newest trades. That is settling, not "history
+        # incomplete" — the next ask, seconds later, sees the trade.
+        recent = [t for t in trades if t.settled_at and now - t.settled_at <= RECENT_SETTLEMENT]
+        recent_ids = {id(t) for t in recent}
+        lagging = (current and not explained and bool(recent)
+                   and ledger_explains_chain(ledger_units([t for t in trades if id(t) not in recent_ids]), chain))
+        pending = current and (bool(in_flight) or lagging)
         if not current and any(t.when < end for t in in_flight):
             explained = False               # month just ended under a trade in flight
         # Units come from each trade's signed quote, so the ledger needs every
