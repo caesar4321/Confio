@@ -31,6 +31,13 @@ def trade(symbol, kind, units, usd, when):
                     usd=None if usd is None else Decimal(usd), when=when)
 
 
+def complete_units(address):
+    """The units of a complete scan (None when unknown), like Tu mes reads them."""
+    from cusd_plus import gm_holdings
+    result = gm_holdings.complete_holdings(address)
+    return None if result is None else result[0]
+
+
 class NothingOnTheWire:
     """Caching tests: no stock trade of the wallet in flight (the real check
     is a DB query, which SimpleTestCase refuses; that would fail closed)."""
@@ -429,7 +436,7 @@ class FreshHoldingsTests(NothingOnTheWire, SimpleTestCase):
              mock.patch.object(gm_holdings, '_scan', side_effect=TimeoutError('node down')), \
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
             self.assertEqual(gm_holdings.holdings_units(holder), {'TSLAon': 1.0})
-            self.assertIsNone(gm_holdings.holdings_units(holder, require_complete=True))
+            self.assertIsNone(complete_units(holder))
 
     def test_complete_mode_never_serves_a_partial_or_stale_scan(self):
         from cusd_plus import gm_holdings
@@ -444,11 +451,11 @@ class FreshHoldingsTests(NothingOnTheWire, SimpleTestCase):
         with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
              mock.patch.object(gm_holdings, '_scan', side_effect=RuntimeError('GM balanceOf failed')) as scan, \
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
-            self.assertIsNone(gm_holdings.holdings_units(holder, require_complete=True))
+            self.assertIsNone(complete_units(holder))
         self.assertIn('failures', scan.call_args.kwargs)
         with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 2.0}):
-            self.assertEqual(gm_holdings.holdings_units(holder, require_complete=True), {'TSLAon': 2.0})
+            self.assertEqual(complete_units(holder), {'TSLAon': 2.0})
         self.assertEqual(cache.get(f'gm_hold:{holder}'), {'TSLAon': 2.0})   # also the best answer for others
         gm_holdings.invalidate_holdings(holder)
         self.assertIsNone(cache.get(f'gm_hold_full_v2:{holder}'))
@@ -590,7 +597,7 @@ class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
              mock.patch('cusd_plus.gm_api.all_addresses', side_effect=TimeoutError('ondo down')), \
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 1.0}) as scan, \
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
-            self.assertIsNone(gm_holdings.holdings_units(ADDR, require_complete=True))
+            self.assertIsNone(complete_units(ADDR))
             self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})   # lists still degrade
         scan.assert_called_once()
         self.assertFalse(gm_holdings.registry_entry()[1])
@@ -600,7 +607,7 @@ class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
         with mock.patch('cusd_plus.gm_api.all_addresses', return_value=rows), \
              mock.patch.object(gm_holdings, '_fallback_registry', return_value=snapshot), \
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 2.0}):
-            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
+            self.assertEqual(complete_units(ADDR), {'TSLAon': 2.0})
         self.assertTrue(gm_holdings.registry_entry()[1])
 
     def test_liveness_travels_with_the_registry_entry(self):
@@ -632,16 +639,16 @@ class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
         with mock.patch.object(gm_holdings, 'registry_entry', return_value=(live, True)), \
              mock.patch.object(gm_holdings, '_fallback_registry', return_value=snapshot), \
              mock.patch.object(gm_holdings, '_scan', side_effect=scan):
-            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0, 'OLDon': 3.0})
+            self.assertEqual(complete_units(ADDR), {'TSLAon': 1.0, 'OLDon': 3.0})
             self.assertEqual(calls, [['OLDon', 'TSLAon']])                       # one Multicall pass
             self.assertEqual(cache.get(f'gm_hold:{ADDR.lower()}'), {'TSLAon': 1.0})   # the list's own token set
             gm_holdings.invalidate_holdings(ADDR)
             failing.add('OLDon')                                                   # a retired contract: tolerated
-            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0, 'OLDon': 3.0})
+            self.assertEqual(complete_units(ADDR), {'TSLAon': 1.0, 'OLDon': 3.0})
             gm_holdings.invalidate_holdings(ADDR)
             failing.add('TSLAon')                                                  # a live one: unknown
             with self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
-                self.assertIsNone(gm_holdings.holdings_units(ADDR, require_complete=True))
+                self.assertIsNone(complete_units(ADDR))
 
     def test_a_trade_confirming_mid_scan_is_never_cached_or_used(self):
         from cusd_plus import gm_holdings
@@ -657,7 +664,7 @@ class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
         with mock.patch.object(gm_holdings, 'registry_entry', return_value=(live, True)), \
              mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
              mock.patch.object(gm_holdings, '_scan', side_effect=scan):
-            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
+            self.assertEqual(complete_units(ADDR), {'TSLAon': 2.0})
         self.assertEqual(cache.get(f'gm_hold_full_v2:{ADDR.lower()}')['held'], {'TSLAon': 2.0})
 
     def test_a_trade_invalidating_during_the_cache_write_drops_the_entry(self):
@@ -677,7 +684,7 @@ class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
              mock.patch.object(gm_holdings, '_scan', side_effect=[{'TSLAon': 1.0}, {'TSLAon': 2.0}]), \
              mock.patch.object(gm_holdings.cache, 'set_many', side_effect=set_many):
             # The pre-trade scan is dropped AND not used: the chain is read again.
-            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
+            self.assertEqual(complete_units(ADDR), {'TSLAon': 2.0})
         self.assertEqual(cache.get(f'gm_hold_full_v2:{ADDR.lower()}')['held'], {'TSLAon': 2.0})
         self.assertEqual(cache.get(f'gm_hold:{ADDR.lower()}'), {'TSLAon': 2.0})
 

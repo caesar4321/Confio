@@ -325,24 +325,20 @@ def _generation(key: str):
     return cache.get(f'gm_hold_gen:{key}')
 
 
-def holdings_units(user_bsc_address: str, *, require_complete: bool = False) -> dict | None:
+def holdings_units(user_bsc_address: str) -> dict | None:
     """{symbol: units} for everything the address holds; {} when it holds
     nothing (or the registry is empty). None means UNKNOWN — the scan
     failed and no last-known value exists; callers must not render that
     as an empty portfolio.
 
-    require_complete=True (never stale, for numbers stated as "today" like
-    Tu mes): every token's balanceOf must answer, or the result is UNKNOWN.
-    The default scan skips a failing token
-    so one bad contract can't hide a portfolio, which is right for a list and
-    wrong for a total. Complete scans keep their own 30s entry, because a
-    partial scan stored by another screen must never pass as complete."""
+    A list's scan: it skips a failing token so one bad contract can't hide a
+    portfolio, and degrades to the last-known. A total stated as "today"
+    (Tu mes) uses complete_holdings instead: every live token must answer,
+    never stale, in its own 30s entry (a partial scan stored here never
+    passes as complete)."""
     if not user_bsc_address:
         return {}
     key = user_bsc_address.lower()
-    if require_complete:
-        complete = _complete_holdings(key)
-        return None if complete is None else complete[0]
     cached = cache.get(f'gm_hold:{key}')
     if cached is not None:
         return cached
