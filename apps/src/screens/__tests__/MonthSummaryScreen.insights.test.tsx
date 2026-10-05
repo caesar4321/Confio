@@ -72,26 +72,29 @@ it('reveals the dollar slot, then habitual payments, in fixed order', () => {
   expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-recurring-card']);
 });
 
-it('a quiet current month still shows savings and habitual payments, with the empty message below (R25)', () => {
+it('a quiet month shows every section with inviting empty states (founder 2026-10-04)', () => {
   mockSummary = summary(0);
-  mockInsights = { revealed: true, insights: recurring, savings, protection: null };
+  mockInsights = { revealed: true, insights: { previousMonthSpendingUsd: '0.00', recurring: [] }, savings: null, protection: null };
   const tree = mount();
-  expect(has(tree, 'tumes-summary-card')).toBe(false);
-  expect(order(tree)).toEqual(['tumes-savings-card', 'tumes-recurring-card']);
-  expect(has(tree, 'month-summary-empty')).toBe(true);
+  expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-recurring-card']);
+  for (const id of ['tumes-quiet-actions', 'tumes-savings-invite', 'tumes-recurring-empty', 'empty-spending',
+    'empty-own', 'empty-people']) {
+    expect(has(tree, id)).toBe(true);
+  }
 });
 
-it('a quiet past month keeps savings but not habitual payments (23A, R25)', () => {
+it('an unknown answer never shows a fake zero: a failed insights query hides the habitual-payments card', () => {
+  mockSummary = summary(0);
+  mockInsights = { revealed: true, insights: null, savings: null, protection: null };
+  const tree = mount();
+  expect(has(tree, 'tumes-recurring-card')).toBe(false);
+});
+
+it('a quiet past month keeps savings (23A)', () => {
   mockSummary = summary(0, true);
   mockParams = { year: 2025, month: 3 };
   mockInsights = { revealed: true, insights: recurring, savings, protection: null };
   const tree = mount();
-  expect(order(tree)).toEqual(['tumes-savings-card']);
-});
-
-it('a quiet month waits on the skeleton until the reveal decides', () => {
-  mockSummary = summary(0);
-  mockInsights = { revealed: false };
-  const tree = mount();
-  expect(has(tree, 'month-summary-loading')).toBe(true);
+  expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-recurring-card']);
+  expect(has(tree, 'tumes-savings-invite')).toBe(false);
 });

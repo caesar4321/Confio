@@ -165,6 +165,8 @@ export function MonthSummaryScreen() {
           onOpen={openList}
           onSend={() => navigation.navigate('Send')}
           onReceive={() => navigation.navigate('Receive')}
+          onSave={() => navigation.navigate('ProtectedSavings')}
+          onTopUp={() => navigation.navigate('TopUp')}
         />
       )}
     </View>
@@ -193,6 +195,8 @@ type BodyProps = {
   onOpen: (filterBy: MainStackParamList['MonthMovements']['filterBy'], title: string, value?: string) => void;
   onSend: () => void;
   onReceive: () => void;
+  onSave: () => void;
+  onTopUp: () => void;
 };
 
 /** One precision on this screen: whole dollars (design C, 2026-10-04). */
@@ -230,9 +234,8 @@ const isUnknownWallet = (key: string, name: string) =>
 /** A single unknown wallet is a deposit only if no money went out to it. */
 const externalName = (sent: number) => (sent > 0 ? 'Billetera externa' : 'Depósito externo');
 
-function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onOpen, onSend, onReceive }: BodyProps) {
+function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onOpen, onSend, onReceive, onSave, onTopUp }: BodyProps) {
   const cur = summary.current;
-  const monthLabel = monthName(summary.month);
 
   const uncategorized = cur.spendingByCategory.find((c) => c.category === 'uncategorized');
   const categorized = cur.spendingByCategory.filter((c) => c.category !== 'uncategorized');
@@ -281,48 +284,30 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
       sentUsd,
     };
   });
-  const isEmpty = cur.movementCount === 0 && ownRows.length === 0;
   const today = new Date();
   const slot = insights ? dollarSlot(insights.protection, insights.savings) : null;
   const recurring = insights?.insights?.recurring ?? [];
-  // Empty past months: no habitual-payments card (R25); B' still shows (23A).
-  const showRecurring = recurring.length > 0 && (!isEmpty || isCurrent);
   const pace = insights ? paceLine(summary, insights.insights?.previousMonthSpendingUsd, today, business) : null;
 
-  if (isEmpty && !insights) {
-    return <SkeletonState />;     // ≤800ms: the reveal decides what a quiet month shows
-  }
-
+  // Every section is always on screen (founder decision 2026-10-04): a real
+  // zero shows an inviting empty state; an UNKNOWN (failed query, missing
+  // snapshot) still hides — never a fake US$0.
   return (
     <ScrollView contentContainerStyle={styles.body}>
-      {!isEmpty && (
-        <SummaryCard summary={summary} masked={masked} runKey={runKey} pace={pace}
-          onOpenIncome={() => onOpen('income', 'Entró')} onOpenSpending={() => onOpen('spending', 'Salió')} />
-      )}
+      <SummaryCard summary={summary} masked={masked} runKey={runKey} pace={pace}
+        onOpenIncome={() => onOpen('income', 'Entró')} onOpenSpending={() => onOpen('spending', 'Salió')}
+        onSend={onSend} onReceive={onReceive} />
       {insights && (
         <Animated.View style={{ opacity: fade }} testID="tumes-revealed">
           {slot?.kind === 'protection' && <ProtectionCard value={slot.value} month={summary.month} masked={masked} />}
           {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
           {slot?.kind === 'stable' && <StableCard value={slot.value} masked={masked} />}
-          {showRecurring && (
+          {!slot && <SavingsInvite onSave={onSave} />}
+          {insights.insights && (
             <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}
               onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />
           )}
-          {isEmpty ? (
-            <View style={[styles.emptyBelow, !slot && !showRecurring && styles.emptyAlone]} testID="month-summary-empty">
-              <Text style={styles.emptyTitle}>Todavía no hay movimientos en {monthLabel}.</Text>
-              <View style={styles.emptyActions}>
-                <TouchableOpacity style={styles.pill} onPress={onSend} accessibilityRole="button">
-                  <Text style={styles.pillText}>Enviar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.pill, styles.pillGhost]} onPress={onReceive} accessibilityRole="button">
-                  <Text style={[styles.pillText, styles.pillGhostText]}>Recibir</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            renderSections()
-          )}
+          {renderSections()}
         </Animated.View>
       )}
     </ScrollView>
@@ -331,7 +316,11 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
   function renderSections() {
     return (
       <>
-      {cur.spendingByCategory.length > 0 && (
+      {cur.spendingByCategory.length === 0 ? (
+        <Section title="En qué se fue">
+          <EmptyHint text="Cuando gastes, aquí verás en qué se fue tu dinero." testID="empty-spending" />
+        </Section>
+      ) : (
         <Section
           title="En qué se fue"
           aside={uncategorized
@@ -370,7 +359,12 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
         </Section>
       )}
 
-      {ownRows.length > 0 && (
+      {ownRows.length === 0 ? (
+        <Section title="Entre tus cuentas">
+          <EmptyHint text="Tus recargas, retiros y ahorro aparecerán aquí." action="Recargar" onPress={onTopUp}
+            testID="empty-own" />
+        </Section>
+      ) : (
         <Section title="Entre tus cuentas">
           <View style={styles.listCard}>
             {ownRows.map((r, i) => (
@@ -388,7 +382,12 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
         </Section>
       )}
 
-      {people.length > 0 && (
+      {people.length === 0 ? (
+        <Section title="Con quién">
+          <EmptyHint text="Las personas con las que mueves dinero aparecerán aquí." action="Enviar" onPress={onSend}
+            testID="empty-people" />
+        </Section>
+      ) : (
         <Section title="Con quién">
           <View style={styles.listCard}>
             {people.map((p, i) => {
@@ -452,6 +451,33 @@ export function ownMoneyRows(t: MonthTotals): { label: string; amount: number; b
   return rows;
 }
 
+/** A real zero: a short invitation, at most one small action. */
+function EmptyHint({ text, action, onPress, testID }: { text: string; action?: string; onPress?: () => void; testID?: string }) {
+  return (
+    <View style={styles.emptyCard} testID={testID}>
+      <Text style={styles.emptyText}>{text}</Text>
+      {action && onPress && (
+        <TouchableOpacity onPress={onPress} style={styles.emptyAction} accessibilityRole="button">
+          <Text style={styles.emptyActionText}>{action}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+/** The dollar slot with nothing to show yet: invite to save (no number). */
+function SavingsInvite({ onSave }: { onSave: () => void }) {
+  return (
+    <View style={[styles.emptyCard, styles.slotInvite]} testID="tumes-savings-invite">
+      <Text style={styles.inviteTitle}>Pon tus dólares a ganar</Text>
+      <Text style={styles.emptyText}>Tu ahorro crece cada día, y aquí verás cuánto ganó.</Text>
+      <TouchableOpacity onPress={onSave} style={styles.emptyAction} accessibilityRole="button">
+        <Text style={styles.emptyActionText}>Ahorrar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 function Section({ title, aside, children }: { title: string; aside?: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
@@ -474,17 +500,17 @@ const styles = StyleSheet.create({
   monthTitle: { fontSize: 16, fontWeight: '600', color: colors.text.primary, minWidth: 150, textAlign: 'center' },
   body: { paddingHorizontal: 16, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  emptyBelow: { alignItems: 'center', marginTop: 32 },
-  emptyAlone: { marginTop: 120 },
+  emptyCard: { backgroundColor: colors.white, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border, padding: 16 },
+  emptyText: { fontSize: 14, lineHeight: 20, color: colors.text.secondary },
+  emptyAction: { alignSelf: 'flex-start', marginTop: 10, minHeight: 40, paddingHorizontal: 16, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.primaryMuted, justifyContent: 'center' },
+  emptyActionText: { fontSize: 14, fontWeight: '600', color: colors.flowIn.textSmall },
+  slotInvite: { marginTop: 12, borderRadius: 20, padding: 20 },
+  inviteTitle: { fontSize: 17, lineHeight: 22, fontWeight: '600', color: colors.textFlat, marginBottom: 4 },
   muted: { fontSize: 15, color: colors.text.secondary, textAlign: 'center' },
   retry: { marginTop: 12, paddingHorizontal: 20, minHeight: 44, justifyContent: 'center' },
   retryText: { fontSize: 15, fontWeight: '700', color: colors.primaryDark },
-  emptyTitle: { fontSize: 16, color: colors.text.primary, textAlign: 'center' },
-  emptyActions: { flexDirection: 'row', gap: 12, marginTop: 16 },
-  pill: { backgroundColor: colors.primaryDark, borderRadius: 999, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center' },
-  pillGhost: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
-  pillText: { color: colors.white, fontWeight: '700', fontSize: 15 },
-  pillGhostText: { color: colors.text.primary },
   card: { backgroundColor: colors.white, borderRadius: 20, padding: 18, borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.primaryMuted, overflow: 'hidden' },
   ratioTrack: { flexDirection: 'row', height: 10, borderRadius: 999, overflow: 'hidden', backgroundColor: colors.surfaceMuted,

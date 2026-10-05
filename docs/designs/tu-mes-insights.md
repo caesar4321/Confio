@@ -874,6 +874,11 @@ Delta completion: scope unchanged (D1 arrangement minus PaceCard.tsx); 5 delta f
 - Users with no on-ramp lots in BO/AR now get the month-start basis, like Venezuela: dollars held all month at the Binance P2P rate kept for the 1st vs today. Users who did buy keep "más de lo que pagaste".
 - First month-start figure: November 1 (the first kept 1st-of-month rate).
 
+### R32: Every section always on screen (founder decision 2026-10-04: "encourage users to engage")
+- Supersedes §1's "omit cards that don't qualify" and R25's empty-month layout.
+- A real zero shows an inviting empty state (one action where it fits): Te quedaron → Enviar/Recibir; dollar slot → "Pon tus dólares a ganar" + Ahorrar; Pagos habituales → hint; En qué se fue → hint; Entre tus cuentas → Recargar; Con quién → Enviar.
+- An UNKNOWN (failed query, missing snapshot) still hides: never a fake US$0.
+
 ### Other review fixes
 - Cap trims the OLDEST lots first (same rule as spending).
 - Savings snapshot: block pinned 5 behind the head, rotating RPC pool, retries with backoff, hourly 00:15–06:15 UTC (idempotent), analytics queue.

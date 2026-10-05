@@ -44,6 +44,17 @@ export function RecurringCard({ items, year, month, today, masked, onOpen }: Pro
   const last = daysIn(year, month);
   const isCurrent = year === today.getFullYear() && month === today.getMonth() + 1;
 
+  if (sorted.length === 0) {
+    return (
+      <CardShell testID="tumes-recurring-card">
+        <CardTitle icon="calendar" title="Pagos habituales" />
+        <Text style={styles.empty} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER} testID="tumes-recurring-empty">
+          Cuando pagues a alguien cada mes, lo verás aquí.
+        </Text>
+      </CardShell>
+    );
+  }
+
   return (
     <CardShell testID="tumes-recurring-card">
       <CardTitle icon="calendar" title="Pagos habituales" />
@@ -147,5 +158,6 @@ const styles = StyleSheet.create({
   pillText: { fontSize: 12, lineHeight: 16, fontWeight: '600', color: colors.flowIn.textSmall },
   pillTextPast: { color: colors.text.secondary },
   more: { minHeight: 44, justifyContent: 'center' },
+  empty: { fontSize: 14, lineHeight: 20, color: colors.text.secondary },
   moreText: { fontSize: 15, fontWeight: '600', color: colors.flowIn.textSmall },
 });
