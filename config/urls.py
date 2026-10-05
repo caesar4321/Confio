@@ -200,20 +200,12 @@ from ramps.views import koywe_webhook
 from ramps.stereum_views import webhook as stereum_test_webhook
 from payment_accounts.views import cobre_webhook, infinia_webhook
 from security.views import didit_webhook
-from security.emergency_views import (
-    emergency_exit_challenge, emergency_exit_face_complete, emergency_exit_face_start, emergency_exit_session,
-)
 from users.funnel_ingest import funnel_ingest
 from content_ingestion.views import enqueue_ai_context_commit, enqueue_telegram_sync
 
 # Catch-all pattern should be last
 urlpatterns += [
     path('api/didit/webhook/', didit_webhook, name='didit_webhook'),
-    # Banned-account emergency exit: wallet-signed, no JWT (security/emergency_exit.py).
-    path('api/emergency-exit/challenge/', emergency_exit_challenge, name='emergency_exit_challenge'),
-    path('api/emergency-exit/session/', emergency_exit_session, name='emergency_exit_session'),
-    path('api/emergency-exit/face/start/', emergency_exit_face_start, name='emergency_exit_face_start'),
-    path('api/emergency-exit/face/complete/', emergency_exit_face_complete, name='emergency_exit_face_complete'),
     path('api/koywe/webhook/', koywe_webhook, name='koywe_webhook'),
     path('api/stereum/test/webhook/', stereum_test_webhook, name='stereum_test_webhook'),
     path('api/payment-accounts/cobre/webhook/', cobre_webhook, name='cobre_payment_webhook'),

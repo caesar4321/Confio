@@ -1,220 +1,6 @@
-// Pure-logic coverage for the emergency exit: the reachability timing
-// policy and the Algorand exit planner. Execution paths (RPC, signing)
-// are covered by the disaster drill, not unit tests.
-
-import {
-  classifyReachability,
-  OUTAGE_IMMEDIATE_SECONDS,
-} from '../emergencyExit/reachability';
-import {
-  planAlgorandExit, AlgoAccountState, CUSD_APP_ID, CUSD_ASSET_ID, USDC_ASSET_ID,
-} from '../emergencyExit/algorandExit';
-
-const T0 = 1_800_000_000;
-
-describe('classifyReachability', () => {
-  it('normal state resets the outage window', () => {
-    const r = classifyReachability({
-      confioOk: true, chainOk: true, prevOutageStartSec: T0, chainNowSec: T0 + 999,
-    });
-    expect(r.state).toBe('normal');
-    expect(r.outageStartSec).toBeNull();
-    expect(r.immediate).toBe(false);
-  });
-
-  it('fresh outage starts the window at chain-now, not immediate', () => {
-    const r = classifyReachability({
-      confioOk: false, chainOk: true, prevOutageStartSec: null, chainNowSec: T0,
-    });
-    expect(r.state).toBe('outage');
-    expect(r.outageStartSec).toBe(T0);
-    expect(r.immediate).toBe(false);
-  });
-
-  it('outage past the 72h threshold (chain time) unlocks immediate exit', () => {
-    const r = classifyReachability({
-      confioOk: false, chainOk: true,
-      prevOutageStartSec: T0, chainNowSec: T0 + OUTAGE_IMMEDIATE_SECONDS,
-    });
-    expect(r.immediate).toBe(true);
-    expect(r.prominent).toBe(true);
-  });
-
-  it('full offline neither advances nor resets the window', () => {
-    const r = classifyReachability({
-      confioOk: false, chainOk: false, prevOutageStartSec: T0, chainNowSec: null,
-    });
-    expect(r.state).toBe('offline');
-    expect(r.outageStartSec).toBe(T0); // preserved
-    expect(r.immediate).toBe(false);
-  });
-
-  it('explicit ban is immediate regardless of everything else', () => {
-    const r = classifyReachability({
-      confioOk: true, chainOk: true, prevOutageStartSec: null, chainNowSec: T0, banned: true,
-    });
-    expect(r.state).toBe('banned');
-    expect(r.immediate).toBe(true);
-  });
-});
-
-describe('planAlgorandExit', () => {
-  const CUSD = 1001, CONFIO = 1002, USDC = 1003;
-  const account: AlgoAccountState = {
-    address: 'SELF',
-    amountMicro: 1_500_000n,
-    minBalanceMicro: 400_000n,
-    assets: [
-      { id: CUSD, amountMicro: 25_000_000n },
-      { id: CONFIO, amountMicro: 0n },
-      { id: USDC, amountMicro: 3_000_000n },
-    ],
-    appLocalStateIds: [77],
-  };
-
-  it('moves exactly the funded assets, nothing else', () => {
-    const plan = planAlgorandExit(account, [CUSD, USDC]);
-    expect(plan.steps).toEqual([
-      { kind: 'assetTransfer', assetId: CUSD, amountMicro: 25_000_000n },
-      { kind: 'assetTransfer', assetId: USDC, amountMicro: 3_000_000n },
-    ]);
-    expect(plan.destMissingOptIns).toEqual([]);
-  });
-
-  it('funded asset with no destination opt-in is blocked, never burned', () => {
-    const plan = planAlgorandExit(account, [CUSD]);
-    expect(plan.destMissingOptIns).toEqual([USDC]);
-    expect(plan.steps.find((s) => s.assetId === USDC)).toBeUndefined();
-  });
-
-  it('never emits native-ALGO or close-out steps — zero sponsor money moves', () => {
-    // Close-outs (sponsor MBR → dest) and ALGO sweeps are the farming
-    // primitives; they must be unrepresentable in the plan for any input.
-    const plan = planAlgorandExit(account, [CUSD, CONFIO, USDC]);
-    expect(new Set(plan.steps.map((s) => s.kind))).toEqual(new Set(['assetTransfer']));
-  });
-
-  describe('redeem-first cUSD burn', () => {
-    const withCusd = (cusdMicro: bigint, opts: { selfUsdc?: boolean; app?: boolean } = {}): AlgoAccountState => ({
-      address: 'SELF',
-      amountMicro: 1_500_000n,
-      minBalanceMicro: 400_000n,
-      assets: [
-        { id: CUSD_ASSET_ID, amountMicro: cusdMicro },
-        ...(opts.selfUsdc === false ? [] : [{ id: USDC_ASSET_ID, amountMicro: 0n }]),
-      ],
-      appLocalStateIds: opts.app === false ? [] : [CUSD_APP_ID],
-    });
-
-    it('burns when every prerequisite holds, then moves the USDC output', () => {
-      const plan = planAlgorandExit(withCusd(5_000_000n), [CUSD_ASSET_ID, USDC_ASSET_ID]);
-      expect(plan.steps).toEqual([
-        { kind: 'burnCusd', amountMicro: 5_000_000n },
-        // zero pre-balance USDC is still planned: the burn output arrives
-        // before this step's live re-read.
-        { kind: 'assetTransfer', assetId: USDC_ASSET_ID, amountMicro: 0n },
-      ]);
-    });
-
-    it('falls back to raw cUSD transfer when the destination rejects USDC', () => {
-      const plan = planAlgorandExit(withCusd(5_000_000n), [CUSD_ASSET_ID]);
-      expect(plan.steps).toEqual([
-        { kind: 'assetTransfer', assetId: CUSD_ASSET_ID, amountMicro: 5_000_000n },
-      ]);
-    });
-
-    it('falls back below the contract MIN_BURN', () => {
-      const plan = planAlgorandExit(withCusd(900_000n), [CUSD_ASSET_ID, USDC_ASSET_ID]);
-      expect(plan.steps.map((s) => s.kind)).toEqual(['assetTransfer']);
-    });
-
-    it('falls back when self lacks the USDC opt-in or the app opt-in', () => {
-      for (const acct of [withCusd(5_000_000n, { selfUsdc: false }), withCusd(5_000_000n, { app: false })]) {
-        const plan = planAlgorandExit(acct, [CUSD_ASSET_ID, USDC_ASSET_ID]);
-        expect(plan.steps.find((s) => s.kind === 'burnCusd')).toBeUndefined();
-      }
-    });
-
-    it('names WHY cUSD ships raw — the recipient will ask', () => {
-      // The 2026-07-22 drill: 0.008 cUSD dust went out raw with no explanation.
-      expect(planAlgorandExit(withCusd(8_172n), [CUSD_ASSET_ID, USDC_ASSET_ID]).cusdFallbackReason)
-        .toBe('below_min_burn');
-      expect(planAlgorandExit(withCusd(5_000_000n), [CUSD_ASSET_ID]).cusdFallbackReason)
-        .toBe('dest_missing_usdc');
-      expect(planAlgorandExit(withCusd(5_000_000n, { selfUsdc: false }), [CUSD_ASSET_ID, USDC_ASSET_ID]).cusdFallbackReason)
-        .toBe('self_missing_usdc');
-      expect(planAlgorandExit(withCusd(5_000_000n, { app: false }), [CUSD_ASSET_ID, USDC_ASSET_ID]).cusdFallbackReason)
-        .toBe('not_opted_into_app');
-      // The happy burn path carries no reason at all.
-      expect(planAlgorandExit(withCusd(5_000_000n), [CUSD_ASSET_ID, USDC_ASSET_ID]).cusdFallbackReason)
-        .toBeUndefined();
-    });
-  });
-});
-
-// The 72h wait is per-episode anti-coercion. It used to be a one-time
-// toll: `elapsed >= 24h` only ever becomes MORE true, and nothing spent
-// the unlock — so one served wait left an account permanently drainable
-// in a single session.
-describe('cooloff lifecycle', () => {
-  const {
-    getExitEligibility, consumeExitCooloff, requestExitCooloff,
-    NORMAL_COOLOFF_SECONDS, COOLOFF_VALID_SECONDS,
-  } = require('../emergencyExit/reachability');
-  const KEY = 'personal_0';
-  const STORE_KEY = `confio_emergency_cooloff_v1_${KEY}`;
-  const NOW = 1_900_000_000;
-
-  const store = (seed?: Record<string, string>) => {
-    const m = new Map<string, string>(Object.entries(seed ?? {}));
-    return {
-      map: m,
-      get: async (k: string) => m.get(k) ?? null,
-      set: async (k: string, v: string) => { m.set(k, v); },
-      del: async (k: string) => { m.delete(k); },
-    };
-  };
-  const normal = { state: 'normal', immediate: false, chainNowSec: NOW } as any;
-  const at = (secondsAgo: number) => store({ [STORE_KEY]: String(NOW - secondsAgo) });
-
-  it('is pending before 72h and eligible after', async () => {
-    expect((await getExitEligibility(store(), KEY, normal)).reason).toBe('no_request');
-    expect((await getExitEligibility(at(3600), KEY, normal)).reason).toBe('cooloff_pending');
-    expect((await getExitEligibility(at(NORMAL_COOLOFF_SECONDS), KEY, normal)).eligible).toBe(true);
-  });
-
-  it('an unused unlock expires, and the stale key is dropped', async () => {
-    const s = at(NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS + 1);
-    const elig = await getExitEligibility(s, KEY, normal);
-    expect(elig).toMatchObject({ eligible: false, reason: 'cooloff_expired' });
-    // Dropped, so the screen offers a fresh wait instead of a dead button.
-    expect(s.map.has(STORE_KEY)).toBe(false);
-  });
-
-  it('stays usable through the whole validity window', async () => {
-    const s = at(NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS - 60);
-    expect((await getExitEligibility(s, KEY, normal)).eligible).toBe(true);
-  });
-
-  it('consuming the unlock re-arms the wait', async () => {
-    const s = at(NORMAL_COOLOFF_SECONDS);
-    expect((await getExitEligibility(s, KEY, normal)).eligible).toBe(true);
-    await consumeExitCooloff(s, KEY);
-    expect((await getExitEligibility(s, KEY, normal)).reason).toBe('no_request');
-  });
-
-  it('immediate states never consult the cooloff at all', async () => {
-    const banned = { state: 'banned', immediate: true, chainNowSec: NOW } as any;
-    expect(await getExitEligibility(store(), KEY, banned))
-      .toEqual({ eligible: true, reason: 'immediate' });
-  });
-
-  it('re-requesting does not restart a running wait', async () => {
-    const s = at(3600);
-    const { requestedAtSec } = await requestExitCooloff(s, KEY);
-    expect(requestedAtSec).toBe(NOW - 3600);
-  });
-});
+// Coverage for the BSC emergency exit engine and its local plumbing:
+// receipt accounting, checkpoints, ban signal, account roster. The heartbeat
+// gate (gatedTx.ts / heartbeat.ts) has its own suite.
 
 describe('usdtCreditedTo', () => {
   const { usdtCreditedTo } = require('../emergencyExit/bscExit');
@@ -298,6 +84,29 @@ describe('bsc exit checkpoint', () => {
       isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
       setBscTransport: () => {},
     }));
+    jest.doMock('../emergencyExit/gatedTx', () => ({
+      sendGatedCall: (p: any) => (sendCall as any)(p),
+      GATE_GAS_OVERHEAD: 60_000n,
+      AUTH_GAS_OVERHEAD: 30_000n,
+    }));
+    jest.doMock('../emergencyExit/heartbeat', () => ({
+      BUNDLED_HEARTBEAT: { address: '', owner: '' },
+      assertExitOpen: async () => ({ state: 'open' }),
+      isConfioAlive: (e: any) => e?.name === 'ConfioAliveError',
+    }));
+    // Exit sends go through the heartbeat gate (gatedTx.ts); here the gate is
+    // open and each gated send is the stubbed sendCall, so these tests keep
+    // pinning the engine's legs. Gate behavior has its own suite.
+    jest.doMock('../emergencyExit/gatedTx', () => ({
+      sendGatedCall: (p: any) => (sendCall as any)(p),
+      GATE_GAS_OVERHEAD: 60_000n,
+      AUTH_GAS_OVERHEAD: 30_000n,
+    }));
+    jest.doMock('../emergencyExit/heartbeat', () => ({
+      BUNDLED_HEARTBEAT: { address: '', owner: '' },
+      assertExitOpen: async () => ({ state: 'open' }),
+      isConfioAlive: (e: any) => e?.name === 'ConfioAliveError',
+    }));
     return require('../emergencyExit/bscExit');
   };
 
@@ -333,7 +142,7 @@ describe('bsc exit checkpoint', () => {
     });
 
     expect(res.sentNow).toEqual(['redeemCusdPlus', 'redeemCusd', 'transferUsdt']);
-    expect(send.mock.calls.map(([call]) => call.to.toLowerCase())).toEqual([
+    expect((send.mock.calls as any[]).map(([call]) => call.to.toLowerCase())).toEqual([
       VAULT.toLowerCase(),
       CUSD.toLowerCase(),
       '0x55d398326f99059ff775485246999027b3197955',
@@ -423,11 +232,21 @@ describe('bsc exit checkpoint', () => {
       isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
       setBscTransport: () => {},
     }));
+    jest.doMock('../emergencyExit/gatedTx', () => ({
+      sendGatedCall: (p: any) => (send as any)(p),
+      GATE_GAS_OVERHEAD: 60_000n,
+      AUTH_GAS_OVERHEAD: 30_000n,
+    }));
+    jest.doMock('../emergencyExit/heartbeat', () => ({
+      BUNDLED_HEARTBEAT: { address: '', owner: '' },
+      assertExitOpen: async () => ({ state: 'open' }),
+      isConfioAlive: (e: any) => e?.name === 'ConfioAliveError',
+    }));
     const mod = require('../emergencyExit/bscExit');
     const res = await run(mod, memStore());
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][0]).toMatchObject({ to: mod.BUNDLED_CONFIO_ADDRESS });
+    expect((send.mock.calls as any[])[0][0]).toMatchObject({ to: mod.BUNDLED_CONFIO_ADDRESS });
     expect(res.sentNow).toEqual(['transferConfio']);
   });
 
@@ -449,6 +268,16 @@ describe('bsc exit checkpoint', () => {
       encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
       isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
       setBscTransport: () => {},
+    }));
+    jest.doMock('../emergencyExit/gatedTx', () => ({
+      sendGatedCall: (p: any) => (send as any)(p),
+      GATE_GAS_OVERHEAD: 60_000n,
+      AUTH_GAS_OVERHEAD: 30_000n,
+    }));
+    jest.doMock('../emergencyExit/heartbeat', () => ({
+      BUNDLED_HEARTBEAT: { address: '', owner: '' },
+      assertExitOpen: async () => ({ state: 'open' }),
+      isConfioAlive: (e: any) => e?.name === 'ConfioAliveError',
     }));
     const mod = require('../emergencyExit/bscExit');
 
@@ -483,6 +312,16 @@ describe('bsc exit checkpoint', () => {
       encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
       isOutcomeUnknown: () => false,
       setBscTransport: () => {},
+    }));
+    jest.doMock('../emergencyExit/gatedTx', () => ({
+      sendGatedCall: (p: any) => (send as any)(p),
+      GATE_GAS_OVERHEAD: 60_000n,
+      AUTH_GAS_OVERHEAD: 30_000n,
+    }));
+    jest.doMock('../emergencyExit/heartbeat', () => ({
+      BUNDLED_HEARTBEAT: { address: '', owner: '' },
+      assertExitOpen: async () => ({ state: 'open' }),
+      isConfioAlive: (e: any) => e?.name === 'ConfioAliveError',
     }));
     const mod = require('../emergencyExit/bscExit');
     const store = memStore();
@@ -533,6 +372,16 @@ describe('bsc exit checkpoint', () => {
       encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
       isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
       setBscTransport: () => {},
+    }));
+    jest.doMock('../emergencyExit/gatedTx', () => ({
+      sendGatedCall: (p: any) => (send as any)(p),
+      GATE_GAS_OVERHEAD: 60_000n,
+      AUTH_GAS_OVERHEAD: 30_000n,
+    }));
+    jest.doMock('../emergencyExit/heartbeat', () => ({
+      BUNDLED_HEARTBEAT: { address: '', owner: '' },
+      assertExitOpen: async () => ({ state: 'open' }),
+      isConfioAlive: (e: any) => e?.name === 'ConfioAliveError',
     }));
     const mod = require('../emergencyExit/bscExit');
     const res = await run(mod, memStore());

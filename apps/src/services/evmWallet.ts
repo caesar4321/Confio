@@ -414,6 +414,9 @@ export const bscWaitForReceipt = async (
 export const bscGetCode = async (address: string): Promise<string> =>
   rpcCall('eth_getCode', [address, 'latest']);
 
+export const bscGetStorageAt = async (address: string, slot: string): Promise<string> =>
+  rpcCall('eth_getStorageAt', [address, slot, 'latest']);
+
 // ── EIP-7702 authorization signing ──────────────────────────────────────
 // The one-time tuple designating ConfioBatchDelegate at the user's own EOA:
 // sign keccak(0x05 ‖ rlp([chainId, delegate, accountNonce])). The sponsor
@@ -584,6 +587,119 @@ export function deriveIntentId(calls: BatchCall[], requestId?: string): string {
               ? 'mint_cusd'
         : 'subscribe';
   return '0x' + bytesToHex(keccak_256(utf8ToBytes(`${kind}:${requestId || ''}`)));
+}
+
+const EXECUTE_SIGNATURE = 'execute((address,uint256,bytes)[],uint256,uint256,bytes32,bytes)';
+
+/** ConfioBatchDelegate's ERC-7201 nonce slot (see the contract's STORAGE_SLOT). */
+export const BATCH_DELEGATE_NONCE_SLOT =
+  '0x90a10e3e6e0ef9c0307c0baf881893473293514cc333083b3696b5a0aa5eb100';
+
+const word32 = (v: bigint | number): string => BigInt(v).toString(16).padStart(64, '0');
+const padRight32 = (hexNoPrefix: string): string =>
+  hexNoPrefix.padEnd(Math.ceil(hexNoPrefix.length / 64) * 64, '0');
+const encodeDynBytes = (hexNoPrefix: string): string =>
+  word32(hexNoPrefix.length / 2) + padRight32(hexNoPrefix);
+
+/**
+ * ABI-encode ConfioBatchDelegate.execute(calls, nonce, deadline, intentId,
+ * signature). Byte-identical to cusd_plus/sponsor_7702.execute_calldata
+ * (eth_abi); the parity vector lives in __tests__/evmWallet.setCode.test.ts.
+ */
+export function encodeExecuteCalldata(
+  calls: BatchCall[],
+  nonce: bigint,
+  deadline: bigint,
+  intentId: string,
+  signature: string,
+): string {
+  const tuples = calls.map((c) => {
+    const data = c.data.replace(/^0x/, '');
+    if (data.length % 2) throw new Error('odd-length call data');
+    return encodeAddress(c.to) + word32(c.valueWei) + word32(96) + encodeDynBytes(data);
+  });
+  let cursor = calls.length * 32;
+  const offsets = tuples.map((t) => {
+    const o = word32(cursor);
+    cursor += t.length / 2;
+    return o;
+  }).join('');
+  const callsEnc = word32(calls.length) + offsets + tuples.join('');
+  const sig = signature.replace(/^0x/, '');
+  const head = 5 * 32;
+  return (
+    selector(EXECUTE_SIGNATURE) +
+    word32(head) +
+    word32(nonce) +
+    word32(deadline) +
+    intentId.replace(/^0x/, '').padStart(64, '0') +
+    word32(head + callsEnc.length / 2) +
+    callsEnc +
+    encodeDynBytes(sig)
+  );
+}
+
+// ── EIP-7702 (type-4) transaction signing ───────────────────────────────
+// Used only where the USER pays gas for a call to their own address that must
+// also install the delegate (Emergency Exit on a never-delegated EOA).
+// Sponsored flows keep building type-4 on the server. Validated against
+// eth_account (the server's signer) in __tests__/evmWallet.setCode.test.ts.
+
+export interface SetCodeTxParams {
+  nonce: bigint;
+  maxPriorityFeePerGas: bigint;
+  maxFeePerGas: bigint;
+  gasLimit: bigint;
+  to: string;
+  valueWei: bigint;
+  data: string;
+  authorizationList: SetCodeAuthorization[];
+  chainId?: bigint;
+}
+
+export function signSetCodeTransaction(tx: SetCodeTxParams, privKeyHex: string): SignedTx {
+  const chainId = tx.chainId ?? BSC_NETWORK.chainId;
+  if (!tx.authorizationList.length) throw new Error('type-4 needs an authorization');
+  const auths: RlpInput[] = tx.authorizationList.map((a) => [
+    bigintToMinimalBytes(BigInt(a.chainId)),
+    hexToBytes0x(a.address),
+    bigintToMinimalBytes(BigInt(a.nonce)),
+    bigintToMinimalBytes(BigInt(a.yParity)),
+    bigintToMinimalBytes(BigInt(a.r)),
+    bigintToMinimalBytes(BigInt(a.s)),
+  ]);
+  const fields: RlpInput[] = [
+    bigintToMinimalBytes(chainId),
+    bigintToMinimalBytes(tx.nonce),
+    bigintToMinimalBytes(tx.maxPriorityFeePerGas),
+    bigintToMinimalBytes(tx.maxFeePerGas),
+    bigintToMinimalBytes(tx.gasLimit),
+    hexToBytes0x(tx.to),
+    bigintToMinimalBytes(tx.valueWei),
+    tx.data ? hexToBytes0x(tx.data) : new Uint8Array(0),
+    [], // accessList
+    auths,
+  ];
+  const msgHash = keccak_256(concatBytes(Uint8Array.from([0x04]), rlpEncode(fields)));
+  const sigBytes = secp256k1.sign(msgHash, hexToBytes(privKeyHex), {
+    prehash: false,
+    lowS: true,
+    format: 'recovered',
+  });
+  const sig = secp256k1.Signature.fromBytes(sigBytes, 'recovered');
+  const signed = concatBytes(
+    Uint8Array.from([0x04]),
+    rlpEncode([
+      ...fields,
+      bigintToMinimalBytes(BigInt(sig.recovery ?? 0)),
+      bigintToMinimalBytes(sig.r),
+      bigintToMinimalBytes(sig.s),
+    ]),
+  );
+  return {
+    rawTx: '0x' + bytesToHex(signed),
+    txHash: '0x' + bytesToHex(keccak_256(signed)),
+  };
 }
 
 /** 65-byte r‖s‖v signature (v = 27/28, what OZ ECDSA.recover expects). */

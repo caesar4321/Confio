@@ -16,7 +16,7 @@ import { NativeModules } from 'react-native';
 
 // Money movements only. Opening the app uses the phone's own biometric
 // ('app_unlock' remains a server purpose for older builds and history).
-export type FaceCheckPurpose = 'on_ramp' | 'withdrawal' | 'emergency_exit' | 'payin_release' | 'payroll_authority';
+export type FaceCheckPurpose = 'on_ramp' | 'withdrawal' | 'payin_release' | 'payroll_authority';
 export type FaceCaptureOutcome = 'passed' | 'failed' | 'cancelled' | 'unavailable';
 
 // Mirrors security/face_step_up.py. The server sends this exact text when a
@@ -145,9 +145,7 @@ export interface FaceCheckGrade {
 }
 
 /**
- * Where a face check is opened and graded. GraphQL for signed-in users; the
- * banned-account emergency exit has its own wallet-signed endpoints
- * (emergencyExit/emergencyFace.ts), since a banned user cannot use GraphQL.
+ * Where a face check is opened and graded (GraphQL for signed-in users).
  */
 export interface FaceCheckBackend {
   start(purpose: FaceCheckPurpose): Promise<FaceCheckStart | undefined>;
