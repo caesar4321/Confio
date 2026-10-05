@@ -36,6 +36,7 @@ class StockMonthTests(SimpleTestCase):
         cache.clear()
         self.trades = []
         self.chain = {}
+        self.pending = False
         self.market = market(NVDA=110, AAPL=200)
         self.candles = {
             'NVDAon': [candle(datetime(2026, 9, 30, tzinfo=UTC), '100'),
@@ -45,7 +46,8 @@ class StockMonthTests(SimpleTestCase):
         }
         patches = [
             mock.patch.object(sm, 'confirmed_trades', side_effect=lambda _a: self.trades),
-            mock.patch('cusd_plus.gm_holdings.holdings_units', side_effect=lambda _a: self.chain),
+            mock.patch.object(sm, 'pending_trade_exists', side_effect=lambda _a: self.pending),
+            mock.patch('cusd_plus.gm_holdings.holdings_units', side_effect=self.scan),
             mock.patch('cusd_plus.gm_api.all_market', side_effect=lambda: self.market),
             mock.patch('cusd_plus.gm_api.ohlc', side_effect=lambda s, _r: self.candles.get(s, [])),
             mock.patch('cusd_plus.schema._display_name', side_effect=lambda n: n.replace(' Inc.', '')),
@@ -53,6 +55,10 @@ class StockMonthTests(SimpleTestCase):
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
+
+    def scan(self, _address, *, allow_stale=True):
+        self.assertFalse(allow_stale)                         # "today" never from a days-old snapshot
+        return self.chain
 
     def run_month(self, start=OCT_START, end=NOV_START, now=NOW):
         return sm.stock_month(ADDR, start, end, now)
@@ -116,6 +122,21 @@ class StockMonthTests(SimpleTestCase):
         self.chain = {'NVDAon': 1.0}
         self.assertEqual(self.run_month().state, 'value_only')
 
+    def test_trade_settling_is_unknown_not_value_only(self):
+        # The receipt landed (chain has the units) but finality hasn't confirmed the batch.
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
+        self.chain = {'NVDAon': 2.0}
+        self.pending = True
+        self.assertIsNone(self.run_month())
+
+    def test_candle_fetch_failure_is_a_missing_price(self):
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
+        self.chain = {'NVDAon': 3.0}                          # value_only: the mover is optional
+        with mock.patch('cusd_plus.gm_api.ohlc', side_effect=RuntimeError('ondo down')):
+            r = self.run_month()
+        self.assertEqual(r.state, 'value_only')
+        self.assertIsNone(r.top)
+
     def test_no_stocks_is_none_state_and_unknown_scan_is_none(self):
         self.assertEqual(self.run_month().state, 'none')
         self.chain = None
@@ -172,3 +193,18 @@ class StockMonthResolverTests(SimpleTestCase):
         self.assertIsNone(self.resolve(sm.StockMonth(state='none'), can_buy=False))
         self.assertIsNone(self.resolve(None))
         self.assertIsNone(self.resolve(sm.StockMonth(state='gain'), surfaces=False))
+
+
+class FreshHoldingsTests(SimpleTestCase):
+    def tearDown(self):
+        cache.clear()
+
+    def test_failed_scan_uses_last_known_only_when_stale_is_allowed(self):
+        from cusd_plus import gm_holdings
+        holder = '0x' + '88' * 20
+        cache.set(f'gm_hold_last:{holder}', {'TSLAon': 1.0}, 60)
+        with mock.patch.object(gm_holdings, 'registry', return_value={'TSLAon': {'address': '0x' + '11' * 20}}), \
+             mock.patch.object(gm_holdings, '_scan', side_effect=TimeoutError('node down')), \
+             self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
+            self.assertEqual(gm_holdings.holdings_units(holder), {'TSLAon': 1.0})
+            self.assertIsNone(gm_holdings.holdings_units(holder, allow_stale=False))

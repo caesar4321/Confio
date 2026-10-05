@@ -206,11 +206,13 @@ def _scan(
     return held
 
 
-def holdings_units(user_bsc_address: str) -> dict | None:
+def holdings_units(user_bsc_address: str, *, allow_stale: bool = True) -> dict | None:
     """{symbol: units} for everything the address holds; {} when it holds
     nothing (or the registry is empty). None means UNKNOWN — the scan
     failed and no last-known value exists; callers must not render that
-    as an empty portfolio."""
+    as an empty portfolio. allow_stale=False: a failed scan is UNKNOWN even
+    when a last-known (up to 7 days old) exists — for numbers stated as
+    "today" (Tu mes)."""
     if not user_bsc_address:
         return {}
     key = user_bsc_address.lower()
@@ -219,14 +221,14 @@ def holdings_units(user_bsc_address: str) -> dict | None:
         return cached
     token_registry = registry()
     if token_registry is None:
-        return cache.get(f'gm_hold_last:{user_bsc_address.lower()}')
+        return cache.get(f'gm_hold_last:{key}') if allow_stale else None
     if not token_registry:
         return {}
     try:
         held = _scan(key, token_registry)
     except Exception:  # noqa: BLE001 — degrade to stale, never to vanished
         logger.warning('GM holdings scan failed for %s', user_bsc_address, exc_info=True)
-        return cache.get(f'gm_hold_last:{key}')
+        return cache.get(f'gm_hold_last:{key}') if allow_stale else None
     cache.set(f'gm_hold:{key}', held, SCAN_TTL)
     cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
     return held

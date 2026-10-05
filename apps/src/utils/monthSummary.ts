@@ -53,6 +53,12 @@ export function formatUsd(amount: string | number, { whole = false }: { whole?: 
   return formatUsdAmount(value, { decimals: digits });
 }
 
+/** "+US$4.20" / "−US$3.10": cents and a true minus sign (no alarm color implied). */
+export function signedUsd(amount: number): string {
+  const text = formatUsdAmount(Math.abs(amount), { decimals: 2 });
+  return amount < 0 ? `−${text}` : `+${text}`;
+}
+
 export const MASK = '••••';
 
 // Same keys and order as the server (users/models_cashflow.py).
