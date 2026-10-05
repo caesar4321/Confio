@@ -1,6 +1,7 @@
 /**
- * "Sin categoría" labels a whole counterparty with one tap; two quick taps
- * must not race (the later-committed write would win over the last choice).
+ * "Sin categoría" labels a whole counterparty with one tap, optimistically:
+ * the group leaves the list at once and the save runs in the background; a
+ * failure brings it back with "No se guardó" (founder 2026-10-05).
  */
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
@@ -46,22 +47,30 @@ describe('MonthMovementsScreen (Sin categoría)', () => {
     expect(tree.root.findAllByProps({ testID: 'uncategorized-group-user:9' }).length).toBeGreaterThan(0);
   });
 
-  it('one save at a time: a second tap while saving is ignored', async () => {
+  it('a pick is instant: the group leaves at once and saves in the background', async () => {
     let resolve!: (v: any) => void;
     mockCategorize.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
     let tree!: renderer.ReactTestRenderer;
     act(() => { tree = renderer.create(<MonthMovementsScreen />); });
     act(() => { chip(tree, 'food').props.onPress(); });
-    expect(chip(tree, 'family').props.disabled).toBe(true);
-    act(() => { chip(tree, 'family').props.onPress(); });
+    // Gone before the server answers.
+    expect(tree.root.findAllByProps({ testID: 'uncategorized-group-user:9' })).toHaveLength(0);
     expect(mockCategorize).toHaveBeenCalledTimes(1);
     expect(mockCategorize).toHaveBeenCalledWith({ variables: { movementId: '1', category: 'food', applyTo: 'counterparty' } });
     await act(async () => resolve({ data: { categorizeMovement: { success: true } } }));
-    expect(mockRefetch).toHaveBeenCalled();
-    // the post-save refetch is a new request, never one sent before the save
-    expect(mockQueryOpts.context).toEqual({ queryDeduplication: false });
-    // the mounted Tu mes summary is refetched by name, even if the user left mid-save
+    // the mounted Tu mes summary + this list are refetched by name, even if the user left
     expect(mockMutationOpts.refetchQueries).toEqual(['MonthSummary', 'MonthMovements']);
-    expect(chip(tree, 'family').props.disabled).toBe(false);
+    expect(mockQueryOpts.context).toEqual({ queryDeduplication: false });
+  });
+
+  it('a failed save brings the group back and says so', async () => {
+    mockCategorize.mockImplementationOnce(() => Promise.resolve({ data: { categorizeMovement: { success: false } } }));
+    let tree!: renderer.ReactTestRenderer;
+    act(() => { tree = renderer.create(<MonthMovementsScreen />); });
+    await act(async () => { chip(tree, 'food').props.onPress(); });
+    expect(tree.root.findAllByProps({ testID: 'uncategorized-group-user:9' }).length).toBeGreaterThan(0);
+    const text = tree.root.findAll(n => (n.type as unknown) === 'Text')
+      .map(n => [].concat(n.props.children).filter((c: unknown) => typeof c !== 'object').join('')).join('|');
+    expect(text).toContain('No se guardó');
   });
 });

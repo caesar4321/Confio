@@ -60,11 +60,20 @@ export function MonthMovementsScreen() {
   const [categorize] = useMutation(CATEGORIZE_MOVEMENT, { refetchQueries: ['MonthSummary', 'MonthMovements'] });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
-  // One save at a time (mutation + refetch): two quick taps must not race
-  // and leave the later-committed, not the last-chosen, category.
-  const [savingKey, setSavingKey] = useState<string | null>(null);
-  const savingRef = useRef(false);
-  const movements = data?.monthMovements ?? [];
+  // Optimistic (founder 2026-10-05: "it should be reactive"): a pick shows at
+  // once and saves in the background; a failure puts things back and says so.
+  //   hidden:    "Sin categoría" groups already labeled (gone from the list)
+  //   overrides: row id -> category shown before the server confirms
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [overrides, setOverrides] = useState<Record<string, CategoryKey | null>>({});
+  // Last pick wins: a slower, older answer for the same key never reverts a
+  // newer choice.
+  const latestPick = useRef(new Map<string, number>());
+  const raw = data?.monthMovements ?? [];
+  const movements = useMemo(
+    () => raw.map((m) => (m.id in overrides ? { ...m, category: overrides[m.id] } : m)),
+    [raw, overrides],
+  );
 
   const groups: Group[] = useMemo(() => {
     if (params.filterBy !== 'uncategorized') return [];
@@ -76,30 +85,46 @@ export function MonthMovementsScreen() {
       g.total += Number(m.amountUsd);
       by.set(key, g);
     }
-    return [...by.values()].sort((a, b) => b.total - a.total);
-  }, [movements, params.filterBy]);
+    return [...by.values()].filter((g) => !hidden.has(g.key)).sort((a, b) => b.total - a.total);
+  }, [movements, params.filterBy, hidden]);
 
-  const save = useCallback(async (movementId: string, category: CategoryKey, applyTo: 'counterparty' | 'movement', failKey: string) => {
-    if (savingRef.current) return;
-    savingRef.current = true;
-    setSavingKey(failKey);
-    setFailedKey(null);
+  const save = useCallback(async (
+    movementId: string, category: CategoryKey, applyTo: 'counterparty' | 'movement', failKey: string,
+    optimistic: { hideGroup?: string; rowIds?: string[] },
+  ) => {
+    const seq = (latestPick.current.get(failKey) ?? 0) + 1;
+    latestPick.current.set(failKey, seq);
+    const before: Record<string, CategoryKey | null> = {};
+    for (const id of optimistic.rowIds ?? []) before[id] = raw.find((m) => m.id === id)?.category ?? null;
+    // Show the result now.
+    setFailedKey((k) => (k === failKey ? null : k));
+    setEditingId(null);
+    if (optimistic.hideGroup) setHidden((h) => new Set(h).add(optimistic.hideGroup!));
+    if (optimistic.rowIds?.length) {
+      setOverrides((o) => ({ ...o, ...Object.fromEntries(optimistic.rowIds!.map((id) => [id, category])) }));
+    }
     try {
       const res = await categorize({ variables: { movementId, category, applyTo } });
       if (!res.data?.categorizeMovement?.success) throw new Error('failed');
-      setEditingId(null);
-      await refetch(); // the lock holds until the list is post-save
+      // refetchQueries brings the server truth; the optimistic view already matches it.
     } catch {
+      if (latestPick.current.get(failKey) !== seq) return;    // a newer pick owns this item now
+      if (optimistic.hideGroup) {
+        setHidden((h) => { const n = new Set(h); n.delete(optimistic.hideGroup!); return n; });
+      }
+      if (optimistic.rowIds?.length) {
+        setOverrides((o) => ({ ...o, ...before }));
+        setEditingId(failKey);                 // reopen so "No se guardó" is seen
+      }
       setFailedKey(failKey);
-    } finally {
-      savingRef.current = false;
-      setSavingKey(null);
     }
-  }, [categorize, refetch]);
+  }, [categorize, raw]);
 
   const editMovement = (m: MonthMovement, category: CategoryKey) => {
+    const allRows = raw.filter((x) => x.counterpartyKey && x.counterpartyKey === m.counterpartyKey
+      && SPENDING_KINDS.has(x.kind)).map((x) => x.id);
     if (!m.counterpartyKey) {
-      save(m.id, category, 'movement', m.id);
+      save(m.id, category, 'movement', m.id, { rowIds: [m.id] });
       return;
     }
     Alert.alert(
@@ -107,8 +132,8 @@ export function MonthMovementsScreen() {
       `¿Solo este pago o todos los pagos a ${m.counterpartyName || 'este destinatario'}? "Todos" también cambia los pagos anteriores.`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Solo este pago', onPress: () => save(m.id, category, 'movement', m.id) },
-        { text: 'Todos', onPress: () => save(m.id, category, 'counterparty', m.id) },
+        { text: 'Solo este pago', onPress: () => save(m.id, category, 'movement', m.id, { rowIds: [m.id] }) },
+        { text: 'Todos', onPress: () => save(m.id, category, 'counterparty', m.id, { rowIds: allRows }) },
       ],
     );
   };
@@ -156,8 +181,8 @@ export function MonthMovementsScreen() {
               {/* A group keyed by a real counterparty labels all of them (rule). */}
               <ChipGrid
                 selected={null}
-                disabled={savingKey !== null}
-                onPick={(c) => save(item.firstId, c, item.key.startsWith('row:') ? 'movement' : 'counterparty', item.key)}
+                onPick={(c) => save(item.firstId, c, item.key.startsWith('row:') ? 'movement' : 'counterparty', item.key,
+                  { hideGroup: item.key })}
               />
               {failedKey === item.key && <Text style={styles.failed}>No se guardó</Text>}
             </View>
@@ -202,7 +227,7 @@ export function MonthMovementsScreen() {
               </TouchableOpacity>
               {editingId === item.id && (
                 <>
-                  <ChipGrid selected={item.category} disabled={savingKey !== null} onPick={(c) => editMovement(item, c)} />
+                  <ChipGrid selected={item.category} onPick={(c) => editMovement(item, c)} />
                   {failedKey === item.id && <Text style={styles.failed}>No se guardó</Text>}
                 </>
               )}
