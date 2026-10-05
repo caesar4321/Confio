@@ -42,6 +42,9 @@ export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpe
   const net = bought - sold;
   const valueText = masked ? MASK : formatUsd(value.valueUsd, { whole: true });
   const valueLabel = isCurrent ? 'Valen hoy' : `Valían al cierre de ${monthName(month)}`;
+  // A first trade on the wire the scan doesn't show yet: its value is not
+  // US$0 but unknown, so no number until it settles (seconds).
+  const valueUnknown = value.state === 'settling' && value.holdings === 0;
 
   const facts: string[] = [`${valueLabel} ${valueText}`];
   if (exact && Math.abs(net) >= 0.01) {
@@ -53,7 +56,9 @@ export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpe
     ? 'Tus acciones. Montos ocultos.'
     : exact
       ? `Tus acciones ${gain >= 0 ? 'ganaron' : 'perdieron'} ${Math.abs(gain).toFixed(2)} dólares en ${monthName(month)}. ${facts.join('. ')}.`
-      : `Tus acciones valen ${Math.round(Number(value.valueUsd))} dólares.`;
+      : valueUnknown
+        ? 'Tus acciones. Tu última operación se está confirmando.'
+        : `Tus acciones valen ${Math.round(Number(value.valueUsd))} dólares.`;
 
   return (
     <CardShell testID="tumes-stocks-card">
@@ -68,19 +73,21 @@ export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpe
             </Text>
             {!masked && pct !== null && (
               <Text style={styles.pct} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>
-                {pct < 0 ? '−' : '+'}{formatPercent(Math.abs(pct), 1)}%
+                {gain < 0 ? '−' : '+'}{formatPercent(Math.abs(pct), 1)}%
               </Text>
             )}
           </View>
-        ) : (
+        ) : !valueUnknown && (
           <Text style={[styles.result, styles.resultDown]} numberOfLines={1}
             maxFontSizeMultiplier={CARD_FONT_MULTIPLIER} testID="tumes-stocks-value">
             {valueText}
           </Text>
         )}
-        <Text style={styles.caption} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>
-          {exact ? `en ${monthName(month)} · ${facts.join(' · ')}` : 'valen hoy'}
-        </Text>
+        {!valueUnknown && (
+          <Text style={styles.caption} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>
+            {exact ? `en ${monthName(month)} · ${facts.join(' · ')}` : 'valen hoy'}
+          </Text>
+        )}
       </TouchableOpacity>
 
       {value.topMover && (

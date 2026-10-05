@@ -78,8 +78,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { formatDecimal } from '../utils/numberLocale';
 import { formatMinorMoney } from '../utils/currencies';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
-const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
-const BALANCE_VISIBILITY_KEY = 'balance_visibility';
+import { BALANCE_VISIBILITY_KEY, PREFERENCES_KEYCHAIN_SERVICE } from '../utils/balanceVisibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
 const INVITE_TS_KEY = 'invite_banner_last_ts';
 

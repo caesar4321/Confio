@@ -52,6 +52,12 @@ jest.mock('../../hooks/useStockMonthNow', () => ({
   useStockMonthNow: () => mockStockMonth,
 }));
 
+let mockHiddenBalance = false;
+jest.mock('react-native-keychain', () => ({
+  getInternetCredentials: jest.fn(() => Promise.resolve(
+    {username: 'balance_visibility', password: mockHiddenBalance ? 'false' : 'true'})),
+}));
+
 let mockIsEmployee = false;
 jest.mock('../../contexts/AccountContext', () => ({
   useAccount: () => ({activeAccount: {isEmployee: mockIsEmployee}}),
@@ -118,9 +124,15 @@ it('links holders to Tu mes, with this month\'s result when it is known', async 
   await act(async () => {tree = renderer.create(<StocksListScreen />);});
   expect(texts(tree)).toContain('Este mes +US$4.20 · Ver tu mes');
   const link = tree.root.findAll(n => n.props.testID === 'stocks-month-link' && typeof n.props.onPress === 'function')[0];
-  link.props.onPress();
+  await act(async () => link.props.onPress());
   const now = new Date();
-  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary', {year: now.getFullYear(), month: now.getMonth() + 1}, {pop: true, merge: true});
+  const thisMonth = {year: now.getFullYear(), month: now.getMonth() + 1};
+  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary', {...thisMonth, masked: false}, {pop: true, merge: true});
+  // Balances hidden on Home stay hidden in Tu mes, whichever door opens it.
+  mockHiddenBalance = true;
+  await act(async () => link.props.onPress());
+  expect(mockNavigate).toHaveBeenLastCalledWith('MonthSummary', {...thisMonth, masked: true}, {pop: true, merge: true});
+  mockHiddenBalance = false;
   await act(async () => tree.unmount());
 
   // Tu mes is owners only: an employee gets no door to a month they can't see.

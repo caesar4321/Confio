@@ -30,8 +30,8 @@ import { useGmMarket, useGmHighlights, GmStock } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
-import { stockMonthGain, useStockMonthNow } from '../hooks/useStockMonthNow';
-import { currentYearMonth, signedUsd } from '../utils/monthSummary';
+import { openTuMesNow, stockMonthGain, useStockMonthNow } from '../hooks/useStockMonthNow';
+import { signedUsd } from '../utils/monthSummary';
 import { useAccount } from '../contexts/AccountContext';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
@@ -348,7 +348,7 @@ export const StocksListScreen = () => {
                   ("Tus acciones"); this is the door to it. */}
               {canOpenMonth && (
               <TouchableOpacity
-                onPress={() => navigation.navigate('MonthSummary', currentYearMonth(), { pop: true, merge: true })}
+                onPress={() => { void openTuMesNow(navigation); }}
                 style={styles.monthLink}
                 accessibilityRole="button"
                 accessibilityLabel={monthGain !== null
