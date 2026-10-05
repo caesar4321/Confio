@@ -154,6 +154,26 @@ class StockMonthTests(SimpleTestCase):
         # A past month ends before the in-flight trade and stays exact.
         self.assertEqual(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START).state, 'gain')
 
+    def test_trade_confirming_between_the_two_reads_is_settling_never_value_only(self):
+        # The batch turns 'confirmed' between the ledger and the in-flight
+        # reads: whichever list is read first still sees it on the wire.
+        old = trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))
+        new = trade('NVDAon', 'stock_buy', '1', '108', NOW - timedelta(minutes=1))
+        reads = []
+
+        def confirmed(_a):
+            reads.append('ledger')
+            return [old] if len(reads) == 1 else [old, new]
+
+        def pending(_a):
+            reads.append('pending')
+            return [new] if len(reads) == 1 else []
+
+        self.chain = {'NVDAon': 2.0}
+        with mock.patch.object(sm, 'confirmed_trades', side_effect=confirmed), \
+             mock.patch.object(sm, 'pending_trades', side_effect=pending):
+            self.assertEqual(self.run_month().state, 'settling')
+
     def test_past_month_boundaries_of_a_symbol_share_one_task(self):
         # Start and end candles of one symbol are read one after the other in
         # the same task, so the second read hits gm_api's cache instead of a
@@ -306,7 +326,7 @@ class FreshHoldingsTests(SimpleTestCase):
              mock.patch.object(gm_holdings, '_scan', side_effect=RuntimeError('GM balanceOf failed')) as scan, \
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
             self.assertIsNone(gm_holdings.holdings_units(holder, require_complete=True))
-        self.assertTrue(scan.call_args.kwargs['require_complete'])
+        self.assertIn('failures', scan.call_args.kwargs)
         with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 2.0}):
             self.assertEqual(gm_holdings.holdings_units(holder, require_complete=True), {'TSLAon': 2.0})
@@ -409,16 +429,65 @@ class LiveRegistryTests(SimpleTestCase):
         live = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
         snapshot = {**live, 'OLDon': {'address': '0x' + '22' * 20, 'decimals': 18}}
         calls = []
+        failing = set()
 
-        def scan(_key, tokens, *, require_complete=False, **_kw):
-            calls.append((sorted(tokens), require_complete))
-            return {'TSLAon': 1.0} if 'TSLAon' in tokens else {'OLDon': 3.0}
+        def scan(_key, tokens, *, failures=None, **_kw):
+            calls.append(sorted(tokens))
+            failures.update(failing)
+            return {'TSLAon': 1.0, 'OLDon': 3.0}
 
         with mock.patch.object(gm_holdings, 'registry_entry', return_value=(live, True)), \
              mock.patch.object(gm_holdings, '_fallback_registry', return_value=snapshot), \
              mock.patch.object(gm_holdings, '_scan', side_effect=scan):
             self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0, 'OLDon': 3.0})
-        self.assertEqual(calls, [(['TSLAon'], True), (['OLDon'], False)])
+            self.assertEqual(calls, [['OLDon', 'TSLAon']])                       # one Multicall pass
+            gm_holdings.invalidate_holdings(ADDR)
+            failing.add('OLDon')                                                   # a retired contract: tolerated
+            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0, 'OLDon': 3.0})
+            gm_holdings.invalidate_holdings(ADDR)
+            failing.add('TSLAon')                                                  # a live one: unknown
+            with self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
+                self.assertIsNone(gm_holdings.holdings_units(ADDR, require_complete=True))
+
+    def test_a_trade_confirming_mid_scan_is_never_cached_or_used(self):
+        from cusd_plus import gm_holdings
+        live = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        answers = [{'TSLAon': 1.0}, {'TSLAon': 2.0}]                              # pre-trade, then post-trade
+
+        def scan(_key, _tokens, **_kw):
+            held = answers.pop(0)
+            if held == {'TSLAon': 1.0}:
+                gm_holdings.invalidate_holdings(ADDR)                              # the confirm task, mid-scan
+            return held
+
+        with mock.patch.object(gm_holdings, 'registry_entry', return_value=(live, True)), \
+             mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
+             mock.patch.object(gm_holdings, '_scan', side_effect=scan):
+            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
+        self.assertEqual(cache.get(f'gm_hold_full:{ADDR.lower()}'), {'TSLAon': 2.0})
+
+    def test_a_list_scan_racing_a_trade_is_returned_but_not_cached(self):
+        from cusd_plus import gm_holdings
+
+        def scan(_key, _tokens, **_kw):
+            gm_holdings.invalidate_holdings(ADDR)
+            return {'TSLAon': 1.0}
+
+        with mock.patch.object(gm_holdings, 'registry', return_value={'TSLAon': {'address': '0x' + '11' * 20}}), \
+             mock.patch.object(gm_holdings, '_scan', side_effect=scan):
+            self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})
+        self.assertIsNone(cache.get(f'gm_hold:{ADDR.lower()}'))
+
+    def test_scan_reports_tokens_that_did_not_answer(self):
+        from cusd_plus import gm_holdings
+        reg = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18},
+               'AAPLon': {'address': '0x' + '22' * 20, 'decimals': 18}}
+        one = (10 ** 18).to_bytes(32, 'big')
+        failures = set()
+        with mock.patch('cusd_plus.gm_holdings.vault._rpc', return_value='0x00'), \
+             mock.patch('cusd_plus.gm_holdings.decode', return_value=([(True, one), (False, b'')],)):
+            self.assertEqual(gm_holdings._scan(ADDR, reg, failures=failures), {'TSLAon': 1.0})
+        self.assertEqual(failures, {'AAPLon'})
 
 
 class PendingWindowTests(SimpleTestCase):

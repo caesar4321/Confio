@@ -150,3 +150,20 @@ it('a shown gain card that gets a settling answer keeps its value and flags the 
   expect(latest.stocks.valueUsd).toBe('220.00');
   expect(latest.stocksSettling).toBe(false);
 });
+
+it('a settling poll never stacks a second stocks ask on one still in flight', async () => {
+  const settling = { state: 'settling', valueUsd: '220.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  const slow = deferred<any>();
+  mockQuery.mockReset();
+  mockQuery.mockImplementation(() => slow.promise);
+  await act(async () => { latest.refreshStocks(); latest.refreshStocks(); });
+  expect(mockQuery).toHaveBeenCalledTimes(1);
+  await act(async () => { slow.resolve({ data: { stockMonth: { state: 'gain', valueUsd: '220.00' } } }); });
+  expect(latest.stocks.state).toBe('gain');
+  mockQuery.mockResolvedValue({ data: { stockMonth: { state: 'gain', valueUsd: '221.00' } } });
+  await act(async () => { latest.refreshStocks(); });
+  expect(mockQuery).toHaveBeenCalledTimes(2);           // free again once answered
+});

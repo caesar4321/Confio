@@ -105,6 +105,7 @@ export function useMonthInsights(params: {
   // The latest stocks answer's state, even when the shown card kept its own
   // (gain/value_only never swap to 'settling'): the screen polls on it.
   const lastStocks = useRef<StockMonth['state'] | null>(null);
+  const stocksInFlight = useRef(false);
   useEffect(() => () => { generation.current += 1; }, []);
 
   const fetchStocks = useCallback(() => client.query<{ stockMonth: StockMonth | null }>(
@@ -181,11 +182,14 @@ export function useMonthInsights(params: {
     });
   }, [fetchAll]);
 
-  /** Stocks only (a settling trade): the other cards are not re-asked. */
+  /** Stocks only (a settling trade): the other cards are not re-asked. One
+   *  ask at a time: a slow answer (cold scan) is not stacked with the next
+   *  poll's, and an older answer can't land after a newer one. */
   const refreshStocks = useCallback(() => {
     const gen = generation.current;
-    if (!shown.current) return;
-    fetchStocks().then((k) => {
+    if (!shown.current || stocksInFlight.current) return;
+    stocksInFlight.current = true;
+    fetchStocks().finally(() => { stocksInFlight.current = false; }).then((k) => {
       if (generation.current !== gen || !shown.current) return;
       if (k) lastStocks.current = k.state;
       const merged = mergeValues(shown.current, { ...shown.current, stocks: k });

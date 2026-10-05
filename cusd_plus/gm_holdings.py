@@ -188,9 +188,12 @@ def _scan(
     *,
     block_tag: str = 'latest',
     require_complete: bool = False,
+    failures: set | None = None,
 ) -> dict:
     """One Multicall3 pass over the whole registry; returns nonzero
-    balances as {symbol: units_float}. Raises on RPC failure."""
+    balances as {symbol: units_float}. Raises on RPC failure. `failures`,
+    when given, collects the symbols whose balanceOf didn't answer (the
+    default mode skips them), so a caller can decide which ones matter."""
     entries = list(token_registry.items())
     holder_arg = encode(['address'], [user_bsc_address])
     held = {}
@@ -206,10 +209,14 @@ def _scan(
         results = decode(['(bool,bytes)[]'], bytes.fromhex(res[2:]))[0]
         if require_complete and len(results) != len(chunk):
             raise RuntimeError('GM Multicall returned an incomplete result set')
+        if failures is not None:
+            failures.update(symbol for symbol, _ in chunk[len(results):])
         for (ok, ret), (symbol, item) in zip(results, chunk):
             if not ok or len(ret) < 32:
                 if require_complete:
                     raise RuntimeError(f'GM balanceOf failed for {symbol}')
+                if failures is not None:
+                    failures.add(symbol)
                 continue
             raw = int.from_bytes(ret[:32], 'big')
             if raw:
@@ -218,9 +225,17 @@ def _scan(
 
 
 def invalidate_holdings(user_bsc_address: str) -> None:
-    """Drop the fresh scans (both modes) after a trade; last-known stays."""
+    """Drop the fresh scans (both modes) after a trade; last-known stays.
+    Also moves the holdings generation: a scan already running read the
+    pre-trade chain, and must neither be cached nor (complete mode) used."""
+    from uuid import uuid4
     key = (user_bsc_address or '').lower()
+    cache.set(f'gm_hold_gen:{key}', uuid4().hex, SCAN_LAST_TTL)
     cache.delete_many([f'gm_hold:{key}', f'gm_hold_full:{key}'])
+
+
+def _generation(key: str):
+    return cache.get(f'gm_hold_gen:{key}')
 
 
 def holdings_units(user_bsc_address: str, *, require_complete: bool = False) -> dict | None:
@@ -248,13 +263,15 @@ def holdings_units(user_bsc_address: str, *, require_complete: bool = False) -> 
         return cache.get(f'gm_hold_last:{key}')
     if not token_registry:
         return {}
+    generation = _generation(key)
     try:
         held = _scan(key, token_registry)
     except Exception:  # noqa: BLE001 — degrade to stale, never to vanished
         logger.warning('GM holdings scan failed for %s', user_bsc_address, exc_info=True)
         return cache.get(f'gm_hold_last:{key}')
-    cache.set(f'gm_hold:{key}', held, SCAN_TTL)
-    cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
+    if _generation(key) == generation:     # else a trade landed mid-scan: don't cache it
+        cache.set(f'gm_hold:{key}', held, SCAN_TTL)
+        cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
     return held
 
 
@@ -274,14 +291,23 @@ def _complete_holdings(key: str) -> dict | None:
                 if s not in token_registry and str(m.get('address') or '').lower() not in live_addresses}
     if not token_registry and not delisted:
         return {}
-    try:
-        held = _scan(key, token_registry, require_complete=True) if token_registry else {}
-        if delisted:
-            held.update(_scan(key, delisted))
-    except Exception:  # noqa: BLE001 — incomplete is unknown, never a smaller portfolio
-        logger.warning('GM complete holdings scan failed for %s', key, exc_info=True)
-        return None
-    # A complete scan is also the best answer for every other reader.
-    cache.set_many({f'gm_hold_full:{key}': held, f'gm_hold:{key}': held}, SCAN_TTL)
-    cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
-    return held
+    # One pass over both; only a live token that didn't answer makes it unknown.
+    for _attempt in range(2):
+        generation = _generation(key)
+        failures: set = set()
+        try:
+            held = _scan(key, {**delisted, **token_registry}, failures=failures)
+        except Exception:  # noqa: BLE001 — incomplete is unknown, never a smaller portfolio
+            logger.warning('GM complete holdings scan failed for %s', key, exc_info=True)
+            return None
+        missed = failures & set(token_registry)
+        if missed:
+            logger.warning('GM complete holdings scan for %s missed %s', key, sorted(missed))
+            return None
+        if _generation(key) != generation:
+            continue                           # a trade confirmed mid-scan: read the chain again
+        # A complete scan is also the best answer for every other reader.
+        cache.set_many({f'gm_hold_full:{key}': held, f'gm_hold:{key}': held}, SCAN_TTL)
+        cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
+        return held
+    return None                                # trades keep landing: unknown for now

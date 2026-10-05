@@ -19,6 +19,7 @@ None too — the card hides, never a guessed number.
 """
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -222,6 +223,7 @@ def _close_from_candles(symbol: str, when: datetime) -> Decimal | None:
 
 
 _POOL = None
+_POOL_LOCK = threading.Lock()
 
 
 def _pool():
@@ -231,8 +233,10 @@ def _pool():
     Created lazily, so no thread exists before a pre-fork server forks."""
     global _POOL
     if _POOL is None:
-        from concurrent.futures import ThreadPoolExecutor
-        _POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix='stock-month')
+        with _POOL_LOCK:               # two first requests at once: still one pool
+            if _POOL is None:
+                from concurrent.futures import ThreadPoolExecutor
+                _POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix='stock-month')
     return _POOL
 
 
@@ -278,11 +282,18 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         return StockMonth(state='none')
     current = end > now
     try:
-        # The chain scan and the market are network waits independent of the
-        # ledger (a DB read, kept on this thread's connection): overlap them.
         # Registry first, on this thread: on a cold cache the scan and the
         # ledger decode would otherwise each fetch Ondo's address list.
         registry()
+        # In-flight trades BEFORE the ledger: a batch confirming between the
+        # two reads is then in one list or both, never in neither (read the
+        # other way round, a trade confirming during the scan would be in no
+        # list while the chain shows it: 'value_only' after the user's own
+        # trade). Both lists holding it only reads as 'settling', which asks
+        # again in seconds.
+        in_flight = pending_trades(bsc_address)
+        # The chain scan and the market are network waits independent of the
+        # ledger (a DB read, kept on this thread's connection): overlap them.
         pool = _pool()
         # Fresh (≤30s), complete, or nothing: a total is never partial or stale.
         scan = pool.submit(holdings_units, bsc_address, require_complete=True)
@@ -297,7 +308,6 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         # the chain: the scan can lag the receipt the app already showed (a
         # node a block behind), and a month result from the pre-trade chain
         # would stand as final, with nothing asking again.
-        in_flight = pending_trades(bsc_address)
         pending = current and bool(in_flight)
         # The chain may or may not show an in-flight trade yet: the ledger
         # explains it either way. A past month ends before any in-flight
