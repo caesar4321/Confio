@@ -212,17 +212,15 @@ def invalidate_holdings(user_bsc_address: str) -> None:
     cache.delete_many([f'gm_hold:{key}', f'gm_hold_full:{key}'])
 
 
-def holdings_units(user_bsc_address: str, *, allow_stale: bool = True,
-                   require_complete: bool = False) -> dict | None:
+def holdings_units(user_bsc_address: str, *, require_complete: bool = False) -> dict | None:
     """{symbol: units} for everything the address holds; {} when it holds
     nothing (or the registry is empty). None means UNKNOWN — the scan
     failed and no last-known value exists; callers must not render that
-    as an empty portfolio. allow_stale=False: a failed scan is UNKNOWN even
-    when a last-known (up to 7 days old) exists — for numbers stated as
-    "today" (Tu mes).
+    as an empty portfolio.
 
-    require_complete=True (implies no stale): every token's balanceOf must
-    answer, or the result is UNKNOWN. The default scan skips a failing token
+    require_complete=True (never stale, for numbers stated as "today" like
+    Tu mes): every token's balanceOf must answer, or the result is UNKNOWN.
+    The default scan skips a failing token
     so one bad contract can't hide a portfolio, which is right for a list and
     wrong for a total. Complete scans keep their own 30s entry, because a
     partial scan stored by another screen must never pass as complete."""
@@ -236,14 +234,14 @@ def holdings_units(user_bsc_address: str, *, allow_stale: bool = True,
         return cached
     token_registry = registry()
     if token_registry is None:
-        return cache.get(f'gm_hold_last:{key}') if allow_stale else None
+        return cache.get(f'gm_hold_last:{key}')
     if not token_registry:
         return {}
     try:
         held = _scan(key, token_registry)
     except Exception:  # noqa: BLE001 — degrade to stale, never to vanished
         logger.warning('GM holdings scan failed for %s', user_bsc_address, exc_info=True)
-        return cache.get(f'gm_hold_last:{key}') if allow_stale else None
+        return cache.get(f'gm_hold_last:{key}')
     cache.set(f'gm_hold:{key}', held, SCAN_TTL)
     cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
     return held

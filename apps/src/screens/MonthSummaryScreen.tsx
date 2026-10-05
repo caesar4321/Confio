@@ -187,7 +187,9 @@ export function MonthSummaryScreen() {
           onReceive={() => navigation.navigate('Receive')}
           onSave={() => navigation.navigate('ProtectedSavings')}
           onTopUp={() => navigation.navigate('TopUp')}
-          onOpenStocks={() => navigation.navigate('StocksList')}
+          // Back to a stocks list already in the stack (Tu mes ↔ Acciones
+          // cross-link both ways) instead of stacking copies of each.
+          onOpenStocks={() => navigation.navigate('StocksList', undefined, { pop: true })}
           onOpenStock={(ticker) => navigation.navigate('StockDetail', { ticker })}
         />
       )}

@@ -122,3 +122,11 @@ it('a settling stocks card resolves in place, but never into an invitation', () 
   expect(mergeValues({ ...base, stocks: gain }, { ...base, stocks: settling }).stocks).toBe(gain);
   expect(mergeValues({ ...base, stocks: null }, { ...base, stocks: gain }).stocks).toBeNull();
 });
+
+it('the invitation gives way to the card after a purchase, never the reverse', () => {
+  const base = { insights: null, savings: null, protection: null };
+  const none = { state: 'none', canBuy: true } as any;
+  const gain = { state: 'gain', gainUsd: '1.00' } as any;
+  expect(mergeValues({ ...base, stocks: none }, { ...base, stocks: gain }).stocks).toBe(gain);
+  expect(mergeValues({ ...base, stocks: gain }, { ...base, stocks: none }).stocks).toBe(gain);
+});

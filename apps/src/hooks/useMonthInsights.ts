@@ -68,11 +68,14 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
     protection: shown.protection
       ? (next.protection && next.protection.state === shown.protection.state ? next.protection : shown.protection)
       : null,
-    // Same state only: gain↔value_only↔invite would swap the card. A
-    // settling card resolves in place to gain or value_only (same card).
+    // Same state only: gain↔value_only would swap the card. Two one-way
+    // exceptions: a settling card resolves in place (same card), and the
+    // invitation gives way to the card once the user has bought through it
+    // (back from a trade, an invitation to buy would be wrong).
     stocks: shown.stocks
       ? (next.stocks && (next.stocks.state === shown.stocks.state
-        || (shown.stocks.state === 'settling' && next.stocks.state !== 'none')) ? next.stocks : shown.stocks)
+        || (['settling', 'none'].includes(shown.stocks.state) && next.stocks.state !== 'none'))
+        ? next.stocks : shown.stocks)
       : null,
   };
 }
