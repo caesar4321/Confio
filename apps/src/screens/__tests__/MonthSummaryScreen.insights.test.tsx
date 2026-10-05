@@ -98,3 +98,27 @@ it('a quiet past month keeps savings (23A)', () => {
   expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-recurring-card']);
   expect(has(tree, 'tumes-savings-invite')).toBe(false);
 });
+
+const stockGain = {
+  state: 'gain', canBuy: true, valueUsd: '220.00', valueStartUsd: '100.00', boughtUsd: '105.00', soldUsd: '0.00',
+  gainUsd: '15.00', gainPct: '7.32', holdings: 1, topMover: { ticker: 'NVDA', name: 'NVIDIA', changePct: '10.00' },
+};
+
+it('"Tus acciones" sits under the dollar slot, above habitual payments', () => {
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: stockGain };
+  const tree = mount();
+  expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-stocks-card', 'tumes-recurring-card']);
+});
+
+it('no stocks: an invitation only where buying is offered; unknown shows nothing', () => {
+  mockSummary = summary(3);
+  const none = { ...stockGain, state: 'none', gainUsd: null, topMover: null };
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: none };
+  expect(has(mount(), 'tumes-stocks-invite')).toBe(true);
+  mockInsights = { ...mockInsights, stocks: { ...none, canBuy: false } };
+  expect(has(mount(), 'tumes-stocks-invite')).toBe(false);
+  mockInsights = { ...mockInsights, stocks: null };
+  const tree = mount();
+  expect(has(tree, 'tumes-stocks-invite') || has(tree, 'tumes-stocks-card')).toBe(false);
+});

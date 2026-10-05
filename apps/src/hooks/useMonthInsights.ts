@@ -1,8 +1,9 @@
 // Data for the Tu mes insight cards (docs/designs/tu-mes-insights.md 8A and
 // the delta corrections):
 //
-// - Three isolated queries (monthInsights, savingsEarned, protectionValue):
-//   each fails alone, and an older server never breaks monthSummary.
+// - Four isolated queries (monthInsights, savingsEarned, protectionValue,
+//   stockMonth): each fails alone, and an older server never breaks
+//   monthSummary.
 // - One reveal: the window opens when Card A has rendered (`ready`) and
 //   closes when every query has settled or after 800ms. What arrived by then
 //   is shown, together and in slot order; anything later is dropped for this
@@ -14,8 +15,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApolloClient } from '@apollo/client';
 import {
-  GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED,
-  type MonthInsights, type ProtectionValue, type RecurringPayment, type SavingsEarned,
+  GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH,
+  type MonthInsights, type ProtectionValue, type RecurringPayment, type SavingsEarned, type StockMonth,
 } from '../apollo/monthSummary';
 import { MIN_SAVINGS_USD } from '../utils/monthInsights';
 
@@ -25,13 +26,15 @@ export type InsightData = {
   insights: MonthInsights | null;
   savings: SavingsEarned | null;
   protection: ProtectionValue | null;
+  /** "Tus acciones": null hides the card (unknown, or stocks not offered). */
+  stocks?: StockMonth | null;
 };
 
 export type MonthInsightsState =
   | { revealed: false }
   | ({ revealed: true } & InsightData);
 
-const EMPTY: InsightData = { insights: null, savings: null, protection: null };
+const EMPTY: InsightData = { insights: null, savings: null, protection: null, stocks: null };
 
 /** What the reveal actually shows: a savings answer under a cent and a
  *  savings answer behind protection are not cards, so they are not "shown"
@@ -64,6 +67,10 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
     // Same state only: a gained↔stable flip would swap the slot's card.
     protection: shown.protection
       ? (next.protection && next.protection.state === shown.protection.state ? next.protection : shown.protection)
+      : null,
+    // Same state only: gain↔value_only↔invite would swap the card.
+    stocks: shown.stocks
+      ? (next.stocks && next.stocks.state === shown.stocks.state ? next.stocks : shown.stocks)
       : null,
   };
 }
@@ -101,7 +108,9 @@ export function useMonthInsights(params: {
       ? safe(client.query<{ protectionValue: ProtectionValue | null }>({ query: GET_PROTECTION_VALUE, variables: { timezone }, ...opt }))
         .then((d) => d?.protectionValue ?? null)
       : Promise.resolve(null);
-    return { insights, savings, protection };
+    const stocks = safe(client.query<{ stockMonth: StockMonth | null }>(
+      { query: GET_STOCK_MONTH, variables: { year, month, timezone }, ...opt })).then((d) => d?.stockMonth ?? null);
+    return { insights, savings, protection, stocks };
   }, [client, year, month, timezone, isCurrent]);
 
   // A new month or account is a new view: hide, then reveal again.
@@ -128,12 +137,13 @@ export function useMonthInsights(params: {
       shown.current = visibleAtReveal({ ...got });
       setState({ revealed: true, ...shown.current });
     };
-    const { insights, savings, protection } = fetchAll();
+    const { insights, savings, protection, stocks } = fetchAll();
     insights.then((v) => { if (!closed) got.insights = v; });
     savings.then((v) => { if (!closed) got.savings = v; });
     protection.then((v) => { if (!closed) got.protection = v; });
+    stocks.then((v) => { if (!closed) got.stocks = v; });
     const timer = setTimeout(reveal, REVEAL_WINDOW_MS);
-    Promise.all([insights, savings, protection]).then(() => {
+    Promise.all([insights, savings, protection, stocks]).then(() => {
       clearTimeout(timer);
       reveal();
     });
@@ -146,10 +156,10 @@ export function useMonthInsights(params: {
   const refresh = useCallback(() => {
     const gen = generation.current;
     if (!shown.current) return;
-    const { insights, savings, protection } = fetchAll();
-    Promise.all([insights, savings, protection]).then(([i, s, p]) => {
+    const { insights, savings, protection, stocks } = fetchAll();
+    Promise.all([insights, savings, protection, stocks]).then(([i, s, p, k]) => {
       if (generation.current !== gen || !shown.current) return;
-      const merged = mergeValues(shown.current, { insights: i, savings: s, protection: p });
+      const merged = mergeValues(shown.current, { insights: i, savings: s, protection: p, stocks: k });
       shown.current = merged;
       setState({ revealed: true, ...merged });
     });

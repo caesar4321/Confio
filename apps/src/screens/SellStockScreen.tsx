@@ -202,6 +202,14 @@ export const SellStockScreen = () => {
           >
             <Text style={styles.successCtaText}>Ver mi ahorro</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.successMonthLink}
+            onPress={() => navigation.navigate('MonthSummary')}
+            accessibilityRole="button"
+            testID="stock-success-month-link"
+          >
+            <Text style={styles.successMonthLinkText}>Ver el resultado en Tu mes</Text>
+          </TouchableOpacity>
         </StockTradeSuccessContent>
       </View>
     );
@@ -461,5 +469,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     marginTop: 32,
   },
+  successMonthLink: { marginTop: 8, minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
+  successMonthLinkText: { color: colors.primaryDark, fontSize: 15, fontWeight: '600' },
   successCtaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

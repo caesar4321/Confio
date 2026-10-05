@@ -46,6 +46,12 @@ jest.mock('../../utils/numberFormatting', () => ({
   useNumberFormat: () => ({formatNumber: (v: number) => v.toFixed(2)}),
 }));
 
+let mockStockMonth: any = null;
+jest.mock('../../hooks/useStockMonthNow', () => ({
+  ...jest.requireActual('../../hooks/useStockMonthNow'),
+  useStockMonthNow: () => mockStockMonth,
+}));
+
 import {StocksListScreen} from '../StocksListScreen';
 
 const texts = (tree: renderer.ReactTestRenderer) =>
@@ -59,6 +65,7 @@ beforeEach(() => {
   mockEnabled = true;
   mockKnown = true;
   mockPortfolioLoading = false;
+  mockStockMonth = null;
 });
 
 it('invites a first-time investor, with a factual starter shelf and no warning box', async () => {
@@ -91,6 +98,22 @@ it('leads with what the user owns, largest first', async () => {
   const firstOwned = t.indexOf('NVDA', mine);
   expect(firstOwned).toBeGreaterThan(mine);
   expect(firstOwned).toBeLessThan(t.indexOf('AAPL', mine));
+  await act(async () => tree.unmount());
+});
+
+it('links holders to Tu mes, with this month\'s result when it is known', async () => {
+  mockPositions = [{ticker: 'NVDA', name: 'NVIDIA', valueUsd: 20} as any];
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  expect(texts(tree)).toContain('Ver tu mes');
+  await act(async () => tree.unmount());
+
+  mockStockMonth = {state: 'gain', gainUsd: '4.20'};
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  expect(texts(tree)).toContain('Este mes +US$4.20 · Ver tu mes');
+  const link = tree.root.findAll(n => n.props.testID === 'stocks-month-link' && typeof n.props.onPress === 'function')[0];
+  link.props.onPress();
+  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary');
   await act(async () => tree.unmount());
 });
 
