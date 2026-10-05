@@ -1,20 +1,33 @@
 // This month's "Tus acciones" result for the stocks screens' link to Tu mes.
 // Same isolated query as the Tu mes card: null (unknown, older server, or
-// stocks not offered) only drops the number, never the link.
-import { useMemo } from 'react';
+// stocks not offered) only drops the number, never the link. The stocks
+// screen stays mounted under a buy or sell: every refocus re-reads, so the
+// number matches Tu mes after a trade.
+import { useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@apollo/client';
+import { useFocusEffect } from '@react-navigation/native';
 import { GET_STOCK_MONTH, type StockMonth } from '../apollo/monthSummary';
 import { currentYearMonth, deviceTimezone } from '../utils/monthSummary';
 
 export function useStockMonthNow(enabled: boolean): StockMonth | null {
   const { year, month } = currentYearMonth();
   const timezone = useMemo(() => deviceTimezone(), []);
-  const { data } = useQuery<{ stockMonth: StockMonth | null }>(GET_STOCK_MONTH, {
+  const { data, refetch } = useQuery<{ stockMonth: StockMonth | null }>(GET_STOCK_MONTH, {
     variables: { year, month, timezone },
     skip: !enabled,
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
   });
+  // Refetch via refs: the effect must run per focus, never per render.
+  const refetchRef = useRef(refetch);
+  refetchRef.current = refetch;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  const focusedOnce = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (focusedOnce.current && enabledRef.current) refetchRef.current().catch(() => undefined);
+    focusedOnce.current = true;
+  }, []));
   return data?.stockMonth ?? null;
 }
 

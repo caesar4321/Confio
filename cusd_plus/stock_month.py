@@ -19,7 +19,7 @@ None too — the card hides, never a guessed number.
 """
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -66,7 +66,6 @@ class StockMonth:
     gain_pct: Decimal | None = None    # gain / (value at start + bought)
     top: Mover | None = None
     holdings: int = 0                  # positions held at the end of the window
-    tickers: list = field(default_factory=list)
 
 
 def _dec(value) -> Decimal | None:
@@ -122,6 +121,16 @@ def confirmed_trades(bsc_address: str) -> list[Trade]:
     return trades
 
 
+def pending_trade_exists(bsc_address: str) -> bool:
+    """A Confío trade is on the wire but not final yet. The client shows success
+    on the receipt, before finality marks the batch confirmed, so in that window
+    the chain already holds (or lost) the units while the ledger does not."""
+    from blockchain.models import SponsoredBatch
+    return SponsoredBatch.objects.filter(
+        user_bsc_address__iexact=bsc_address, kind__in=('stock_buy', 'stock_sell'),
+        status__in=('signed', 'sent')).exists()
+
+
 def ledger_units(trades: list[Trade], before: datetime | None = None) -> dict:
     """{symbol: units} the ledger says the wallet held at `before` (all time when None)."""
     units: dict[str, Decimal] = {}
@@ -153,7 +162,11 @@ def close_before(symbol: str, when: datetime) -> Decimal | None:
     cached = cache.get(key)
     if cached is not None:
         return _dec(cached)
-    price = _close_from_candles(symbol, when)
+    try:
+        price = _close_from_candles(symbol, when)
+    except Exception:  # noqa: BLE001 — an Ondo/network failure is a missing price
+        logger.warning('stock month: candles unavailable for %s', symbol, exc_info=True)
+        return None
     if price is not None and dj_tz.now() - when > timedelta(days=1):
         cache.set(key, str(price), 6 * 3600)
     return price
@@ -174,6 +187,19 @@ def _close_from_candles(symbol: str, when: datetime) -> Decimal | None:
         return None
     price = _dec(best[1])
     return price if price is not None and price > 0 else None
+
+
+def _prefetch(prices: dict, pairs: set) -> None:
+    """Fill `prices` for every (symbol, boundary) at once: one Ondo candle
+    request per symbol in parallel instead of one after another, so a cold
+    cache still fits Tu mes's reveal window."""
+    from concurrent.futures import ThreadPoolExecutor
+    todo = [p for p in pairs if p not in prices]
+    if not todo:
+        return
+    with ThreadPoolExecutor(max_workers=min(8, len(todo))) as pool:
+        for pair, price in zip(todo, pool.map(lambda p: close_before(*p), todo)):
+            prices[pair] = price
 
 
 def _price(cache: dict, symbol: str, when: datetime) -> Decimal:
@@ -197,13 +223,16 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         return StockMonth(state='none')
     current = end > now
     try:
-        chain_raw = holdings_units(bsc_address)
+        # Fresh (≤30s) or nothing: a days-old snapshot is not "today".
+        chain_raw = holdings_units(bsc_address, allow_stale=False)
         if chain_raw is None:
             return None                     # scan unknown, never "no stocks"
         chain = {s: d for s, u in chain_raw.items() if (d := _dec(u)) is not None and d > 0}
         trades = confirmed_trades(bsc_address)
         exact = (ledger_explains_chain(ledger_units(trades), chain)
                  and all(t.usd is not None for t in trades))
+        if not exact and pending_trade_exists(bsc_address):
+            return None                     # a trade settling: unknown, not "from outside"
 
         market = {}
         for item in gm_api.all_market():
@@ -228,10 +257,11 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
                 return None
             if not chain:
                 return StockMonth(state='none')
+            _prefetch(prices, {(s, start) for s in chain})
             value = sum((u * live_price(s) for s, u in chain.items()), Decimal('0'))
             return StockMonth(state='value_only', value_end=value,
                               top=_top_mover(chain, market, prices, start, live_price),
-                              holdings=len(chain), tickers=_tickers(chain, market))
+                              holdings=len(chain))
 
         in_month = [t for t in trades if start <= t.when < end]
         units_start = ledger_units(trades, before=start)
@@ -239,6 +269,10 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         if not units_start and not units_end and not in_month:
             return StockMonth(state='none')
 
+        # Start prices for every position (value on the 1st, top mover);
+        # end prices only for a past month (the current one ends live).
+        _prefetch(prices, {(s, start) for s in set(units_start) | set(units_end)}
+                  | (set() if current else {(s, end) for s in units_end}))
         value_start = sum((u * _price(prices, s, start) for s, u in units_start.items()), Decimal('0'))
         end_price = live_price if current else (lambda s: _price(prices, s, end))
         value_end = sum((u * end_price(s) for s, u in units_end.items()), Decimal('0'))
@@ -250,14 +284,10 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
             state='gain', value_end=value_end, value_start=value_start, bought=bought, sold=sold,
             gain=gain, gain_pct=(gain / base * 100) if base > 0 else None,
             top=_top_mover(units_end, market, prices, start, end_price),
-            holdings=len(units_end), tickers=_tickers(units_end, market))
+            holdings=len(units_end))
     except StockMonthUnavailable as exc:
         logger.info('stock month unavailable for %s: %s', bsc_address, exc)
         return None
-
-
-def _tickers(units: dict, market: dict) -> list:
-    return [(market.get(s) or {}).get('ticker') or s.removesuffix('on') for s in sorted(units)]
 
 
 def _top_mover(units: dict, market: dict, prices: dict, start: datetime, end_price) -> Mover | None:

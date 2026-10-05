@@ -31,7 +31,7 @@ import { TickerLogo } from '../components/TickerLogo';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { stockMonthGain, useStockMonthNow } from '../hooks/useStockMonthNow';
-import { signedUsd } from '../components/tuMes/StocksCard';
+import { signedUsd } from '../utils/monthSummary';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 

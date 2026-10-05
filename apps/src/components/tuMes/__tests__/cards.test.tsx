@@ -172,7 +172,8 @@ describe('Pagos habituales', () => {
 
 describe('StocksCard', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { StocksCard, moverVerb, signedUsd } = require('../StocksCard');
+  const { StocksCard, moverVerb } = require('../StocksCard');
+  const { signedUsd } = require('../../../utils/monthSummary');
   const base = {
     state: 'gain', canBuy: true, valueUsd: '220.00', valueStartUsd: '100.00', boughtUsd: '105.00', soldUsd: '0.00',
     gainUsd: '15.00', gainPct: '7.32', holdings: 1, topMover: { ticker: 'NVDA', name: 'NVIDIA', changePct: '10.00' },

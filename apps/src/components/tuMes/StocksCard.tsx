@@ -13,7 +13,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Text } from '../common/AppText';
 import { colors } from '../../config/theme';
 import type { StockMonth } from '../../apollo/monthSummary';
-import { formatUsd, MASK, monthName } from '../../utils/monthSummary';
+import { formatUsd, MASK, monthName, signedUsd } from '../../utils/monthSummary';
 import { formatPercent, formatUsdAmount } from '../../utils/numberLocale';
 import { CardShell, CardTitle, CARD_FONT_MULTIPLIER } from './CardShell';
 
@@ -25,12 +25,6 @@ type Props = {
   onOpenStock: (ticker: string) => void;
   onOpenStocks: () => void;
 };
-
-/** "+US$4.20" / "−US$3.10" (a true minus sign; the color carries no alarm). */
-export function signedUsd(amount: number): string {
-  const text = formatUsdAmount(Math.abs(amount), { decimals: 2 });
-  return amount < 0 ? `−${text}` : `+${text}`;
-}
 
 /** "subió 8,2%" / "bajó 3%" / "se mantuvo" (under 0.05%). */
 export function moverVerb(changePct: number): string {
@@ -109,7 +103,7 @@ export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpe
         </TouchableOpacity>
       ) : (
         <Text style={styles.note} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER} testID="tumes-stocks-value-note">
-          Parte de tus acciones llegó desde fuera de Confío, así que no podemos calcular cuánto ganaron este mes.
+          No tenemos el historial completo de tus acciones, así que no podemos calcular cuánto ganaron este mes.
         </Text>
       )}
       {exact && (
