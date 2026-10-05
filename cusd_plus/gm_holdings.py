@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Canonical Multicall3 (same address on BSC as everywhere).
 MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11'
 SEL_TRY_AGGREGATE = keccak(text='tryAggregate(bool,(address,bytes)[])')[:4]
+SEL_GET_BLOCK_NUMBER = keccak(text='getBlockNumber()')[:4]
 SEL_BALANCE_OF = keccak(text='balanceOf(address)')[:4]
 
 # Subcalls per eth_call — keeps calldata well under public-node limits.
@@ -189,11 +190,15 @@ def _scan(
     block_tag: str = 'latest',
     require_complete: bool = False,
     failures: set | None = None,
+    blocks: dict | None = None,
 ) -> dict:
     """One Multicall3 pass over the whole registry; returns nonzero
     balances as {symbol: units_float}. Raises on RPC failure. `failures`,
     when given, collects the symbols whose balanceOf didn't answer (the
-    default mode skips them), so a caller can decide which ones matter."""
+    default mode skips them), so a caller can decide which ones matter.
+    `blocks`, when given, gets {symbol: block number the balance was read
+    at}: Multicall3.getBlockNumber() rides in each chunk's own call, so it is
+    exact even when the RPC pool serves chunks from different nodes."""
     entries = list(token_registry.items())
     holder_arg = encode(['address'], [user_bsc_address])
     held = {}
@@ -203,10 +208,16 @@ def _scan(
             (item['address'], SEL_BALANCE_OF + holder_arg)
             for _, item in chunk
         ]
+        if blocks is not None:
+            calls.insert(0, (MULTICALL3, SEL_GET_BLOCK_NUMBER))
         # requireSuccess=False: one misbehaving token must not hide the rest.
         data = SEL_TRY_AGGREGATE + encode(['bool', '(address,bytes)[]'], [False, calls])
         res = vault._rpc('eth_call', [{'to': MULTICALL3, 'data': '0x' + data.hex()}, block_tag])
         results = decode(['(bool,bytes)[]'], bytes.fromhex(res[2:]))[0]
+        if blocks is not None:
+            head, results = (results[0] if results else (False, b'')), results[1:]
+            at = int.from_bytes(head[1][:32], 'big') if head[0] and len(head[1]) >= 32 else None
+            blocks.update({symbol: at for symbol, _ in chunk})
         if require_complete and len(results) != len(chunk):
             raise RuntimeError('GM Multicall returned an incomplete result set')
         if failures is not None:
@@ -231,7 +242,7 @@ def invalidate_holdings(user_bsc_address: str) -> None:
     from uuid import uuid4
     key = (user_bsc_address or '').lower()
     cache.set(f'gm_hold_gen:{key}', uuid4().hex, SCAN_LAST_TTL)
-    cache.delete_many([f'gm_hold:{key}', f'gm_hold_full:{key}'])
+    cache.delete_many([f'gm_hold:{key}', f'gm_hold_full_v2:{key}'])
 
 
 def _generation(key: str):
@@ -254,7 +265,8 @@ def holdings_units(user_bsc_address: str, *, require_complete: bool = False) -> 
         return {}
     key = user_bsc_address.lower()
     if require_complete:
-        return _complete_holdings(key)
+        complete = _complete_holdings(key)
+        return None if complete is None else complete[0]
     cached = cache.get(f'gm_hold:{key}')
     if cached is not None:
         return cached
@@ -295,10 +307,20 @@ def _store(key: str, generation, fresh: dict, last: dict) -> bool:
     return True
 
 
-def _complete_holdings(key: str) -> dict | None:
-    cached = cache.get(f'gm_hold_full:{key}')
-    if cached is not None:
-        return cached
+def complete_holdings(user_bsc_address: str) -> tuple[dict, dict] | None:
+    """(units, blocks) from a complete scan, or None (unknown): blocks maps
+    every scanned symbol to the block its balance was read at (None when
+    that chunk's node didn't say), so a caller can tell which confirmed
+    trades this chain has not seen yet."""
+    if not user_bsc_address:
+        return {}, {}
+    return _complete_holdings(user_bsc_address.lower())
+
+
+def _complete_holdings(key: str) -> tuple[dict, dict] | None:
+    cached = cache.get(f'gm_hold_full_v2:{key}')
+    if isinstance(cached, dict) and 'held' in cached:
+        return cached['held'], cached['blocks']
     token_registry, live = registry_entry()
     if token_registry is None or not live:
         return None                        # the snapshot may lack a held token
@@ -310,13 +332,14 @@ def _complete_holdings(key: str) -> dict | None:
     delisted = {s: m for s, m in _fallback_registry().items()
                 if s not in token_registry and str(m.get('address') or '').lower() not in live_addresses}
     if not token_registry and not delisted:
-        return {}
+        return {}, {}
     # One pass over both; only a live token that didn't answer makes it unknown.
     for _attempt in range(2):
         generation = _generation(key)
         failures: set = set()
+        blocks: dict = {}
         try:
-            held = _scan(key, {**delisted, **token_registry}, failures=failures)
+            held = _scan(key, {**delisted, **token_registry}, failures=failures, blocks=blocks)
         except Exception:  # noqa: BLE001 — incomplete is unknown, never a smaller portfolio
             logger.warning('GM complete holdings scan failed for %s', key, exc_info=True)
             return None
@@ -330,7 +353,8 @@ def _complete_holdings(key: str) -> dict | None:
         # the list scan's own token set (live only): a delisted position must
         # not appear or vanish there depending on which scan ran last.
         listed = {s: u for s, u in held.items() if s in token_registry}
-        if _store(key, generation, {f'gm_hold_full:{key}': held, f'gm_hold:{key}': listed}, listed):
+        full = {'held': held, 'blocks': blocks}
+        if _store(key, generation, {f'gm_hold_full_v2:{key}': full, f'gm_hold:{key}': listed}, listed):
             continue                           # moved during the write: pre-trade, never used
-        return held
+        return held, blocks
     return None                                # trades keep landing: unknown for now

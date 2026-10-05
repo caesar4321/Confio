@@ -36,6 +36,7 @@ class StockMonthTests(SimpleTestCase):
         cache.clear()
         self.trades = []
         self.chain = {}
+        self.blocks = {}                                      # {symbol: block the scan read it at}
         self.pending = []
         self.market = market(NVDA=110, AAPL=200)
         self.candles = {
@@ -48,7 +49,7 @@ class StockMonthTests(SimpleTestCase):
             mock.patch.object(sm, 'confirmed_trades', side_effect=lambda _a: self.trades),
             mock.patch('cusd_plus.gm_holdings.registry', return_value={}),
             mock.patch.object(sm, 'pending_trades', side_effect=lambda _a: list(self.pending)),
-            mock.patch('cusd_plus.gm_holdings.holdings_units', side_effect=self.scan),
+            mock.patch('cusd_plus.gm_holdings.complete_holdings', side_effect=self.scan),
             mock.patch('cusd_plus.gm_api.all_market', side_effect=lambda: self.market),
             mock.patch('cusd_plus.gm_api.ohlc', side_effect=lambda s, _r: self.candles.get(s, [])),
             mock.patch('cusd_plus.schema._display_name', side_effect=lambda n: n.replace(' Inc.', '')),
@@ -57,9 +58,9 @@ class StockMonthTests(SimpleTestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def scan(self, _address, *, require_complete=False):
-        self.assertTrue(require_complete)                     # a total never from a partial or stale scan
-        return self.chain
+    def scan(self, _address):
+        # The complete scan (never a partial or stale one), with its blocks.
+        return None if self.chain is None else (self.chain, self.blocks)
 
     def run_month(self, start=OCT_START, end=NOV_START, now=NOW):
         return sm.stock_month(ADDR, start, end, now)
@@ -253,41 +254,74 @@ class StockMonthTests(SimpleTestCase):
         self.chain = {'NVDAon': 1.0}
         self.assertEqual(self.run_month().state, 'value_only')
 
-    def test_a_scan_lagging_a_just_confirmed_trade_is_settling(self):
+    def test_a_scan_from_a_node_behind_a_confirmed_trade_is_settling(self):
         bought = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=20))
-        bought.settled_at = NOW - timedelta(seconds=10)
+        bought.block = 102
         self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), bought]
-        self.chain = {'NVDAon': 1.0}                          # a node one block behind finality
+        self.chain, self.blocks = {'NVDAon': 1.0}, {'NVDAon': 101}           # read one block before it
         result = self.run_month()
         self.assertEqual(result.state, 'settling')
-        self.assertEqual(result.value_end, Decimal('220'))    # today is the final ledger, not the old chain
-        bought.settled_at = NOW - timedelta(minutes=5)        # long settled: the history is what's missing
+        self.assertEqual(result.value_end, Decimal('220'))                    # the chain plus that trade
+        self.blocks = {'NVDAon': 102}                                         # caught up: history really short
         self.assertEqual(self.run_month().state, 'value_only')
-        bought.settled_at = NOW - timedelta(seconds=10)
-        self.chain = {'NVDAon': 3.0}                          # not explained even without it: not lag
-        self.assertEqual(self.run_month().state, 'value_only')
-
-    def test_a_scan_that_saw_only_the_first_of_two_quick_trades_is_settling(self):
-        first = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=40))
-        first.settled_at = NOW - timedelta(seconds=30)
-        second = trade('AAPLon', 'stock_buy', '1', '200', NOW - timedelta(seconds=20))
-        second.settled_at = NOW - timedelta(seconds=10)
-        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), first, second]
-        self.chain = {'NVDAon': 2.0}                          # a node that has the first, not the second
-        self.assertEqual(self.run_month().state, 'settling')
-        self.chain = {'NVDAon': 2.0, 'AAPLon': 1.0}
+        self.chain, self.blocks = {'NVDAon': 2.0}, {'NVDAon': 102}
         self.assertEqual(self.run_month().state, 'gain')
 
-    def test_the_lagging_prefix_follows_block_order_not_save_order(self):
-        # The earlier block's receipt checker was on a slower retry: it was
-        # saved confirmed AFTER the later block's trade.
+    def test_lag_is_per_token_block_so_two_quick_trades_resolve_exactly(self):
         first = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=40))
-        first.settled_at, first.block = NOW - timedelta(seconds=5), 100
+        first.block = 100
         second = trade('AAPLon', 'stock_buy', '1', '200', NOW - timedelta(seconds=20))
-        second.settled_at, second.block = NOW - timedelta(seconds=10), 102
+        second.block = 102
         self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), first, second]
-        self.chain = {'NVDAon': 2.0}                          # a node at block 101: has the first only
-        self.assertEqual(self.run_month().state, 'settling')
+        # The chunks came from different nodes: NVDA read at 101 (has the first), AAPL at 101 (not the second).
+        self.chain, self.blocks = {'NVDAon': 2.0}, {'NVDAon': 101, 'AAPLon': 101}
+        result = self.run_month()
+        self.assertEqual(result.state, 'settling')
+        self.assertEqual(result.value_end, Decimal('420'))                    # 2 NVDA + the unseen AAPL
+
+    def test_lag_today_is_anchored_on_the_chain_so_outside_units_stay_counted(self):
+        # 1 NVDA arrived from outside (ledger never saw it), then a Confío buy
+        # the scan hasn't seen: today is 2 + 1, never the ledger's 2.
+        bought = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=20))
+        bought.block = 102
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), bought]
+        self.chain, self.blocks = {'NVDAon': 2.0}, {'NVDAon': 101}
+        result = self.run_month()
+        self.assertEqual(result.state, 'settling')
+        self.assertEqual(result.value_end, Decimal('330'))
+
+    def test_selling_units_that_arrived_from_outside_is_never_a_negative_today(self):
+        sold = trade('NVDAon', 'stock_sell', '1', '110', NOW - timedelta(seconds=20))
+        sold.block = 100
+        self.trades = [sold]
+        self.chain, self.blocks = {}, {'NVDAon': 100}                         # seen: not lag
+        result = self.run_month()
+        self.assertEqual(result.state, 'value_only')
+        self.assertEqual(result.value_end, Decimal('0'))
+        self.blocks = {'NVDAon': 99}                                          # unseen, and the chain had none
+        result = self.run_month()
+        self.assertEqual(result.state, 'settling')
+        self.assertEqual(result.holdings, 0)                                  # no number, never a negative one
+
+    def test_a_past_month_stays_exact_while_a_later_trade_lags(self):
+        bought = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=20))
+        bought.block = 102
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), bought]
+        self.chain, self.blocks = {'NVDAon': 1.0}, {'NVDAon': 101}
+        sept = self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START)
+        self.assertEqual(sept.state, 'gain')
+        self.assertEqual(sept.value_end, Decimal('100'))
+
+    def test_scan_reports_the_block_of_each_chunk(self):
+        from cusd_plus import gm_holdings
+        reg = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        one = (10 ** 18).to_bytes(32, 'big')
+        block = (777).to_bytes(32, 'big')
+        blocks = {}
+        with mock.patch('cusd_plus.gm_holdings.vault._rpc', return_value='0x00'), \
+             mock.patch('cusd_plus.gm_holdings.decode', return_value=([(True, block), (True, one)],)):
+            self.assertEqual(gm_holdings._scan(ADDR, reg, blocks=blocks, require_complete=True), {'TSLAon': 1.0})
+        self.assertEqual(blocks, {'TSLAon': 777})
 
     def test_ledger_tolerates_float_dust_but_not_real_differences(self):
         ledger = {'NVDAon': Decimal('0.123456789')}
@@ -389,7 +423,7 @@ class FreshHoldingsTests(SimpleTestCase):
             self.assertEqual(gm_holdings.holdings_units(holder, require_complete=True), {'TSLAon': 2.0})
         self.assertEqual(cache.get(f'gm_hold:{holder}'), {'TSLAon': 2.0})   # also the best answer for others
         gm_holdings.invalidate_holdings(holder)
-        self.assertIsNone(cache.get(f'gm_hold_full:{holder}'))
+        self.assertIsNone(cache.get(f'gm_hold_full_v2:{holder}'))
         self.assertIsNone(cache.get(f'gm_hold:{holder}'))
 
 
@@ -522,7 +556,7 @@ class LiveRegistryTests(SimpleTestCase):
              mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
              mock.patch.object(gm_holdings, '_scan', side_effect=scan):
             self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
-        self.assertEqual(cache.get(f'gm_hold_full:{ADDR.lower()}'), {'TSLAon': 2.0})
+        self.assertEqual(cache.get(f'gm_hold_full_v2:{ADDR.lower()}')['held'], {'TSLAon': 2.0})
 
     def test_a_trade_invalidating_during_the_cache_write_drops_the_entry(self):
         from cusd_plus import gm_holdings
@@ -542,19 +576,20 @@ class LiveRegistryTests(SimpleTestCase):
              mock.patch.object(gm_holdings.cache, 'set_many', side_effect=set_many):
             # The pre-trade scan is dropped AND not used: the chain is read again.
             self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
-        self.assertEqual(cache.get(f'gm_hold_full:{ADDR.lower()}'), {'TSLAon': 2.0})
+        self.assertEqual(cache.get(f'gm_hold_full_v2:{ADDR.lower()}')['held'], {'TSLAon': 2.0})
         self.assertEqual(cache.get(f'gm_hold:{ADDR.lower()}'), {'TSLAon': 2.0})
 
     def test_a_late_write_restores_the_previous_last_known(self):
         from cusd_plus import gm_holdings
         key = ADDR.lower()
         cache.set(f'gm_hold_last:{key}', {'TSLAon': 9.0}, 60)                    # last good portfolio
-        cache.set(f'gm_hold_full:{key}', {'TSLAon': 2.0}, 30)                    # a post-trade complete scan
+        # A post-trade complete scan.
+        cache.set(f'gm_hold_full_v2:{key}', {'held': {'TSLAon': 2.0}, 'blocks': {}}, 30)
         real_set_many = cache.set_many
 
         def set_many(*args, **kwargs):
             gm_holdings.invalidate_holdings(ADDR)
-            cache.set(f'gm_hold_full:{key}', {'TSLAon': 2.0}, 30)                # rewritten post-trade
+            cache.set(f'gm_hold_full_v2:{key}', {'held': {'TSLAon': 2.0}, 'blocks': {}}, 30)                # rewritten post-trade
             return real_set_many(*args, **kwargs)
 
         with mock.patch.object(gm_holdings, 'registry', return_value={'TSLAon': {'address': '0x' + '11' * 20}}), \
@@ -563,7 +598,7 @@ class LiveRegistryTests(SimpleTestCase):
             gm_holdings.holdings_units(ADDR)
         self.assertEqual(cache.get(f'gm_hold_last:{key}'), {'TSLAon': 9.0})      # never the pre-trade scan
         self.assertIsNone(cache.get(f'gm_hold:{key}'))
-        self.assertEqual(cache.get(f'gm_hold_full:{key}'), {'TSLAon': 2.0})      # a list write never drops it
+        self.assertEqual(cache.get(f'gm_hold_full_v2:{key}')['held'], {'TSLAon': 2.0})      # a list write never drops it
 
     def test_a_list_scan_racing_a_trade_is_returned_but_not_cached(self):
         from cusd_plus import gm_holdings
