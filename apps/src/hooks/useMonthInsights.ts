@@ -21,6 +21,10 @@ import {
 import { MIN_SAVINGS_USD } from '../utils/monthInsights';
 
 export const REVEAL_WINDOW_MS = 800;
+/** Arriving from a trade's success screen: the trade just invalidated the
+ *  holdings scan, and the stocks card is what the user came to see. The
+ *  reveal still happens the moment every query has answered. */
+export const REVEAL_WINDOW_AFTER_TRADE_MS = 2500;
 
 export type InsightData = {
   insights: MonthInsights | null;
@@ -68,13 +72,15 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
     protection: shown.protection
       ? (next.protection && next.protection.state === shown.protection.state ? next.protection : shown.protection)
       : null,
-    // Same state only: gain↔value_only would swap the card. Two one-way
-    // exceptions: a settling card resolves in place (same card), and the
-    // invitation gives way to the card once the user has bought through it
-    // (back from a trade, an invitation to buy would be wrong).
+    // Never a downgrade (gain → value_only). One-way exceptions, all in the
+    // same card: a settling card resolves in place; value only becomes the
+    // month's result once the history explains it (a passing value-only
+    // right after a trade must not stick); and the invitation gives way to
+    // the card once the user has bought through it.
     stocks: shown.stocks
       ? (next.stocks && (next.stocks.state === shown.stocks.state
         || (shown.stocks.state === 'none' && next.stocks.state !== 'none')
+        || (shown.stocks.state === 'value_only' && next.stocks.state === 'gain')
         // After settling the server answers 'none' only when the trade
         // failed (a pending one is still 'settling'): never a stuck note.
         || shown.stocks.state === 'settling')
@@ -91,8 +97,13 @@ export function useMonthInsights(params: {
   isCurrent: boolean;
   /** Card A has rendered (monthSummary answered): the 800ms window starts. */
   ready: boolean;
+  /** Reveal window override (REVEAL_WINDOW_AFTER_TRADE_MS from a trade). */
+  revealWindowMs?: number;
 }): MonthInsightsState & { refresh: () => void; refreshStocks: () => void; stocksSettling: boolean } {
-  const { accountKey, year, month, timezone, isCurrent, ready } = params;
+  const { accountKey, year, month, timezone, isCurrent, ready, revealWindowMs = REVEAL_WINDOW_MS } = params;
+  // Read at reveal time: a param merged later must not restart a reveal.
+  const windowMs = useRef(revealWindowMs);
+  windowMs.current = revealWindowMs;
   const client = useApolloClient();
   const viewKey = `${accountKey ?? ''}:${year}-${month}`;
   const [state, setState] = useState<MonthInsightsState>({ revealed: false });
@@ -105,6 +116,9 @@ export function useMonthInsights(params: {
   // The latest stocks answer's state, even when the shown card kept its own
   // (gain/value_only never swap to 'settling'): the screen polls on it.
   const lastStocks = useRef<StockMonth['state'] | null>(null);
+  // This view saw a trade settle: a value-only answer right after it may be
+  // a passing race (scan vs finality), so it keeps being re-asked.
+  const sawSettling = useRef(false);
   const stocksInFlight = useRef(false);
   // Stocks asks are numbered when sent: an answer older than one already
   // applied (a focus refresh waits for its slowest query; a poll doesn't)
@@ -138,6 +152,7 @@ export function useMonthInsights(params: {
     generation.current += 1;
     shown.current = null;
     lastStocks.current = null;
+    sawSettling.current = false;
     if (state.revealed) setState({ revealed: false });
   }
 
@@ -163,7 +178,7 @@ export function useMonthInsights(params: {
     savings.then((v) => { if (!closed) got.savings = v; });
     protection.then((v) => { if (!closed) got.protection = v; });
     stocks.then((v) => { if (!closed) got.stocks = v; });
-    const timer = setTimeout(reveal, REVEAL_WINDOW_MS);
+    const timer = setTimeout(reveal, windowMs.current);
     Promise.all([insights, savings, protection, stocks]).then(() => {
       clearTimeout(timer);
       reveal();
@@ -219,6 +234,8 @@ export function useMonthInsights(params: {
   }, [fetchStocks]);
 
   // Only a shown card can resolve in place (a dropped one never appears).
-  const stocksSettling = Boolean(shown.current?.stocks) && lastStocks.current === 'settling';
+  if (lastStocks.current === 'settling') sawSettling.current = true;
+  const stocksSettling = Boolean(shown.current?.stocks) && (lastStocks.current === 'settling'
+    || (sawSettling.current && lastStocks.current === 'value_only'));
   return { ...state, refresh, refreshStocks, stocksSettling };
 }

@@ -272,7 +272,15 @@ def holdings_units(user_bsc_address: str, *, require_complete: bool = False) -> 
     if _generation(key) == generation:     # else a trade landed mid-scan: don't cache it
         cache.set(f'gm_hold:{key}', held, SCAN_TTL)
         cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
+        _drop_if_moved(key, generation)
     return held
+
+
+def _drop_if_moved(key: str, generation) -> None:
+    """A trade invalidating between the generation check and the write must
+    not leave this (pre-trade) scan cached for SCAN_TTL: re-check and drop."""
+    if _generation(key) != generation:
+        cache.delete_many([f'gm_hold:{key}', f'gm_hold_full:{key}'])
 
 
 def _complete_holdings(key: str) -> dict | None:
@@ -312,5 +320,6 @@ def _complete_holdings(key: str) -> dict | None:
         listed = {s: u for s, u in held.items() if s in token_registry}
         cache.set_many({f'gm_hold_full:{key}': held, f'gm_hold:{key}': listed}, SCAN_TTL)
         cache.set(f'gm_hold_last:{key}', listed, SCAN_LAST_TTL)
+        _drop_if_moved(key, generation)
         return held
     return None                                # trades keep landing: unknown for now

@@ -209,7 +209,7 @@ export const SellStockScreen = () => {
           {canOpenMonth && (
           <TouchableOpacity
             style={styles.successMonthLink}
-            onPress={() => { void openTuMesNow(navigation); }}
+            onPress={() => { void openTuMesNow(navigation, { fromTrade: true }); }}
             accessibilityRole="button"
             testID="stock-success-month-link"
           >

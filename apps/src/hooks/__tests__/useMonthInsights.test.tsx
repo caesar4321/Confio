@@ -6,7 +6,7 @@ const mockQuery = jest.fn();
 const mockClient = { query: (...a: any[]) => mockQuery(...a) };
 jest.mock('@apollo/client', () => ({ ...jest.requireActual('@apollo/client'), useApolloClient: () => mockClient }));
 
-import { mergeValues, REVEAL_WINDOW_MS, useMonthInsights } from '../useMonthInsights';
+import { mergeValues, REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights } from '../useMonthInsights';
 
 const insights = (keys: string[]) => ({
   previousMonthSpendingUsd: '390.00',
@@ -203,4 +203,24 @@ it('a focus refresh never stacks a stocks ask on a poll still in flight', async 
   await act(async () => { slow.resolve({ data: { stockMonth: { state: 'gain', valueUsd: '221.00' } } }); });
   expect(latest.stocks.state).toBe('gain');
   expect(latest.stocksSettling).toBe(false);
+});
+
+it('from a trade, the reveal waits longer for a slow stocks answer (the card the user came for)', async () => {
+  const slow = deferred<any>();
+  mockQuery.mockImplementation(({ query }: any) => (query === GET_STOCK_MONTH ? slow.promise
+    : Promise.resolve({ data: {} })));
+  await act(async () => { renderer.create(<Probe {...base} revealWindowMs={REVEAL_WINDOW_AFTER_TRADE_MS} />); });
+  await act(async () => { jest.advanceTimersByTime(REVEAL_WINDOW_MS); });
+  expect(latest.revealed).toBe(false);
+  await act(async () => { slow.resolve({ data: { stockMonth: { state: 'gain', gainUsd: '1.00' } } }); });
+  expect(latest.revealed).toBe(true);
+  expect(latest.stocks.state).toBe('gain');
+});
+
+it('value only becomes the result once explained, and a view that saw settling keeps asking', () => {
+  const base2 = { insights: null, savings: null, protection: null };
+  const valueOnly = { state: 'value_only', valueUsd: '220.00' } as any;
+  const gain = { state: 'gain', gainUsd: '1.00' } as any;
+  expect(mergeValues({ ...base2, stocks: valueOnly }, { ...base2, stocks: gain }).stocks).toBe(gain);
+  expect(mergeValues({ ...base2, stocks: gain }, { ...base2, stocks: valueOnly }).stocks).toBe(gain);   // never a downgrade
 });

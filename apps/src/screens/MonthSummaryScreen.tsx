@@ -34,7 +34,9 @@ import { SummaryCard } from '../components/tuMes/SummaryCard';
 import { ProtectionCard, SavingsCard, StableCard } from '../components/tuMes/ProtectionCard';
 import { RecurringCard } from '../components/tuMes/RecurringCard';
 import { StocksCard } from '../components/tuMes/StocksCard';
-import { useMonthInsights, type InsightData } from '../hooks/useMonthInsights';
+import {
+  REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights, type InsightData,
+} from '../hooks/useMonthInsights';
 import { dollarSlot, paceLine } from '../utils/monthInsights';
 import { AnalyticsService } from '../services/analyticsService';
 import {
@@ -101,6 +103,7 @@ export function MonthSummaryScreen() {
   const insights = useMonthInsights({
     accountKey: activeAccount?.id, year: period.year, month: period.month, timezone, isCurrent,
     ready: Boolean(summary && summary.year === period.year && summary.month === period.month),
+    revealWindowMs: route.params?.fromTrade ? REVEAL_WINDOW_AFTER_TRADE_MS : REVEAL_WINDOW_MS,
   });
   const refreshInsights = useRef(insights.refresh);
   refreshInsights.current = insights.refresh;

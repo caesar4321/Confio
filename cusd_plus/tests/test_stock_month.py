@@ -488,6 +488,23 @@ class LiveRegistryTests(SimpleTestCase):
             self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
         self.assertEqual(cache.get(f'gm_hold_full:{ADDR.lower()}'), {'TSLAon': 2.0})
 
+    def test_a_trade_invalidating_during_the_cache_write_drops_the_entry(self):
+        from cusd_plus import gm_holdings
+        live = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        real_set_many = cache.set_many
+
+        def set_many(*args, **kwargs):
+            gm_holdings.invalidate_holdings(ADDR)            # between the generation check and the write
+            return real_set_many(*args, **kwargs)
+
+        with mock.patch.object(gm_holdings, 'registry_entry', return_value=(live, True)), \
+             mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
+             mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 1.0}), \
+             mock.patch.object(gm_holdings.cache, 'set_many', side_effect=set_many):
+            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0})
+        self.assertIsNone(cache.get(f'gm_hold_full:{ADDR.lower()}'))
+        self.assertIsNone(cache.get(f'gm_hold:{ADDR.lower()}'))
+
     def test_a_list_scan_racing_a_trade_is_returned_but_not_cached(self):
         from cusd_plus import gm_holdings
 

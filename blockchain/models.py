@@ -1,4 +1,6 @@
 from django.db import models
+from django.db.models import F
+from django.db.models.functions import Upper
 from django.conf import settings
 from django.utils import timezone
 from users.models import Account
@@ -376,6 +378,9 @@ class SponsoredBatch(models.Model):
             models.Index(fields=['tx_hash'], name='cpsb_tx_hash_idx'),
             models.Index(fields=['status'], name='cpsb_status_idx'),
             models.Index(fields=['kind', 'source_id'], name='cpsb_kind_source_idx'),
+            # Per-wallet stock history (Tu mes, every open and settling poll):
+            # matches the UPPER(col) = UPPER(%s) that __iexact compiles to.
+            models.Index(Upper('user_bsc_address'), F('kind'), name='cpsb_addr_kind_idx'),
         ]
         constraints = [
             # One batch per tx hash — blocks the same broadcast being
