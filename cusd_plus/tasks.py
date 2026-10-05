@@ -79,21 +79,31 @@ def _change_floor_refusal_marker(key: str, delta: int) -> bool:
     return delta < 0
 
 
-@shared_task(name='cusd_plus.warm_gm_holdings', ignore_result=True)
-def warm_gm_holdings(bsc_address: str):
-    """Fill the complete holdings scan right after a stock trade confirms."""
-    from .gm_holdings import holdings_units
+@shared_task(name='cusd_plus.warm_gm_holdings', bind=True, ignore_result=True, max_retries=3)
+def warm_gm_holdings(self, bsc_address: str, min_block: int | None = None):
+    """Fill the complete holdings scan right after a stock trade confirms.
+    A scan served by a node still behind `min_block` (the trade's block; the
+    RPC pool rotates) is pre-trade: never left cached for the stocks list —
+    dropped, and asked again a moment later."""
+    from .gm_holdings import complete_holdings, invalidate_holdings
 
     try:
-        holdings_units(bsc_address, require_complete=True)
+        complete = complete_holdings(bsc_address)
     except Exception:  # noqa: BLE001 — a warm-up; the next read scans anyway
         logger.warning('holdings warm-up failed for %s', bsc_address, exc_info=True)
+        return
+    if complete is None or min_block is None:
+        return
+    if any(at is not None and at < min_block for at in complete[1].values()):
+        invalidate_holdings(bsc_address)
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=2)
 
 
-def _dispatch_holdings_warmup(bsc_address: str) -> None:
+def _dispatch_holdings_warmup(bsc_address: str, min_block: int | None = None) -> None:
     try:
         # retry=False: an unreachable broker must not stall the caller.
-        warm_gm_holdings.apply_async(args=[bsc_address], retry=False)
+        warm_gm_holdings.apply_async(args=[bsc_address, min_block], retry=False)
     except Exception:  # noqa: BLE001 — optional warm-up
         logger.warning('could not queue holdings warm-up for %s', bsc_address, exc_info=True)
 
@@ -2007,8 +2017,8 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         # complete post-trade scan in its own task (never delays finality):
         # Tu mes, often opened from the success screen, must answer inside
         # its reveal window, and a cold Multicall may not.
-        address = batch.user_bsc_address
-        transaction.on_commit(lambda: _dispatch_holdings_warmup(address))
+        address, block = batch.user_bsc_address, batch.block_number
+        transaction.on_commit(lambda: _dispatch_holdings_warmup(address, block))
     logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)
 
 

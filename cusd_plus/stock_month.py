@@ -199,13 +199,23 @@ def _unseen_by_scan(trades: list[Trade], blocks: dict) -> list[Trade]:
 
 def _apply(units: dict, trades: list[Trade]) -> dict | None:
     """Units after `trades` on top of `units`; None if any would go negative
-    (the inputs disagree, so no "today" can be stated)."""
+    (the inputs disagree, so no "today" can be stated). The chain's units
+    are float reads (~17 digits) and a trade's are exact (18 decimals): a
+    sell-all leaves ±dust, which is zero (never a held position, nor a
+    reason to drop every other one), within the ledger's own tolerance."""
     out = dict(units)
+    moved: dict = {}
     for t in trades:
         out[t.symbol] = out.get(t.symbol, Decimal('0')) + (t.units if t.kind == 'stock_buy' else -t.units)
-    if any(u < 0 for u in out.values()):
-        return None
-    return {s: u for s, u in out.items() if u > 0}
+        moved[t.symbol] = moved.get(t.symbol, Decimal('0')) + t.units
+    held = {}
+    for s, u in out.items():
+        if abs(u) <= max(abs(units.get(s, Decimal('0'))), moved.get(s, Decimal('0'))) * UNITS_TOLERANCE:
+            continue
+        if u < 0:
+            return None
+        held[s] = u
+    return held
 
 
 def close_before(symbol: str, when: datetime) -> Decimal | None:
