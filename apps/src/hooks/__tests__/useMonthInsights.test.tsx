@@ -7,7 +7,7 @@ const mockClient = { query: (...a: any[]) => mockQuery(...a) };
 jest.mock('@apollo/client', () => ({ ...jest.requireActual('@apollo/client'), useApolloClient: () => mockClient }));
 
 import {
-  mergeValues, REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights, VALUE_ONLY_RECHECKS,
+  mergeValues, REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights, VALUE_ONLY_RECHECK_MS,
 } from '../useMonthInsights';
 
 const insights = (keys: string[]) => ({
@@ -237,10 +237,13 @@ it('after a trade settles, value only is re-asked for a while, then taken as the
   await act(async () => { latest.refresh(); });
   expect(latest.stocksSettling).toBe(true);
   stocks = { state: 'value_only', valueUsd: '220.00' };
-  for (let i = 0; i < VALUE_ONLY_RECHECKS; i += 1) {
-    await act(async () => { latest.refreshStocks(); });
-    expect(latest.stocksSettling).toBe(true);         // may be a passing race: keep asking
-  }
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocksSettling).toBe(true);           // may be a passing race: keep asking
+  // Time, not a count: with polls every 30s, two answers already pass it.
+  jest.advanceTimersByTime(30000);
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocksSettling).toBe(true);
+  jest.advanceTimersByTime(VALUE_ONLY_RECHECK_MS - 30000 + 1);
   await act(async () => { latest.refreshStocks(); });
   expect(latest.stocksSettling).toBe(false);          // a real value-only answer: the poll ends
   stocks = { state: 'settling', valueUsd: '300.00' };

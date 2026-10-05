@@ -25,11 +25,11 @@ export const REVEAL_WINDOW_MS = 800;
  *  holdings scan, and the stocks card is what the user came to see. The
  *  reveal still happens the moment every query has answered. */
 export const REVEAL_WINDOW_AFTER_TRADE_MS = 2500;
-/** Value-only answers re-asked after a trade settled (one per poll, ~4s
- *  apart: past the server's 30s scan cache) before value only is taken as
- *  the real answer — an incomplete history is not a race, never polled for
- *  the whole settling window. */
-export const VALUE_ONLY_RECHECKS = 12;
+/** How long after the last 'settling' answer a value-only answer is still
+ *  re-asked (past the server's 30s scan cache) before it is taken as the
+ *  real answer — an incomplete history is not a race. Time, not a count of
+ *  answers: polls slow to every 30s after the first minute. */
+export const VALUE_ONLY_RECHECK_MS = 45000;
 
 export type InsightData = {
   insights: MonthInsights | null;
@@ -122,10 +122,10 @@ export function useMonthInsights(params: {
   // (gain/value_only never swap to 'settling'): the screen polls on it.
   const lastStocks = useRef<StockMonth['state'] | null>(null);
   // This view saw a trade settle: a value-only answer right after it may be
-  // a passing race (scan vs finality), so it keeps being re-asked (up to
-  // VALUE_ONLY_RECHECKS answers: an incomplete history is a real answer).
+  // a passing race (scan vs finality), so it keeps being re-asked (for
+  // VALUE_ONLY_RECHECK_MS: an incomplete history is a real answer).
   const sawSettling = useRef(false);
-  const valueOnlyChecks = useRef(0);
+  const lastSettlingAt = useRef(0);
   const stocksInFlight = useRef(false);
   // Stocks asks are numbered when sent: an answer older than one already
   // applied (a focus refresh waits for its slowest query; a poll doesn't)
@@ -139,10 +139,9 @@ export function useMonthInsights(params: {
     lastStocks.current = next;
     if (next === 'settling') {
       sawSettling.current = true;
-      valueOnlyChecks.current = 0;
+      lastSettlingAt.current = Date.now();
     } else if (next === 'value_only' && sawSettling.current) {
-      valueOnlyChecks.current += 1;
-      if (valueOnlyChecks.current > VALUE_ONLY_RECHECKS) sawSettling.current = false;
+      if (Date.now() - lastSettlingAt.current > VALUE_ONLY_RECHECK_MS) sawSettling.current = false;
     } else if (next === 'gain' || next === 'none') {
       sawSettling.current = false;               // the trade resolved
     }
@@ -174,7 +173,7 @@ export function useMonthInsights(params: {
     shown.current = null;
     lastStocks.current = null;
     sawSettling.current = false;
-    valueOnlyChecks.current = 0;
+    lastSettlingAt.current = 0;
     if (state.revealed) setState({ revealed: false });
   }
 

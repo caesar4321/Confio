@@ -190,6 +190,20 @@ def ledger_explains_chain(ledger: dict, chain: dict) -> bool:
     return True
 
 
+def _chain_lags_recent_trades(trades: list[Trade], chain: dict, now: datetime) -> bool:
+    """The chain is the ledger minus its newest trades confirmed in the last
+    RECENT_SETTLEMENT. A lagging node has seen a prefix of them (in the order
+    they settled), so each suffix is tried: of two quick trades it may show
+    the first and not the second."""
+    recent = sorted((t for t in trades if t.settled_at and now - t.settled_at <= RECENT_SETTLEMENT),
+                    key=lambda t: t.settled_at)
+    for k in range(len(recent)):
+        unseen = {id(t) for t in recent[k:]}
+        if ledger_explains_chain(ledger_units([t for t in trades if id(t) not in unseen]), chain):
+            return True
+    return False
+
+
 def close_before(symbol: str, when: datetime) -> Decimal | None:
     """The last daily close at or before `when` (within PRICE_LOOKBACK).
     A boundary more than a day old never changes: cached for hours, so Tu mes
@@ -322,10 +336,7 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         # the one that saw finality (the RPC pool rotates): the chain is the
         # ledger WITHOUT the newest trades. That is settling, not "history
         # incomplete" — the next ask, seconds later, sees the trade.
-        recent = [t for t in trades if t.settled_at and now - t.settled_at <= RECENT_SETTLEMENT]
-        recent_ids = {id(t) for t in recent}
-        lagging = (current and not explained and bool(recent)
-                   and ledger_explains_chain(ledger_units([t for t in trades if id(t) not in recent_ids]), chain))
+        lagging = current and not explained and _chain_lags_recent_trades(trades, chain, now)
         pending = current and (bool(in_flight) or lagging)
         if not current and any(t.when < end for t in in_flight):
             explained = False               # month just ended under a trade in flight
