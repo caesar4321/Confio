@@ -338,9 +338,12 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         # The chain scan and the market are network waits independent of the
         # ledger (a DB read, kept on this thread's connection): overlap them.
         pool = _pool()
-        # Fresh (≤30s), complete, or nothing: a total is never partial or stale.
-        # A trade it saw on the wire spares the pool's query; none seen is
-        # asked again at store time (one may broadcast during the scan).
+        # The stored complete scan (StockHoldings), at any age: Tu mes moves
+        # no stocks, and the wallet's own trades mark it stale. Scanned here
+        # only when there is no row yet or it is stale; complete or nothing,
+        # a total is never partial. A trade it saw on the wire spares the
+        # pool's query; none seen is asked again at store time (one may
+        # broadcast during the scan).
         scan = pool.submit(_in_pool_db, complete_holdings, bsc_address, wallet_in_flight=bool(in_flight))
         listing = pool.submit(_market_by_symbol)    # {symbol: price (> 0), ticker, name}
         trades = confirmed_trades(bsc_address)

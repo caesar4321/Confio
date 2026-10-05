@@ -44,8 +44,7 @@ export function stockMonthGain(value: StockMonth | null): number | null {
 /** The stocks screens' door to this month in Tu mes: back to a Tu mes already
  *  in the stack (pop + merge) instead of stacking copies, and masked like
  *  Home when the user hid their balances (these screens don't pass by Home). */
-export async function openTuMesNow(navigation: NativeStackNavigationProp<MainStackParamList>,
-  { fromTrade = false }: { fromTrade?: boolean } = {}): Promise<void> {
+export async function openTuMesNow(navigation: NativeStackNavigationProp<MainStackParamList>): Promise<void> {
   // A Tu mes already in the stack may have been opened masked by another
   // screen's own toggle (the account detail's per-account eye): the merge
   // must never unmask it. The LAST one: navigate's pop goes back to the
@@ -54,5 +53,5 @@ export async function openTuMesNow(navigation: NativeStackNavigationProp<MainSta
   const existing = [...routes].reverse().find((r) => r.name === 'MonthSummary');
   const wasMasked = Boolean((existing?.params as MainStackParamList['MonthSummary'])?.masked);
   const masked = wasMasked || await isBalanceHidden();
-  navigation.navigate('MonthSummary', { ...currentYearMonth(), masked, fromTrade }, { pop: true, merge: true });
+  navigation.navigate('MonthSummary', { ...currentYearMonth(), masked }, { pop: true, merge: true });
 }

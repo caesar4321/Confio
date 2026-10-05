@@ -316,9 +316,7 @@ export type MainStackParamList = {
     transactionData?: any; // You can make this more specific based on your data structure
   };
   // "Tu mes": month summary and the movement lists behind each number
-  /** fromTrade: opened from a buy/sell success screen (a longer reveal window
-   *  for the stocks card, whose scan the trade just made cold). */
-  MonthSummary: { year?: number; month?: number; masked?: boolean; fromTrade?: boolean } | undefined;
+  MonthSummary: { year?: number; month?: number; masked?: boolean } | undefined;
   MonthMovements: {
     year: number;
     month: number;

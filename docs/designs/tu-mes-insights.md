@@ -203,7 +203,7 @@ No title row, no calendar bar (the bar measured days, not money; removed with th
 
 | State | Behavior |
 |---|---|
-| Loading | (design review 8A) Card A placeholder (same height) renders first. The insight cards **and the sections below them** are revealed together, in fixed slot order, once every insight query settles or 800ms pass, whichever comes first. A query that answers later is dropped for this view. Refocus refetches silently (no re-fade, no re-grow). Nothing on screen ever moves after the reveal. |
+| Loading | (design review 8A) Card A placeholder (same height) renders first. The insight cards **and the sections below them** are revealed together, in fixed slot order, once every insight query settles. (Amended 2026-10-05: the 800ms cap is dropped; a cold stocks scan of ~1.6s kept losing "Tus acciones". Placeholder rows hold the space until then; only a hung request is cut off, at 5s.) A query that answers after that is dropped for this view. Refocus refetches silently (no re-fade, no re-grow). Nothing on screen ever moves after the reveal. |
 | Month with no movements | (R25 + approved mockup) B/B' and C (current month) render first; A hidden. 32pt below the last card: "Todavía no hay movimientos en {mes}." 15 regular text.secondary, centered, then the existing Enviar (filled) / Recibir (outlined) pills. With no cards at all, today's vertically centered empty state is unchanged. |
 | monthSummary error | (design review 10B) Today's full-screen "Reintentar" is unchanged; insight cards hidden until it succeeds. |
 | Insights query error | B/B' and C hidden silently; A still renders from `monthSummary` (independent queries) |

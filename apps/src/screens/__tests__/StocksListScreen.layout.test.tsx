@@ -127,11 +127,11 @@ it('links holders to Tu mes, with this month\'s result when it is known', async 
   await act(async () => link.props.onPress());
   const now = new Date();
   const thisMonth = {year: now.getFullYear(), month: now.getMonth() + 1};
-  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary', {...thisMonth, masked: false, fromTrade: false}, {pop: true, merge: true});
+  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary', {...thisMonth, masked: false}, {pop: true, merge: true});
   // Balances hidden on Home stay hidden in Tu mes, whichever door opens it.
   mockHiddenBalance = true;
   await act(async () => link.props.onPress());
-  expect(mockNavigate).toHaveBeenLastCalledWith('MonthSummary', {...thisMonth, masked: true, fromTrade: false}, {pop: true, merge: true});
+  expect(mockNavigate).toHaveBeenLastCalledWith('MonthSummary', {...thisMonth, masked: true}, {pop: true, merge: true});
   mockHiddenBalance = false;
   await act(async () => tree.unmount());
 

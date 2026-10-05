@@ -5,7 +5,7 @@
 // line on the current month) · the dollar slot (protection, else savings
 // earned) · Tus acciones (stocks, or an invitation) · Pagos habituales · En qué se fue · Entre tus cuentas · Con quién.
 // Card A renders as soon as monthSummary answers; the insight cards and the
-// sections below are revealed together (≤800ms later), so nothing moves under
+// sections below are revealed together (once their queries answer), so nothing moves under
 // the user's finger. Amounts always US$, masked with the balance. A month with
 // no movements still shows the insight cards, with the empty message below.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -35,7 +35,7 @@ import { Rise } from '../components/tuMes/motion';
 import { TuMesIntro } from '../components/tuMes/TuMesIntro';
 import { StocksCard } from '../components/tuMes/StocksCard';
 import {
-  REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights, type InsightData,
+  useMonthInsights, type InsightData,
 } from '../hooks/useMonthInsights';
 import { dollarSlot, paceLine } from '../utils/monthInsights';
 import { AnalyticsService } from '../services/analyticsService';
@@ -105,10 +105,6 @@ export function MonthSummaryScreen() {
   const insights = useMonthInsights({
     accountKey: activeAccount?.id, year: period.year, month: period.month, timezone, isCurrent,
     ready: Boolean(summary && summary.year === period.year && summary.month === period.month),
-    // Only for the month the trade link opened: the merged param outlives
-    // that visit, and browsing other months keeps the usual window.
-    revealWindowMs: route.params?.fromTrade && route.params.year === period.year && route.params.month === period.month
-      ? REVEAL_WINDOW_AFTER_TRADE_MS : REVEAL_WINDOW_MS,
   });
   const refreshInsights = useRef(insights.refresh);
   refreshInsights.current = insights.refresh;

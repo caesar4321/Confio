@@ -7,7 +7,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from .models import (
     Balance, IndexerAssetCursor, OndoStockTrade, PendingAutoSwap,
-    ProcessedIndexerTransaction, SponsoredBatch,
+    ProcessedIndexerTransaction, SponsoredBatch, StockHoldings,
 )
 
 logger = logging.getLogger(__name__)
@@ -17,9 +17,26 @@ logger = logging.getLogger(__name__)
 class BalanceAdmin(admin.ModelAdmin):
     list_display = ['account', 'token', 'amount', 'available_amount', 'pending_amount', 'is_stale', 'last_synced']
     list_filter = ['token', 'is_stale', 'last_synced']
-    search_fields = ['account__user__email', 'account__algorand_address']
+    search_fields = ['account__user__email', 'account__algorand_address', 'address']
     readonly_fields = ['last_synced', 'last_blockchain_check', 'available_amount']
     
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('account', 'account__user')
+
+
+@admin.register(StockHoldings)
+class StockHoldingsAdmin(admin.ModelAdmin):
+    list_display = ['bsc_address', 'account', 'positions', 'is_stale', 'scanned_at']
+    list_filter = ['is_stale']
+    search_fields = ['bsc_address', 'account__user__email']
+    readonly_fields = ['bsc_address', 'account', 'held', 'blocks', 'scanned_at', 'updated_at']
+
+    def positions(self, obj):
+        return len(obj.held or {})
+
+    def has_add_permission(self, request):
+        return False                     # rows come from chain scans only
+
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('account', 'account__user')
 

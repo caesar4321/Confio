@@ -886,7 +886,7 @@ class ReceiptCheckerTests(SimpleTestCase):
                 batch = self._batch(kind=kind)
                 self._run(batch, self._receipt(logs=[self._exec_log()]))
                 self.assertEqual(batch.status, 'confirmed')
-                invalidate.assert_called_once_with(USER)
+                invalidate.assert_called_once_with(USER, min_block=100)
 
     def test_stock_history_failure_keeps_batch_retryable(self):
         batch = self._batch(kind='stock_buy')

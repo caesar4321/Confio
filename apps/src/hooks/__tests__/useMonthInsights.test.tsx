@@ -7,7 +7,7 @@ const mockClient = { query: (...a: any[]) => mockQuery(...a) };
 jest.mock('@apollo/client', () => ({ ...jest.requireActual('@apollo/client'), useApolloClient: () => mockClient }));
 
 import {
-  mergeValues, REVEAL_WINDOW_AFTER_TRADE_MS, REVEAL_WINDOW_MS, useMonthInsights,
+  mergeValues, REVEAL_HANG_GUARD_MS, useMonthInsights,
 } from '../useMonthInsights';
 
 const insights = (keys: string[]) => ({
@@ -45,13 +45,25 @@ it('reveals once every query settles, together', async () => {
   expect(latest.savings.earnedUsd).toBe('0.42');
 });
 
-it('reveals what arrived by 800ms and drops anything later (8A)', async () => {
+it('a slow query (a cold stocks scan) still makes the reveal: no short window', async () => {
+  const slow = deferred<any>();
+  mockQuery.mockImplementation(({ query }: any) => (query === GET_STOCK_MONTH ? slow.promise
+    : Promise.resolve({ data: query === GET_MONTH_INSIGHTS ? { monthInsights: insights([]) } : {} })));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  await act(async () => { jest.advanceTimersByTime(2000); });
+  expect(latest.revealed).toBe(false);
+  await act(async () => { slow.resolve({ data: { stockMonth: { state: 'none', canBuy: true } } }); });
+  expect(latest.revealed).toBe(true);
+  expect(latest.stocks).toEqual({ state: 'none', canBuy: true });
+});
+
+it('only a hung query is cut off, and its late answer never swaps the slot', async () => {
   const slow = deferred<any>();
   mockQuery.mockImplementation(({ query }: any) => (query === GET_PROTECTION_VALUE ? slow.promise
     : Promise.resolve({ data: query === GET_MONTH_INSIGHTS ? { monthInsights: insights([]) } : { savingsEarned: { earnedUsd: '0.42', daily: [] } } })));
   await act(async () => { renderer.create(<Probe {...base} />); });
   expect(latest.revealed).toBe(false);
-  await act(async () => { jest.advanceTimersByTime(REVEAL_WINDOW_MS); });
+  await act(async () => { jest.advanceTimersByTime(REVEAL_HANG_GUARD_MS); });
   expect(latest.revealed).toBe(true);
   expect(latest.protection).toBeNull();
   await act(async () => { slow.resolve({ data: { protectionValue: { currency: 'BOB' } } }); });
@@ -265,18 +277,6 @@ it("nor for a 'none' with nothing to offer (nothing drawn), unless a trade is se
   await act(async () => { latest.refresh(); });
   expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(1);
   await act(async () => tree.unmount());
-});
-
-it('from a trade, the reveal waits longer for a slow stocks answer (the card the user came for)', async () => {
-  const slow = deferred<any>();
-  mockQuery.mockImplementation(({ query }: any) => (query === GET_STOCK_MONTH ? slow.promise
-    : Promise.resolve({ data: {} })));
-  await act(async () => { renderer.create(<Probe {...base} revealWindowMs={REVEAL_WINDOW_AFTER_TRADE_MS} />); });
-  await act(async () => { jest.advanceTimersByTime(REVEAL_WINDOW_MS); });
-  expect(latest.revealed).toBe(false);
-  await act(async () => { slow.resolve({ data: { stockMonth: { state: 'gain', gainUsd: '1.00' } } }); });
-  expect(latest.revealed).toBe(true);
-  expect(latest.stocks.state).toBe('gain');
 });
 
 it('the answer that resolves a trade replaces the card, even a pre-trade gain (never the pre-trade value)', async () => {

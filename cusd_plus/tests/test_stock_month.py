@@ -4,7 +4,7 @@ from decimal import Decimal
 from unittest import mock
 
 from django.core.cache import cache
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from cusd_plus import stock_month as sm
 
@@ -29,6 +29,12 @@ def candle(day: datetime, close):
 def trade(symbol, kind, units, usd, when):
     return sm.Trade(symbol=symbol, kind=kind, units=Decimal(units),
                     usd=None if usd is None else Decimal(usd), when=when)
+
+
+def stored(address):
+    """The wallet's stored complete scan (StockHoldings), or None."""
+    from blockchain.models import StockHoldings
+    return StockHoldings.objects.filter(bsc_address=address.lower()).first()
 
 
 def complete_units(address):
@@ -424,7 +430,7 @@ class StockMonthResolverTests(SimpleTestCase):
         self.assertIsNone(self.resolve(sm.StockMonth(state='gain'), surfaces=False))
 
 
-class FreshHoldingsTests(NothingOnTheWire, SimpleTestCase):
+class FreshHoldingsTests(NothingOnTheWire, TestCase):
     def tearDown(self):
         cache.clear()
 
@@ -432,7 +438,10 @@ class FreshHoldingsTests(NothingOnTheWire, SimpleTestCase):
         from cusd_plus import gm_holdings
         holder = '0x' + '88' * 20
         cache.set(f'gm_hold_last:{holder}', {'TSLAon': 1.0}, 60)
-        with mock.patch.object(gm_holdings, 'registry', return_value={'TSLAon': {'address': '0x' + '11' * 20}}), \
+        reg = {'TSLAon': {'address': '0x' + '11' * 20}}
+        with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
+             mock.patch.object(gm_holdings, 'registry_entry', return_value=(reg, True)), \
+             mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
              mock.patch.object(gm_holdings, '_scan', side_effect=TimeoutError('node down')), \
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
             self.assertEqual(gm_holdings.holdings_units(holder), {'TSLAon': 1.0})
@@ -457,8 +466,9 @@ class FreshHoldingsTests(NothingOnTheWire, SimpleTestCase):
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 2.0}):
             self.assertEqual(complete_units(holder), {'TSLAon': 2.0})
         self.assertEqual(cache.get(f'gm_hold:{holder}'), {'TSLAon': 2.0})   # also the best answer for others
+        self.assertEqual(stored(holder).held, {'TSLAon': 2.0})
         gm_holdings.invalidate_holdings(holder)
-        self.assertIsNone(cache.get(f'gm_hold_full_v2:{holder}'))
+        self.assertTrue(stored(holder).is_stale)
         self.assertIsNone(cache.get(f'gm_hold:{holder}'))
 
 
@@ -492,7 +502,7 @@ class ConfirmedTradesCacheTests(SimpleTestCase):
         self.assertEqual(self.run_read(sig, bad)[1], 1)
 
 
-class HoldingsWarmupTests(NothingOnTheWire, SimpleTestCase):
+class HoldingsWarmupTests(NothingOnTheWire, TestCase):
     def tearDown(self):
         cache.clear()
 
@@ -538,12 +548,13 @@ class HoldingsWarmupTests(NothingOnTheWire, SimpleTestCase):
             with mock.patch.object(gm_holdings, '_scan', side_effect=behind):
                 self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})
                 self.assertEqual(gm_holdings.complete_holdings(ADDR), ({'TSLAon': 1.0}, {'TSLAon': 99}))
-            for k in ('gm_hold', 'gm_hold_full_v2', 'gm_hold_last'):
+            for k in ('gm_hold', 'gm_hold_last'):
                 self.assertIsNone(cache.get(f'{k}:{key}'))                     # nothing pre-trade cached
+            self.assertIsNone(stored(ADDR))                                     # nor stored
             with mock.patch.object(gm_holdings, '_scan', side_effect=caught_up):
                 self.assertEqual(gm_holdings.complete_holdings(ADDR), ({}, {'TSLAon': 100}))
             self.assertEqual(cache.get(f'gm_hold:{key}'), {})
-            self.assertEqual(cache.get(f'gm_hold_full_v2:{key}')['blocks'], {'TSLAon': 100})
+            self.assertEqual(stored(ADDR).blocks, {'TSLAon': 100})
 
     def test_no_read_is_cached_while_a_trade_is_on_the_wire(self):
         from cusd_plus import gm_holdings
@@ -562,8 +573,9 @@ class HoldingsWarmupTests(NothingOnTheWire, SimpleTestCase):
              mock.patch.object(gm_holdings, '_scan', side_effect=read):
             self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})
             self.assertEqual(gm_holdings.complete_holdings(ADDR), ({'TSLAon': 1.0}, {'TSLAon': 99}))
-            for k in ('gm_hold', 'gm_hold_full_v2', 'gm_hold_last'):
+            for k in ('gm_hold', 'gm_hold_last'):
                 self.assertIsNone(cache.get(f'{k}:{key}'))                     # served, never cached
+            self.assertIsNone(stored(ADDR))                                     # nor stored
             on_wire[0] = False                                                  # confirmed (or failed)
             gm_holdings.holdings_units(ADDR)
             self.assertEqual(cache.get(f'gm_hold:{key}'), {'TSLAon': 1.0})
@@ -573,10 +585,10 @@ class HoldingsWarmupTests(NothingOnTheWire, SimpleTestCase):
         key = ADDR.lower()
         cache.set(f'gm_hold_gen:{key}', 'g1')
         cache.set(f'gm_hold:{key}', {'TSLAon': 1.0})
-        cache.set(f'gm_hold_full_v2:{key}', {'held': {}, 'blocks': {}})
+        gm_holdings._write_row(key, {}, {})
         gm_holdings.drop_fresh_holdings(ADDR)
         self.assertIsNone(cache.get(f'gm_hold:{key}'))
-        self.assertIsNone(cache.get(f'gm_hold_full_v2:{key}'))
+        self.assertTrue(stored(ADDR).is_stale)
         self.assertEqual(gm_holdings._generation(key), 'g1')                   # scans running elsewhere kept
 
     def test_dispatch_never_raises_on_a_broker_failure(self):
@@ -586,7 +598,7 @@ class HoldingsWarmupTests(NothingOnTheWire, SimpleTestCase):
             tasks._dispatch_holdings_warmup(ADDR)
 
 
-class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
+class LiveRegistryTests(NothingOnTheWire, TestCase):
     def tearDown(self):
         cache.clear()
 
@@ -665,7 +677,8 @@ class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
              mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
              mock.patch.object(gm_holdings, '_scan', side_effect=scan):
             self.assertEqual(complete_units(ADDR), {'TSLAon': 2.0})
-        self.assertEqual(cache.get(f'gm_hold_full_v2:{ADDR.lower()}')['held'], {'TSLAon': 2.0})
+        self.assertEqual(stored(ADDR).held, {'TSLAon': 2.0})
+        self.assertFalse(stored(ADDR).is_stale)
 
     def test_a_trade_invalidating_during_the_cache_write_drops_the_entry(self):
         from cusd_plus import gm_holdings
@@ -685,29 +698,32 @@ class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
              mock.patch.object(gm_holdings.cache, 'set_many', side_effect=set_many):
             # The pre-trade scan is dropped AND not used: the chain is read again.
             self.assertEqual(complete_units(ADDR), {'TSLAon': 2.0})
-        self.assertEqual(cache.get(f'gm_hold_full_v2:{ADDR.lower()}')['held'], {'TSLAon': 2.0})
+        self.assertEqual(stored(ADDR).held, {'TSLAon': 2.0})
+        self.assertFalse(stored(ADDR).is_stale)
         self.assertEqual(cache.get(f'gm_hold:{ADDR.lower()}'), {'TSLAon': 2.0})
 
     def test_a_late_write_restores_the_previous_last_known(self):
         from cusd_plus import gm_holdings
         key = ADDR.lower()
         cache.set(f'gm_hold_last:{key}', {'TSLAon': 9.0}, 60)                    # last good portfolio
-        # A post-trade complete scan.
-        cache.set(f'gm_hold_full_v2:{key}', {'held': {'TSLAon': 2.0}, 'blocks': {}}, 30)
+        reg = {'TSLAon': {'address': '0x' + '11' * 20}}
         real_set_many = cache.set_many
 
         def set_many(*args, **kwargs):
             gm_holdings.invalidate_holdings(ADDR)
-            cache.set(f'gm_hold_full_v2:{key}', {'held': {'TSLAon': 2.0}, 'blocks': {}}, 30)                # rewritten post-trade
+            gm_holdings._write_row(key, {'TSLAon': 2.0}, {})                         # a post-trade complete scan
             return real_set_many(*args, **kwargs)
 
-        with mock.patch.object(gm_holdings, 'registry', return_value={'TSLAon': {'address': '0x' + '11' * 20}}), \
+        # Ondo's list is down: the stocks screen falls back to a list scan.
+        with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
+             mock.patch.object(gm_holdings, 'registry_entry', return_value=(reg, False)), \
              mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 1.0}), \
              mock.patch.object(gm_holdings.cache, 'set_many', side_effect=set_many):
             gm_holdings.holdings_units(ADDR)
         self.assertEqual(cache.get(f'gm_hold_last:{key}'), {'TSLAon': 9.0})      # never the pre-trade scan
         self.assertIsNone(cache.get(f'gm_hold:{key}'))
-        self.assertEqual(cache.get(f'gm_hold_full_v2:{key}')['held'], {'TSLAon': 2.0})      # a list write never drops it
+        self.assertEqual(stored(ADDR).held, {'TSLAon': 2.0})                     # a list write never drops it
+        self.assertFalse(stored(ADDR).is_stale)
 
     def test_a_list_scan_racing_a_trade_is_returned_but_not_cached(self):
         from cusd_plus import gm_holdings
@@ -716,7 +732,9 @@ class LiveRegistryTests(NothingOnTheWire, SimpleTestCase):
             gm_holdings.invalidate_holdings(ADDR)
             return {'TSLAon': 1.0}
 
-        with mock.patch.object(gm_holdings, 'registry', return_value={'TSLAon': {'address': '0x' + '11' * 20}}), \
+        reg = {'TSLAon': {'address': '0x' + '11' * 20}}
+        with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
+             mock.patch.object(gm_holdings, 'registry_entry', return_value=(reg, False)), \
              mock.patch.object(gm_holdings, '_scan', side_effect=scan):
             self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})
         self.assertIsNone(cache.get(f'gm_hold:{ADDR.lower()}'))
@@ -753,7 +771,7 @@ class PendingWindowTests(SimpleTestCase):
         self.assertLessEqual(gm_holdings.IN_FLIGHT_MAX_AGE, timedelta(minutes=15))
 
 
-class FloorAndInFlightTests(NothingOnTheWire, SimpleTestCase):
+class FloorAndInFlightTests(NothingOnTheWire, TestCase):
     def tearDown(self):
         cache.clear()
 

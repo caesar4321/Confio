@@ -4,9 +4,10 @@
 // - Four isolated queries (monthInsights, savingsEarned, protectionValue,
 //   stockMonth): each fails alone, and an older server never breaks
 //   monthSummary.
-// - One reveal: the window opens when Card A has rendered (`ready`) and
-//   closes when every query has settled or after 800ms. What arrived by then
-//   is shown, together and in slot order; anything later is dropped for this
+// - One reveal: once Card A has rendered (`ready`), the cards are shown
+//   together, in slot order, when every query has settled (no short window:
+//   a cold stocks scan of ~1.6s must not lose its card). Only a request
+//   that hangs (a degraded node) is cut off, at REVEAL_HANG_GUARD_MS; anything later is dropped for this
 //   view, so nothing below ever moves after the reveal.
 // - Refocus refetches silently: values inside cards already shown update,
 //   but no card or row is added, removed or swapped until the next view
@@ -20,11 +21,9 @@ import {
 } from '../apollo/monthSummary';
 import { MIN_SAVINGS_USD } from '../utils/monthInsights';
 
-export const REVEAL_WINDOW_MS = 800;
-/** Arriving from a trade's success screen: the trade just invalidated the
- *  holdings scan, and the stocks card is what the user came to see. The
- *  reveal still happens the moment every query has answered. */
-export const REVEAL_WINDOW_AFTER_TRADE_MS = 2500;
+/** Not a design window: the reveal waits for every query. This only cuts off
+ *  a request that never answers, so the lower screen can't stay empty. */
+export const REVEAL_HANG_GUARD_MS = 5000;
 
 export type InsightData = {
   insights: MonthInsights | null;
@@ -99,15 +98,10 @@ export function useMonthInsights(params: {
   month: number;
   timezone: string | undefined;
   isCurrent: boolean;
-  /** Card A has rendered (monthSummary answered): the 800ms window starts. */
+  /** Card A has rendered (monthSummary answered): the insight queries start. */
   ready: boolean;
-  /** Reveal window override (REVEAL_WINDOW_AFTER_TRADE_MS from a trade). */
-  revealWindowMs?: number;
 }): MonthInsightsState & { refresh: () => void; refreshStocks: () => void; stocksSettling: boolean } {
-  const { accountKey, year, month, timezone, isCurrent, ready, revealWindowMs = REVEAL_WINDOW_MS } = params;
-  // Read at reveal time: a param merged later must not restart a reveal.
-  const windowMs = useRef(revealWindowMs);
-  windowMs.current = revealWindowMs;
+  const { accountKey, year, month, timezone, isCurrent, ready } = params;
   const client = useApolloClient();
   const viewKey = `${accountKey ?? ''}:${year}-${month}`;
   const [state, setState] = useState<MonthInsightsState>({ revealed: false });
@@ -198,7 +192,7 @@ export function useMonthInsights(params: {
     savings.then((v) => { if (!closed) got.savings = v; });
     protection.then((v) => { if (!closed) got.protection = v; });
     stocks.then((v) => { if (!closed) got.stocks = v; });
-    const timer = setTimeout(reveal, windowMs.current);
+    const timer = setTimeout(reveal, REVEAL_HANG_GUARD_MS);
     Promise.all([insights, savings, protection, stocks]).then(() => {
       clearTimeout(timer);
       reveal();
