@@ -270,6 +270,22 @@ def _pool():
     return _POOL
 
 
+def _in_pool_db(fn, *args, **kwargs):
+    """Run `fn` on a pool thread that may touch the database (the holdings
+    cache gate asks for trades on the wire). Django tidies a thread's
+    connection only around requests, which these long-lived threads never
+    see: without this, each keeps its connection forever, and one dropped by
+    the server (RDS Proxy, a failover) fails every later query of that
+    thread, so the in-flight check fails closed and no scan is ever cached
+    from it again. Same hygiene as a request: before and after."""
+    from django.db import close_old_connections
+    close_old_connections()
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        close_old_connections()
+
+
 def _prefetch(prices: dict, pairs: set) -> None:
     """Fill `prices` for every (symbol, boundary) at once: one Ondo candle
     request per symbol in parallel instead of one after another, so a cold
@@ -326,7 +342,8 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         # ledger (a DB read, kept on this thread's connection): overlap them.
         pool = _pool()
         # Fresh (≤30s), complete, or nothing: a total is never partial or stale.
-        scan = pool.submit(complete_holdings, bsc_address)
+        # It already knows what's on the wire: no second query from the pool.
+        scan = pool.submit(_in_pool_db, complete_holdings, bsc_address, wallet_in_flight=bool(in_flight))
         listing = pool.submit(_market_by_symbol)    # {symbol: price (> 0), ticker, name}
         trades = confirmed_trades(bsc_address)
         complete = scan.result()

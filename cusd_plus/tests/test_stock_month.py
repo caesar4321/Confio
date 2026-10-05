@@ -69,8 +69,10 @@ class StockMonthTests(SimpleTestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def scan(self, _address):
-        # The complete scan (never a partial or stale one), with its blocks.
+    def scan(self, _address, *, wallet_in_flight=None):
+        # The complete scan (never a partial or stale one), with its blocks;
+        # told what's on the wire (no second query from the pool thread).
+        self.assertIsInstance(wallet_in_flight, bool)          # always told, never left to query
         return None if self.chain is None else (self.chain, self.blocks)
 
     def run_month(self, start=OCT_START, end=NOV_START, now=NOW):
@@ -763,3 +765,23 @@ class InFlightCheckTests(SimpleTestCase):
             model.objects.filter.side_effect = RuntimeError('db down')
             with self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
                 self.assertTrue(gm_holdings._wallet_in_flight(ADDR.lower()))  # unknown: don't cache
+
+    def test_the_pool_scan_tidies_its_db_connection_like_a_request(self):
+        # The long-lived pool threads never see request signals: a connection
+        # dropped by the server would otherwise poison every later in-flight
+        # check of that thread (fail closed: nothing cached, ever).
+        calls = []
+        with mock.patch('django.db.close_old_connections', side_effect=lambda: calls.append('tidy')):
+            self.assertEqual(sm._in_pool_db(lambda a: calls.append(a) or 'ok', 'scan'), 'ok')
+            self.assertEqual(calls, ['tidy', 'scan', 'tidy'])
+            calls.clear()
+            with self.assertRaises(RuntimeError):
+                sm._in_pool_db(lambda: (_ for _ in ()).throw(RuntimeError('rpc')))
+            self.assertEqual(calls, ['tidy', 'tidy'])
+
+    def test_a_caller_that_knows_skips_the_query(self):
+        from cusd_plus import gm_holdings
+        with mock.patch.object(gm_holdings, '_wallet_in_flight') as query:
+            self.assertFalse(gm_holdings._behind_floor(ADDR.lower(), {'TSLAon': 5}, False))
+            self.assertTrue(gm_holdings._behind_floor(ADDR.lower(), {'TSLAon': 5}, True))
+        query.assert_not_called()
