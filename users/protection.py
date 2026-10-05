@@ -13,7 +13,7 @@ Two bases, by country:
     today     = the same dollars at today's Binance P2P rate.
     Conservative: purchase prices include fees, the P2P rate doesn't.
 
-  month_start (VE: no on-ramp)
+  month_start (VE: no on-ramp; and BO/AR users who never bought in Confío)
     protected = dollars held since the 1st (balance now minus this month's
                 net inflow, capped at the balance);
     paid      = those dollars at the Binance P2P rate kept for the 1st;
@@ -246,7 +246,16 @@ def protection_value(user, account, account_type, business_id, year: int, month:
     today_rate, fetched_at = now
 
     version, load = _ledger(user, account, account_type, business_id)
-    if currency in MONTH_START_CURRENCIES:
+    lots = []
+    if currency not in MONTH_START_CURRENCIES:
+        key = f'tumes_protection:{account.id}:{version}:lots:{currency}'
+        lots = cache.get(key)
+        if lots is None:
+            lots = replay(load(), currency)
+            cache.set(key, lots, RESULT_TTL)
+    if not lots:
+        # No dollars bought in Confío (VE always; BO/AR users who got their
+        # dollars another way): compare with the 1st of the month instead.
         start_rate = month_start_rate(currency, year, month)
         if start_rate is None:
             return None
@@ -265,13 +274,6 @@ def protection_value(user, account, account_type, business_id, year: int, month:
                             paid_local=protected * start_rate, today_local=protected * today_rate,
                             avg_rate=start_rate, today_rate=today_rate, quoted_at=fetched_at.isoformat())
     else:
-        key = f'tumes_protection:{account.id}:{version}:lots:{currency}'
-        lots = cache.get(key)
-        if lots is None:
-            lots = replay(load(), currency)
-            cache.set(key, lots, RESULT_TTL)
-        if not lots:
-            return None
         lots = _cap(lots, _balance_usd(account, version))
         protected = sum((l.usd for l in lots), Decimal('0'))
         if protected <= 0:
