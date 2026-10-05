@@ -33,6 +33,9 @@ PRICE_LOOKBACK = timedelta(days=7)
 # Daily candles reach back one year ('1Y'); older months have no price.
 OHLC_RANGE = '1Y'
 UNITS_TOLERANCE = Decimal('0.000001')        # relative, ledger vs chain
+# A trade still 'signed'/'sent' after this long is stuck (dropped, never
+# reconciled), not settling: it must not hide the card forever.
+PENDING_MAX_AGE = timedelta(days=1)
 
 
 class StockMonthUnavailable(Exception):
@@ -57,7 +60,7 @@ class Mover:
 
 @dataclass
 class StockMonth:
-    state: str                         # 'gain' | 'value_only' | 'none'
+    state: str                         # 'gain' | 'value_only' | 'settling' | 'none'
     value_end: Decimal = Decimal('0')
     value_start: Decimal | None = None
     bought: Decimal | None = None
@@ -89,15 +92,38 @@ def _symbol_by_address() -> dict:
 
 def confirmed_trades(bsc_address: str) -> list[Trade]:
     """Every confirmed Confío stock trade of this wallet, oldest first."""
+    from django.core.cache import cache
+    from django.db.models import Count, Max, Q
     from blockchain.models import SponsoredBatch
+
+    confirmed = SponsoredBatch.objects.filter(
+        user_bsc_address__iexact=bsc_address, kind__in=('stock_buy', 'stock_sell'), status='confirmed')
+    # One cheap aggregate decides whether the decoded ledger is still valid:
+    # a new confirmation, a batch edit, a history row added, re-synced (its
+    # exact amount) or hidden all change this key. Unchanged → no decoding.
+    sig = confirmed.aggregate(
+        n=Count('id'), last=Max('id'), touched=Max('updated_at'),
+        rows=Count('unified_transaction', filter=Q(unified_transaction__deleted_at__isnull=True)),
+        rows_touched=Max('unified_transaction__updated_at'))
+    if not sig['n']:
+        return []
+    stamp = lambda v: v.timestamp() if v else 0  # noqa: E731
+    key = (f'gm_trades_v1:{bsc_address.lower()}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
+           f'{sig["rows"]}:{stamp(sig["rows_touched"])}')
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    trades = _decode_trades(confirmed.select_related('unified_transaction').order_by('created_at', 'id'))
+    if not any(t.symbol.startswith('?') for t in trades):
+        # An unreadable trade may become readable (registry update): re-read it.
+        cache.set(key, trades, 24 * 3600)
+    return trades
+
+
+def _decode_trades(batches) -> list[Trade]:
     from .sponsor_7702 import _decode_stock_call
 
     by_address = _symbol_by_address()
-    batches = (SponsoredBatch.objects
-               .filter(user_bsc_address__iexact=bsc_address, kind__in=('stock_buy', 'stock_sell'),
-                       status='confirmed')
-               .select_related('unified_transaction')
-               .order_by('created_at', 'id'))
     trades = []
     for batch in batches:
         try:
@@ -125,10 +151,11 @@ def pending_trade_exists(bsc_address: str) -> bool:
     """A Confío trade is on the wire but not final yet. The client shows success
     on the receipt, before finality marks the batch confirmed, so in that window
     the chain already holds (or lost) the units while the ledger does not."""
+    from django.utils import timezone as dj_tz
     from blockchain.models import SponsoredBatch
     return SponsoredBatch.objects.filter(
         user_bsc_address__iexact=bsc_address, kind__in=('stock_buy', 'stock_sell'),
-        status__in=('signed', 'sent')).exists()
+        status__in=('signed', 'sent'), created_at__gte=dj_tz.now() - PENDING_MAX_AGE).exists()
 
 
 def ledger_units(trades: list[Trade], before: datetime | None = None) -> dict:
@@ -224,16 +251,13 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
     current = end > now
     try:
         # Fresh (≤30s) or nothing: a days-old snapshot is not "today".
-        chain_raw = holdings_units(bsc_address, allow_stale=False)
+        chain_raw = holdings_units(bsc_address, require_complete=True)
         if chain_raw is None:
             return None                     # scan unknown, never "no stocks"
         chain = {s: d for s, u in chain_raw.items() if (d := _dec(u)) is not None and d > 0}
         trades = confirmed_trades(bsc_address)
         exact = (ledger_explains_chain(ledger_units(trades), chain)
                  and all(t.usd is not None for t in trades))
-        if not exact and pending_trade_exists(bsc_address):
-            return None                     # a trade settling: unknown, not "from outside"
-
         market = {}
         for item in gm_api.all_market():
             pm = item.get('primaryMarket') or {}
@@ -253,8 +277,18 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
 
         prices: dict = {}
         if not exact:
+            settling = pending_trade_exists(bsc_address)
             if not current:
                 return None
+            if settling:
+                # A trade on the wire but not final (the app shows success on
+                # the receipt): today's value is known, the month's result in
+                # seconds. Never "from outside Confío", never a guessed gain.
+                _prefetch(prices, {(s, start) for s in chain})
+                value = sum((u * live_price(s) for s, u in chain.items()), Decimal('0'))
+                return StockMonth(state='settling', value_end=value,
+                                  top=_top_mover(chain, market, prices, start, live_price),
+                                  holdings=len(chain))
             if not chain:
                 return StockMonth(state='none')
             _prefetch(prices, {(s, start) for s in chain})
@@ -267,7 +301,9 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         units_start = ledger_units(trades, before=start)
         units_end = chain if current else ledger_units(trades, before=end)
         if not units_start and not units_end and not in_month:
-            return StockMonth(state='none')
+            # A past month before the first purchase of someone who holds
+            # stocks now: no card, never an invitation to buy what they own.
+            return StockMonth(state='none') if current or not chain else None
 
         # Start prices for every position (value on the 1st, top mover);
         # end prices only for a past month (the current one ends live).

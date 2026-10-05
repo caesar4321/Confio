@@ -25,9 +25,12 @@ jest.mock('@apollo/client', () => ({
     : { data: { monthMovements: [] }, refetch: jest.fn().mockResolvedValue({}) }),
 }));
 let mockInsights: any;
-jest.mock('../../hooks/useMonthInsights', () => ({ useMonthInsights: () => ({ ...mockInsights, refresh: jest.fn() }) }));
+const mockRefreshStocks = jest.fn();
+jest.mock('../../hooks/useMonthInsights', () => ({
+  useMonthInsights: () => ({ ...mockInsights, refresh: jest.fn(), refreshStocks: mockRefreshStocks }),
+}));
 
-import { MonthSummaryScreen } from '../MonthSummaryScreen';
+import { MonthSummaryScreen, SETTLING_MAX_TRIES, SETTLING_POLL_MS } from '../MonthSummaryScreen';
 
 const totals = (spending: string, count: number) => ({
   incomeUsd: '215.00', spendingUsd: spending, topUpsUsd: '0', withdrawalsUsd: '0', savingsNetUsd: '0',
@@ -121,4 +124,33 @@ it('no stocks: an invitation only where buying is offered; unknown shows nothing
   mockInsights = { ...mockInsights, stocks: null };
   const tree = mount();
   expect(has(tree, 'tumes-stocks-invite') || has(tree, 'tumes-stocks-card')).toBe(false);
+});
+
+it('a settling trade (arriving from a buy) shows the card and re-asks stocks until it resolves, bounded', () => {
+  jest.useFakeTimers();
+  mockRefreshStocks.mockClear();
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null,
+    stocks: { ...stockGain, state: 'settling', gainUsd: null, gainPct: null, valueStartUsd: null } };
+  const tree = mount();
+  expect(has(tree, 'tumes-stocks-card')).toBe(true);
+  expect(has(tree, 'tumes-stocks-settling-note')).toBe(true);
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 2); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(2);
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 100); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(SETTLING_MAX_TRIES);
+  act(() => tree.unmount());
+  jest.useRealTimers();
+});
+
+it('a resolved month does not poll', () => {
+  jest.useFakeTimers();
+  mockRefreshStocks.mockClear();
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: stockGain };
+  const tree = mount();
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 5); });
+  expect(mockRefreshStocks).not.toHaveBeenCalled();
+  act(() => tree.unmount());
+  jest.useRealTimers();
 });

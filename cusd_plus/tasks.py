@@ -1971,8 +1971,8 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         from . import vault
         vault.invalidate_position(batch.user_bsc_address)
     if batch.kind in ('stock_buy', 'stock_sell'):
-        from django.core.cache import cache
-        cache.delete(f'gm_hold:{batch.user_bsc_address.lower()}')
+        from .gm_holdings import invalidate_holdings
+        invalidate_holdings(batch.user_bsc_address)
     logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)
 
 
