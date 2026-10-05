@@ -249,17 +249,24 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
     if not bsc_address:
         return StockMonth(state='none')
     current = end > now
+    from concurrent.futures import ThreadPoolExecutor
     try:
-        # Fresh (≤30s) or nothing: a days-old snapshot is not "today".
-        chain_raw = holdings_units(bsc_address, require_complete=True)
+        # The chain scan and the market are network waits independent of the
+        # ledger (a DB read, kept on this thread's connection): overlap them.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            # Fresh (≤30s), complete, or nothing: a total is never partial or stale.
+            scan = pool.submit(holdings_units, bsc_address, require_complete=True)
+            listing = pool.submit(gm_api.all_market)
+            trades = confirmed_trades(bsc_address)
+            chain_raw = scan.result()
+            market_rows = listing.result()
         if chain_raw is None:
             return None                     # scan unknown, never "no stocks"
         chain = {s: d for s, u in chain_raw.items() if (d := _dec(u)) is not None and d > 0}
-        trades = confirmed_trades(bsc_address)
         exact = (ledger_explains_chain(ledger_units(trades), chain)
                  and all(t.usd is not None for t in trades))
         market = {}
-        for item in gm_api.all_market():
+        for item in market_rows:
             pm = item.get('primaryMarket') or {}
             um = item.get('underlyingMarket') or {}
             if pm.get('symbol'):
@@ -289,6 +296,10 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
                                   top=_top_mover(chain, market, prices, start, live_price),
                                   holdings=len(chain))
             if not chain:
+                if any(start <= t.when < end for t in trades):
+                    # Sold out this month, but the history can't say for how
+                    # much: worth US$0 today, never an invitation to buy.
+                    return StockMonth(state='value_only')
                 return StockMonth(state='none')
             _prefetch(prices, {(s, start) for s in chain})
             value = sum((u * live_price(s) for s, u in chain.items()), Decimal('0'))

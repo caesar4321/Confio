@@ -240,7 +240,7 @@ class MonthSummaryQuery(graphene.ObjectType):
     def resolve_stock_month(self, info, year, month, timezone=None):
         from django.utils import timezone as dj_tz
         from cusd_plus.eligibility import stock_buy_overlay_allows
-        from cusd_plus.schema import _stock_surfaces_enabled
+        from cusd_plus.schema import _stock_execution_ready, _stock_surfaces_enabled
         from cusd_plus.stock_month import stock_month
         from users.cashflow import month_window
         context = _summary_context(info, year, month, timezone)
@@ -258,14 +258,16 @@ class MonthSummaryQuery(graphene.ObjectType):
             return None
         if result is None:
             return None
-        # Surfaces (issuer policy + kill switch) passed above; only the buy
-        # overlay is left (_stock_buy_enabled would re-run the issuer policy).
-        # It only gates the invitation, and it is not free (phone + IP).
-        can_buy = result.state == 'none' and stock_buy_overlay_allows(user, meta)
+        # Surfaces (issuer policy + kill switch) passed above; the buy overlay
+        # and the execution rails are left (_stock_buy_enabled would re-run the
+        # issuer policy). Same gates as stocksBuyEnabled: never invite to buy
+        # while trading is off. The overlay is not free (phone + IP): last.
+        can_buy = (result.state == 'none' and _stock_execution_ready()
+                   and stock_buy_overlay_allows(user, meta))
         if result.state == 'none' and not can_buy:
             return None                      # nothing to show and nothing to offer
+        # Dollars and percents alike: 2 decimals, half up.
         opt = lambda v: None if v is None else _usd(v)  # noqa: E731
-        pct = lambda v: None if v is None else format(v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), 'f')  # noqa: E731
         top = result.top
         gain = result.gain
         if gain is not None and None not in (result.value_start, result.bought, result.sold):
@@ -276,8 +278,8 @@ class MonthSummaryQuery(graphene.ObjectType):
         return StockMonthType(
             state=result.state, can_buy=can_buy, value_usd=_usd(result.value_end),
             value_start_usd=opt(result.value_start), bought_usd=opt(result.bought), sold_usd=opt(result.sold),
-            gain_usd=opt(gain), gain_pct=pct(result.gain_pct), holdings=result.holdings,
-            top_mover=StockMoverType(ticker=top.ticker, name=top.name, change_pct=pct(top.change_pct)) if top else None)
+            gain_usd=opt(gain), gain_pct=opt(result.gain_pct), holdings=result.holdings,
+            top_mover=StockMoverType(ticker=top.ticker, name=top.name, change_pct=_usd(top.change_pct)) if top else None)
 
     def resolve_protection_value(self, info, timezone=None, include_stable=False):
         from django.utils import timezone as dj_tz

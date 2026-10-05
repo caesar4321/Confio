@@ -47,6 +47,8 @@ SCAN_LAST_TTL = 7 * 24 * 3600
 REGISTRY_TTL = 24 * 3600
 REGISTRY_FALLBACK_TTL = 5 * 60
 REGISTRY_CACHE_KEY = 'gm_bsc_registry_v1'
+# Present while the cached registry is Ondo's live answer (not the snapshot).
+REGISTRY_LIVE_KEY = 'gm_bsc_registry_live_v1'
 
 
 def _parse_bsc_registry(rows, *, strict: bool = False) -> dict:
@@ -118,13 +120,24 @@ def registry() -> dict | None:
         result = live or fallback
         if result:
             cache.set(REGISTRY_CACHE_KEY, result, REGISTRY_TTL if live else REGISTRY_FALLBACK_TTL)
+        if live:
+            cache.set(REGISTRY_LIVE_KEY, True, REGISTRY_TTL)
+        else:
+            cache.delete(REGISTRY_LIVE_KEY)
         return result or None
     except Exception:  # noqa: BLE001 — portfolio degrades to shipped snapshot
         logger.warning('GM address registry unavailable; using local fallback', exc_info=True)
+        cache.delete(REGISTRY_LIVE_KEY)
         if fallback:
             # Retry Ondo soon after an outage, but avoid a request stampede.
             cache.set(REGISTRY_CACHE_KEY, fallback, REGISTRY_FALLBACK_TTL)
         return fallback or None
+
+
+def registry_is_live() -> bool:
+    """Whether the registry in use is Ondo's live list. The shipped snapshot
+    lacks tokens listed after it, so a scan over it can miss a position."""
+    return cache.get(REGISTRY_LIVE_KEY) is True
 
 
 def audit_registry() -> dict:
@@ -252,8 +265,8 @@ def _complete_holdings(key: str) -> dict | None:
     if cached is not None:
         return cached
     token_registry = registry()
-    if token_registry is None:
-        return None
+    if token_registry is None or not registry_is_live():
+        return None                        # the snapshot may lack a held token
     if not token_registry:
         return {}
     try:

@@ -166,6 +166,14 @@ class StockMonthTests(SimpleTestCase):
         self.candles['NVDAon'] = [candle(datetime(2026, 9, 10, tzinfo=UTC), '100')]   # 3 weeks stale
         self.assertIsNone(self.run_month())
 
+    def test_sold_out_with_an_unreadable_trade_is_value_only_not_an_invitation(self):
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)),
+                       trade('?7', 'stock_sell', '0', None, datetime(2026, 10, 15, tzinfo=UTC))]
+        self.chain = {}
+        r = self.run_month()
+        self.assertEqual(r.state, 'value_only')
+        self.assertEqual(r.value_end, Decimal('0'))
+
     def test_ledger_tolerates_float_dust_but_not_real_differences(self):
         ledger = {'NVDAon': Decimal('0.123456789')}
         self.assertTrue(sm.ledger_explains_chain(ledger, {'NVDAon': Decimal('0.1234567890000001')}))
@@ -183,7 +191,7 @@ class StockMonthTests(SimpleTestCase):
 class StockMonthResolverTests(SimpleTestCase):
     """Gating: unknown hides, 'none' shows only when buying is offered."""
 
-    def resolve(self, result, *, surfaces=True, can_buy=True):
+    def resolve(self, result, *, surfaces=True, can_buy=True, trading=True):
         from types import SimpleNamespace
         from zoneinfo import ZoneInfo
         from users import cashflow_schema
@@ -192,6 +200,7 @@ class StockMonthResolverTests(SimpleTestCase):
         ctx = (object(), account, 'personal', None, ZoneInfo('UTC'))
         with mock.patch.object(cashflow_schema, '_summary_context', return_value=ctx), \
              mock.patch('cusd_plus.schema._stock_surfaces_enabled', return_value=surfaces), \
+             mock.patch('cusd_plus.schema._stock_execution_ready', return_value=trading), \
              mock.patch('cusd_plus.eligibility.stock_buy_overlay_allows', return_value=can_buy), \
              mock.patch('cusd_plus.stock_month.stock_month', return_value=result):
             return cashflow_schema.MonthSummaryQuery().resolve_stock_month(info, 2026, 10)
@@ -215,6 +224,7 @@ class StockMonthResolverTests(SimpleTestCase):
     def test_none_needs_buying_and_unknown_or_gated_is_null(self):
         self.assertTrue(self.resolve(sm.StockMonth(state='none')).can_buy)
         self.assertIsNone(self.resolve(sm.StockMonth(state='none'), can_buy=False))
+        self.assertIsNone(self.resolve(sm.StockMonth(state='none'), trading=False))   # never invite while trading is off
         self.assertIsNone(self.resolve(None))
         self.assertIsNone(self.resolve(sm.StockMonth(state='gain'), surfaces=False))
 
@@ -239,6 +249,9 @@ class FreshHoldingsTests(SimpleTestCase):
         reg = {'TSLAon': {'address': '0x' + '11' * 20}}
         cache.set(f'gm_hold:{holder}', {'TSLAon': 1.0}, 30)       # a partial scan from another screen
         cache.set(f'gm_hold_last:{holder}', {'TSLAon': 1.0}, 60)
+        live = mock.patch.object(gm_holdings, 'registry_is_live', return_value=True)
+        live.start()
+        self.addCleanup(live.stop)
         with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
              mock.patch.object(gm_holdings, '_scan', side_effect=RuntimeError('GM balanceOf failed')) as scan, \
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
@@ -281,3 +294,47 @@ class ConfirmedTradesCacheTests(SimpleTestCase):
         bad = [trade('?9', 'stock_buy', '0', None, t0)]
         self.run_read(sig, bad)
         self.assertEqual(self.run_read(sig, bad)[1], 1)
+
+
+class HoldingsWarmupTests(SimpleTestCase):
+    def tearDown(self):
+        cache.clear()
+
+    def test_warmup_fills_the_complete_scan_and_never_raises(self):
+        from cusd_plus import tasks
+        with mock.patch('cusd_plus.gm_holdings.holdings_units') as scan:
+            tasks.warm_gm_holdings(ADDR)
+        scan.assert_called_once_with(ADDR, require_complete=True)
+        with mock.patch('cusd_plus.gm_holdings.holdings_units', side_effect=RuntimeError('rpc down')), \
+             self.assertLogs('cusd_plus.tasks', level='WARNING'):
+            tasks.warm_gm_holdings(ADDR)
+
+    def test_dispatch_never_raises_on_a_broker_failure(self):
+        from cusd_plus import tasks
+        with mock.patch.object(tasks.warm_gm_holdings, 'apply_async', side_effect=OSError('broker down')), \
+             self.assertLogs('cusd_plus.tasks', level='WARNING'):
+            tasks._dispatch_holdings_warmup(ADDR)
+
+
+class LiveRegistryTests(SimpleTestCase):
+    def tearDown(self):
+        cache.clear()
+
+    def test_complete_scan_requires_the_live_registry(self):
+        from cusd_plus import gm_holdings
+        snapshot = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        with mock.patch.object(gm_holdings, '_fallback_registry', return_value=snapshot), \
+             mock.patch('cusd_plus.gm_api.all_addresses', side_effect=TimeoutError('ondo down')), \
+             mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 1.0}) as scan, \
+             self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
+            self.assertIsNone(gm_holdings.holdings_units(ADDR, require_complete=True))
+            self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})   # lists still degrade
+        scan.assert_called_once()
+        self.assertFalse(gm_holdings.registry_is_live())
+        rows = [{'symbol': 'TSLAon', 'addresses': [
+            {'networkChainId': 'bsc-56', 'address': '0x' + '11' * 20, 'decimals': 18}]}]
+        cache.clear()
+        with mock.patch('cusd_plus.gm_api.all_addresses', return_value=rows), \
+             mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 2.0}):
+            self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 2.0})
+        self.assertTrue(gm_holdings.registry_is_live())

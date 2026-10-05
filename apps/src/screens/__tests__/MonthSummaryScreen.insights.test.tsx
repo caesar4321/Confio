@@ -154,3 +154,18 @@ it('a resolved month does not poll', () => {
   act(() => tree.unmount());
   jest.useRealTimers();
 });
+
+it('a link back with a month (pop + merge) shows that month, not the one being browsed', () => {
+  mockSummary = summary(3);
+  mockInsights = { revealed: false };
+  mockParams = { year: 2025, month: 3 };
+  const tree = mount();
+  const title = () => tree.root.findAll((n) => typeof n.type === 'string' && n.props.accessibilityRole === 'header')
+    .map((n) => [].concat(n.props.children).join('')).join('|');
+  expect(title()).toContain('2025');
+  mockParams = { year: now.getFullYear(), month: now.getMonth() + 1 };
+  act(() => { tree.update(<MonthSummaryScreen />); });
+  expect(title()).toContain(String(now.getFullYear()));
+  expect(title()).not.toContain('2025');
+  act(() => { tree.unmount(); });
+});

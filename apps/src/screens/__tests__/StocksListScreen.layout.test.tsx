@@ -119,7 +119,8 @@ it('links holders to Tu mes, with this month\'s result when it is known', async 
   expect(texts(tree)).toContain('Este mes +US$4.20 · Ver tu mes');
   const link = tree.root.findAll(n => n.props.testID === 'stocks-month-link' && typeof n.props.onPress === 'function')[0];
   link.props.onPress();
-  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary', undefined, {pop: true, merge: true});
+  const now = new Date();
+  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary', {year: now.getFullYear(), month: now.getMonth() + 1}, {pop: true, merge: true});
   await act(async () => tree.unmount());
 
   // Tu mes is owners only: an employee gets no door to a month they can't see.

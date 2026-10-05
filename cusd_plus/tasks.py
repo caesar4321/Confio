@@ -79,6 +79,25 @@ def _change_floor_refusal_marker(key: str, delta: int) -> bool:
     return delta < 0
 
 
+@shared_task(name='cusd_plus.warm_gm_holdings', ignore_result=True)
+def warm_gm_holdings(bsc_address: str):
+    """Fill the complete holdings scan right after a stock trade confirms."""
+    from .gm_holdings import holdings_units
+
+    try:
+        holdings_units(bsc_address, require_complete=True)
+    except Exception:  # noqa: BLE001 — a warm-up; the next read scans anyway
+        logger.warning('holdings warm-up failed for %s', bsc_address, exc_info=True)
+
+
+def _dispatch_holdings_warmup(bsc_address: str) -> None:
+    try:
+        # retry=False: an unreachable broker must not stall the caller.
+        warm_gm_holdings.apply_async(args=[bsc_address], retry=False)
+    except Exception:  # noqa: BLE001 — optional warm-up
+        logger.warning('could not queue holdings warm-up for %s', bsc_address, exc_info=True)
+
+
 @shared_task(name='cusd_plus.refresh_gm_tvl')
 def refresh_gm_tvl():
     """Keep the Home Ondo Stocks TVL metric warm outside request latency."""
@@ -1971,8 +1990,14 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         from . import vault
         vault.invalidate_position(batch.user_bsc_address)
     if batch.kind in ('stock_buy', 'stock_sell'):
+        from django.db import transaction
         from .gm_holdings import invalidate_holdings
         invalidate_holdings(batch.user_bsc_address)
+        # Warm the complete post-trade scan in its own task (never delays
+        # finality): Tu mes, often opened from the success screen, must answer
+        # inside its reveal window, and a cold Multicall may not.
+        address = batch.user_bsc_address
+        transaction.on_commit(lambda: _dispatch_holdings_warmup(address))
     logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)
 
 
