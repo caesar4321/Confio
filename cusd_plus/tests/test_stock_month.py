@@ -303,6 +303,21 @@ class StockMonthTests(SimpleTestCase):
         self.assertEqual(result.state, 'settling')
         self.assertEqual(result.holdings, 0)                                  # no number, never a negative one
 
+    def test_a_lagging_sell_all_leaves_no_float_dust_either_way(self):
+        # The chain's float read of 1/3 is a hair under or over the exact
+        # 18-decimal units sold: neither drops AAPL nor keeps NVDA "held".
+        for read in (0.3333333333333333, 0.33333333333333337):
+            sold = trade('NVDAon', 'stock_sell', '0.333333333333333333', '35', NOW - timedelta(seconds=20))
+            sold.block = 102
+            self.trades = [trade('NVDAon', 'stock_buy', '0.333333333333333333', '30', datetime(2026, 9, 5, tzinfo=UTC)),
+                           trade('AAPLon', 'stock_buy', '1', '190', datetime(2026, 9, 6, tzinfo=UTC)), sold]
+            self.chain = {'NVDAon': read, 'AAPLon': 1.0}
+            self.blocks = {'NVDAon': 101, 'AAPLon': 101}
+            result = self.run_month()
+            self.assertEqual(result.state, 'settling')
+            self.assertEqual(result.holdings, 1)
+            self.assertEqual(result.value_end, Decimal('200'))
+
     def test_a_past_month_stays_exact_while_a_later_trade_lags(self):
         bought = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=20))
         bought.block = 102
@@ -463,12 +478,27 @@ class HoldingsWarmupTests(SimpleTestCase):
 
     def test_warmup_fills_the_complete_scan_and_never_raises(self):
         from cusd_plus import tasks
-        with mock.patch('cusd_plus.gm_holdings.holdings_units') as scan:
-            tasks.warm_gm_holdings(ADDR)
-        scan.assert_called_once_with(ADDR, require_complete=True)
-        with mock.patch('cusd_plus.gm_holdings.holdings_units', side_effect=RuntimeError('rpc down')), \
+        with mock.patch('cusd_plus.gm_holdings.complete_holdings', return_value=({}, {})) as scan:
+            tasks.warm_gm_holdings(ADDR, 100)
+        scan.assert_called_once_with(ADDR)
+        with mock.patch('cusd_plus.gm_holdings.complete_holdings', side_effect=RuntimeError('rpc down')), \
              self.assertLogs('cusd_plus.tasks', level='WARNING'):
-            tasks.warm_gm_holdings(ADDR)
+            tasks.warm_gm_holdings(ADDR, 100)
+
+    def test_a_warmup_read_behind_the_trade_is_dropped_and_retried(self):
+        from celery.exceptions import Retry
+        from cusd_plus import tasks
+        with mock.patch('cusd_plus.gm_holdings.complete_holdings',
+                        return_value=({'TSLAon': 1.0}, {'TSLAon': 99})), \
+             mock.patch('cusd_plus.gm_holdings.invalidate_holdings') as drop, \
+             self.assertRaises(Retry):
+            tasks.warm_gm_holdings(ADDR, 100)
+        drop.assert_called_once_with(ADDR)
+        with mock.patch('cusd_plus.gm_holdings.complete_holdings',
+                        return_value=({}, {'TSLAon': 100})), \
+             mock.patch('cusd_plus.gm_holdings.invalidate_holdings') as drop:
+            tasks.warm_gm_holdings(ADDR, 100)                 # caught up: kept
+        drop.assert_not_called()
 
     def test_dispatch_never_raises_on_a_broker_failure(self):
         from cusd_plus import tasks
