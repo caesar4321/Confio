@@ -265,6 +265,17 @@ class StockMonthTests(SimpleTestCase):
         self.chain = {'NVDAon': 3.0}                          # not explained even without it: not lag
         self.assertEqual(self.run_month().state, 'value_only')
 
+    def test_a_scan_that_saw_only_the_first_of_two_quick_trades_is_settling(self):
+        first = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=40))
+        first.settled_at = NOW - timedelta(seconds=30)
+        second = trade('AAPLon', 'stock_buy', '1', '200', NOW - timedelta(seconds=20))
+        second.settled_at = NOW - timedelta(seconds=10)
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), first, second]
+        self.chain = {'NVDAon': 2.0}                          # a node that has the first, not the second
+        self.assertEqual(self.run_month().state, 'settling')
+        self.chain = {'NVDAon': 2.0, 'AAPLon': 1.0}
+        self.assertEqual(self.run_month().state, 'gain')
+
     def test_ledger_tolerates_float_dust_but_not_real_differences(self):
         ledger = {'NVDAon': Decimal('0.123456789')}
         self.assertTrue(sm.ledger_explains_chain(ledger, {'NVDAon': Decimal('0.1234567890000001')}))
