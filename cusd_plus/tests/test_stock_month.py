@@ -56,7 +56,7 @@ class StockMonthTests(SimpleTestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def scan(self, _address, *, allow_stale=True, require_complete=False):
+    def scan(self, _address, *, require_complete=False):
         self.assertTrue(require_complete)                     # a total never from a partial or stale scan
         return self.chain
 
@@ -135,6 +135,11 @@ class StockMonthTests(SimpleTestCase):
         # A past month can't be reconstructed while the ledger disagrees.
         self.assertIsNone(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START))
 
+    def test_first_purchase_not_yet_scanned_is_settling_never_an_invite(self):
+        self.pending = True                                   # receipt shown; the scan lags the trade
+        self.assertEqual(self.run_month().state, 'settling')
+        self.assertEqual(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START).state, 'none')
+
     def test_candle_fetch_failure_is_a_missing_price(self):
         self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
         self.chain = {'NVDAon': 3.0}                          # value_only: the mover is optional
@@ -196,7 +201,7 @@ class StockMonthResolverTests(SimpleTestCase):
                           bought=Decimal('105'), sold=Decimal('0'), gain=Decimal('15'),
                           gain_pct=Decimal('7.3170'), holdings=1,
                           top=sm.Mover(ticker='NVDA', name='NVIDIA', change_pct=Decimal('10')))
-        out = self.resolve(r, can_buy=False)
+        out = self.resolve(r)                                 # the buy overlay only matters for 'none'
         self.assertEqual((out.state, out.gain_usd, out.gain_pct, out.value_usd), ('gain', '15.00', '7.32', '220.00'))
         self.assertEqual(out.top_mover.change_pct, '10.00')
         self.assertFalse(out.can_buy)
@@ -218,7 +223,7 @@ class FreshHoldingsTests(SimpleTestCase):
     def tearDown(self):
         cache.clear()
 
-    def test_failed_scan_uses_last_known_only_when_stale_is_allowed(self):
+    def test_failed_scan_uses_last_known_only_outside_complete_mode(self):
         from cusd_plus import gm_holdings
         holder = '0x' + '88' * 20
         cache.set(f'gm_hold_last:{holder}', {'TSLAon': 1.0}, 60)
@@ -226,7 +231,7 @@ class FreshHoldingsTests(SimpleTestCase):
              mock.patch.object(gm_holdings, '_scan', side_effect=TimeoutError('node down')), \
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
             self.assertEqual(gm_holdings.holdings_units(holder), {'TSLAon': 1.0})
-            self.assertIsNone(gm_holdings.holdings_units(holder, allow_stale=False))
+            self.assertIsNone(gm_holdings.holdings_units(holder, require_complete=True))
 
     def test_complete_mode_never_serves_a_partial_or_stale_scan(self):
         from cusd_plus import gm_holdings

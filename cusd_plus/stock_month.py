@@ -277,10 +277,9 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
 
         prices: dict = {}
         if not exact:
-            settling = pending_trade_exists(bsc_address)
             if not current:
                 return None
-            if settling:
+            if pending_trade_exists(bsc_address):
                 # A trade on the wire but not final (the app shows success on
                 # the receipt): today's value is known, the month's result in
                 # seconds. Never "from outside Confío", never a guessed gain.
@@ -301,6 +300,10 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         units_start = ledger_units(trades, before=start)
         units_end = chain if current else ledger_units(trades, before=end)
         if not units_start and not units_end and not in_month:
+            if current and pending_trade_exists(bsc_address):
+                # A first trade on the wire that the scan doesn't show yet:
+                # never invite someone who just bought; resolves in seconds.
+                return StockMonth(state='settling')
             # A past month before the first purchase of someone who holds
             # stocks now: no card, never an invitation to buy what they own.
             return StockMonth(state='none') if current or not chain else None

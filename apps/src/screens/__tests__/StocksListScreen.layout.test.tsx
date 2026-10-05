@@ -52,6 +52,11 @@ jest.mock('../../hooks/useStockMonthNow', () => ({
   useStockMonthNow: () => mockStockMonth,
 }));
 
+let mockIsEmployee = false;
+jest.mock('../../contexts/AccountContext', () => ({
+  useAccount: () => ({activeAccount: {isEmployee: mockIsEmployee}}),
+}));
+
 import {StocksListScreen} from '../StocksListScreen';
 
 const texts = (tree: renderer.ReactTestRenderer) =>
@@ -66,6 +71,7 @@ beforeEach(() => {
   mockKnown = true;
   mockPortfolioLoading = false;
   mockStockMonth = null;
+  mockIsEmployee = false;
 });
 
 it('invites a first-time investor, with a factual starter shelf and no warning box', async () => {
@@ -113,7 +119,13 @@ it('links holders to Tu mes, with this month\'s result when it is known', async 
   expect(texts(tree)).toContain('Este mes +US$4.20 · Ver tu mes');
   const link = tree.root.findAll(n => n.props.testID === 'stocks-month-link' && typeof n.props.onPress === 'function')[0];
   link.props.onPress();
-  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary');
+  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary', undefined, {pop: true, merge: true});
+  await act(async () => tree.unmount());
+
+  // Tu mes is owners only: an employee gets no door to a month they can't see.
+  mockIsEmployee = true;
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  expect(tree.root.findAll(n => n.props.testID === 'stocks-month-link')).toHaveLength(0);
   await act(async () => tree.unmount());
 });
 

@@ -169,7 +169,8 @@ class StockMonthType(graphene.ObjectType):
     state = graphene.String(required=True, description="'gain' | 'value_only' (history incomplete: no month "
                                                        "gain) | 'settling' (a trade not final yet: today's value "
                                                        "only, ask again in seconds) | 'none' (no stocks this month)")
-    can_buy = graphene.Boolean(required=True, description='The invitation may offer a purchase')
+    can_buy = graphene.Boolean(required=True, description="'none' only: the invitation may offer a purchase "
+                                                          "(false on every other state)")
     value_usd = graphene.String(required=True, description='Value at the end of the month (today on the current month)')
     value_start_usd = graphene.String(description='gain: value on the 1st')
     bought_usd = graphene.String(description='gain: Confío purchases this month (exact settlements, fees included)')
@@ -259,7 +260,8 @@ class MonthSummaryQuery(graphene.ObjectType):
             return None
         # Surfaces (issuer policy + kill switch) passed above; only the buy
         # overlay is left (_stock_buy_enabled would re-run the issuer policy).
-        can_buy = stock_buy_overlay_allows(user, meta)
+        # It only gates the invitation, and it is not free (phone + IP).
+        can_buy = result.state == 'none' and stock_buy_overlay_allows(user, meta)
         if result.state == 'none' and not can_buy:
             return None                      # nothing to show and nothing to offer
         opt = lambda v: None if v is None else _usd(v)  # noqa: E731

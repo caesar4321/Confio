@@ -33,6 +33,7 @@ import { StockTradeSuccessContent } from '../components/common/StockTradeSuccess
 import { StockTradeLoadingOverlay } from '../components/common/StockTradeLoadingOverlay';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { useAccount } from '../contexts/AccountContext';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
@@ -62,6 +63,8 @@ type Phase = 'input' | 'processing' | 'success';
 
 export const SellStockScreen = () => {
   const navigation = useNavigation<NavProp>();
+  // Tu mes is owners only (employees never see the month).
+  const canOpenMonth = !useAccount().activeAccount?.isEmployee;
   const route = useRoute<SellRoute>();
   const { formatNumber } = useNumberFormat();
   const { stocks, refetch } = useSavingsPortfolio();
@@ -202,14 +205,16 @@ export const SellStockScreen = () => {
           >
             <Text style={styles.successCtaText}>Ver mi ahorro</Text>
           </TouchableOpacity>
+          {canOpenMonth && (
           <TouchableOpacity
             style={styles.successMonthLink}
-            onPress={() => navigation.navigate('MonthSummary')}
+            onPress={() => navigation.navigate('MonthSummary', undefined, { pop: true, merge: true })}
             accessibilityRole="button"
             testID="stock-success-month-link"
           >
             <Text style={styles.successMonthLinkText}>Ver el resultado en Tu mes</Text>
           </TouchableOpacity>
+          )}
         </StockTradeSuccessContent>
       </View>
     );

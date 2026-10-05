@@ -32,6 +32,7 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { stockMonthGain, useStockMonthNow } from '../hooks/useStockMonthNow';
 import { signedUsd } from '../utils/monthSummary';
+import { useAccount } from '../contexts/AccountContext';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
@@ -43,7 +44,10 @@ export const StocksListScreen = () => {
   const { savings, stocks: myStocks, loading: portfolioLoading, refetch: refetchPortfolio } = useSavingsPortfolio();
   const { session, stocks, loading } = useGmMarket(myStocks.enabled);
   const highlights = useGmHighlights(myStocks.enabled);
-  const monthGain = stockMonthGain(useStockMonthNow(myStocks.enabled && myStocks.totalUsd > 0));
+  // Tu mes is owners only (employees never see the month): no door to it.
+  const { activeAccount } = useAccount();
+  const canOpenMonth = !activeAccount?.isEmployee;
+  const monthGain = stockMonthGain(useStockMonthNow(canOpenMonth && myStocks.enabled && myStocks.totalUsd > 0));
   const [search, setSearch] = useState('');
 
   // Every row carries BOTH numbers with the app-wide hierarchy: the big
@@ -342,8 +346,9 @@ export const StocksListScreen = () => {
               )}
               {/* The month's result net of what was put in lives in Tu mes
                   ("Tus acciones"); this is the door to it. */}
+              {canOpenMonth && (
               <TouchableOpacity
-                onPress={() => navigation.navigate('MonthSummary')}
+                onPress={() => navigation.navigate('MonthSummary', undefined, { pop: true, merge: true })}
                 style={styles.monthLink}
                 accessibilityRole="button"
                 accessibilityLabel={monthGain !== null
@@ -356,6 +361,7 @@ export const StocksListScreen = () => {
                 </Text>
                 <Icon name="chevron-right" size={16} color={colors.white} />
               </TouchableOpacity>
+              )}
             </View>
           )}
           <View style={styles.headerMetaRow}>
