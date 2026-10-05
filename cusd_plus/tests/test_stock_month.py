@@ -234,6 +234,25 @@ class StockMonthTests(SimpleTestCase):
         self.assertEqual(r.state, 'value_only')
         self.assertEqual(r.value_end, Decimal('0'))
 
+    def test_only_this_months_trades_need_their_settlement(self):
+        # August's buy lost its history row: October is still exact (its own
+        # dollars are known); August itself can't be.
+        self.trades = [trade('NVDAon', 'stock_buy', '1', None, datetime(2026, 8, 5, tzinfo=UTC)),
+                       trade('NVDAon', 'stock_buy', '1', '105', datetime(2026, 10, 10, tzinfo=UTC))]
+        self.chain = {'NVDAon': 2.0}
+        r = self.run_month()
+        self.assertEqual(r.state, 'gain')
+        self.assertEqual(r.gain, Decimal('15'))
+        self.candles['NVDAon'].insert(0, candle(datetime(2026, 7, 31, tzinfo=UTC), '90'))
+        self.candles['NVDAon'].insert(1, candle(datetime(2026, 8, 31, tzinfo=UTC), '95'))
+        self.assertIsNone(self.run_month(start=datetime(2026, 8, 1, tzinfo=UTC), end=datetime(2026, 9, 1, tzinfo=UTC)))
+
+    def test_an_unreadable_trade_anywhere_leaves_the_ledger_untrusted(self):
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)),
+                       trade('?3', 'stock_buy', '0', None, datetime(2026, 8, 5, tzinfo=UTC))]
+        self.chain = {'NVDAon': 1.0}
+        self.assertEqual(self.run_month().state, 'value_only')
+
     def test_ledger_tolerates_float_dust_but_not_real_differences(self):
         ledger = {'NVDAon': Decimal('0.123456789')}
         self.assertTrue(sm.ledger_explains_chain(ledger, {'NVDAon': Decimal('0.1234567890000001')}))

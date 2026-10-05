@@ -167,3 +167,24 @@ it('a settling poll never stacks a second stocks ask on one still in flight', as
   await act(async () => { latest.refreshStocks(); });
   expect(mockQuery).toHaveBeenCalledTimes(2);           // free again once answered
 });
+
+it("a focus refresh's older stocks answer never lands over a newer poll's (no restarted poll)", async () => {
+  const settling = { state: 'settling', valueUsd: '220.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.stocksSettling).toBe(true);
+  // Focus refresh: stocks answers 'settling' at once, but monthInsights is slow.
+  const slowInsights = deferred<any>();
+  mockQuery.mockImplementation(({ query }: any) => (query === GET_MONTH_INSIGHTS ? slowInsights.promise
+    : Promise.resolve({ data: query === GET_STOCK_MONTH ? { stockMonth: settling } : {} })));
+  await act(async () => { latest.refresh(); });
+  // A poll sent later answers 'gain' first.
+  mockQuery.mockImplementation(() => Promise.resolve({ data: { stockMonth: { state: 'gain', valueUsd: '221.00' } } }));
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocks.state).toBe('gain');
+  expect(latest.stocksSettling).toBe(false);
+  await act(async () => { slowInsights.resolve({ data: { monthInsights: null } }); });
+  expect(latest.stocks.state).toBe('gain');
+  expect(latest.stocksSettling).toBe(false);          // the stale 'settling' did not restart the poll
+});

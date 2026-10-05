@@ -44,3 +44,29 @@ it('only an exact month result is a number', () => {
   expect(stockMonthGain(null)).toBeNull();
   expect(stockMonthGain({ state: 'gain', gainUsd: '-3.10' } as any)).toBe(-3.1);
 });
+
+describe('openTuMesNow', () => {
+  const { openTuMesNow } = require('../useStockMonthNow');
+  const mockHidden = jest.spyOn(require('../../utils/balanceVisibility'), 'isBalanceHidden');
+
+  it('never unmasks a Tu mes already in the stack', async () => {
+    mockHidden.mockResolvedValue(false);
+    const navigate = jest.fn();
+    const navigation = {
+      navigate,
+      getState: () => ({ routes: [{ name: 'MonthSummary', params: { masked: true } }, { name: 'BuyStock' }] }),
+    };
+    await openTuMesNow(navigation as any);
+    expect(navigate.mock.calls[0][1].masked).toBe(true);
+  });
+
+  it('masks like Home when no Tu mes is in the stack', async () => {
+    mockHidden.mockResolvedValue(true);
+    const navigate = jest.fn();
+    await openTuMesNow({ navigate, getState: () => ({ routes: [{ name: 'BuyStock' }] }) } as any);
+    expect(navigate.mock.calls[0][1].masked).toBe(true);
+    mockHidden.mockResolvedValue(false);
+    await openTuMesNow({ navigate, getState: () => ({ routes: [] }) } as any);
+    expect(navigate.mock.calls[1][1].masked).toBe(false);
+  });
+});

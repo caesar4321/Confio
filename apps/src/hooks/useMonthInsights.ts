@@ -106,6 +106,11 @@ export function useMonthInsights(params: {
   // (gain/value_only never swap to 'settling'): the screen polls on it.
   const lastStocks = useRef<StockMonth['state'] | null>(null);
   const stocksInFlight = useRef(false);
+  // Stocks asks are numbered when sent: an answer older than one already
+  // applied (a focus refresh waits for its slowest query; a poll doesn't)
+  // must not land over it and restart the settling poll.
+  const stocksAsked = useRef(0);
+  const stocksApplied = useRef(0);
   useEffect(() => () => { generation.current += 1; }, []);
 
   const fetchStocks = useCallback(() => client.query<{ stockMonth: StockMonth | null }>(
@@ -172,11 +177,17 @@ export function useMonthInsights(params: {
   const refresh = useCallback(() => {
     const gen = generation.current;
     if (!shown.current) return;
+    const seq = ++stocksAsked.current;
     const { insights, savings, protection, stocks } = fetchAll();
     Promise.all([insights, savings, protection, stocks]).then(([i, s, p, k]) => {
       if (generation.current !== gen || !shown.current) return;
-      if (k) lastStocks.current = k.state;
-      const merged = mergeValues(shown.current, { insights: i, savings: s, protection: p, stocks: k });
+      const fresh = seq > stocksApplied.current;
+      if (fresh) {
+        stocksApplied.current = seq;
+        if (k) lastStocks.current = k.state;
+      }
+      const merged = mergeValues(shown.current,
+        { insights: i, savings: s, protection: p, stocks: fresh ? k : shown.current.stocks });
       shown.current = merged;
       setState({ revealed: true, ...merged });
     });
@@ -189,8 +200,10 @@ export function useMonthInsights(params: {
     const gen = generation.current;
     if (!shown.current || stocksInFlight.current) return;
     stocksInFlight.current = true;
+    const seq = ++stocksAsked.current;
     fetchStocks().finally(() => { stocksInFlight.current = false; }).then((k) => {
-      if (generation.current !== gen || !shown.current) return;
+      if (generation.current !== gen || !shown.current || seq <= stocksApplied.current) return;
+      stocksApplied.current = seq;
       if (k) lastStocks.current = k.state;
       const merged = mergeValues(shown.current, { ...shown.current, stocks: k });
       shown.current = merged;
