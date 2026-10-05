@@ -156,6 +156,7 @@ class ProtectionValueType(graphene.ObjectType):
     avg_rate = graphene.String(required=True, description='purchase: average paid per USD; month_start: rate on the 1st')
     today_rate = graphene.String(required=True, description='Binance P2P local per USD (2 decimals)')
     quoted_at = graphene.String(required=True, description='ISO time the "today" rate was fetched')
+    start_date = graphene.String(description="month_start: the baseline day (ISO date), usually the 1st")
 
 
 class MonthSummaryQuery(graphene.ObjectType):
@@ -230,7 +231,7 @@ class MonthSummaryQuery(graphene.ObjectType):
         return ProtectionValueType(
             currency=p.currency, basis=p.basis, state=p.state, source='binance_p2p', protected_usd=_usd(p.protected_usd), paid_local=two(p.paid_local),
             today_local=two(p.today_local), gain_local=two(p.gain_local), avg_rate=two(p.avg_rate),
-            today_rate=two(p.today_rate), quoted_at=p.quoted_at)
+            today_rate=two(p.today_rate), quoted_at=p.quoted_at, start_date=p.start_date)
 
     def resolve_savings_earned(self, info, year, month):
         from cusd_plus.savings_snapshots import savings_earned
