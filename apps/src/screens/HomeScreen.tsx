@@ -78,7 +78,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { formatDecimal } from '../utils/numberLocale';
 import { formatMinorMoney } from '../utils/currencies';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
-import { BALANCE_VISIBILITY_KEY, PREFERENCES_KEYCHAIN_SERVICE } from '../utils/balanceVisibility';
+import { BALANCE_VISIBILITY_KEY, loadSavedBalanceVisibility, PREFERENCES_KEYCHAIN_SERVICE } from '../utils/balanceVisibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
 const INVITE_TS_KEY = 'invite_banner_last_ts';
 
@@ -687,10 +687,8 @@ export const HomeScreen = () => {
     const server = String(PREFERENCES_KEYCHAIN_SERVICE);
     logBreadcrumb(`Home.loadBalanceVisibility | ${describeTypes({ server })}`);
     try {
-      const credentials = await Keychain.getInternetCredentials(server);
-      if (credentials && credentials.username === BALANCE_VISIBILITY_KEY) {
-        setShowBalance(credentials.password === 'true');
-      }
+      const saved = await loadSavedBalanceVisibility();
+      if (saved !== null) setShowBalance(saved);
     } catch (error) {
       // No saved preference, default to showing balance
       recordCrashError(error);
