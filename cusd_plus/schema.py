@@ -1870,10 +1870,10 @@ class SponsorBscBatch(graphene.Mutation):
                 # Drop only fresh values. If the tx later reverts, the next
                 # scan simply observes the unchanged chain; if it executes,
                 # the client's receipt-triggered refetch sees the new state.
-                from django.core.cache import cache as _cache
                 from . import vault as _vault
+                from .gm_holdings import invalidate_holdings
                 _vault.invalidate_position(user_addr)
-                _cache.delete(f'gm_hold:{user_addr.lower()}')
+                invalidate_holdings(user_addr)
             if mint_call is not None and mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
                 # Gate passed and the batch is on the wire: record the mint as
                 # history. subscribeAndMint(uint256 usdtAmount, ...) — first

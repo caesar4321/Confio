@@ -206,16 +206,31 @@ def _scan(
     return held
 
 
-def holdings_units(user_bsc_address: str, *, allow_stale: bool = True) -> dict | None:
+def invalidate_holdings(user_bsc_address: str) -> None:
+    """Drop the fresh scans (both modes) after a trade; last-known stays."""
+    key = (user_bsc_address or '').lower()
+    cache.delete_many([f'gm_hold:{key}', f'gm_hold_full:{key}'])
+
+
+def holdings_units(user_bsc_address: str, *, allow_stale: bool = True,
+                   require_complete: bool = False) -> dict | None:
     """{symbol: units} for everything the address holds; {} when it holds
     nothing (or the registry is empty). None means UNKNOWN — the scan
     failed and no last-known value exists; callers must not render that
     as an empty portfolio. allow_stale=False: a failed scan is UNKNOWN even
     when a last-known (up to 7 days old) exists — for numbers stated as
-    "today" (Tu mes)."""
+    "today" (Tu mes).
+
+    require_complete=True (implies no stale): every token's balanceOf must
+    answer, or the result is UNKNOWN. The default scan skips a failing token
+    so one bad contract can't hide a portfolio, which is right for a list and
+    wrong for a total. Complete scans keep their own 30s entry, because a
+    partial scan stored by another screen must never pass as complete."""
     if not user_bsc_address:
         return {}
     key = user_bsc_address.lower()
+    if require_complete:
+        return _complete_holdings(key)
     cached = cache.get(f'gm_hold:{key}')
     if cached is not None:
         return cached
@@ -230,5 +245,25 @@ def holdings_units(user_bsc_address: str, *, allow_stale: bool = True) -> dict |
         logger.warning('GM holdings scan failed for %s', user_bsc_address, exc_info=True)
         return cache.get(f'gm_hold_last:{key}') if allow_stale else None
     cache.set(f'gm_hold:{key}', held, SCAN_TTL)
+    cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
+    return held
+
+
+def _complete_holdings(key: str) -> dict | None:
+    cached = cache.get(f'gm_hold_full:{key}')
+    if cached is not None:
+        return cached
+    token_registry = registry()
+    if token_registry is None:
+        return None
+    if not token_registry:
+        return {}
+    try:
+        held = _scan(key, token_registry, require_complete=True)
+    except Exception:  # noqa: BLE001 — incomplete is unknown, never a smaller portfolio
+        logger.warning('GM complete holdings scan failed for %s', key, exc_info=True)
+        return None
+    # A complete scan is also the best answer for every other reader.
+    cache.set_many({f'gm_hold_full:{key}': held, f'gm_hold:{key}': held}, SCAN_TTL)
     cache.set(f'gm_hold_last:{key}', held, SCAN_LAST_TTL)
     return held

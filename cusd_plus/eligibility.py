@@ -145,7 +145,10 @@ def check_stock_buy_eligibility(user, request_meta) -> bool:
     deliberately never call it.
     """
     meta = request_meta or {}
-    return (
-        ONDO_POLICY.evaluate(user, meta).allowed
-        and CONFIO_STOCK_BUY_POLICY.evaluate(user, meta).allowed
-    )
+    return ONDO_POLICY.evaluate(user, meta).allowed and stock_buy_overlay_allows(user, meta)
+
+
+def stock_buy_overlay_allows(user, request_meta) -> bool:
+    """Confío's entry-only country overlay alone, for callers that already
+    evaluated the issuer policy (it is not free: phone + IP resolution)."""
+    return CONFIO_STOCK_BUY_POLICY.evaluate(user, request_meta or {}).allowed

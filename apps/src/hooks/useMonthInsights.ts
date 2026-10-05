@@ -68,9 +68,11 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
     protection: shown.protection
       ? (next.protection && next.protection.state === shown.protection.state ? next.protection : shown.protection)
       : null,
-    // Same state only: gain↔value_only↔invite would swap the card.
+    // Same state only: gain↔value_only↔invite would swap the card. A
+    // settling card resolves in place to gain or value_only (same card).
     stocks: shown.stocks
-      ? (next.stocks && next.stocks.state === shown.stocks.state ? next.stocks : shown.stocks)
+      ? (next.stocks && (next.stocks.state === shown.stocks.state
+        || (shown.stocks.state === 'settling' && next.stocks.state !== 'none')) ? next.stocks : shown.stocks)
       : null,
   };
 }
@@ -83,7 +85,7 @@ export function useMonthInsights(params: {
   isCurrent: boolean;
   /** Card A has rendered (monthSummary answered): the 800ms window starts. */
   ready: boolean;
-}): MonthInsightsState & { refresh: () => void } {
+}): MonthInsightsState & { refresh: () => void; refreshStocks: () => void } {
   const { accountKey, year, month, timezone, isCurrent, ready } = params;
   const client = useApolloClient();
   const viewKey = `${accountKey ?? ''}:${year}-${month}`;
@@ -95,6 +97,10 @@ export function useMonthInsights(params: {
   const generation = useRef(0);
   const shown = useRef<InsightData | null>(null);
   useEffect(() => () => { generation.current += 1; }, []);
+
+  const fetchStocks = useCallback(() => client.query<{ stockMonth: StockMonth | null }>(
+    { query: GET_STOCK_MONTH, variables: { year, month, timezone }, fetchPolicy: 'no-cache' })
+    .then((r) => r.data?.stockMonth ?? null).catch(() => null), [client, year, month, timezone]);
 
   const fetchAll = useCallback(() => {
     const opt = { fetchPolicy: 'no-cache' as const };
@@ -108,10 +114,8 @@ export function useMonthInsights(params: {
       ? safe(client.query<{ protectionValue: ProtectionValue | null }>({ query: GET_PROTECTION_VALUE, variables: { timezone }, ...opt }))
         .then((d) => d?.protectionValue ?? null)
       : Promise.resolve(null);
-    const stocks = safe(client.query<{ stockMonth: StockMonth | null }>(
-      { query: GET_STOCK_MONTH, variables: { year, month, timezone }, ...opt })).then((d) => d?.stockMonth ?? null);
-    return { insights, savings, protection, stocks };
-  }, [client, year, month, timezone, isCurrent]);
+    return { insights, savings, protection, stocks: fetchStocks() };
+  }, [client, year, month, timezone, isCurrent, fetchStocks]);
 
   // A new month or account is a new view: hide, then reveal again.
   if (view.current !== viewKey) {
@@ -165,5 +169,17 @@ export function useMonthInsights(params: {
     });
   }, [fetchAll]);
 
-  return { ...state, refresh };
+  /** Stocks only (a settling trade): the other cards are not re-asked. */
+  const refreshStocks = useCallback(() => {
+    const gen = generation.current;
+    if (!shown.current) return;
+    fetchStocks().then((k) => {
+      if (generation.current !== gen || !shown.current) return;
+      const merged = mergeValues(shown.current, { ...shown.current, stocks: k });
+      shown.current = merged;
+      setState({ revealed: true, ...merged });
+    });
+  }, [fetchStocks]);
+
+  return { ...state, refresh, refreshStocks };
 }

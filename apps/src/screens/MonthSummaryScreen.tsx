@@ -46,6 +46,9 @@ import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Route = RouteProp<MainStackParamList, 'MonthSummary'>;
 
+export const SETTLING_POLL_MS = 4000;
+export const SETTLING_MAX_TRIES = 15;            // ~1 minute; finality is seconds
+
 function monthsBetween(a: { year: number; month: number }, b: { year: number; month: number }) {
   return (b.year - a.year) * 12 + (b.month - a.month);
 }
@@ -86,6 +89,22 @@ export function MonthSummaryScreen() {
   });
   const refreshInsights = useRef(insights.refresh);
   refreshInsights.current = insights.refresh;
+
+  // Arriving from a buy or sell: the trade may not be final yet ("settling").
+  // Re-ask the stocks card alone until it resolves in place (bounded).
+  const settling = insights.revealed && insights.stocks?.state === 'settling';
+  const refreshStocks = useRef(insights.refreshStocks);
+  refreshStocks.current = insights.refreshStocks;
+  useEffect(() => {
+    if (!settling) return undefined;
+    let tries = 0;
+    const id = setInterval(() => {
+      tries += 1;
+      refreshStocks.current();
+      if (tries >= SETTLING_MAX_TRIES) clearInterval(id);
+    }, SETTLING_POLL_MS);
+    return () => clearInterval(id);
+  }, [settling]);
 
   // Back from a movement list where categories may have changed: re-read.
   // (refetch via ref: the effect must run per focus, never per render.)
@@ -309,6 +328,7 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
           {slot?.kind === 'stable' && <StableCard value={slot.value} masked={masked} />}
           {!slot && <SavingsInvite onSave={onSave} />}
           {insights.stocks && insights.stocks.state !== 'none' && (
+            // gain · value_only · settling (resolves in place)
             <StocksCard value={insights.stocks} month={summary.month} isCurrent={isCurrent} masked={masked}
               onOpenStocks={onOpenStocks} onOpenStock={onOpenStock} />
           )}

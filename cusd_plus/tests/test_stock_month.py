@@ -56,8 +56,8 @@ class StockMonthTests(SimpleTestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def scan(self, _address, *, allow_stale=True):
-        self.assertFalse(allow_stale)                         # "today" never from a days-old snapshot
+    def scan(self, _address, *, allow_stale=True, require_complete=False):
+        self.assertTrue(require_complete)                     # a total never from a partial or stale scan
         return self.chain
 
     def run_month(self, start=OCT_START, end=NOV_START, now=NOW):
@@ -122,12 +122,18 @@ class StockMonthTests(SimpleTestCase):
         self.chain = {'NVDAon': 1.0}
         self.assertEqual(self.run_month().state, 'value_only')
 
-    def test_trade_settling_is_unknown_not_value_only(self):
+    def test_trade_settling_shows_today_value_not_value_only(self):
         # The receipt landed (chain has the units) but finality hasn't confirmed the batch.
         self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
         self.chain = {'NVDAon': 2.0}
         self.pending = True
-        self.assertIsNone(self.run_month())
+        r = self.run_month()
+        self.assertEqual(r.state, 'settling')
+        self.assertEqual(r.value_end, Decimal('220'))
+        self.assertIsNone(r.gain)
+        self.assertEqual(r.top.ticker, 'NVDA')
+        # A past month can't be reconstructed while the ledger disagrees.
+        self.assertIsNone(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START))
 
     def test_candle_fetch_failure_is_a_missing_price(self):
         self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
@@ -141,6 +147,13 @@ class StockMonthTests(SimpleTestCase):
         self.assertEqual(self.run_month().state, 'none')
         self.chain = None
         self.assertIsNone(self.run_month())
+
+    def test_past_month_before_first_purchase_never_invites_a_holder(self):
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 10, 5, tzinfo=UTC))]
+        self.chain = {'NVDAon': 1.0}
+        self.assertIsNone(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START))
+        self.chain, self.trades = {}, []
+        self.assertEqual(self.run_month(start=datetime(2026, 9, 1, tzinfo=UTC), end=OCT_START).state, 'none')
 
     def test_missing_boundary_price_hides_the_card(self):
         self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC))]
@@ -174,7 +187,7 @@ class StockMonthResolverTests(SimpleTestCase):
         ctx = (object(), account, 'personal', None, ZoneInfo('UTC'))
         with mock.patch.object(cashflow_schema, '_summary_context', return_value=ctx), \
              mock.patch('cusd_plus.schema._stock_surfaces_enabled', return_value=surfaces), \
-             mock.patch('cusd_plus.schema._stock_buy_enabled', return_value=can_buy), \
+             mock.patch('cusd_plus.eligibility.stock_buy_overlay_allows', return_value=can_buy), \
              mock.patch('cusd_plus.stock_month.stock_month', return_value=result):
             return cashflow_schema.MonthSummaryQuery().resolve_stock_month(info, 2026, 10)
 
@@ -187,6 +200,12 @@ class StockMonthResolverTests(SimpleTestCase):
         self.assertEqual((out.state, out.gain_usd, out.gain_pct, out.value_usd), ('gain', '15.00', '7.32', '220.00'))
         self.assertEqual(out.top_mover.change_pct, '10.00')
         self.assertFalse(out.can_buy)
+
+    def test_gain_adds_up_from_the_cents_shown(self):
+        r = sm.StockMonth(state='gain', value_end=Decimal('100.004'), value_start=Decimal('50.005'),
+                          bought=Decimal('0'), sold=Decimal('0'), gain=Decimal('49.999'), holdings=1)
+        out = self.resolve(r)
+        self.assertEqual((out.value_usd, out.value_start_usd, out.gain_usd), ('100.00', '50.01', '49.99'))
 
     def test_none_needs_buying_and_unknown_or_gated_is_null(self):
         self.assertTrue(self.resolve(sm.StockMonth(state='none')).can_buy)
@@ -208,3 +227,52 @@ class FreshHoldingsTests(SimpleTestCase):
              self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
             self.assertEqual(gm_holdings.holdings_units(holder), {'TSLAon': 1.0})
             self.assertIsNone(gm_holdings.holdings_units(holder, allow_stale=False))
+
+    def test_complete_mode_never_serves_a_partial_or_stale_scan(self):
+        from cusd_plus import gm_holdings
+        holder = '0x' + '99' * 20
+        reg = {'TSLAon': {'address': '0x' + '11' * 20}}
+        cache.set(f'gm_hold:{holder}', {'TSLAon': 1.0}, 30)       # a partial scan from another screen
+        cache.set(f'gm_hold_last:{holder}', {'TSLAon': 1.0}, 60)
+        with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
+             mock.patch.object(gm_holdings, '_scan', side_effect=RuntimeError('GM balanceOf failed')) as scan, \
+             self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
+            self.assertIsNone(gm_holdings.holdings_units(holder, require_complete=True))
+        self.assertTrue(scan.call_args.kwargs['require_complete'])
+        with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
+             mock.patch.object(gm_holdings, '_scan', return_value={'TSLAon': 2.0}):
+            self.assertEqual(gm_holdings.holdings_units(holder, require_complete=True), {'TSLAon': 2.0})
+        self.assertEqual(cache.get(f'gm_hold:{holder}'), {'TSLAon': 2.0})   # also the best answer for others
+        gm_holdings.invalidate_holdings(holder)
+        self.assertIsNone(cache.get(f'gm_hold_full:{holder}'))
+        self.assertIsNone(cache.get(f'gm_hold:{holder}'))
+
+
+class ConfirmedTradesCacheTests(SimpleTestCase):
+    def tearDown(self):
+        cache.clear()
+
+    def run_read(self, sig, decoded):
+        qs = mock.MagicMock()
+        qs.aggregate.return_value = sig
+        with mock.patch('blockchain.models.SponsoredBatch') as model, \
+             mock.patch.object(sm, '_decode_trades', return_value=decoded) as decode:
+            model.objects.filter.return_value = qs
+            return sm.confirmed_trades(ADDR), decode.call_count
+
+    def test_decodes_once_until_the_ledger_changes(self):
+        t0 = datetime(2026, 10, 1, tzinfo=UTC)
+        sig = {'n': 1, 'last': 7, 'touched': t0, 'rows': 1, 'rows_touched': t0}
+        one = [trade('NVDAon', 'stock_buy', '1', '95', t0)]
+        self.assertEqual(self.run_read(sig, one), (one, 1))
+        self.assertEqual(self.run_read(sig, one), (one, 0))                       # cached
+        self.assertEqual(self.run_read({**sig, 'rows_touched': t0 + timedelta(seconds=1)}, one)[1], 1)  # amount re-synced
+        self.assertEqual(self.run_read({**sig, 'n': 2, 'last': 8}, one)[1], 1)    # a new confirmation
+
+    def test_no_trades_skips_decoding_and_unreadable_ones_are_not_cached(self):
+        self.assertEqual(self.run_read({'n': 0}, []), ([], 0))
+        t0 = datetime(2026, 10, 1, tzinfo=UTC)
+        sig = {'n': 1, 'last': 9, 'touched': t0, 'rows': 0, 'rows_touched': None}
+        bad = [trade('?9', 'stock_buy', '0', None, t0)]
+        self.run_read(sig, bad)
+        self.assertEqual(self.run_read(sig, bad)[1], 1)

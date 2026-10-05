@@ -166,8 +166,9 @@ class StockMoverType(graphene.ObjectType):
 
 
 class StockMonthType(graphene.ObjectType):
-    state = graphene.String(required=True, description="'gain' | 'value_only' (stocks from outside Confío: "
-                                                       "no month gain) | 'none' (no stocks this month)")
+    state = graphene.String(required=True, description="'gain' | 'value_only' (history incomplete: no month "
+                                                       "gain) | 'settling' (a trade not final yet: today's value "
+                                                       "only, ask again in seconds) | 'none' (no stocks this month)")
     can_buy = graphene.Boolean(required=True, description='The invitation may offer a purchase')
     value_usd = graphene.String(required=True, description='Value at the end of the month (today on the current month)')
     value_start_usd = graphene.String(description='gain: value on the 1st')
@@ -237,7 +238,8 @@ class MonthSummaryQuery(graphene.ObjectType):
 
     def resolve_stock_month(self, info, year, month, timezone=None):
         from django.utils import timezone as dj_tz
-        from cusd_plus.schema import _stock_buy_enabled, _stock_surfaces_enabled
+        from cusd_plus.eligibility import stock_buy_overlay_allows
+        from cusd_plus.schema import _stock_surfaces_enabled
         from cusd_plus.stock_month import stock_month
         from users.cashflow import month_window
         context = _summary_context(info, year, month, timezone)
@@ -255,16 +257,24 @@ class MonthSummaryQuery(graphene.ObjectType):
             return None
         if result is None:
             return None
-        can_buy = _stock_buy_enabled(user, meta)
+        # Surfaces (issuer policy + kill switch) passed above; only the buy
+        # overlay is left (_stock_buy_enabled would re-run the issuer policy).
+        can_buy = stock_buy_overlay_allows(user, meta)
         if result.state == 'none' and not can_buy:
             return None                      # nothing to show and nothing to offer
         opt = lambda v: None if v is None else _usd(v)  # noqa: E731
         pct = lambda v: None if v is None else format(v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), 'f')  # noqa: E731
         top = result.top
+        gain = result.gain
+        if gain is not None and None not in (result.value_start, result.bought, result.sold):
+            # From the cents shown, so "¿Cómo lo calculamos?" adds up to the cent.
+            cents = lambda v: v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)  # noqa: E731
+            gain = (cents(result.value_end) - cents(result.value_start)
+                    - cents(result.bought) + cents(result.sold))
         return StockMonthType(
             state=result.state, can_buy=can_buy, value_usd=_usd(result.value_end),
             value_start_usd=opt(result.value_start), bought_usd=opt(result.bought), sold_usd=opt(result.sold),
-            gain_usd=opt(result.gain), gain_pct=pct(result.gain_pct), holdings=result.holdings,
+            gain_usd=opt(gain), gain_pct=pct(result.gain_pct), holdings=result.holdings,
             top_mover=StockMoverType(ticker=top.ticker, name=top.name, change_pct=pct(top.change_pct)) if top else None)
 
     def resolve_protection_value(self, info, timezone=None, include_stable=False):

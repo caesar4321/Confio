@@ -101,6 +101,10 @@ export function StocksCard({ value, month, isCurrent, masked, onOpenStock, onOpe
           hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }} testID="tumes-stocks-how">
           <Text style={styles.linkText} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>¿Cómo lo calculamos?</Text>
         </TouchableOpacity>
+      ) : value.state === 'settling' ? (
+        <Text style={styles.note} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER} testID="tumes-stocks-settling-note">
+          Tu última operación se está confirmando. En unos segundos verás el resultado del mes.
+        </Text>
       ) : (
         <Text style={styles.note} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER} testID="tumes-stocks-value-note">
           No tenemos el historial completo de tus acciones, así que no podemos calcular cuánto ganaron este mes.
@@ -139,7 +143,7 @@ function HowSheet({ visible, onClose, value, month, isCurrent, masked }: {
           </View>
         ))}
         <Text style={styles.sheetBody}>
-          Al valor de hoy le restamos lo que valían el 1 y lo que compraste, y le sumamos lo que vendiste: así, poner
+          {isCurrent ? 'Al valor de hoy' : `Al valor al cierre de ${monthName(month)}`} le restamos lo que valían el 1 y lo que compraste, y le sumamos lo que vendiste: así, poner
           dinero no cuenta como ganancia. Las compras incluyen el costo de operación. Usamos los precios de Ondo; los
           dividendos ya están en el precio.
         </Text>

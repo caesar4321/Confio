@@ -112,3 +112,13 @@ it('a gained↔stable flip on refocus never swaps the slot card', () => {
     { insights: null, savings: null, protection: p('stable') });
   expect(merged.protection?.state).toBe('gained');
 });
+
+it('a settling stocks card resolves in place, but never into an invitation', () => {
+  const base = { insights: null, savings: null, protection: null };
+  const settling = { state: 'settling', valueUsd: '220.00' } as any;
+  const gain = { state: 'gain', valueUsd: '220.00', gainUsd: '15.00' } as any;
+  expect(mergeValues({ ...base, stocks: settling }, { ...base, stocks: gain }).stocks).toBe(gain);
+  expect(mergeValues({ ...base, stocks: settling }, { ...base, stocks: { state: 'none' } as any }).stocks).toBe(settling);
+  expect(mergeValues({ ...base, stocks: gain }, { ...base, stocks: settling }).stocks).toBe(gain);
+  expect(mergeValues({ ...base, stocks: null }, { ...base, stocks: gain }).stocks).toBeNull();
+});

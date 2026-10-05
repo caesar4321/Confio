@@ -225,9 +225,10 @@ export const GET_STOCK_MONTH = gql`
 `;
 
 export type StockMonth = {
-  /** 'gain': the month's result is exact · 'value_only': stocks from outside
-   *  Confío, so only today's value · 'none': no stocks this month (invite) */
-  state: 'gain' | 'value_only' | 'none';
+  /** 'gain': the month's result is exact · 'value_only': history incomplete,
+   *  so only today's value · 'settling': a trade not final yet (today's value;
+   *  ask again in seconds) · 'none': no stocks this month (invite) */
+  state: 'gain' | 'value_only' | 'settling' | 'none';
   canBuy: boolean;
   valueUsd: string;
   valueStartUsd: string | null;
