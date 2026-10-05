@@ -25,7 +25,8 @@ class Command(BaseCommand):
     def handle(self, *args, dry_run=False, limit=0, **options):
         if limit < 0:
             raise CommandError('--limit must be non-negative')
-        has_reference = set(FaceReference.objects.filter(is_active=True).values_list('user_id', flat=True))
+        has_reference = set(FaceReference.objects.filter(
+            is_active=True, identity_verification__status='verified').values_list('user_id', flat=True))
         todo = []
         uncovered = set()
         for verification in IdentityVerification.all_documents.filter(status='verified').order_by('-verified_at', '-pk'):

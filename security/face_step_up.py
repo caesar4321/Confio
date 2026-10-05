@@ -180,8 +180,10 @@ def _download_selfie(url: str) -> tuple[bytes, str]:
 
 
 def _newer_reference_exists(verification) -> bool:
+    # A reference whose KYC was rejected never blocks one from a verified KYC.
     active = FaceReference.objects.filter(
-        user_id=verification.user_id, is_active=True).select_related('identity_verification').first()
+        user_id=verification.user_id, is_active=True, identity_verification__status='verified',
+    ).select_related('identity_verification').first()
     if not active:
         return False
     if active.identity_verification_id == verification.pk:
@@ -224,7 +226,10 @@ def store_face_reference_from_didit(verification, response_payload: dict) -> Fac
 
 
 def _active_reference(user) -> FaceReference | None:
-    return FaceReference.objects.filter(user=user, is_active=True).first()
+    """Only while its KYC stands: a selfie from a session later rejected (a
+    borrowed document) proves only that the same impostor is at the phone."""
+    return FaceReference.objects.filter(user=user, is_active=True,
+                                        identity_verification__status='verified').first()
 
 
 def _reference_bytes(reference: FaceReference) -> bytes:
