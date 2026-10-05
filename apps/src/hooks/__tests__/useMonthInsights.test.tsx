@@ -237,6 +237,18 @@ it('a focus refresh never stacks a stocks ask on a poll still in flight', async 
   expect(latest.stocksSettling).toBe(false);
 });
 
+it('a focus refresh does not ask stocks when no stocks card is shown (its answer could never appear)', async () => {
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: null } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.revealed).toBe(true);
+  expect(latest.stocks).toBeNull();
+  mockQuery.mockClear();
+  await act(async () => { latest.refresh(); });
+  expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(0);
+  expect(mockQuery).toHaveBeenCalled();                 // the other cards still refresh
+});
+
 it('from a trade, the reveal waits longer for a slow stocks answer (the card the user came for)', async () => {
   const slow = deferred<any>();
   mockQuery.mockImplementation(({ query }: any) => (query === GET_STOCK_MONTH ? slow.promise

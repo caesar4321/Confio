@@ -749,7 +749,8 @@ class PendingWindowTests(SimpleTestCase):
         scan.assert_called_once()           # the scan answered: None is the month-end rule, not an unknown scan
 
     def test_stuck_batches_stop_counting_as_settling(self):
-        self.assertLessEqual(sm.PENDING_MAX_AGE, timedelta(minutes=15))
+        from cusd_plus import gm_holdings
+        self.assertLessEqual(gm_holdings.IN_FLIGHT_MAX_AGE, timedelta(minutes=15))
 
 
 class FloorAndInFlightTests(NothingOnTheWire, SimpleTestCase):

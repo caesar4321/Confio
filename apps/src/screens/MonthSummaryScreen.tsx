@@ -115,7 +115,7 @@ export function MonthSummaryScreen() {
   // Re-ask the stocks card alone until it resolves in place (bounded).
   // Also when a shown card (gain · value_only) got a 'settling' answer: it
   // keeps its last value meanwhile and updates once the trade is final.
-  const settling = insights.revealed && (insights.stocks?.state === 'settling' || Boolean(insights.stocksSettling));
+  const settling = insights.revealed && insights.stocksSettling;
   const refreshStocks = useRef(insights.refreshStocks);
   refreshStocks.current = insights.refreshStocks;
   // Not while another screen is on top (the user moved on): no wasted asks
