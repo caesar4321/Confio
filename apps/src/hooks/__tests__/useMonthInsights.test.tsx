@@ -178,6 +178,28 @@ it('a settling poll never stacks a second stocks ask on one still in flight', as
   expect(mockQuery).toHaveBeenCalledTimes(2);           // free again once answered
 });
 
+it('a month switch frees the stocks slot; the old ask finishing later never frees the new one', async () => {
+  const settling = { state: 'settling', valueUsd: '220.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Probe {...base} />); });
+  const oldAsk = deferred<any>();
+  mockQuery.mockImplementation(() => oldAsk.promise);
+  await act(async () => { latest.refreshStocks(); });                    // October's ask hangs
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  await act(async () => { tree.update(<Probe {...base} month={9} isCurrent={false} />); });
+  const newAsk = deferred<any>();
+  mockQuery.mockReset();
+  mockQuery.mockImplementation(() => newAsk.promise);
+  await act(async () => { latest.refreshStocks(); });
+  expect(mockQuery).toHaveBeenCalledTimes(1);                             // not blocked by October's
+  await act(async () => { oldAsk.resolve({ data: { stockMonth: null } }); });
+  await act(async () => { latest.refreshStocks(); });
+  expect(mockQuery).toHaveBeenCalledTimes(1);                             // September's still holds it
+});
+
 it("a focus refresh's older stocks answer never lands over a newer poll's (no restarted poll)", async () => {
   const settling = { state: 'settling', valueUsd: '220.00' };
   mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
