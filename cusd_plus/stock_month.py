@@ -38,8 +38,6 @@ UNITS_TOLERANCE = Decimal('0.000001')        # relative, ledger vs chain
 # past this a batch still 'signed'/'sent' is stuck (ops reconciles it), not
 # settling, so it can't hold every card on "se está confirmando".
 PENDING_MAX_AGE = timedelta(minutes=15)
-# A node behind the one that confirmed a trade catches up within blocks.
-RECENT_SETTLEMENT = timedelta(seconds=60)
 
 
 class StockMonthUnavailable(Exception):
@@ -53,7 +51,6 @@ class Trade:
     units: Decimal
     usd: Decimal | None    # exact settlement; None when its history row is missing
     when: datetime
-    settled_at: datetime | None = None   # when the batch was saved confirmed (pending: None)
     block: int | None = None             # the block that holds it (confirmed only)
 
 
@@ -114,7 +111,7 @@ def confirmed_trades(bsc_address: str) -> list[Trade]:
     if not sig['n']:
         return []
     stamp = lambda v: v.timestamp() if v else 0  # noqa: E731
-    key = (f'gm_trades_v3:{bsc_address.lower()}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
+    key = (f'gm_trades_v4:{bsc_address.lower()}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
            f'{sig["rows"]}:{stamp(sig["rows_touched"])}')
     cached = cache.get(key)
     if cached is not None:
@@ -143,18 +140,14 @@ def _decode_trades(batches) -> list[Trade]:
             # ledger can no longer explain the chain (value only, never a gain).
             logger.warning('stock month: unreadable stock batch %s', batch.id)
             trades.append(Trade(symbol=f'?{batch.id}', kind=batch.kind, units=Decimal('0'), usd=None,
-                                when=batch.created_at, settled_at=_settled_at(batch), block=_block(batch)))
+                                when=batch.created_at, block=_block(batch)))
             continue
         action = actions[0]
         row = getattr(batch, 'unified_transaction', None)
         usd = _dec(row.amount) if row is not None and row.deleted_at is None else None
         trades.append(Trade(symbol=symbol, kind=batch.kind, units=Decimal(action['quantity']) / WAD,
-                            usd=usd, when=batch.created_at, settled_at=_settled_at(batch), block=_block(batch)))
+                            usd=usd, when=batch.created_at, block=_block(batch)))
     return trades
-
-
-def _settled_at(batch):
-    return batch.updated_at if batch.status == 'confirmed' else None
 
 
 def _block(batch):
@@ -195,19 +188,24 @@ def ledger_explains_chain(ledger: dict, chain: dict) -> bool:
     return True
 
 
-def _chain_lags_recent_trades(trades: list[Trade], chain: dict, now: datetime) -> bool:
-    """The chain is the ledger minus its newest trades confirmed in the last
-    RECENT_SETTLEMENT. A lagging node has seen a prefix of them in BLOCK
-    order (receipt checkers retry on their own clocks, so the order they
-    were saved confirmed can differ), so each suffix is tried: of two quick
-    trades it may show the first and not the second."""
-    recent = sorted((t for t in trades if t.settled_at and now - t.settled_at <= RECENT_SETTLEMENT),
-                    key=lambda t: (t.block is None, t.block or 0, t.settled_at))
-    for k in range(len(recent)):
-        unseen = {id(t) for t in recent[k:]}
-        if ledger_explains_chain(ledger_units([t for t in trades if id(t) not in unseen]), chain):
-            return True
-    return False
+def _unseen_by_scan(trades: list[Trade], blocks: dict) -> list[Trade]:
+    """Confirmed trades in a later block than the one their token's balance
+    was read at: a node behind the one that confirmed them (the RPC pool
+    rotates). Exact, from the blocks the scan itself reported; a trade or
+    token without a block is taken as seen."""
+    return [t for t in trades
+            if t.block is not None and blocks.get(t.symbol) is not None and t.block > blocks[t.symbol]]
+
+
+def _apply(units: dict, trades: list[Trade]) -> dict | None:
+    """Units after `trades` on top of `units`; None if any would go negative
+    (the inputs disagree, so no "today" can be stated)."""
+    out = dict(units)
+    for t in trades:
+        out[t.symbol] = out.get(t.symbol, Decimal('0')) + (t.units if t.kind == 'stock_buy' else -t.units)
+    if any(u < 0 for u in out.values()):
+        return None
+    return {s: u for s, u in out.items() if u > 0}
 
 
 def close_before(symbol: str, when: datetime) -> Decimal | None:
@@ -300,7 +298,7 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
 
     The current month (end > now) ends "now" at the live price; a past month
     ends at its last daily close."""
-    from .gm_holdings import holdings_units, registry
+    from .gm_holdings import complete_holdings, registry
     from .gm_tvl import _market_by_symbol
 
     if not bsc_address:
@@ -321,13 +319,14 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         # ledger (a DB read, kept on this thread's connection): overlap them.
         pool = _pool()
         # Fresh (≤30s), complete, or nothing: a total is never partial or stale.
-        scan = pool.submit(holdings_units, bsc_address, require_complete=True)
+        scan = pool.submit(complete_holdings, bsc_address)
         listing = pool.submit(_market_by_symbol)    # {symbol: price (> 0), ticker, name}
         trades = confirmed_trades(bsc_address)
-        chain_raw = scan.result()
+        complete = scan.result()
         market = listing.result()
-        if chain_raw is None:
+        if complete is None:
             return None                     # scan unknown, never "no stocks"
+        chain_raw, blocks = complete
         chain = {s: d for s, u in chain_raw.items() if (d := _dec(u)) is not None and d > 0}
         # A trade on the wire is settling even when the ledger still matches
         # the chain: the scan can lag the receipt the app already showed (a
@@ -336,13 +335,17 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
         # The chain may or may not show an in-flight trade yet: the ledger
         # explains it either way. A past month ends before any in-flight
         # trade (≤15 min old), so its own numbers never include one.
-        explained = (ledger_explains_chain(ledger_units(trades), chain)
-                     or (bool(in_flight) and ledger_explains_chain(ledger_units(trades + in_flight), chain)))
-        # Just confirmed, but this scan came from a node still a block behind
-        # the one that saw finality (the RPC pool rotates): the chain is the
-        # ledger WITHOUT the newest trades. That is settling, not "history
-        # incomplete" — the next ask, seconds later, sees the trade.
-        lagging = current and not explained and _chain_lags_recent_trades(trades, chain, now)
+        # A confirmed trade can also be newer than the node that served the
+        # scan (the RPC pool rotates): the scan's own blocks say exactly
+        # which ones it hasn't seen. The ledger must explain the chain as of
+        # what it HAS seen; that's settling on the current month (seconds),
+        # and changes nothing for a month that ended before those trades.
+        unseen = _unseen_by_scan(trades, blocks)
+        unseen_ids = {id(t) for t in unseen}
+        seen = [t for t in trades if id(t) not in unseen_ids]
+        explained = (ledger_explains_chain(ledger_units(seen), chain)
+                     or (bool(in_flight) and ledger_explains_chain(ledger_units(seen + in_flight), chain)))
+        lagging = bool(unseen)
         pending = current and (bool(in_flight) or lagging)
         if not current and any(t.when < end for t in in_flight):
             explained = False               # month just ended under a trade in flight
@@ -369,9 +372,12 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
                 # the receipt): today's value is known, the month's result in
                 # seconds. Never "from outside Confío", never a guessed gain.
                 # A lagging scan is the chain BEFORE the confirmed trades it
-                # hasn't seen: "today" is the final ledger (after a sell-all,
-                # never the sold position's value), not that older chain.
-                held = ledger_units(trades) if lagging and not in_flight else chain
+                # hasn't seen: "today" is that chain plus exactly those trades
+                # (after a sell-all, never the sold position's value). Anchored
+                # on the chain, so units from outside Confío stay counted.
+                held = _apply(chain, unseen) if lagging else chain
+                if held is None:
+                    held = {}                   # can't state today: the card shows no number
                 _prefetch(prices, {(s, start) for s in held})
                 value = sum((u * live_price(s) for s, u in held.items()), Decimal('0'))
                 return StockMonth(state='settling', value_end=value,
