@@ -258,7 +258,9 @@ class StockMonthTests(SimpleTestCase):
         bought.settled_at = NOW - timedelta(seconds=10)
         self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), bought]
         self.chain = {'NVDAon': 1.0}                          # a node one block behind finality
-        self.assertEqual(self.run_month().state, 'settling')
+        result = self.run_month()
+        self.assertEqual(result.state, 'settling')
+        self.assertEqual(result.value_end, Decimal('220'))    # today is the final ledger, not the old chain
         bought.settled_at = NOW - timedelta(minutes=5)        # long settled: the history is what's missing
         self.assertEqual(self.run_month().state, 'value_only')
         bought.settled_at = NOW - timedelta(seconds=10)
@@ -275,6 +277,17 @@ class StockMonthTests(SimpleTestCase):
         self.assertEqual(self.run_month().state, 'settling')
         self.chain = {'NVDAon': 2.0, 'AAPLon': 1.0}
         self.assertEqual(self.run_month().state, 'gain')
+
+    def test_the_lagging_prefix_follows_block_order_not_save_order(self):
+        # The earlier block's receipt checker was on a slower retry: it was
+        # saved confirmed AFTER the later block's trade.
+        first = trade('NVDAon', 'stock_buy', '1', '105', NOW - timedelta(seconds=40))
+        first.settled_at, first.block = NOW - timedelta(seconds=5), 100
+        second = trade('AAPLon', 'stock_buy', '1', '200', NOW - timedelta(seconds=20))
+        second.settled_at, second.block = NOW - timedelta(seconds=10), 102
+        self.trades = [trade('NVDAon', 'stock_buy', '1', '95', datetime(2026, 9, 5, tzinfo=UTC)), first, second]
+        self.chain = {'NVDAon': 2.0}                          # a node at block 101: has the first only
+        self.assertEqual(self.run_month().state, 'settling')
 
     def test_ledger_tolerates_float_dust_but_not_real_differences(self):
         ledger = {'NVDAon': Decimal('0.123456789')}

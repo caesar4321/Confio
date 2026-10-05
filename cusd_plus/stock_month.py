@@ -54,6 +54,7 @@ class Trade:
     usd: Decimal | None    # exact settlement; None when its history row is missing
     when: datetime
     settled_at: datetime | None = None   # when the batch was saved confirmed (pending: None)
+    block: int | None = None             # the block that holds it (confirmed only)
 
 
 @dataclass
@@ -113,7 +114,7 @@ def confirmed_trades(bsc_address: str) -> list[Trade]:
     if not sig['n']:
         return []
     stamp = lambda v: v.timestamp() if v else 0  # noqa: E731
-    key = (f'gm_trades_v2:{bsc_address.lower()}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
+    key = (f'gm_trades_v3:{bsc_address.lower()}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
            f'{sig["rows"]}:{stamp(sig["rows_touched"])}')
     cached = cache.get(key)
     if cached is not None:
@@ -142,18 +143,22 @@ def _decode_trades(batches) -> list[Trade]:
             # ledger can no longer explain the chain (value only, never a gain).
             logger.warning('stock month: unreadable stock batch %s', batch.id)
             trades.append(Trade(symbol=f'?{batch.id}', kind=batch.kind, units=Decimal('0'), usd=None,
-                                when=batch.created_at, settled_at=_settled_at(batch)))
+                                when=batch.created_at, settled_at=_settled_at(batch), block=_block(batch)))
             continue
         action = actions[0]
         row = getattr(batch, 'unified_transaction', None)
         usd = _dec(row.amount) if row is not None and row.deleted_at is None else None
         trades.append(Trade(symbol=symbol, kind=batch.kind, units=Decimal(action['quantity']) / WAD,
-                            usd=usd, when=batch.created_at, settled_at=_settled_at(batch)))
+                            usd=usd, when=batch.created_at, settled_at=_settled_at(batch), block=_block(batch)))
     return trades
 
 
 def _settled_at(batch):
     return batch.updated_at if batch.status == 'confirmed' else None
+
+
+def _block(batch):
+    return batch.block_number if batch.status == 'confirmed' else None
 
 
 def pending_trades(bsc_address: str) -> list[Trade]:
@@ -192,11 +197,12 @@ def ledger_explains_chain(ledger: dict, chain: dict) -> bool:
 
 def _chain_lags_recent_trades(trades: list[Trade], chain: dict, now: datetime) -> bool:
     """The chain is the ledger minus its newest trades confirmed in the last
-    RECENT_SETTLEMENT. A lagging node has seen a prefix of them (in the order
-    they settled), so each suffix is tried: of two quick trades it may show
-    the first and not the second."""
+    RECENT_SETTLEMENT. A lagging node has seen a prefix of them in BLOCK
+    order (receipt checkers retry on their own clocks, so the order they
+    were saved confirmed can differ), so each suffix is tried: of two quick
+    trades it may show the first and not the second."""
     recent = sorted((t for t in trades if t.settled_at and now - t.settled_at <= RECENT_SETTLEMENT),
-                    key=lambda t: t.settled_at)
+                    key=lambda t: (t.block is None, t.block or 0, t.settled_at))
     for k in range(len(recent)):
         unseen = {id(t) for t in recent[k:]}
         if ledger_explains_chain(ledger_units([t for t in trades if id(t) not in unseen]), chain):
@@ -362,11 +368,15 @@ def stock_month(bsc_address: str, start: datetime, end: datetime, now: datetime)
                 # A trade on the wire but not final (the app shows success on
                 # the receipt): today's value is known, the month's result in
                 # seconds. Never "from outside Confío", never a guessed gain.
-                _prefetch(prices, {(s, start) for s in chain})
-                value = sum((u * live_price(s) for s, u in chain.items()), Decimal('0'))
+                # A lagging scan is the chain BEFORE the confirmed trades it
+                # hasn't seen: "today" is the final ledger (after a sell-all,
+                # never the sold position's value), not that older chain.
+                held = ledger_units(trades) if lagging and not in_flight else chain
+                _prefetch(prices, {(s, start) for s in held})
+                value = sum((u * live_price(s) for s, u in held.items()), Decimal('0'))
                 return StockMonth(state='settling', value_end=value,
-                                  top=_top_mover(chain, market, prices, start, live_price),
-                                  holdings=len(chain))
+                                  top=_top_mover(held, market, prices, start, live_price),
+                                  holdings=len(held))
             if not chain:
                 if any(start <= t.when < end for t in trades):
                     # Sold out this month, but the history can't say for how
