@@ -869,6 +869,11 @@ Delta completion: scope unchanged (D1 arrangement minus PaceCard.tsx); 5 delta f
 - Slot order: a `gained` protection card → else savings earned (≥ 1¢) → else the stable card "Tu dólar se mantuvo: tus US$X siguen valiendo US$X" (no local amounts, no bars, no sheet) → else nothing. The slot no longer vanishes for someone holding dollars.
 - Refocus keeps the state revealed for the view (a gained↔stable flip never swaps the card mid-view).
 
+### R31: Bolivians/Argentines without Confío purchases (founder decision 2026-10-04)
+- Found on @julianm (BO): every Koywe on-ramp had FAILED, so there were no lots and no card.
+- Users with no on-ramp lots in BO/AR now get the month-start basis, like Venezuela: dollars held all month at the Binance P2P rate kept for the 1st vs today. Users who did buy keep "más de lo que pagaste".
+- First month-start figure: November 1 (the first kept 1st-of-month rate).
+
 ### Other review fixes
 - Cap trims the OLDEST lots first (same rule as spending).
 - Savings snapshot: block pinned 5 behind the head, rotating RPC pool, retries with backoff, hourly 00:15–06:15 UTC (idempotent), analytics queue.

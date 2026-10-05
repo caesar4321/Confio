@@ -88,7 +88,7 @@ class ProtectionValueTests(SimpleTestCase):
     def test_every_unknown_hides_the_card(self):
         lots = [p.Lot(D('100'), D('1150'))]
         self.assertIsNone(self._value(rate=None, lots=lots))                          # stale / no P2P rate
-        self.assertIsNone(self._value(lots=[]))                                       # no lots (BO/AR)
+        self.assertIsNone(self._value(lots=[]))                                       # no lots and no 1st-of-month rate yet
         self.assertIsNone(self._value(country='VE', rate=('40', 0), start_rate=None))  # no rate kept for the 1st
         self.assertIsNone(self._value(country='PE', lots=lots))
         self.assertIsNone(self._value(lots=lots, account_type='business'))
@@ -183,3 +183,15 @@ class StableGateTests(TestCase):
              mock.patch('users.protection.protection_value', return_value=stable):
             self.assertIsNone(MonthSummaryQuery().resolve_protection_value(info))
             self.assertEqual(MonthSummaryQuery().resolve_protection_value(info, include_stable=True).state, 'stable')
+
+
+class NoPurchaseFallbackTests(ProtectionValueTests):
+    """BO/AR users who never bought dollars in Confío get the month-start basis."""
+
+    def test_bolivian_without_purchases_compares_with_the_1st(self):
+        r = self._value(lots=[], start_rate='11.80', rate=('12.50', 0), net_in=D('100'))
+        self.assertEqual((r.basis, r.currency, r.protected_usd, r.paid_local), ('month_start', 'BOB', D('100'), D('1180.00')))
+
+    def test_purchases_still_use_what_was_paid(self):
+        r = self._value(lots=[p.Lot(D('100'), D('1150'))], start_rate='11.80', rate=('12.50', 0), net_in=D('100'))
+        self.assertEqual(r.basis, 'purchase')
