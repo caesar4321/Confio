@@ -1931,6 +1931,11 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         except Exception:  # noqa: BLE001
             pass
         if not recheck:
+            if batch.kind in ('stock_buy', 'stock_sell'):
+                # A scan cached while the trade was mined holds units the
+                # ledger will never get: drop it with the trade.
+                from .gm_holdings import invalidate_holdings
+                invalidate_holdings(batch.user_bsc_address)
             batch.status = 'reorged'
             settle_savings_mint(batch.tx_hash, 'reorged')
             batch.save(update_fields=['status', 'updated_at'])
@@ -1977,6 +1982,13 @@ def check_sponsored_batch_receipt(self, batch_id: int):
                            batch.tx_hash, exc)
             raise self.retry(countdown=_retry_countdown(self.request.retries))
 
+    if batch.kind in ('stock_buy', 'stock_sell'):
+        # BEFORE the row turns 'confirmed': a Tu mes read between the two
+        # would otherwise pair the confirmed ledger with a fresh scan cached
+        # pre-trade ('value_only' after the user's own trade). Invalidated
+        # first, any scan cached from here on read the final chain.
+        from .gm_holdings import invalidate_holdings
+        invalidate_holdings(batch.user_bsc_address)
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
@@ -1991,11 +2003,10 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         vault.invalidate_position(batch.user_bsc_address)
     if batch.kind in ('stock_buy', 'stock_sell'):
         from django.db import transaction
-        from .gm_holdings import invalidate_holdings
-        invalidate_holdings(batch.user_bsc_address)
-        # Warm the complete post-trade scan in its own task (never delays
-        # finality): Tu mes, often opened from the success screen, must answer
-        # inside its reveal window, and a cold Multicall may not.
+        # Holdings were invalidated before the status write above. Warm the
+        # complete post-trade scan in its own task (never delays finality):
+        # Tu mes, often opened from the success screen, must answer inside
+        # its reveal window, and a cold Multicall may not.
         address = batch.user_bsc_address
         transaction.on_commit(lambda: _dispatch_holdings_warmup(address))
     logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)

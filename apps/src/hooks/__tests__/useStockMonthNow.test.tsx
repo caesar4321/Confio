@@ -81,4 +81,14 @@ describe('openTuMesNow', () => {
     await openTuMesNow({ navigate, getState: () => ({ routes: [] }) } as any);
     expect(navigate.mock.calls[1][1].masked).toBe(false);
   });
+
+  it('marks a visit from a trade (longer reveal for the stocks card) and keeps pop + merge', async () => {
+    mockHidden.mockResolvedValue(false);
+    const navigate = jest.fn();
+    await openTuMesNow({ navigate, getState: () => ({ routes: [] }) } as any, { fromTrade: true });
+    expect(navigate.mock.calls[0][1].fromTrade).toBe(true);
+    expect(navigate.mock.calls[0][2]).toEqual({ pop: true, merge: true });
+    await openTuMesNow({ navigate, getState: () => ({ routes: [] }) } as any);
+    expect(navigate.mock.calls[1][1].fromTrade).toBe(false);
+  });
 });
