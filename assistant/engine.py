@@ -290,19 +290,8 @@ PUBLIC_DOCUMENTS = {
 }
 PUBLIC_DOCUMENT_MAX_CHARS = 60_000
 # Facts newer than a document's text, verified on-chain; returned first so the
-# model never repeats the stale passage. Remove once the document says it.
-PUBLIC_DOCUMENT_ERRATA = {
-    'tokenomics': (
-        'Corrección verificada en BNB Smart Chain el 2026-10-05 (reemplaza lo que el documento dice en §7, §8 y §9 '
-        'sobre que esas asignaciones "no están depositadas ni añadidas"): las bóvedas de vesting del fundador '
-        '(0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A, 893,6 millones, 36 meses), del co-creador '
-        '(0xF32ACF2933a51D89e4C6F3a22C432E43b518A129, 10 millones, 24 meses) y del Fondo de Invitación Cultural '
-        '(0x86c2051eb6e882888bd12417642C664D4A2fb4E7, 15 millones, 90 días) ya tienen los tokens depositados y la '
-        'asignación registrada (con la tesorería multifirma como beneficiaria temporal), pero ninguna se ha '
-        'activado: no ha empezado ninguna liberación y no se ha retirado nada. Antes de activarse, la tesorería '
-        'todavía puede cancelar una asignación y recuperar sus tokens; después de activarse es irrevocable.'
-    ),
-}
+# model never repeats a stale passage. Empty while the documents are current.
+PUBLIC_DOCUMENT_ERRATA: dict[str, str] = {}
 
 
 class Toolbelt:
