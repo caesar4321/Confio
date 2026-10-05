@@ -34,8 +34,6 @@ PRICE_LOOKBACK = timedelta(days=7)
 # Daily candles reach back one year ('1Y'); older months have no price.
 OHLC_RANGE = '1Y'
 UNITS_TOLERANCE = Decimal('0.000001')        # relative, ledger vs chain
-# A trade still 'signed'/'sent' after this long is stuck (dropped, never
-# reconciled), not settling: it must not hide the card forever.
 # The receipt checker gives up after ~9 minutes (5×3s + 35×15s retries):
 # past this a batch still 'signed'/'sent' is stuck (ops reconciles it), not
 # settling, so it can't hold every card on "se está confirmando".

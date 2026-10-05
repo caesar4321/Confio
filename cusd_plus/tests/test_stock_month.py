@@ -309,10 +309,12 @@ class StockMonthResolverTests(SimpleTestCase):
         out = self.resolve(r)
         self.assertEqual((out.gain_usd, out.gain_pct), ('0.00', '0.00'))
 
-    def test_none_needs_buying_and_unknown_or_gated_is_null(self):
+    def test_none_offers_buying_only_when_possible_and_unknown_or_gated_is_null(self):
         self.assertTrue(self.resolve(sm.StockMonth(state='none')).can_buy)
-        self.assertIsNone(self.resolve(sm.StockMonth(state='none'), can_buy=False))
-        self.assertIsNone(self.resolve(sm.StockMonth(state='none'), trading=False))   # never invite while trading is off
+        # A definite "no stocks, nothing to offer" (resolves a failed settling card), never null.
+        none = self.resolve(sm.StockMonth(state='none'), can_buy=False)
+        self.assertEqual((none.state, none.can_buy), ('none', False))
+        self.assertFalse(self.resolve(sm.StockMonth(state='none'), trading=False).can_buy)   # never invite while trading is off
         self.assertIsNone(self.resolve(None))
         self.assertIsNone(self.resolve(sm.StockMonth(state='gain'), surfaces=False))
 
@@ -460,6 +462,7 @@ class LiveRegistryTests(SimpleTestCase):
              mock.patch.object(gm_holdings, '_scan', side_effect=scan):
             self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0, 'OLDon': 3.0})
             self.assertEqual(calls, [['OLDon', 'TSLAon']])                       # one Multicall pass
+            self.assertEqual(cache.get(f'gm_hold:{ADDR.lower()}'), {'TSLAon': 1.0})   # the list's own token set
             gm_holdings.invalidate_holdings(ADDR)
             failing.add('OLDon')                                                   # a retired contract: tolerated
             self.assertEqual(gm_holdings.holdings_units(ADDR, require_complete=True), {'TSLAon': 1.0, 'OLDon': 3.0})

@@ -264,8 +264,9 @@ class MonthSummaryQuery(graphene.ObjectType):
         # while trading is off. The overlay is not free (phone + IP): last.
         can_buy = (result.state == 'none' and _stock_execution_ready()
                    and stock_buy_overlay_allows(user, meta))
-        if result.state == 'none' and not can_buy:
-            return None                      # nothing to show and nothing to offer
+        # 'none' without a purchase on offer is still a definite answer (the
+        # app draws nothing): it resolves a 'settling' card whose trade
+        # failed, where null ("unknown") would leave it confirming forever.
         # Dollars and percents alike: 2 decimals, half up.
         opt = lambda v: None if v is None else _usd(v)  # noqa: E731
         top = result.top
