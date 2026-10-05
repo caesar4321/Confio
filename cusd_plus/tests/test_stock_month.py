@@ -485,20 +485,45 @@ class HoldingsWarmupTests(SimpleTestCase):
              self.assertLogs('cusd_plus.tasks', level='WARNING'):
             tasks.warm_gm_holdings(ADDR, 100)
 
-    def test_a_warmup_read_behind_the_trade_is_dropped_and_retried(self):
+    def test_a_warmup_read_behind_the_trade_is_retried(self):
         from celery.exceptions import Retry
         from cusd_plus import tasks
         with mock.patch('cusd_plus.gm_holdings.complete_holdings',
                         return_value=({'TSLAon': 1.0}, {'TSLAon': 99})), \
-             mock.patch('cusd_plus.gm_holdings.invalidate_holdings') as drop, \
              self.assertRaises(Retry):
             tasks.warm_gm_holdings(ADDR, 100)
-        drop.assert_called_once_with(ADDR)
         with mock.patch('cusd_plus.gm_holdings.complete_holdings',
-                        return_value=({}, {'TSLAon': 100})), \
-             mock.patch('cusd_plus.gm_holdings.invalidate_holdings') as drop:
-            tasks.warm_gm_holdings(ADDR, 100)                 # caught up: kept
-        drop.assert_not_called()
+                        return_value=({}, {'TSLAon': 100})):
+            tasks.warm_gm_holdings(ADDR, 100)                 # caught up: done
+
+    def test_no_read_behind_the_last_trade_is_cached_by_either_scan(self):
+        from cusd_plus import gm_holdings
+        key = ADDR.lower()
+        reg = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        gm_holdings.invalidate_holdings(ADDR, min_block=100)
+        gm_holdings.invalidate_holdings(ADDR, min_block=90)   # the floor never goes down
+        self.assertEqual(cache.get(f'gm_hold_floor:{key}'), 100)
+
+        def behind(_key, _tokens, *, blocks=None, **_kw):
+            blocks.update({'TSLAon': 99})
+            return {'TSLAon': 1.0}
+
+        def caught_up(_key, _tokens, *, blocks=None, **_kw):
+            blocks.update({'TSLAon': 100})
+            return {}
+
+        with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
+             mock.patch.object(gm_holdings, 'registry_entry', return_value=(reg, True)), \
+             mock.patch.object(gm_holdings, '_fallback_registry', return_value={}):
+            with mock.patch.object(gm_holdings, '_scan', side_effect=behind):
+                self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})
+                self.assertEqual(gm_holdings.complete_holdings(ADDR), ({'TSLAon': 1.0}, {'TSLAon': 99}))
+            for k in ('gm_hold', 'gm_hold_full_v2', 'gm_hold_last'):
+                self.assertIsNone(cache.get(f'{k}:{key}'))                     # nothing pre-trade cached
+            with mock.patch.object(gm_holdings, '_scan', side_effect=caught_up):
+                self.assertEqual(gm_holdings.complete_holdings(ADDR), ({}, {'TSLAon': 100}))
+            self.assertEqual(cache.get(f'gm_hold:{key}'), {})
+            self.assertEqual(cache.get(f'gm_hold_full_v2:{key}')['blocks'], {'TSLAon': 100})
 
     def test_dispatch_never_raises_on_a_broker_failure(self):
         from cusd_plus import tasks
