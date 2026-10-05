@@ -544,6 +544,9 @@ class HoldingsWarmupTests(SimpleTestCase):
             for k in ('gm_hold', 'gm_hold_full_v2', 'gm_hold_last'):
                 self.assertIsNone(cache.get(f'{k}:{key}'))
             gm_holdings.invalidate_holdings(ADDR, min_block=99)            # confirmed: the floor takes over
+            with mock.patch('blockchain.models.SponsoredBatch') as model:
+                model.objects.filter.return_value.exists.return_value = False
+                gm_holdings.lift_in_flight(ADDR)                           # after the status write
             self.assertIsNone(cache.get(f'gm_hold_inflight:{key}'))
             gm_holdings.holdings_units(ADDR)
             self.assertEqual(cache.get(f'gm_hold:{key}'), {'TSLAon': 1.0})
@@ -732,7 +735,26 @@ class FloorAndInFlightTests(SimpleTestCase):
         from cusd_plus import gm_holdings
         key = ADDR.lower()
         gm_holdings.invalidate_holdings(ADDR, in_flight=True)
-        gm_holdings.invalidate_holdings(ADDR, min_block=100, others_in_flight=True)
-        self.assertIsNotNone(cache.get(f'gm_hold_inflight:{key}'))
-        gm_holdings.invalidate_holdings(ADDR, min_block=101)
+        gm_holdings.invalidate_holdings(ADDR, min_block=100)
+        self.assertIsNotNone(cache.get(f'gm_hold_inflight:{key}'))     # kept until the status write
+        with mock.patch('blockchain.models.SponsoredBatch') as model:
+            model.objects.filter.return_value.exists.return_value = True     # another trade on the wire
+            gm_holdings.lift_in_flight(ADDR)
+            self.assertIsNotNone(cache.get(f'gm_hold_inflight:{key}'))
+            # Only rows young enough to hold a marker count (a stuck batch doesn't).
+            since = model.objects.filter.call_args.kwargs['created_at__gte']
+            from django.utils import timezone as dj_tz
+            self.assertLessEqual(dj_tz.now() - since,
+                                 timedelta(seconds=gm_holdings.IN_FLIGHT_TTL, milliseconds=500))
+            model.objects.filter.return_value.exists.return_value = False
+            gm_holdings.lift_in_flight(ADDR)
         self.assertIsNone(cache.get(f'gm_hold_inflight:{key}'))
+
+    def test_lifting_the_marker_never_raises(self):
+        from cusd_plus import gm_holdings
+        gm_holdings.invalidate_holdings(ADDR, in_flight=True)
+        with mock.patch('blockchain.models.SponsoredBatch') as model, \
+             self.assertLogs('cusd_plus.gm_holdings', level='WARNING'):
+            model.objects.filter.side_effect = RuntimeError('db down')
+            gm_holdings.lift_in_flight(ADDR)
+        self.assertIsNotNone(cache.get(f'gm_hold_inflight:{ADDR.lower()}'))
