@@ -69,7 +69,7 @@ class ProtectionValueTests(SimpleTestCase):
             return None
         with mock.patch.object(p, 'protection_countries', return_value={'BO', 'AR', 'VE'}), \
              mock.patch.object(p, 'current_rate', return_value=now), \
-             mock.patch.object(p, 'month_start_rate', return_value=None if start_rate is None else D(start_rate)), \
+             mock.patch.object(p, 'month_baseline', return_value=None if start_rate is None else (__import__('datetime').date(2026, 10, 1), D(start_rate))), \
              mock.patch.object(p, '_ledger', return_value=('v1', lambda: [])), \
              mock.patch.object(p.cache, 'get', side_effect=cache_get), \
              mock.patch.object(p.cache, 'set'):
@@ -126,8 +126,7 @@ class RatesTests(TestCase):
             self.assertEqual(snapshot_daily_rates(), 'VES')
             self.assertEqual(snapshot_daily_rates(), 'none')                           # idempotent
         today = timezone.now().date()
-        self.assertEqual(p.month_start_rate('VES', today.year, today.month),
-                         D('40.00') if today.day == 1 else None)
+        self.assertEqual(p.month_baseline('VES', today.year, today.month), (today, D('40.00')))
         self.assertEqual(DailyRateSnapshot.objects.filter(date=today).count(), 1)
 
 
@@ -195,3 +194,14 @@ class NoPurchaseFallbackTests(ProtectionValueTests):
     def test_purchases_still_use_what_was_paid(self):
         r = self._value(lots=[p.Lot(D('100'), D('1150'))], start_rate='11.80', rate=('12.50', 0), net_in=D('100'))
         self.assertEqual(r.basis, 'purchase')
+
+
+class BaselineTests(TestCase):
+    def test_first_kept_day_of_the_month_is_the_baseline(self):
+        from datetime import date
+        from django.utils import timezone as tz
+        from exchange_rates.models import DailyRateSnapshot
+        for d, r in ((date(2026, 10, 4), '11.99'), (date(2026, 10, 5), '11.98'), (date(2026, 9, 30), '12.10')):
+            DailyRateSnapshot.objects.create(date=d, currency='BOB', rate=r, fetched_at=tz.now())
+        self.assertEqual(p.month_baseline('BOB', 2026, 10), (date(2026, 10, 4), D('11.99')))
+        self.assertIsNone(p.month_baseline('BOB', 2026, 11))

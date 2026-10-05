@@ -12,6 +12,13 @@ import { formatLocal, quoteTime, shortDate, SPARK_MIN_DAYS } from '../../utils/m
 import { formatUsdAmount } from '../../utils/numberLocale';
 import { CardShell, CardTitle, CARD_FONT_MULTIPLIER } from './CardShell';
 
+/** Day of the month the comparison starts (the 1st, or the first day a
+ *  rate was kept in the launch month). */
+function baselineDay(value: ProtectionValue): number {
+  const day = Number((value.startDate ?? '').slice(8, 10));
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? day : 1;
+}
+
 const LOCAL_NAME: Record<string, string> = { BOB: 'bolivianos', VES: 'bolívares', ARS: 'pesos' };
 
 export function ProtectionCard({ value, month, masked }: { value: ProtectionValue; month: number; masked: boolean }) {
@@ -19,7 +26,8 @@ export function ProtectionCard({ value, month, masked }: { value: ProtectionValu
   // Bolivia/Argentina: what they paid in Confío. Venezuela (no on-ramp yet):
   // what those dollars were worth on the 1st. "Hoy" is Binance P2P for both.
   const monthStart = value.basis === 'month_start';
-  const startLabel = shortDate(month, 1);
+  const startDay = baselineDay(value);
+  const startLabel = shortDate(month, startDay);
   const usd = formatUsd(value.protectedUsd, { whole: true });
   const gain = formatLocal(value.gainLocal, value.currency);
   const paid = Number(value.paidLocal);
@@ -32,12 +40,12 @@ export function ProtectionCard({ value, month, masked }: { value: ProtectionValu
       <View accessible accessibilityLabel={masked
         ? 'Tu dólar te protegió. Montos ocultos.'
         : monthStart
-          ? `Tu dólar te protegió: tus ${Math.round(Number(value.protectedUsd))} dólares valen hoy ${Math.round(Number(value.gainLocal))} ${LOCAL_NAME[value.currency] ?? value.currency} más que el 1 de ${monthName(month)}.`
+          ? `Tu dólar te protegió: tus ${Math.round(Number(value.protectedUsd))} dólares valen hoy ${Math.round(Number(value.gainLocal))} ${LOCAL_NAME[value.currency] ?? value.currency} más que el ${startDay} de ${monthName(month)}.`
           : `Tu dólar te protegió: tus ${Math.round(Number(value.protectedUsd))} dólares hoy valen ${Math.round(Number(value.gainLocal))} ${LOCAL_NAME[value.currency] ?? value.currency} más de lo que pagaste.`}>
         {!masked && (
           <Text style={styles.sentence} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>
             {monthStart
-              ? <>Tus {usd} valen hoy <Text style={styles.gain}>{gain} más</Text> que el 1 de {monthName(month)}.</>
+              ? <>Tus {usd} valen hoy <Text style={styles.gain}>{gain} más</Text> que el {startDay} de {monthName(month)}.</>
               : <>Tus {usd} hoy valen <Text style={styles.gain}>{gain} más</Text> de lo que pagaste.</>}
           </Text>
         )}
@@ -72,14 +80,15 @@ function HowSheet({ visible, onClose, value, month, masked }: {
   visible: boolean; onClose: () => void; value: ProtectionValue; month: number; masked: boolean;
 }) {
   const monthStart = value.basis === 'month_start';
+  const startDay = baselineDay(value);
   const perUsd = (rate: string) => (masked ? MASK : `${formatLocal(rate, value.currency, 2)} por dólar`);
   const rows: [string, string][] = [
-    [monthStart ? `El 1 de ${monthName(month)} (Binance P2P)` : 'Pagaste en Confío, en promedio', perUsd(value.avgRate)],
+    [monthStart ? `El ${startDay} de ${monthName(month)} (Binance P2P)` : 'Pagaste en Confío, en promedio', perUsd(value.avgRate)],
     ['Hoy (Binance P2P)', perUsd(value.todayRate)],
     ['Tasa consultada', quoteTime(value.quotedAt)],
   ];
   const body = monthStart
-    ? 'Comparamos lo que valían tus dólares el 1 del mes con lo que valen hoy, a la tasa de Binance P2P. Solo cuentan los dólares que tuviste todo el mes.'
+    ? `Comparamos lo que valían tus dólares el ${startDay} de ${monthName(month)} con lo que valen hoy, a la tasa de Binance P2P. Solo cuentan los dólares que tuviste desde ese día.`
     : 'Comparamos lo que pagaste en Confío por tus dólares con lo que valen hoy a la tasa de Binance P2P.';
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

@@ -109,6 +109,13 @@ describe('dollar slot cards', () => {
     expect(texts(tree).join(' ')).toContain('El 1 de octubre (Binance P2P)');
   });
 
+  it('names the real baseline day in the launch month', () => {
+    const tree = mount(<ProtectionCard value={{ ...protection, currency: 'BOB', basis: 'month_start', startDate: '2026-10-04' }} month={10} masked={false} />);
+    expect(texts(tree).join(' ')).toContain('4 oct');
+    const label = tree.root.find((n) => typeof n.type === 'string' && /Tu dólar te protegió:/.test(n.props.accessibilityLabel ?? ''));
+    expect(label.props.accessibilityLabel).toContain('más que el 4 de octubre');
+  });
+
   it('stable: the dollars kept their dollar value, no local amounts, no loss', () => {
     const tree = mount(<StableCard value={{ ...protection, state: 'stable', gainLocal: '-150' }} masked={false} />);
     const all = texts(tree).join(' ');

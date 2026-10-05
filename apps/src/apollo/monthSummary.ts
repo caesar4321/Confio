@@ -161,6 +161,7 @@ export const GET_PROTECTION_VALUE = gql`
       avgRate
       todayRate
       quotedAt
+      startDate
     }
   }
 `;
@@ -197,4 +198,6 @@ export type ProtectionValue = {
   avgRate: string;
   todayRate: string;
   quotedAt: string;
+  /** month_start: the baseline day (ISO date), usually the 1st */
+  startDate?: string | null;
 };

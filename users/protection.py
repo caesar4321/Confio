@@ -16,7 +16,8 @@ Two bases, by country:
   month_start (VE: no on-ramp; and BO/AR users who never bought in Confío)
     protected = dollars held since the 1st (balance now minus this month's
                 net inflow, capped at the balance);
-    paid      = those dollars at the Binance P2P rate kept for the 1st;
+    paid      = those dollars at the first Binance P2P rate kept this month
+                (the 1st, except in the launch month: the card names the day);
     today     = those dollars at today's Binance P2P rate.
 
 A gain worth at least US$1 at today's rate is state 'gained'. Anything
@@ -66,12 +67,18 @@ def current_rate(currency: str):
     return Decimal(row.rate), row.fetched_at
 
 
-def month_start_rate(currency: str, year: int, month: int):
-    """The rate kept for the 1st of the month (DailyRateSnapshot), or None."""
+def month_baseline(currency: str, year: int, month: int):
+    """(date, rate) of the FIRST rate kept in the month — the 1st once the
+    daily snapshot has run for a full month; before that (the first month
+    after launch) the first day it ran, which the card names explicitly
+    ("desde el 4 de octubre"). None when nothing was kept this month."""
+    import calendar
     from datetime import date
     from exchange_rates.models import DailyRateSnapshot
-    row = DailyRateSnapshot.objects.filter(date=date(year, month, 1), currency=currency, source=RATE_SOURCE).first()
-    return Decimal(row.rate) if row and row.rate > 0 else None
+    row = (DailyRateSnapshot.objects.filter(
+        date__gte=date(year, month, 1), date__lte=date(year, month, calendar.monthrange(year, month)[1]),
+        currency=currency, source=RATE_SOURCE, rate__gt=0).order_by('date').first())
+    return (row.date, Decimal(row.rate)) if row else None
 
 
 # ── R13: chronological lot replay ───────────────────────────────────────────
@@ -185,6 +192,7 @@ class Protection:
     avg_rate: Decimal           # purchase: average paid per USD; month_start: rate on the 1st
     today_rate: Decimal
     quoted_at: str
+    start_date: str | None = None   # month_start: the baseline day (ISO), usually the 1st
     state: str = 'gained'       # 'gained' | 'stable' (gain under US$1, or a reversal)
 
     @property
@@ -256,23 +264,24 @@ def protection_value(user, account, account_type, business_id, year: int, month:
     if not lots:
         # No dollars bought in Confío (VE always; BO/AR users who got their
         # dollars another way): compare with the 1st of the month instead.
-        start_rate = month_start_rate(currency, year, month)
-        if start_rate is None:
+        baseline = month_baseline(currency, year, month)
+        if baseline is None:
             return None
+        start_day, start_rate = baseline
         balance = _balance_usd(account, version)
-        key = f'tumes_protection:{account.id}:{version}:held:{year}-{month}'
+        key = f'tumes_protection:{account.id}:{version}:held:{start_day.isoformat()}'
         protected = cache.get(key)
         if protected is None:
-            from users.cashflow import month_window
-            from zoneinfo import ZoneInfo
-            start, _ = month_window(year, month, ZoneInfo('UTC'))   # the 1st's rate is a UTC-day snapshot
+            from datetime import datetime, timezone as dt_tz
+            start = datetime(start_day.year, start_day.month, start_day.day, tzinfo=dt_tz.utc)  # UTC-day snapshot
             protected = held_since(balance, load(since=start))
             cache.set(key, protected, RESULT_TTL)
         if protected <= 0:
             return None
         result = Protection(currency=currency, basis='month_start', protected_usd=protected,
                             paid_local=protected * start_rate, today_local=protected * today_rate,
-                            avg_rate=start_rate, today_rate=today_rate, quoted_at=fetched_at.isoformat())
+                            avg_rate=start_rate, today_rate=today_rate, quoted_at=fetched_at.isoformat(),
+                            start_date=start_day.isoformat())
     else:
         lots = _cap(lots, _balance_usd(account, version))
         protected = sum((l.usd for l in lots), Decimal('0'))
