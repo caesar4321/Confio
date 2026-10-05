@@ -99,11 +99,15 @@ type Props = {
   pace: PaceLine | null;
   onOpenIncome: () => void;
   onOpenSpending: () => void;
+  /** Shown on a month with no movements yet: an invitation to start. */
+  onSend?: () => void;
+  onReceive?: () => void;
 };
 
 const PACE_ICON = { less: 'check-circle', same: 'minus-circle', more: 'info' } as const;
 
-export function SummaryCard({ summary, masked, runKey, pace, onOpenIncome, onOpenSpending }: Props) {
+export function SummaryCard({ summary, masked, runKey, pace, onOpenIncome, onOpenSpending, onSend, onReceive }: Props) {
+  const quiet = summary.current.movementCount === 0;
   const income = Number(summary.current.incomeUsd);
   const spending = Number(summary.current.spendingUsd);
   const result = income - spending;
@@ -173,6 +177,22 @@ export function SummaryCard({ summary, masked, runKey, pace, onOpenIncome, onOpe
         <Text style={styles.caption} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER} testID="month-comparison">{comparison}</Text>
       )}
 
+      {quiet && onSend && onReceive && (
+        <View style={styles.actions} testID="tumes-quiet-actions">
+          <Text style={styles.caption} maxFontSizeMultiplier={CARD_FONT_MULTIPLIER}>
+            Todavía no hay movimientos este mes.
+          </Text>
+          <View style={styles.actionRow}>
+            <TouchableOpacity style={[styles.action, styles.actionPrimary]} onPress={onSend} accessibilityRole="button">
+              <Text style={[styles.actionText, styles.actionPrimaryText]}>Enviar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.action} onPress={onReceive} accessibilityRole="button">
+              <Text style={styles.actionText}>Recibir</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {pace && (
         <View style={styles.pace} testID="tumes-pace" accessible
           accessibilityLabel={`${pace.verdict}.${pace.projectionUsd !== null && !masked
@@ -211,6 +231,13 @@ const styles = StyleSheet.create({
   barOut: { backgroundColor: colors.flowOut.bar, borderRadius: 4 },
   caption: { fontSize: 13, lineHeight: 18, color: colors.text.secondary, marginTop: 8, fontVariant: ['tabular-nums'] },
   pace: { marginTop: 12 },
+  actions: { marginTop: 4 },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  action: { minHeight: 44, paddingHorizontal: 22, borderRadius: 999, borderWidth: 1, borderColor: colors.primaryMuted,
+    backgroundColor: colors.white, justifyContent: 'center' },
+  actionPrimary: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
+  actionText: { fontSize: 15, fontWeight: '700', color: colors.flowIn.textSmall },
+  actionPrimaryText: { color: colors.white },
   paceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   paceVerdict: { fontSize: 15, lineHeight: 20, fontWeight: '600', color: colors.textFlat, flexShrink: 1 },
 });
