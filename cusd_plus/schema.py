@@ -1867,13 +1867,14 @@ class SponsorBscBatch(graphene.Mutation):
                                 else None))
             broadcast_tx_hash = tx_hash  # past the point of no return
             if kind in ('stock_buy', 'stock_sell'):
-                # Drop only fresh values. If the tx later reverts, the next
-                # scan simply observes the unchanged chain; if it executes,
-                # the client's receipt-triggered refetch sees the new state.
+                # Drop only fresh values, and cache none until it confirms (a
+                # read from before it was mined must not serve the client's
+                # receipt-triggered refetch). If the tx later reverts, the
+                # next scan simply observes the unchanged chain.
                 from . import vault as _vault
                 from .gm_holdings import invalidate_holdings
                 _vault.invalidate_position(user_addr)
-                invalidate_holdings(user_addr)
+                invalidate_holdings(user_addr, in_flight=True)
             if mint_call is not None and mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
                 # Gate passed and the batch is on the wire: record the mint as
                 # history. subscribeAndMint(uint256 usdtAmount, ...) — first

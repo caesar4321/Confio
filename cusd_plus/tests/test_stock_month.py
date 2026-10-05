@@ -525,6 +525,29 @@ class HoldingsWarmupTests(SimpleTestCase):
             self.assertEqual(cache.get(f'gm_hold:{key}'), {})
             self.assertEqual(cache.get(f'gm_hold_full_v2:{key}')['blocks'], {'TSLAon': 100})
 
+    def test_no_read_is_cached_while_a_trade_is_on_the_wire(self):
+        from cusd_plus import gm_holdings
+        key = ADDR.lower()
+        reg = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+
+        def read(_key, _tokens, *, blocks=None, **_kw):
+            blocks.update({'TSLAon': 99})
+            return {'TSLAon': 1.0}
+
+        with mock.patch.object(gm_holdings, 'registry', return_value=reg), \
+             mock.patch.object(gm_holdings, 'registry_entry', return_value=(reg, True)), \
+             mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
+             mock.patch.object(gm_holdings, '_scan', side_effect=read):
+            gm_holdings.invalidate_holdings(ADDR, in_flight=True)          # broadcast: block unknown
+            self.assertEqual(gm_holdings.holdings_units(ADDR), {'TSLAon': 1.0})
+            self.assertEqual(gm_holdings.complete_holdings(ADDR), ({'TSLAon': 1.0}, {'TSLAon': 99}))
+            for k in ('gm_hold', 'gm_hold_full_v2', 'gm_hold_last'):
+                self.assertIsNone(cache.get(f'{k}:{key}'))
+            gm_holdings.invalidate_holdings(ADDR, min_block=99)            # confirmed: the floor takes over
+            self.assertIsNone(cache.get(f'gm_hold_inflight:{key}'))
+            gm_holdings.holdings_units(ADDR)
+            self.assertEqual(cache.get(f'gm_hold:{key}'), {'TSLAon': 1.0})
+
     def test_dispatch_never_raises_on_a_broker_failure(self):
         from cusd_plus import tasks
         with mock.patch.object(tasks.warm_gm_holdings, 'apply_async', side_effect=OSError('broker down')), \
@@ -693,3 +716,23 @@ class PendingWindowTests(SimpleTestCase):
 
     def test_stuck_batches_stop_counting_as_settling(self):
         self.assertLessEqual(sm.PENDING_MAX_AGE, timedelta(minutes=15))
+
+
+class FloorAndInFlightTests(SimpleTestCase):
+    def tearDown(self):
+        cache.clear()
+
+    def test_the_floor_only_rises(self):
+        from cusd_plus import gm_holdings
+        gm_holdings.invalidate_holdings(ADDR, min_block=105)
+        gm_holdings.invalidate_holdings(ADDR, min_block=100)
+        self.assertEqual(cache.get(f'gm_hold_floor:{ADDR.lower()}'), 105)
+
+    def test_a_confirmation_keeps_the_marker_of_another_trade_in_flight(self):
+        from cusd_plus import gm_holdings
+        key = ADDR.lower()
+        gm_holdings.invalidate_holdings(ADDR, in_flight=True)
+        gm_holdings.invalidate_holdings(ADDR, min_block=100, others_in_flight=True)
+        self.assertIsNotNone(cache.get(f'gm_hold_inflight:{key}'))
+        gm_holdings.invalidate_holdings(ADDR, min_block=101)
+        self.assertIsNone(cache.get(f'gm_hold_inflight:{key}'))
