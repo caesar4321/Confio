@@ -500,46 +500,43 @@ def erc20_balance_raw(token_address: str, holder: str) -> int:
     )
 
 
-# Fresh-read window per address; within it, summary queries cost zero RPCs.
-POSITION_TTL = 30
-# How long a last-known value may stand in when the node is unreachable.
-POSITION_LAST_TTL = 7 * 24 * 3600
-
-
-def invalidate_position(user_bsc_address: str) -> None:
-    """Drop the fresh-read caches so the next summary re-reads the chain
-    (called when a conversion leg lands and the balances just changed —
-    a mint moves BOTH the vault position and the wallet USDT)."""
+def invalidate_position(user_bsc_address: str, min_block: int | None = None) -> None:
+    """The wallet's BSC balances just changed (or are about to): mark its
+    stored rows stale so the next display read re-reads the chain (called
+    at broadcast, at confirmation, and by the inbound scanners; a mint moves
+    BOTH the vault position and the wallet USDT)."""
     if user_bsc_address:
-        key = user_bsc_address.lower()
-        cache.delete(f'cusd_plus_pos:{key}')
-        cache.delete(f'cusd_plus_usdt:{key}')
+        from blockchain.bsc_balance_service import BscBalanceService
+        BscBalanceService.mark_stale(user_bsc_address, min_block=min_block)
+
+
+PPLUS_LAST_TTL = 7 * 24 * 3600
 
 
 def position_usd(user_bsc_address: str) -> float:
-    """USD value of an address's cUSD+ position = shares × pPlus.
-    Returns 0.0 if the vault isn't wired or the address holds nothing.
+    """USD value of an address's cUSD+ position = shares × pPlus, display-
+    grade: shares come from the stored balance (BscBalanceService), so the
+    value grows with yield without re-reading the wallet. Returns 0.0 if
+    the vault isn't wired or the address holds nothing (or is unknown).
 
-    Cached POSITION_TTL per address. On RPC failure falls back to the last
-    successfully read value — a flaky node must degrade to a slightly stale
-    savings balance, never to a false $0."""
+    A failed price read falls back to the last price read: a flaky node
+    must degrade to a slightly stale savings balance, never to a false $0."""
     addr = vault_address()
     if not addr or not user_bsc_address:
         return 0.0
-    key = user_bsc_address.lower()
-    cached = cache.get(f'cusd_plus_pos:{key}')
-    if cached is not None:
-        return cached
+    from blockchain.bsc_balance_service import BscBalanceService
+    shares = BscBalanceService.balances_raw(user_bsc_address).get('CUSD_PLUS')
+    if not shares:
+        return 0.0
     try:
-        shares = erc20_balance_raw(addr, key)
-        value = 0.0 if shares == 0 else (shares * p_plus_wad()) / (10 ** 36)
+        pps = p_plus_wad()
+        cache.set('cusd_plus_pplus_last', pps, PPLUS_LAST_TTL)
     except Exception:  # noqa: BLE001 — read failure must not break the screen
-        logger.warning('cUSD+ position read failed for %s', user_bsc_address, exc_info=True)
-        last = cache.get(f'cusd_plus_pos_last:{key}')
-        return last if last is not None else 0.0
-    cache.set(f'cusd_plus_pos:{key}', value, POSITION_TTL)
-    cache.set(f'cusd_plus_pos_last:{key}', value, POSITION_LAST_TTL)
-    return value
+        logger.warning('cUSD+ price read failed', exc_info=True)
+        pps = cache.get('cusd_plus_pplus_last')
+        if pps is None:
+            return 0.0
+    return (shares * pps) / (10 ** 36)
 
 
 # Reserve stat cadence: this is a platform-wide marketing number, not a
@@ -600,28 +597,18 @@ def usdt_address() -> str:
 
 def usdt_balance_raw(user_bsc_address: str, fresh: bool = False) -> int:
     """Wei of raw wallet USDT (pre-mint, or held as "Confío Dollar" by
-    geo-ineligible users). Cached POSITION_TTL like position_usd, with a
-    last-known fallback — a flaky node degrades to slightly stale, never to
-    a false 0 (which would make just-landed money vanish from the screen).
-    fresh=True bypasses the cache for exactness-sensitive callers (off-ramp
+    geo-ineligible users). Display reads come from the stored balance
+    (BscBalanceService), which degrades to the last stored row, never to a
+    false 0 (which would make just-landed money vanish from the screen).
+    fresh=True reads the chain for exactness-sensitive callers (off-ramp
     sufficiency); it raises on RPC failure instead of falling back."""
     if not user_bsc_address:
         return 0
     key = user_bsc_address.lower()
     if fresh:
         return erc20_balance_raw(usdt_address(), key)
-    cached = cache.get(f'cusd_plus_usdt:{key}')
-    if cached is not None:
-        return cached
-    try:
-        raw = erc20_balance_raw(usdt_address(), key)
-    except Exception:  # noqa: BLE001 — read failure must not break the screen
-        logger.warning('USDT balance read failed for %s', user_bsc_address, exc_info=True)
-        last = cache.get(f'cusd_plus_usdt_last:{key}')
-        return last if last is not None else 0
-    cache.set(f'cusd_plus_usdt:{key}', raw, POSITION_TTL)
-    cache.set(f'cusd_plus_usdt_last:{key}', raw, POSITION_LAST_TTL)
-    return raw
+    from blockchain.bsc_balance_service import BscBalanceService
+    return BscBalanceService.balances_raw(key).get('USDT_BSC', 0)
 
 
 def usdt_balance_usd(user_bsc_address: str) -> float:

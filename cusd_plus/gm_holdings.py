@@ -9,8 +9,14 @@ their address with Multicall3 — balanceOf calls packed into 250-call
 chunks — so the chain stays the single source of truth and nothing can go
 invisible because a row wasn't created. No DB model, no sync jobs.
 
-Freshness mirrors vault.position_usd: 30s fresh cache per address, 7-day
-last-known fallback so a dead node degrades to a stale portfolio, never a
+Storage mirrors the BSC balances (blockchain/bsc_balance_service.py): the
+last COMPLETE scan is a StockHoldings row in Postgres. The stocks screen
+re-reads the chain when the row is stale or older than STALE_AFTER; Tu mes
+reads the row at any age (it moves no stocks) and scans only when there is
+no row yet or it was marked stale. The wallet's own trades mark it stale at
+broadcast and at confirmation; a transfer in from outside shows up at the
+next re-read. A partial (list) scan keeps a 30s Redis entry and a 7-day
+last-known fallback, so a dead node degrades to a stale portfolio, never a
 vanished one. USD values are never stored — the resolver computes them
 from the globally cached GM market payload (display only, chain-first).
 
@@ -28,6 +34,7 @@ import re
 
 from django.core.cache import cache
 from django.conf import settings
+from django.utils import timezone
 from eth_abi import decode, encode
 from eth_utils import keccak
 
@@ -46,6 +53,8 @@ CHUNK = 250
 
 SCAN_TTL = 30
 SCAN_LAST_TTL = 7 * 24 * 3600
+# The stocks screen re-reads the chain past this (cUSD-a's threshold).
+STALE_AFTER = timedelta(minutes=5)
 REGISTRY_TTL = 24 * 3600
 REGISTRY_FALLBACK_TTL = 5 * 60
 # {'tokens': registry, 'live': bool} in ONE entry: whether the registry is
@@ -260,18 +269,39 @@ def invalidate_holdings(user_bsc_address: str, min_block: int | None = None) -> 
     key = (user_bsc_address or '').lower()
     # The floor BEFORE the generation: a scan that reads the new generation
     # always sees it.
-    if min_block is not None:
-        _raise_floor(key, int(min_block))
-    cache.set(f'gm_hold_gen:{key}', uuid4().hex, SCAN_LAST_TTL)
-    drop_fresh_holdings(key)
+    try:
+        if min_block is not None:
+            _raise_floor(key, int(min_block))
+        cache.set(f'gm_hold_gen:{key}', uuid4().hex, SCAN_LAST_TTL)
+    finally:
+        drop_fresh_holdings(key)          # the durable mark lands even when Redis is down
 
 
 def drop_fresh_holdings(user_bsc_address: str) -> None:
-    """Drop the fresh scans (both modes) without moving the generation: at a
-    broadcast, scans cached before it are pre-trade, while ones running now
-    can't be stored anyway (the trade's row is on the wire)."""
+    """Drop the fresh list scan and mark the stored complete scan stale,
+    without moving the generation: at a broadcast, scans stored before it
+    are pre-trade, while ones running now can't be stored anyway (the
+    trade's row is on the wire)."""
+    from blockchain.models import StockHoldings
     key = (user_bsc_address or '').lower()
-    cache.delete_many([f'gm_hold:{key}', f'gm_hold_full_v2:{key}'])
+    try:
+        StockHoldings.objects.filter(bsc_address=key).update(is_stale=True)
+    finally:
+        cache.delete(f'gm_hold:{key}')
+
+
+def _stored(key: str):
+    from blockchain.models import StockHoldings
+    return StockHoldings.objects.filter(bsc_address=key).first()
+
+
+def _listed(held: dict) -> dict:
+    """The positions on Ondo's live list (a delisted one stays out of the
+    list readers, whichever scan ran last)."""
+    token_registry = registry()
+    if not token_registry:
+        return dict(held)
+    return {s: u for s, u in held.items() if s in token_registry}
 
 
 def stock_batches_in_flight(user_bsc_address: str, max_age=IN_FLIGHT_MAX_AGE):
@@ -294,13 +324,11 @@ def _wallet_in_flight(key: str) -> bool:
 
 
 def _raise_floor(key: str, block: int) -> None:
-    """floor = max(floor, block). Not atomic (the cache API has no CAS): two
-    confirmations of one wallet within the same instant can leave the lower
-    block, and a node between the two may then get one read cached for 30s.
-    Accepted: rare, and bounded by SCAN_TTL."""
-    floor_key = f'gm_hold_floor:{key}'
-    if int(cache.get(floor_key) or 0) < block:
-        cache.set(floor_key, block, FLOOR_TTL)
+    """floor = max(floor, block), atomic on Redis: two confirmations of one
+    wallet at once must leave the higher block, or a node between the two
+    could get its read STORED (Tu mes reads the row at any age)."""
+    from blockchain.bsc_balance_service import raise_floor
+    raise_floor(f'gm_hold_floor:{key}', block, FLOOR_TTL)
 
 
 def reads_before(blocks: dict, block: int | None) -> bool:
@@ -334,17 +362,36 @@ def holdings_units(user_bsc_address: str) -> dict | None:
     A list's scan: it skips a failing token so one bad contract can't hide a
     portfolio, and degrades to the last-known. A total stated as "today"
     (Tu mes) uses complete_holdings instead: every live token must answer,
-    never stale, in its own 30s entry (a partial scan stored here never
-    passes as complete)."""
+    stored as a StockHoldings row (a partial scan cached here never passes
+    as complete)."""
     if not user_bsc_address:
         return {}
     key = user_bsc_address.lower()
+    row = _stored(key)
+    if row is not None and not row.is_stale and timezone.now() - row.scanned_at <= STALE_AFTER:
+        return _listed(row.held)
     cached = cache.get(f'gm_hold:{key}')
     if cached is not None:
         return cached
+    # Re-read with a COMPLETE scan, which also refreshes the stored row Tu
+    # mes reads (a transfer in reaches it from here). A partial scan below
+    # only when a complete one can't be had; after a failed one, not tried
+    # again for SCAN_TTL (a token that keeps failing, an RPC outage), so
+    # each read doesn't pay two scans.
+    fail_key = f'gm_hold_full_fail:{key}'
+    complete = None
+    if not cache.get(fail_key):
+        try:
+            complete = _complete_holdings(key, max_age=STALE_AFTER)
+        except Exception:  # noqa: BLE001 — fall through to the list scan
+            logger.warning('GM complete holdings refresh failed for %s', key, exc_info=True)
+        if complete is None:
+            cache.set(fail_key, 1, SCAN_TTL)
+    if complete is not None:
+        return _listed(complete[0])
     token_registry = registry()
     if token_registry is None:
-        return cache.get(f'gm_hold_last:{key}')
+        return _last_known(key, row)
     if not token_registry:
         return {}
     generation = _generation(key)
@@ -353,11 +400,18 @@ def holdings_units(user_bsc_address: str) -> dict | None:
         held = _scan(key, token_registry, blocks=blocks)
     except Exception:  # noqa: BLE001 — degrade to stale, never to vanished
         logger.warning('GM holdings scan failed for %s', user_bsc_address, exc_info=True)
-        return cache.get(f'gm_hold_last:{key}')
+        return _last_known(key, row)
     # Not cached if a trade landed mid-scan, or a node behind the last trade served it.
     if _generation(key) == generation and not _behind_floor(key, blocks):
         _store(key, generation, {f'gm_hold:{key}': held}, held)
     return held
+
+
+def _last_known(key: str, row) -> dict | None:
+    last = cache.get(f'gm_hold_last:{key}')
+    if last is not None:
+        return last
+    return _listed(row.held) if row is not None else None
 
 
 def _store(key: str, generation, fresh: dict, last: dict) -> bool:
@@ -381,20 +435,26 @@ def _store(key: str, generation, fresh: dict, last: dict) -> bool:
     return True
 
 
-def complete_holdings(user_bsc_address: str, *, wallet_in_flight: bool | None = None) -> tuple[dict, dict] | None:
+def complete_holdings(user_bsc_address: str, *, wallet_in_flight: bool | None = None,
+                      max_age: timedelta | None = None) -> tuple[dict, dict] | None:
     """(units, blocks) from a complete scan, or None (unknown): blocks maps
     every scanned symbol to the block its balance was read at (None when
     that chunk's node didn't say), so a caller can tell which confirmed
-    trades this chain has not seen yet."""
+    trades this chain has not seen yet.
+
+    The stored scan (StockHoldings) when it isn't stale and, with
+    `max_age`, isn't older than that; otherwise a fresh scan, stored."""
     if not user_bsc_address:
         return {}, {}
-    return _complete_holdings(user_bsc_address.lower(), wallet_in_flight)
+    return _complete_holdings(user_bsc_address.lower(), wallet_in_flight, max_age)
 
 
-def _complete_holdings(key: str, wallet_in_flight: bool | None = None) -> tuple[dict, dict] | None:
-    cached = cache.get(f'gm_hold_full_v2:{key}')
-    if isinstance(cached, dict) and 'held' in cached:
-        return cached['held'], cached['blocks']
+def _complete_holdings(key: str, wallet_in_flight: bool | None = None,
+                       max_age: timedelta | None = None) -> tuple[dict, dict] | None:
+    row = _stored(key)
+    if row is not None and not row.is_stale and (
+            max_age is None or timezone.now() - row.scanned_at <= max_age):
+        return dict(row.held), dict(row.blocks)
     token_registry, live = registry_entry()
     if token_registry is None or not live:
         return None                        # the snapshot may lack a held token
@@ -431,8 +491,34 @@ def _complete_holdings(key: str, wallet_in_flight: bool | None = None) -> tuple[
             # Read by a node behind the last trade: the caller can tell which
             # trades it hasn't seen (blocks), but nobody else gets it cached.
             return held, blocks
-        full = {'held': held, 'blocks': blocks}
-        if _store(key, generation, {f'gm_hold_full_v2:{key}': full, f'gm_hold:{key}': listed}, listed):
-            continue                           # moved during the write: pre-trade, never used
+        _write_row(key, held, blocks)
+        try:
+            moved = _store(key, generation, {f'gm_hold:{key}': listed}, listed)
+        except Exception:
+            _mark_row_stale(key)               # unknown whether a trade moved it: never stand as fresh
+            raise
+        if moved:
+            _mark_row_stale(key)               # moved during the write: pre-trade, never used
+            continue
+        if _wallet_in_flight(key):
+            # A trade broadcast after the in-flight check above (broadcast
+            # marks the row stale without moving the generation): this read
+            # may be pre-trade. Usable by this caller, never stored as fresh.
+            _mark_row_stale(key)
+            cache.delete(f'gm_hold:{key}')
         return held, blocks
     return None                                # trades keep landing: unknown for now
+
+
+def _write_row(key: str, held: dict, blocks: dict) -> None:
+    from blockchain.bsc_balance_service import account_id_for
+    from blockchain.models import StockHoldings
+    StockHoldings.objects.update_or_create(
+        bsc_address=key,
+        defaults={'held': held, 'blocks': blocks, 'scanned_at': timezone.now(),
+                  'is_stale': False, 'account_id': account_id_for(key)})
+
+
+def _mark_row_stale(key: str) -> None:
+    from blockchain.models import StockHoldings
+    StockHoldings.objects.filter(bsc_address=key).update(is_stale=True)

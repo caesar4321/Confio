@@ -76,6 +76,7 @@ it('shows Card A first and holds every insight and section until the reveal', ()
   expect(has(tree, 'tumes-summary-card')).toBe(true);
   expect(has(tree, 'tumes-revealed')).toBe(false);
   expect(has(tree, 'categorize-cta')).toBe(false);
+  expect(has(tree, 'tumes-insights-loading')).toBe(true);     // placeholders, never a blank screen
 });
 
 it('reveals the dollar slot, then habitual payments, in fixed order', () => {
@@ -83,6 +84,7 @@ it('reveals the dollar slot, then habitual payments, in fixed order', () => {
   mockInsights = { revealed: true, insights: recurring, savings, protection: null };
   const tree = mount();
   expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-recurring-card']);
+  expect(has(tree, 'tumes-insights-loading')).toBe(false);    // the placeholders give way
 });
 
 it('a quiet month shows every section with inviting empty states (founder 2026-10-04)', () => {

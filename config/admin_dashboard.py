@@ -2154,8 +2154,10 @@ confio_admin_site.register(SupportConversationState, SupportConversationStateAdm
 
 # Blockchain models (events and processing logs removed); add indexer cursor + processed markers
 from blockchain.models import Balance, ProcessedIndexerTransaction, IndexerAssetCursor
-from blockchain.admin import BalanceAdmin, ProcessedIndexerTransactionAdmin, IndexerAssetCursorAdmin
+from blockchain.admin import BalanceAdmin, ProcessedIndexerTransactionAdmin, IndexerAssetCursorAdmin, StockHoldingsAdmin
+from blockchain.models import StockHoldings
 confio_admin_site.register(Balance, BalanceAdmin)
+confio_admin_site.register(StockHoldings, StockHoldingsAdmin)
 confio_admin_site.register(ProcessedIndexerTransaction, ProcessedIndexerTransactionAdmin)
 confio_admin_site.register(IndexerAssetCursor, IndexerAssetCursorAdmin)
 
