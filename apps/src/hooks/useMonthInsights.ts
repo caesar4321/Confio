@@ -88,7 +88,7 @@ export function useMonthInsights(params: {
   isCurrent: boolean;
   /** Card A has rendered (monthSummary answered): the 800ms window starts. */
   ready: boolean;
-}): MonthInsightsState & { refresh: () => void; refreshStocks: () => void } {
+}): MonthInsightsState & { refresh: () => void; refreshStocks: () => void; stocksSettling: boolean } {
   const { accountKey, year, month, timezone, isCurrent, ready } = params;
   const client = useApolloClient();
   const viewKey = `${accountKey ?? ''}:${year}-${month}`;
@@ -99,6 +99,9 @@ export function useMonthInsights(params: {
   // SAME month can never overwrite a newer one.
   const generation = useRef(0);
   const shown = useRef<InsightData | null>(null);
+  // The latest stocks answer's state, even when the shown card kept its own
+  // (gain/value_only never swap to 'settling'): the screen polls on it.
+  const lastStocks = useRef<StockMonth['state'] | null>(null);
   useEffect(() => () => { generation.current += 1; }, []);
 
   const fetchStocks = useCallback(() => client.query<{ stockMonth: StockMonth | null }>(
@@ -125,6 +128,7 @@ export function useMonthInsights(params: {
     view.current = viewKey;
     generation.current += 1;
     shown.current = null;
+    lastStocks.current = null;
     if (state.revealed) setState({ revealed: false });
   }
 
@@ -142,6 +146,7 @@ export function useMonthInsights(params: {
       if (closed || generation.current !== gen) return;
       closed = true;
       shown.current = visibleAtReveal({ ...got });
+      lastStocks.current = got.stocks?.state ?? null;
       setState({ revealed: true, ...shown.current });
     };
     const { insights, savings, protection, stocks } = fetchAll();
@@ -166,6 +171,7 @@ export function useMonthInsights(params: {
     const { insights, savings, protection, stocks } = fetchAll();
     Promise.all([insights, savings, protection, stocks]).then(([i, s, p, k]) => {
       if (generation.current !== gen || !shown.current) return;
+      if (k) lastStocks.current = k.state;
       const merged = mergeValues(shown.current, { insights: i, savings: s, protection: p, stocks: k });
       shown.current = merged;
       setState({ revealed: true, ...merged });
@@ -178,11 +184,14 @@ export function useMonthInsights(params: {
     if (!shown.current) return;
     fetchStocks().then((k) => {
       if (generation.current !== gen || !shown.current) return;
+      if (k) lastStocks.current = k.state;
       const merged = mergeValues(shown.current, { ...shown.current, stocks: k });
       shown.current = merged;
       setState({ revealed: true, ...merged });
     });
   }, [fetchStocks]);
 
-  return { ...state, refresh, refreshStocks };
+  // Only a shown card can resolve in place (a dropped one never appears).
+  const stocksSettling = Boolean(shown.current?.stocks) && lastStocks.current === 'settling';
+  return { ...state, refresh, refreshStocks, stocksSettling };
 }

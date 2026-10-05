@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED } from '../../apollo/monthSummary';
+import { GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH } from '../../apollo/monthSummary';
 
 const mockQuery = jest.fn();
 const mockClient = { query: (...a: any[]) => mockQuery(...a) };
@@ -129,4 +129,22 @@ it('the invitation gives way to the card after a purchase, never the reverse', (
   const gain = { state: 'gain', gainUsd: '1.00' } as any;
   expect(mergeValues({ ...base, stocks: none }, { ...base, stocks: gain }).stocks).toBe(gain);
   expect(mergeValues({ ...base, stocks: gain }, { ...base, stocks: none }).stocks).toBe(gain);
+});
+
+it('a shown gain card that gets a settling answer keeps its value and flags the poll until final', async () => {
+  const gain = { state: 'gain', valueUsd: '100.00' };
+  let stocks: any = gain;
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.stocks).toEqual(gain);
+  expect(latest.stocksSettling).toBe(false);
+  stocks = { state: 'settling', valueUsd: '220.00' };
+  await act(async () => { latest.refresh(); });
+  expect(latest.stocks).toEqual(gain);                 // never swaps the card
+  expect(latest.stocksSettling).toBe(true);
+  stocks = { state: 'gain', valueUsd: '220.00' };
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocks.valueUsd).toBe('220.00');
+  expect(latest.stocksSettling).toBe(false);
 });

@@ -66,6 +66,15 @@ export function MonthSummaryScreen() {
     month: route.params?.month ?? today.month,
   });
   const timezone = useMemo(() => deviceTimezone(), []);
+  // Back to an existing Tu mes with a month (the stocks screens' links, with
+  // pop + merge): show that month, not whichever one was being browsed. Keyed
+  // on the params object, which a navigate replaces and a re-render keeps.
+  const params = route.params;
+  useEffect(() => {
+    const { year, month } = params ?? {};
+    if (!year || !month) return;
+    setPeriod((p) => (p.year === year && p.month === month ? p : { year, month }));
+  }, [params]);
 
   const firstMonth = useMemo(() => {
     const created = activeAccount?.createdAt ? new Date(activeAccount.createdAt) : null;
@@ -92,13 +101,22 @@ export function MonthSummaryScreen() {
 
   // Arriving from a buy or sell: the trade may not be final yet ("settling").
   // Re-ask the stocks card alone until it resolves in place (bounded).
-  const settling = insights.revealed && insights.stocks?.state === 'settling';
+  // Also when a shown card (gain · value_only) got a 'settling' answer: it
+  // keeps its last value meanwhile and updates once the trade is final.
+  const settling = insights.revealed && (insights.stocks?.state === 'settling' || Boolean(insights.stocksSettling));
   const refreshStocks = useRef(insights.refreshStocks);
   refreshStocks.current = insights.refreshStocks;
+  // Not while another screen is on top (the user moved on): no wasted asks.
+  const focused = useRef(true);
+  useFocusEffect(useCallback(() => {
+    focused.current = true;
+    return () => { focused.current = false; };
+  }, []));
   useEffect(() => {
     if (!settling) return undefined;
     let tries = 0;
     const id = setInterval(() => {
+      if (!focused.current) return;
       tries += 1;
       refreshStocks.current();
       if (tries >= SETTLING_MAX_TRIES) clearInterval(id);
