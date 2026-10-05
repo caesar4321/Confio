@@ -17,7 +17,7 @@ matrix, route and principle below.** The older sections stay for history.
 **Why.** Users cannot reach their keys (Drive appDataFolder and the team
 keychain are readable only by Confío's signed app), so a ban plus the relay
 refusing to sign is a real freeze, and Emergency Exit was the only way around
-it. A provider fraud report (money mules — Koywe/Colombia 2026-09) needs that
+it. A provider fraud report (money mules, 2026-09) needs that
 freeze to hold until a local authority acts. The narrative is "if Confío
 fails, your money doesn't die with it", not "Confío can never stop you".
 
