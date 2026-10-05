@@ -27,7 +27,11 @@ jest.mock('@apollo/client', () => ({
 let mockInsights: any;
 const mockRefreshStocks = jest.fn();
 jest.mock('../../hooks/useMonthInsights', () => ({
-  useMonthInsights: () => ({ ...mockInsights, refresh: jest.fn(), refreshStocks: mockRefreshStocks }),
+  // Like the hook: polling follows the latest stocks answer of a shown card.
+  useMonthInsights: () => ({
+    stocksSettling: Boolean(mockInsights?.stocks) && mockInsights.stocks.state === 'settling',
+    ...mockInsights, refresh: jest.fn(), refreshStocks: mockRefreshStocks,
+  }),
 }));
 
 import {
