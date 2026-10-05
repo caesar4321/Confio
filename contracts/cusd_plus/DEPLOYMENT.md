@@ -753,3 +753,25 @@ a dual-vault code path. Note this is a *cutover*, not an upgrade: v2 starts
 with EMPTY `isDelegate` mappings, so **every business must re-activate
 payroll before it can pay anyone**. Items left `PREPARED` across the cutover
 answer `payout_not_prepared`; the client re-prepares them.
+
+## ConfioHeartbeat — deployed 2026-10-05 (Salida de emergencia trigger)
+
+| | |
+|---|---|
+| Proxy (bundle THIS) | `0xAE49E3AD57531974CD2AEc2633b03770fF4a20FF` |
+| Implementation | `0x91D9F13869aa8072E3890Bf4A5351eEA1eC86dc0` |
+| Owner | Safe `0xF29A418744E793973BF4eEc676F8a30B2793b623` |
+| Beater | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
+| silenceRequired | 1209600 s (14 days), bounds [1 day, 365 days] |
+| Deployer | KMS sponsor, nonces 769–770 |
+
+- Deployed via `manage.py deploy_confio_heartbeat --broadcast --yes-mainnet`;
+  proxy created with its `initialize` calldata in the same transaction.
+  Implementation tx `0xe0731f4b68667c97b8dbd30a0f56c1d9e3b8c6a831cc0cae460794ac2343d972`,
+  proxy tx `0xaa0c1f71a6cbd15ba53a4eac286166c0b1a4e71b5f646aaa7694167011dcda8b`.
+- Verified on chain after deploy: owner/beater/silence as above, `isSilent()`
+  false, `assertSilent()` reverts `ConfioAlive(opensAt)`, ERC-1967 slot →
+  implementation.
+- Wired: app `BUNDLED_HEARTBEAT.address` (emergencyExit/heartbeat.ts), server
+  `CONFIO_HEARTBEAT_ADDRESS` (.env.mainnet), GitHub repo variable for the
+  watchdog. Design: docs/plans/salida-de-emergencia-design.md § Phase 3.
