@@ -5,9 +5,10 @@
 // HeroMonthLine), so its content can change at any time without moving
 // Enviar/Recibir:
 //   - loading: a quiet placeholder,
-//   - a month with >= 3 Entró/Salió movements: "Octubre · Entró … · Salió …"
-//     (this month, or last month early in the month),
-//   - otherwise: the invitation "Tu mes · Mira lo que entra y sale".
+//   - the CURRENT month, always — "Entró US$0 · Salió US$0" on a quiet month
+//     (founder decision 2026-10-04: same as Tu mes, real zeros are shown),
+//   - the invitation "Tu mes · Mira lo que entra y sale" only when nothing
+//     is known (first load failed): never a fake US$0.
 //
 // Account switches: some switch paths update activeAccount BEFORE the new
 // JWT exists and the cache is cleared, so during `switching` the cache and
@@ -29,9 +30,8 @@ import { AppState } from 'react-native';
 import { useApolloClient } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 import { GET_MONTH_SUMMARY, type MonthSummary } from '../apollo/monthSummary';
-import { currentYearMonth, deviceTimezone, previousMonth } from '../utils/monthSummary';
+import { currentYearMonth, deviceTimezone } from '../utils/monthSummary';
 
-export const HERO_LINE_MIN_MOVEMENTS = 3;
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
 function msUntilNextMonth(now = new Date()) {
@@ -41,13 +41,6 @@ function msUntilNextMonth(now = new Date()) {
 
 type Summary = { monthSummary: MonthSummary | null };
 
-const hasLine = (s: MonthSummary | null | undefined): s is MonthSummary =>
-  Boolean(s && s.current.movementCount >= HERO_LINE_MIN_MOVEMENTS);
-
-/** Early in the month (< 3 movements) the line shows last month instead,
- *  until this month reaches 3. Neither -> null (the invitation). */
-const pickMonth = (current: MonthSummary | null, previous: MonthSummary | null) =>
-  hasLine(current) ? current : hasLine(previous) ? previous : null;
 
 /** What the row shows. */
 export type HeroMonthState =
@@ -86,7 +79,6 @@ export function useMonthHeroLine(
     }
     if (switching) return; // cache + JWT may still be the previous account's
     const { year, month } = currentYearMonth();
-    const prev = previousMonth(year, month);
     const timezone = deviceTimezone();
     const key = `${accountKey}:${year}-${month}`;
 
@@ -98,12 +90,12 @@ export function useMonthHeroLine(
         return null;
       }
     };
-    // Own answers first; else a month Tu mes already cached; otherwise keep
-    // what is on screen until the answer lands.
+    // Own answers first; else the month Tu mes already cached; otherwise
+    // keep what is on screen until the answer lands.
     if (fresh.current.has(key)) {
       setChosen(fresh.current.get(key) ?? null);
     } else {
-      const cached = pickMonth(readCached(year, month), readCached(prev.year, prev.month));
+      const cached = readCached(year, month);
       if (cached) setChosen(cached);
     }
 
@@ -113,7 +105,6 @@ export function useMonthHeroLine(
 
     const id = ++request.current;
     fetchMonth(year, month)
-      .then(async (current) => (hasLine(current) ? current : pickMonth(current, await fetchMonth(prev.year, prev.month))))
       .then((answer) => {
         if (id !== request.current) return; // asked for an earlier account/month
         fresh.current.set(key, answer);
