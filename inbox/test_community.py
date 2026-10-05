@@ -1365,3 +1365,29 @@ class AdditionalDocumentVerificationTests(CommunityTestBase):
     def test_additional_verified_document_counts_as_a_verified_reporter(self):
         user = self.member_verified_by_additional_document()
         self.assertEqual(community.personally_verified_count([user.id]), 1)
+
+
+class MemberPostDetailTests(CommunityTestBase):
+    """2026-10-04: post detail showed neither text nor photo (empty blocks)."""
+
+    def test_detail_blocks_carry_the_text_and_the_photo(self):
+        user = make_user()
+        item = self.post(user, body='Mi primer ahorro', image_key=community.pending_image_prefix(user) + 'a.jpg')
+        with patch('inbox.community.load_pending_image', return_value=community.ReviewImage('image/jpeg', b'x')), \
+                patch('inbox.community.publish_image', return_value='https://pub/community/images/a.jpg'):
+            self.run_review(item, APPROVE)
+        viewer = make_user()
+        account = Account.objects.get(user=viewer)
+        with patch('inbox.schema.get_context_models', return_value=(viewer, account, None, {})):
+            post = Query().resolve_discover_post(MockInfo(viewer), content_item_id=str(item.id))
+        self.assertEqual(post.blocks, [
+            {'id': 'body', 'type': 'paragraph', 'text': 'Mi primer ahorro'},
+            {'id': 'image', 'type': 'image', 'image': {'url': 'https://pub/community/images/a.jpg'}},
+        ])
+        self.assertEqual(post.image_url, 'https://pub/community/images/a.jpg')
+
+    def test_text_only_post_has_just_the_paragraph(self):
+        item = self.post(make_user(), body='Solo texto')
+        self.run_review(item, APPROVE)
+        item.refresh_from_db()
+        self.assertEqual(community.member_post_blocks(item), [{'id': 'body', 'type': 'paragraph', 'text': 'Solo texto'}])

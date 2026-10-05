@@ -468,6 +468,8 @@ def build_discover_feed_item_payload(
         official_ids = official_channel_ids([item.channel])
     metadata = item.metadata or {}
     blocks = metadata.get('blocks') or []
+    if not blocks and item.owner_type == OwnerType.USER:
+        blocks = community.member_post_blocks(item)
     preview_image = metadata.get('image') or next(
         (
             block.get('image')

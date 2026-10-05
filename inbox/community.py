@@ -149,6 +149,21 @@ def author_display_name(user) -> str:
     return 'Miembro de Confío'
 
 
+def member_post_blocks(item: ContentItem) -> list:
+    """A member post as detail-screen blocks: its text, then its photo.
+
+    Member posts are plain text plus one image, not editorial blocks; without
+    this the post detail got an empty block list and showed neither.
+    """
+    blocks = []
+    if item.body:
+        blocks.append({'id': 'body', 'type': 'paragraph', 'text': item.body})
+    image_url = ((item.metadata or {}).get('image') or {}).get('url')
+    if image_url:
+        blocks.append({'id': 'image', 'type': 'image', 'image': {'url': image_url}})
+    return blocks
+
+
 def is_community_item(item: ContentItem) -> bool:
     return item.owner_type == OwnerType.USER and item.channel.slug == COMMUNITY_CHANNEL_SLUG
 
