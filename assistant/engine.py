@@ -23,6 +23,8 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 
+from users.models_cashflow import CATEGORY_CHOICES
+
 from . import conf, market
 from .destinations import DESTINATIONS, OWNER_ONLY, PERSONAL_ONLY
 from .prompts import ANALYSIS_PROMPT, build_system_prompt
@@ -213,8 +215,8 @@ KIND_LABELS = {
     'investment_in': 'compra de inversión', 'investment_out': 'venta de inversión',
 }
 MOVEMENT_GROUPS = {'income': 'income', 'spending': 'spending', 'own_money': 'own_money'}
-CATEGORY_LABELS = {'food': 'Comida', 'transport': 'Transporte', 'home': 'Casa',
-                   'family': 'Familia', 'work': 'Trabajo', 'other': 'Otro'}
+# The same categories as "Tu mes" (one source: adding one there adds it here).
+CATEGORY_LABELS = dict(CATEGORY_CHOICES)
 
 
 def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=30):
