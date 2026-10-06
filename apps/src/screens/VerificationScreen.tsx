@@ -49,7 +49,7 @@ const MY_IDENTITY_DOCUMENTS = gql`
 `;
 
 // Only Didit's own hosted verification page is ever opened in the browser.
-const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me(?::443)?\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/;
+const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me(?::443)?\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/i;
 
 const openDiditSessionUrl = async (url: unknown, unsafeMessage: string) => {
   if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) throw new Error(unsafeMessage);
@@ -283,8 +283,6 @@ const VerificationScreen = () => {
   // warm or cold start alike. Sync the session it names; the server checks it
   // belongs to this user. Business keeps its webhook + refresh.
   const redirectedSessionId = route.params?.verificationSessionId;
-  const syncRef = React.useRef(syncSessionAndRefresh);
-  syncRef.current = syncSessionAndRefresh;
   const handledRedirectRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     // The active account is unknown until AccountContext loads.
@@ -294,12 +292,13 @@ const VerificationScreen = () => {
     if (isBusinessAccount || !DIDIT_SESSION_ID.test(redirectedSessionId)) return;
     awaitingBrowserRef.current = false;
     setIsSyncingRedirect(true);
-    syncRef.current(redirectedSessionId)
-      .catch((error: any) => {
-        setBanner({ variant: 'error', message: userFacingMessage(error) || 'No se pudo sincronizar la decisión de Didit.' });
-      })
+    // A redirect the server will not sync here (e.g. a business KYB session
+    // while the personal account is active) is not the user's to fix: refresh
+    // quietly and let the webhook record the decision.
+    syncSessionAndRefresh(redirectedSessionId)
+      .catch(() => refreshStatuses().catch(() => {}))
       .finally(() => setIsSyncingRedirect(false));
-  }, [accountReady, isBusinessAccount, navigation, redirectedSessionId]);
+  }, [accountReady, isBusinessAccount, navigation, redirectedSessionId, refreshStatuses, syncSessionAndRefresh]);
 
   // A browser session belongs to the account that started it.
   React.useEffect(() => { awaitingBrowserRef.current = false; }, [isBusinessAccount]);
@@ -380,7 +379,8 @@ const VerificationScreen = () => {
   const hasPending = list.some(doc => doc.status === 'pending');
   const hasCountryAttempt = list.some(doc => !doc.isAdditional);
   // One browser fallback per screen: on the first unverified country document.
-  const browserFallbackDocId = list.find(doc => !doc.isAdditional && normalizeStatus(doc.status) !== 'verified')?.id;
+  // Not under a pending review: a second primary session would race it.
+  const browserFallbackDocId = list.find(doc => !doc.isAdditional && normalizeStatus(doc.status) === 'rejected')?.id;
 
   // ─── Pieces ───
 
