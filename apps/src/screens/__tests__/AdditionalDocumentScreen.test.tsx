@@ -51,3 +51,15 @@ it('never opens a link that is not Didit\'s', async () => {
   await act(async () => tree.unmount());
   open.mockRestore();
 });
+
+it('never shows a raw transport error', async () => {
+  (createAdditionalDocumentBrowserSession as jest.Mock).mockRejectedValue(
+    Object.assign(new Error('Response not successful: Received status code 400'), {networkError: {statusCode: 400}}));
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<AdditionalDocumentScreen />); });
+  await act(async () => { await browserButton(tree)[0].props.onPress(); });
+  const texts = tree.root.findAllByType(Text).map(t => String(t.props.children));
+  expect(texts.some(t => t.includes('status code'))).toBe(false);
+  expect(texts).toContain('No se pudo abrir la verificación en el navegador.');
+  await act(async () => tree.unmount());
+});
