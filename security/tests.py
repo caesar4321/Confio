@@ -38,8 +38,9 @@ class IdentityVerificationSchemaContractTests(SimpleTestCase):
         from config.schema import schema
 
         source = (Path(settings.BASE_DIR) / 'apps/src/services/localMoney.ts').read_text()
-        query = re.search(r'const SYNC_ADDITIONAL_DOCUMENT = gql`([^`]+)`', source).group(1)
-        self.assertEqual(validate(schema.graphql_schema, parse(query)), [])
+        for name in ('SYNC_ADDITIONAL_DOCUMENT', 'CREATE_ADDITIONAL_DOCUMENT_BROWSER_SESSION'):
+            query = re.search(rf'const {name} = gql`([^`]+)`', source).group(1)
+            self.assertEqual(validate(schema.graphql_schema, parse(query)), [], name)
         screen = (Path(settings.BASE_DIR) / 'apps/src/screens/VerificationScreen.tsx').read_text()
         documents = re.search(r'const MY_IDENTITY_DOCUMENTS = gql`([^`]+)`', screen).group(1)
         self.assertEqual(validate(schema.graphql_schema, parse(documents)), [])
@@ -59,6 +60,32 @@ class IdentityVerificationSchemaContractTests(SimpleTestCase):
             result = schema.execute('{ verification { rejectedReason } }', root_value=reason)
             self.assertIsNone(result.errors)
             self.assertEqual(result.data['verification']['rejectedReason'], reason)
+
+
+class DiditBrowserSessionMutationTests(SimpleTestCase):
+    def _create(self, account_type, **kwargs):
+        from users.schema import CreateDiditVerificationSession
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=True)))
+        ctx = {'account_type': account_type, 'business_id': '7' if account_type == 'business' else None}
+        session = {'session_id': 'sess', 'session_token': None, 'status': 'Not Started', 'vendor_data': {},
+                   'session_url': 'https://verify.didit.me/session/sess'}
+        with patch('users.jwt_context.get_jwt_business_context_with_validation', return_value=ctx), \
+                patch('users.jwt_context.is_business_employee', return_value=False), \
+                patch('users.schema.create_didit_session', return_value=session) as create:
+            return CreateDiditVerificationSession.mutate(None, info, in_browser=True, **kwargs), create
+
+    def test_additional_document_opens_in_browser(self):
+        result, create = self._create('personal', purpose='additional_document',
+                                      id_country='COL', document_types=['P'])
+        self.assertTrue(result.success, result.error)
+        self.assertTrue(create.call_args.kwargs['hosted'])
+        self.assertEqual(create.call_args.kwargs['callback_url'], 'confio://verification')
+        self.assertIsNotNone(create.call_args.kwargs['document_request'])
+
+    def test_business_never_takes_the_personal_browser_flag(self):
+        result, create = self._create('business')
+        self.assertFalse(result.success)
+        create.assert_not_called()
 
 
 class DiditPayloadExtractionTests(SimpleTestCase):
@@ -639,6 +666,23 @@ class DiditIntegrationTests(TestCase):
         })
         with self.assertRaises(DiditAPIError):
             create_didit_session(user=self.user, account_type='personal', hosted=True)
+
+    @override_settings(DIDIT_ADDITIONAL_DOCUMENT_WORKFLOW_ID='workflow-additional')
+    @patch('security.didit.requests.request')
+    def test_hosted_additional_document_stays_additional(self, mock_request):
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_web_doc', 'session_token': 'token_web_doc',
+            'url': 'https://verify.didit.me/session/sess_web_doc', 'status': 'Not Started',
+        })
+        session = create_didit_session(user=self.user, account_type='personal',
+                                       callback_url='confio://verification', hosted=True,
+                                       document_request={'id_country': 'COL', 'document_types': ['P']})
+        self.assertEqual(session['session_url'], 'https://verify.didit.me/session/sess_web_doc')
+        payload = mock_request.call_args.kwargs['json']
+        self.assertEqual(payload['workflow_id'], 'workflow-additional')
+        self.assertEqual(payload['callback'], 'confio://verification')
+        verification = IdentityVerification.all_documents.get(user=self.user, risk_factors__didit__session_id='sess_web_doc')
+        self.assertTrue(verification.is_additional_document)
 
     def test_create_session_rejects_unsupported_phone_country(self):
         self.user.phone_country = 'JP'

@@ -3110,8 +3110,8 @@ class CreateDiditVerificationSession(graphene.Mutation):
                 document_request = normalize_document_request(id_country, document_types)
             elif purpose not in (None, '', 'primary'):
                 raise DiditAPIError('Unsupported verification purpose')
-            if in_browser and (account_type != 'personal' or document_request is not None):
-                # Only the personal primary verification has a browser fallback.
+            if in_browser and account_type != 'personal':
+                # Business KYB always opens in the browser; the flag is personal-only.
                 raise DiditAPIError('La verificación en el navegador no está disponible para esta solicitud.')
 
             session_data = create_didit_session(

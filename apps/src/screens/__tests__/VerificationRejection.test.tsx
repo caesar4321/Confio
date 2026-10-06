@@ -38,7 +38,8 @@ jest.mock('../../apollo/queries', () => ({GET_ME: 'me', GET_MY_KYC_STATUS: 'any'
 jest.mock('../../apollo/mutations', () => ({
   CREATE_DIDIT_VERIFICATION_SESSION: 'create', CREATE_DIDIT_BROWSER_VERIFICATION_SESSION: 'browser', SYNC_DIDIT_VERIFICATION_SESSION: 'sync',
 }));
-jest.mock('../../services/diditService', () => ({getDiditResultSessionId: jest.fn(), startDiditVerification: jest.fn()}));
+jest.mock('../../services/diditService', () => ({getDiditResultSessionId: jest.fn(), startDiditVerification: jest.fn(),
+  openDiditSessionUrl: jest.requireActual('../../services/diditService').openDiditSessionUrl}));
 jest.mock('../../services/analyticsService', () => ({AnalyticsService: {logEvent: jest.fn()}}));
 jest.mock('../../navigation/Header', () => ({Header: () => null}));
 jest.mock('../../components/common/Button', () => ({Button: 'Button'}));
@@ -270,12 +271,12 @@ it('keeps a failed redirect sync quiet and refreshes instead', async () => {
   }
 });
 
-it('offers no browser fallback on a document under review', async () => {
+it('keeps the browser fallback on a document under review, beside "¿Te equivocaste?"', async () => {
   mockDocuments = [{id: '1', documentType: 'national_id', issuingCountry: 'PY', status: 'pending',
     isAdditional: false, localCountries: [], rejectedReason: null}];
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
-  expect(browserLink(tree)).toHaveLength(0);
+  expect(browserLink(tree)).toHaveLength(1);
   await act(async () => tree.unmount());
 });
 

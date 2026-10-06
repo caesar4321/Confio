@@ -504,6 +504,20 @@ const CREATE_ADDITIONAL_DOCUMENT_SESSION = gql`
   }
 `;
 
+// Its own mutation: the same document on Didit's page in the browser.
+const CREATE_ADDITIONAL_DOCUMENT_BROWSER_SESSION = gql`
+  mutation CreateAdditionalDocumentBrowserSession($idCountry: String, $documentTypes: [String]) {
+    createDiditVerificationSession(purpose: "additional_document", idCountry: $idCountry, documentTypes: $documentTypes, inBrowser: true) {
+      success
+      error
+      session {
+        sessionId
+        sessionUrl
+      }
+    }
+  }
+`;
+
 const SYNC_ADDITIONAL_DOCUMENT = gql`
   mutation SyncAdditionalDocument($sessionId: String!) {
     syncDiditVerificationSession(sessionId: $sessionId) {
@@ -685,6 +699,18 @@ export async function createAdditionalDocumentSession(idCountry: string, documen
     throw new Error(result?.error || 'No pudimos iniciar la verificación.');
   }
   return result.session as {sessionId: string; sessionToken: string};
+}
+
+export async function createAdditionalDocumentBrowserSession(idCountry: string, documentTypes: string[]) {
+  const response = await (await client()).mutate({
+    mutation: CREATE_ADDITIONAL_DOCUMENT_BROWSER_SESSION,
+    variables: {idCountry: idCountry || null, documentTypes},
+  });
+  const result = response.data?.createDiditVerificationSession;
+  if (!result?.success || !result?.session?.sessionId) {
+    throw new Error(result?.error || 'No pudimos iniciar la verificación.');
+  }
+  return result.session as {sessionId: string; sessionUrl: string | null};
 }
 
 export async function syncAdditionalDocument(sessionId: string) {
