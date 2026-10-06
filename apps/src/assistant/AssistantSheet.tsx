@@ -898,7 +898,34 @@ export default function AssistantSheet() {
             windowSize={21}
             keyboardShouldPersistTaps="handled"
             ListHeaderComponent={
-              thinking ? (
+              // The chips sit under the last message (the list is inverted)
+              // and scroll with it, so they never cover the conversation.
+              showStarters ? (
+                <View style={styles.starters}>
+                  {profile?.mascot !== 'CUSTOM' ? (
+                  <Pressable style={[styles.starter, styles.starterPet]} onPress={() => setPickerOpen(true)}>
+                    <Text style={styles.starterPetText}>✨ Personaliza a tu asistente</Text>
+                  </Pressable>
+                ) : null}
+                {probe ? (
+                  <View style={styles.probe}>
+                    <Text style={styles.probeQuestion}>{probe.question}</Text>
+                    <View style={styles.probeAnswers}>
+                      {probe.answers.map((a) => (
+                        <Pressable key={a.key} style={styles.starter} onPress={() => void answerProbe(probe, a.key)}
+                          accessibilityRole="button">
+                          <Text style={styles.starterText}>{a.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : starters.map((s) => (
+                    <Pressable key={s.id} style={styles.starter} onPress={() => void send({ body: s.prompt || s.text })}>
+                      <Text style={styles.starterText}>{s.text}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : thinking ? (
                 <View style={styles.messageRow}>
                   <View style={styles.msgAvatar}>
                     <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
@@ -916,33 +943,6 @@ export default function AssistantSheet() {
               ) : null
             }
           />
-
-          {showStarters ? (
-            <View style={styles.starters}>
-              {profile?.mascot !== 'CUSTOM' ? (
-              <Pressable style={[styles.starter, styles.starterPet]} onPress={() => setPickerOpen(true)}>
-                <Text style={styles.starterPetText}>✨ Personaliza a tu asistente</Text>
-              </Pressable>
-            ) : null}
-            {probe ? (
-              <View style={styles.probe}>
-                <Text style={styles.probeQuestion}>{probe.question}</Text>
-                <View style={styles.probeAnswers}>
-                  {probe.answers.map((a) => (
-                    <Pressable key={a.key} style={styles.starter} onPress={() => void answerProbe(probe, a.key)}
-                      accessibilityRole="button">
-                      <Text style={styles.starterText}>{a.label}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ) : starters.map((s) => (
-                <Pressable key={s.id} style={styles.starter} onPress={() => void send({ body: s.prompt || s.text })}>
-                  <Text style={styles.starterText}>{s.text}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -1222,7 +1222,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   actionChipText: { fontSize: 13, fontWeight: '600', color: EMERALD },
-  starters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 14, paddingBottom: 8 },
+  starters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4, paddingBottom: 4 },
   starter: {
     borderWidth: 1,
     borderColor: '#E5E7EB',
