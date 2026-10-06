@@ -78,12 +78,18 @@ export function getDiditResultSessionId(result: any, fallbackSessionId?: string 
   );
 }
 
-// iOS resolves the native result ({ errorType, errorMessage }); the Android JS
-// wrapper maps it to { error: { type, message } }.
+// iOS resolves the native result ({ errorType }); the Android JS wrapper maps it
+// to { error: { type } }. The SDK's own messages are English, so only known
+// types get a Spanish message; anything else falls back to the caller's text.
+const DIDIT_ERROR_MESSAGES: Record<string, string> = {
+  sessionExpired: 'La sesión de verificación expiró. Inténtalo de nuevo.',
+  networkError: 'Revisa tu conexión a internet e inténtalo de nuevo.',
+  cameraAccessDenied: 'Permite el acceso a la cámara en los ajustes de tu teléfono para continuar.',
+  // Android only: the iOS bridge reports it as 'unknown'.
+  retryBlocked: 'Alcanzaste el máximo de intentos de verificación. Contacta a soporte para continuar.',
+};
+
 export function getDiditErrorMessage(result: any): string | null {
   const type = result?.errorType || result?.error?.type;
-  if (type === 'retryBlocked') {
-    return 'Alcanzaste el máximo de intentos de verificación. Contacta a soporte para continuar.';
-  }
-  return result?.errorMessage || result?.error?.message || null;
+  return (type && DIDIT_ERROR_MESSAGES[type]) || null;
 }
