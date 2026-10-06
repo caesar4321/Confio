@@ -87,6 +87,23 @@
 	<string>Confío no utiliza reconocimiento de voz ni transcribe tu audio. Esta declaración se incluye porque el SDK utilizado para la verificación facial contiene funciones de reconocimiento de voz que Confío no activa.</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>Confío will send you important notifications about your transactions, received payments, and security alerts.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Feather.ttf</string>
