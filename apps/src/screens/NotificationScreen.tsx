@@ -430,6 +430,16 @@ export const NotificationScreen = () => {
         });
         return;
       }
+      // Comunidad: a post (comments, mentions, approvals) or the author's list.
+      const discoverPost = normalizedUrl.match(/discover\/post\/(\d+)/);
+      if (discoverPost) {
+        navigation.navigate('DiscoverPostDetail', { contentItemId: Number(discoverPost[1]) });
+        return;
+      }
+      if (normalizedUrl.includes('community/my-posts')) {
+        navigation.navigate('MyCommunityPosts');
+        return;
+      }
       if (normalizedUrl.includes('referrals/reward-claim')) {
         navigation.navigate('ReferralRewardClaim');
         return;

@@ -75,8 +75,8 @@ const sectionEmptyStates: Record<DiscoverSectionKey, { icon: string; title: stri
   },
   community: {
     icon: 'users',
-    title: 'Comunidad llega pronto',
-    subtitle: 'Aquí podrás leer y publicar con otras personas verificadas en Confío. Mientras tanto, mira Para ti.',
+    title: 'Aún no hay publicaciones',
+    subtitle: 'Aquí lees y publicas con otras personas verificadas en Confío. ¡Sé la primera en compartir algo!',
   },
 };
 
@@ -101,6 +101,10 @@ type DiscoverFeedProps = {
   sections?: DiscoverSection[];
   activeSection?: DiscoverSectionKey;
   onSelectSection?: (key: DiscoverSectionKey) => void;
+  /** Rendered under the chips (e.g. the compose prompt, "Mis publicaciones"). */
+  sectionAccessory?: React.ReactNode;
+  /** Comments per Comunidad post id; posts without comments are absent. */
+  commentCounts?: Record<number, number>;
 };
 
 export function DiscoverFeed({
@@ -118,6 +122,8 @@ export function DiscoverFeed({
   sections = [],
   activeSection = 'for_you',
   onSelectSection,
+  sectionAccessory,
+  commentCounts,
 }: DiscoverFeedProps) {
   const renderItem = ({ item }: { item: DiscoverItem }) => {
     const platforms = platformOrder.filter((platform) =>
@@ -179,14 +185,27 @@ export function DiscoverFeed({
 
         <ContentPoll poll={item.poll} />
         <View style={styles.reactions}>
-          <ReactionBar
-            reactions={item.reactionSummary}
-            viewerReaction={item.viewerReaction}
-            canReact={item.canReact !== false && Boolean(onReact)}
-            onReact={(emoji) => {
-              void onReact?.(item.id, emoji);
-            }}
-          />
+          {commentCounts?.[item.id] ? (
+            <Pressable
+              onPress={() => onOpenItem?.(item)}
+              style={styles.commentCount}
+              accessibilityRole="button"
+              accessibilityLabel={`${commentCounts[item.id]} comentarios`}
+            >
+              <Icon name="message-circle" size={14} color={colors.textSecondary} />
+              <Text style={styles.commentCountText}>{commentCounts[item.id]}</Text>
+            </Pressable>
+          ) : null}
+          <View style={styles.reactionBar}>
+            <ReactionBar
+              reactions={item.reactionSummary}
+              viewerReaction={item.viewerReaction}
+              canReact={item.canReact !== false && Boolean(onReact)}
+              onReact={(emoji) => {
+                void onReact?.(item.id, emoji);
+              }}
+            />
+          </View>
         </View>
       </View>
     );
@@ -223,11 +242,17 @@ export function DiscoverFeed({
       })}
     </ScrollView>
   ) : null;
+  const listHeader = sectionHeader || sectionAccessory ? (
+    <>
+      {sectionHeader}
+      {sectionAccessory}
+    </>
+  ) : null;
 
   return (
     <FlatList
       data={items}
-      ListHeaderComponent={sectionHeader}
+      ListHeaderComponent={listHeader}
       keyExtractor={(item) => String(item.id)}
       renderItem={renderItem}
       contentContainerStyle={styles.content}
@@ -387,6 +412,23 @@ const styles = StyleSheet.create({
   },
   reactions: {
     marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reactionBar: {
+    flex: 1,
+  },
+  commentCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+  },
+  commentCountText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
   },
   footerLoader: {
     paddingVertical: 8,

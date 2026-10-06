@@ -15,7 +15,7 @@ import { ReferralInputModal } from '../components/ReferralInputModal';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { DriveStorageFullModal } from '../components/DriveStorageFullModal';
 import { useQuery } from '@apollo/client';
-import { GET_MY_REFERRALS } from '../apollo/queries';
+import { GET_MY_PROFILE_PICTURE, GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
@@ -383,6 +383,14 @@ export const ProfileScreen = () => {
   const displayInfo = getDisplayInfo();
   const authReady = useAuthReady();
   const personalAccount = activeAccount?.type.toLowerCase() === 'personal';
+  // Own query: on a server without profile pictures it errors and the
+  // initial stays.
+  const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
+  const { data: pictureData } = useQuery(GET_MY_PROFILE_PICTURE, {
+    skip: isBusinessAccount,
+    fetchPolicy: 'cache-and-network',
+  });
+  const profilePictureUrl: string | null = isBusinessAccount ? null : pictureData?.myProfilePicture?.url || null;
   const { data: referralData } = useQuery(GET_MY_REFERRALS, {
     fetchPolicy: 'cache-and-network',
   });
@@ -468,9 +476,13 @@ export const ProfileScreen = () => {
                 }
               }}
             >
-              <Text style={styles.avatarText}>
-                {activeAccount?.avatar || (userProfile?.firstName?.charAt(0) || userProfile?.username?.charAt(0) || 'U')}
-              </Text>
+              {profilePictureUrl ? (
+                <Image source={{ uri: profilePictureUrl }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {activeAccount?.avatar || (userProfile?.firstName?.charAt(0) || userProfile?.username?.charAt(0) || 'U')}
+                </Text>
+              )}
               <View style={styles.editIconContainer}>
                 <Icon name="edit-2" size={12} color={colors.white} />
               </View>
@@ -1055,6 +1067,11 @@ const styles = StyleSheet.create({
   avatarEmbajador: {
     borderWidth: 3,
     borderColor: colors.secondary,
+  },
+  avatarImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
   },
   avatarText: {
     fontSize: 32,
