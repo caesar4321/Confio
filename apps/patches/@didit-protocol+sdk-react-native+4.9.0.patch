@@ -1,17 +1,17 @@
 diff --git a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.h b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.h
-index 7234724..3308b50 100644
+index b5d106a..3f9db92 100644
 --- a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.h
 +++ b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.h
 @@ -1,5 +1,6 @@
 +#import <React/RCTBridgeModule.h>
  #import <SdkReactNativeSpec/SdkReactNativeSpec.h>
  
--@interface SdkReactNative : NSObject <NativeSdkReactNativeSpec>
-+@interface SdkReactNative : NSObject <NativeSdkReactNativeSpec, RCTBridgeModule>
+-@interface SdkReactNative : NativeSdkReactNativeSpecBase <NativeSdkReactNativeSpec>
++@interface SdkReactNative : NativeSdkReactNativeSpecBase <NativeSdkReactNativeSpec, RCTBridgeModule>
  
  @end
 diff --git a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
-index b6e27ee..46eca9f 100644
+index 9a20595..ca249d9 100644
 --- a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
 +++ b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
 @@ -1,4 +1,5 @@
@@ -20,15 +20,15 @@ index b6e27ee..46eca9f 100644
  
  // Import the Swift-generated header for the bridge class.
  // The header name follows the pattern: <ProductModuleName>-Swift.h
-@@ -12,6 +13,8 @@
- @implementation SdkReactNative {
+@@ -13,6 +14,8 @@
      DiditSdkBridge *_bridge;
  }
-+
-+RCT_EXPORT_MODULE(SdkReactNative);
  
++RCT_EXPORT_MODULE(SdkReactNative);
++
  - (instancetype)init {
      if (self = [super init]) {
+         _bridge = [[DiditSdkBridge alloc] init];
 @@ -20,6 +23,11 @@
      return self;
  }
@@ -41,15 +41,14 @@ index b6e27ee..46eca9f 100644
  // MARK: - Codegen Struct → NSDictionary Helpers
  
  - (NSDictionary *)configDictFrom:(JS::NativeSdkReactNative::VerificationConfig &)config
-@@ -122,9 +130,36 @@
+@@ -192,9 +200,39 @@ static NSError *DiditTransactionNSError(NSString *message, NSDictionary *userInf
      return std::make_shared<facebook::react::NativeSdkReactNativeSpecJSI>(params);
  }
  
 -+ (NSString *)moduleName
--{
--    return @"SdkReactNative";
--}
--
++// Old-architecture (bridge) entry points: the app runs with
++// RCT_NEW_ARCH_ENABLED=0, where the TurboModule spec methods above are not
++// reachable from NativeModules.
 +RCT_REMAP_METHOD(startVerification,
 +                 startVerificationLegacy:(NSString *)token
 +                 config:(NSDictionary * _Nullable)config
@@ -72,7 +71,8 @@ index b6e27ee..46eca9f 100644
 +                 config:(NSDictionary * _Nullable)config
 +                 resolver:(RCTPromiseResolveBlock)resolve
 +                 rejecter:(RCTPromiseRejectBlock)reject)
-+{
+ {
+-    return @"SdkReactNative";
 +    [_bridge startVerificationWithWorkflowWithWorkflowId:workflowId
 +                                              vendorData:vendorData
 +                                                metadata:metadata
@@ -80,6 +80,6 @@ index b6e27ee..46eca9f 100644
 +                                         expectedDetails:expectedDetails
 +                                                  config:config
 +                                              completion:^(NSDictionary *result) { resolve(result); }];
-+}
-+
+ }
+ 
  @end
