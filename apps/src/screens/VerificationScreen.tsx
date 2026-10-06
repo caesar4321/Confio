@@ -53,7 +53,12 @@ const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me\/(?:[a-z]{2}\/)?session\
 
 const openDiditSessionUrl = async (url: unknown, unsafeMessage: string) => {
   if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) throw new Error(unsafeMessage);
-  await Linking.openURL(url);
+  try {
+    await Linking.openURL(url);
+  } catch {
+    // The native error quotes the URL, a bearer link: never show it.
+    throw new Error('No encontramos un navegador para abrir la verificación.');
+  }
 };
 
 const DIDIT_REDIRECT = /^confio:\/\/verification(?:[/?#]|$)/;
@@ -303,7 +308,9 @@ const VerificationScreen = () => {
       // account later in this run never syncs it under the wrong context.
       if (isBusinessAccount) return;
       awaitingBrowserRef.current = false;
-      syncSessionAndRefresh(sessionId).catch((error: any) => {
+      // Busy while syncing, so no second Didit session starts meanwhile.
+      setIsLaunchingDidit(true);
+      syncSessionAndRefresh(sessionId).finally(() => setIsLaunchingDidit(false)).catch((error: any) => {
         // A transport failure may be retried by a later redirect.
         if (error?.networkError) syncedDiditRedirects.delete(sessionId);
         setBanner({ variant: 'error', message: userFacingMessage(error) || 'No se pudo sincronizar la decisión de Didit.' });

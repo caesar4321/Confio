@@ -42,6 +42,12 @@ jest.mock('../../components/common/InlineBanner', () => ({InlineBanner: () => nu
 
 import VerificationScreen from '../VerificationScreen';
 
+// React Native's jest mock returns undefined from these; the screen needs a
+// promise and a subscription, as on a device.
+beforeEach(() => {
+  (Linking as any).getInitialURL = jest.fn().mockResolvedValue(null);
+  (Linking as any).addEventListener = jest.fn(() => ({remove: jest.fn()}));
+});
 beforeEach(() => { mockAccountLoading = false; mockBusiness = false; mockDocuments = []; mockBusinessStatus = 'rejected'; mockAnyStatus = null; mockPersonalStatus = 'rejected'; });
 
 it.each(['verified', 'pending', 'rejected'])('does not use %s personal KYC for an unverified business', async personalStatus => {
@@ -254,4 +260,24 @@ it('waits for the active account before handling a cold-start redirect', async (
   await act(async () => tree.unmount());
   initial.mockRestore();
   urls.restore();
+});
+
+it('never shows the session link when no browser can open it', async () => {
+  mockPersonalStatus = null;
+  mockBrowserSession.mockResolvedValue({data: {createDiditVerificationSession: {success: true,
+    session: {sessionId: 'web-4', sessionUrl: 'https://verify.didit.me/session/web-4'}}}});
+  const open = jest.spyOn(Linking, 'openURL').mockRejectedValue(
+    new Error("Could not open URL 'https://verify.didit.me/session/web-4': No Activity found"));
+  const banners: any[] = [];
+  const banner = jest.requireMock('../../components/common/InlineBanner');
+  const original = banner.InlineBanner;
+  banner.InlineBanner = (props: any) => { banners.push(props.message); return null; };
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  await act(async () => { await browserLink(tree)[0].props.onPress(); });
+  expect(banners.length).toBeGreaterThan(0);
+  expect(banners.some(m => String(m).includes('verify.didit.me'))).toBe(false);
+  await act(async () => tree.unmount());
+  banner.InlineBanner = original;
+  open.mockRestore();
 });
