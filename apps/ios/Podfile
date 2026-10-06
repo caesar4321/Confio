@@ -18,7 +18,11 @@ use_frameworks! :linkage => :static
 target 'Confio' do
   config = use_native_modules!
 
-  pod 'DiditSDK', :podspec => 'https://raw.githubusercontent.com/didit-protocol/sdk-ios/main/DiditSDK.podspec'
+  # Pinned to the release @didit-protocol/sdk-react-native depends on
+  # (diditNativeSdkVersions.ios); `main` drifts and breaks `pod install`.
+  # 'all' = auto-capture + NFC, as before 4.x (the wrapper reads this global).
+  $DiditSdkIosVariant = 'all'
+  pod 'DiditSDK/All', :podspec => 'https://raw.githubusercontent.com/didit-protocol/sdk-ios/4.9.0/DiditSDK.podspec'
   
   use_react_native!(
     :path => config[:reactNativePath],

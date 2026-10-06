@@ -69,6 +69,8 @@ export function getDiditResultSessionId(result: any, fallbackSessionId?: string 
   return (
     result?.sessionId ||
     result?.session_id ||
+    // The JS wrapper (Android) nests it: { type, session: { sessionId, status } }.
+    result?.session?.sessionId ||
     result?.data?.sessionId ||
     result?.data?.session_id ||
     fallbackSessionId ||
