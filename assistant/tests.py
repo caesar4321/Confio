@@ -1426,6 +1426,11 @@ class VerificationNudgeTests(TestCase):
         self._doc(review, 'pending', 2, raw='In Review')
         self.assertFalse(self._pending(review))
 
+    def test_recent_expired_session_still_nudges(self):
+        user = User.objects.create_user(username='vn6', email='vn6@example.com', password='x', firebase_uid='fb-vn6')
+        self._doc(user, 'expired', 3, raw='Expired')
+        self.assertTrue(self._pending(user))
+
     def test_old_abandoned_attempt_stops_nudging(self):
         user = User.objects.create_user(username='vn3', email='vn3@example.com', password='x', firebase_uid='fb-vn3')
         self._doc(user, 'pending', 30)

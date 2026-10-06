@@ -123,7 +123,8 @@ def _state(viewer, request_meta) -> _State:
     latest = personal_docs.order_by('-created_at').first()
     now = timezone.now()
     stage = _didit_stage(latest)
-    pending = bool(latest and latest.status == 'pending' and stage != 'in_review'
+    # 'expired' is a dead session (abandoned or timed out): still worth a nudge.
+    pending = bool(latest and latest.status in ('pending', 'expired') and stage != 'in_review'
                    and now - timedelta(days=VERIFICATION_NUDGE_DAYS) <= latest.created_at <= now - timedelta(hours=24)
                    and not personal_docs.filter(status='verified').exists())
     try:
@@ -146,7 +147,7 @@ def _state(viewer, request_meta) -> _State:
 
 
 # Didit's raw statuses (risk_factors['didit']['raw_status']); our `status`
-# column folds all of them into 'pending'.
+# column folds most of them into 'pending' (Expired/Abandoned into 'expired').
 DIDIT_UNFINISHED = {'not started', 'in progress', 'abandoned', 'expired', 'kyc expired'}
 DIDIT_IN_REVIEW = {'in review'}
 

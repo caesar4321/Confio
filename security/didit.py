@@ -1148,6 +1148,11 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
     }
 
 
+# Didit session statuses that end a session without a decision. "Kyc
+# Expired" is different (an approval that aged out) and is not in this set.
+DIDIT_DEAD_SESSION_STATUSES = {'expired', 'abandoned'}
+
+
 def _map_didit_status(response_payload: dict[str, Any]) -> str:
     raw_status = str(
         _first_non_empty(
@@ -1161,6 +1166,11 @@ def _map_didit_status(response_payload: dict[str, Any]) -> str:
         return 'verified'
     if raw_status in {'declined', 'rejected', 'failed', 'denied'}:
         return 'rejected'
+    if raw_status in DIDIT_DEAD_SESSION_STATUSES:
+        # The session ended without a decision: nothing is in review, and the
+        # person has to start again. 'pending' made the app say "Estamos
+        # revisando tu documento" for months-old abandoned sessions.
+        return 'expired'
     return 'pending'
 
 

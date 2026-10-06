@@ -1150,3 +1150,41 @@ class DiditWebhookSignatureTests(TestCase):
         signature = hmac.new(b'super-secret', body, hashlib.sha256).hexdigest()
         self.assertTrue(verify_didit_webhook_signature(body, signature))
         self.assertFalse(verify_didit_webhook_signature(body, 'invalid'))
+
+
+class DiditDeadSessionTests(TestCase):
+    def test_expired_and_abandoned_sessions_are_not_in_review(self):
+        from security.didit import _map_didit_status
+        self.assertEqual(_map_didit_status({'status': 'Expired'}), 'expired')
+        self.assertEqual(_map_didit_status({'status': 'Abandoned'}), 'expired')
+        self.assertEqual(_map_didit_status({'status': 'In Review'}), 'pending')
+        self.assertEqual(_map_didit_status({'status': 'Not Started'}), 'pending')
+        self.assertEqual(_map_didit_status({'status': 'Approved'}), 'verified')
+
+    def test_backfill_only_touches_dead_never_verified_sessions(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        from django.utils import timezone
+
+        user = User.objects.create_user(username='dead1', email='dead1@example.com', password='x',
+                                        firebase_uid='fb-dead1')
+
+        def row(raw, verified_at=None, n=[0]):
+            n[0] += 1
+            return IdentityVerification.all_objects.create(
+                user=user, status='pending', verified_at=verified_at, document_type='national_id',
+                verified_first_name='A', verified_last_name='B', verified_date_of_birth='1990-01-01',
+                verified_nationality='PE', verified_address='', verified_city='', verified_state='',
+                verified_country='', document_number=f'didit:s{n[0]}',
+                risk_factors={'provider': 'didit', 'didit': {'raw_status': raw}})
+
+        expired, abandoned = row('Expired'), row('Abandoned')
+        review, kyc_expired = row('In Review'), row('Kyc Expired', verified_at=timezone.now())
+        out = StringIO()
+        call_command('expire_dead_didit_sessions', stdout=out)
+        self.assertEqual(IdentityVerification.all_objects.filter(status='expired').count(), 0)  # dry run
+        call_command('expire_dead_didit_sessions', '--apply', stdout=out)
+        statuses = dict(IdentityVerification.all_objects.values_list('pk', 'status'))
+        self.assertEqual((statuses[expired.pk], statuses[abandoned.pk]), ('expired', 'expired'))
+        self.assertEqual((statuses[review.pk], statuses[kyc_expired.pk]), ('pending', 'pending'))
