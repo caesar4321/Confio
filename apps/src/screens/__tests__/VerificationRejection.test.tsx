@@ -25,7 +25,8 @@ jest.mock('@apollo/client', () => ({
   }),
 }));
 jest.mock('@react-navigation/native', () => ({useNavigation: () => ({}), useFocusEffect: () => {}}));
-jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: {
+let mockAccountLoading = false;
+jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: mockAccountLoading ? null : {
   type: mockBusiness ? 'business' : 'personal', business: {id: '1', name: 'Business'},
 }})}));
 jest.mock('../../hooks/useRampCountry', () => ({useRampCountry: () => ({countryCode: 'PY', isBlocked: false})}));
@@ -41,7 +42,7 @@ jest.mock('../../components/common/InlineBanner', () => ({InlineBanner: () => nu
 
 import VerificationScreen from '../VerificationScreen';
 
-beforeEach(() => { mockBusiness = false; mockDocuments = []; mockBusinessStatus = 'rejected'; mockAnyStatus = null; mockPersonalStatus = 'rejected'; });
+beforeEach(() => { mockAccountLoading = false; mockBusiness = false; mockDocuments = []; mockBusinessStatus = 'rejected'; mockAnyStatus = null; mockPersonalStatus = 'rejected'; });
 
 it.each(['verified', 'pending', 'rejected'])('does not use %s personal KYC for an unverified business', async personalStatus => {
   mockBusiness = true;
@@ -231,6 +232,24 @@ it('leaves business redirects to the webhook', async () => {
   mockBusiness = false;
   mockPersonalStatus = null;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  expect(mockSyncSession).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+  initial.mockRestore();
+  urls.restore();
+});
+
+it('waits for the active account before handling a cold-start redirect', async () => {
+  mockBusiness = true;
+  mockAccountLoading = true;
+  mockSyncSession.mockReset();
+  const initial = jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('confio://verification?verificationSessionId=kyb-cold&status=Approved');
+  const urls = listenForUrls();
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  mockAccountLoading = false;
+  await act(async () => { tree.update(<VerificationScreen />); });
+  mockBusiness = false;
+  await act(async () => { tree.update(<VerificationScreen />); });
   expect(mockSyncSession).not.toHaveBeenCalled();
   await act(async () => tree.unmount());
   initial.mockRestore();
