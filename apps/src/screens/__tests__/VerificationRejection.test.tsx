@@ -24,7 +24,11 @@ jest.mock('@apollo/client', () => ({
           : query === 'any' ? {myKycStatus: {status: mockAnyStatus, statusDetail: 'Personal verification'}} : {},
   }),
 }));
-jest.mock('@react-navigation/native', () => ({useNavigation: () => ({}), useFocusEffect: () => {}}));
+let mockRouteParams: any;
+const mockSetParams = jest.fn();
+jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => ({setParams: mockSetParams}), useFocusEffect: () => {}, useRoute: () => ({params: mockRouteParams}),
+}));
 let mockAccountLoading = false;
 jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: mockAccountLoading ? null : {
   type: mockBusiness ? 'business' : 'personal', business: {id: '1', name: 'Business'},
@@ -42,13 +46,7 @@ jest.mock('../../components/common/InlineBanner', () => ({InlineBanner: () => nu
 
 import VerificationScreen from '../VerificationScreen';
 
-// React Native's jest mock returns undefined from these; the screen needs a
-// promise and a subscription, as on a device.
-beforeEach(() => {
-  (Linking as any).getInitialURL = jest.fn().mockResolvedValue(null);
-  (Linking as any).addEventListener = jest.fn(() => ({remove: jest.fn()}));
-});
-beforeEach(() => { mockAccountLoading = false; mockBusiness = false; mockDocuments = []; mockBusinessStatus = 'rejected'; mockAnyStatus = null; mockPersonalStatus = 'rejected'; });
+beforeEach(() => { mockRouteParams = undefined; mockSetParams.mockReset(); mockAccountLoading = false; mockBusiness = false; mockDocuments = []; mockBusinessStatus = 'rejected'; mockAnyStatus = null; mockPersonalStatus = 'rejected'; });
 
 it.each(['verified', 'pending', 'rejected'])('does not use %s personal KYC for an unverified business', async personalStatus => {
   mockBusiness = true;
@@ -181,85 +179,52 @@ it('keeps the browser fallback off business accounts and additional documents', 
   await act(async () => tree.unmount());
 });
 
-const listenForUrls = () => {
-  const handlers: Array<(event: {url: string}) => void> = [];
-  const listen = jest.spyOn(Linking, 'addEventListener').mockImplementation(((_: string, handler: any) => {
-    handlers.push(handler);
-    return {remove: jest.fn()};
-  }) as any);
-  const fire = (url: string) => act(async () => { handlers.forEach(h => h({url})); });
-  return {fire, restore: () => listen.mockRestore()};
-};
-
-it('syncs the session Didit redirects back with, once', async () => {
+it('syncs the session Didit\'s redirect names, then clears it', async () => {
   mockPersonalStatus = null;
   mockSyncSession.mockReset().mockResolvedValue({data: {syncDiditVerificationSession: {success: true, verificationStatus: 'pending'}}});
-  const urls = listenForUrls();
+  mockRouteParams = {verificationSessionId: 'web-2', status: 'Approved'};
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
-  await urls.fire('confio://p2p/trade/1?verificationSessionId=web-2');
-  await urls.fire('confio://verification?verificationSessionId=..%2Fadmin');
-  await urls.fire('confio://verification?verificationSessionId=%E0%A4%A');
-  expect(mockSyncSession).not.toHaveBeenCalled();
-  await urls.fire('confio://verification?verificationSessionId=web-2&status=Approved');
-  await urls.fire('confio://verification?verificationSessionId=web-2&status=Approved');
   expect(mockSyncSession).toHaveBeenCalledTimes(1);
   expect(mockSyncSession).toHaveBeenCalledWith({variables: {sessionId: 'web-2'}});
+  expect(mockSetParams).toHaveBeenCalledWith({verificationSessionId: undefined, status: undefined});
   await act(async () => tree.unmount());
-  urls.restore();
 });
 
-it('syncs a redirect that cold-started the app', async () => {
-  mockPersonalStatus = null;
-  mockSyncSession.mockReset().mockResolvedValue({data: {syncDiditVerificationSession: {success: true, verificationStatus: 'verified'}}});
-  const initial = jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('confio://verification?verificationSessionId=web-3&status=Approved');
-  const urls = listenForUrls();
+it('ignores a malformed redirected session id', async () => {
+  mockSyncSession.mockReset();
+  mockRouteParams = {verificationSessionId: '../admin'};
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
-  expect(mockSyncSession).toHaveBeenCalledWith({variables: {sessionId: 'web-3'}});
+  expect(mockSyncSession).not.toHaveBeenCalled();
+  expect(mockSetParams).toHaveBeenCalled();
   await act(async () => tree.unmount());
-  initial.mockRestore();
-  urls.restore();
 });
 
 it('leaves business redirects to the webhook', async () => {
   mockBusiness = true;
   mockSyncSession.mockReset();
-  const initial = jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('confio://verification?verificationSessionId=kyb-8&status=Approved');
-  const urls = listenForUrls();
+  mockRouteParams = {verificationSessionId: 'kyb-8', status: 'Approved'};
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
-  await urls.fire('confio://verification?verificationSessionId=kyb-9&status=Approved');
   expect(mockSyncSession).not.toHaveBeenCalled();
+  expect(mockSetParams).toHaveBeenCalled();
   await act(async () => tree.unmount());
-
-  // Switching to the personal account later in the same run never syncs the
-  // business session that cold-started the app.
-  mockBusiness = false;
-  mockPersonalStatus = null;
-  await act(async () => { tree = renderer.create(<VerificationScreen />); });
-  expect(mockSyncSession).not.toHaveBeenCalled();
-  await act(async () => tree.unmount());
-  initial.mockRestore();
-  urls.restore();
 });
 
-it('waits for the active account before handling a cold-start redirect', async () => {
+it('waits for the active account before handling a redirect', async () => {
   mockBusiness = true;
   mockAccountLoading = true;
   mockSyncSession.mockReset();
-  const initial = jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('confio://verification?verificationSessionId=kyb-cold&status=Approved');
-  const urls = listenForUrls();
+  mockRouteParams = {verificationSessionId: 'kyb-cold', status: 'Approved'};
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  expect(mockSetParams).not.toHaveBeenCalled();
   mockAccountLoading = false;
   await act(async () => { tree.update(<VerificationScreen />); });
-  mockBusiness = false;
-  await act(async () => { tree.update(<VerificationScreen />); });
   expect(mockSyncSession).not.toHaveBeenCalled();
+  expect(mockSetParams).toHaveBeenCalled();
   await act(async () => tree.unmount());
-  initial.mockRestore();
-  urls.restore();
 });
 
 it('never shows the session link when no browser can open it', async () => {

@@ -36,7 +36,8 @@ export type MainStackParamList = {
   Employees: undefined;
   BottomTabs: NavigatorScreenParams<BottomTabParamList>;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
-  Verification: undefined;
+  // Didit's browser redirect (confio://verification?verificationSessionId=…&status=…).
+  Verification: { verificationSessionId?: string; status?: string } | undefined;
   Memberships: { provider?: string; token?: string; obligationId?: string } | undefined;
   InfiniaPayment: { direction?: 'to_bank' | 'to_wallet' } | undefined;
   CobrePayment: { direction?: 'to_bank' | 'to_wallet' } | undefined;

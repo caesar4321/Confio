@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Text } from '../components/common/AppText';
-import { CompositeNavigationProp, NavigationProp, useFocusEffect, useNavigation } from '@react-navigation/native';
+import { CompositeNavigationProp, NavigationProp, RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { gql, useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 
@@ -49,7 +49,7 @@ const MY_IDENTITY_DOCUMENTS = gql`
 `;
 
 // Only Didit's own hosted verification page is ever opened in the browser.
-const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/;
+const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me(?::443)?\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/;
 
 const openDiditSessionUrl = async (url: unknown, unsafeMessage: string) => {
   if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) throw new Error(unsafeMessage);
@@ -61,25 +61,11 @@ const openDiditSessionUrl = async (url: unknown, unsafeMessage: string) => {
   }
 };
 
-const DIDIT_REDIRECT = /^confio:\/\/verification(?:[/?#]|$)/;
-// Sessions already synced from a redirect in this app run: the initial URL
-// stays the same for the whole run, and the screen can mount many times.
-const syncedDiditRedirects = new Set<string>();
+const DIDIT_SESSION_ID = /^[A-Za-z0-9_-]+$/;
 
 // The server's own message, never a raw GraphQL or transport error.
 function userFacingMessage(error: any): string | null {
   return error?.graphQLErrors?.length || error?.networkError ? null : error?.message || null;
-}
-
-function diditRedirectSessionId(url: string): string | null {
-  const raw = /[?&]verificationSessionId=([^&#]+)/.exec(url)?.[1];
-  if (!raw) return null;
-  try {
-    const id = decodeURIComponent(raw);
-    return /^[A-Za-z0-9_-]+$/.test(id) ? id : null;
-  } catch {
-    return null;
-  }
 }
 
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
@@ -190,6 +176,7 @@ function capabilities(doc: IdentityDocument, phoneCountryName: string, rampBlock
 
 const VerificationScreen = () => {
   const navigation = useNavigation<CompositeNavigationProp<NavigationProp<MainStackParamList>, NavigationProp<RootStackParamList>>>();
+  const route = useRoute<RouteProp<MainStackParamList, 'Verification'>>();
   const { activeAccount } = useAccount();
   const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
   const { countryCode: phoneCountry, isBlocked: rampBlocked } = useRampCountry();
@@ -223,6 +210,7 @@ const VerificationScreen = () => {
 
   const [isLaunchingDidit, setIsLaunchingDidit] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [isSyncingRedirect, setIsSyncingRedirect] = React.useState(false);
   const [banner, setBanner] = React.useState<{ message: string; variant: 'error' | 'success' | 'info' | 'warning' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);
 
@@ -234,7 +222,7 @@ const VerificationScreen = () => {
   const effectiveDetail = isBusinessAccount
     ? bizKycData?.businessKycStatus?.statusDetail
     : personalKycData?.myPersonalKycStatus?.statusDetail;
-  const isBusy = isLaunchingDidit || isRefreshing;
+  const isBusy = isLaunchingDidit || isRefreshing || isSyncingRedirect;
   const isInitialLoading = meLoading || personalLoading || businessLoading
     || (!isBusinessAccount && documentsQuery.loading && !documents);
 
@@ -291,35 +279,27 @@ const VerificationScreen = () => {
   }, [isBusinessAccount, refreshStatuses]);
 
   // Didit's redirect back (confio://verification?verificationSessionId=…)
-  // names the session that finished in the browser. Sync it even when Android
-  // killed the app meanwhile (then it is the initial URL); the server checks
-  // the session belongs to this user. Business keeps its webhook + refresh.
+  // reaches this screen as route params through the navigation linking config,
+  // warm or cold start alike. Sync the session it names; the server checks it
+  // belongs to this user. Business keeps its webhook + refresh.
+  const redirectedSessionId = route.params?.verificationSessionId;
+  const syncRef = React.useRef(syncSessionAndRefresh);
+  syncRef.current = syncSessionAndRefresh;
+  const handledRedirectRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!accountReady) return undefined;
-    const handle = (url: string | null) => {
-      if (!url || !DIDIT_REDIRECT.test(url)) return;
-      // Only the session the redirect names: a bare confio://verification link
-      // (e.g. a plain navigation to this screen) must not sync, and so mark as
-      // seen, a browser session the user has not finished yet.
-      const sessionId = diditRedirectSessionId(url);
-      if (!sessionId || syncedDiditRedirects.has(sessionId)) return;
-      syncedDiditRedirects.add(sessionId);
-      // A business redirect is only marked seen, so switching to the personal
-      // account later in this run never syncs it under the wrong context.
-      if (isBusinessAccount) return;
-      awaitingBrowserRef.current = false;
-      // Busy while syncing, so no second Didit session starts meanwhile.
-      setIsLaunchingDidit(true);
-      syncSessionAndRefresh(sessionId).finally(() => setIsLaunchingDidit(false)).catch((error: any) => {
-        // A transport failure may be retried by a later redirect.
-        if (error?.networkError) syncedDiditRedirects.delete(sessionId);
+    // The active account is unknown until AccountContext loads.
+    if (!accountReady || !redirectedSessionId || handledRedirectRef.current === redirectedSessionId) return;
+    handledRedirectRef.current = redirectedSessionId;
+    navigation.setParams({ verificationSessionId: undefined, status: undefined } as any);
+    if (isBusinessAccount || !DIDIT_SESSION_ID.test(redirectedSessionId)) return;
+    awaitingBrowserRef.current = false;
+    setIsSyncingRedirect(true);
+    syncRef.current(redirectedSessionId)
+      .catch((error: any) => {
         setBanner({ variant: 'error', message: userFacingMessage(error) || 'No se pudo sincronizar la decisión de Didit.' });
-      });
-    };
-    Linking.getInitialURL().then(handle).catch(() => {});
-    const listener = Linking.addEventListener('url', ({ url }) => handle(url));
-    return () => listener.remove();
-  }, [accountReady, isBusinessAccount, syncSessionAndRefresh]);
+      })
+      .finally(() => setIsSyncingRedirect(false));
+  }, [accountReady, isBusinessAccount, navigation, redirectedSessionId]);
 
   // A browser session belongs to the account that started it.
   React.useEffect(() => { awaitingBrowserRef.current = false; }, [isBusinessAccount]);
