@@ -14,6 +14,7 @@ import {
 import { GET_MY_PROFILE_PICTURE } from '../apollo/queries';
 import { uploadFileToPresignedForm } from '../services/uploadService';
 import { usePollWhile } from '../hooks/usePollWhile';
+import { CommunityRulesSheet } from './CommunityRulesSheet';
 
 const POLL_MS = 3000;
 // Past this, the screen stops asking; reopening it shows the outcome.
@@ -24,6 +25,7 @@ type MyPicture = {
   latestStatus?: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'FAILED' | 'REMOVED' | null;
   latestReason?: string | null;
   blockMessage?: string | null;
+  rulesRequired?: boolean | null;
 };
 
 type Props = { initial: string };
@@ -45,6 +47,7 @@ export function ProfilePictureEditor({ initial }: Props) {
   const [uploading, setUploading] = useState(false);
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const picture: MyPicture | undefined = data?.myProfilePicture;
   const pending = picture?.latestStatus === 'PENDING';
@@ -58,8 +61,13 @@ export function ProfilePictureEditor({ initial }: Props) {
 
   if (error || !picture) return null;
 
-  const pick = async () => {
-    if (picture.blockMessage) {
+  const pick = async (rulesJustAccepted = false) => {
+    if (picture.rulesRequired && !rulesJustAccepted) {
+      // A photo is shown to other members, so the community rules apply.
+      setRulesOpen(true);
+      return;
+    }
+    if (picture.blockMessage && !(rulesJustAccepted && picture.rulesRequired)) {
       setMessage(picture.blockMessage);
       return;
     }
@@ -141,6 +149,15 @@ export function ProfilePictureEditor({ initial }: Props) {
           </Pressable>
         ) : null}
       </View>
+      <CommunityRulesSheet
+        visible={rulesOpen}
+        onAccepted={() => {
+          setRulesOpen(false);
+          refetch().catch(() => {});
+          void pick(true);
+        }}
+        onClose={() => setRulesOpen(false)}
+      />
     </View>
   );
 }

@@ -82,7 +82,9 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Confío usa el micrófono para los audios que le mandas a Confio Assistant y para la verificación de identidad en video.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>We need access to save QR codes to your photo library</string>
+	<string>Confío usa tus fotos solo cuando eliges una: para publicar en Comunidad, para tu foto de perfil o para leer un código QR.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Confío guarda en tus fotos los comprobantes que decides descargar.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Confío no utiliza reconocimiento de voz ni transcribe tu audio. Esta declaración se incluye porque el SDK utilizado para la verificación facial contiene funciones de reconocimiento de voz que Confío no activa.</string>
 	<key>NSUserNotificationsUsageDescription</key>

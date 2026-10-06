@@ -17,6 +17,7 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { Text, TextInput } from '../components/common/AppText';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { CommunityRulesSheet } from '../components/CommunityRulesSheet';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { CREATE_COMMUNITY_POST, REQUEST_COMMUNITY_IMAGE_UPLOAD } from '../apollo/mutations';
@@ -227,6 +228,20 @@ export const CommunityComposeScreen = () => {
         <View style={styles.stateWrap}>
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
+      </View>
+    );
+  }
+
+  if (status?.blockCode === 'rules_required') {
+    // First time: the rules, accepted once, then straight into the editor.
+    return (
+      <View style={styles.container}>
+        {header}
+        <CommunityRulesSheet
+          visible
+          onAccepted={() => { refetchStatus().catch(() => {}); }}
+          onClose={() => navigation.goBack()}
+        />
       </View>
     );
   }
