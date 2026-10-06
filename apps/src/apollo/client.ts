@@ -238,6 +238,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   const redactVariables = isMembershipClaim || [
     'AskAssistant', 'SendSupportMessage', 'CreateAssistantPet', 'VerifyAssistantPurchase',
     'StartAssistantVoice', 'ConnectAssistantVoice', 'RunAssistantVoiceTool', 'LogAssistantVoice',
+    'UpdateAssistantProfile', 'UseAssistantPet', 'DeleteAssistantPet',
   ].includes(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {

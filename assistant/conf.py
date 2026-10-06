@@ -53,9 +53,12 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_IOS_BUNDLE_ID': 'com.Confio.Confio',
     # Public (App Store listing id6472662314, iTunes lookup by bundle id).
     'CONFIO_ASSISTANT_APPLE_APP_ID': 6472662314,
-    # Sandbox purchases (TestFlight, App Review) unlock Assistant+ too: App Review
-    # must be able to use what it reviews. They are flagged environment=Sandbox.
+    # Sandbox purchases (TestFlight, App Review) are verified and recorded, flagged
+    # environment=Sandbox (Google: Test). They are free, so they unlock
+    # Assistant+ only for staff and these user ids (e.g. the App Review demo
+    # account) — never for any TestFlight tester or Play license tester.
     'CONFIO_ASSISTANT_ACCEPT_APPLE_SANDBOX': True,
+    'CONFIO_ASSISTANT_TEST_PURCHASE_USER_IDS': [],
     'CONFIO_ASSISTANT_ANDROID_PACKAGE': 'com.Confio.Confio',
     # Service-account JSON (string or dict) with Play Console financial access.
     'CONFIO_ASSISTANT_GOOGLE_PLAY_CREDENTIALS': None,

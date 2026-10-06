@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   Easing,
   FlatList,
   Keyboard,
@@ -60,6 +61,9 @@ const STARTERS = [
   '¿Cómo recargo desde mi banco?',
   '¿Cómo invierto en acciones?',
 ];
+
+// Wake-word recordings stop after this and are discarded unless sent by tap.
+const WAKE_RECORDING_MS = 15_000;
 
 function deviceTimezone() {
   try {
@@ -172,6 +176,12 @@ export default function AssistantSheet() {
   // the previous visit's channel.
   const [channelReady, setChannelReady] = useState(false);
   const channelRef = useRef<BoxChannel>('ia');
+  // The visit a reply belongs to: an answer may only move the app while the
+  // box is still open on Confio Assistant in that same opening.
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
+  const openSeqRef = useRef(openSeq);
+  openSeqRef.current = openSeq;
   const wakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const call = useCall();
   const callLive = call.state !== 'idle' && call.state !== 'ended';
@@ -298,7 +308,7 @@ export default function AssistantSheet() {
       wakeTimer.current = setTimeout(() => {
         wakeTimer.current = null;
         if (recordingMs === null && channelRef.current === 'ia') {
-          void toggleRecording();
+          void toggleRecording({ fromWake: true });
         }
       }, 400);
       return () => {
@@ -382,6 +392,7 @@ export default function AssistantSheet() {
       }
       setError(null);
       setSentThisOpen(true);
+      const visit = openSeqRef.current;
       const tempId = `pending-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
@@ -440,7 +451,10 @@ export default function AssistantSheet() {
         );
         if (navigateTo?.destination) {
           setTimeout(() => {
-            if (gen === accountGen.current) {
+            // Closed, switched channel or reopened since asking: leave the
+            // chip in the thread (a tap still works) instead of moving the app.
+            if (gen === accountGen.current && isOpenRef.current && channelRef.current === 'ia'
+                && openSeqRef.current === visit) {
               runAction(navigateTo.destination!);
               const replyText = payload.reply?.body;
               if (typeof replyText === 'string' && replyText.trim() && navigateTo.destination !== 'messages') {
@@ -518,6 +532,20 @@ export default function AssistantSheet() {
     setRecordingMs(null);
     void cancelVoiceNote();
   };
+  // Going to the background stops (never sends) a recording in progress.
+  // Only a running recording: the mic permission prompt itself makes the app
+  // inactive (iOS) and must not cancel the start it is asking for.
+  const recordingRef = useRef(false);
+  recordingRef.current = recordingMs !== null;
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background' && recordingRef.current) {
+        stopRecordingNow();
+      }
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Leaving the signed-in app (sign-out) must never leave the mic on.
   const mountedRef = useRef(true);
   useEffect(() => () => {
@@ -544,7 +572,7 @@ export default function AssistantSheet() {
     }
   }, [send]);
 
-  const toggleRecording = async () => {
+  const toggleRecording = async (opts: { fromWake?: boolean } = {}) => {
     if (recordingMs !== null) {
       await finishRecording();
       return;
@@ -559,7 +587,14 @@ export default function AssistantSheet() {
       }
       recordGen.current = genAtStart;
       setRecordingMs(0);
-      autoStopTimer.current = setTimeout(() => void finishRecording(), MAX_VOICE_NOTE_MS);
+      autoStopTimer.current = opts.fromWake
+        // Nobody tapped anything: a wake-word recording is short and is only
+        // sent if the person taps Enviar (a false trigger never uploads).
+        ? setTimeout(() => {
+          stopRecordingNow();
+          setError('Dejé de escuchar. Toca el micrófono para mandarme un audio.');
+        }, WAKE_RECORDING_MS)
+        : setTimeout(() => void finishRecording(), MAX_VOICE_NOTE_MS);
     } catch {
       setError('No pude usar el micrófono.');
     }
@@ -884,7 +919,7 @@ export default function AssistantSheet() {
                 </Pressable>
               ) : (
                 <Pressable
-                  onPress={toggleRecording}
+                  onPress={() => void toggleRecording()}
                   style={[styles.sendButton, thinking && styles.disabled]}
                   disabled={thinking}
                   accessibilityLabel="Grabar audio"

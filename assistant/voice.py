@@ -33,12 +33,13 @@ VOICE_NOTE = """
 - Habla natural y breve: 1-3 oraciones. Nada de listas, viñetas ni formato.
 - Di los montos como se dicen ("doce dólares con cincuenta"), no como se escriben.
 - Si abres una pantalla, dilo en pocas palabras mientras se abre.
-- Antes de clasificar movimientos, di cuáles encontraste y espera un "sí".
+- En llamada no puedes clasificar movimientos: si te lo piden, di que lo hagan por escrito en el chat.
 - Si el usuario dice "gracias, eso es todo" o se despide, despídete en una línea.
 """
 
-SERVER_TOOLS = {'escalate_to_human', 'get_month_summary', 'get_transactions',
-                'categorize_transactions', 'analyze_finances'}
+# navigate is checked here too (the per-user screen list: employees and
+# business accounts), then the app opens what the server approved.
+SERVER_TOOLS = {'navigate', 'escalate_to_human', 'get_month_summary', 'get_transactions', 'analyze_finances'}
 
 
 class VoiceUnavailable(Exception):
@@ -64,8 +65,9 @@ def minutes_left(user):
     return max(conf.get('CONFIO_ASSISTANT_PLUS_VOICE_MINUTES') - minutes_used(user), 0.0)
 
 
-# Text-only tools: whole documents don't fit a voice call's tool output.
-TEXT_ONLY_TOOLS = {'read_public_document'}
+# Text-only tools: whole documents don't fit a voice call's tool output, and
+# categorizing needs a typed "sí" (service.confirm_pending_categorization).
+TEXT_ONLY_TOOLS = {'read_public_document', 'categorize_transactions'}
 
 
 def _realtime_tools(belt):

@@ -37,9 +37,20 @@ class BillingTransient(BillingError):
 # Entitlement
 # --------------------------------------------------------------------------- #
 
+TEST_ENVIRONMENTS = {'sandbox', 'test', 'xcode', 'localtesting'}
+
+
+def test_purchases_count_for(user):
+    return bool(getattr(user, 'is_staff', False)) or user.pk in set(
+        conf.get('CONFIO_ASSISTANT_TEST_PURCHASE_USER_IDS') or [])
+
+
 def active_subscription(user):
     now = timezone.now()
     for sub in AssistantSubscription.objects.filter(user=user).order_by('-expires_at'):
+        if (sub.environment or '').strip().lower() in TEST_ENVIRONMENTS and not test_purchases_count_for(user):
+            # A free store-test purchase: recorded, but no Assistant+.
+            continue
         if sub.is_entitled(now):
             return sub
     return None

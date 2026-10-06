@@ -11,6 +11,7 @@ open a screen; every transfer is still confirmed by the user in-flow.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 import logging
 import time
@@ -65,6 +66,8 @@ class TurnResult:
     cost_usd: Decimal = Decimal('0')
     handoff_reason: str = ''
     writes: list = field(default_factory=list)
+    # categorize_transactions proposal awaiting the user's "sí".
+    pending_categorization: dict | None = None
 
     def add_usage(self, model, usage):
         usage = usage or {}
@@ -87,6 +90,20 @@ class TurnResult:
             + Decimal(cached) * per_cached
             + Decimal(output_tokens) * per_output
         ) / million
+
+
+# Text written by other people (names they chose, remitter names): data, never
+# instructions. One line, no control/bidi characters, short.
+_UNSAFE_CHARS = re.compile(r'[\x00-\x1f\x7f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]')
+THIRD_PARTY_MAX_CHARS = 40
+# Only real staff replies carry this prefix in the model's history.
+STAFF_PREFIX = '[Equipo Confío, persona]'
+_STAFF_PREFIX_SPOOF = re.compile(r'\[\s*equipo\s+conf[ií]o[^\]]*\]', re.IGNORECASE)
+
+
+def third_party_text(value, limit=THIRD_PARTY_MAX_CHARS):
+    text = ' '.join(_UNSAFE_CHARS.sub(' ', value or '').split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
 
 
 def allowed_destinations(viewer: Viewer):
@@ -181,7 +198,8 @@ def month_summary_data(viewer: Viewer, months_back=0):
             **_totals_dict(result.previous),
         },
         'principales_contactos': [
-            {'nombre': c.name or 'Sin nombre', 'recibido_usd': _usd(c.received), 'enviado_usd': _usd(c.sent)}
+            {'nombre': third_party_text(c.name) or 'Sin nombre', 'recibido_usd': _usd(c.received),
+             'enviado_usd': _usd(c.sent)}
             for c in result.counterparties
         ],
     }
@@ -231,7 +249,7 @@ def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=
                 'tipo': KIND_LABELS.get(m.kind, m.kind),
                 'sentido': {'received': 'entró', 'sent': 'salió'}.get(m.direction, m.direction),
                 'monto_usd': _usd(m.amount),
-                'contraparte': m.counterparty_name or '',
+                'contraparte': third_party_text(m.counterparty_name),
                 'categoria': CATEGORY_LABELS.get(m.category) if m.category else (
                     'sin categoría' if m.kind in {'merchant', 'p2p_send', 'payroll_out', 'donation'} else None),
             }
@@ -240,8 +258,9 @@ def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=
     }
 
 
-def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
-    """Label the user's own spending movements, exactly like the Tu mes chips."""
+def categorize_movements(viewer: Viewer, movement_ids, category, apply_to, *, dry_run=False):
+    """Label the user's own spending movements, exactly like the Tu mes chips.
+    dry_run: validate and count only (the proposal the user must confirm)."""
     if viewer.is_employee:
         return {'ok': False, 'motivo': 'Solo el dueño del negocio puede clasificar movimientos.'}
     if category not in CATEGORY_LABELS or apply_to not in ('counterparty', 'movement'):
@@ -251,7 +270,7 @@ def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
         from users.models_cashflow import CounterpartyRule, MovementOverride
     except ImportError:
         return {'ok': False, 'motivo': 'La clasificación aún no está disponible.'}
-    done, skipped, counterparties = [], [], set()
+    done, skipped, counterparties, names = [], [], set(), []
     for movement_id in list(dict.fromkeys(movement_ids or []))[:50]:
         # Scoped lookup: an id outside this account resolves to nothing.
         row, movement = resolve_movement(viewer.user, viewer.account, viewer.account_type,
@@ -259,16 +278,21 @@ def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
         if row is None or movement is None or movement.kind not in SPENDING_KINDS:
             skipped.append(movement_id)
             continue
+        name = third_party_text(getattr(movement, 'counterparty_name', ''), 24)
+        if name and name not in names:
+            names.append(name)
         if apply_to == 'counterparty':
             if not movement.counterparty_key:
                 skipped.append(movement_id)
                 continue
-            if movement.counterparty_key not in counterparties:
+            if dry_run:
+                counterparties.add(movement.counterparty_key)
+            elif movement.counterparty_key not in counterparties:
                 CounterpartyRule.objects.update_or_create(
                     account=viewer.account, counterparty_key=movement.counterparty_key,
                     defaults={'category': category, 'created_by': viewer.user})
                 counterparties.add(movement.counterparty_key)
-        else:
+        elif not dry_run:
             MovementOverride.objects.update_or_create(
                 account=viewer.account, movement=row,
                 defaults={'category': category, 'created_by': viewer.user})
@@ -280,6 +304,7 @@ def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
         'categoria': CATEGORY_LABELS[category],
         'alcance': 'todos los pagos pasados y futuros a esos contactos' if apply_to == 'counterparty'
                    else 'solo esos movimientos',
+        'contactos': names[:5],
     }
 
 
@@ -309,6 +334,8 @@ class Toolbelt:
         self.reserve_news = reserve_news
         self.saw_web = False
         self.docs_read = set()
+        # Paid tools run at most once per user message, whatever the model asks.
+        self.paid_used = set()
         self.can_navigate = can_navigate
         self.destinations = allowed_destinations(viewer)
 
@@ -504,7 +531,7 @@ class Toolbelt:
         action = {'type': 'navigate', 'destination': destination}
         if action not in self.result.actions:
             self.result.actions.append(action)
-        return {'ok': True}
+        return {'ok': True, 'destination': destination}
 
     def escalate_to_human(self, reason):
         self.result.handoff_reason = (reason or '').strip()[:280] or 'Solicitud del usuario'
@@ -521,13 +548,30 @@ class Toolbelt:
         return movements_data(self.viewer, months_back, group, search, limit)
 
     def categorize_transactions(self, ids, category, apply_to):
-        result = categorize_movements(self.viewer, ids, category, apply_to)
-        if result.get('ok'):
-            self.result.writes.append({'type': 'categorize', 'count': result['clasificados'],
-                                       'category': category, 'apply_to': apply_to})
-        return result
+        # Never written here: text in tool data (a sender's name) could have
+        # asked for it. The proposal is kept and applied only if the user's
+        # next message says yes (service.confirm_pending_categorization).
+        if self.result.pending_categorization is not None:
+            return {'ok': False, '_denied': True, 'motivo': 'Una propuesta de clasificación por mensaje.'}
+        result = categorize_movements(self.viewer, ids, category, apply_to, dry_run=True)
+        if not result.get('ok'):
+            return result
+        self.result.pending_categorization = {
+            'ids': list(dict.fromkeys(ids or []))[:50], 'category': category, 'apply_to': apply_to,
+            'count': result['clasificados'], 'label': result['categoria'], 'contacts': result.get('contactos') or []}
+        return {
+            'pendiente_de_confirmacion': True,
+            'movimientos': result['clasificados'],
+            'omitidos': result['omitidos'],
+            'categoria': result['categoria'],
+            'alcance': result['alcance'],
+            'instruccion': 'Todavía NO está guardado. La app agrega debajo de tu respuesta la pregunta de '
+                           'confirmación exacta; no hagas otra pregunta distinta en este mensaje.',
+        }
 
     def analyze_finances(self, question):
+        if 'analyze_finances' in self.paid_used:
+            return {'disponible': False, '_denied': True, 'motivo': 'Un análisis por mensaje.'}
         if self.viewer.is_employee:
             return {'disponible': False, 'motivo': 'Solo el dueño del negocio puede analizar la cuenta.'}
         if self.reserve_analysis is not None:
@@ -538,6 +582,7 @@ class Toolbelt:
         if not allowed:
             return {'disponible': False, '_denied': True,
                     'motivo': 'Llegaste al límite de análisis de hoy. Mañana puedes pedir otro.'}
+        self.paid_used.add('analyze_finances')
         months = [month_summary_data(self.viewer, back) for back in range(3)]
         if not any(m.get('disponible') for m in months):
             return months[0]
@@ -590,9 +635,12 @@ class Toolbelt:
         if market.resolve_topic(topic) is None:
             return {'encontrado': False, '_denied': True,
                     'motivo': 'Solo puedo buscar noticias de una empresa, ticker o índice.'}
+        if 'search_market_news' in self.paid_used:
+            return {'disponible': False, '_denied': True, 'motivo': 'Una búsqueda de noticias por mensaje.'}
         if not self.reserve_news():
             return {'disponible': False, '_denied': True,
                     'motivo': 'Llegaste al límite de búsquedas de noticias de hoy.'}
+        self.paid_used.add('search_market_news')
         try:
             found = market.market_news(topic, timeframe=timeframe, language=language)
         except AssistantUnavailable:
@@ -621,10 +669,22 @@ def history_items(messages):
         body = (message.body or '').strip()
         if not body:
             continue
+        metadata = message.metadata or {}
+        if metadata.get('client_reported') or metadata.get('handoff_note'):
+            # Lines a client relayed (voice captions) and handoff notes for the
+            # team are not things the user or the assistant said in this chat.
+            continue
+        is_staff = (message.sender_type == 'AGENT' and not metadata.get('ai')
+                    and getattr(message, 'sender_user_id', None) is not None)
+        if not is_staff:
+            # Only a real person on the team may speak as the team.
+            body = _STAFF_PREFIX_SPOOF.sub('', body).strip()
+            if not body:
+                continue
         if message.sender_type == 'USER':
             items.append({'role': 'user', 'content': body})
-        elif message.sender_type == 'AGENT' and not (message.metadata or {}).get('ai'):
-            items.append({'role': 'assistant', 'content': f'[Equipo Confío, persona] {body}'})
+        elif is_staff:
+            items.append({'role': 'assistant', 'content': f'{STAFF_PREFIX} {body}'})
         else:
             items.append({'role': 'assistant', 'content': body})
     return items
