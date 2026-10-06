@@ -9,8 +9,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
   // Mirrors the scene's window: Reanimated, RNFB Messaging, react-native-share
   // and react-native-contacts still read UIApplication.delegate.window.
   var window: UIWindow?
-  // Created once, by the first scene; a reconnected scene reuses it.
+  // Created once, by the first scene. A scene iOS rebuilds (after discarding
+  // it in the background) reuses both: a new root view would remount the
+  // whole app and replay the cold-start link from the bridge's launch options.
   var bridge: RCTBridge?
+  var reactRootViewController: UIViewController?
 
   func application(
     _ application: UIApplication,
@@ -73,38 +76,43 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     let launchURL = connectionOptions.urlContexts.first?.url
     let googleHandled = launchURL.map { GIDSignIn.sharedInstance.handle($0) } ?? false
 
-    let bridge: RCTBridge
-    if let existing = appDelegate.bridge {
-      bridge = existing
-      // JavaScript is already running: deliver the link as a live event.
+    let rootVC: UIViewController
+    let reconnecting: Bool
+    if let existing = appDelegate.reactRootViewController {
+      rootVC = existing
+      reconnecting = true
+    } else {
+      // Linking.getInitialURL() reads the bridge's launch options, which no
+      // longer carry the URL that opened the app: hand it over from the scene.
+      guard let bridge = RCTBridge(delegate: appDelegate,
+                                   launchOptions: Self.launchOptions(from: connectionOptions,
+                                                                     includeURL: !googleHandled)) else {
+        fatalError("Failed to create RCTBridge")
+      }
+      let rootView = RCTRootView(bridge: bridge, moduleName: "Confio", initialProperties: nil)
+      rootView.backgroundColor = .systemBackground
+      rootVC = UIViewController()
+      rootVC.view = rootView
+      appDelegate.bridge = bridge
+      appDelegate.reactRootViewController = rootVC
+      reconnecting = false
+    }
+
+    let window = UIWindow(windowScene: windowScene)
+    window.rootViewController = rootVC
+    self.window = window
+    appDelegate.window = window
+    window.makeKeyAndVisible()
+
+    if reconnecting {
+      // JavaScript is still mounted and listening: deliver the link as a live event.
       if let url = launchURL, !googleHandled {
         _ = RCTLinkingManager.application(UIApplication.shared, open: url, options: [:])
       }
       for activity in connectionOptions.userActivities {
         _ = RCTLinkingManager.application(UIApplication.shared, continue: activity) { _ in }
       }
-    } else {
-      // Linking.getInitialURL() reads the bridge's launch options, which no
-      // longer carry the URL that opened the app: hand it over from the scene.
-      guard let created = RCTBridge(delegate: appDelegate,
-                                    launchOptions: Self.launchOptions(from: connectionOptions,
-                                                                      includeURL: !googleHandled)) else {
-        fatalError("Failed to create RCTBridge")
-      }
-      appDelegate.bridge = created
-      bridge = created
     }
-
-    let rootView = RCTRootView(bridge: bridge, moduleName: "Confio", initialProperties: nil)
-    rootView.backgroundColor = .systemBackground
-
-    let window = UIWindow(windowScene: windowScene)
-    let rootVC = UIViewController()
-    rootVC.view = rootView
-    window.rootViewController = rootVC
-    self.window = window
-    appDelegate.window = window
-    window.makeKeyAndVisible()
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
