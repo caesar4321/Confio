@@ -237,12 +237,44 @@ it('never shows the session link when no browser can open it', async () => {
   const banner = jest.requireMock('../../components/common/InlineBanner');
   const original = banner.InlineBanner;
   banner.InlineBanner = (props: any) => { banners.push(props.message); return null; };
+  try {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<VerificationScreen />); });
+    await act(async () => { await browserLink(tree)[0].props.onPress(); });
+    expect(banners.length).toBeGreaterThan(0);
+    expect(banners.some(m => String(m).includes('verify.didit.me'))).toBe(false);
+    await act(async () => tree.unmount());
+  } finally {
+    banner.InlineBanner = original;
+    open.mockRestore();
+  }
+});
+
+it('keeps a failed redirect sync quiet and refreshes instead', async () => {
+  mockSyncSession.mockReset().mockResolvedValue({data: {syncDiditVerificationSession: {success: false, error: 'Didit session does not match'}}});
+  mockRefetch.mockClear();
+  mockRouteParams = {verificationSessionId: 'kyb-under-personal'};
+  const banners: any[] = [];
+  const banner = jest.requireMock('../../components/common/InlineBanner');
+  const original = banner.InlineBanner;
+  banner.InlineBanner = (props: any) => { banners.push(props.message); return null; };
+  try {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<VerificationScreen />); });
+    expect(mockSyncSession).toHaveBeenCalledTimes(1);
+    expect(mockRefetch).toHaveBeenCalled();
+    expect(banners).toHaveLength(0);
+    await act(async () => tree.unmount());
+  } finally {
+    banner.InlineBanner = original;
+  }
+});
+
+it('offers no browser fallback on a document under review', async () => {
+  mockDocuments = [{id: '1', documentType: 'national_id', issuingCountry: 'PY', status: 'pending',
+    isAdditional: false, localCountries: [], rejectedReason: null}];
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
-  await act(async () => { await browserLink(tree)[0].props.onPress(); });
-  expect(banners.length).toBeGreaterThan(0);
-  expect(banners.some(m => String(m).includes('verify.didit.me'))).toBe(false);
+  expect(browserLink(tree)).toHaveLength(0);
   await act(async () => tree.unmount());
-  banner.InlineBanner = original;
-  open.mockRestore();
 });
