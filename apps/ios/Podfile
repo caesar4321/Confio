@@ -15,6 +15,7 @@ $DiditSdkIosVariant = 'all'
 didit_sdk_ios_version = JSON.parse(
   File.read(File.join(__dir__, '../node_modules/@didit-protocol/sdk-react-native/package.json'))
 ).dig('diditNativeSdkVersions', 'ios')
+raise "Missing diditNativeSdkVersions.ios in @didit-protocol/sdk-react-native" if didit_sdk_ios_version.to_s.empty?
 prepare_react_native_project!
 
 # Flipper is disabled due to Firebase use_frameworks requirement
