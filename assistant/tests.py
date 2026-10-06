@@ -1315,3 +1315,104 @@ class CategoryAlignmentTests(TestCase):
         spec = next(s for s in Toolbelt(viewer, TurnResult(reply=''), analyses_left=0).specs()
                     if s['name'] == 'categorize_transactions')
         self.assertEqual(set(spec['parameters']['properties']['category']['enum']), set(dict(CATEGORY_CHOICES)))
+
+
+class SuggestionRankingTests(TestCase):
+    def _viewer(self, user, account_type='personal', owner=False):
+        return Viewer(user=user, account=None, account_type=account_type, business_id=1 if account_type == 'business' else None,
+                      is_business_owner=owner, tz=ZoneInfo('UTC'))
+
+    def _state(self, **kw):
+        from .suggestions import _State
+        base = dict(personal=True, employee=False, country='AR', funded=False, topup_in_progress=False,
+                    verification_pending=False, ondo_eligible=True, probe_answered=False)
+        base.update(kw)
+        return _State(**base)
+
+    def _build(self, state, screen='Home'):
+        from . import suggestions
+        with patch('assistant.suggestions._state', return_value=state):
+            return suggestions.build(self._viewer(None), screen)
+
+    def test_never_funded_rail_country_gets_the_probe_first(self):
+        result = self._build(self._state())
+        self.assertEqual(result.hints[0].kind, 'probe')
+        self.assertEqual(result.probe['id'], 'first_use_2026_10')
+        self.assertEqual(result.starters[0].id, 'first.how')
+        self.assertLessEqual(len(result.starters), 4)
+
+    def test_attention_outranks_everything(self):
+        result = self._build(self._state(topup_in_progress=True, verification_pending=True))
+        self.assertEqual([h.id for h in result.hints[:2]], ['attention.topup', 'attention.verification'])
+        self.assertEqual(result.starters[0].id, 'attention.topup')
+
+    def test_no_rail_country_and_funded_and_employee_paths(self):
+        ve = self._build(self._state(country='VE'))
+        self.assertIsNone(ve.probe)
+        self.assertEqual(ve.hints[0].id, 'norail.receive')
+        funded = self._build(self._state(funded=True, ondo_eligible=False))
+        self.assertIsNone(funded.probe)
+        self.assertIn('save.dollars', [s.id for s in funded.starters])
+        self.assertNotIn('invest.how', [s.id for s in funded.starters])
+        employee = self._build(self._state(personal=False, employee=True))
+        self.assertIsNone(employee.probe)
+        self.assertNotIn('first.how', [s.id for s in employee.starters])
+
+    def test_other_screens_get_their_help_and_no_home_situation(self):
+        result = self._build(self._state(funded=True), screen='Invest')
+        self.assertEqual(result.hints[0].id, 'invest.what_is_stock')
+        self.assertNotIn('month.where', [h.id for h in result.hints])
+
+    def test_probe_answer_is_recorded_once_and_validated(self):
+        from . import suggestions
+        from .models import ProbeAnswer
+        user = User.objects.create_user(username='pr', email='pr@example.com', password='x', firebase_uid='fb-pr')
+        suggestions.record_probe_answer(user, suggestions.PROBE_ID, 'family', funded=False)
+        suggestions.record_probe_answer(user, suggestions.PROBE_ID, 'savings', funded=False)
+        self.assertEqual(list(ProbeAnswer.objects.filter(user=user).values_list('answer', flat=True)), ['family'])
+        with self.assertRaises(ValueError):
+            suggestions.record_probe_answer(user, suggestions.PROBE_ID, 'hack', funded=False)
+        with self.assertRaises(ValueError):
+            suggestions.record_probe_answer(user, 'other_probe', 'family', funded=False)
+
+    def test_state_reads_real_tables(self):
+        from . import suggestions
+        user = User.objects.create_user(username='st2', email='st2@example.com', password='x', firebase_uid='fb-st2',
+                                        phone_country='PE')
+        state = suggestions._state(self._viewer(user), {})
+        self.assertFalse(state.funded)
+        self.assertTrue(suggestions.wants_probe(state))
+
+
+class SuggestionQueryContractTests(TestCase):
+    """The exact client documents must validate against the schema."""
+
+    def test_client_suggestion_query_and_mutation_validate(self):
+        import re
+        from pathlib import Path
+
+        from django.conf import settings as dj
+        from graphql import parse, validate
+
+        from config.schema import schema
+        source = (Path(dj.BASE_DIR) / 'apps/src/assistant/api.ts').read_text()
+        for name in ('GET_ASSISTANT_SUGGESTIONS', 'ANSWER_ASSISTANT_PROBE'):
+            doc = re.search(name + r' = gql`(.*?)`;', source, re.S).group(1)
+            errors = validate(schema.graphql_schema, parse(doc))
+            self.assertEqual(errors, [], name)
+
+    def test_pending_or_failed_money_is_not_funded(self):
+        from . import suggestions
+        from users.models_unified import UnifiedTransactionTable
+        user = User.objects.create_user(username='pf', email='pf@example.com', password='x', firebase_uid='fb-pf',
+                                        phone_country='PE')
+        viewer = Viewer(user=user, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        fields = {f.name for f in UnifiedTransactionTable._meta.get_fields()}
+        self.assertIn('status', fields)
+        with patch('users.models_unified.UnifiedTransactionTable.objects') as rows:
+            rows.filter.return_value.exclude.return_value.exists.return_value = False
+            self.assertFalse(suggestions._state(viewer, {}).funded)
+            kwargs = rows.filter.call_args.kwargs
+        self.assertEqual(kwargs['status'], 'CONFIRMED')
+        self.assertEqual(kwargs['counterparty_user'], user)

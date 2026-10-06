@@ -253,3 +253,24 @@ export const DELETE_ASSISTANT_PET = gql`
     deleteAssistantPet(petId: $petId) { success }
   }
 `;
+
+// Ranked by the person's situation on the server. Its own query: an older
+// server without it must not break anything (the app keeps its built-in list).
+export const GET_ASSISTANT_SUGGESTIONS = gql`
+  query GetAssistantSuggestions($screen: String, $contextKey: String) {
+    assistantSuggestions(screen: $screen, contextKey: $contextKey) {
+      hints { id text prompt kind }
+      starters { id text prompt kind }
+      probe { id question answers { key label } }
+    }
+  }
+`;
+
+export const ANSWER_ASSISTANT_PROBE = gql`
+  mutation AnswerAssistantProbe($probeId: String!, $answer: String!) {
+    answerAssistantProbe(probeId: $probeId, answer: $answer) { success error label }
+  }
+`;
+
+export type AssistantSuggestion = { id: string; text: string; prompt: string; kind: 'prompt' | 'probe' | 'picker' | string };
+export type AssistantProbe = { id: string; question: string; answers: { key: string; label: string }[] };

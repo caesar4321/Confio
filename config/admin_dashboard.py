@@ -2267,3 +2267,6 @@ from assistant.admin import AssistantProfileAdmin, AssistantThreadStateAdmin, As
 confio_admin_site.register(AssistantTurn, AssistantTurnAdmin)
 confio_admin_site.register(AssistantThreadState, AssistantThreadStateAdmin)
 confio_admin_site.register(AssistantProfile, AssistantProfileAdmin)
+from assistant.models import ProbeAnswer
+from assistant.admin import ProbeAnswerAdmin
+confio_admin_site.register(ProbeAnswer, ProbeAnswerAdmin)

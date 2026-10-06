@@ -9,6 +9,8 @@ export type BoxChannel = 'ia' | 'julian' | 'confio';
 type OpenOptions = {
   prompt?: string;
   picker?: boolean;
+  // Show the server's one-time question ("¿Para qué te gustaría usar Confío?").
+  probe?: boolean;
   plus?: boolean;
   call?: boolean;
   channel?: BoxChannel;
@@ -30,6 +32,7 @@ type AssistantState = {
   // One-shot requests the sheet consumes when it opens.
   consumePrompt: () => string | undefined;
   consumePicker: () => boolean;
+  consumeProbe: () => boolean;
   consumePlus: () => boolean;
   consumeCall: () => boolean;
   consumeChannel: () => BoxChannel | undefined;
@@ -116,6 +119,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     consume('picker');
     return value;
   }, [request, consume]);
+  const consumeProbe = useCallback(() => {
+    const value = !!request.probe;
+    consume('probe');
+    return value;
+  }, [request, consume]);
   const consumePlus = useCallback(() => {
     const value = !!request.plus;
     consume('plus');
@@ -144,11 +152,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo(
     () => ({
-      isOpen, route, open, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel,
+      isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
       consumeVoiceNote, consumeVoiceNoteData, available, setAvailable, aiEnabled, setAiEnabled, plan, setPlan, inCall, setInCall,
       bubbleAnchor, setBubbleAnchor, micBusy, setMicBusy, openSeq, navNote, showNavNote,
     }),
-    [isOpen, route, open, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel,
+    [isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
       consumeVoiceNote, consumeVoiceNoteData, available,
       aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote],
   );

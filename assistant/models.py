@@ -229,3 +229,23 @@ class CustomPet(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['user', '-created_at'], name='assistant_pet_user_idx')]
+
+
+class ProbeAnswer(models.Model):
+    """One tap answer to a server-defined question the bubble asked once
+    ("¿Para qué te gustaría usar Confío?"). Evidence for product decisions;
+    never shown to other users."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_probe_answers')
+    probe_id = models.CharField(max_length=64)
+    answer = models.CharField(max_length=32)
+    # Snapshot at answer time, so later analysis needs no joins or guessing.
+    phone_country = models.CharField(max_length=2, blank=True, default='')
+    funded = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'probe_id'], name='assistant_probe_once_per_user')]
+        indexes = [models.Index(fields=['probe_id', 'answer'], name='assistant_probe_answer_idx')]
+
+    def __str__(self):
+        return f'{self.probe_id}: {self.answer}'

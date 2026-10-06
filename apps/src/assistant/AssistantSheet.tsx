@@ -28,13 +28,17 @@ import { GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/que
 import { MessageInboxContent } from '../components/MessageInboxContent';
 import { ChannelAvatar } from '../components/MessageInboxShared';
 import {
+  ANSWER_ASSISTANT_PROBE,
   ASK_ASSISTANT,
   GET_ASSISTANT_PLAN,
+  GET_ASSISTANT_SUGGESTIONS,
   GET_ASSISTANT_THREAD,
   RETURN_TO_ASSISTANT,
   type AssistantAction,
   type AssistantMessage,
+  type AssistantProbe,
   type AssistantProfile,
+  type AssistantSuggestion,
 } from './api';
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
@@ -168,7 +172,7 @@ export default function AssistantSheet() {
     isOpen, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel, consumeVoiceNote,
     consumeVoiceNoteData, openSeq, route, plan,
     setPlan, available,
-    aiEnabled, bubbleAnchor, showNavNote,
+    aiEnabled, bubbleAnchor, showNavNote, consumeProbe,
   } = useAssistant();
   // Which chat head is open: Confio Assistant, Julian or Confío News.
   const [channel, setChannel] = useState<BoxChannel>('ia');
@@ -192,6 +196,8 @@ export default function AssistantSheet() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [sentThisOpen, setSentThisOpen] = useState(false);
+  // The server's one-time question, asked when this opening was for it (or it's pending).
+  const [askOther, setAskOther] = useState(false);
   const [mode, setMode] = useState<'AI' | 'HUMAN'>('AI');
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
@@ -290,6 +296,8 @@ export default function AssistantSheet() {
     }
     // Suggestions come back on every opening, not only in an empty thread.
     setSentThisOpen(false);
+    setAskOther(false);
+    consumeProbe();
     const requested = consumeChannel();
     setChannel(requested ?? 'ia');
     setChannelReady(true);
@@ -705,6 +713,49 @@ export default function AssistantSheet() {
 
   const mood: MascotMood = recordingMs !== null ? 'listening' : thinking ? 'thinking' : speaking ? 'talking' : 'idle';
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
+  // Chips and the one-time question, ranked on the server for this person;
+  // the built-in STARTERS stay as the fallback (older server, offline).
+  const { data: suggestionData, refetch: refetchSuggestions } = useQuery(GET_ASSISTANT_SUGGESTIONS, {
+    variables: { screen: route ?? null, contextKey: activeAccount?.id || 'no-account' },
+    skip: !isOpen || !aiEnabled,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'ignore',
+  });
+  const serverStarters: AssistantSuggestion[] | undefined = suggestionData?.assistantSuggestions?.starters
+    ?.filter((s: AssistantSuggestion) => s.kind === 'prompt');
+  const starters: AssistantSuggestion[] = serverStarters?.length
+    ? serverStarters
+    : STARTERS.map((text) => ({ id: text, text, prompt: text, kind: 'prompt' }));
+  const probe: AssistantProbe | null = suggestionData?.assistantSuggestions?.probe ?? null;
+  const [answerProbeMutation] = useMutation(ANSWER_ASSISTANT_PROBE);
+  const answeringProbe = useRef(false);
+  const answerProbe = async (current: AssistantProbe, key: string) => {
+    if (answeringProbe.current) {
+      return; // one answer per question, even on a fast double tap
+    }
+    answeringProbe.current = true;
+    const gen = accountGen.current;
+    let label: string | null | undefined;
+    try {
+      const { data } = await answerProbeMutation({ variables: { probeId: current.id, answer: key } });
+      label = data?.answerAssistantProbe?.success ? data.answerAssistantProbe.label : null;
+    } catch {
+      label = null;
+    }
+    // Always release the guard, whatever happened meanwhile.
+    void refetchSuggestions().catch(() => {}).finally(() => {
+      answeringProbe.current = false;
+    });
+    if (gen !== accountGen.current) {
+      return; // the account changed: don't send into the new account's chat
+    }
+    if (key === 'other') {
+      setAskOther(true); // the next message they type is the answer
+    } else if (label) {
+      void send({ body: label }); // the assistant takes it from there
+    }
+  };
+
   // AI mode only: in a handed-off thread a chip would send a canned prompt to the team.
   const showStarters = aiEnabled && mode === 'AI' && !thinking && !sentThisOpen && !(loading && !messages.length);
   const petName = profile?.mascotName?.trim();
@@ -873,9 +924,21 @@ export default function AssistantSheet() {
                 <Text style={styles.starterPetText}>✨ Personaliza a tu asistente</Text>
               </Pressable>
             ) : null}
-            {STARTERS.map((s) => (
-                <Pressable key={s} style={styles.starter} onPress={() => void send({ body: s })}>
-                  <Text style={styles.starterText}>{s}</Text>
+            {probe ? (
+              <View style={styles.probe}>
+                <Text style={styles.probeQuestion}>{probe.question}</Text>
+                <View style={styles.probeAnswers}>
+                  {probe.answers.map((a) => (
+                    <Pressable key={a.key} style={styles.starter} onPress={() => void answerProbe(probe, a.key)}
+                      accessibilityRole="button">
+                      <Text style={styles.starterText}>{a.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : starters.map((s) => (
+                <Pressable key={s.id} style={styles.starter} onPress={() => void send({ body: s.prompt || s.text })}>
+                  <Text style={styles.starterText}>{s.text}</Text>
                 </Pressable>
               ))}
             </View>
@@ -902,7 +965,8 @@ export default function AssistantSheet() {
                 style={styles.input}
                 value={draft}
                 onChangeText={setDraft}
-                placeholder={isVoiceNoteAvailable ? 'Escríbeme o mándame un audio' : 'Escríbeme'}
+                placeholder={askOther ? 'Cuéntame para qué te gustaría usarlo'
+                  : isVoiceNoteAvailable ? 'Escríbeme o mándame un audio' : 'Escríbeme'}
                 placeholderTextColor="#9CA3AF"
                 multiline
                 maxLength={2000}
@@ -1167,6 +1231,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   starterText: { fontSize: 13, color: '#374151' },
+  probe: { width: '100%', gap: 8 },
+  probeQuestion: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  probeAnswers: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   error: { color: '#B91C1C', fontSize: 13, paddingHorizontal: 16, paddingBottom: 6 },
   composer: {
     flexDirection: 'row',
