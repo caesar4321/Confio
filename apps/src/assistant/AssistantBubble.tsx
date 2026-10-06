@@ -180,9 +180,11 @@ export default function AssistantBubble() {
     endTalk();
     void cancelVoiceNote();
   };
-  // An account switch mid-hold drops the note.
+  // An account switch mid-hold drops the note, and the previous account's
+  // post-navigation note goes too.
   useEffect(() => {
     cancelTalking();
+    setHint((prev) => (prev?.kind === 'note' ? null : prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccount?.id]);
 

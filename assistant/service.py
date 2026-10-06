@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -11,6 +12,7 @@ from decimal import Decimal
 
 import requests
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
@@ -19,7 +21,7 @@ from inbox.push_service import send_support_staff_push
 from inbox.schema import get_or_create_support_conversation
 
 from . import conf
-from .engine import AssistantUnavailable, Viewer, human_mode_active, run_turn
+from .engine import AssistantUnavailable, Viewer, categorize_movements, human_mode_active, run_turn, third_party_text
 from .models import AssistantProfile, AssistantThreadState, AssistantTurn, TurnModality
 
 logger = logging.getLogger(__name__)
@@ -172,7 +174,8 @@ def news_searches_left(user):
 def _account_label(viewer, business):
     if business is not None:
         role = 'dueño' if viewer.is_business_owner else 'empleado'
-        return f'negocio "{business.name}" ({role})'
+        # Set by the owner: quoted, one line, short (it sits in the instructions).
+        return f'negocio "{third_party_text(business.name, 60)}" ({role})'
     return 'personal'
 
 
@@ -183,9 +186,20 @@ def _append(conversation, **kwargs):
     return message
 
 
+TEAM_PUSH_WINDOW = timedelta(minutes=10)
+TEAM_PUSHES_PER_WINDOW = 5
+
+
 def _route_to_team(message):
     message.metadata = {**(message.metadata or {}), 'to_team': True}
     message.save(update_fields=['metadata'])
+    # Every message still reaches the team's queue; only the phone pings are
+    # rate-limited, so one person can't flood the team's notifications.
+    recent = SupportMessage.objects.filter(
+        conversation_id=message.conversation_id, metadata__to_team=True,
+        created_at__gte=timezone.now() - TEAM_PUSH_WINDOW).count()
+    if recent > TEAM_PUSHES_PER_WINDOW:
+        return
 
     def push():
         try:
@@ -258,6 +272,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         human = is_human_mode(conversation, state) or not conf.get('CONFIO_ASSISTANT_ENABLED')
         user_message = _append(conversation, sender_type='USER', sender_user=user, body=clean,
                                metadata={'modality': modality, 'screen': screen})
+        # A proposal lives for exactly one user message, whatever path it takes.
+        proposal = take_pending_categorization(conversation)
         if turn is not None:
             turn.user_message = user_message
             turn.save(update_fields=['user_message'])
@@ -280,6 +296,16 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     # 4. Answer (no lock; analyses reserve their own slot).
     viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name)
+    confirmed = confirm_pending_categorization(conversation, viewer, clean, proposal, user_message)
+    if confirmed is not None:
+        applied, reply_text = confirmed
+        reply = _append(conversation, sender_type='AGENT', body=reply_text, metadata={'ai': True})
+        turn.reply_message = reply
+        turn.tools = [{'name': 'categorize_transactions:confirmed', 'ok': applied > 0}]
+        turn.error = ''
+        turn.save(update_fields=['reply_message', 'tools', 'error'])
+        return AskOutcome(user_message=user_message, reply_message=reply, remaining_turns=remaining - 1,
+                          transcript=transcript, data_changed=applied > 0)
     history = list(conversation.messages.order_by('-created_at')[:conf.get('CONFIO_ASSISTANT_HISTORY_MESSAGES')])
     history.reverse()
     started = time.monotonic()
@@ -331,8 +357,15 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                           remaining_turns=remaining - 1, transcript=transcript,
                           data_changed=bool(result.writes))
 
-    reply = _append(conversation, sender_type='AGENT', body=result.reply,
+    body = result.reply
+    if result.pending_categorization:
+        # The question the user answers is written by code from the stored
+        # proposal, never by the model.
+        body = f'{body}\n\n{confirmation_question(result.pending_categorization)}'
+    reply = _append(conversation, sender_type='AGENT', body=body,
                     metadata={'ai': True, 'actions': result.actions})
+    if result.pending_categorization:
+        _store_pending_categorization(conversation, viewer, result.pending_categorization, reply)
     turn.reply_message = reply
     turn.models_used = result.models_used
     turn.input_tokens = result.input_tokens
@@ -355,6 +388,72 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         return outcome
     return AskOutcome(user_message=user_message, reply_message=reply, actions=result.actions,
                       remaining_turns=remaining - 1, transcript=transcript, data_changed=bool(result.writes))
+
+
+# --------------------------------------------------------------------------- #
+# Categorizing needs the user's own "sí"
+# --------------------------------------------------------------------------- #
+
+PENDING_CATEGORIZATION_SECONDS = 15 * 60
+# "sí" (accented) or a bare "si" on its own: "si quieres…" means "if".
+_YES = re.compile(r'^\s*(?:(?:s[íÍ]+|sip|dale|ok(?:ay|ey)?|okey|confirmo|confirmado|de acuerdo|claro|hazlo|'
+                  r'adelante|perfecto|correcto|yes|yep|yeah|sure|sim|pode|isso)\b|si(?:\s*[.!]*\s*$|\s*,))',
+                  re.IGNORECASE)
+_NOT_YES = re.compile(r'\b(no|nop|nunca|pero|espera|cancela|cancelar|not|wait|cancel|stop|but|n[aã]o|mas)\b',
+                      re.IGNORECASE)
+
+
+def is_affirmative(text):
+    text = (text or '').strip()
+    return len(text) <= 60 and bool(_YES.match(text)) and not _NOT_YES.search(text)
+
+
+def _pending_key(conversation):
+    return f'assistant:pending-categorization:{conversation.id}'
+
+
+def confirmation_question(proposal):
+    count = proposal['count']
+    noun = 'movimiento' if count == 1 else 'movimientos'
+    who = f' ({", ".join(proposal["contacts"])})' if proposal.get('contacts') else ''
+    scope = ', también los pagos futuros a esos contactos' if proposal['apply_to'] == 'counterparty' else ''
+    return f'¿Confirmas clasificar {count} {noun}{who} como {proposal["label"]}{scope}? Responde "sí" para guardarlo.'
+
+
+def _store_pending_categorization(conversation, viewer, proposal, reply):
+    cache.set(_pending_key(conversation), {**proposal, 'account_id': viewer.account.id, 'reply_id': reply.id},
+              PENDING_CATEGORIZATION_SECONDS)
+
+
+def take_pending_categorization(conversation):
+    """Remove and return the open proposal: every user message consumes it."""
+    key = _pending_key(conversation)
+    proposal = cache.get(key)
+    if proposal is not None:
+        cache.delete(key)
+    return proposal
+
+
+def confirm_pending_categorization(conversation, viewer, text, proposal, user_message):
+    """Apply `proposal` if this message is the user's yes to it.
+
+    The model only proposes (its tool input can be steered by text other
+    people wrote, like a sender's name); the write happens here, in code, on
+    the user's own reply — and only as the answer to the very message that
+    showed the code-written question. Returns (applied_count, reply) or None."""
+    if proposal is None or proposal.get('account_id') != viewer.account.id or not is_affirmative(text):
+        return None
+    previous = (conversation.messages.filter(sender_type='AGENT', created_at__lte=user_message.created_at)
+                .exclude(pk=user_message.pk).order_by('-created_at', '-pk').values_list('pk', flat=True).first())
+    if previous != proposal.get('reply_id'):
+        return None
+    result = categorize_movements(viewer, proposal['ids'], proposal['category'], proposal['apply_to'])
+    count = int(result.get('clasificados') or 0)
+    if not result.get('ok'):
+        return 0, 'No pude guardar esa clasificación; puede que esos movimientos ya no estén disponibles.'
+    noun = 'movimiento' if count == 1 else 'movimientos'
+    scope = ' También aplica a los pagos futuros a esos contactos.' if proposal['apply_to'] == 'counterparty' else ''
+    return count, f'Listo, clasifiqué {count} {noun} como {result["categoria"]}.{scope} Puedes verlo en Tu mes.'
 
 
 def _team_took_over(user, conversation, user_message):
@@ -422,8 +521,11 @@ def append_voice_transcript(conversation, user, entries):
             saved.append(_append(conversation, sender_type='USER', sender_user=user, body=text,
                                  metadata={'modality': TurnModality.REALTIME}))
         else:
+            # Relayed by the client, not produced here: shown in the thread
+            # but never fed back to the model, and marked for the team.
             saved.append(_append(conversation, sender_type='AGENT', body=text,
-                                 metadata={'ai': True, 'modality': TurnModality.REALTIME}))
+                                 metadata={'ai': True, 'client_reported': True,
+                                           'modality': TurnModality.REALTIME}))
     return saved
 
 
@@ -433,9 +535,11 @@ def handoff_from_voice(conversation, reason):
     state.handoff_at = timezone.now()
     state.handoff_reason = (reason or 'Llamada con Confio Assistant')[:280]
     state.save(update_fields=['handoff_at', 'handoff_reason', 'updated_at'])
+    # The model wrote this reason: it routes the call to the team but never
+    # comes back to the model as something the user said.
     note = _append(conversation, sender_type='USER', sender_user=conversation.user,
                    body=f'(Desde una llamada con Confio Assistant) {state.handoff_reason}',
-                   metadata={'modality': TurnModality.REALTIME})
+                   metadata={'modality': TurnModality.REALTIME, 'handoff_note': True})
     _route_to_team(note)
 
 
@@ -512,7 +616,8 @@ def mp4_duration_seconds(data):
         minf = _child(data, *mdia, b'minf')
         stbl = _child(data, *minf, b'stbl') if minf else None
         stts = _child(data, *stbl, b'stts') if stbl else None
-        if mdhd is None or stts is None:
+        stsz = (_child(data, *stbl, b'stsz') or _child(data, *stbl, b'stz2')) if stbl else None
+        if mdhd is None or stts is None or stsz is None:
             continue
         try:
             version = data[mdhd[0]]
@@ -521,9 +626,15 @@ def mp4_duration_seconds(data):
             if stts[0] + 8 + count * 8 > stts[1]:
                 continue
             total = 0
+            timed_samples = 0
             for n in range(count):
                 samples, delta = struct.unpack('>II', data[stts[0] + 8 + n * 8:stts[0] + 16 + n * 8])
                 total += samples * delta
+                timed_samples += samples
+            # A short timing table with more samples than it times makes
+            # decoders reuse the last delta: the file plays longer than stts says.
+            if struct.unpack('>I', data[stsz[0] + 8:stsz[0] + 12])[0] != timed_samples:
+                continue
         except (IndexError, struct.error):
             continue
         if timescale:
@@ -580,7 +691,11 @@ def transcribe(audio_base64, mime_type, duration_ms):
         raise AssistantUnavailable(f'transcription failed: {exc}') from exc
     if response.status_code >= 400:
         raise AssistantUnavailable(f'transcription {response.status_code}: {response.text[:200]}')
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        # Never show a parser message to the user (AskAssistant returns ValueError text).
+        raise AssistantUnavailable('transcription returned an unreadable response') from exc
     usage = data.get('usage') or {}
     if usage.get('type') == 'duration' and usage.get('seconds'):
         # The provider measured the audio: meter what it actually billed.

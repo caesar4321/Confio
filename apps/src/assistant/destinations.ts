@@ -52,12 +52,13 @@ export const DESTINATION_LABELS: Record<string, string> = {
   pending_incoming: 'Ver dinero por recibir',
 };
 
+// Own keys only: `in` would also accept prototype names ("constructor").
 export function isKnownDestination(key?: string | null): key is string {
-  return !!key && key in DESTINATION_TARGETS;
+  return !!key && Object.prototype.hasOwnProperty.call(DESTINATION_TARGETS, key);
 }
 
 export function openDestination(key: string, opts: { isBusiness?: boolean } = {}): boolean {
-  const target = DESTINATION_TARGETS[key];
+  const target = isKnownDestination(key) ? DESTINATION_TARGETS[key] : undefined;
   if (!target || !navigationRef.isReady()) {
     return false;
   }
