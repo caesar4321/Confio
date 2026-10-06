@@ -1416,3 +1416,122 @@ class SuggestionQueryContractTests(TestCase):
             kwargs = rows.filter.call_args.kwargs
         self.assertEqual(kwargs['status'], 'CONFIRMED')
         self.assertEqual(kwargs['counterparty_user'], user)
+
+
+class PortfolioAndNeedsTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='pt', email='pt@example.com', password='x', firebase_uid='fb-pt',
+                                             phone_country='AR')
+        self.account = SimpleNamespace(id=1, bsc_address='0xabc')
+        self.viewer = Viewer(user=self.user, account=self.account, account_type='personal', business_id=None,
+                             is_business_owner=False, tz=ZoneInfo('UTC'))
+
+    def test_portfolio_reads_balances_and_marks_unknowns(self):
+        from .engine import portfolio_data
+        month = {'disponible': True, 'actual': {'salio_usd': '300.00'}}
+        with patch('blockchain.bsc_balance_service.BscBalanceService.balances_raw',
+                   return_value={'CUSD_BSC': 12 * 10 ** 18}), \
+                patch('cusd_plus.eligibility.is_ondo_eligible', return_value=True), \
+                patch('assistant.engine._holdings', return_value=[{'ticker': 'AAPL', 'valor_usd': '50.00'}]), \
+                patch('assistant.engine.month_summary_data', return_value=month):
+            result = portfolio_data(self.viewer)
+        self.assertEqual(result['confio_dollar_usd'], '12.00')
+        self.assertEqual(result['confio_dollar_plus_usd'], 'desconocido')  # no share balance read: unknown, not 0
+        self.assertEqual(result['gasto_mensual_promedio_usd'], '300.00')
+        # No request in hand: eligibility is unknown, never a phone-only "yes".
+        self.assertEqual(result['acciones_y_confio_dollar_plus_disponibles'], 'desconocido')
+        employee = Viewer(user=self.user, account=self.account, account_type='business', business_id=1,
+                          is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.assertFalse(portfolio_data(employee)['disponible'])
+
+    def test_portfolio_plus_value_eligibility_and_new_account_months(self):
+        from datetime import timedelta
+
+        from django.core.cache import cache
+        from django.utils import timezone
+
+        from .engine import portfolio_data
+        cache.delete('cusd_plus_pplus_last')
+        account = SimpleNamespace(id=1, bsc_address='0xabc', created_at=timezone.now() - timedelta(days=20))
+        viewer = Viewer(user=self.user, account=account, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'), request_meta={'REMOTE_ADDR': '1.2.3.4'})
+        raw = {'CUSD_BSC': 0, 'CUSD_PLUS': 100 * 10 ** 18}
+        months = patch('assistant.engine.month_summary_data', return_value={'disponible': True,
+                                                                           'actual': {'salio_usd': '300.00'}})
+        with patch('blockchain.bsc_balance_service.BscBalanceService.balances_raw', return_value=raw), \
+                patch('cusd_plus.vault.vault_address', return_value='0xvault'), \
+                patch('cusd_plus.vault.p_plus_wad', return_value=(102 * 10 ** 16)), \
+                patch('cusd_plus.eligibility.ONDO_POLICY') as policy, \
+                patch('assistant.engine._holdings', return_value=[]), months as summary:
+            policy.evaluate.return_value = SimpleNamespace(allowed=False)
+            evaluate = policy.evaluate
+            result = portfolio_data(viewer)
+        self.assertEqual(result['confio_dollar_plus_usd'], '102.00')
+        self.assertIs(result['acciones_y_confio_dollar_plus_disponibles'], False)
+        self.assertEqual(evaluate.call_args.args[1], {'REMOTE_ADDR': '1.2.3.4'})
+        # Opened 20 days ago: no full month yet, so no $0 months dragging the average.
+        self.assertEqual((result['gasto_mensual_promedio_usd'], result['meses_completos_considerados']),
+                         ('sin datos', 0))
+        summary.assert_not_called()
+        with patch('blockchain.bsc_balance_service.BscBalanceService.balances_raw', return_value=raw), \
+                patch('cusd_plus.vault.vault_address', return_value='0xvault'), \
+                patch('cusd_plus.vault.p_plus_wad', side_effect=RuntimeError('rpc')), \
+                patch('assistant.engine._holdings', return_value=[]), months:
+            self.assertEqual(portfolio_data(viewer)['confio_dollar_plus_usd'], 'desconocido')
+
+    def test_holdings_use_last_known_without_scanning(self):
+        from .engine import _holdings
+        with patch('cusd_plus.gm_holdings.known_holdings_units', return_value=None), \
+                patch('cusd_plus.gm_holdings.holdings_units') as scan:
+            self.assertEqual(_holdings('0xabc'), 'desconocido')
+        scan.assert_not_called()
+
+    def test_redaction_covers_wallets_and_ids(self):
+        from .needs import redact
+        text = redact('cédula V-1234567B, envié a TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbRSE, quiero USDT en Binance')
+        self.assertNotIn('1234567', text)
+        self.assertNotIn('TQn9Y2', text)
+        self.assertIn('USDT en Binance', text)
+
+    def test_guidance_rules_are_always_in_the_prompt(self):
+        from .prompts import INVEST_RULES_GUIDANCE, build_system_prompt
+        prompt = build_system_prompt(first_name='A', account_label='personal', country='AR', screen='Home',
+                                     local_now='2026-10-06 10:00', destinations=['home'])
+        self.assertIn(INVEST_RULES_GUIDANCE, prompt)
+        self.assertNotIn('{invest_rules}', prompt)
+
+    def test_need_tagger_stores_redacted_tags_once(self):
+        from inbox.models import SupportConversation, SupportMessage
+        from . import needs
+        from .models import AssistantNeed
+        account = Account.objects.create(user=self.user, account_type='personal', account_index=0)
+        conv = SupportConversation.objects.create(user=self.user, account=account, status='OPEN')
+        msg = SupportMessage.objects.create(conversation=conv, sender_type='USER', sender_user=self.user,
+                                            message_type='TEXT', body='¿Me prestan 100? mi número +54 9 11 5555 1234')
+        SupportMessage.objects.create(conversation=conv, sender_type='AGENT', message_type='TEXT', body='Hola',
+                                      metadata={'ai': True})
+        SupportMessage.objects.create(conversation=conv, sender_type='USER', sender_user=self.user,
+                                      message_type='TEXT', body='Nota de la llamada', metadata={'handoff_note': True})
+        sent = {}
+
+        def fake_post(payload):
+            sent['input'] = payload['input']
+            self.assertFalse(payload['store'])
+            return text_response(json.dumps({'items': [
+                {'id': msg.id, 'category': 'loan_credit', 'paraphrase': 'Pide un préstamo, tel +54 9 11 5555 1234'}]}))
+
+        with patch('assistant.engine._openai_post', side_effect=fake_post):
+            self.assertEqual(needs.tag_recent(), 1)
+            self.assertEqual(needs.tag_recent(), 0)  # already tagged
+        self.assertNotIn('5555', sent['input'])
+        need = AssistantNeed.objects.get()
+        self.assertEqual((need.category, need.met_by_confio, need.phone_country), ('loan_credit', False, 'AR'))
+        self.assertNotIn('5555', need.paraphrase)
+
+    def test_report_command_runs(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        out = StringIO()
+        call_command('assistant_needs_report', '--days', '7', stdout=out)
+        self.assertIn('Needs in the last 7 days', out.getvalue())

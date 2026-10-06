@@ -32,3 +32,18 @@ class ProbeAnswerAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+class AssistantNeedAdmin(admin.ModelAdmin):
+    """Nightly-tagged needs (read-only evidence; paraphrases are redacted)."""
+    list_display = ('category', 'met_by_confio', 'phone_country', 'funded', 'paraphrase', 'message_at')
+    list_filter = ('category', 'met_by_confio', 'phone_country', 'funded')
+    readonly_fields = ('message', 'user', 'category', 'met_by_confio', 'paraphrase', 'phone_country', 'funded',
+                       'message_at', 'created_at')
+    raw_id_fields = ('message', 'user')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

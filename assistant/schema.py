@@ -290,7 +290,8 @@ class AskAssistant(graphene.Mutation):
         try:
             # Transcription happens inside, after the quota/human-mode checks.
             outcome = service.ask(user, account, business, jwt_context, None if audio else body, audio=audio,
-                                  screen=screen or '', tz_name=timezone)
+                                  screen=screen or '', tz_name=timezone,
+                                  request_meta=getattr(info.context, 'META', None))
         except ValueError as exc:
             return AskAssistant(success=False, error=str(exc), actions=[], mode='AI')
         except AssistantUnavailable as exc:
@@ -488,7 +489,7 @@ class RunAssistantVoiceTool(graphene.Mutation):
             voice.hang_up(session)
             return cls(output=ended, handed_off=False, keep_going=False)
         viewer = service._viewer(user, account, business, jwt_context, screen=session.screen,
-                                 tz_name=session.tz_name)
+                                 tz_name=session.tz_name, request_meta=getattr(info.context, 'META', None))
         # Analyses reserve their slot under the user's lock inside run_tool;
         # the slow work itself runs unlocked.
         output, result = voice.run_tool(session, viewer, name, arguments)

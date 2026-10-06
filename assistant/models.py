@@ -249,3 +249,23 @@ class ProbeAnswer(models.Model):
 
     def __str__(self):
         return f'{self.probe_id}: {self.answer}'
+
+
+class AssistantNeed(models.Model):
+    """What a user's message asked for, tagged nightly (assistant/needs.py).
+    Product evidence only: a short redacted paraphrase, never the message."""
+    message = models.OneToOneField('inbox.SupportMessage', on_delete=models.CASCADE, related_name='assistant_need')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_needs')
+    category = models.CharField(max_length=32)
+    met_by_confio = models.BooleanField()
+    paraphrase = models.CharField(max_length=120, blank=True, default='')
+    phone_country = models.CharField(max_length=2, blank=True, default='')
+    funded = models.BooleanField(default=False)
+    message_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['category', '-message_at'], name='assistant_need_cat_idx')]
+
+    def __str__(self):
+        return f'{self.category} ({self.phone_country})'

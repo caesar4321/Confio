@@ -407,6 +407,19 @@ def holdings_units(user_bsc_address: str) -> dict | None:
     return held
 
 
+def known_holdings_units(user_bsc_address: str) -> dict | None:
+    """holdings_units without a chain scan: the fresh cache, the stored row
+    or the last-known (possibly a few minutes old). For latency-bound
+    readers (a chat turn); None = never scanned, UNKNOWN."""
+    if not user_bsc_address:
+        return {}
+    key = user_bsc_address.lower()
+    cached = cache.get(f'gm_hold:{key}')
+    if cached is not None:
+        return cached
+    return _last_known(key, _stored(key))
+
+
 def _last_known(key: str, row) -> dict | None:
     last = cache.get(f'gm_hold_last:{key}')
     if last is not None:

@@ -2270,3 +2270,6 @@ confio_admin_site.register(AssistantProfile, AssistantProfileAdmin)
 from assistant.models import ProbeAnswer
 from assistant.admin import ProbeAnswerAdmin
 confio_admin_site.register(ProbeAnswer, ProbeAnswerAdmin)
+from assistant.models import AssistantNeed
+from assistant.admin import AssistantNeedAdmin
+confio_admin_site.register(AssistantNeed, AssistantNeedAdmin)
