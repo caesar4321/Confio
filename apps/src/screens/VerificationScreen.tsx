@@ -56,6 +56,22 @@ const openDiditSessionUrl = async (url: unknown, unsafeMessage: string) => {
   await Linking.openURL(url);
 };
 
+const DIDIT_REDIRECT = /^confio:\/\/verification(?:[/?#]|$)/;
+// Sessions already synced from a redirect in this app run: the initial URL
+// stays the same for the whole run, and the screen can mount many times.
+const syncedDiditRedirects = new Set<string>();
+
+function diditRedirectSessionId(url: string): string | null {
+  const raw = /[?&]verificationSessionId=([^&#]+)/.exec(url)?.[1];
+  if (!raw) return null;
+  try {
+    const id = decodeURIComponent(raw);
+    return /^[A-Za-z0-9_-]+$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
 
 type IdentityDocument = {
@@ -260,20 +276,26 @@ const VerificationScreen = () => {
     return () => listener.remove();
   }, [isBusinessAccount, refreshStatuses]);
 
+  // Didit's redirect back (confio://verification?verificationSessionId=…)
+  // names the session that finished in the browser. Sync it even when Android
+  // killed the app meanwhile (then it is the initial URL); the server checks
+  // the session belongs to this user. Business keeps its webhook + refresh.
   React.useEffect(() => {
-    const listener = Linking.addEventListener('url', ({ url }) => {
-      const sessionId = browserSessionRef.current;
-      if (!sessionId || !/^confio:\/\/verification(?:[/?#]|$)/.test(url)) return;
-      // Didit names the finished session in its redirect; never sync another one.
-      const redirected = /[?&]verificationSessionId=([^&#]+)/.exec(url)?.[1];
-      if (redirected && decodeURIComponent(redirected) !== sessionId) return;
+    if (isBusinessAccount) return undefined;
+    const handle = (url: string | null) => {
+      if (!url || !DIDIT_REDIRECT.test(url)) return;
+      const sessionId = diditRedirectSessionId(url) || browserSessionRef.current;
+      if (!sessionId || syncedDiditRedirects.has(sessionId)) return;
+      syncedDiditRedirects.add(sessionId);
       browserSessionRef.current = null;
       syncSessionAndRefresh(sessionId).catch((error: any) => {
         setBanner({ variant: 'error', message: error?.message || 'No se pudo sincronizar la decisión de Didit.' });
       });
-    });
+    };
+    Linking.getInitialURL().then(handle).catch(() => {});
+    const listener = Linking.addEventListener('url', ({ url }) => handle(url));
     return () => listener.remove();
-  }, [syncSessionAndRefresh]);
+  }, [isBusinessAccount, syncSessionAndRefresh]);
 
   // A browser session belongs to the account that started it.
   React.useEffect(() => { browserSessionRef.current = null; }, [isBusinessAccount]);
@@ -332,8 +354,9 @@ const VerificationScreen = () => {
       setBanner({ variant: 'info', message: 'Termina la verificación en tu navegador. Al volver, actualizaremos tu estado.' });
     } catch (error: any) {
       browserSessionRef.current = null;
-      // A server without `inBrowser` rejects the document: never show its raw GraphQL error.
-      const message = error?.graphQLErrors?.length ? null : error?.message;
+      // A server without `inBrowser` rejects the document (HTTP 400, surfaced by
+      // Apollo as a network error): never show its raw GraphQL/transport error.
+      const message = error?.graphQLErrors?.length || error?.networkError ? null : error?.message;
       setBanner({ variant: 'error', message: message || 'No se pudo abrir la verificación en el navegador.' });
     } finally {
       setIsLaunchingDidit(false);
