@@ -183,9 +183,10 @@ const VerificationScreen = () => {
   const [createDiditSession] = useMutation(CREATE_DIDIT_VERIFICATION_SESSION);
   const [syncDiditSession] = useMutation(SYNC_DIDIT_VERIFICATION_SESSION);
   const [createDiditBrowserSession] = useMutation(CREATE_DIDIT_BROWSER_VERIFICATION_SESSION);
-  // Set while the user verifies on Didit's page in the browser; the decision
-  // arrives by webhook, so returning to the app only needs a refresh.
-  const awaitingBrowserRef = React.useRef(false);
+  // The session the user is verifying on Didit's page in the browser. Returning
+  // to the app refreshes; Didit's redirect back (confio://verification) means
+  // the session finished, so it is synced without waiting for the webhook.
+  const browserSessionRef = React.useRef<string | null>(null);
 
   const [isLaunchingDidit, setIsLaunchingDidit] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
@@ -249,10 +250,22 @@ const VerificationScreen = () => {
 
   React.useEffect(() => {
     const listener = AppState.addEventListener('change', state => {
-      if (state === 'active' && (isBusinessAccount || awaitingBrowserRef.current)) refreshStatuses().catch(() => {});
+      if (state === 'active' && (isBusinessAccount || browserSessionRef.current)) refreshStatuses().catch(() => {});
     });
     return () => listener.remove();
   }, [isBusinessAccount, refreshStatuses]);
+
+  React.useEffect(() => {
+    const listener = Linking.addEventListener('url', ({ url }) => {
+      const sessionId = browserSessionRef.current;
+      if (!sessionId || !/^confio:\/\/verification(?:[/?#]|$)/.test(url)) return;
+      browserSessionRef.current = null;
+      syncSessionAndRefresh(sessionId).catch((error: any) => {
+        setBanner({ variant: 'error', message: error?.message || 'No se pudo sincronizar la decisión de Didit.' });
+      });
+    });
+    return () => listener.remove();
+  }, [syncSessionAndRefresh]);
 
   // Business verification resumes its pending hosted session; personal
   // verification starts a new native session.
@@ -303,17 +316,21 @@ const VerificationScreen = () => {
       const { data } = await createDiditBrowserSession();
       const result = data?.createDiditVerificationSession;
       const url = result?.session?.sessionUrl;
-      if (!result?.success) {
+      const sessionId = result?.session?.sessionId;
+      if (!result?.success || !sessionId) {
         throw new Error(result?.error || 'No se pudo crear la sesión de Didit.');
       }
       if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) {
         throw new Error('No se recibió un enlace seguro para verificarte en el navegador.');
       }
+      browserSessionRef.current = sessionId;
       await Linking.openURL(url);
-      awaitingBrowserRef.current = true;
       setBanner({ variant: 'info', message: 'Termina la verificación en tu navegador. Al volver, actualizaremos tu estado.' });
     } catch (error: any) {
-      setBanner({ variant: 'error', message: error?.message || 'No se pudo abrir la verificación en el navegador.' });
+      browserSessionRef.current = null;
+      // A server without `inBrowser` rejects the document: never show its raw GraphQL error.
+      const message = error?.graphQLErrors?.length ? null : error?.message;
+      setBanner({ variant: 'error', message: message || 'No se pudo abrir la verificación en el navegador.' });
     } finally {
       setIsLaunchingDidit(false);
     }
