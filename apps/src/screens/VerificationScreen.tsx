@@ -286,7 +286,12 @@ const VerificationScreen = () => {
   const handledRedirectRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     // The active account is unknown until AccountContext loads.
-    if (!accountReady || !redirectedSessionId || handledRedirectRef.current === redirectedSessionId) return;
+    if (!redirectedSessionId) {
+      // Params cleared: a later redirect for the same session is new again.
+      handledRedirectRef.current = null;
+      return;
+    }
+    if (!accountReady || handledRedirectRef.current === redirectedSessionId) return;
     handledRedirectRef.current = redirectedSessionId;
     navigation.setParams({ verificationSessionId: undefined, status: undefined } as any);
     if (isBusinessAccount || !DIDIT_SESSION_ID.test(redirectedSessionId)) return;
