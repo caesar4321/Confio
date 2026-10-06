@@ -301,7 +301,10 @@ const VerificationScreen = () => {
     // while the personal account is active) is not the user's to fix: refresh
     // quietly and let the webhook record the decision.
     syncSessionAndRefresh(redirectedSessionId)
-      .catch(() => refreshStatuses().catch(() => {}))
+      .catch(() => {
+        setBanner(null);
+        refreshStatuses().catch(() => {});
+      })
       .finally(() => setIsSyncingRedirect(false));
   }, [accountReady, isBusinessAccount, navigation, redirectedSessionId, refreshStatuses, syncSessionAndRefresh]);
 
@@ -385,7 +388,8 @@ const VerificationScreen = () => {
   const hasCountryAttempt = list.some(doc => !doc.isAdditional);
   // One browser fallback per screen: on the first unverified country document.
   // Not under a pending review: a second primary session would race it.
-  const browserFallbackDocId = list.find(doc => !doc.isAdditional && normalizeStatus(doc.status) === 'rejected')?.id;
+  const browserFallbackDocId = list.find(doc => !doc.isAdditional
+    && !['verified', 'pending'].includes(normalizeStatus(doc.status)))?.id;
 
   // ─── Pieces ───
 
