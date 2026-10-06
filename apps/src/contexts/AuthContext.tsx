@@ -1,4 +1,5 @@
 import { isFaceCaptureRunning } from '../services/faceStepUp';
+import { isSystemPickerOpen } from '../services/systemPickerGuard';
 import React, { createContext, useContext, useState, useEffect, RefObject, useRef } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
 import { AuthService } from '../services/authService';
@@ -565,6 +566,12 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         const currentCycle = appStateCycle;
         if (lastPromptedCycle === currentCycle) {
           return; // Already prompted for this resume cycle
+        }
+        // Back from the OS photo picker (a separate app): not "leaving
+        // Confío". Bounded by SYSTEM_PICKER_MAX_MS, after which it locks.
+        if (isSystemPickerOpen()) {
+          lastPromptedCycle = currentCycle;
+          return;
         }
         const sinceLastBiometric = Date.now() - lastBiometricSuccessRef.current;
         if (sinceLastBiometric < 5000) {
