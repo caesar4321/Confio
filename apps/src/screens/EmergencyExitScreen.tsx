@@ -1,28 +1,22 @@
-// Salida de emergencia — server-independent full exit
-// (docs/plans/salida-de-emergencia-design.md).
+// Salida de emergencia — move everything to the user's own wallet if Confío
+// stops operating (docs/plans/salida-de-emergencia-design.md § Phase 3).
 //
-// Always reachable from Seguridad; server state only changes prominence
-// and wait: ban / 72h-persistent outage ⇒ immediate, normal ⇒ 72h local
-// cooloff, full offline ⇒ visible but not executable. Every judgment is
-// client-local (reachability.ts) and chain-timed (chainClock.ts) — the
-// server can never delay, extend or cancel an exit.
+// ONE trigger: the on-chain ConfioHeartbeat. Confío beats daily; once the
+// chain has gone silenceRequired (14 days) without a beat, the exit opens for
+// everyone. No ban route, no Confío Face, no waiting periods, no client-judged
+// outages. The screen only READS the heartbeat (heartbeat.ts); enforcement is
+// on-chain — every exit transaction runs assertSilent() first, in the same
+// atomic batch (gatedTx.ts), so nothing here can move money early.
 //
-// UI is a STAGED flow, not a wall of forms: the screen's job is calm in
-// the worst moment (the outage state is the narrative's proof moment).
-// Stage 1 is the wait/status surface; once eligible, a 4-step WIZARD
-// (one decision per screen, internal step state — never separate routes:
-// this screen lives in BOTH stacks and shares selection/dest/check state):
-// Paso 1 cuenta+comisión (with a beginner intro to gas/BNB) →
-// Paso 2 destino → Paso 3 checklist → Paso 4 resumen+ejecución.
+// While Confío beats, the screen explains the safeguard and how to prepare.
+// Once open, a 4-step WIZARD (one decision per screen, internal state — this
+// screen lives in BOTH stacks and the recovery-only boot route):
+// Paso 1 cuenta+comisión → Paso 2 destino → Paso 3 checklist → Paso 4
+// resumen+ejecución.
 //
-// BSC-only since the 2026-07 migration: the Algorand leg was removed from
-// this screen (users exiting legacy Algorand balances are a support case,
-// not a self-serve flow).
-//
-// Execution is Direct mode always (user gas, public RPCs): it works in
-// every server state. A fee-free Sponsored mode for the explicit-ban case
-// layers on when the backend ships a ban signal. The exit moves USER
-// ASSETS ONLY — no close-outs, no native sweeps (engine invariants).
+// Execution is Direct mode (user gas, public RPCs, zero GraphQL) and moves
+// USER ASSETS ONLY — no close-outs, no native sweeps (engine invariants).
+// BSC only: Algorand balances are not part of the exit.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -45,7 +39,6 @@ import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { colors } from '../config/theme';
-import { API_URL } from '../config/env';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { AddressScannerModal } from '../components/AddressScannerModal';
 import { evmAccountKey, getEvmAddressForDisplay, getActiveEvmWallet } from '../services/secureDeterministicWallet';
@@ -56,20 +49,16 @@ import {
   RosterAccount, rosterAccountKey, getAccountRoster, exitableAccounts,
 } from '../services/emergencyExit/accountRoster';
 import {
-  evaluateEmergencyState, getExitEligibility, requestExitCooloff, cancelExitCooloff,
-  consumeExitCooloff, devElapseCooloff, ReachabilityResult, ExitEligibility,
-  NORMAL_COOLOFF_SECONDS, hasFaceWaiver, waiveFaceWithNewCooloff,
-  markBanRouteWait, hasBanRouteWait, clearBanRouteWait } from '../services/emergencyExit/reachability';
+  readHeartbeat, HeartbeatStatus, isConfioAlive,
+} from '../services/emergencyExit/heartbeat';
 import {
   executeBscExit, planBscExit, estimateBscExitGasWei,
   installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BUNDLED_CUSD_ADDRESS, BscExitResult, BscExitStep,
 } from '../services/emergencyExit/bscExit';
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { LoadingOverlay } from '../components/LoadingOverlay';
-import { ensureFaceCheck, fetchFaceStepUpStatus } from '../services/faceStepUp';
-import { confirmBannedExit } from '../services/emergencyExit/emergencyFace';
-import { clearBanSignal } from '../services/emergencyExit/banSignal';
 import { formatDecimal } from '../utils/numberLocale';
+import { formatLocalDateTime } from '../utils/dateUtils';
 
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -120,15 +109,16 @@ const stepWait = (step: BscExitStep): string => {
 const fmtUsdt = (wei: string): string =>
   formatDecimal(Number(BigInt(wei) / 10n ** 12n) / 1e6);
 
-const fmtRemaining = (sec: number): string => {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  return h > 0 ? `${h} h ${m} min` : `${m} min`;
+// Durations in the app's plain Spanish: "9 días y 3 h", "5 h", "menos de 1 h".
+const fmtDuration = (sec: number): string => {
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  if (d > 0) return h > 0 ? `${d} ${d === 1 ? 'día' : 'días'} y ${h} h` : `${d} ${d === 1 ? 'día' : 'días'}`;
+  return h > 0 ? `${h} h` : 'menos de 1 h';
 };
+const fmtChainDate = (sec: number): string => formatLocalDateTime(new Date(sec * 1000).toISOString());
 
 const truncAddr = (a: string): string => (a.length > 20 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a);
-
-type EmState = (ReachabilityResult & { chainNowSec: number | null }) | null;
 
 export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const navigation = useNavigation<any>();
@@ -147,8 +137,8 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   const [selCtx, setSelCtx] = useState<RosterAccount | null>(null);
   const [accountKey, setAccountKey] = useState('');
 
-  const [es, setEs] = useState<EmState>(null);
-  const [elig, setElig] = useState<ExitEligibility | null>(null);
+  // On-chain heartbeat — the only thing that opens the exit.
+  const [hb, setHb] = useState<HeartbeatStatus | null>(null);
   const [evaluating, setEvaluating] = useState(true);
 
   const [evmAddress, setEvmAddress] = useState<string | null>(null);
@@ -174,6 +164,8 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   // Destination as it was at execution time — the result card must not
   // re-read the editable input.
   const [sentTo, setSentTo] = useState<string | null>(null);
+  // The gate closed mid-exit AFTER some legs already moved (Confío beat again).
+  const [closedMidway, setClosedMidway] = useState(false);
 
   // Wizard step within the eligible flow (0..3). Internal state, not
   // routes — one decision per screen without any navigation plumbing.
@@ -187,28 +179,11 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   const evaluate = useCallback(async () => {
     setEvaluating(true);
     try {
-      let state = await evaluateEmergencyState(emergencyStore, API_URL);
-      if (state.state === 'banned' && accountKey
-        && (await hasBanRouteWait(emergencyStore, accountKey, state.chainNowSec))) {
-        // Banned without KYC: the normal waiting period, still prominent.
-        state = { ...state, immediate: false };
-      } else if (state.state === 'normal' && accountKey) {
-        // Confío answers and no ban: any earlier ban's wait is over.
-        await clearBanRouteWait(emergencyStore, accountKey);
-      }
-      setEs(state);
-      // Immediate states (ban, 72h outage) don't touch the per-account
-      // cooloff key, so don't gate them on the account being loaded — a
-      // banned user's account hydration is best-effort and the exit must
-      // not wait for it. Non-immediate paths still need the real key
-      // (cooloffs are per account).
-      if (accountKey || state.immediate) {
-        setElig(await getExitEligibility(emergencyStore, accountKey || 'no_account', state));
-      }
+      setHb(await readHeartbeat().catch((): HeartbeatStatus => ({ state: 'unreachable' })));
     } finally {
       setEvaluating(false);
     }
-  }, [accountKey]);
+  }, []);
 
   useEffect(() => { evaluate(); }, [evaluate]);
 
@@ -269,7 +244,7 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
       setBscGasShortWei(null);
       gasAddrRef.current = null;
       // Results/errors belong to the previously selected account.
-      setBscResult(null); setBscError(null); setBscPending(false); setBscPendingTx(null); setSentTo(null);
+      setBscResult(null); setBscError(null); setBscPending(false); setBscPendingTx(null); setSentTo(null); setClosedMidway(false);
       try {
         const ctx = { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } as const;
         const { deriveAddressesForContext } = await import('../services/secureDeterministicWallet');
@@ -301,167 +276,18 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   const bscDestValid =
     EVM_ADDR_RE.test(bscDest.trim()) &&
     bscDest.trim().toLowerCase() !== (evmAddress ?? '').toLowerCase();
-  const eligible = !!elig?.eligible;
-  const offline = es?.state === 'offline';
-
-  /**
-   * Confío Face for the normal route, asked twice: when the wait starts and
-   * again before anything is sent. 'not_asked' when enforcement is off or
-   * the user never did KYC (nothing to compare against).
-   */
-  const confirmExitFace = async (): Promise<'passed' | 'not_asked' | 'failed'> => {
-    const status = await fetchFaceStepUpStatus();
-    // An unreadable status must use the same face-or-wait path; only an
-    // explicit disabled / not-required response skips it.
-    if (status?.enabled === false || status?.required === false) return 'not_asked';
-    // (The face check fetches an App Check token itself; see faceStepUp.ts.)
-    return (await ensureFaceCheck('emergency_exit')) ? 'passed' : 'failed';
-  };
-
-  const startCooloffBusy = useRef(false);
-  const startCooloff = async () => {
-    // The face check below can take a while (status fetch, App Check, the
-    // capture itself): a second tap must not queue a second face check.
-    if (startCooloffBusy.current) return;
-    startCooloffBusy.current = true;
-    try {
-      await startCooloffInner();
-    } finally {
-      startCooloffBusy.current = false;
-    }
-  };
-
-  // The wait is timed on chain, so starting it needs a chain read.
-  const beginCooloff = async () => {
-    try {
-      await requestExitCooloff(emergencyStore, accountKey);
-    } catch {
-      Alert.alert('No se pudo iniciar la espera', 'Revisa tu conexión e inténtalo de nuevo.');
-    }
-    await evaluate();
-  };
-
-  const startCooloffInner = async () => {
-    // Starting a waiting period does not move funds or unlock the app, but a
-    // ring should learn now, not in 72 hours, that the holder must show up.
-    // Never a veto: the wait may start anyway, and the face is asked again
-    // before sending ('blocked' cannot reach the check at all, so it only
-    // meets that second ask).
-    if (es?.state === 'normal' && (await confirmExitFace()) === 'failed') {
-      Alert.alert(
-        'Confío Face no confirmado',
-        'Puedes iniciar la espera igual. Al terminar te pediremos tu rostro de nuevo; si no se confirma, la salida necesitará una segunda espera de 72 horas.',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Iniciar espera',
-            onPress: beginCooloff,
-          },
-        ],
-      );
-      return;
-    }
-    await beginCooloff();
-  };
-
-  const cancelCooloff = async () => {
-    await cancelExitCooloff(emergencyStore, accountKey);
-    await evaluate();
-  };
+  const eligible = hb?.state === 'open';
+  const offline = hb?.state === 'unreachable';
 
   const runBsc = async () => {
-    // Online routes authenticate with Confío Face. The phone's biometric is
-    // used where no face is checked: the server-independent fallback, a face
-    // waiver, and any route where no face is asked (no KYC, not enforced).
-    // One successful prompt covers this tap; later checks only add one when
-    // nothing has authenticated yet.
-    let locallyAuthenticated = false;
-    const requireLocalAuth = async (): Promise<boolean> => {
-      if (locallyAuthenticated) return true;
-      locallyAuthenticated = await biometricAuthService.authenticateEmergencyExit(
-        'Confirmar salida de emergencia (BNB Smart Chain)');
-      return locallyAuthenticated;
-    };
-    if ((es?.state !== 'normal' && es?.state !== 'banned') || await hasFaceWaiver(emergencyStore, accountKey)) {
-      if (!(await requireLocalAuth())) return;
-    }
+    // The phone's own biometric guards the send. Nothing server-side is asked:
+    // by definition Confío is gone when this runs.
+    if (!(await biometricAuthService.authenticateEmergencyExit(
+      'Confirmar salida de emergencia (BNB Smart Chain)'))) return;
     const exitCtx = selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined;
-    if (es?.state === 'banned') {
-      // The ban route: the server confirms the ban (a faked 403 cannot
-      // route here) and the exit runs only after Confío Face passes, with
-      // no waiting-period fallback.
-      let outcome: Awaited<ReturnType<typeof confirmBannedExit>>;
-      try {
-        outcome = await confirmBannedExit(await getActiveEvmWallet(exitCtx), API_URL);
-      } catch (e: any) {
-        Alert.alert('No se puede continuar', e?.message || String(e));
-        return;
-      }
-      if (outcome.outcome === 'wait') {
-        // No face to check: only an elapsed waiting period opens the exit.
-        const waited = await getExitEligibility(emergencyStore, accountKey, { ...es, immediate: false });
-        if (!waited.eligible) {
-          await markBanRouteWait(emergencyStore, accountKey, es.chainNowSec);
-          Alert.alert(
-            'Espera de seguridad',
-            'Tu cuenta está suspendida y no tenemos una verificación de identidad con la que confirmar tu rostro. Tu salida se habilita 72 horas después de solicitarla.',
-          );
-          await evaluate();
-          return;
-        }
-      }
-      if (outcome.outcome === 'not_banned') {
-        await clearBanSignal(emergencyStore);
-        await clearBanRouteWait(emergencyStore, accountKey);
-        Alert.alert('Tu cuenta está activa', 'Confío confirmó que tu cuenta no está suspendida. Revisa de nuevo tu salida.');
-        await evaluate();
-        return;
-      }
-      if (outcome.outcome === 'failed') {
-        Alert.alert('No se puede continuar', outcome.message);
-        return;
-      }
-      if (outcome.outcome === 'wait' || (outcome.outcome === 'passed' && !outcome.faceChecked)) {
-        // No face was checked (none on file, or not enforced): the phone's
-        // own biometric is the only authentication left.
-        if (!(await requireLocalAuth())) return;
-      }
-    } else if ((es?.state === 'normal' || es?.state === 'blocked') && !(await hasFaceWaiver(emergencyStore, accountKey))) {
-      // The normal route also asks for Confío Face (while the server
-      // enforces it): a ring holding someone else's account must bring them
-      // back to move it out. Never a veto: if the face check fails or can't
-      // run, the person may continue without it after a second full local
-      // wait. 'blocked' (Confío hidden from this phone, up per the outage
-      // Worker) cannot reach the face check at all, so it goes straight to
-      // that choice.
-      const face = es.state === 'normal' ? await confirmExitFace() : 'failed';
-      if (face === 'not_asked') {
-        // No face to check: the phone's own biometric is the only
-        // authentication left, so it is never skipped here.
-        if (!(await requireLocalAuth())) return;
-      }
-      if (face === 'failed') {
-        Alert.alert(
-          'Salida sin Confío Face',
-          es.state === 'blocked'
-            ? 'Tu red no llega a Confío, así que no podemos confirmar tu rostro. Puedes continuar sin Confío Face: tu salida se habilitará después de una nueva espera de 72 horas.'
-            : 'Puedes continuar sin confirmar tu rostro: tu salida se habilitará después de una nueva espera de 72 horas.',
-          [
-            { text: 'Cancelar', style: 'cancel' },
-            {
-              text: 'Continuar sin Confío Face',
-              onPress: async () => {
-                await waiveFaceWithNewCooloff(emergencyStore, accountKey);
-                await evaluate();
-              },
-            },
-          ],
-        );
-        return;
-      }
-    }
     const dest = bscDest.trim();
     setBscRunning(true); setBscError(null); setBscPending(false); setBscPendingTx(null); setBscPhase(null); setSentTo(dest);
+    setClosedMidway(false);
     try {
       const wallet = await getActiveEvmWallet(exitCtx);
       const result = await executeBscExit({
@@ -475,27 +301,42 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
         onStep: (step: BscExitStep) => setBscPhase(stepWait(step)),
       });
       setBscResult(result);
-      // An exit that actually broadcast SPENDS the 72h unlock: the wait is
-      // per-episode anti-coercion, not a one-time toll. Never on failure —
-      // a half-moved exit must stay retryable now, not in a day.
-      if (result.sentNow.length && !result.unresolved.length) {
-        try {
-          await consumeExitCooloff(emergencyStore, accountKey);
-        } catch (e) {
-          // Chain success is final. A local anti-coercion bookkeeping failure
-          // must not turn it into a false “retry” state after funds moved.
-          console.warn('[EmergencyExit] cooloff consumption failed', e);
-        }
-      }
       // The result card carries the degraded case (headline + explanation);
       // an Alert on top of it would just be a second thing to dismiss.
     } catch (e: any) {
-      if (e?.partialResult) setBscResult(e.partialResult as BscExitResult);
-      if (isOutcomeUnknown(e)) {
+      if (isConfioAlive(e)) {
+        const partial = (e as any)?.partialResult as BscExitResult | undefined;
+        const gateState = (e as any)?.status?.state;
+        const confioBack = gateState === 'alive' || gateState === 'quiet';
+        if (partial?.sentNow.length && !confioBack) {
+          // The heartbeat could not be READ (e.g. the phone lost data) after
+          // some legs landed. Nothing says Confío is back: show what moved
+          // and keep the retry — it re-reads the gate before every send.
+          setBscResult(partial);
+          setBscError('No pudimos leer la señal de Confío en la blockchain. Lo que ya se envió está abajo; revisa tu conexión');
+        } else if (partial?.sentNow.length) {
+          // Some legs landed before the gate closed: show exactly those
+          // receipts under a "closed midway" headline — never "Listo".
+          setBscResult(partial);
+          setClosedMidway(true);
+        } else {
+          // Nothing moved: drop back to the live (closed) state, no result card.
+          setBscResult(null);
+          Alert.alert(
+            gateState === 'alive' || gateState === 'quiet' ? 'La salida se cerró' : 'No pudimos verificar la salida',
+            gateState === 'alive' || gateState === 'quiet'
+              ? 'Confío volvió a publicar su señal, así que la blockchain no permite la salida. No se movió nada; tu dinero sigue en tu cuenta.'
+              : 'No pudimos leer la señal de Confío en la blockchain. No se movió nada. Revisa tu conexión e inténtalo de nuevo.',
+          );
+        }
+        await evaluate();
+      } else if (isOutcomeUnknown(e)) {
+        if (e?.partialResult) setBscResult(e.partialResult as BscExitResult);
         setBscPending(true);
         setBscPendingTx(typeof e?.txHash === 'string' ? e.txHash : null);
         setBscError('La transacción fue enviada, pero la red aún no confirmó el resultado.');
       } else {
+        if (e?.partialResult) setBscResult(e.partialResult as BscExitResult);
         setBscError(e?.message || String(e));
       }
     } finally {
@@ -508,126 +349,89 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
 
   // ── Hero state: the emotional core of the screen ──────────────────────
   const hero = (() => {
-    if (evaluating || !es) {
+    if (evaluating && !hb) {
       return { label: 'Verificando…', sub: 'Consultando la blockchain', tone: 'neutral' as const };
     }
-    switch (es.state) {
-      case 'banned':
+    const since = hb?.lastBeatSec != null && hb.chainNowSec != null ? hb.chainNowSec - hb.lastBeatSec : 0;
+    switch (hb?.state) {
+      case 'open':
         return {
-          label: 'Tu dinero sigue siendo tuyo',
-          sub: es.immediate
-            ? 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Confirma con tu rostro que eres tú y podrás retirarlos ahora mismo.'
-            : 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Como no podemos confirmar tu rostro, la salida se habilita 72 horas después de solicitarla.',
+          label: 'La salida está abierta',
+          sub: `Confío no publica su señal desde el ${fmtChainDate(hb.lastBeatSec!)}. Tu dinero está en la blockchain, y desde aquí puedes moverlo a una billetera tuya.`,
           tone: 'alert' as const,
         };
-      case 'blocked':
+      case 'quiet':
         return {
-          label: 'Tu red no llega a Confío',
-          sub: 'Confío sigue funcionando, pero no podemos conectarnos desde tu red. Tu dinero está en la blockchain, intacto, y la salida sigue disponible con la espera de seguridad.',
+          label: 'Confío no da señales',
+          sub: `Hace ${fmtDuration(since)} que Confío no publica su señal. Si llega a ${fmtDuration(hb.silenceSec!)}, esta salida se abre para todos. Tu dinero está en la blockchain, intacto.`,
           tone: 'warn' as const,
         };
-      case 'outage':
-        return es.immediate
-          ? {
-              label: 'Tu dinero está a salvo',
-              sub: 'Los servidores de Confío llevan más de 72 horas sin responder. Tu dinero nunca estuvo en ellos: está en la blockchain, y desde aquí puedes moverlo sin nosotros.',
-              tone: 'alert' as const,
-            }
-          : {
-              label: 'Sin conexión con Confío',
-              sub: `Interrupción de ${fmtRemaining(es.outageSeconds)}. Si supera las 72 horas, la salida se habilita de inmediato. Tu dinero está en la blockchain, intacto.`,
-              tone: 'warn' as const,
-            };
-      case 'offline':
+      case 'unreachable':
         return {
-          label: 'Sin internet',
-          sub: 'Tu dinero sigue en la blockchain. Conéctate a la red para poder moverlo.',
+          label: 'Sin conexión con la blockchain',
+          sub: 'No pudimos leer la señal de Confío. Revisa tu conexión e inténtalo de nuevo.',
           tone: 'neutral' as const,
         };
-      default:
-        if (elig?.reason === 'cooloff_pending') {
-          return {
-            label: 'Todo funciona con normalidad',
-            sub: 'Tu salida está en espera de seguridad. Puedes cancelarla en cualquier momento — y tu dinero sigue disponible con los envíos normales.',
-            tone: 'ok' as const,
-          };
-        }
+      case 'invalid':
+      case 'not_configured':
         return {
-          label: 'Todo funciona con normalidad',
-          sub: 'Esta salida existe para emergencias: mueve todo tu dinero a otra billetera sin pedirnos permiso. Hoy también puedes usar los envíos normales.',
+          label: 'Salida de emergencia',
+          sub: 'Esta versión de la app no puede verificar la señal de Confío. Actualiza la app para ver el estado.',
+          tone: 'neutral' as const,
+        };
+      case 'alive':
+        return {
+          label: 'Tu respaldo si Confío deja de operar',
+          sub: 'Confío funciona con normalidad. Esta salida solo se abre si Confío deja de operar.',
           tone: 'ok' as const,
         };
+      default:
+        // Nothing read yet: never claim Confío is fine without the chain saying so.
+        return { label: 'Verificando…', sub: 'Consultando la blockchain', tone: 'neutral' as const };
     }
   })();
 
-  // ── Stage: 1 = wait/status, 2 = destination+confirm, 3 = done-ish ─────
+  // ── Stage: 1 = closed (explain + prepare), 2 = open wizard / outcome ──
   const anyResult = !!bscResult || bscPending;
+  // Silence period as the CHAIN states it (owner-tunable), 14 days at launch.
+  const silenceText = fmtDuration(hb?.silenceSec ?? 14 * 86400);
   const stage = eligible || anyResult ? 2 : 1;
 
-  const renderWaitCard = () => {
-    if (!es || es.immediate || es.state === 'offline') return null;
-    if (!elig) return null;
-    if (elig.reason === 'no_request' || elig.reason === 'cooloff_expired') {
-      const expired = elig.reason === 'cooloff_expired';
-      return (
-        <View style={styles.card}>
-          <View style={styles.stepHeader}>
-            <View style={styles.stepBadge}><Text style={styles.stepBadgeText}>1</Text></View>
-            <Text style={styles.cardTitle}>Espera de seguridad</Text>
+  // The heartbeat itself, in plain words: when Confío last signalled and
+  // when the exit would open if it never does again.
+  const renderSignalCard = () => {
+    if (!hb || hb.lastBeatSec == null || hb.opensAtSec == null || hb.chainNowSec == null) return null;
+    const quiet = hb.state === 'quiet';
+    return (
+      <View style={styles.card}>
+        <View style={styles.stepHeader}>
+          <View style={styles.stepBadge}>
+            <Icon name={quiet ? 'clock' : 'activity'} size={13} color={colors.white} />
           </View>
-          {/* An unlock that sat unused for a week re-arms. Say so plainly:
-              a user who returns to a button that no longer works deserves
-              the reason, not a silently reset screen. */}
-          {expired && (
+          <Text style={styles.cardTitle}>Señal de Confío</Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Icon name="radio" size={14} color={colors.text.secondary} />
+          <Text style={styles.summaryText}>
+            Última señal: {fmtChainDate(hb.lastBeatSec)} (hace {fmtDuration(hb.chainNowSec - hb.lastBeatSec)})
+          </Text>
+        </View>
+        {quiet ? (
+          <>
+            <Text style={styles.countdownText}>{fmtDuration(hb.opensAtSec - hb.chainNowSec)}</Text>
             <Text style={styles.bodyText}>
-              Tu espera anterior venció por no usarse. Puedes iniciarla de
-              nuevo — tu dinero nunca dejó de ser tuyo.
+              para que la salida se abra, el {fmtChainDate(hb.opensAtSec)}, si Confío no
+              vuelve a dar señales.
             </Text>
-          )}
+          </>
+        ) : (
           <Text style={styles.bodyText}>
-            Para protegerte de estafas, la salida completa se habilita 72 horas
-            después de solicitarla. El tiempo se mide en la blockchain — ni
-            Confío puede acortarlo, extenderlo ni cancelarlo.
+            Confío publica esta señal todos los días. Mientras siga llegando, la
+            salida permanece cerrada.
           </Text>
-          <TouchableOpacity style={styles.primaryBtn} onPress={startCooloff}>
-            <Icon name="clock" size={16} color={colors.white} />
-            <Text style={styles.primaryBtnText}>Iniciar espera de 72 horas</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-    if (elig.reason === 'cooloff_pending') {
-      return (
-        <View style={styles.card}>
-          <View style={styles.stepHeader}>
-            <View style={styles.stepBadge}><Icon name="clock" size={13} color={colors.white} /></View>
-            <Text style={styles.cardTitle}>Espera en curso</Text>
-          </View>
-          <Text style={styles.countdownText}>
-            {fmtRemaining(elig.remainingSec ?? NORMAL_COOLOFF_SECONDS)}
-          </Text>
-          <Text style={styles.bodyText}>restantes para habilitar la salida.</Text>
-          <View style={styles.scamBox}>
-            <Icon name="alert-triangle" size={15} color={colors.warning.text} />
-            <Text style={styles.scamBoxText}>
-              ¿Alguien te pidió hacer esto? Cancela ahora: es una estafa.
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.ghostBtn} onPress={cancelCooloff}>
-            <Text style={styles.ghostBtnText}>Cancelar la salida</Text>
-          </TouchableOpacity>
-          {__DEV__ && (
-            <TouchableOpacity
-              style={styles.ghostBtn}
-              onPress={async () => { await devElapseCooloff(emergencyStore, accountKey); await evaluate(); }}
-            >
-              <Text style={[styles.ghostBtnText, { color: colors.text.light }]}>(dev) saltar espera</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      );
-    }
-    return null;
+        )}
+      </View>
+    );
   };
 
   const gasStatusLine = (short: bigint | null, fmt: (v: bigint) => string) => {
@@ -721,7 +525,8 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   // Read sentNow, NEVER txids: txids can replay hashes from an interrupted
   // earlier attempt, and a headline built on those claimed "tu dinero
   // salió" for a run that broadcast nothing at all.
-  const outcome: 'none' | 'error' | 'pending' | 'partial' | 'empty' | 'already' | 'degraded' | 'ok' = (() => {
+  const outcome: 'none' | 'error' | 'pending' | 'closed' | 'partial' | 'empty' | 'already' | 'degraded' | 'ok' = (() => {
+    if (closedMidway) return 'closed';
     if (bscPending) return 'pending';
     if (bscError) return 'error';
     if (!bscResult) return 'none';
@@ -737,6 +542,10 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   })();
 
   const OUTCOME_COPY = {
+    closed: {
+      icon: 'alert-triangle', tone: colors.warning.text,
+      title: 'La salida se cerró a mitad',
+    },
     ok: {
       icon: 'check-circle', tone: colors.primaryDark,
       title: 'Listo. Tu dinero salió de Confío',
@@ -796,6 +605,8 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
           : 'Los envíos de este intento ya se habían hecho, así que no se repitieron. Puedes comprobarlos abajo.';
       case 'empty':
         return 'Esta cuenta no tenía saldo en BNB Smart Chain. No se envió ninguna transacción y no se cobró ninguna comisión.';
+      case 'closed':
+        return `Confío volvió a publicar su señal y la blockchain detuvo la salida. Lo que se alcanzó a enviar llegó a ${to} (compruébalo abajo); el resto sigue en tu cuenta.`;
       case 'pending':
         return 'La red recibió la transacción, pero no confirmó el resultado a tiempo. Compruébala en BscScan antes de volver a intentar para no enviar dos veces.';
       default:
@@ -803,8 +614,11 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
     }
   };
 
+  // Retry after an error doesn't wait for a fresh "open" read (see the button).
+  const canRun = outcome === 'error' || (eligible && !offline);
+
   // Nothing left to send for this account+destination.
-  const exitDone = outcome === 'ok' || outcome === 'degraded' || outcome === 'already' || outcome === 'pending';
+  const exitDone = outcome === 'ok' || outcome === 'degraded' || outcome === 'already' || outcome === 'pending' || outcome === 'closed';
 
   const renderOutcome = () => {
     if (outcome === 'none') return null;
@@ -934,19 +748,19 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* The permanent promise, verbatim in every state */}
+        {/* The rule, verbatim in every state */}
         <View style={styles.promiseRow}>
           <Icon name="anchor" size={14} color={colors.primaryDark} />
           <Text style={styles.promiseText}>
-            Confío no puede aprobar, rechazar ni bloquear esta operación.
+            La blockchain decide cuándo se abre: {silenceText} sin señal de Confío.
           </Text>
         </View>
 
         {/* Account sweep: one account at a time, every OWNED account listed
             (local roster mirror — works without the server). Employee
-            businesses are excluded: their keys are the owner's. Shown while
-            waiting (cooloffs are per account) and on wizard Paso 1. */}
-        {roster.length > 1 && (stage === 1 || wStep === 0) && (
+            businesses are excluded: their keys are the owner's. Only on
+            wizard Paso 1 — there is nothing to choose while the exit is closed. */}
+        {roster.length > 1 && stage === 2 && wStep === 0 && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>¿Qué cuenta retiras?</Text>
             <Text style={styles.bodyText}>
@@ -978,20 +792,39 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
 
         {stage === 1 && (
           <>
-            {renderWaitCard()}
-            {/* How it works — shown while waiting, so the flow is never a surprise */}
+            {renderSignalCard()}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Cómo funciona</Text>
               {[
-                ['map-pin', 'Eliges la billetera de destino — una que sea tuya.'],
-                ['send', 'Tu ahorro sale como USDT y tus acciones Ondo se transfieren directamente por la blockchain.'],
-                ['zap', 'En una emergencia real (Confío inaccesible por más de 72 horas), no hay espera: la salida es inmediata.'],
+                ['radio', 'Confío publica una señal en la blockchain todos los días.'],
+                ['calendar', `Si pasan ${silenceText} sin señal, esta salida se abre para todos los usuarios de Confío.`],
+                ['send', 'Entonces mueves tu dinero a una billetera tuya: tu ahorro sale como USDT y tus acciones Ondo se transfieren tal cual.'],
               ].map(([icon, text], i) => (
                 <View key={i} style={styles.howRow}>
                   <Icon name={icon as string} size={16} color={colors.primaryDark} />
                   <Text style={styles.howText}>{text}</Text>
                 </View>
               ))}
+            </View>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Mientras tanto</Text>
+              {[
+                ['arrow-up-right', 'Para mover tu dinero hoy, usa Enviar como siempre.'],
+                ['briefcase', 'Si quieres estar preparado, ten una billetera propia en BNB Smart Chain (por ejemplo, MetaMask). Es donde recibirías tu dinero.'],
+                ['info', 'La salida mueve tus saldos en BNB Smart Chain. Los saldos antiguos en Algorand no forman parte de ella.'],
+              ].map(([icon, text], i) => (
+                <View key={i} style={styles.howRow}>
+                  <Icon name={icon as string} size={16} color={colors.primaryDark} />
+                  <Text style={styles.howText}>{text}</Text>
+                </View>
+              ))}
+              <View style={styles.scamBox}>
+                <Icon name="shield-off" size={15} color={colors.error.text} />
+                <Text style={[styles.scamBoxText, { color: colors.error.text }]}>
+                  Ni soporte ni nadie puede abrirte esta salida antes de
+                  tiempo. Si alguien te ofrece hacerlo, es una estafa.
+                </Text>
+              </View>
             </View>
           </>
         )}
@@ -1146,10 +979,17 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
             </View>
 
             <View style={styles.card}>
+              {/* After an error, retry is always tappable: it re-reads the
+                  heartbeat first, and the gate is enforced again inside every
+                  transaction — so a stale "unreachable" read can't strand the
+                  user behind a disabled button. */}
               <TouchableOpacity
-                style={[styles.execBtn, (!eligible || !allChecked || !bscDestValid || bscRunning || offline) && styles.execBtnDisabled]}
-                disabled={!eligible || !allChecked || !bscDestValid || bscRunning || offline}
-                onPress={runBsc}
+                style={[styles.execBtn, (!canRun || !allChecked || !bscDestValid || bscRunning) && styles.execBtnDisabled]}
+                disabled={!canRun || !allChecked || !bscDestValid || bscRunning}
+                onPress={async () => {
+                  if (outcome === 'error') await evaluate();
+                  await runBsc();
+                }}
               >
                 <Icon name="send" size={16} color={colors.white} />
                 <Text style={styles.execBtnText}>

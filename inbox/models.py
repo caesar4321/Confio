@@ -780,3 +780,37 @@ class PublicObject(models.Model):
 
     def __str__(self):
         return f'{self.bucket}/{self.key}: {self.state}'
+
+
+class CommunityBlock(models.Model):
+    """A member blocking another. Mutual invisibility in Comunidad: neither
+    sees the other's posts or comments, and they cannot mention or notify
+    each other. Only the blocker can undo it."""
+    blocker = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_blocks_made')
+    blocked = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_blocks_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['blocker', 'blocked'], name='inbox_community_block_uniq'),
+            models.CheckConstraint(condition=~Q(blocker=models.F('blocked')), name='inbox_community_block_not_self'),
+        ]
+
+    def __str__(self):
+        return f'{self.blocker_id} blocked {self.blocked_id}'
+
+
+class CommunityRulesAcceptance(models.Model):
+    """A member accepting a version of the Comunidad rules (Terms §11), required
+    before their first post, comment or profile picture under that version."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_rules_acceptances')
+    version = models.CharField(max_length=32)
+    accepted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'version'], name='inbox_community_rules_uniq'),
+        ]
+
+    def __str__(self):
+        return f'{self.user_id} accepted rules {self.version}'

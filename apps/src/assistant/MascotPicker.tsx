@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useMutation, useQuery } from '@apollo/client';
-import { launchImageLibrary } from 'react-native-image-picker';
+import { pickFromLibrary } from '../services/systemPicker';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text, TextInput } from '../components/common/AppText';
 import {
@@ -77,7 +77,7 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
     setError(null);
     let photo: { base64: string; type: string } | null = null;
     if (fromPhoto) {
-      const picked = await launchImageLibrary({
+      const picked = await pickFromLibrary({
         mediaType: 'photo',
         selectionLimit: 1,
         includeBase64: true,

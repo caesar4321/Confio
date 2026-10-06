@@ -30,6 +30,9 @@ import { useGmMarket, useGmHighlights, GmStock } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
+import { openTuMesNow, stockMonthGain, useStockMonthNow } from '../hooks/useStockMonthNow';
+import { signedUsd } from '../utils/monthSummary';
+import { useAccount } from '../contexts/AccountContext';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
@@ -41,6 +44,10 @@ export const StocksListScreen = () => {
   const { savings, stocks: myStocks, loading: portfolioLoading, refetch: refetchPortfolio } = useSavingsPortfolio();
   const { session, stocks, loading } = useGmMarket(myStocks.enabled);
   const highlights = useGmHighlights(myStocks.enabled);
+  // Tu mes is owners only (employees never see the month): no door to it.
+  const { activeAccount } = useAccount();
+  const canOpenMonth = !activeAccount?.isEmployee;
+  const monthGain = stockMonthGain(useStockMonthNow(canOpenMonth && myStocks.enabled && myStocks.totalUsd > 0));
   const [search, setSearch] = useState('');
 
   // Every row carries BOTH numbers with the app-wide hierarchy: the big
@@ -337,6 +344,24 @@ export const StocksListScreen = () => {
                   </View>
                 </View>
               )}
+              {/* The month's result net of what was put in lives in Tu mes
+                  ("Tus acciones"); this is the door to it. */}
+              {canOpenMonth && (
+              <TouchableOpacity
+                onPress={() => { void openTuMesNow(navigation); }}
+                style={styles.monthLink}
+                accessibilityRole="button"
+                accessibilityLabel={monthGain !== null
+                  ? `Este mes ${monthGain >= 0 ? 'ganaron' : 'perdieron'} ${Math.abs(monthGain).toFixed(2)} dólares. Ver tu mes`
+                  : 'Ver tu mes'}
+                testID="stocks-month-link"
+              >
+                <Text style={styles.monthLinkText}>
+                  {monthGain !== null ? `Este mes ${signedUsd(monthGain)} · ` : ''}Ver tu mes
+                </Text>
+                <Icon name="chevron-right" size={16} color={colors.white} />
+              </TouchableOpacity>
+              )}
             </View>
           )}
           <View style={styles.headerMetaRow}>
@@ -512,6 +537,8 @@ const styles = StyleSheet.create({
   sectionHeader: { paddingTop: 12, paddingBottom: 10 },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
   inviteHero: { marginTop: 14 },
+  monthLink: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 12, minHeight: 32 },
+  monthLinkText: { fontSize: 13, fontWeight: '700', color: colors.white, fontVariant: ['tabular-nums'] },
   inviteLink: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 10, alignSelf: 'flex-start' },
   inviteLinkText: { fontSize: 14, fontWeight: '700', color: colors.white, textDecorationLine: 'underline' },
   todayPill: {

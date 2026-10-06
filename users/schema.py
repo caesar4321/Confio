@@ -2677,12 +2677,12 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		# locked figures come from the DB and are still worth showing.
 		available = Decimal('0')
 		try:
-			from cusd_plus import vault as cusd_plus_vault
+			from blockchain.bsc_balance_service import BscBalanceService, to_amount
 			bsc_address = _breakdown_bsc_address(jwt_context, user)
-			token = getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', None)
-			if bsc_address and token:
-				raw = cusd_plus_vault.erc20_balance_raw(token, bsc_address)
-				available = Decimal(raw) / Decimal(10 ** 18)
+			if bsc_address:
+				# The stored balance (Postgres + Redis, re-read when stale).
+				raw = BscBalanceService.balances_raw(bsc_address).get('CONFIO_BSC', 0)
+				available = to_amount(raw)
 		except Exception:  # pylint: disable=broad-except
 			logger.warning("[confio_breakdown] BEP-20 read failed for user %s", user.id)
 
@@ -2872,8 +2872,10 @@ class UpdateUserProfile(graphene.Mutation):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return UpdateUserProfile(success=False, error="Authentication required", user=None)
 
-		# Check if user is verified - if so, don't allow name changes
-		if user.is_identity_verified:
+		# A verified person's name is the verified one: no changes after ANY
+		# verified personal document (an additional ID counts too), or a member
+		# could rename themselves on Comunidad bylines after verifying.
+		if user.is_identity_verified or user.has_verified_identity_document:
 			return UpdateUserProfile(success=False, error="No se puede modificar el nombre de un usuario verificado", user=None)
 
 		# Validate input

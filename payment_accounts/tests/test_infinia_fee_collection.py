@@ -94,6 +94,16 @@ class FeeCollectionTests(TestCase):
             with self.assertRaisesRegex(PolicyError, 'local_mint_request_required'):
                 self.policy([self.mint], request='generic_a0')
 
+    def test_a_generic_sweep_waits_while_the_pay_in_is_still_bridging(self):
+        # Any client version: its USDT can land before delivery is recorded.
+        self.journey.bridge.status = 'bridging'
+        self.journey.bridge.save()
+        for request in ('', None):
+            with self.subTest(request=request), self.assertRaisesRegex(PolicyError, 'local_arrival_in_flight'):
+                mint_policy_calls([self.mint], self.user, self.owner.bsc_address, request)
+        # A saga mint names its own conversion: never held by this.
+        self.assertEqual(mint_policy_calls([self.mint], self.user, self.owner.bsc_address, 'conv-1'), [self.mint])
+
     def test_only_confirmed_atomic_collection_reduces_received_amount(self):
         batch = self.batch(status='sent')
         journey = SimpleNamespace(direction='to_wallet', money_flow=self.journey.money_flow,

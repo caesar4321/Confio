@@ -78,8 +78,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { formatDecimal } from '../utils/numberLocale';
 import { formatMinorMoney } from '../utils/currencies';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
-const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
-const BALANCE_VISIBILITY_KEY = 'balance_visibility';
+import { BALANCE_VISIBILITY_KEY, loadSavedBalanceVisibility, PREFERENCES_KEYCHAIN_SERVICE } from '../utils/balanceVisibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
 const INVITE_TS_KEY = 'invite_banner_last_ts';
 
@@ -688,10 +687,8 @@ export const HomeScreen = () => {
     const server = String(PREFERENCES_KEYCHAIN_SERVICE);
     logBreadcrumb(`Home.loadBalanceVisibility | ${describeTypes({ server })}`);
     try {
-      const credentials = await Keychain.getInternetCredentials(server);
-      if (credentials && credentials.username === BALANCE_VISIBILITY_KEY) {
-        setShowBalance(credentials.password === 'true');
-      }
+      const saved = await loadSavedBalanceVisibility();
+      if (saved !== null) setShowBalance(saved);
     } catch (error) {
       // No saved preference, default to showing balance
       recordCrashError(error);
@@ -839,15 +836,12 @@ export const HomeScreen = () => {
   // something the user owns.
   const hasStockHoldings = savingsPortfolio.stocks.positions.length > 0
     || savingsPortfolio.stocks.totalUsd > 0;
-  // Names, not a count alone: "S&P 500 · NVIDIA" is yours; "2 posiciones"
-  // is a statement. Home stays calm — no day change here.
-  const stockHoldingsSummary = React.useMemo(() => {
-    const names = [...savingsPortfolio.stocks.positions]
-      .sort((a, b) => b.valueUsd - a.valueUsd)
-      .map(p => p.name);
-    if (names.length === 0) return 'Inversiones · Ondo';
-    return names.length <= 2 ? names.join(' · ') : `${names.slice(0, 2).join(' · ')} y ${names.length - 2} más`;
-  }, [savingsPortfolio.stocks.positions]);
+  // One short line like the other wallets (founder 2026-10-06): company
+  // names wrapped to three lines here; they live in the Invertir tab.
+  const stockCount = savingsPortfolio.stocks.positions.length;
+  const stockHoldingsSummary = stockCount === 0
+    ? 'Inversiones · Ondo'
+    : `${stockCount} ${stockCount === 1 ? 'acción' : 'acciones'}`;
   const primaryAction: 'send' | 'receive' =
     balancesLoaded && totalUSDValue < 0.01 ? 'receive' : 'send';
 
@@ -1706,10 +1700,9 @@ export const HomeScreen = () => {
                     <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
                       <StocksMark size={44} />
                     </View>
-                    {/* Nothing invested yet: an invitation, not a "$0.00"
-                        dead end. The balance slot holds no market data — it
-                        becomes an "Explorar" pill until there is money of
-                        the user's own to show there. */}
+                    {/* Nothing invested yet: the subtitle invites, the balance
+                        is a plain $0,00 like any wallet (the Invertir tab is
+                        the place to explore; no "Explorar" pill here). */}
                     <View style={styles.walletInfo}>
                       <Text style={styles.walletName}>Acciones de EE.UU.</Text>
                       <Text style={styles.walletSymbol}>
@@ -1717,17 +1710,11 @@ export const HomeScreen = () => {
                       </Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
-                      {hasStockHoldings ? (
-                        <Text style={styles.walletBalanceText}>
-                          {(canViewBalance && showBalance)
-                            ? `$${formatFixedFloor(savingsPortfolio.stocks.totalUsd, 2)}`
-                            : '••••'}
-                        </Text>
-                      ) : (
-                        <View style={styles.explorePill}>
-                          <Text style={styles.explorePillText}>Explorar</Text>
-                        </View>
-                      )}
+                      <Text style={styles.walletBalanceText}>
+                        {(canViewBalance && showBalance)
+                          ? `$${formatFixedFloor(savingsPortfolio.stocks.totalUsd, 2)}`
+                          : '••••'}
+                      </Text>
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>
                   </View>
@@ -1923,17 +1910,6 @@ const styles = StyleSheet.create({
     color: colors.white,
   },
   heroActionLabelFilled: {
-    color: colors.primaryDeep,
-  },
-  explorePill: {
-    backgroundColor: colors.primaryLight,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  explorePillText: {
-    fontSize: 13,
-    fontWeight: '700',
     color: colors.primaryDeep,
   },
   employeeWelcomeSlot: {

@@ -63,6 +63,9 @@ export type MainStackParamList = {
   DiscoverPostDetail: {
     contentItemId: number;
   };
+  CommunityCompose: { initialBody?: string } | undefined;
+  MyCommunityPosts: undefined;
+  BlockedMembers: undefined;
   CreateBusiness: undefined;
   EditBusiness: undefined;
   EditProfile: undefined;
@@ -312,10 +315,6 @@ export type MainStackParamList = {
   };
   PayrollRunsHistory: undefined;
   PayrollRun: undefined;
-  TransactionDetail: {
-    transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion' | 'ramp';
-    transactionData?: any; // You can make this more specific based on your data structure
-  };
   // "Tu mes": month summary and the movement lists behind each number
   MonthSummary: { year?: number; month?: number; masked?: boolean } | undefined;
   MonthMovements: {
@@ -325,6 +324,10 @@ export type MainStackParamList = {
     value?: string;
     title: string;
     masked?: boolean;
+  };
+  TransactionDetail: {
+    transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion' | 'ramp';
+    transactionData?: any; // You can make this more specific based on your data structure
   };
   TransactionProcessing: {
     transactionData: {

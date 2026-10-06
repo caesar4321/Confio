@@ -25,7 +25,7 @@ test('Back during success cannot approve the next queued purpose', async () => {
   const second = jest.fn();
   act(() => {
     void present('withdrawal').then(first);
-    void present('emergency_exit').then(second);
+    void present('on_ramp').then(second);
   });
   jest.mocked(runFaceCapture).mockResolvedValueOnce({ outcome: 'passed' });
   await act(async () => { await tree.root.findAllByType(Pressable)[0].props.onPress(); });
@@ -48,7 +48,7 @@ test('unmount settles active and queued callers without late success', async () 
   const second = jest.fn();
   act(() => {
     void present('withdrawal').then(first);
-    void present('emergency_exit').then(second);
+    void present('on_ramp').then(second);
   });
   await act(async () => { tree.unmount(); jest.advanceTimersByTime(2000); });
   expect(first).toHaveBeenCalledWith(false);

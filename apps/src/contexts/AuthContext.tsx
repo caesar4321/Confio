@@ -1,4 +1,5 @@
 import { isFaceCaptureRunning } from '../services/faceStepUp';
+import { isSystemPickerOpen } from '../services/systemPickerGuard';
 import React, { createContext, useContext, useState, useEffect, RefObject, useRef } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
 import { AuthService } from '../services/authService';
@@ -518,6 +519,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           resetAuthReady();
           setIsAuthenticated(false);
           setProfileData(null);
+          // A server-ended session is a sign-out too: the next person must
+          // not see this one's cached data.
+          void clearSignedOutCache();
           explainSessionEnded();
 
           // Navigate directly to Login screen (not phone verification)
@@ -565,6 +569,12 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         const currentCycle = appStateCycle;
         if (lastPromptedCycle === currentCycle) {
           return; // Already prompted for this resume cycle
+        }
+        // Back from the OS photo picker (a separate app): not "leaving
+        // Confío". Bounded by SYSTEM_PICKER_MAX_MS, after which it locks.
+        if (isSystemPickerOpen()) {
+          lastPromptedCycle = currentCycle;
+          return;
         }
         const sinceLastBiometric = Date.now() - lastBiometricSuccessRef.current;
         if (sinceLastBiometric < 5000) {
@@ -1214,6 +1224,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               resetAuthReady();
               setIsAuthenticated(false);
               setProfileData(null);
+              void clearSignedOutCache();
               explainSessionEnded();
               navigateToScreen('Auth');
               return;
@@ -1315,11 +1326,22 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     return true;
   };
 
+  // The next person to sign in on this phone must never see the last one's
+  // cached data (balances, history, unpublished posts). clearStore() also
+  // cancels in-flight queries and does not refetch.
+  const clearSignedOutCache = async () => {
+    try {
+      await apolloClient.clearStore();
+    } catch (error) {
+      console.error('Error clearing the Apollo cache on sign-out:', error);
+    }
+  };
+
   const signOut = async () => {
     // Resume can still be refreshing/persisting this account's tokens. Do not
     // let an account switch race that work and resurrect the old session.
     if (resumeAuthenticationRef.current) {
-      Alert.alert('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta. La salida de emergencia sigue disponible.');
+      Alert.alert('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta.');
       return;
     }
     setIsLocked(false);
@@ -1327,11 +1349,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       resetAuthReady();
       const authService = AuthService.getInstance();
       await authService.signOut();
+      await clearSignedOutCache();
       setIsAuthenticated(false);
       setProfileData(null);
       navigateToScreen('Auth');
     } catch (error) {
       console.error('Error signing out:', error);
+      await clearSignedOutCache();
       resetAuthReady();
       setIsAuthenticated(false);
       setProfileData(null);

@@ -110,6 +110,9 @@ import PayrollRecipientsManageScreen from '../screens/PayrollRecipientsManageScr
 import PayrollDelegatesManageScreen from '../screens/PayrollDelegatesManageScreen';
 import MessageScreen from '../screens/MessageScreen';
 import DiscoverPostDetailScreen from '../screens/DiscoverPostDetailScreen';
+import CommunityComposeScreen from '../screens/CommunityComposeScreen';
+import MyCommunityPostsScreen from '../screens/MyCommunityPostsScreen';
+import BlockedMembersScreen from '../screens/BlockedMembersScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 
 import { MigrationModal } from '../components/MigrationModal';
@@ -204,6 +207,27 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="DiscoverPostDetail"
           component={DiscoverPostDetailScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="CommunityCompose"
+          component={CommunityComposeScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="MyCommunityPosts"
+          component={MyCommunityPostsScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="BlockedMembers"
+          component={BlockedMembersScreen}
           options={{
             headerShown: false,
           }}

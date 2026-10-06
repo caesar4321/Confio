@@ -4,12 +4,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   Easing,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  StatusBar,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -25,17 +28,21 @@ import { GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/que
 import { MessageInboxContent } from '../components/MessageInboxContent';
 import { ChannelAvatar } from '../components/MessageInboxShared';
 import {
+  ANSWER_ASSISTANT_PROBE,
   ASK_ASSISTANT,
   GET_ASSISTANT_PLAN,
+  GET_ASSISTANT_SUGGESTIONS,
   GET_ASSISTANT_THREAD,
   RETURN_TO_ASSISTANT,
   type AssistantAction,
   type AssistantMessage,
+  type AssistantProbe,
   type AssistantProfile,
+  type AssistantSuggestion,
 } from './api';
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
-import { DESTINATION_LABELS, isKnownDestination, openDestination } from './destinations';
+import { openDestination, resolveNavigate } from './destinations';
 import MascotPicker from './MascotPicker';
 import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
@@ -59,6 +66,9 @@ const STARTERS = [
   '¿Cómo invierto en acciones?',
 ];
 
+// Wake-word recordings stop after this and are discarded unless sent by tap.
+const WAKE_RECORDING_MS = 15_000;
+
 function deviceTimezone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -72,21 +82,26 @@ function formatClock(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function ActionChips({ actions, onPress }: { actions: AssistantAction[]; onPress: (key: string) => void }) {
-  const known = actions.filter((a) => a.type === 'navigate' && isKnownDestination(a.destination));
+type OpenTarget = { key: string; ticker?: string; label: string };
+
+function ActionChips({ actions, onPress }: { actions: AssistantAction[]; onPress: (target: OpenTarget) => void }) {
+  const known = actions
+    .filter((a) => a.type === 'navigate')
+    .map(resolveNavigate)
+    .filter((t): t is OpenTarget => t !== null);
   if (!known.length) {
     return null;
   }
   return (
     <View style={styles.chipsRow}>
-      {known.map((a) => (
+      {known.map((t) => (
         <Pressable
-          key={a.destination!}
-          onPress={() => onPress(a.destination!)}
+          key={`${t.key}:${t.ticker ?? ''}`}
+          onPress={() => onPress(t)}
           style={styles.actionChip}
           accessibilityRole="button"
         >
-          <Text style={styles.actionChipText}>{DESTINATION_LABELS[a.destination!]}</Text>
+          <Text style={styles.actionChipText}>{t.label}</Text>
           <Icon name="arrow-up-right" size={14} color={EMERALD} />
         </Pressable>
       ))}
@@ -125,7 +140,7 @@ function TypingDots() {
   );
 }
 
-function Bubble({ message, onAction, pet }: { message: AssistantMessage; onAction: (key: string) => void; pet: PetFace }) {
+function Bubble({ message, onAction, pet }: { message: AssistantMessage; onAction: (target: OpenTarget) => void; pet: PetFace }) {
   const mine = message.role === 'user';
   const team = message.role === 'team';
   const ai = message.role === 'assistant';
@@ -162,7 +177,7 @@ export default function AssistantSheet() {
     isOpen, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel, consumeVoiceNote,
     consumeVoiceNoteData, openSeq, route, plan,
     setPlan, available,
-    aiEnabled, bubbleAnchor,
+    aiEnabled, bubbleAnchor, showNavNote, consumeProbe,
   } = useAssistant();
   // Which chat head is open: Confio Assistant, Julian or Confío News.
   const [channel, setChannel] = useState<BoxChannel>('ia');
@@ -170,6 +185,12 @@ export default function AssistantSheet() {
   // the previous visit's channel.
   const [channelReady, setChannelReady] = useState(false);
   const channelRef = useRef<BoxChannel>('ia');
+  // The visit a reply belongs to: an answer may only move the app while the
+  // box is still open on Confio Assistant in that same opening.
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
+  const openSeqRef = useRef(openSeq);
+  openSeqRef.current = openSeq;
   const wakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const call = useCall();
   const callLive = call.state !== 'idle' && call.state !== 'ended';
@@ -179,6 +200,9 @@ export default function AssistantSheet() {
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [sentThisOpen, setSentThisOpen] = useState(false);
+  // The server's one-time question, asked when this opening was for it (or it's pending).
+  const [askOther, setAskOther] = useState(false);
   const [mode, setMode] = useState<'AI' | 'HUMAN'>('AI');
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
@@ -275,6 +299,10 @@ export default function AssistantSheet() {
       stopRecordingNow();
       return;
     }
+    // Suggestions come back on every opening, not only in an empty thread.
+    setSentThisOpen(false);
+    setAskOther(false);
+    consumeProbe();
     const requested = consumeChannel();
     setChannel(requested ?? 'ia');
     setChannelReady(true);
@@ -293,7 +321,7 @@ export default function AssistantSheet() {
       wakeTimer.current = setTimeout(() => {
         wakeTimer.current = null;
         if (recordingMs === null && channelRef.current === 'ia') {
-          void toggleRecording();
+          void toggleRecording({ fromWake: true });
         }
       }, 400);
       return () => {
@@ -357,14 +385,14 @@ export default function AssistantSheet() {
   );
 
   const runAction = useCallback(
-    (key: string) => {
+    ({ key, ticker }: { key: string; ticker?: string }) => {
       if (key === 'messages') {
         // Mensajes lives here: show Julian's channel instead of leaving.
         setChannel('julian');
         return;
       }
       close();
-      setTimeout(() => openDestination(key, { isBusiness }), 250);
+      setTimeout(() => openDestination(key, { isBusiness, ticker }), 250);
     },
     [close, isBusiness],
   );
@@ -376,6 +404,8 @@ export default function AssistantSheet() {
         return;
       }
       setError(null);
+      setSentThisOpen(true);
+      const visit = openSeqRef.current;
       const tempId = `pending-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
@@ -429,13 +459,21 @@ export default function AssistantSheet() {
           setTimeout(() => setSpeaking(false), 1600);
         }
         // "Confío, abre QR para pagar": the answer moves the app.
-        const navigateTo = (payload.actions as AssistantAction[]).find(
-          (a) => a.type === 'navigate' && isKnownDestination(a.destination),
-        );
-        if (navigateTo?.destination) {
+        const navigateTo = (payload.actions as AssistantAction[])
+          .filter((a) => a.type === 'navigate')
+          .map(resolveNavigate)
+          .find((t) => t !== null);
+        if (navigateTo) {
           setTimeout(() => {
-            if (gen === accountGen.current) {
-              runAction(navigateTo.destination!);
+            // Closed, switched channel or reopened since asking: leave the
+            // chip in the thread (a tap still works) instead of moving the app.
+            if (gen === accountGen.current && isOpenRef.current && channelRef.current === 'ia'
+                && openSeqRef.current === visit) {
+              runAction(navigateTo);
+              const replyText = payload.reply?.body;
+              if (typeof replyText === 'string' && replyText.trim() && navigateTo.key !== 'messages') {
+                showNavNote(replyText);
+              }
             }
           }, 900);
         }
@@ -446,7 +484,7 @@ export default function AssistantSheet() {
         setThinking(false);
       }
     },
-    [ask, route, runAction, thinking],
+    [ask, route, runAction, thinking, showNavNote],
   );
 
   useEffect(() => {
@@ -508,6 +546,20 @@ export default function AssistantSheet() {
     setRecordingMs(null);
     void cancelVoiceNote();
   };
+  // Going to the background stops (never sends) a recording in progress.
+  // Only a running recording: the mic permission prompt itself makes the app
+  // inactive (iOS) and must not cancel the start it is asking for.
+  const recordingRef = useRef(false);
+  recordingRef.current = recordingMs !== null;
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background' && recordingRef.current) {
+        stopRecordingNow();
+      }
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Leaving the signed-in app (sign-out) must never leave the mic on.
   const mountedRef = useRef(true);
   useEffect(() => () => {
@@ -534,7 +586,7 @@ export default function AssistantSheet() {
     }
   }, [send]);
 
-  const toggleRecording = async () => {
+  const toggleRecording = async (opts: { fromWake?: boolean } = {}) => {
     if (recordingMs !== null) {
       await finishRecording();
       return;
@@ -549,7 +601,14 @@ export default function AssistantSheet() {
       }
       recordGen.current = genAtStart;
       setRecordingMs(0);
-      autoStopTimer.current = setTimeout(() => void finishRecording(), MAX_VOICE_NOTE_MS);
+      autoStopTimer.current = opts.fromWake
+        // Nobody tapped anything: a wake-word recording is short and is only
+        // sent if the person taps Enviar (a false trigger never uploads).
+        ? setTimeout(() => {
+          stopRecordingNow();
+          setError('Dejé de escuchar. Toca el micrófono para mandarme un audio.');
+        }, WAKE_RECORDING_MS)
+        : setTimeout(() => void finishRecording(), MAX_VOICE_NOTE_MS);
     } catch {
       setError('No pude usar el micrófono.');
     }
@@ -618,12 +677,41 @@ export default function AssistantSheet() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  const anchor = bubbleAnchor ?? { x: screenW - 62 - 12, y: screenH - insets.bottom - 62 - 76, size: 62 };
-  const below = anchor.y < screenH / 2; // bubble high on screen: open downward
+  // Android: with the keyboard up, sit right on top of it. The modal window may
+  // already have shrunk (adjustResize) and the bubble may have moved too, so
+  // anchoring to the bubble would lift the box twice; measure instead.
+  const [modalH, setModalH] = useState(0);
+  const [kbTop, setKbTop] = useState<number | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return undefined;
+    }
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setKbTop(e.endCoordinates.screenY));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbTop(null));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  // The modal is statusBarTranslucent (origin = top of the screen). Below
+  // Android 15 the app window is not edge-to-edge: it starts under the status
+  // bar, insets.top is 0 and the bubble's anchor is measured from there, so
+  // shift it into screen coordinates and keep the card clear of the bar.
+  const statusShift = Platform.OS === 'android' && Number(Platform.Version) < 35 ? (StatusBar.currentHeight ?? 0) : 0;
+  const topSafe = Math.max(insets.top, statusShift);
+  const boxH = modalH || screenH;
+  const keyboardArea = Platform.OS === 'android' && kbTop !== null && modalH > 0
+    ? { top: topSafe + 12, bottom: Math.max(8, modalH - kbTop + 8) }
+    : null;
+
+  const anchor = bubbleAnchor
+    ? { ...bubbleAnchor, y: bubbleAnchor.y + statusShift }
+    : { x: screenW - 62 - 12, y: boxH - insets.bottom - 62 - 76, size: 62 };
+  const below = anchor.y < boxH / 2; // bubble high on screen: open downward
   const gap = 14;
-  const area = below
+  const area = keyboardArea ?? (below
     ? { top: anchor.y + anchor.size + gap, bottom: Math.max(insets.bottom, 10) + 6 }
-    : { top: insets.top + 12, bottom: screenH - anchor.y + gap };
+    : { top: topSafe + 12, bottom: boxH - anchor.y + gap });
   const tailLeft = Math.min(Math.max(anchor.x + anchor.size / 2 - 9, 28), screenW - 46);
   const tailTop = below ? anchor.y + anchor.size + gap - 9 : anchor.y - gap - 9;
   const lift = progress.interpolate({ inputRange: [0, 1], outputRange: [below ? -28 : 28, 0] });
@@ -631,11 +719,58 @@ export default function AssistantSheet() {
 
   const mood: MascotMood = recordingMs !== null ? 'listening' : thinking ? 'thinking' : speaking ? 'talking' : 'idle';
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
-  const showStarters = aiEnabled && !thinking && messages.filter((m) => m.role === 'user').length === 0;
+  // Chips and the one-time question, ranked on the server for this person;
+  // the built-in STARTERS stay as the fallback (older server, offline).
+  const { data: suggestionData, refetch: refetchSuggestions } = useQuery(GET_ASSISTANT_SUGGESTIONS, {
+    variables: { screen: route ?? null, contextKey: activeAccount?.id || 'no-account' },
+    skip: !isOpen || !aiEnabled,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'ignore',
+  });
+  const serverStarters: AssistantSuggestion[] | undefined = suggestionData?.assistantSuggestions?.starters
+    ?.filter((s: AssistantSuggestion) => s.kind === 'prompt');
+  const starters: AssistantSuggestion[] = serverStarters?.length
+    ? serverStarters
+    : STARTERS.map((text) => ({ id: text, text, prompt: text, kind: 'prompt' }));
+  const probe: AssistantProbe | null = suggestionData?.assistantSuggestions?.probe ?? null;
+  const [answerProbeMutation] = useMutation(ANSWER_ASSISTANT_PROBE);
+  const answeringProbe = useRef(false);
+  const answerProbe = async (current: AssistantProbe, key: string) => {
+    if (answeringProbe.current) {
+      return; // one answer per question, even on a fast double tap
+    }
+    answeringProbe.current = true;
+    const gen = accountGen.current;
+    let label: string | null | undefined;
+    try {
+      const { data } = await answerProbeMutation({ variables: { probeId: current.id, answer: key } });
+      label = data?.answerAssistantProbe?.success ? data.answerAssistantProbe.label : null;
+    } catch {
+      label = null;
+    }
+    // Always release the guard, whatever happened meanwhile.
+    void refetchSuggestions().catch(() => {}).finally(() => {
+      answeringProbe.current = false;
+    });
+    if (gen !== accountGen.current) {
+      return; // the account changed: don't send into the new account's chat
+    }
+    if (key === 'other') {
+      setAskOther(true); // the next message they type is the answer
+    } else if (label) {
+      void send({ body: label }); // the assistant takes it from there
+    }
+  };
+
+  // AI mode only: in a handed-off thread a chip would send a canned prompt to the team.
+  const showStarters = aiEnabled && mode === 'AI' && !thinking && !sentThisOpen && !(loading && !messages.length);
   const petName = profile?.mascotName?.trim();
 
+  // statusBarTranslucent: modal coordinates = screen coordinates, so the
+  // keyboard top (screen-absolute) and insets.top line up on Android.
   return (
-    <Modal visible={shown} animationType="none" transparent onRequestClose={close}>
+    <Modal visible={shown} animationType="none" transparent statusBarTranslucent onRequestClose={close}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none" onLayout={(e) => setModalH(e.nativeEvent.layout.height)} />
       <Animated.View style={[styles.scrim, { opacity: progress }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Cerrar mensajes" />
       </Animated.View>
@@ -769,7 +904,34 @@ export default function AssistantSheet() {
             windowSize={21}
             keyboardShouldPersistTaps="handled"
             ListHeaderComponent={
-              thinking ? (
+              // The chips sit under the last message (the list is inverted)
+              // and scroll with it, so they never cover the conversation.
+              showStarters ? (
+                <View style={styles.starters}>
+                  {profile?.mascot !== 'CUSTOM' ? (
+                  <Pressable style={[styles.starter, styles.starterPet]} onPress={() => setPickerOpen(true)}>
+                    <Text style={styles.starterPetText}>✨ Personaliza a tu asistente</Text>
+                  </Pressable>
+                ) : null}
+                {probe ? (
+                  <View style={styles.probe}>
+                    <Text style={styles.probeQuestion}>{probe.question}</Text>
+                    <View style={styles.probeAnswers}>
+                      {probe.answers.map((a) => (
+                        <Pressable key={a.key} style={styles.starter} onPress={() => void answerProbe(probe, a.key)}
+                          accessibilityRole="button">
+                          <Text style={styles.starterText}>{a.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : starters.map((s) => (
+                    <Pressable key={s.id} style={styles.starter} onPress={() => void send({ body: s.prompt || s.text })}>
+                      <Text style={styles.starterText}>{s.text}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : thinking ? (
                 <View style={styles.messageRow}>
                   <View style={styles.msgAvatar}>
                     <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
@@ -787,21 +949,6 @@ export default function AssistantSheet() {
               ) : null
             }
           />
-
-          {showStarters ? (
-            <View style={styles.starters}>
-              {profile?.mascot !== 'CUSTOM' ? (
-              <Pressable style={[styles.starter, styles.starterPet]} onPress={() => setPickerOpen(true)}>
-                <Text style={styles.starterPetText}>✨ Personaliza a tu asistente</Text>
-              </Pressable>
-            ) : null}
-            {STARTERS.map((s) => (
-                <Pressable key={s} style={styles.starter} onPress={() => void send({ body: s })}>
-                  <Text style={styles.starterText}>{s}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -824,7 +971,8 @@ export default function AssistantSheet() {
                 style={styles.input}
                 value={draft}
                 onChangeText={setDraft}
-                placeholder={isVoiceNoteAvailable ? 'Escríbeme o mándame un audio' : 'Escríbeme'}
+                placeholder={askOther ? 'Cuéntame para qué te gustaría usarlo'
+                  : isVoiceNoteAvailable ? 'Escríbeme o mándame un audio' : 'Escríbeme'}
                 placeholderTextColor="#9CA3AF"
                 multiline
                 maxLength={2000}
@@ -841,7 +989,7 @@ export default function AssistantSheet() {
                 </Pressable>
               ) : (
                 <Pressable
-                  onPress={toggleRecording}
+                  onPress={() => void toggleRecording()}
                   style={[styles.sendButton, thinking && styles.disabled]}
                   disabled={thinking}
                   accessibilityLabel="Grabar audio"
@@ -864,10 +1012,13 @@ export default function AssistantSheet() {
       </KeyboardAvoidingView>
 
       {/* The tail and the bubble itself tie the box to where it came from. */}
+      {keyboardArea ? null : (
       <Animated.View
         pointerEvents="none"
         style={[styles.tail, below ? styles.tailUp : styles.tailDown, { left: tailLeft, top: tailTop, opacity: progress }]}
       />
+      )}
+      {keyboardArea ? null : (
       <Animated.View
         style={[styles.anchor, { left: anchor.x, top: anchor.y, opacity: progress, transform: [{ scale: grow }] }]}
       >
@@ -883,6 +1034,7 @@ export default function AssistantSheet() {
           </View>
         </Pressable>
       </Animated.View>
+      )}
 
       <MascotPicker
         visible={pickerOpen}
@@ -1076,7 +1228,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   actionChipText: { fontSize: 13, fontWeight: '600', color: EMERALD },
-  starters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 14, paddingBottom: 8 },
+  starters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4, paddingBottom: 4 },
   starter: {
     borderWidth: 1,
     borderColor: '#E5E7EB',
@@ -1085,6 +1237,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   starterText: { fontSize: 13, color: '#374151' },
+  probe: { width: '100%', gap: 8 },
+  probeQuestion: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  probeAnswers: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   error: { color: '#B91C1C', fontSize: 13, paddingHorizontal: 16, paddingBottom: 6 },
   composer: {
     flexDirection: 'row',

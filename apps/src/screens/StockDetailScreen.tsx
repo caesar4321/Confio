@@ -9,6 +9,7 @@
 
 import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   StyleSheet,
   TouchableOpacity,
@@ -50,8 +51,8 @@ export const StockDetailScreen = () => {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<DetailRoute>();
   const { formatNumber } = useNumberFormat();
-  const { savings, stocks: stockHoldings } = useSavingsPortfolio();
-  const { byTicker, tradabilityFor } = useGmMarket(stockHoldings.enabled);
+  const { savings, stocks: stockHoldings, loading: portfolioLoading } = useSavingsPortfolio();
+  const { byTicker, tradabilityFor, loading: marketLoading } = useGmMarket(stockHoldings.enabled);
 
   const stock = byTicker(route.params.ticker);
   const position = stockHoldings.positions.find((p) => p.ticker === route.params.ticker);
@@ -96,6 +97,16 @@ export const StockDetailScreen = () => {
       })
       .join(' ');
   }, [series]);
+
+  // Opened directly (e.g. by Confio Assistant) the market may still be
+  // loading: wait for it instead of saying "no disponibles".
+  if (!stock && (portfolioLoading || (stockHoldings.enabled && marketLoading))) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator color={colors.primaryDark} />
+      </View>
+    );
+  }
 
   if (!stockHoldings.enabled || !stock) {
     return (

@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from notifications.models import NotificationType as NotificationTypeChoices
 from notifications.utils import create_notification
-from security.models import IdentityVerification, normalize_brazilian_cpf
+from security.models import PASSED_KYC, IdentityVerification, normalize_brazilian_cpf
 from users.models import Business
 
 logger = logging.getLogger(__name__)
@@ -1151,6 +1151,14 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
     }
 
 
+# Didit statuses we store as 'expired'; the precise reason stays readable as
+# IdentityVerification.expired_reason. "Expired": the session timed out with
+# nothing submitted. "Abandoned": left mid-flow. "Kyc Expired": the identity
+# document's validity date passed (the person must verify again).
+DIDIT_DEAD_SESSION_STATUSES = {'expired', 'abandoned'}
+DIDIT_DOCUMENT_EXPIRED_STATUSES = {'kyc expired'}
+
+
 def _map_didit_status(response_payload: dict[str, Any]) -> str:
     raw_status = str(
         _first_non_empty(
@@ -1164,6 +1172,11 @@ def _map_didit_status(response_payload: dict[str, Any]) -> str:
         return 'verified'
     if raw_status in {'declined', 'rejected', 'failed', 'denied'}:
         return 'rejected'
+    if raw_status in DIDIT_DEAD_SESSION_STATUSES | DIDIT_DOCUMENT_EXPIRED_STATUSES:
+        # Nothing is in review and the person has to verify again. 'pending'
+        # made the app say "Estamos revisando tu documento" for dead sessions
+        # and for approvals whose document had expired.
+        return 'expired'
     return 'pending'
 
 
@@ -1508,7 +1521,9 @@ def retry_pending_same_face() -> int:
 def _anchor_for(verification: IdentityVerification) -> IdentityVerification | None:
     from django.db.models import Q
     return (
-        IdentityVerification.all_documents.filter(user=verification.user, status='verified')
+        # A document that was verified and then expired still names the
+        # person: re-verifying after expiry must be the same person.
+        IdentityVerification.all_documents.filter(user=verification.user).filter(PASSED_KYC)
         .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
         .exclude(pk=verification.pk)
         # The personal copy a company verification creates (security.models

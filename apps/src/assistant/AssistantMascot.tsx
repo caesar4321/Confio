@@ -256,7 +256,21 @@ function BuiltInMascot({ kind = 'CONFI', color, size = 56, mood = 'idle', animat
   );
 }
 
+// The signed URL's query changes on every refresh, but each pet image has its
+// own path. Keep showing the URL already loaded while the path is the same, so
+// a re-signed URL doesn't blank the photo; switch when the pet changes, or when
+// the old URL stops loading (expired).
+const imagePath = (url: string) => url.split('?')[0];
+
 function CustomPetMascot({ imageUrl, size, mood, animated }: { imageUrl: string; size: number; mood: MascotMood; animated: boolean }) {
+  const [shownUrl, setShownUrl] = useState(imageUrl);
+  // The current URL itself failed (expired, or the image is gone): show Confi
+  // rather than an empty circle until a new URL arrives.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+    setShownUrl((current) => (imagePath(current) === imagePath(imageUrl) ? current : imageUrl));
+  }, [imageUrl]);
   const lift = useSharedValue(0);
   const scale = useSharedValue(1);
   const tilt = useSharedValue(0);
@@ -300,13 +314,23 @@ function CustomPetMascot({ imageUrl, size, mood, animated }: { imageUrl: string;
     ],
   }));
 
+  if (failed) {
+    return <BuiltInMascot size={size} mood={mood} animated={animated} />;
+  }
   return (
     <View style={{ width: size, height: size }} accessible={false}>
       <Animated.View style={style}>
         <Image
-          source={{ uri: imageUrl }}
+          source={{ uri: shownUrl }}
           style={{ width: size, height: size, borderRadius: size / 2 }}
           resizeMode="cover"
+          onError={() => {
+            if (shownUrl === imageUrl) {
+              setFailed(true);
+            } else {
+              setShownUrl(imageUrl);
+            }
+          }}
         />
       </Animated.View>
     </View>

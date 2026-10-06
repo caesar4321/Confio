@@ -39,7 +39,6 @@ type Stage = 'intro' | 'capturing' | 'grading' | 'passed' | 'failed' | 'unavaila
 const PURPOSE_COPY: Record<FaceCheckPurpose, string> = {
   on_ramp: 'Antes de crear tu recarga, confirma con tu rostro que eres tú.',
   withdrawal: 'Solo tú puedes mover tu dinero. Confirma con tu rostro para continuar.',
-  emergency_exit: 'Para proteger tu salida de emergencia, confirma con tu rostro que eres tú.',
   payin_release: 'Tienes dinero por recibir. Confirma con tu rostro que eres tú para recibirlo.',
   payroll_authority: 'Vas a autorizar pagos de nómina en nombre de tu negocio. Confirma con tu rostro que eres tú.',
 };

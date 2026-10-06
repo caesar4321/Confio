@@ -327,12 +327,15 @@ class GmApiTradingTests(SimpleTestCase):
              self.assertRaisesRegex(RuntimeError, 'malformed addresses'):
             gm_holdings.audit_registry()
 
-    def test_fresh_holdings_cache_skips_registry_lookup(self):
+    def test_fresh_stored_holdings_skip_the_chain_scan(self):
+        from django.utils import timezone
         holder = '0x' + '77' * 20
-        cache.set(f'gm_hold:{holder}', {'TSLAon': 1.0}, 30)
-        with mock.patch('cusd_plus.gm_holdings.registry') as registry:
+        row = SimpleNamespace(held={'TSLAon': 1.0}, blocks={}, is_stale=False, scanned_at=timezone.now())
+        with mock.patch('cusd_plus.gm_holdings._stored', return_value=row), \
+                mock.patch('cusd_plus.gm_holdings.registry', return_value={'TSLAon': {}}), \
+                mock.patch('cusd_plus.gm_holdings._scan') as scan:
             self.assertEqual(gm_holdings.holdings_units(holder), {'TSLAon': 1.0})
-        registry.assert_not_called()
+        scan.assert_not_called()
 
     def test_asset_description_is_served_per_ticker(self):
         info = SimpleNamespace(context=SimpleNamespace(

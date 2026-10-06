@@ -280,6 +280,10 @@ def confirm_bsc_invite_claim(self, invite_id: int, tx_hash: str):
     if stx is not None:
         stx.invitation_claimed = True
         stx.save(update_fields=['invitation_claimed', 'updated_at'])
+    # A KMS claim, not a sponsored batch: the receipt hook never sees it.
+    # The invitee's stored balance (from the receipt's Transfer) is stale.
+    from cusd_plus.tasks import _mark_receipt_balances_stale
+    _mark_receipt_balances_stale('', receipt)
     logger.info('[INVITE][BSC] invite %s claimed: %s', invite.pk, tx_hash)
 
 

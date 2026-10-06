@@ -9,6 +9,126 @@ longer one half of a pair (§ «Rejected: raw key export»)
 «Rejected: raw key export» below). Salida de emergencia is now the *only*
 survivability path, not the mass-market half of a pair.
 
+## Phase 3: on-chain heartbeat is the only trigger (2026-10-05) — SUPERSEDES
+
+Decided by Julian on 2026-10-05. **This section overrides every timing
+matrix, route and principle below.** The older sections stay for history.
+
+**Why.** Users cannot reach their keys (Drive appDataFolder and the team
+keychain are readable only by Confío's signed app), so a ban plus the relay
+refusing to sign is a real freeze, and Emergency Exit was the only way around
+it. A provider fraud report (money mules, 2026-09) needs that
+freeze to hold until a local authority acts. The narrative is "if Confío
+fails, your money doesn't die with it", not "Confío can never stop you".
+
+**The rule.** Emergency Exit is available to every user only once
+`ConfioHeartbeat` has had no beat for 14 days (`silenceRequired`). Nothing
+else opens it:
+
+- no ban route, no Confío Face, no device attestation for the exit;
+- no normal-state exit or cooloff of any length;
+- no client-judged outage (Confío domain probes, the Cloudflare outage
+  Worker, the phone's local 72h rule).
+
+**Enforced on-chain, atomically.** The exit is one self-signed BSC
+transaction to the user's own EOA through `ConfioBatchDelegate.execute`, and
+its first call is `ConfioHeartbeat.assertSilent()`. While Confío beats, the
+whole batch reverts on-chain, whatever RPC, DNS or server state the phone
+saw. A beat that lands before the exit reverts it too. Users whose EOA is
+not yet delegated include the 7702 authorization in the same (type-4)
+transaction.
+
+**Contract** (`contracts/cusd_plus/ConfioHeartbeat.sol`, tests
+`test/ConfioHeartbeat.t.sol`): UUPS proxy owned by the BSC Safe, same
+pattern as the vaults, upgradeable on purpose (fixing it too early is the
+bigger risk). `beater` (KMS signer) posts `beat()`; the owner can rotate the
+beater and change `silenceRequired` within [1 day, 365 days] — the change is
+retroactive, so beat right before lowering it; a fresh deploy counts as a
+beat; renounce disabled; an uninitialized address (the bare implementation)
+fails closed (`NotInitialized`). Two Claude audit rounds, the second clean.
+Deploy only with `script/DeployConfioHeartbeat.s.sol` (proxy + initialize in
+one transaction, so initialize cannot be front-run).
+
+**Fail-open guard in the app.** The delegate treats any successful call as a
+pass, and a codeless address always succeeds. So the app bundles the PROXY
+address and refuses to call the exit open unless that address has code,
+`beater()` is non-zero and `silenceRequired()` is non-zero
+(`emergencyExit/heartbeat.ts`). The owner is deliberately NOT pinned: a Safe
+rotation would otherwise close every shipped build's exit for good. The gate
+primitive (`gatedTx.ts`) re-checks all of this itself before every send.
+
+**Banned users.** BlockedAccountScreen is where a banned user's app always
+opens, and after Confío dies nothing can clear their ban flag. So that screen
+reads the heartbeat and shows the exit entry ONLY when the chain says it is
+open; while Confío beats, the ban keeps the funds frozen.
+
+**As built (2026-10-05, uncommitted):**
+- App: `heartbeat.ts` (read state from public RPCs), `gatedTx.ts` (every
+  exit send = `execute([assertSilent(), leg])` to the user's own address;
+  type-4 with a self-sponsored authorization when not delegated; a status-1
+  receipt without `BatchExecuted` is never a success), `bscExit.ts` (pre-flight
+  `assertExitOpen`, every leg gated, a closed-gate revert stops the exit with
+  no fallback), `evmWallet.ts` (`encodeExecuteCalldata`,
+  `signSetCodeTransaction` — byte-identical to eth_abi/eth_account), the
+  screen (closed: signal card, how it works, how to prepare; open: the
+  4-step wizard), BlockedAccountScreen (no exit button; funds stay frozen).
+- Backend: `cusd_plus/heartbeat.py` — `post_confio_heartbeat` daily 14:40 UTC
+  (health gate: DB + RPC; signer must equal on-chain `beater()`; success
+  requires a `Beat` log from the heartbeat contract) and
+  `check_confio_heartbeat` hourly (CRITICAL log when the chain shows no beat
+  for 26h; ERROR when the beater's BNB is low). Settings
+  `CONFIO_HEARTBEAT_*`; empty address = both no-op.
+- Removed: server ban route (`security/emergency_exit.py`, views, URLs),
+  `workers/outage-status`, reachability/outage/Face/Algorand exit modules.
+
+**Open items.**
+- Alerts page the team Telegram group (where Confio Brain lives) through a
+  dedicated bot, never Brain's own user session (a second Telethon client
+  kills its listener): `config/ops_alerts.py` from the Celery monitor (stale
+  hourly + "recovered", low beater BNB, chain unreadable, beat failed after
+  every retry) and an outside watchdog, `.github/workflows/heartbeat-watchdog.yml`
+  + `scripts/ops/heartbeat_watchdog.py`, hourly from GitHub so a dead
+  backend still pages. Setup: create the bot, add it to the group, store
+  `prod/ops-alert-telegram` = {"bot_token","chat_id"} in Secrets Manager,
+  and the repo secrets OPS_ALERT_TELEGRAM_BOT_TOKEN / _CHAT_ID + repo
+  variable CONFIO_HEARTBEAT_ADDRESS. GitHub disables scheduled workflows in
+  public repos after 60 days without activity.
+- Old app builds keep their old exit logic. With the server ban route gone,
+  a banned user on an old build gets no immediate exit; but the old client's
+  local waiting-period route (72h, then a second 72h when Face cannot run)
+  still opens without the server — and with the outage Worker gone, an old
+  build that cannot reach Confío falls back to its local 72h outage rule.
+  That residual lasts until those builds are gone; only the new gated exit is
+  enforced on-chain.
+
+**Algorand.** Removed from the exit (option a). An Algorand group cannot
+read the BSC heartbeat and Algorand gets no new work; Algorand balances move
+only through the app's normal flows.
+
+**Work list.**
+
+1. Contract: audit, deploy the proxy, record it in `DEPLOYMENT.md`. Bundle
+   the proxy address in the app (`bscExit.ts`, alongside the vault address).
+2. Heartbeat job: Celery beat task signing `beat()` with the KMS beater,
+   daily. Alert after ~24h without a beat on chain — a silent failure for 14
+   days opens every exit, frozen accounts included.
+3. App: `bscExit.ts` sends the whole exit as one `execute` batch with
+   `assertSilent()` first (today it is a sequence of separate transactions);
+   the screen reads `opensAt()` / `isSilent()` from chain to show state;
+   remove `algorandExit.ts` from the pipeline.
+4. Delete: `workers/outage-status`, `outageStatus.ts`,
+   `outageStatusConfig.ts`, the Confío probes and outage state machine in
+   `reachability.ts`, `emergencyFace.ts`, the ban route
+   (`security/emergency_exit.py`, `security/emergency_views.py`, its URLs and
+   tests), and BlockedAccountScreen's «Retirar mi dinero» entry.
+   BlockedAccountScreen keeps the support contact only.
+5. Copy: no "sin pedir permiso a Confío". The claim is that the app lets you
+   move your money to another wallet if Confío stops operating, after 14
+   days.
+6. Disaster drill on BSC testnet/fork: stop beats, warp/wait past
+   `silenceRequired`, run the full exit, and confirm it reverts after a late
+   beat.
+
 ## What this is
 
 A mass-market escape hatch in each account's **Seguridad** tab: move the

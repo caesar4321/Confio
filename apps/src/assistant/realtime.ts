@@ -15,7 +15,7 @@ import {
   RUN_ASSISTANT_VOICE_TOOL,
   START_ASSISTANT_VOICE,
 } from './api';
-import { openDestination } from './destinations';
+import { openDestination, resolveNavigate, type NavigateAction } from './destinations';
 
 const FLUSH_MS = 8000;
 
@@ -213,29 +213,35 @@ export class VoiceCall {
 
   private async runTool(name: string, callId: string, args: string) {
     let output: string;
-    if (name === 'navigate') {
-      let destination = '';
-      try {
-        destination = JSON.parse(args || '{}').destination;
-      } catch {
-        destination = '';
-      }
-      const ok = openDestination(destination, { isBusiness: this.opts.isBusiness });
-      if (ok) {
-        this.cb.onNavigate?.();
-      }
-      output = JSON.stringify({ ok });
-    } else if (this.sessionId) {
+    if (this.sessionId) {
       try {
         const { data } = await this.client.mutate({
           mutation: RUN_ASSISTANT_VOICE_TOOL,
           variables: { sessionId: this.sessionId, name, arguments: args },
         });
+        if (this.ended) {
+          return; // hung up (or switched account / signed out) while the server answered
+        }
         const tool = data?.runAssistantVoiceTool;
         output = tool?.output ?? '{"error": "sin respuesta"}';
         if (tool && tool.keepGoing === false) {
           this.finish('La llamada terminó.');
           return;
+        }
+        if (name === 'navigate') {
+          // Only a screen the server approved for this user (employees and
+          // business accounts have fewer): never the model's raw choice.
+          let approved: NavigateAction & { ok?: boolean } = {};
+          try {
+            approved = JSON.parse(output);
+          } catch {
+            approved = {};
+          }
+          const open = approved.ok ? resolveNavigate(approved) : null;
+          if (!this.ended && open
+              && openDestination(open.key, { isBusiness: this.opts.isBusiness, ticker: open.ticker })) {
+            this.cb.onNavigate?.();
+          }
         }
       } catch {
         output = '{"error": "No pude consultarlo ahora."}';

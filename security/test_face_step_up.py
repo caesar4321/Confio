@@ -167,6 +167,15 @@ class FaceStepUpTests(TestCase):
         self.assertEqual(replay.pk, current.pk)
         self.assertEqual(FaceReference.objects.filter(user=self.user, is_active=True).count(), 1)
 
+    def test_a_rejected_kyc_reference_never_blocks_a_verified_one(self):
+        borrowed = self._verification(verified_at=timezone.now() + timedelta(days=1), document_number='P7654321')
+        rejected_ref = self._store_reference(borrowed)
+        IdentityVerification.all_documents.filter(pk=borrowed.pk).update(status='rejected')
+        current = self._store_reference(self.verification)  # older, but still verified
+        rejected_ref.refresh_from_db()
+        self.assertFalse(rejected_ref.is_active)
+        self.assertEqual(current.identity_verification_id, self.verification.pk)
+
     def test_download_failure_never_carries_the_signed_url(self):
         with mock.patch.object(fsu.requests, 'get', return_value=_download(status=403)):
             with self.assertRaises(fsu.FaceStepUpError) as ctx:
@@ -190,6 +199,23 @@ class FaceStepUpTests(TestCase):
     def test_start_requires_a_reference(self):
         with self.assertRaises(fsu.FaceStepUpError):
             fsu.start_face_check(self.user, 'on_ramp')
+
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
+    def test_a_rejected_kyc_no_longer_vouches_for_its_selfie(self):
+        # A borrowed document: the selfie only proves the impostor is back.
+        self._store_reference()
+        data = fsu.start_face_check(self.user, 'withdrawal')
+        IdentityVerification.all_documents.filter(pk=self.verification.pk).update(status='rejected')
+        with self.assertRaises(fsu.FaceStepUpError):
+            fsu.start_face_check(self.user, 'withdrawal')
+        self._liveness()
+        self.assertFalse(fsu.complete_face_check(self.user, data['session_id']))  # opened before the rejection
+        self.assertEqual(FaceCheck.objects.get(liveness_session_id=data['session_id']).failure_reason, 'no_reference')
+        self.rek.compare_faces.assert_not_called()
+        # Re-approved in Didit: the same reference counts again.
+        IdentityVerification.all_documents.filter(pk=self.verification.pk).update(status='verified')
+        self.rek.create_face_liveness_session.return_value = {'SessionId': 'sess-2'}
+        self.assertEqual(fsu.start_face_check(self.user, 'withdrawal')['session_id'], 'sess-2')
 
     @override_settings(FACE_STEP_UP_AVAILABLE=True)
     def test_passing_check(self):
@@ -732,8 +758,15 @@ class FaceChallengeLevelTests(TestCase):
         self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
         self.assertEqual(FaceCheck.objects.get(liveness_session_id='sess-level').challenge, 'full')
 
+    def test_emergency_exit_face_checks_can_no_longer_start(self):
+        # Salida de emergencia opens only on the on-chain heartbeat; old
+        # builds must not be able to open exit face checks.
+        with self.assertRaises(fsu.FaceStepUpError):
+            fsu.start_face_check(self.user, 'emergency_exit')
+        self.assertFalse(FaceCheck.objects.filter(purpose='emergency_exit').exists())
+
     def test_other_purposes_always_run_the_full_challenge(self):
-        for purpose in ('on_ramp', 'emergency_exit', 'payroll_authority', 'payin_release'):
+        for purpose in ('on_ramp', 'payroll_authority', 'payin_release'):
             FaceCheck.objects.filter(liveness_session_id='sess-level').delete()
             fsu.start_face_check(self.user, purpose, movement=('20', 'cUSD', False))
             self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])

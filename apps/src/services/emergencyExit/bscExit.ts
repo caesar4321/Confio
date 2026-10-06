@@ -21,7 +21,7 @@ import {
   bscGasPrice,
   bscEthCall,
   bscGetTransactionReceipt,
-  sendCall,
+  BscReceipt,
   selector,
   encodeUint,
   encodeAddress,
@@ -29,8 +29,10 @@ import {
   isOutcomeUnknown,
   DerivedEvmWallet,
 } from '../evmWallet';
-import { CHAIN_ENDPOINTS } from './chainClock';
-import type { KVStore } from './reachability';
+import { CHAIN_ENDPOINTS } from './bscRpcs';
+import { BUNDLED_HEARTBEAT, assertExitOpen, isConfioAlive } from './heartbeat';
+import { AUTH_GAS_OVERHEAD, GATE_GAS_OVERHEAD, sendGatedCall } from './gatedTx';
+import type { KVStore } from './kvStore';
 import { BUNDLED_ONDO_STOCK_TOKENS } from '../../config/ondoStockTokens.generated';
 import { CUSD_BSC_VAULT_ADDRESS } from '../../config/env';
 
@@ -254,6 +256,10 @@ export const estimateBscExitGasWei = async (plan: BscExitPlan): Promise<bigint> 
   // Ondo tokens can execute compliance hooks. Budget conservatively; the
   // actual send uses eth_estimateGas rather than a brittle fixed ceiling.
   units += BigInt(plan.ondoStocks.length) * 200_000n;
+  // Every send is execute([assertSilent(), leg]); the first one may also
+  // carry the 7702 authorization for a never-delegated account.
+  const sends = BigInt(plan.steps.filter((s) => s !== 'transferOndoStocks').length + plan.ondoStocks.length);
+  if (sends > 0n) units += sends * GATE_GAS_OVERHEAD + AUTH_GAS_OVERHEAD;
   return gasPrice * units;
 };
 
@@ -353,10 +359,13 @@ export const executeBscExit = async (params: {
    * on instead of showing one undifferentiated spinner.
    */
   onStep?: (step: BscExitStep) => void;
+  /** ConfioHeartbeat proxy (tests override). */
+  heartbeatAddress?: string;
 }): Promise<BscExitResult> => {
   const {
     wallet, dest, vaultAddress, store, accountKey, onStep,
     cusdAddress = BUNDLED_CUSD_ADDRESS,
+    heartbeatAddress = BUNDLED_HEARTBEAT.address,
   } = params;
   if (!/^0x[0-9a-fA-F]{40}$/.test(dest)) throw new Error('bad destination address');
   if (dest.toLowerCase() === wallet.address.toLowerCase()) throw new Error('destination is own address');
@@ -403,7 +412,10 @@ export const executeBscExit = async (params: {
       const degradedMarker = PENDING_DEGRADED_CK_PREFIX + step;
       const wasDegraded = Boolean(ck[degradedMarker]);
       delete ck[degradedMarker];
-      if (receipt.status === '0x1') {
+      // status 1 with an affirmatively empty log list is a 7702 no-op: the
+      // delegation did not apply and nothing ran (gatedTx.ts). Not a send.
+      const noop = receipt.status === '0x1' && Array.isArray(receipt.logs) && receipt.logs.length === 0;
+      if (receipt.status === '0x1' && !noop) {
         ck[step] = txHash;
         completed.push(step);
         if (wasDegraded) {
@@ -412,7 +424,7 @@ export const executeBscExit = async (params: {
         if (!wasDegraded && (step === 'redeemCusdPlus' || step === 'redeemCusd' || step === 'transferUsdt')) {
           usdtToDest += usdtCreditedTo(receipt, dest);
         }
-      } else if (receipt.status !== '0x0') {
+      } else if (receipt.status !== '0x0' && !noop) {
         // Unknown receipt shape: retain the pending marker and fail closed.
         ck[marker] = txHash;
         if (wasDegraded) ck[degradedMarker] = '1';
@@ -428,6 +440,9 @@ export const executeBscExit = async (params: {
     // for the rest of the app session.
     Object.assign(ck, await loadCk(store, key));
     await reconcilePending();
+    // Nothing is signed unless the chain says Confío has been silent long
+    // enough. The same check also runs inside every transaction.
+    await assertExitOpen(heartbeatAddress);
     if (ck[DEGRADED_REDEEM_CK]) degraded.push('redeemCusdPlus');
     if (ck[DEGRADED_CUSD_REDEEM_CK]) degraded.push('redeemCusd');
 
@@ -439,9 +454,8 @@ export const executeBscExit = async (params: {
         activeStep = 'redeemCusdPlus';
         activeDegraded = false;
         try {
-          const receipt = await sendCall({
-            from: wallet.address,
-            privKeyHex: wallet.privKeyHex,
+          const receipt = await sendGatedCall({
+            wallet, heartbeatAddress,
             to: vaultAddress,
             data:
               selector('redeemToUsdt(uint256,uint256,address)') +
@@ -457,15 +471,14 @@ export const executeBscExit = async (params: {
           // A receipt timeout means the redeem was broadcast and can still
           // settle. Sending the raw shares before its outcome is known is an
           // unsafe fallback and can waste the user's remaining emergency gas.
-          if (isOutcomeUnknown(e)) throw e;
+          if (isOutcomeUnknown(e) || isConfioAlive(e)) throw e;
           // Ondo leg dead (paused vault, tripped guard, IM outage): fall
           // back to a raw share transfer so value at least MOVES, and
           // surface the degradation for the screen's warning.
           activeDegraded = true;
           try {
-            const receipt = await sendCall({
-              from: wallet.address,
-              privKeyHex: wallet.privKeyHex,
+            const receipt = await sendGatedCall({
+              wallet, heartbeatAddress,
               to: vaultAddress,
               data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(shares),
               gasLimit: 120_000n,
@@ -474,7 +487,7 @@ export const executeBscExit = async (params: {
             if (!degraded.includes('redeemCusdPlus')) degraded.push('redeemCusdPlus');
             await record('redeemCusdPlus', receipt.transactionHash);
           } catch (fallbackError) {
-            if (isOutcomeUnknown(fallbackError)) throw fallbackError;
+            if (isOutcomeUnknown(fallbackError) || isConfioAlive(fallbackError)) throw fallbackError;
             unresolved.push('cUSD+');
           }
           activeStep = null;
@@ -495,9 +508,8 @@ export const executeBscExit = async (params: {
         activeStep = 'redeemCusd';
         activeDegraded = false;
         try {
-          const receipt = await sendCall({
-            from: wallet.address,
-            privKeyHex: wallet.privKeyHex,
+          const receipt = await sendGatedCall({
+            wallet, heartbeatAddress,
             to: cusdAddress,
             data:
               selector('redeemWithFee(uint256,uint256,address)') +
@@ -510,12 +522,11 @@ export const executeBscExit = async (params: {
           await record('redeemCusd', receipt.transactionHash);
           activeStep = null;
         } catch (e) {
-          if (isOutcomeUnknown(e)) throw e;
+          if (isOutcomeUnknown(e) || isConfioAlive(e)) throw e;
           activeDegraded = true;
           try {
-            const receipt = await sendCall({
-              from: wallet.address,
-              privKeyHex: wallet.privKeyHex,
+            const receipt = await sendGatedCall({
+              wallet, heartbeatAddress,
               to: cusdAddress,
               data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(cusd),
               gasLimit: 120_000n,
@@ -524,7 +535,7 @@ export const executeBscExit = async (params: {
             if (!degraded.includes('redeemCusd')) degraded.push('redeemCusd');
             await record('redeemCusd', receipt.transactionHash);
           } catch (fallbackError) {
-            if (isOutcomeUnknown(fallbackError)) throw fallbackError;
+            if (isOutcomeUnknown(fallbackError) || isConfioAlive(fallbackError)) throw fallbackError;
             unresolved.push('cUSD');
           }
           activeStep = null;
@@ -543,9 +554,8 @@ export const executeBscExit = async (params: {
         activeStep = 'transferUsdt';
         activeDegraded = false;
         try {
-          const receipt = await sendCall({
-            from: wallet.address,
-            privKeyHex: wallet.privKeyHex,
+          const receipt = await sendGatedCall({
+            wallet, heartbeatAddress,
             to: USDT_BSC,
             data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(usdt),
             gasLimit: 80_000n,
@@ -553,7 +563,7 @@ export const executeBscExit = async (params: {
           usdtToDest += usdtCreditedTo(receipt, dest);
           await record('transferUsdt', receipt.transactionHash);
         } catch (e) {
-          if (isOutcomeUnknown(e)) throw e;
+          if (isOutcomeUnknown(e) || isConfioAlive(e)) throw e;
           unresolved.push('USDT');
         }
         activeStep = null;
@@ -571,16 +581,15 @@ export const executeBscExit = async (params: {
         activeStep = 'transferConfio';
         activeDegraded = false;
         try {
-          const receipt = await sendCall({
-            from: wallet.address,
-            privKeyHex: wallet.privKeyHex,
+          const receipt = await sendGatedCall({
+            wallet, heartbeatAddress,
             to: BUNDLED_CONFIO_ADDRESS,
             data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(confio),
             gasLimit: 80_000n,
           });
           await record('transferConfio', receipt.transactionHash);
         } catch (e) {
-          if (isOutcomeUnknown(e)) throw e;
+          if (isOutcomeUnknown(e) || isConfioAlive(e)) throw e;
           unresolved.push('CONFIO');
         }
         activeStep = null;
@@ -599,18 +608,17 @@ export const executeBscExit = async (params: {
       onStep?.(step);
       activeStep = step;
       activeDegraded = false;
-      let receipt: Awaited<ReturnType<typeof sendCall>>;
+      let receipt: BscReceipt;
       try {
-        receipt = await sendCall({
-          from: wallet.address,
-          privKeyHex: wallet.privKeyHex,
+        receipt = await sendGatedCall({
+          wallet, heartbeatAddress,
           to: stock.address,
           data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(stock.balanceWei),
         });
       } catch (e) {
         // Do not advance to another nonce while a broadcast transaction can
         // still mine. The user must reconcile that hash first.
-        if (isOutcomeUnknown(e)) throw e;
+        if (isOutcomeUnknown(e) || isConfioAlive(e)) throw e;
         // Continue with the other stocks. Completed sends are checkpointed;
         // a retry re-reads balances and attempts only what remains.
         unresolved.push(stock.symbol);

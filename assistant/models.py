@@ -229,3 +229,43 @@ class CustomPet(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['user', '-created_at'], name='assistant_pet_user_idx')]
+
+
+class ProbeAnswer(models.Model):
+    """One tap answer to a server-defined question the bubble asked once
+    ("¿Para qué te gustaría usar Confío?"). Evidence for product decisions;
+    never shown to other users."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_probe_answers')
+    probe_id = models.CharField(max_length=64)
+    answer = models.CharField(max_length=32)
+    # Snapshot at answer time, so later analysis needs no joins or guessing.
+    phone_country = models.CharField(max_length=2, blank=True, default='')
+    funded = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'probe_id'], name='assistant_probe_once_per_user')]
+        indexes = [models.Index(fields=['probe_id', 'answer'], name='assistant_probe_answer_idx')]
+
+    def __str__(self):
+        return f'{self.probe_id}: {self.answer}'
+
+
+class AssistantNeed(models.Model):
+    """What a user's message asked for, tagged nightly (assistant/needs.py).
+    Product evidence only: a short redacted paraphrase, never the message."""
+    message = models.OneToOneField('inbox.SupportMessage', on_delete=models.CASCADE, related_name='assistant_need')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_needs')
+    category = models.CharField(max_length=32)
+    met_by_confio = models.BooleanField()
+    paraphrase = models.CharField(max_length=120, blank=True, default='')
+    phone_country = models.CharField(max_length=2, blank=True, default='')
+    funded = models.BooleanField(default=False)
+    message_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['category', '-message_at'], name='assistant_need_cat_idx')]
+
+    def __str__(self):
+        return f'{self.category} ({self.phone_country})'

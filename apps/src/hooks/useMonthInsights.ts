@@ -1,11 +1,13 @@
 // Data for the Tu mes insight cards (docs/designs/tu-mes-insights.md 8A and
 // the delta corrections):
 //
-// - Three isolated queries (monthInsights, savingsEarned, protectionValue):
-//   each fails alone, and an older server never breaks monthSummary.
-// - One reveal: the window opens when Card A has rendered (`ready`) and
-//   closes when every query has settled or after 800ms. What arrived by then
-//   is shown, together and in slot order; anything later is dropped for this
+// - Four isolated queries (monthInsights, savingsEarned, protectionValue,
+//   stockMonth): each fails alone, and an older server never breaks
+//   monthSummary.
+// - One reveal: once Card A has rendered (`ready`), the cards are shown
+//   together, in slot order, when every query has settled (no short window:
+//   a cold stocks scan of ~1.6s must not lose its card). Only a request
+//   that hangs (a degraded node) is cut off, at REVEAL_HANG_GUARD_MS; anything later is dropped for this
 //   view, so nothing below ever moves after the reveal.
 // - Refocus refetches silently: values inside cards already shown update,
 //   but no card or row is added, removed or swapped until the next view
@@ -14,24 +16,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApolloClient } from '@apollo/client';
 import {
-  GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED,
-  type MonthInsights, type ProtectionValue, type RecurringPayment, type SavingsEarned,
+  GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH,
+  type MonthInsights, type ProtectionValue, type RecurringPayment, type SavingsEarned, type StockMonth,
 } from '../apollo/monthSummary';
 import { MIN_SAVINGS_USD } from '../utils/monthInsights';
 
-export const REVEAL_WINDOW_MS = 800;
+/** Not a design window: the reveal waits for every query. This only cuts off
+ *  a request that never answers, so the lower screen can't stay empty. */
+export const REVEAL_HANG_GUARD_MS = 5000;
 
 export type InsightData = {
   insights: MonthInsights | null;
   savings: SavingsEarned | null;
   protection: ProtectionValue | null;
+  /** "Tus acciones": null hides the card (unknown, or stocks not offered). */
+  stocks?: StockMonth | null;
 };
 
 export type MonthInsightsState =
   | { revealed: false }
   | ({ revealed: true } & InsightData);
 
-const EMPTY: InsightData = { insights: null, savings: null, protection: null };
+const EMPTY: InsightData = { insights: null, savings: null, protection: null, stocks: null };
 
 /** What the reveal actually shows: a savings answer under a cent and a
  *  savings answer behind protection are not cards, so they are not "shown"
@@ -65,6 +71,24 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
     protection: shown.protection
       ? (next.protection && next.protection.state === shown.protection.state ? next.protection : shown.protection)
       : null,
+    // Never a downgrade (gain → value_only; the hook alone overrides this for
+    // a value-only answer final after a trade). One-way exceptions, all in the
+    // same card: a settling card resolves in place; value only becomes the
+    // month's result once the history explains it (a passing value-only
+    // right after a trade must not stick); and the invitation gives way to
+    // the card once the user has bought through it. 'none' stays as shown:
+    // its only content is whether the invitation is drawn (canBuy, which
+    // follows the request's IP), and a flip would add or remove a card.
+    stocks: shown.stocks
+      ? (next.stocks && !(shown.stocks.state === 'none' && next.stocks.state === 'none')
+        && (next.stocks.state === shown.stocks.state
+        || (shown.stocks.state === 'none' && next.stocks.state !== 'none')
+        || (shown.stocks.state === 'value_only' && next.stocks.state === 'gain')
+        // After settling the server answers 'none' only when the trade
+        // failed (a pending one is still 'settling'): never a stuck note.
+        || shown.stocks.state === 'settling')
+        ? next.stocks : shown.stocks)
+      : null,
   };
 }
 
@@ -74,9 +98,9 @@ export function useMonthInsights(params: {
   month: number;
   timezone: string | undefined;
   isCurrent: boolean;
-  /** Card A has rendered (monthSummary answered): the 800ms window starts. */
+  /** Card A has rendered (monthSummary answered): the insight queries start. */
   ready: boolean;
-}): MonthInsightsState & { refresh: () => void } {
+}): MonthInsightsState & { refresh: () => void; refreshStocks: () => void; stocksSettling: boolean } {
   const { accountKey, year, month, timezone, isCurrent, ready } = params;
   const client = useApolloClient();
   const viewKey = `${accountKey ?? ''}:${year}-${month}`;
@@ -87,9 +111,42 @@ export function useMonthInsights(params: {
   // SAME month can never overwrite a newer one.
   const generation = useRef(0);
   const shown = useRef<InsightData | null>(null);
+  // The latest stocks answer's state, even when the shown card kept its own
+  // (gain/value_only never swap to 'settling'): the screen polls on it.
+  const lastStocks = useRef<StockMonth['state'] | null>(null);
+  // The view (generation) whose stocks ask is in flight: a month switch
+  // frees the slot at once, and an old ask's cleanup never frees a new one.
+  const stocksInFlight = useRef<number | null>(null);
+  // Stocks asks are numbered when sent: an answer older than one already
+  // applied (a focus refresh waits for its slowest query; a poll doesn't)
+  // must not land over it and restart the settling poll.
+  const stocksAsked = useRef(0);
+  const stocksApplied = useRef(0);
   useEffect(() => () => { generation.current += 1; }, []);
 
-  const fetchAll = useCallback(() => {
+  /** Records an applied stocks answer's state (what the screen polls on).
+   *  True when it resolves a trade this view saw settling: the server's
+   *  answer after a trade is final (it says 'settling' itself while a trade
+   *  is on the wire or a node lags it, from the scan's own blocks), so that
+   *  answer replaces the card shown — even a pre-trade 'gain', which would
+   *  otherwise keep the value before the trade. */
+  const noteStocks = useCallback((next: StockMonth['state'] | null): boolean => {
+    const resolvesTrade = lastStocks.current === 'settling' && next !== null && next !== 'settling';
+    lastStocks.current = next;
+    return resolvesTrade;
+  }, []);
+
+  /** mergeValues, except the answer that resolves a trade replaces the shown card. */
+  const mergeStocksAnswer = useCallback((current: InsightData, next: InsightData, resolvesTrade: boolean) => {
+    const merged = mergeValues(current, next);
+    return resolvesTrade && current.stocks && next.stocks ? { ...merged, stocks: next.stocks } : merged;
+  }, []);
+
+  const fetchStocks = useCallback(() => client.query<{ stockMonth: StockMonth | null }>(
+    { query: GET_STOCK_MONTH, variables: { year, month, timezone }, fetchPolicy: 'no-cache' })
+    .then((r) => r.data?.stockMonth ?? null).catch(() => null), [client, year, month, timezone]);
+
+  const fetchAll = useCallback((withStocks = true) => {
     const opt = { fetchPolicy: 'no-cache' as const };
     const safe = <T,>(p: Promise<{ data?: T }>) => p.then((r) => r.data ?? null).catch(() => null);
     const insights = safe(client.query<{ monthInsights: MonthInsights | null }>(
@@ -101,14 +158,15 @@ export function useMonthInsights(params: {
       ? safe(client.query<{ protectionValue: ProtectionValue | null }>({ query: GET_PROTECTION_VALUE, variables: { timezone }, ...opt }))
         .then((d) => d?.protectionValue ?? null)
       : Promise.resolve(null);
-    return { insights, savings, protection };
-  }, [client, year, month, timezone, isCurrent]);
+    return { insights, savings, protection, stocks: withStocks ? fetchStocks() : Promise.resolve(null) };
+  }, [client, year, month, timezone, isCurrent, fetchStocks]);
 
   // A new month or account is a new view: hide, then reveal again.
   if (view.current !== viewKey) {
     view.current = viewKey;
     generation.current += 1;
     shown.current = null;
+    lastStocks.current = null;
     if (state.revealed) setState({ revealed: false });
   }
 
@@ -126,14 +184,16 @@ export function useMonthInsights(params: {
       if (closed || generation.current !== gen) return;
       closed = true;
       shown.current = visibleAtReveal({ ...got });
+      noteStocks(got.stocks?.state ?? null);
       setState({ revealed: true, ...shown.current });
     };
-    const { insights, savings, protection } = fetchAll();
+    const { insights, savings, protection, stocks } = fetchAll();
     insights.then((v) => { if (!closed) got.insights = v; });
     savings.then((v) => { if (!closed) got.savings = v; });
     protection.then((v) => { if (!closed) got.protection = v; });
-    const timer = setTimeout(reveal, REVEAL_WINDOW_MS);
-    Promise.all([insights, savings, protection]).then(() => {
+    stocks.then((v) => { if (!closed) got.stocks = v; });
+    const timer = setTimeout(reveal, REVEAL_HANG_GUARD_MS);
+    Promise.all([insights, savings, protection, stocks]).then(() => {
       clearTimeout(timer);
       reveal();
     });
@@ -141,19 +201,59 @@ export function useMonthInsights(params: {
       closed = true;
       clearTimeout(timer);
     };
-  }, [ready, accountKey, viewKey, fetchAll]);
+  }, [ready, accountKey, viewKey, fetchAll, noteStocks]);
 
   const refresh = useCallback(() => {
     const gen = generation.current;
     if (!shown.current) return;
-    const { insights, savings, protection } = fetchAll();
-    Promise.all([insights, savings, protection]).then(([i, s, p]) => {
+    // A stocks ask already in flight (a settling poll, cold scan) answers on
+    // its own: never stack a second one on it. Ours holds the slot too.
+    // Nothing drawn (no answer, or 'none' with nothing to offer): don't make
+    // the server scan and price the portfolio for nothing — and an answer
+    // could only add a card mid-view. Unless a trade is settling here.
+    const drawn = shown.current.stocks
+      && !(shown.current.stocks.state === 'none' && !shown.current.stocks.canBuy);
+    const askStocks = Boolean(drawn || lastStocks.current === 'settling') && stocksInFlight.current !== gen;
+    const seq = askStocks ? ++stocksAsked.current : 0;
+    const { insights, savings, protection, stocks } = fetchAll(askStocks);
+    if (askStocks) {
+      stocksInFlight.current = gen;
+      stocks.finally(() => { if (stocksInFlight.current === gen) stocksInFlight.current = null; });
+    }
+    Promise.all([insights, savings, protection, stocks]).then(([i, s, p, k]) => {
       if (generation.current !== gen || !shown.current) return;
-      const merged = mergeValues(shown.current, { insights: i, savings: s, protection: p });
+      const fresh = askStocks && seq > stocksApplied.current;
+      let resolvesTrade = false;
+      if (fresh) {
+        stocksApplied.current = seq;
+        if (k) resolvesTrade = noteStocks(k.state);
+      }
+      const merged = mergeStocksAnswer(shown.current,
+        { insights: i, savings: s, protection: p, stocks: fresh ? k : shown.current.stocks }, resolvesTrade);
       shown.current = merged;
       setState({ revealed: true, ...merged });
     });
-  }, [fetchAll]);
+  }, [fetchAll, noteStocks, mergeStocksAnswer]);
 
-  return { ...state, refresh };
+  /** Stocks only (a settling trade): the other cards are not re-asked. One
+   *  ask at a time: a slow answer (cold scan) is not stacked with the next
+   *  poll's, and an older answer can't land after a newer one. */
+  const refreshStocks = useCallback(() => {
+    const gen = generation.current;
+    if (!shown.current || stocksInFlight.current === gen) return;
+    stocksInFlight.current = gen;
+    const seq = ++stocksAsked.current;
+    fetchStocks().finally(() => { if (stocksInFlight.current === gen) stocksInFlight.current = null; }).then((k) => {
+      if (generation.current !== gen || !shown.current || seq <= stocksApplied.current) return;
+      stocksApplied.current = seq;
+      const resolvesTrade = k ? noteStocks(k.state) : false;
+      const merged = mergeStocksAnswer(shown.current, { ...shown.current, stocks: k }, resolvesTrade);
+      shown.current = merged;
+      setState({ revealed: true, ...merged });
+    });
+  }, [fetchStocks, noteStocks, mergeStocksAnswer]);
+
+  // Only a shown card can resolve in place (a dropped one never appears).
+  const stocksSettling = Boolean(shown.current?.stocks) && lastStocks.current === 'settling';
+  return { ...state, refresh, refreshStocks, stocksSettling };
 }

@@ -4713,3 +4713,158 @@ export const GET_MY_PAYMENT_ACCOUNTS = gql`
     }
   }
 `;
+
+// Comunidad: each its own query, so a server without them fails only these
+// (the compose button and post actions hide) and never the feed.
+export const GET_COMMUNITY_POSTING_STATUS = gql`
+  query GetCommunityPostingStatus {
+    communityPostingStatus {
+      canPost
+      blockCode
+      blockMessage
+      maxChars
+    }
+  }
+`;
+
+export const GET_MY_COMMUNITY_POST = gql`
+  query GetMyCommunityPost($contentItemId: ID!) {
+    myCommunityPost(contentItemId: $contentItemId) {
+      id
+      status
+      reason
+    }
+  }
+`;
+
+export const GET_COMMUNITY_POST_VIEWER = gql`
+  query GetCommunityPostViewer($contentItemId: ID!) {
+    communityPostViewer(contentItemId: $contentItemId) {
+      isCommunity
+      isOwn
+      canReport
+      viewerReported
+      canComment
+      commentBlockMessage
+      commentMaxChars
+      commentBlockCode
+      authorId
+      authorName
+    }
+  }
+`;
+
+export const GET_MY_COMMUNITY_POSTS = gql`
+  query GetMyCommunityPosts($offset: Int, $limit: Int) {
+    myCommunityPosts(offset: $offset, limit: $limit) {
+      id
+      body
+      imageUrl
+      hasImage
+      status
+      reason
+      createdAt
+      publishedAt
+      commentCount
+    }
+  }
+`;
+
+const COMMUNITY_COMMENT_FIELDS = `
+  id
+  parentId
+  body
+  authorId
+  authorName
+  isPostAuthor
+  isOwn
+  canDelete
+  canReport
+  status
+  reason
+  time
+  authorAvatarUrl
+  viewerReaction
+  reactionSummary {
+    emoji
+    count
+  }
+  mentions {
+    id
+    name
+  }
+`;
+
+export const GET_COMMUNITY_COMMENTS = gql`
+  query GetCommunityComments($contentItemId: ID!, $offset: Int, $limit: Int, $expandedThreadIds: [ID!]) {
+    communityComments(
+      contentItemId: $contentItemId
+      offset: $offset
+      limit: $limit
+      expandedThreadIds: $expandedThreadIds
+    ) {
+      hasMore
+      totalCount
+      items {
+        ${COMMUNITY_COMMENT_FIELDS}
+        replyCount
+        replies {
+          ${COMMUNITY_COMMENT_FIELDS}
+        }
+      }
+    }
+  }
+`;
+
+export const GET_COMMUNITY_POST_PARTICIPANTS = gql`
+  query GetCommunityPostParticipants($contentItemId: ID!) {
+    communityPostParticipants(contentItemId: $contentItemId) {
+      id
+      name
+      isPostAuthor
+      avatarUrl
+    }
+  }
+`;
+
+export const GET_COMMUNITY_COMMENT_COUNTS = gql`
+  query GetCommunityCommentCounts($contentItemIds: [ID!]!) {
+    communityCommentCounts(contentItemIds: $contentItemIds) {
+      contentItemId
+      count
+    }
+  }
+`;
+
+// Own query: an older server rejects it and the avatar stays an initial.
+export const GET_MY_PROFILE_PICTURE = gql`
+  query GetMyProfilePicture {
+    myProfilePicture {
+      url
+      latestStatus
+      latestReason
+      blockMessage
+      rulesRequired
+    }
+  }
+`;
+
+export const GET_COMMUNITY_RULES = gql`
+  query GetCommunityRules {
+    communityRules {
+      version
+      accepted
+      rules
+    }
+  }
+`;
+
+export const GET_MY_BLOCKED_MEMBERS = gql`
+  query GetMyBlockedMembers {
+    myBlockedMembers {
+      id
+      name
+      avatarUrl
+    }
+  }
+`;

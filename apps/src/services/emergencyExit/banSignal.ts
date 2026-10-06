@@ -1,22 +1,18 @@
-// Ban signal for the emergency exit (docs/plans/salida-de-emergencia-design.md,
-// "Ban work package").
+// Ban signal: routes a suspended user to the BlockedAccount announcement.
 //
 // The backend's SecurityMiddleware answers EVERY authenticated request
 // from a banned user with a plain-text 403 ("Your account has been
-// suspended…") — before any GraphQL resolver runs. Without this signal a
-// banned user's emergency screen would read the server as healthy (the
-// unauthenticated probe passes the middleware) and impose the 24h
-// cooloff: a de-facto one-day freeze, exactly what the design forbids.
-//
-// Trusting this server-originated signal is safe by construction: the
-// flag can only ACCELERATE the exit (banned ⇒ immediate), never delay
-// it. Any later successful GraphQL response clears it (un-ban).
+// suspended…") — before any GraphQL resolver runs. This flag remembers it
+// so the app opens on the announcement instead of a broken home screen.
+// It has NO effect on Salida de emergencia, which opens only on the
+// on-chain heartbeat (docs/plans/salida-de-emergencia-design.md § Phase 3).
+// Any later successful authenticated GraphQL response clears it (un-ban).
 //
 // An in-memory mirror avoids a keychain round-trip per GraphQL response;
 // the persisted flag survives restarts (banned users stay banned across
 // launches — every request they make keeps 403ing anyway).
 
-import type { KVStore } from './reachability';
+import type { KVStore } from './kvStore';
 
 const BAN_KEY = 'confio_emergency_ban_signal_v1';
 

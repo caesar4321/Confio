@@ -128,6 +128,13 @@ const NOTIFICATIONS: Record<string, IconVisual> = {
   PRESALE_PURCHASE_CONFIRMED: visual('lock', 'invest', 'done'),
   PRESALE_AVAILABLE: visual('unlock', 'invest'),
 
+  // Comunidad
+  COMMUNITY_POST_APPROVED: visual('users', 'social', 'done'),
+  COMMUNITY_POST_REJECTED: visual('users', 'neutral', 'failed'),
+  COMMUNITY_COMMENT: visual('message-circle', 'social'),
+  COMMUNITY_REPLY: visual('corner-down-right', 'social'),
+  COMMUNITY_MENTION: visual('at-sign', 'social'),
+
   // General
   PROMOTION: visual('tag', 'promo'),
   SYSTEM: visual('info', 'neutral'),

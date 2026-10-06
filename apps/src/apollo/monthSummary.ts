@@ -201,3 +201,42 @@ export type ProtectionValue = {
   /** month_start: the baseline day (ISO date), usually the 1st */
   startDate?: string | null;
 };
+
+// "Tus acciones" (U.S. stocks) for the viewed month. Own query, like the three above.
+export const GET_STOCK_MONTH = gql`
+  query StockMonth($year: Int!, $month: Int!, $timezone: String) {
+    stockMonth(year: $year, month: $month, timezone: $timezone) {
+      state
+      canBuy
+      valueUsd
+      valueStartUsd
+      boughtUsd
+      soldUsd
+      gainUsd
+      gainPct
+      holdings
+      topMover {
+        ticker
+        name
+        changePct
+      }
+    }
+  }
+`;
+
+export type StockMonth = {
+  /** 'gain': the month's result is exact · 'value_only': history incomplete,
+   *  so only today's value · 'settling': a trade not final yet (today's value;
+   *  ask again in seconds) · 'none': no stocks this month (invite) */
+  state: 'gain' | 'value_only' | 'settling' | 'none';
+  canBuy: boolean;
+  valueUsd: string;
+  valueStartUsd: string | null;
+  boughtUsd: string | null;
+  soldUsd: string | null;
+  /** value − value on the 1st − bought + sold: deposits never read as gains */
+  gainUsd: string | null;
+  gainPct: string | null;
+  holdings: number;
+  topMover: { ticker: string; name: string; changePct: string } | null;
+};

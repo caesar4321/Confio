@@ -1,4 +1,6 @@
 from django.db import models
+from django.db.models import F
+from django.db.models.functions import Upper
 from django.conf import settings
 from django.utils import timezone
 from users.models import Account
@@ -26,7 +28,18 @@ class Balance(models.Model):
         ('CONFIO', 'CONFIO'),
         ('CONFIO_PRESALE', 'CONFIO_PRESALE'),
         ('USDC', 'USDC'),
+        # BSC (blockchain/bsc_balance_service.py). CUSD_PLUS is vault SHARES:
+        # its dollar value is shares x the vault's live price per share.
+        ('CUSD_BSC', 'cUSD (BSC)'),
+        ('CONFIO_BSC', 'CONFIO (BSC)'),
+        ('USDT_BSC', 'USDT (BSC)'),
+        ('CUSD_PLUS', 'cUSD+ shares (BSC)'),
     ])
+    # The wallet a BSC row was read from: an account's BSC anchor can be
+    # replaced (stale re-enrollment), and a row from the old wallet must
+    # never stand for the new one. Blank on the Algorand rows. db_default:
+    # code from before this column (mid-deploy) can still insert rows.
+    address = models.CharField(max_length=42, blank=True, default='', db_default='')
     amount = models.DecimalField(max_digits=36, decimal_places=18)
     pending_amount = models.DecimalField(max_digits=36, decimal_places=18, default=0)  # For in-flight transactions
     last_synced = models.DateTimeField(auto_now=True)
@@ -376,6 +389,9 @@ class SponsoredBatch(models.Model):
             models.Index(fields=['tx_hash'], name='cpsb_tx_hash_idx'),
             models.Index(fields=['status'], name='cpsb_status_idx'),
             models.Index(fields=['kind', 'source_id'], name='cpsb_kind_source_idx'),
+            # Per-wallet stock history (Tu mes, every open and settling poll):
+            # matches the UPPER(col) = UPPER(%s) that __iexact compiles to.
+            models.Index(Upper('user_bsc_address'), F('kind'), name='cpsb_addr_kind_idx'),
         ]
         constraints = [
             # One batch per tx hash — blocks the same broadcast being
@@ -494,6 +510,33 @@ class SponsoredBatch(models.Model):
 
     def __str__(self):
         return f'7702 {self.kind} x{self.num_calls} [{self.status}] {self.tx_hash or "pending"}'
+
+
+class StockHoldings(models.Model):
+    """A wallet's Ondo GM (tokenized stock) balances from its last COMPLETE
+    chain scan (cusd_plus/gm_holdings.py): every live token answered.
+
+    The stock sibling of Balance: one row per wallet, because "scanned,
+    holds nothing" must be storable and a stock position is one of ~440
+    possible tokens. `blocks` is the block each balance was read at, so Tu
+    mes can tell exactly which confirmed trades a row has not seen yet.
+    Marked stale when one of the wallet's own trades is broadcast or
+    confirms; a transfer in from outside shows up at the next re-read."""
+    bsc_address = models.CharField(max_length=42, unique=True, help_text='Lowercase BSC wallet address')
+    account = models.ForeignKey(Account, null=True, blank=True, on_delete=models.SET_NULL,
+                                related_name='stock_holdings')
+    held = models.JSONField(default=dict, help_text='{symbol: units} for every nonzero balance, delisted included')
+    blocks = models.JSONField(default=dict, help_text='{symbol: block the balance was read at}')
+    scanned_at = models.DateTimeField()
+    is_stale = models.BooleanField(default=False, help_text='True if the next read must re-scan the chain')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Stock holdings'
+        verbose_name_plural = 'Stock holdings'
+
+    def __str__(self):
+        return f'{self.bsc_address} - {len(self.held)} positions'
 
 
 class OndoStockTrade(SponsoredBatch):

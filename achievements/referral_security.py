@@ -174,7 +174,9 @@ def _get_verified_identity_user_ids(
 
     # all_documents: a passport verified as an additional document is still
     # that person's identity, so it links accounts like a primary one does.
-    base = _personal_context_filter(IdentityVerification.all_documents.filter(status='verified'))
+    # PASSED_KYC: a person whose document expired is still that person.
+    from security.models import PASSED_KYC
+    base = _personal_context_filter(IdentityVerification.all_documents.filter(PASSED_KYC))
 
     user_ids: set = set()
 

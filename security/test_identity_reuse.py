@@ -387,3 +387,45 @@ class BannedPhoneReuseTests(TestCase):
             admin.mark_as_dismissed(request, cases)
         self.assertEqual(self.check(), '')
         self.assertEqual(cases.get().investigated_by_id, self.reviewer.pk)
+
+
+@override_settings(FACE_STEP_UP_ENABLED=False)
+class ExpiredDocumentStillLinksPeopleTests(TestCase):
+    """A document that was verified and then expired (Didit "Kyc Expired")
+    still names its person: bans, duplicate flags and reward uniqueness keep
+    seeing it. A dead session that was never verified does not."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.banned = User.objects.create_user(username='exp-banned', firebase_uid='exp-banned')
+        self.other = User.objects.create_user(username='exp-other', firebase_uid='exp-other')
+
+    def doc(self, user, number, status, verified_at=None):
+        return IdentityVerification.all_documents.create(
+            user=user, document_number=number, document_issuing_country='COL', document_type='national_id',
+            status=status, verified_at=verified_at, verified_first_name='Ana', verified_last_name='Ruiz',
+            verified_date_of_birth='1990-01-01')
+
+    def test_ban_hold_survives_the_banned_persons_document_expiring(self):
+        self.doc(self.banned, 'CC-777', 'expired', verified_at=timezone.now())
+        UserBan.objects.create(user=self.banned, ban_type='permanent', reason='fraud')
+        self.doc(self.other, 'cc777', 'verified', verified_at=timezone.now())
+        self.assertEqual(require_face_step_up(self.other, 'withdrawal'), MESSAGE)
+
+    def test_never_verified_dead_session_links_nobody(self):
+        self.doc(self.banned, 'CC-778', 'expired')  # no verified_at: a session that timed out
+        UserBan.objects.create(user=self.banned, ban_type='permanent', reason='fraud')
+        self.doc(self.other, 'cc778', 'verified', verified_at=timezone.now())
+        self.assertEqual(require_face_step_up(self.other, 'withdrawal'), '')
+
+    def test_duplicate_identity_flag_sees_an_expired_document(self):
+        self.doc(self.banned, 'CC-779', 'expired', verified_at=timezone.now())
+        new = self.doc(self.other, 'cc779', 'verified', verified_at=timezone.now())
+        new.refresh_from_db()
+        self.assertIn('duplicate_identity', new.risk_factors or {})
+
+    def test_reward_uniqueness_sees_an_expired_document(self):
+        from achievements.referral_security import _get_verified_identity_user_ids
+        self.doc(self.banned, 'CC-780', 'expired', verified_at=timezone.now())
+        found = _get_verified_identity_user_ids('COL', 'CC780')
+        self.assertIn(self.banned.pk, found)

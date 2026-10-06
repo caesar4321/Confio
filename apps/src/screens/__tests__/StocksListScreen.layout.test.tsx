@@ -46,6 +46,23 @@ jest.mock('../../utils/numberFormatting', () => ({
   useNumberFormat: () => ({formatNumber: (v: number) => v.toFixed(2)}),
 }));
 
+let mockStockMonth: any = null;
+jest.mock('../../hooks/useStockMonthNow', () => ({
+  ...jest.requireActual('../../hooks/useStockMonthNow'),
+  useStockMonthNow: () => mockStockMonth,
+}));
+
+let mockHiddenBalance = false;
+jest.mock('react-native-keychain', () => ({
+  getInternetCredentials: jest.fn(() => Promise.resolve(
+    {username: 'balance_visibility', password: mockHiddenBalance ? 'false' : 'true'})),
+}));
+
+let mockIsEmployee = false;
+jest.mock('../../contexts/AccountContext', () => ({
+  useAccount: () => ({activeAccount: {isEmployee: mockIsEmployee}}),
+}));
+
 import {StocksListScreen} from '../StocksListScreen';
 
 const texts = (tree: renderer.ReactTestRenderer) =>
@@ -59,6 +76,8 @@ beforeEach(() => {
   mockEnabled = true;
   mockKnown = true;
   mockPortfolioLoading = false;
+  mockStockMonth = null;
+  mockIsEmployee = false;
 });
 
 it('invites a first-time investor, with a factual starter shelf and no warning box', async () => {
@@ -91,6 +110,35 @@ it('leads with what the user owns, largest first', async () => {
   const firstOwned = t.indexOf('NVDA', mine);
   expect(firstOwned).toBeGreaterThan(mine);
   expect(firstOwned).toBeLessThan(t.indexOf('AAPL', mine));
+  await act(async () => tree.unmount());
+});
+
+it('links holders to Tu mes, with this month\'s result when it is known', async () => {
+  mockPositions = [{ticker: 'NVDA', name: 'NVIDIA', valueUsd: 20} as any];
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  expect(texts(tree)).toContain('Ver tu mes');
+  await act(async () => tree.unmount());
+
+  mockStockMonth = {state: 'gain', gainUsd: '4.20'};
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  expect(texts(tree)).toContain('Este mes +US$4.20 · Ver tu mes');
+  const link = tree.root.findAll(n => n.props.testID === 'stocks-month-link' && typeof n.props.onPress === 'function')[0];
+  await act(async () => link.props.onPress());
+  const now = new Date();
+  const thisMonth = {year: now.getFullYear(), month: now.getMonth() + 1};
+  expect(mockNavigate).toHaveBeenCalledWith('MonthSummary', {...thisMonth, masked: false}, {pop: true, merge: true});
+  // Balances hidden on Home stay hidden in Tu mes, whichever door opens it.
+  mockHiddenBalance = true;
+  await act(async () => link.props.onPress());
+  expect(mockNavigate).toHaveBeenLastCalledWith('MonthSummary', {...thisMonth, masked: true}, {pop: true, merge: true});
+  mockHiddenBalance = false;
+  await act(async () => tree.unmount());
+
+  // Tu mes is owners only: an employee gets no door to a month they can't see.
+  mockIsEmployee = true;
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  expect(tree.root.findAll(n => n.props.testID === 'stocks-month-link')).toHaveLength(0);
   await act(async () => tree.unmount());
 });
 

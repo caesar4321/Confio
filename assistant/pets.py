@@ -211,12 +211,50 @@ def _create_pet(user, slot, *, idea='', photo_base64=None, photo_mime=None):
     return slot
 
 
+PET_URL_REUSE_SECONDS = 40 * 60
+
+
+def _reuse_seconds():
+    """How long a signed URL may be handed out again: at most 40 minutes,
+    and never past the signing credentials' own expiry (role credentials
+    near rotation would otherwise leave a dead URL cached)."""
+    from django.conf import settings
+    from django.utils import timezone
+
+    if settings.AWS_ACCESS_KEY_ID and not getattr(settings, 'AWS_SESSION_TOKEN', None):
+        return PET_URL_REUSE_SECONDS
+    try:
+        import boto3
+        expiry = getattr(boto3._get_default_session().get_credentials(), '_expiry_time', None)
+    except Exception:  # noqa: BLE001 - unknown lifetime: don't reuse
+        return 0
+    if expiry is None:
+        return 0 if getattr(settings, 'AWS_SESSION_TOKEN', None) else PET_URL_REUSE_SECONDS
+    left = (expiry - timezone.now()).total_seconds() - 5 * 60
+    return int(max(0, min(PET_URL_REUSE_SECONDS, left)))
+
+
 def pet_url(pet):
     if pet is None or pet.deleted_at:
         return None
+    from django.core.cache import cache
+
     from security.s3_utils import generate_presigned_get
+    # The same URL for a while: a freshly signed one on every profile fetch is
+    # a "new" image to the app, which drops the photo and downloads it again
+    # (the bubble flickers to its empty circle). Reused well inside its life,
+    # since a URL signed with rotating role credentials can die with them
+    # (about an hour), whatever its ExpiresIn says.
+    cache_key = f'assistant_pet_url:{pet.image_key}'
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
     try:
-        return generate_presigned_get(key=pet.image_key, expires_in_seconds=conf.get('CONFIO_ASSISTANT_PET_URL_SECONDS'))
+        url = generate_presigned_get(key=pet.image_key, expires_in_seconds=conf.get('CONFIO_ASSISTANT_PET_URL_SECONDS'))
+        reuse = _reuse_seconds()
+        if reuse > 0:
+            cache.set(cache_key, url, reuse)
+        return url
     except Exception:  # noqa: BLE001 - a missing image falls back to Confi
         logger.exception('Pet URL failed for %s', pet.id)
         return None

@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.4.0',
-    'last_updated': '2026-08-04',
+    'version': '1.5.1',
+    'last_updated': '2026-10-06',
     'is_legally_binding': True,
     'sections': [
         {
@@ -114,11 +114,22 @@ TERMS = {
             ]
         },
         {
-            'title': '11. Modificaciones',
+            'title': '11. Normas de la Comunidad',
+            'content': [
+                'Comunidad, dentro de Descubrir, permite a personas con identidad verificada publicar textos y fotos, comentar, reaccionar y usar una foto de perfil. Su contenido se muestra a otros miembros junto con su nombre y la inicial de su apellido; las fotos publicadas y la foto de perfil también pueden verse con su enlace.',
+                'Tenemos tolerancia cero con el contenido ofensivo y con los usuarios abusivos. No está permitido publicar estafas o fraudes; promesas de ganancias o invitaciones a invertir; pedidos de dinero o la compra y venta de dólares o criptomonedas fuera de la app; datos de contacto o enlaces para continuar en privado; datos personales propios o de terceros; suplantación de Confío, de bancos o de autoridades; spam; odio, acoso o amenazas; contenido sexual; violencia; ni contenido ilegal.',
+                'Revisamos con sistemas automáticos, incluido un proveedor de inteligencia artificial (ver la Política de Privacidad), todo el contenido antes de publicarlo y podemos rechazarlo. Usted puede reportar contenido y bloquear a otros miembros desde la app. Revisamos los reportes y podemos retirar contenido en cualquier momento.',
+                'Si incumple estas normas podemos retirar su contenido y suspender o cancelar su acceso a Comunidad o a su cuenta.',
+                'Usted conserva los derechos sobre lo que publica y nos otorga una licencia no exclusiva y gratuita para mostrarlo dentro de Confío mientras permanezca publicado. Puede eliminar sus publicaciones, comentarios y foto de perfil en cualquier momento.',
+                'Debe aceptar estas normas antes de publicar, comentar o usar una foto de perfil, y de nuevo cada vez que cambien.'
+            ]
+        },
+        {
+            'title': '12. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '12. Contacto',
+            'title': '13. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'
@@ -129,8 +140,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.7.1',
-    'last_updated': '2026-10-02',
+    'version': '1.8.1',
+    'last_updated': '2026-10-06',
     'is_legally_binding': True,
     'sections': [
         {
@@ -180,7 +191,8 @@ PRIVACY = {
                 'support_and_content': [
                     'Conversaciones y mensajes de soporte',
                     'Preferencias y estados de lectura de notificaciones o contenido dentro de la app',
-                    'Reacciones, suscripciones a canales y otra interacción con contenido publicado en la plataforma'
+                    'Reacciones, suscripciones a canales y otra interacción con contenido publicado en la plataforma',
+                    'Publicaciones, comentarios, fotos y foto de perfil que usted comparte en Comunidad, junto con su nombre y la inicial de su apellido, que son visibles para otros miembros; los bloqueos y reportes que realiza; y el resultado de la revisión automática de ese contenido'
                 ],
                 'business_and_payroll': [
                     'Datos de negocios, roles de empleados, permisos, notas internas y configuraciones operativas',
@@ -220,7 +232,8 @@ PRIVACY = {
                 'Con proveedores de recargas, retiros, pagos, transferencias y conversión de activos cuando sea necesario para ejecutar una operación solicitada por usted',
                 'Con proveedores de infraestructura, almacenamiento, autenticación, notificaciones push y seguridad que actúan como encargados del tratamiento',
                 'Con autoridades regulatorias, judiciales o administrativas cuando sea necesario',
-                'Con proveedores de pago, bancos o autoridades que lo requieran, los registros de verificación de ubicación de Bre-B como evidencia de cumplimiento'
+                'Con proveedores de pago, bancos o autoridades que lo requieran, los registros de verificación de ubicación de Bre-B como evidencia de cumplimiento',
+                'Con OpenAI (Estados Unidos), que revisa automáticamente el texto y las fotos que usted publica en Comunidad, sus comentarios y su foto de perfil, junto con la publicación o el comentario al que responde, antes de mostrarlos a otros miembros y de nuevo si otros miembros los reportan; y que procesa los mensajes, audios y fotos que usted envía a Confio Assistant para responderle'
             ]
         },
         {
@@ -256,7 +269,8 @@ PRIVACY = {
                 'Podemos conservar registros antifraude, seguridad, auditoría y cumplimiento por el tiempo necesario para investigar incidentes, prevenir abuso y atender requerimientos legales',
                 'Conservamos su imagen de referencia junto con sus datos KYC y por el mismo plazo. El resultado de cada verificación con su rostro se conserva como registro de seguridad y auditoría. Las imágenes de cada verificación, aprobada o rechazada, se eliminan a los 12 meses, porque los reportes de fraude y las consultas de socios y autoridades suelen llegar meses después de la operación. Si su cuenta tiene o ha tenido una sanción, o está vinculada a un caso o una alerta de fraude o cumplimiento que no haya sido descartado, incluidas las alertas automáticas de nuestros sistemas de seguridad y los requerimientos de un socio o de una autoridad, sus imágenes se conservan junto con sus datos KYC para investigar el caso. Confío no conserva el video',
                 'Cuando verifica un documento, comparamos la selfie de esa verificación con la de su verificación anterior para confirmar que ambos documentos son de la misma persona. Si nuestro proveedor de verificación detecta que su rostro ya fue aprobado en otra cuenta, busca ese rostro entre las verificaciones aprobadas y, si corresponde a otra persona usuaria, revisamos el caso antes de permitir salidas de fondos. Si su cuenta es suspendida de forma permanente, pedimos a ese proveedor que bloquee su rostro para que no pueda verificar una cuenta nueva con otro documento, y retiramos ese bloqueo si la suspensión se levanta',
-                'Conservamos cada verificación de ubicación de Bre-B (resultado, dirección IP y su país, coordenadas, precisión y hora de la lectura) como registro de cumplimiento y auditoría. No rastreamos su ubicación en segundo plano'
+                'Conservamos cada verificación de ubicación de Bre-B (resultado, dirección IP y su país, coordenadas, precisión y hora de la lectura) como registro de cumplimiento y auditoría. No rastreamos su ubicación en segundo plano',
+                'En Comunidad, lo que usted elimina y el contenido de una cuenta eliminada dejan de mostrarse y se eliminan, incluidos sus textos y fotos. El contenido que retiramos por moderación se conserva de forma privada hasta 90 días para atender reportes y apelaciones, y luego se eliminan sus textos y fotos; conservamos solo el registro de la decisión de moderación. Las fotos que sube y no llegan a publicarse se eliminan a los 7 días'
             ]
         },
         {
@@ -271,8 +285,8 @@ PRIVACY = {
 
 DELETION = {
     'title': 'Eliminación de Datos',
-    'version': '1.1.0',
-    'last_updated': '2026-03-19',
+    'version': '1.2.1',
+    'last_updated': '2026-10-06',
     'is_legally_binding': True,
     'sections': [
         {
@@ -290,6 +304,7 @@ DELETION = {
             'content': [
                 'Cuando la ley y nuestras obligaciones regulatorias lo permitan, eliminaremos o anonimizaremos datos de perfil, preferencias, información de contacto y otros datos no esenciales para cumplimiento',
                 'También podremos desactivar su acceso, cerrar la cuenta y eliminar o desvincular configuraciones operativas asociadas a la cuenta',
+                'Sus publicaciones, comentarios, fotos y foto de perfil en Comunidad dejan de mostrarse y se eliminan, incluidos sus textos y fotos; también puede eliminarlos usted mismo en cualquier momento desde la app',
                 'Cuando técnicamente o legalmente no sea posible una eliminación inmediata, restringiremos el uso de los datos y los conservaremos solo para fines permitidos'
             ]
         },

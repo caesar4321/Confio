@@ -33,7 +33,7 @@ export const DOCK_ROUTES = new Set([
   'RampInstructions', 'RampAddress', 'RampHistory', 'TradeConfirm', 'BuyStock', 'SellStock', 'StockDetail',
   'USDCDeposit', 'USDCManage', 'USDCHistory', 'USDCConversion', 'ConfioPresaleParticipate',
   'PayrollRun', 'PayrollRunDetail', 'PayrollReceipt', 'PayrollTopUp', 'PayrollPending', 'PayrollHistory',
-  'PayrollRunsHistory', 'PayeeDetail', 'FriendDetail', 'EmployeeDetail',
+  'PayrollRunsHistory', 'PayeeDetail', 'FriendDetail', 'EmployeeDetail', 'PendingIncoming', 'Verification',
 ]);
 
 const HINTS: Record<string, ScreenHint[]> = {

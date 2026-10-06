@@ -65,7 +65,7 @@ describe('DiscoverFeed sections', () => {
 
   it('tells Comunidad readers it is coming, not that the app is empty', () => {
     const tree = render({ sections: DISCOVER_SECTIONS, activeSection: 'community' });
-    expect(tree.root.findByType('EmptyState' as any).props.title).toBe('Comunidad llega pronto');
+    expect(tree.root.findByType('EmptyState' as any).props.title).toBe('Aún no hay publicaciones');
   });
 
   it('says the load failed instead of claiming there is nothing', () => {
