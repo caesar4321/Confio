@@ -212,15 +212,17 @@ const VerificationScreen = () => {
   const isInitialLoading = meLoading || personalLoading || businessLoading
     || (!isBusinessAccount && documentsQuery.loading && !documents);
 
-  const refreshStatuses = React.useCallback(async () => {
+  // Resolves to the refreshed documents (null when unknown).
+  const refreshStatuses = React.useCallback(async (): Promise<IdentityDocument[] | null> => {
     setIsRefreshing(true);
     try {
-      await Promise.all([
+      const [, , , docs] = await Promise.all([
         refetchMe(),
         refetchPersonalKyc(),
         isBusinessAccount && refetchBizKyc ? refetchBizKyc() : Promise.resolve(),
-        isBusinessAccount ? Promise.resolve() : refetchDocuments().catch(() => undefined),
+        isBusinessAccount ? Promise.resolve(undefined) : refetchDocuments().catch(() => undefined),
       ]);
+      return (docs as any)?.data?.myIdentityDocuments || null;
     } finally {
       setIsRefreshing(false);
     }
@@ -238,8 +240,24 @@ const VerificationScreen = () => {
     if (!result?.success) {
       throw new Error(result?.error || 'No se pudo sincronizar la decisión de Didit.');
     }
-    await refreshStatuses();
+    const docs = await refreshStatuses();
     const normalized = normalizeStatus(result.verificationStatus);
+    // A document of another country, back from the browser: not the user's
+    // identity verification, so neither its copy nor its conversion events.
+    const verificationId = result.verification?.id;
+    const additional = verificationId
+      ? docs?.find(doc => doc.id === String(verificationId) && doc.isAdditional)
+      : undefined;
+    if (additional) {
+      if (normalized === 'verified') {
+        setBanner({ variant: 'success', message: 'Listo: tu documento quedó verificado.' });
+      } else if (normalized === 'rejected') {
+        setBanner({ variant: 'error', message: additional.rejectedReason || 'No pudimos verificar este documento.' });
+      } else {
+        setBanner({ variant: 'info', message: 'Estamos revisando tu documento. Te avisaremos apenas termine.' });
+      }
+      return;
+    }
     const detail = result.statusDetail || result.verification?.statusDetail;
     if (normalized === 'verified') {
       const analyticsParams = { method: 'didit', provider: 'didit', verification_status: 'verified', session_id: sessionId };

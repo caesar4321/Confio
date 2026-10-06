@@ -95,7 +95,10 @@ export default function AdditionalDocumentScreen() {
       await openDiditSessionUrl(session.sessionUrl, 'No se recibió un enlace seguro para verificarte en el navegador.');
       setResult({ variant: 'info', message: 'Termina la verificación en tu navegador. Al terminar, verás el resultado en Verificación.' });
     } catch (error: any) {
-      setResult({ variant: 'error', message: error?.message || 'No se pudo abrir la verificación en el navegador.' });
+      // The server's own message, never a raw GraphQL or transport error
+      // (a server without `inBrowser` answers HTTP 400).
+      const own = error?.graphQLErrors?.length || error?.networkError ? null : error?.message;
+      setResult({ variant: 'error', message: own || 'No se pudo abrir la verificación en el navegador.' });
     } finally {
       setBusy(false);
     }
