@@ -37,6 +37,8 @@ PROBE_ANSWERS = [
     ('other', 'Otra cosa'),
 ]
 PROBE_KEYS = {key for key, _ in PROBE_ANSWERS}
+# An unfinished identity verification is worth a nudge for this long.
+VERIFICATION_NUDGE_DAYS = 14
 MAX_STARTERS = 4
 
 
@@ -89,10 +91,15 @@ class _State:
     verification_pending: bool
     ondo_eligible: bool
     probe_answered: bool
+    # Didit's own word for the open attempt: 'unfinished' (not started,
+    # abandoned, expired) or '' when unknown. In review never nudges.
+    verification_stage: str = ''
 
 
 def _state(viewer, request_meta) -> _State:
     from ramps.models import RampTransaction
+    from django.db.models import Q
+
     from security.models import IdentityVerification
     from users.models_unified import UnifiedTransactionTable
 
@@ -107,9 +114,18 @@ def _state(viewer, request_meta) -> _State:
     ).exclude(is_invitation=True, invitation_claimed=False).exists()
     in_progress = on_ramps.filter(status__in=['PENDING', 'PROCESSING', 'AML_REVIEW'],
                                   created_at__gte=timezone.now() - timedelta(days=3)).exists()
-    latest = IdentityVerification.objects.filter(user=user).order_by('-created_at').first()
-    pending = bool(latest and latest.status == 'pending'
-                   and latest.created_at <= timezone.now() - timedelta(hours=24))
+    # "pending" also covers attempts started and never finished, and people
+    # often verify with a second document (a passport, another country's ID)
+    # when they don't have one from their phone's country. So: only when no
+    # personal document of any kind is verified, and only for a recent attempt.
+    personal_docs = IdentityVerification.all_documents.filter(user=user).filter(
+        Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+    latest = personal_docs.order_by('-created_at').first()
+    now = timezone.now()
+    stage = _didit_stage(latest)
+    pending = bool(latest and latest.status == 'pending' and stage != 'in_review'
+                   and now - timedelta(days=VERIFICATION_NUDGE_DAYS) <= latest.created_at <= now - timedelta(hours=24)
+                   and not personal_docs.filter(status='verified').exists())
     try:
         from cusd_plus.eligibility import ONDO_POLICY
         ondo = ONDO_POLICY.evaluate(user, request_meta or {}).allowed
@@ -123,9 +139,28 @@ def _state(viewer, request_meta) -> _State:
         funded=funded,
         topup_in_progress=in_progress,
         verification_pending=pending,
+        verification_stage=stage if pending else '',
         ondo_eligible=ondo,
         probe_answered=ProbeAnswer.objects.filter(user=user, probe_id=PROBE_ID).exists(),
     )
+
+
+# Didit's raw statuses (risk_factors['didit']['raw_status']); our `status`
+# column folds all of them into 'pending'.
+DIDIT_UNFINISHED = {'not started', 'in progress', 'abandoned', 'expired', 'kyc expired'}
+DIDIT_IN_REVIEW = {'in review'}
+
+
+def _didit_stage(verification):
+    if verification is None:
+        return ''
+    risk = verification.risk_factors or {}
+    raw = str((risk.get('didit') or {}).get('raw_status') or '').strip().lower()
+    if raw in DIDIT_IN_REVIEW or risk.get('requires_review'):
+        return 'in_review'
+    if raw in DIDIT_UNFINISHED:
+        return 'unfinished'
+    return ''
 
 
 def probe_payload():
@@ -145,8 +180,12 @@ def build(viewer, screen: str = '', request_meta=None) -> Suggestions:
         attention.append(_s('attention.topup', '¿Cómo va tu recarga? Te digo en qué estado está.',
                             '¿En qué estado está mi recarga?'))
     if state.verification_pending and state.personal:
-        attention.append(_s('attention.verification', 'Tu verificación sigue pendiente. ¿Te ayudo?',
-                            'Mi verificación sigue pendiente, ¿qué hago?'))
+        if state.verification_stage == 'unfinished':
+            attention.append(_s('attention.verification', '¿Te ayudo a terminar tu verificación de identidad?',
+                                'Empecé mi verificación de identidad y no la terminé, ¿qué hago?'))
+        else:  # Didit's status unknown: words that fit an attempt in any state
+            attention.append(_s('attention.verification', '¿Te ayudo con tu verificación de identidad?',
+                                '¿En qué estado está mi verificación de identidad?'))
 
     if state.employee:
         starters = [_s('emp.charge', '¿Cómo cobro a un cliente?'), _s('emp.charge_qr', '¿Cómo genero un QR para cobrar?'),

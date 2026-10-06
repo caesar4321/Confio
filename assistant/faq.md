@@ -47,12 +47,12 @@ percentages or per-order caps from support threads.
 <!-- Contracts: CusdPlusVault.sol freezeAddress/pause (redeemToUsdt is whenNotPaused; frozen holder cannot burn), CusdVault.sol pause; both UUPS, owner = the Safe. See the "narrow and honest" note at CusdPlusVault.sol:214. Never claim Confío "cannot touch" funds: UUPS upgrade authority could rewrite balances. 7702 delegate needs the EOA's own signature (ConfioBatchDelegate.execute), so "cannot sign from your wallet" holds. Keys: device + user's Drive/iCloud backup (app-key encrypted, apps/src/services/secureDeterministicWallet.ts APP_BACKUP_KEY), so never say "solo contigo". -->
 <!-- Julian 2026-10-06: trust answers were reading as pessimistic ("no puedo garantizar que Confío sea confiable", founder's 89.36% $CONFIO brought up unasked). Lines restate facts elsewhere in this file, except the emergency-controls bullet (from the vault contracts, noted below); keep every line verifiable in code. -->
 
-## Comisiones de Confío
+## Comisiones de Confío (dilas solo cuando pregunten qué cobra Confío, cuánto cuesta o por qué reciben menos)
 - Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir. Es decir, 0,9% cuando tus dólares entran al sistema de Confío (recarga o depósito de USDT) y 0,9% cuando salen (retiro o envío a una billetera externa).
 - Gratis dentro de Confío: enviar a otro usuario y pasar entre Confío Dollar y Confío Dollar+. Confío paga la comisión de la red.
 - Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
 - Acciones: 0,30% de Confío en cada compra y venta.
-- Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti. El rendimiento es variable y no está garantizado.
+- Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti.
 - El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
 <!-- docs/whitepaper/README.md §10 (pricing rule, merchant/payroll 0.9%, stocks 0.30%, 15/85 yield share). Provider fees and FX are never quoted. -->
 
@@ -101,6 +101,8 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 ## Verificación de identidad
 - Te verificas dentro de la app con tu documento y una selfie. Hace falta para recargar, retirar y abrir cuentas locales.
 - Tu nombre y fecha de nacimiento deben coincidir en todos tus documentos.
+- Si no tienes un documento del país de tu teléfono, puedes verificarte con tu pasaporte o un documento de otro país. Algunas funciones lo aceptan y otras (como recargar y retirar) piden el del país de tu teléfono: la app te dice cuál necesitas.
+<!-- Julian 2026-10-06: an unfinished attempt stays "pending"; many verify with a second document instead. all_documents readers: rewards, community, Face step-up, Bolivia QR (ramps/stereum_customers.py); Recargar/Retirar read the primary only (User.is_identity_verified). Never nag about a pending attempt when any document is verified. -->
 - Para un límite mayor en cuentas locales se pide un comprobante de domicilio y unas preguntas sobre tus ingresos y el origen de tus fondos.
 - Fotografía tu documento original (no una foto de pantalla ni un escaneo) y evita reflejos sobre el holograma.
 <!-- support: latest 2026-05-25, 3 threads. -->

@@ -1385,6 +1385,53 @@ class SuggestionRankingTests(TestCase):
         self.assertTrue(suggestions.wants_probe(state))
 
 
+class VerificationNudgeTests(TestCase):
+    def _doc(self, user, status, days_ago, additional=False, raw=None):
+        from security.models import IdentityVerification
+        doc = IdentityVerification.all_objects.create(
+            user=user, status=status, is_additional_document=additional, document_type='passport',
+            risk_factors={'provider': 'didit', 'didit': {'raw_status': raw}} if raw else {},
+            verified_first_name='A', verified_last_name='B', verified_date_of_birth='1990-01-01',
+            verified_nationality='PE', verified_address='x', verified_city='x', verified_state='x',
+            verified_country='PE', document_number=f'N{status}{days_ago}{additional}')
+        type(doc).all_objects.filter(pk=doc.pk).update(created_at=timezone.now() - timedelta(days=days_ago))
+        return doc
+
+    def _pending(self, user):
+        from . import suggestions
+        viewer = Viewer(user=user, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        return suggestions._state(viewer, {}).verification_pending
+
+    def test_open_attempt_with_no_verified_document_nudges(self):
+        user = User.objects.create_user(username='vn1', email='vn1@example.com', password='x', firebase_uid='fb-vn1')
+        self._doc(user, 'pending', 2)
+        self.assertTrue(self._pending(user))
+
+    def test_second_document_verified_means_no_nudge(self):
+        user = User.objects.create_user(username='vn2', email='vn2@example.com', password='x', firebase_uid='fb-vn2')
+        self._doc(user, 'verified', 3, additional=True)  # a passport from another country
+        self._doc(user, 'pending', 2)  # the phone-country attempt left open
+        self.assertFalse(self._pending(user))
+
+    def test_didit_status_picks_the_words_and_review_never_nudges(self):
+        from . import suggestions
+        user = User.objects.create_user(username='vn4', email='vn4@example.com', password='x', firebase_uid='fb-vn4')
+        self._doc(user, 'pending', 2, raw='Abandoned')
+        viewer = Viewer(user=user, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.assertEqual(suggestions._state(viewer, {}).verification_stage, 'unfinished')
+        self.assertIn('terminar', suggestions.build(viewer, 'Home', {}).hints[0].text)
+        review = User.objects.create_user(username='vn5', email='vn5@example.com', password='x', firebase_uid='fb-vn5')
+        self._doc(review, 'pending', 2, raw='In Review')
+        self.assertFalse(self._pending(review))
+
+    def test_old_abandoned_attempt_stops_nudging(self):
+        user = User.objects.create_user(username='vn3', email='vn3@example.com', password='x', firebase_uid='fb-vn3')
+        self._doc(user, 'pending', 30)
+        self.assertFalse(self._pending(user))
+
+
 class SuggestionQueryContractTests(TestCase):
     """The exact client documents must validate against the schema."""
 
