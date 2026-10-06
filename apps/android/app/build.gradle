@@ -263,8 +263,9 @@ dependencies {
     // Native modules come from autolinking (react-native.config.js governs
     // exclusions). Only the deliberately-manual Didit SDK stays explicit.
     implementation(project(':didit-sdk-react-native')) {
-        // 4.x's full `didit-sdk` adds the WalletConnect/Reown wallet module (OkHttp 4,
-        // jitpack deps). Didit loads it only if present; we never use wallet ownership.
+        // 4.x's full `didit-sdk` adds the WalletConnect/Reown wallet module (OkHttp 4).
+        // Didit loads it only if present; we never use wallet ownership. This trims the
+        // app's runtime only: the library still resolves it (and jitpack) to compile.
         exclude group: 'me.didit', module: 'didit-sdk-wallet'
     }
 
