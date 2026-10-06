@@ -1030,6 +1030,13 @@ class MessagingService {
             initialChannelId: parts[1] === 'confio-news' ? 'confio' : parts[1]
           });
           break;
+        case 'community':
+          if (parts[1] === 'my-posts') {
+            this.navigateInsideMain('MyCommunityPosts');
+          } else {
+            this.navigateInsideMain('Discover');
+          }
+          break;
         case 'discover':
           if (parts[1] === 'post' && parts[2]) {
             this.navigateInsideMain('DiscoverPostDetail', {

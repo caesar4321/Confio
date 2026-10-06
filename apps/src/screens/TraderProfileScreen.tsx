@@ -23,6 +23,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Alert } from 'react-native';
 import { Text } from '../components/common/AppText';
+import { formatDecimal } from '../utils/numberLocale';
 
 type TraderProfileRouteProp = RouteProp<MainStackParamList, 'TraderProfile'>;
 type TraderProfileNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TraderProfile'>;
@@ -226,10 +227,7 @@ export const TraderProfileScreen: React.FC = () => {
     const currency = getCurrencyForCountry(dummyCountry);
     const amountStr = typeof amount === 'number' ? amount.toString() : amount;
     
-    return `${currency} ${parseFloat(amountStr).toLocaleString('es-VE', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    })}`;
+    return `${currency} ${formatDecimal(parseFloat(amountStr))}`;
   };
 
   // Check if an offer belongs to the current user/account
@@ -340,7 +338,7 @@ export const TraderProfileScreen: React.FC = () => {
               <Text style={styles.lastSeenText}>{profileData?.lastSeen || 'Recientemente'}</Text>
               <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
                 <Icon name="check-circle" size={16} color="#16a34a" style={{marginRight: 4}} />
-                <Text style={styles.profileStatsText}>{Number(profileData?.successRate || 0).toFixed(1)}% completado • {profileData?.completedTrades || 0} operaciones</Text>
+                <Text style={styles.profileStatsText}>{formatDecimal(Number(profileData?.successRate || 0), { decimals: 1 })}% completado • {profileData?.completedTrades || 0} operaciones</Text>
               </View>
             </View>
           </View>
@@ -354,8 +352,8 @@ export const TraderProfileScreen: React.FC = () => {
               <Text style={styles.statLabel}>{isTraderView ? 'Calificación' : 'Tasa de éxito'}</Text>
               <Text style={[styles.statValue, {color: '#16a34a'}]}>
                 {isTraderView && trader?.avgRating ? 
-                  `${trader.avgRating.toFixed(1)} ★` : 
-                  `${Number(profileData?.successRate || 0).toFixed(1)}%`
+                  `${formatDecimal(trader.avgRating, { decimals: 1 })} ★` : 
+                  `${formatDecimal(Number(profileData?.successRate || 0), { decimals: 1 })}%`
                 }
               </Text>
             </View>
@@ -403,8 +401,8 @@ export const TraderProfileScreen: React.FC = () => {
               <View style={{flex: 1}}>
                 <Text style={styles.infoBoxTitle}>Información del trader</Text>
                 <Text style={styles.infoBoxText}>
-                  Este trader ha completado {trader.completedTrades} intercambios con una tasa de éxito del {Number(trader.successRate).toFixed(1)}%.
-                  {trader.avgRating && trader.avgRating > 0 ? ` Su calificación promedio es ${trader.avgRating.toFixed(1)}/5.` : ''}
+                  Este trader ha completado {trader.completedTrades} intercambios con una tasa de éxito del {formatDecimal(Number(trader.successRate), { decimals: 1 })}%.
+                  {trader.avgRating && trader.avgRating > 0 ? ` Su calificación promedio es ${formatDecimal(trader.avgRating, { decimals: 1 })}/5.` : ''}
                 </Text>
               </View>
             </View>

@@ -13,6 +13,10 @@ DESTINATIONS = {
     'withdraw': 'Retirar: enviar dólares a tu propia cuenta bancaria (dentro de Enviar).',
     'invest': 'Invertir: acciones de EE.UU. y preventa de $CONFIO.',
     'stocks': 'Lista de acciones de EE.UU. disponibles.',
+    'stock': 'Página de una acción o ETF concreto (precio, gráfico, comprar o vender). Indica cuál en `asset` (ticker o nombre).',
+    'month_summary': 'Tu mes: cuánto entró y salió este mes, por categoría y por contacto.',
+    'emergency_exit': 'Salida de emergencia: mover el dinero sin depender de la app ni de los servidores de Confío.',
+    'tokenomics': 'Tokenomics de $CONFIO: suministro, distribución y liberación (vesting).',
     'presale': 'Preventa de $CONFIO.',
     'discover': 'Descubrir: novedades y comunidad.',
     'profile': 'Perfil y configuración.',
@@ -25,6 +29,14 @@ DESTINATIONS = {
 }
 
 # Screens only the account owner sees (employees never get bank rails).
-OWNER_ONLY = {'receive', 'top_up', 'withdraw', 'pending_incoming'}
+OWNER_ONLY = {'receive', 'top_up', 'withdraw', 'pending_incoming', 'month_summary', 'emergency_exit'}
 # Screens that only exist for personal accounts.
 PERSONAL_ONLY = {'pending_incoming'}
+# Keys newer builds open directly. The action also carries this older key, so
+# a build that doesn't know the new one still lands on the closest screen.
+FALLBACKS = {
+    'stock': 'stocks',
+    'month_summary': 'home',
+    'emergency_exit': 'profile',
+    'tokenomics': 'invest',
+}

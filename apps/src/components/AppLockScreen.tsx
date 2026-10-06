@@ -12,6 +12,7 @@ import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { colors } from '../config/theme';
+import { useEmergencyExitOpen } from '../hooks/useEmergencyExitOpen';
 
 interface AppLockScreenProps {
   visible: boolean;
@@ -32,6 +33,9 @@ interface AppLockScreenProps {
 export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }: AppLockScreenProps) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Salida de emergencia exists only once Confío stopped operating (on-chain
+  // heartbeat); a failed unlock is not a way into it.
+  const exitOpen = useEmergencyExitOpen(visible);
 
   // Stays mounted across lock sessions; don't carry a previous failure over.
   useEffect(() => {
@@ -95,9 +99,11 @@ export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }:
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={onEmergencyExit} accessibilityRole="button">
-          <Text style={styles.secondaryButtonText}>Salida de emergencia</Text>
-        </TouchableOpacity>
+        {exitOpen && (
+          <TouchableOpacity style={styles.secondaryButton} onPress={onEmergencyExit} accessibilityRole="button">
+            <Text style={styles.secondaryButtonText}>Salida de emergencia</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[styles.primaryButton, busy && styles.buttonDisabled]}
           onPress={handleUnlock}

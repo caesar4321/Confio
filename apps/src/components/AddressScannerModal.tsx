@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from './common/AppText';
 import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
-import { launchImageLibrary } from 'react-native-image-picker';
+import { pickFromLibrary } from '../services/systemPicker';
 import RNQRGenerator from 'rn-qr-generator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -113,7 +113,7 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
   // permissions needed on modern OS versions).
   const handleGallery = async () => {
     try {
-      const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 });
+      const result = await pickFromLibrary({ mediaType: 'photo', selectionLimit: 1 });
       if (result.didCancel) return;
       if (result.errorCode) {
         Alert.alert('No se pudo abrir la galería', result.errorMessage || result.errorCode);

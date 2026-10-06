@@ -1,12 +1,14 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED } from '../../apollo/monthSummary';
+import { GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH } from '../../apollo/monthSummary';
 
 const mockQuery = jest.fn();
 const mockClient = { query: (...a: any[]) => mockQuery(...a) };
 jest.mock('@apollo/client', () => ({ ...jest.requireActual('@apollo/client'), useApolloClient: () => mockClient }));
 
-import { mergeValues, REVEAL_WINDOW_MS, useMonthInsights } from '../useMonthInsights';
+import {
+  mergeValues, REVEAL_HANG_GUARD_MS, useMonthInsights,
+} from '../useMonthInsights';
 
 const insights = (keys: string[]) => ({
   previousMonthSpendingUsd: '390.00',
@@ -43,13 +45,25 @@ it('reveals once every query settles, together', async () => {
   expect(latest.savings.earnedUsd).toBe('0.42');
 });
 
-it('reveals what arrived by 800ms and drops anything later (8A)', async () => {
+it('a slow query (a cold stocks scan) still makes the reveal: no short window', async () => {
+  const slow = deferred<any>();
+  mockQuery.mockImplementation(({ query }: any) => (query === GET_STOCK_MONTH ? slow.promise
+    : Promise.resolve({ data: query === GET_MONTH_INSIGHTS ? { monthInsights: insights([]) } : {} })));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  await act(async () => { jest.advanceTimersByTime(2000); });
+  expect(latest.revealed).toBe(false);
+  await act(async () => { slow.resolve({ data: { stockMonth: { state: 'none', canBuy: true } } }); });
+  expect(latest.revealed).toBe(true);
+  expect(latest.stocks).toEqual({ state: 'none', canBuy: true });
+});
+
+it('only a hung query is cut off, and its late answer never swaps the slot', async () => {
   const slow = deferred<any>();
   mockQuery.mockImplementation(({ query }: any) => (query === GET_PROTECTION_VALUE ? slow.promise
     : Promise.resolve({ data: query === GET_MONTH_INSIGHTS ? { monthInsights: insights([]) } : { savingsEarned: { earnedUsd: '0.42', daily: [] } } })));
   await act(async () => { renderer.create(<Probe {...base} />); });
   expect(latest.revealed).toBe(false);
-  await act(async () => { jest.advanceTimersByTime(REVEAL_WINDOW_MS); });
+  await act(async () => { jest.advanceTimersByTime(REVEAL_HANG_GUARD_MS); });
   expect(latest.revealed).toBe(true);
   expect(latest.protection).toBeNull();
   await act(async () => { slow.resolve({ data: { protectionValue: { currency: 'BOB' } } }); });
@@ -112,3 +126,200 @@ it('a gained↔stable flip on refocus never swaps the slot card', () => {
     { insights: null, savings: null, protection: p('stable') });
   expect(merged.protection?.state).toBe('gained');
 });
+
+it('a settling stocks card resolves in place, or into the invitation when the trade failed', () => {
+  const base = { insights: null, savings: null, protection: null };
+  const settling = { state: 'settling', valueUsd: '220.00' } as any;
+  const gain = { state: 'gain', valueUsd: '220.00', gainUsd: '15.00' } as any;
+  expect(mergeValues({ ...base, stocks: settling }, { ...base, stocks: gain }).stocks).toBe(gain);
+  const none = { state: 'none', canBuy: true } as any;
+  expect(mergeValues({ ...base, stocks: settling }, { ...base, stocks: none }).stocks).toBe(none);
+  expect(mergeValues({ ...base, stocks: settling }, { ...base, stocks: null }).stocks).toBe(settling);
+  expect(mergeValues({ ...base, stocks: gain }, { ...base, stocks: settling }).stocks).toBe(gain);
+  expect(mergeValues({ ...base, stocks: null }, { ...base, stocks: gain }).stocks).toBeNull();
+});
+
+it('the invitation gives way to the card after a purchase, never the reverse', () => {
+  const base = { insights: null, savings: null, protection: null };
+  const none = { state: 'none', canBuy: true } as any;
+  const gain = { state: 'gain', gainUsd: '1.00' } as any;
+  expect(mergeValues({ ...base, stocks: none }, { ...base, stocks: gain }).stocks).toBe(gain);
+  expect(mergeValues({ ...base, stocks: gain }, { ...base, stocks: none }).stocks).toBe(gain);
+});
+
+it('a refocus never draws or removes the invitation (canBuy flips stay for the next view)', () => {
+  const base = { insights: null, savings: null, protection: null };
+  const invite = { state: 'none', canBuy: true } as any;
+  const nothing = { state: 'none', canBuy: false } as any;
+  expect(mergeValues({ ...base, stocks: nothing }, { ...base, stocks: invite }).stocks).toBe(nothing);
+  expect(mergeValues({ ...base, stocks: invite }, { ...base, stocks: nothing }).stocks).toBe(invite);
+});
+
+it('a shown gain card that gets a settling answer keeps its value and flags the poll until final', async () => {
+  const gain = { state: 'gain', valueUsd: '100.00' };
+  let stocks: any = gain;
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.stocks).toEqual(gain);
+  expect(latest.stocksSettling).toBe(false);
+  stocks = { state: 'settling', valueUsd: '220.00' };
+  await act(async () => { latest.refresh(); });
+  expect(latest.stocks).toEqual(gain);                 // never swaps the card
+  expect(latest.stocksSettling).toBe(true);
+  stocks = { state: 'gain', valueUsd: '220.00' };
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocks.valueUsd).toBe('220.00');
+  expect(latest.stocksSettling).toBe(false);
+});
+
+it('a settling poll never stacks a second stocks ask on one still in flight', async () => {
+  const settling = { state: 'settling', valueUsd: '220.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  const slow = deferred<any>();
+  mockQuery.mockReset();
+  mockQuery.mockImplementation(() => slow.promise);
+  await act(async () => { latest.refreshStocks(); latest.refreshStocks(); });
+  expect(mockQuery).toHaveBeenCalledTimes(1);
+  await act(async () => { slow.resolve({ data: { stockMonth: { state: 'gain', valueUsd: '220.00' } } }); });
+  expect(latest.stocks.state).toBe('gain');
+  mockQuery.mockResolvedValue({ data: { stockMonth: { state: 'gain', valueUsd: '221.00' } } });
+  await act(async () => { latest.refreshStocks(); });
+  expect(mockQuery).toHaveBeenCalledTimes(2);           // free again once answered
+});
+
+it('a month switch frees the stocks slot; the old ask finishing later never frees the new one', async () => {
+  const settling = { state: 'settling', valueUsd: '220.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Probe {...base} />); });
+  const oldAsk = deferred<any>();
+  mockQuery.mockImplementation(() => oldAsk.promise);
+  await act(async () => { latest.refreshStocks(); });                    // October's ask hangs
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  await act(async () => { tree.update(<Probe {...base} month={9} isCurrent={false} />); });
+  const newAsk = deferred<any>();
+  mockQuery.mockReset();
+  mockQuery.mockImplementation(() => newAsk.promise);
+  await act(async () => { latest.refreshStocks(); });
+  expect(mockQuery).toHaveBeenCalledTimes(1);                             // not blocked by October's
+  await act(async () => { oldAsk.resolve({ data: { stockMonth: null } }); });
+  await act(async () => { latest.refreshStocks(); });
+  expect(mockQuery).toHaveBeenCalledTimes(1);                             // September's still holds it
+});
+
+it("a focus refresh's older stocks answer never lands over a newer poll's (no restarted poll)", async () => {
+  const settling = { state: 'settling', valueUsd: '220.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.stocksSettling).toBe(true);
+  // Focus refresh: stocks answers 'settling' at once, but monthInsights is slow.
+  const slowInsights = deferred<any>();
+  mockQuery.mockImplementation(({ query }: any) => (query === GET_MONTH_INSIGHTS ? slowInsights.promise
+    : Promise.resolve({ data: query === GET_STOCK_MONTH ? { stockMonth: settling } : {} })));
+  await act(async () => { latest.refresh(); });
+  // A poll sent later answers 'gain' first.
+  mockQuery.mockImplementation(() => Promise.resolve({ data: { stockMonth: { state: 'gain', valueUsd: '221.00' } } }));
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocks.state).toBe('gain');
+  expect(latest.stocksSettling).toBe(false);
+  await act(async () => { slowInsights.resolve({ data: { monthInsights: null } }); });
+  expect(latest.stocks.state).toBe('gain');
+  expect(latest.stocksSettling).toBe(false);          // the stale 'settling' did not restart the poll
+});
+
+it('a focus refresh never stacks a stocks ask on a poll still in flight', async () => {
+  const settling = { state: 'settling', valueUsd: '220.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: settling } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  const slow = deferred<any>();
+  mockQuery.mockReset();
+  mockQuery.mockImplementation(({ query }: any) => (query === GET_STOCK_MONTH ? slow.promise
+    : Promise.resolve({ data: {} })));
+  await act(async () => { latest.refreshStocks(); latest.refresh(); });
+  expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(1);
+  await act(async () => { slow.resolve({ data: { stockMonth: { state: 'gain', valueUsd: '221.00' } } }); });
+  expect(latest.stocks.state).toBe('gain');
+  expect(latest.stocksSettling).toBe(false);
+});
+
+it('a focus refresh does not ask stocks when no stocks card is shown (its answer could never appear)', async () => {
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: null } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.revealed).toBe(true);
+  expect(latest.stocks).toBeNull();
+  mockQuery.mockClear();
+  await act(async () => { latest.refresh(); });
+  expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(0);
+  expect(mockQuery).toHaveBeenCalled();                 // the other cards still refresh
+});
+
+it("nor for a 'none' with nothing to offer (nothing drawn), unless a trade is settling", async () => {
+  let stocks: any = { state: 'none', canBuy: false, valueUsd: '0.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  mockQuery.mockClear();
+  await act(async () => { latest.refresh(); });
+  expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(0);
+  // An invitation on screen is drawn: it is re-asked (a purchase turns it into the card).
+  stocks = { state: 'none', canBuy: true, valueUsd: '0.00' };
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Probe {...base} month={9} isCurrent={false} />); });
+  mockQuery.mockClear();
+  await act(async () => { latest.refresh(); });
+  expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_STOCK_MONTH)).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
+
+it('the answer that resolves a trade replaces the card, even a pre-trade gain (never the pre-trade value)', async () => {
+  let stocks: any = { state: 'gain', gainUsd: '5.00', valueUsd: '100.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  stocks = { state: 'settling', valueUsd: '0.00' };
+  await act(async () => { latest.refresh(); });
+  expect(latest.stocks.state).toBe('gain');            // kept while the trade settles
+  stocks = { state: 'value_only', valueUsd: '0.00' };
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocks.state).toBe('value_only');      // the answer that resolves the trade: the post-trade truth
+  expect(latest.stocks.valueUsd).toBe('0.00');
+  expect(latest.stocksSettling).toBe(false);
+  stocks = { state: 'gain', gainUsd: '1.00', valueUsd: '1.00' };
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocks.state).toBe('gain');            // value only → gain is still an upgrade
+});
+
+it('value only becomes the result once explained, and a view that saw settling keeps asking', () => {
+  const base2 = { insights: null, savings: null, protection: null };
+  const valueOnly = { state: 'value_only', valueUsd: '220.00' } as any;
+  const gain = { state: 'gain', gainUsd: '1.00' } as any;
+  expect(mergeValues({ ...base2, stocks: valueOnly }, { ...base2, stocks: gain }).stocks).toBe(gain);
+  expect(mergeValues({ ...base2, stocks: gain }, { ...base2, stocks: valueOnly }).stocks).toBe(gain);   // never a downgrade
+});
+
+it('only a settling answer keeps the screen polling; whatever resolves it ends the poll', async () => {
+  let stocks: any = { state: 'value_only', valueUsd: '100.00' };
+  mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+    query === GET_STOCK_MONTH ? { stockMonth: stocks } : {} }));
+  await act(async () => { renderer.create(<Probe {...base} />); });
+  expect(latest.stocksSettling).toBe(false);          // an incomplete history alone is never polled
+  stocks = { state: 'settling', valueUsd: '220.00' };
+  await act(async () => { latest.refresh(); });
+  expect(latest.stocksSettling).toBe(true);
+  stocks = { state: 'value_only', valueUsd: '220.00' };
+  await act(async () => { latest.refreshStocks(); });
+  expect(latest.stocksSettling).toBe(false);          // the server's final answer
+  expect(latest.stocks.valueUsd).toBe('220.00');
+  stocks = { state: 'settling', valueUsd: '300.00' };
+  await act(async () => { latest.refresh(); });
+  expect(latest.stocksSettling).toBe(true);           // a later trade starts over
+});
+

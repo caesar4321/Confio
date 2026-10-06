@@ -79,6 +79,34 @@ def _change_floor_refusal_marker(key: str, delta: int) -> bool:
     return delta < 0
 
 
+@shared_task(name='cusd_plus.warm_gm_holdings', bind=True, ignore_result=True, max_retries=3)
+def warm_gm_holdings(self, bsc_address: str, min_block: int | None = None):
+    """Store the complete holdings scan right after a stock trade confirms.
+    A scan served by a node still behind `min_block` (the trade's block; the
+    RPC pool rotates) isn't cached (the confirm set that floor): ask again a
+    moment later, when the node has caught up."""
+    from .gm_holdings import complete_holdings, reads_before
+
+    try:
+        complete = complete_holdings(bsc_address)
+    except Exception:  # noqa: BLE001 — a warm-up; the next read scans anyway
+        logger.warning('holdings warm-up failed for %s', bsc_address, exc_info=True)
+        return
+    if complete is None or min_block is None:
+        return
+    if reads_before(complete[1], min_block):
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=2)
+
+
+def _dispatch_holdings_warmup(bsc_address: str, min_block: int | None = None) -> None:
+    try:
+        # retry=False: an unreachable broker must not stall the caller.
+        warm_gm_holdings.apply_async(args=[bsc_address, min_block], retry=False)
+    except Exception:  # noqa: BLE001 — optional warm-up
+        logger.warning('could not queue holdings warm-up for %s', bsc_address, exc_info=True)
+
+
 @shared_task(name='cusd_plus.refresh_gm_tvl')
 def refresh_gm_tvl():
     """Keep the Home Ondo Stocks TVL metric warm outside request latency."""
@@ -364,6 +392,14 @@ def monitor_bridge_arrivals():
         key = ('0x' + log['topics'][2][-40:]).lower()
         sender = ('0x' + log['topics'][1][-40:]).lower()
         raw_units = int(log['data'], 16)
+        # USDT landed at a watched wallet (a bridge or refund delivery, an
+        # internal send, dust, a conversion leg, a deposit): its stored
+        # balance is stale whatever happens next. Idempotent, so a rescan
+        # replaying the log only forces one more chain read.
+        # The log's block is the floor: the scanner reads to `latest`, and a
+        # display read served by a node behind it must not store the
+        # pre-arrival balance right as the deposit push brings the user in.
+        _mark_receipt_balances_stale(key, {'blockNumber': log.get('blockNumber')})
         from payment_accounts.activity import arrival_owned
         if arrival_owned(log['transactionHash'], key):
             continue
@@ -1610,6 +1646,15 @@ def monitor_cusd_fee_events(self):
                     )
                 ingested += len(_reconcile_cusd_fee_event(
                     batch=batch, receipt={'logs': tx_logs}))
+                # A permissionless mint or exit moved cUSD with no sponsored
+                # receipt of ours to mark it: the sender's and every indexed
+                # address's (a mint's recipient) stored balance is stale.
+                _mark_receipt_balances_stale(batch.user_bsc_address, {})
+                for fee_log in tx_logs:
+                    for topic in (fee_log.get('topics') or [])[1:]:
+                        word = str(topic).lower()
+                        if len(word) == 66 and word[2:26] == '0' * 24:
+                            _mark_receipt_balances_stale('0x' + word[-40:], {})
         final_block = _rpc('eth_getBlockByNumber', [hex(finalized), False]) or {}
         state.last_finalized_block = finalized
         state.last_finalized_hash = final_block.get('hash') or ''
@@ -1912,6 +1957,14 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         except Exception:  # noqa: BLE001
             pass
         if not recheck:
+            if batch.kind in ('stock_buy', 'stock_sell'):
+                # A scan cached while the trade was mined holds units the
+                # ledger will never get: drop it with the trade.
+                from .gm_holdings import invalidate_holdings
+                invalidate_holdings(batch.user_bsc_address)
+            # A read between inclusion and the reorg stored the post-
+            # transaction balances: stale again.
+            _mark_receipt_balances_stale(batch.user_bsc_address, receipt)
             batch.status = 'reorged'
             settle_savings_mint(batch.tx_hash, 'reorged')
             batch.save(update_fields=['status', 'updated_at'])
@@ -1958,22 +2011,87 @@ def check_sponsored_batch_receipt(self, batch_id: int):
                            batch.tx_hash, exc)
             raise self.retry(countdown=_retry_countdown(self.request.retries))
 
+    if batch.kind in ('stock_buy', 'stock_sell'):
+        # BEFORE the row turns 'confirmed': a Tu mes read between the two
+        # would otherwise pair the confirmed ledger with a fresh scan cached
+        # pre-trade ('value_only' after the user's own trade). Invalidated
+        # first, any scan cached from here on read the final chain.
+        from .gm_holdings import invalidate_holdings
+        invalidate_holdings(batch.user_bsc_address, min_block=blk_num)
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
     batch.save(update_fields=['status', 'block_number', 'block_hash', 'updated_at'])
     settle_savings_mint(batch.tx_hash, 'confirmed', receipt=receipt, batch=batch)
-    if batch.kind in ('stock_buy', 'stock_sell', 'wrap_cusd', 'unwrap_to_cusd'):
-        # Internal eligibility normalization changes the same cached cUSD+
-        # position as a stock trade. Invalidate only after finality so the UI
-        # cannot repopulate the cache with the pre-conversion balance while
-        # the transaction is still pending.
-        from . import vault
-        vault.invalidate_position(batch.user_bsc_address)
+    # Every kind, at finality: the stored BSC balances of the signer and of
+    # every wallet a token Transfer in this receipt touched (a send's or
+    # payment's recipient, a payout, a claim) are stale now. Broadcast-time
+    # invalidation alone isn't enough: a read between broadcast and finality
+    # re-stores the pre-transaction balance for 5 minutes.
+    _mark_receipt_balances_stale(batch.user_bsc_address, receipt)
     if batch.kind in ('stock_buy', 'stock_sell'):
-        from django.core.cache import cache
-        cache.delete(f'gm_hold:{batch.user_bsc_address.lower()}')
+        from django.db import transaction
+        # Holdings were invalidated before the status write above. Store the
+        # complete post-trade scan in its own task (never delays finality):
+        # Tu mes, often opened from the success screen, then reads the row
+        # instead of waiting on a cold Multicall.
+        address, block = batch.user_bsc_address, batch.block_number
+        transaction.on_commit(lambda: _dispatch_holdings_warmup(address, block))
     logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)
+
+
+@shared_task(name='cusd_plus.mark_relay_balances_stale', bind=True, ignore_result=True, max_retries=8)
+def mark_relay_balances_stale(self, bsc_address: str, tx_hash: str):
+    """A user-signed relay (submitBscTransaction) has no sponsored batch, so
+    the receipt hook never marks it: once it is mined, mark the signer and
+    every token party stale (a read between broadcast and inclusion stored
+    the pre-transaction balance)."""
+    try:
+        receipt = _rpc('eth_getTransactionReceipt', [tx_hash])
+    except Exception:  # noqa: BLE001
+        receipt = None
+    if not receipt:
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=10)
+        receipt = {}
+    _mark_receipt_balances_stale(bsc_address, receipt)
+
+
+def _mark_receipt_balances_stale(user_bsc_address: str, receipt: dict) -> None:
+    from . import vault
+    try:
+        block = int(str((receipt or {}).get('blockNumber')), 16)
+    except (TypeError, ValueError):
+        block = None                     # a scanner's mark: no receipt, no floor
+    try:
+        from blockchain.bsc_balance_service import parties_from_receipt
+        parties = parties_from_receipt(receipt)
+    except Exception:  # noqa: BLE001 — never blocks finality; the signer still goes stale
+        logger.warning('receipt balance parties unreadable', exc_info=True)
+        parties = set()
+    for address in {(user_bsc_address or '').lower(), *parties} - {''}:
+        try:
+            vault.invalidate_position(address, min_block=block)
+        except Exception:  # noqa: BLE001 — stale for up to 5 min at worst
+            logger.warning('could not mark balances stale for %s', address, exc_info=True)
+    # Stock tokens moved by anything other than a Confío trade (a relayed
+    # transfer, a claim): Tu mes reads the stored scan at any age, so it
+    # must be invalidated here too, after inclusion, like a trade: the
+    # generation moves (a scan already running is not stored) and the block
+    # floor rises (a lagging node's pre-transfer read is not stored).
+    try:
+        from blockchain.bsc_balance_service import parties_from_receipt
+        from .gm_holdings import invalidate_holdings, registry
+        stock_tokens = {str(m.get('address') or '').lower() for m in (registry() or {}).values()} - {''}
+        holders = parties_from_receipt(receipt, watched=stock_tokens) if stock_tokens else set()
+    except Exception:  # noqa: BLE001
+        logger.warning('receipt stock parties unreadable', exc_info=True)
+        holders = set()
+    for address in holders:
+        try:
+            invalidate_holdings(address, min_block=block)
+        except Exception:  # noqa: BLE001
+            logger.warning('could not mark holdings stale for %s', address, exc_info=True)
 
 
 # Kinds that own a SEPARATE domain confirm task keyed (source_id, batch_id).

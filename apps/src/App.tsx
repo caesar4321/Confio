@@ -9,6 +9,7 @@ import { colors } from './config/theme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import apolloClient from './apollo/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { useEmergencyExitOpen } from './hooks/useEmergencyExitOpen';
 import { EmergencyRecoveryScreen, emergencyRecoveryOptions } from './screens/EmergencyRecoveryScreen';
 import { HeaderProvider } from './contexts/HeaderContext';
 import { ScanProvider } from './contexts/ScanContext';
@@ -100,9 +101,11 @@ const Navigation: React.FC = () => {
   );
 };
 
-// The emergency exit must stay reachable when loading never finishes
-// (servers down, hung network), but a normal start or biometric unlock
-// should show only the spinner. The exit appears once loading is slow;
+// When Confío has stopped operating, loading may never finish (servers gone),
+// so the emergency exit must be reachable from here — but ONLY then: the
+// button appears only while the on-chain heartbeat says the exit is open
+// (useEmergencyExitOpen). A normal start or biometric unlock shows only the
+// spinner. Even when open, the button waits until loading is slow;
 // time spent on the phone's unlock prompt is the user's, not a slow start,
 // so the clock starts over when a prompt closes. A prompt that never
 // settles (some Android builds, an activity recreated mid-prompt) must not
@@ -137,10 +140,11 @@ const LoadingOverlay: React.FC<{ onEmergencyExit: () => void }> = ({ onEmergency
       if (timer) clearTimeout(timer);
     };
   }, []);
+  const exitOpen = useEmergencyExitOpen(slow);
   return (
     <View style={loadingStyles.overlay}>
       <ActivityIndicator size="large" color={colors.primaryDark} />
-      {slow && (
+      {slow && exitOpen && (
         <TouchableOpacity onPress={onEmergencyExit} accessibilityRole="button" style={loadingStyles.exitButton}>
           <Text style={loadingStyles.exitText}>Salida de emergencia</Text>
         </TouchableOpacity>

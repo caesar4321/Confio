@@ -313,8 +313,8 @@ class FaceStepUpStatusType(graphene.ObjectType):
 
 
 class SecurityQuery(graphene.ObjectType):
-    # Lets the app decide whether a client-enforced step (the emergency exit)
-    # must ask for Confío Face: only while the server actually enforces it.
+    # Lets the app decide whether a client-enforced step must ask for Confío
+    # Face: only while the server actually enforces it.
     face_step_up_status = graphene.Field(FaceStepUpStatusType)
     my_devices = graphene.List(UserDeviceType)
     my_kyc_status = graphene.Field(IdentityVerificationType)

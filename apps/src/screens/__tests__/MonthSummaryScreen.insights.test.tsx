@@ -2,6 +2,10 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+// The full-screen intro is covered in TuMesIntro.test.tsx.
+jest.mock('../../components/tuMes/TuMesIntro', () => ({ TuMesIntro: () => null }));
+// Entrance motion is covered in motion.test.tsx; here the cards render in place.
+jest.mock('../../components/tuMes/motion', () => ({ Rise: ({ children }: any) => children, Grow: ({ children }: any) => children }));
 jest.mock('react-native-svg', () => {
   const R = require('react');
   const C = (p: any) => R.createElement('Svg', p, p.children);
@@ -25,9 +29,18 @@ jest.mock('@apollo/client', () => ({
     : { data: { monthMovements: [] }, refetch: jest.fn().mockResolvedValue({}) }),
 }));
 let mockInsights: any;
-jest.mock('../../hooks/useMonthInsights', () => ({ useMonthInsights: () => ({ ...mockInsights, refresh: jest.fn() }) }));
+const mockRefreshStocks = jest.fn();
+jest.mock('../../hooks/useMonthInsights', () => ({
+  // Like the hook: polling follows the latest stocks answer of a shown card.
+  useMonthInsights: () => ({
+    stocksSettling: Boolean(mockInsights?.stocks) && mockInsights.stocks.state === 'settling',
+    ...mockInsights, refresh: jest.fn(), refreshStocks: mockRefreshStocks,
+  }),
+}));
 
-import { MonthSummaryScreen } from '../MonthSummaryScreen';
+import {
+  MonthSummaryScreen, SETTLING_FAST_TRIES, SETTLING_MAX_TRIES, SETTLING_POLL_MS, SETTLING_SLOW_MS,
+} from '../MonthSummaryScreen';
 
 const totals = (spending: string, count: number) => ({
   incomeUsd: '215.00', spendingUsd: spending, topUpsUsd: '0', withdrawalsUsd: '0', savingsNetUsd: '0',
@@ -63,6 +76,7 @@ it('shows Card A first and holds every insight and section until the reveal', ()
   expect(has(tree, 'tumes-summary-card')).toBe(true);
   expect(has(tree, 'tumes-revealed')).toBe(false);
   expect(has(tree, 'categorize-cta')).toBe(false);
+  expect(has(tree, 'tumes-insights-loading')).toBe(true);     // placeholders, never a blank screen
 });
 
 it('reveals the dollar slot, then habitual payments, in fixed order', () => {
@@ -70,6 +84,7 @@ it('reveals the dollar slot, then habitual payments, in fixed order', () => {
   mockInsights = { revealed: true, insights: recurring, savings, protection: null };
   const tree = mount();
   expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-recurring-card']);
+  expect(has(tree, 'tumes-insights-loading')).toBe(false);    // the placeholders give way
 });
 
 it('a quiet month shows every section with inviting empty states (founder 2026-10-04)', () => {
@@ -97,4 +112,81 @@ it('a quiet past month keeps savings (23A)', () => {
   const tree = mount();
   expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-recurring-card']);
   expect(has(tree, 'tumes-savings-invite')).toBe(false);
+});
+
+const stockGain = {
+  state: 'gain', canBuy: true, valueUsd: '220.00', valueStartUsd: '100.00', boughtUsd: '105.00', soldUsd: '0.00',
+  gainUsd: '15.00', gainPct: '7.32', holdings: 1, topMover: { ticker: 'NVDA', name: 'NVIDIA', changePct: '10.00' },
+};
+
+it('"Tus acciones" sits under the dollar slot, above habitual payments', () => {
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: stockGain };
+  const tree = mount();
+  expect(order(tree)).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-stocks-card', 'tumes-recurring-card']);
+});
+
+it('no stocks: an invitation only where buying is offered; unknown shows nothing', () => {
+  mockSummary = summary(3);
+  const none = { ...stockGain, state: 'none', gainUsd: null, topMover: null };
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: none };
+  expect(has(mount(), 'tumes-stocks-invite')).toBe(true);
+  mockInsights = { ...mockInsights, stocks: { ...none, canBuy: false } };
+  expect(has(mount(), 'tumes-stocks-invite')).toBe(false);
+  mockInsights = { ...mockInsights, stocks: null };
+  const tree = mount();
+  expect(has(tree, 'tumes-stocks-invite') || has(tree, 'tumes-stocks-card')).toBe(false);
+});
+
+it('a settling trade (arriving from a buy) shows the card and re-asks stocks until it resolves, bounded', () => {
+  jest.useFakeTimers();
+  mockRefreshStocks.mockClear();
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null,
+    stocks: { ...stockGain, state: 'settling', gainUsd: null, gainPct: null, valueStartUsd: null } };
+  const tree = mount();
+  expect(has(tree, 'tumes-stocks-card')).toBe(true);
+  expect(has(tree, 'tumes-stocks-settling-note')).toBe(true);
+  const note = () => tree.root.findAll((n) => typeof n.type === 'string'
+    && n.props.testID === 'tumes-stocks-settling-note')[0].props.children;
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 2); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(2);
+  expect(note()).toMatch(/En unos segundos/);
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * (SETTLING_FAST_TRIES - 2)); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(SETTLING_FAST_TRIES);
+  expect(note()).toMatch(/tardando/);                  // no "seconds" promise past the first minute
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(SETTLING_FAST_TRIES);   // now every 30s
+  act(() => { jest.advanceTimersByTime(SETTLING_SLOW_MS * 100); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(SETTLING_MAX_TRIES);
+  expect(note()).toMatch(/Vuelve más tarde/);
+  act(() => tree.unmount());
+  jest.useRealTimers();
+});
+
+it('a resolved month does not poll', () => {
+  jest.useFakeTimers();
+  mockRefreshStocks.mockClear();
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: stockGain };
+  const tree = mount();
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 5); });
+  expect(mockRefreshStocks).not.toHaveBeenCalled();
+  act(() => tree.unmount());
+  jest.useRealTimers();
+});
+
+it('a link back with a month (pop + merge) shows that month, not the one being browsed', () => {
+  mockSummary = summary(3);
+  mockInsights = { revealed: false };
+  mockParams = { year: 2025, month: 3 };
+  const tree = mount();
+  const title = () => tree.root.findAll((n) => typeof n.type === 'string' && n.props.accessibilityRole === 'header')
+    .map((n) => [].concat(n.props.children).join('')).join('|');
+  expect(title()).toContain('2025');
+  mockParams = { year: now.getFullYear(), month: now.getMonth() + 1 };
+  act(() => { tree.update(<MonthSummaryScreen />); });
+  expect(title()).toContain(String(now.getFullYear()));
+  expect(title()).not.toContain('2025');
+  act(() => { tree.unmount(); });
 });

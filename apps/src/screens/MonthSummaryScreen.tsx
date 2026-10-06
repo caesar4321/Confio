@@ -3,16 +3,14 @@
 //
 // Top to bottom: Card A "Te quedaron" (the single 34pt anchor, with the pace
 // line on the current month) · the dollar slot (protection, else savings
-// earned) · Pagos habituales · En qué se fue · Entre tus cuentas · Con quién.
+// earned) · Tus acciones (stocks, or an invitation) · Pagos habituales · En qué se fue · Entre tus cuentas · Con quién.
 // Card A renders as soon as monthSummary answers; the insight cards and the
-// sections below are revealed together (≤800ms later), so nothing moves under
+// sections below are revealed together (once their queries answer), so nothing moves under
 // the user's finger. Amounts always US$, masked with the balance. A month with
 // no movements still shows the insight cards, with the empty message below.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   ActivityIndicator,
-  Animated,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -33,7 +31,12 @@ import {
 import { SummaryCard } from '../components/tuMes/SummaryCard';
 import { ProtectionCard, SavingsCard, StableCard } from '../components/tuMes/ProtectionCard';
 import { RecurringCard } from '../components/tuMes/RecurringCard';
-import { useMonthInsights, type InsightData } from '../hooks/useMonthInsights';
+import { Rise } from '../components/tuMes/motion';
+import { TuMesIntro } from '../components/tuMes/TuMesIntro';
+import { StocksCard } from '../components/tuMes/StocksCard';
+import {
+  useMonthInsights, type InsightData,
+} from '../hooks/useMonthInsights';
 import { dollarSlot, paceLine } from '../utils/monthInsights';
 import { AnalyticsService } from '../services/analyticsService';
 import {
@@ -44,6 +47,15 @@ import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Route = RouteProp<MainStackParamList, 'MonthSummary'>;
+
+// A settling trade is asked about every 4s for the first minute (finality
+// is seconds), then every 30s up to the server's 15-minute pending window
+// (cusd_plus/gm_holdings.py IN_FLIGHT_MAX_AGE); the note follows the phase.
+export const SETTLING_POLL_MS = 4000;
+export const SETTLING_FAST_TRIES = 15;
+export const SETTLING_SLOW_MS = 30000;
+export const SETTLING_MAX_TRIES = SETTLING_FAST_TRIES + 28;
+export type SettlingPhase = 'fast' | 'slow' | 'stalled';
 
 function monthsBetween(a: { year: number; month: number }, b: { year: number; month: number }) {
   return (b.year - a.year) * 12 + (b.month - a.month);
@@ -62,6 +74,15 @@ export function MonthSummaryScreen() {
     month: route.params?.month ?? today.month,
   });
   const timezone = useMemo(() => deviceTimezone(), []);
+  // Back to an existing Tu mes with a month (the stocks screens' links, with
+  // pop + merge): show that month, not whichever one was being browsed. Keyed
+  // on the params object, which a navigate replaces and a re-render keeps.
+  const params = route.params;
+  useEffect(() => {
+    const { year, month } = params ?? {};
+    if (!year || !month) return;
+    setPeriod((p) => (p.year === year && p.month === month ? p : { year, month }));
+  }, [params]);
 
   const firstMonth = useMemo(() => {
     const created = activeAccount?.createdAt ? new Date(activeAccount.createdAt) : null;
@@ -79,12 +100,62 @@ export function MonthSummaryScreen() {
     context: { queryDeduplication: false },
   });
   const summary = data?.monthSummary ?? null;
+  // Once per screen entry: switching months never replays it.
+  const [showIntro, setShowIntro] = useState(true);
   const insights = useMonthInsights({
     accountKey: activeAccount?.id, year: period.year, month: period.month, timezone, isCurrent,
     ready: Boolean(summary && summary.year === period.year && summary.month === period.month),
   });
   const refreshInsights = useRef(insights.refresh);
   refreshInsights.current = insights.refresh;
+
+  // Arriving from a buy or sell: the trade may not be final yet ("settling").
+  // Re-ask the stocks card alone until it resolves in place (bounded).
+  // Also when a shown card (gain · value_only) got a 'settling' answer: it
+  // keeps its last value meanwhile and updates once the trade is final.
+  const settling = insights.revealed && insights.stocksSettling;
+  const refreshStocks = useRef(insights.refreshStocks);
+  refreshStocks.current = insights.refreshStocks;
+  // Not while another screen is on top (the user moved on): no wasted asks
+  // and no timer left spinning; the poll pauses and resumes on refocus.
+  const focused = useRef(true);
+  const resumePoll = useRef<(() => void) | null>(null);
+  useFocusEffect(useCallback(() => {
+    focused.current = true;
+    const resume = resumePoll.current;
+    resumePoll.current = null;
+    resume?.();
+    return () => { focused.current = false; };
+  }, []));
+  const [settlingPhase, setSettlingPhase] = useState<SettlingPhase>('fast');
+  useEffect(() => {
+    setSettlingPhase('fast');
+    if (!settling) return undefined;
+    let tries = 0;
+    let id: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      id = setTimeout(tick, tries < SETTLING_FAST_TRIES ? SETTLING_POLL_MS : SETTLING_SLOW_MS);
+    };
+    const tick = () => {
+      if (!focused.current) {            // paused: unfocused ticks don't count
+        resumePoll.current = schedule;
+        return;
+      }
+      tries += 1;
+      refreshStocks.current();
+      if (tries === SETTLING_FAST_TRIES) setSettlingPhase('slow');
+      if (tries >= SETTLING_MAX_TRIES) {
+        setSettlingPhase('stalled');
+        return;
+      }
+      schedule();
+    };
+    schedule();
+    return () => {
+      clearTimeout(id);
+      resumePoll.current = null;
+    };
+  }, [settling]);
 
   // Back from a movement list where categories may have changed: re-read.
   // (refetch via ref: the effect must run per focus, never per render.)
@@ -156,6 +227,7 @@ export function MonthSummaryScreen() {
         </View>
       ) : (
         <MonthBody
+          settlingPhase={settlingPhase}
           summary={summary}
           masked={masked}
           isCurrent={isCurrent}
@@ -167,7 +239,16 @@ export function MonthSummaryScreen() {
           onReceive={() => navigation.navigate('Receive')}
           onSave={() => navigation.navigate('ProtectedSavings')}
           onTopUp={() => navigation.navigate('TopUp')}
+          // Back to a stocks list already in the stack (Tu mes ↔ Acciones
+          // cross-link both ways) instead of stacking copies of each.
+          onOpenStocks={() => navigation.navigate('StocksList', undefined, { pop: true })}
+          onOpenStock={(ticker) => navigation.navigate('StockDetail', { ticker })}
         />
+      )}
+      {/* Joyful full-screen intro on every entry (founder 2026-10-05); tap to skip. */}
+      {showIntro && (
+        <TuMesIntro month={period.month} masked={masked} onDone={() => setShowIntro(false)}
+          summary={summary && summary.year === period.year && summary.month === period.month ? summary : null} />
       )}
     </View>
   );
@@ -185,6 +266,7 @@ function SkeletonState() {
 }
 
 type BodyProps = {
+  settlingPhase: SettlingPhase;
   summary: MonthSummary;
   masked: boolean;
   isCurrent: boolean;
@@ -197,6 +279,8 @@ type BodyProps = {
   onReceive: () => void;
   onSave: () => void;
   onTopUp: () => void;
+  onOpenStocks: () => void;
+  onOpenStock: (ticker: string) => void;
 };
 
 /** One precision on this screen: whole dollars (design C, 2026-10-04). */
@@ -234,7 +318,7 @@ const isUnknownWallet = (key: string, name: string) =>
 /** A single unknown wallet is a deposit only if no money went out to it. */
 const externalName = (sent: number) => (sent > 0 ? 'Billetera externa' : 'Depósito externo');
 
-function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onOpen, onSend, onReceive, onSave, onTopUp }: BodyProps) {
+function MonthBody({ summary, masked, isCurrent, business, insights, runKey, settlingPhase, onOpen, onSend, onReceive, onSave, onTopUp, onOpenStocks, onOpenStock }: BodyProps) {
   const cur = summary.current;
 
   const uncategorized = cur.spendingByCategory.find((c) => c.category === 'uncategorized');
@@ -257,19 +341,6 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
   }, []));
   const pendingCount = uncategorized ? uncategorizedData?.monthMovements.length : 0;
 
-  // One fade for the revealed region (design review 19A); none with Reduce Motion.
-  const fade = useRef(new Animated.Value(0)).current;
-  const revealed = Boolean(insights);
-  useEffect(() => {
-    if (!revealed) {
-      fade.setValue(0);
-      return;
-    }
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((reduce) => (reduce ? fade.setValue(1)
-        : Animated.timing(fade, { toValue: 1, duration: 180, useNativeDriver: true }).start()))
-      .catch(() => fade.setValue(1));
-  }, [revealed, fade]);
 
   const ownRows = ownMoneyRows(cur);
   const people = summary.counterparties.map((c) => {
@@ -298,17 +369,36 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, onO
         onOpenIncome={() => onOpen('income', 'Entró')} onOpenSpending={() => onOpen('spending', 'Salió')}
         onSend={onSend} onReceive={onReceive} />
       {insights && (
-        <Animated.View style={{ opacity: fade }} testID="tumes-revealed">
-          {slot?.kind === 'protection' && <ProtectionCard value={slot.value} month={summary.month} masked={masked} />}
-          {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
-          {slot?.kind === 'stable' && <StableCard value={slot.value} masked={masked} />}
-          {!slot && <SavingsInvite onSave={onSave} />}
-          {insights.insights && (
-            <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}
-              onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />
+        // Entrance (founder 2026-10-05): the cards rise in one after another,
+        // once per month view (they mount with the reveal), none with Reduce Motion.
+        <View testID="tumes-revealed">
+          <Rise index={0}>
+            {slot?.kind === 'protection' && <ProtectionCard value={slot.value} month={summary.month} masked={masked} />}
+            {slot?.kind === 'savings' && <SavingsCard value={slot.value} month={summary.month} masked={masked} />}
+            {slot?.kind === 'stable' && <StableCard value={slot.value} masked={masked} />}
+            {!slot && <SavingsInvite onSave={onSave} />}
+          </Rise>
+          {insights.stocks && insights.stocks.state !== 'none' && (
+            // gain · value_only · settling (resolves in place)
+            <StocksCard value={insights.stocks} month={summary.month} isCurrent={isCurrent} masked={masked}
+              settlingPhase={settlingPhase} onOpenStocks={onOpenStocks} onOpenStock={onOpenStock} />
           )}
-          {renderSections()}
-        </Animated.View>
+          {insights.stocks?.state === 'none' && insights.stocks.canBuy && <StocksInvite onOpen={onOpenStocks} />}
+          {insights.insights && (
+            <Rise index={2}>
+              <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}
+                onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />
+            </Rise>
+          )}
+          <Rise index={3}>{renderSections()}</Rise>
+        </View>
+      )}
+      {!insights && (
+        // Waiting on the insight queries (a cold stocks scan can take a
+        // couple of seconds): placeholders, never a blank screen below Card A.
+        <View testID="tumes-insights-loading">
+          {[0, 1, 2].map((i) => <View key={i} style={styles.skeletonRow} />)}
+        </View>
       )}
     </ScrollView>
   );
@@ -473,6 +563,19 @@ function SavingsInvite({ onSave }: { onSave: () => void }) {
       <Text style={styles.emptyText}>Tu ahorro crece cada día, y aquí verás cuánto ganó.</Text>
       <TouchableOpacity onPress={onSave} style={styles.emptyAction} accessibilityRole="button">
         <Text style={styles.emptyActionText}>Ahorrar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/** No stocks this month (and buying is offered): invite, no number. */
+function StocksInvite({ onOpen }: { onOpen: () => void }) {
+  return (
+    <View style={[styles.emptyCard, styles.slotInvite]} testID="tumes-stocks-invite">
+      <Text style={styles.inviteTitle}>Invierte en acciones de EE.UU.</Text>
+      <Text style={styles.emptyText}>Compra fracciones de Apple, NVIDIA o Tesla con tus dólares, y aquí verás cómo les fue cada mes.</Text>
+      <TouchableOpacity onPress={onOpen} style={styles.emptyAction} accessibilityRole="button">
+        <Text style={styles.emptyActionText}>Ver acciones</Text>
       </TouchableOpacity>
     </View>
   );

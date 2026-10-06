@@ -11,7 +11,7 @@
 //
 // RN-free by construction (KVStore-injected) so jest covers it.
 
-import type { KVStore } from './reachability';
+import type { KVStore } from './kvStore';
 
 const ROSTER_KEY = 'confio_emergency_account_roster_v1';
 

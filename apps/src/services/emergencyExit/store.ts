@@ -1,5 +1,5 @@
 // Keychain-backed KV adapter for the emergency exit's persisted state
-// (outage window start, cooloff request times, per-chain checkpoints).
+// (per-chain checkpoints, ban signal, account roster).
 //
 // Kept in its own file so every other emergencyExit module stays free of
 // react-native imports and jest-testable. Values are small strings; they
@@ -7,7 +7,7 @@
 // any new storage dependency (house rule: keychain, never AsyncStorage).
 
 import { credentialStorage } from '../credentialStorage';
-import type { KVStore } from './reachability';
+import type { KVStore } from './kvStore';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();

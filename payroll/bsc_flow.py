@@ -249,18 +249,23 @@ def fundable_split_usd(business_addr: str) -> dict:
     if not business_addr:
         return out
     from cusd_plus import vault as cp_vault
+    from blockchain.bsc_balance_service import BscBalanceService
+    # Display only (prepare_bsc_payroll_admin re-reads the chain): the stored
+    # balances. A token the chain didn't answer with no stored row stays None.
     try:
-        out['CUSD_PLUS'] = cp_vault.position_usd(business_addr)
+        stored = BscBalanceService.balances_raw(business_addr)
     except Exception:  # noqa: BLE001
-        logger.warning('[PAYROLL][BSC] cUSD+ wallet read failed for %s', business_addr)
-    try:
-        out['CUSD'] = cp_vault.erc20_balance_raw(_cusd_address(), business_addr) / WAD
-    except Exception:  # noqa: BLE001
-        logger.warning('[PAYROLL][BSC] cUSD wallet read failed for %s', business_addr)
-    try:
-        out['USDT'] = cp_vault.usdt_balance_raw(business_addr) / WAD
-    except Exception:  # noqa: BLE001
-        logger.warning('[PAYROLL][BSC] USDT wallet read failed for %s', business_addr)
+        logger.warning('[PAYROLL][BSC] wallet balance read failed for %s', business_addr)
+        return out
+    if 'CUSD_PLUS' in stored:
+        try:
+            out['CUSD_PLUS'] = cp_vault.position_usd(business_addr)
+        except Exception:  # noqa: BLE001
+            logger.warning('[PAYROLL][BSC] cUSD+ wallet read failed for %s', business_addr)
+    if 'CUSD_BSC' in stored:
+        out['CUSD'] = stored['CUSD_BSC'] / WAD
+    if 'USDT_BSC' in stored:
+        out['USDT'] = stored['USDT_BSC'] / WAD
     return out
 
 
@@ -280,7 +285,7 @@ def is_onchain_delegate(business_addr: str, delegate_addr: str) -> bool:
 # also what the client derives activation from. These are the BSC answers to
 # the same two questions the Algorand resolvers answer.
 
-ESCROW_TTL = 30              # matches cusd_plus.vault.POSITION_TTL
+ESCROW_TTL = 30
 ESCROW_LAST_TTL = 7 * 24 * 3600
 DELEGATES_TTL = 30
 

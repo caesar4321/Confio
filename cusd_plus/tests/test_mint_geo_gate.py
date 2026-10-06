@@ -117,13 +117,14 @@ class LegacyRelayGateTests(SimpleTestCase):
     def setUp(self):
         cache.clear()
 
-    def _submit(self, raw, user, info=None):
+    def _submit(self, raw, user, info=None, arriving=False):
         from cusd_plus.schema import SubmitBscTransaction
         # The relay binds the recovered signer to the active account's
         # registered address; _legacy_tx signs with SIGNER_KEY. The business
         # permission gate is left unmocked on purpose — with no real JWT the
         # context resolves to None, which is the personal-account path.
-        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=SIGNER_ADDR):
+        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=SIGNER_ADDR), \
+             mock.patch('cusd_plus.vault.incoming_local_arrival_in_flight', return_value=arriving):
             return SubmitBscTransaction.mutate(None, info or _info(user), raw)
 
     def _mint_raw(self, amount=2 * 10**18):
@@ -148,6 +149,14 @@ class LegacyRelayGateTests(SimpleTestCase):
             res = self._submit(self._mint_raw(), _user('VE', uid=13))
         self.assertTrue(res.success, res.error)
         rpc.assert_called_once()
+
+    def test_mint_waits_while_a_local_pay_in_is_still_bridging(self):
+        # An old client's generic sweep would mint it without the journey ID.
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(self._mint_raw(), _user('VE', uid=18), arriving=True)
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'local_arrival_in_flight')
+        rpc.assert_not_called()
 
     def test_exact_one_dollar_mint_stays_raw(self):
         with mock.patch('cusd_plus.tasks._rpc') as rpc, \
@@ -510,49 +519,46 @@ class DepositNotificationCopyTests(SimpleTestCase):
 
 
 class UsdtBalanceCacheTests(SimpleTestCase):
-    """usdt_balance_raw/usd — position_usd cache posture."""
+    """usdt_balance_raw: display reads come from the stored balance
+    (cusd_plus/tests/test_bsc_balances.py covers storage, staleness and the
+    last-stored fallback); fresh=True is a live read that never falls back."""
 
     ADDR = '0x' + 'ab' * 20
 
     def setUp(self):
         cache.clear()
 
-    def test_cached_within_ttl(self):
+    def test_display_read_uses_the_stored_balance(self):
         from cusd_plus import vault
-        with mock.patch.object(vault, 'erc20_balance_raw',
-                               return_value=5 * 10 ** 18) as read:
+        from blockchain.bsc_balance_service import BscBalanceService
+        with mock.patch.object(BscBalanceService, 'balances_raw',
+                               return_value={'USDT_BSC': 5 * 10 ** 18}) as stored, \
+                mock.patch.object(vault, 'erc20_balance_raw') as live:
             self.assertEqual(vault.usdt_balance_usd(self.ADDR), 5.0)
-            self.assertEqual(vault.usdt_balance_usd(self.ADDR), 5.0)
-        read.assert_called_once()
+        stored.assert_called_once_with(self.ADDR.lower())
+        live.assert_not_called()
 
-    def test_rpc_failure_falls_back_to_last_known(self):
+    def test_unknown_display_balance_reads_zero(self):
         from cusd_plus import vault
-        with mock.patch.object(vault, 'erc20_balance_raw',
-                               return_value=5 * 10 ** 18):
-            vault.usdt_balance_usd(self.ADDR)
-        cache.delete(f'cusd_plus_usdt:{self.ADDR.lower()}')
-        with mock.patch.object(vault, 'erc20_balance_raw',
-                               side_effect=RuntimeError('node down')):
-            self.assertEqual(vault.usdt_balance_usd(self.ADDR), 5.0)
+        from blockchain.bsc_balance_service import BscBalanceService
+        with mock.patch.object(BscBalanceService, 'balances_raw', return_value={}):
+            self.assertEqual(vault.usdt_balance_raw(self.ADDR), 0)
 
-    def test_fresh_bypasses_cache_and_raises(self):
+    def test_fresh_bypasses_storage_and_raises(self):
         from cusd_plus import vault
-        with mock.patch.object(vault, 'erc20_balance_raw',
-                               return_value=7 * 10 ** 18) as read:
-            vault.usdt_balance_raw(self.ADDR)          # seeds the cache
-            self.assertEqual(vault.usdt_balance_raw(self.ADDR, fresh=True),
-                             7 * 10 ** 18)
-        self.assertEqual(read.call_count, 2)
+        from blockchain.bsc_balance_service import BscBalanceService
+        with mock.patch.object(BscBalanceService, 'balances_raw') as stored, \
+                mock.patch.object(vault, 'erc20_balance_raw', return_value=7 * 10 ** 18):
+            self.assertEqual(vault.usdt_balance_raw(self.ADDR, fresh=True), 7 * 10 ** 18)
+        stored.assert_not_called()
         with mock.patch.object(vault, 'erc20_balance_raw',
                                side_effect=RuntimeError('node down')):
             with self.assertRaises(RuntimeError):
                 vault.usdt_balance_raw(self.ADDR, fresh=True)
 
-    def test_invalidate_clears_usdt_key(self):
+    def test_invalidate_marks_the_stored_balances_stale(self):
         from cusd_plus import vault
-        with mock.patch.object(vault, 'erc20_balance_raw',
-                               return_value=5 * 10 ** 18) as read:
-            vault.usdt_balance_usd(self.ADDR)
+        from blockchain.bsc_balance_service import BscBalanceService
+        with mock.patch.object(BscBalanceService, 'mark_stale') as stale:
             vault.invalidate_position(self.ADDR)
-            vault.usdt_balance_usd(self.ADDR)
-        self.assertEqual(read.call_count, 2)
+        stale.assert_called_once_with(self.ADDR, min_block=None)

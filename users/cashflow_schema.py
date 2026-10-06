@@ -159,6 +159,28 @@ class ProtectionValueType(graphene.ObjectType):
     start_date = graphene.String(description="month_start: the baseline day (ISO date), usually the 1st")
 
 
+class StockMoverType(graphene.ObjectType):
+    ticker = graphene.String(required=True)
+    name = graphene.String(required=True)
+    change_pct = graphene.String(required=True, description='Price change over the viewed month, 2 decimals')
+
+
+class StockMonthType(graphene.ObjectType):
+    state = graphene.String(required=True, description="'gain' | 'value_only' (history incomplete: no month "
+                                                       "gain) | 'settling' (a trade not final yet: today's value "
+                                                       "only, ask again in seconds) | 'none' (no stocks this month)")
+    can_buy = graphene.Boolean(required=True, description="'none' only: the invitation may offer a purchase "
+                                                          "(false on every other state)")
+    value_usd = graphene.String(required=True, description='Value at the end of the month (today on the current month)')
+    value_start_usd = graphene.String(description='gain: value on the 1st')
+    bought_usd = graphene.String(description='gain: Confío purchases this month (exact settlements, fees included)')
+    sold_usd = graphene.String(description='gain: Confío sales this month (exact settlements)')
+    gain_usd = graphene.String(description='gain: value_usd − value_start_usd − bought_usd + sold_usd')
+    gain_pct = graphene.String(description='gain: over (value_start_usd + bought_usd), 2 decimals')
+    top_mover = graphene.Field(StockMoverType, description='Held position whose price moved most this month')
+    holdings = graphene.Int(required=True, description='Positions held at the end of the month')
+
+
 class MonthSummaryQuery(graphene.ObjectType):
     month_summary = graphene.Field(
         MonthSummaryType,
@@ -205,6 +227,63 @@ class MonthSummaryQuery(graphene.ObjectType):
         description='"Tu dólar te protegió" for the active personal account (current month, Binance P2P '
                     'today). Null whenever anything is unknown (fail closed). Own query.',
     )
+
+    stock_month = graphene.Field(
+        StockMonthType,
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True),
+        timezone=graphene.String(),
+        description='"Tus acciones" in Tu mes: the month\'s gain net of Confío buys and sells. Null whenever '
+                    'anything is unknown (fail closed) or stocks are not offered. Own query.',
+    )
+
+    def resolve_stock_month(self, info, year, month, timezone=None):
+        from django.utils import timezone as dj_tz
+        from cusd_plus.eligibility import stock_buy_overlay_allows
+        from cusd_plus.schema import _stock_execution_ready, _stock_surfaces_enabled
+        from cusd_plus.stock_month import stock_month
+        from users.cashflow import month_window
+        context = _summary_context(info, year, month, timezone)
+        if context is None:
+            return None
+        user, account, _account_type, _business_id, tz = context
+        meta = getattr(info.context, 'META', {})
+        if not _stock_surfaces_enabled(user, meta):
+            return None
+        start, end = month_window(int(year), int(month), tz)
+        try:
+            result = stock_month(account.bsc_address or '', start, end, dj_tz.now())
+        except Exception:  # noqa: BLE001 — an unknown hides the card, never a guess
+            logger.warning('stock month unavailable for account %s', account.id, exc_info=True)
+            return None
+        if result is None:
+            return None
+        # Surfaces (issuer policy + kill switch) passed above; the buy overlay
+        # and the execution rails are left (_stock_buy_enabled would re-run the
+        # issuer policy). Same gates as stocksBuyEnabled: never invite to buy
+        # while trading is off. The overlay is not free (phone + IP): last.
+        can_buy = (result.state == 'none' and _stock_execution_ready()
+                   and stock_buy_overlay_allows(user, meta))
+        # 'none' without a purchase on offer is still a definite answer (the
+        # app draws nothing): it resolves a 'settling' card whose trade
+        # failed, where null ("unknown") would leave it confirming forever.
+        # Dollars and percents alike: 2 decimals, half up.
+        opt = lambda v: None if v is None else _usd(v)  # noqa: E731
+        top = result.top
+        gain, gain_pct = result.gain, result.gain_pct
+        if gain is not None and None not in (result.value_start, result.bought, result.sold):
+            # From the cents shown, so "¿Cómo lo calculamos?" adds up to the cent
+            # and the percent never disagrees with the dollars beside it.
+            cents = lambda v: v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)  # noqa: E731
+            gain = (cents(result.value_end) - cents(result.value_start)
+                    - cents(result.bought) + cents(result.sold))
+            base = cents(result.value_start) + cents(result.bought)
+            gain_pct = gain / base * 100 if base > 0 else None
+        return StockMonthType(
+            state=result.state, can_buy=can_buy, value_usd=_usd(result.value_end),
+            value_start_usd=opt(result.value_start), bought_usd=opt(result.bought), sold_usd=opt(result.sold),
+            gain_usd=opt(gain), gain_pct=opt(gain_pct), holdings=result.holdings,
+            top_mover=StockMoverType(ticker=top.ticker, name=top.name, change_pct=_usd(top.change_pct)) if top else None)
 
     def resolve_protection_value(self, info, timezone=None, include_stable=False):
         from django.utils import timezone as dj_tz

@@ -1,6 +1,8 @@
 import type { ContentPollData } from '../components/ContentPoll';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
+import { Text } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -9,9 +11,17 @@ import { NetworkStatus, useApolloClient, useMutation, useQuery } from '@apollo/c
 import { DISCOVER_SECTIONS, DiscoverFeed, DiscoverItem, DiscoverSectionKey } from '../components/DiscoverFeed';
 import { OfferCardSkeleton } from '../components/SkeletonLoader';
 import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
-import { GET_DISCOVER_FEED, GET_DISCOVER_FEED_CARDS, GET_DISCOVER_FEED_SECTIONED } from '../apollo/queries';
+import {
+  GET_COMMUNITY_COMMENT_COUNTS,
+  GET_DISCOVER_FEED,
+  GET_DISCOVER_FEED_CARDS,
+  GET_DISCOVER_FEED_SECTIONED,
+} from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
+import { useCommunityEntryState } from '../hooks/useCommunityComposeEntry';
+import { memberBlockVersion } from '../services/communityEvents';
+import { CommunityComposePrompt } from '../components/CommunityComposePrompt';
 
 const PAGE_SIZE = 10;
 
@@ -71,6 +81,15 @@ export const DiscoverScreen = () => {
     fetchPolicy: 'network-only',
     notifyOnNetworkStatusChange: true,
   });
+  // The "¿Qué quieres compartir?" card opens Para ti (where Descubrir lands)
+  // and Comunidad; Oficial is Confío's and verified sources only. The header
+  // pencil (DiscoverStackHeader) is the always-reachable entry.
+  const composeSection = section === 'for_you' || section === 'community';
+  const { canCompose, supported: communitySupported } = useCommunityEntryState(!legacyServer);
+  const showPrompt = canCompose && composeSection;
+  // Mis publicaciones travels with the composer card (Para ti and Comunidad).
+  const showMyPosts = communitySupported && composeSection;
+
   // Stepping down is not a failure: the next rung is already on its way.
   const steppingDown = tier < LAST_TIER && isSchemaMismatch(feedError, OLD_SECTIONS_SERVER);
   useEffect(() => {
@@ -100,6 +119,30 @@ export const DiscoverScreen = () => {
     }));
   }, [data]);
 
+  // Comment counts for the cards, asked on their own so a server without
+  // Comunidad comments fails only this (the cards just show none).
+  const pageIds = useMemo(() => items.map((item) => String(item.id)), [items]);
+  const countsSkipped = legacyServer || pageIds.length === 0 || section === 'official';
+  const { data: countsData, refetch: refetchCounts } = useQuery(GET_COMMUNITY_COMMENT_COUNTS, {
+    // The server counts up to 200 posts in one query.
+    variables: { contentItemIds: pageIds.slice(0, 200) },
+    skip: countsSkipped,
+    fetchPolicy: 'cache-and-network',
+  });
+  // The same posts can gain or lose comments while you are away: re-count on
+  // every return and every pull-to-refresh, not only when the page changes.
+  const refreshCounts = useCallback(() => {
+    if (!countsSkipped) refetchCounts().catch(() => {});
+  }, [countsSkipped, refetchCounts]);
+  useFocusEffect(refreshCounts);
+  const commentCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const entry of countsData?.communityCommentCounts || []) {
+      if (entry.count > 0) counts[Number(entry.contentItemId)] = entry.count;
+    }
+    return counts;
+  }, [countsData]);
+
   // "Couldn't load" must never read as "nothing here". Apollo keeps the last
   // good data when a refresh fails, so key off the error, not missing data.
   const loadFailed = !loading && !steppingDown && Boolean(feedError) && items.length === 0;
@@ -127,16 +170,26 @@ export const DiscoverScreen = () => {
   const focusRefreshing = useRef(false);
   paginating.current = isFetchingMore;
   const focusedOnce = useRef(false);
+  const seenBlockVersion = useRef(0);
   useFocusEffect(
     useCallback(() => {
       if (!focusedOnce.current) {
         focusedOnce.current = true;
+        seenBlockVersion.current = memberBlockVersion();
         return;
       }
-      if (loadedCount.current > PAGE_SIZE || paginating.current) return;
+      // After blocking someone, re-read from the top even if scrolled deep:
+      // their posts must disappear, and the new generation drops any page
+      // still in flight for the old list.
+      const currentBlockVersion = memberBlockVersion();
+      const blockedSince = currentBlockVersion !== seenBlockVersion.current;
+      if (!blockedSince && (loadedCount.current > PAGE_SIZE || paginating.current)) return;
       focusRefreshing.current = true;
       feedGeneration.current += 1;
       refetch({ offset: 0, limit: PAGE_SIZE })
+        // Marked seen only once the re-read lands: offline, the next focus
+        // tries again instead of leaving the blocked member's posts up.
+        .then(() => { seenBlockVersion.current = currentBlockVersion; })
         .catch(() => {})
         .finally(() => { focusRefreshing.current = false; });
     }, [refetch]),
@@ -147,6 +200,7 @@ export const DiscoverScreen = () => {
 
   const handleRefresh = async () => {
     feedGeneration.current += 1;
+    refreshCounts();
     await refetch({ offset: 0, limit: PAGE_SIZE });
   };
 
@@ -240,6 +294,25 @@ export const DiscoverScreen = () => {
         // The legacy feed is unfiltered: its empty state is Para ti's.
         activeSection={legacyServer ? 'for_you' : section}
         onSelectSection={selectSection}
+        commentCounts={commentCounts}
+        sectionAccessory={showPrompt || showMyPosts ? (
+          <>
+            {showPrompt ? (
+              <CommunityComposePrompt onPress={() => navigation.navigate('CommunityCompose')} />
+            ) : null}
+            {showMyPosts ? (
+              <Pressable
+                style={styles.myPosts}
+                onPress={() => navigation.navigate('MyCommunityPosts')}
+                accessibilityRole="button"
+              >
+                <Icon name="user" size={14} color={colors.primaryDark} />
+                <Text style={styles.myPostsText}>Mis publicaciones</Text>
+                <Icon name="chevron-right" size={14} color={colors.primaryDark} />
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
         onOpenItem={(item: DiscoverItem) => {
           navigation.navigate('DiscoverPostDetail', { contentItemId: item.id });
         }}
@@ -254,5 +327,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.neutral,
+  },
+  myPosts: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginBottom: 12,
+    paddingVertical: 4,
+  },
+  myPostsText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primaryDark,
   },
 });

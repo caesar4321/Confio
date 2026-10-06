@@ -575,6 +575,8 @@ def get_accessible_content_item(info, content_item_id):
     )
     if item is None:
         raise GraphQLError('Content item not found')
+    if item.owner_type == OwnerType.USER and item.owner_user_id in community.block_relation_ids(user):
+        raise GraphQLError('Content item not found')
 
     has_discover_surface = item.surfaces.filter(surface=ContentSurfaceType.DISCOVER).exists()
     if has_discover_surface:
@@ -922,6 +924,17 @@ class CommunityPostViewerType(graphene.ObjectType):
     # Why not, when can_comment is false (e.g. "Verifica tu identidad…").
     comment_block_message = graphene.String()
     comment_max_chars = graphene.Int(required=True)
+    # e.g. 'rules_required': the app offers to accept the rules right there.
+    comment_block_code = graphene.String()
+    # The post's author, for "Bloquear a María G." (None on your own post).
+    author_id = graphene.ID()
+    author_name = graphene.String()
+
+
+class CommunityRulesType(graphene.ObjectType):
+    version = graphene.String(required=True)
+    accepted = graphene.Boolean(required=True)
+    rules = graphene.List(graphene.NonNull(graphene.String), required=True)
 
 
 class CommunityParticipantType(graphene.ObjectType):
@@ -999,8 +1012,10 @@ def reaction_payload(comment_id, maps):
 
 def build_community_comment_payload(
     comment, viewer, post_author_id, reported_ids, replies=None, avatars=None, reactions=None, reply_count=0,
+    blocked_ids=None,
 ):
     is_own = comment.author_id == viewer.id
+    hidden_ids = blocked_ids if blocked_ids is not None else community.block_relation_ids(viewer)
     avatars = avatars if avatars is not None else profile_pictures.picture_urls(
         [comment.author_id, *[user.id for user in comment.mentions.all()]]
     )
@@ -1033,6 +1048,7 @@ def build_community_comment_payload(
                 avatar_url=avatars.get(user.id),
             )
             for user in comment.mentions.all()
+            if user.id not in hidden_ids
         ],
         replies=replies or [],
         reply_count=reply_count,
@@ -1072,6 +1088,9 @@ def comments_seen_by(viewer, content_item_id):
             )
         )
         .exclude(parent__status=CommunityReviewStatus.REMOVED)
+        # Members in a block with the viewer, and deleted accounts, vanish.
+        .exclude(author_id__in=community.block_relation_ids(viewer))
+        .filter(author__deleted_at__isnull=True)
         .select_related('author')
         .prefetch_related('mentions')
         .order_by('created_at', 'id')
@@ -1299,16 +1318,20 @@ class MyProfilePictureType(graphene.ObjectType):
     latest_reason = graphene.String()
     # Why this context cannot change it right now, if so.
     block_message = graphene.String()
+    # True when the only thing missing is accepting the community rules.
+    rules_required = graphene.Boolean(required=True)
 
 
 def build_my_profile_picture(user, business):
     current = profile_pictures.picture_urls([user.id]).get(user.id)
     latest = profile_pictures.latest_submission(user)
+    block_message = profile_pictures.upload_block(user, business)
     return MyProfilePictureType(
         url=current or None,
         latest_status=latest.status if latest else None,
         latest_reason=(latest.reason or None) if latest else None,
-        block_message=profile_pictures.upload_block(user, business),
+        block_message=block_message,
+        rules_required=block_message == profile_pictures.RULES_REQUIRED_MESSAGE,
     )
 
 
@@ -1380,6 +1403,52 @@ class RemoveProfilePicture(graphene.Mutation):
         return RemoveProfilePicture(success=removed, picture=build_my_profile_picture(user, business))
 
 
+class AcceptCommunityRules(graphene.Mutation):
+    class Arguments:
+        version = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, version):
+        try:
+            community.accept_rules(info.context.user, version)
+        except community.CommunityPostError as error:
+            return AcceptCommunityRules(success=False, error=error.message)
+        return AcceptCommunityRules(success=True, error=None)
+
+
+class BlockCommunityMember(graphene.Mutation):
+    class Arguments:
+        user_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, user_id):
+        try:
+            community.block_member(info.context.user, user_id)
+        except community.CommunityPostError as error:
+            return BlockCommunityMember(success=False, error=error.message)
+        return BlockCommunityMember(success=True, error=None)
+
+
+class UnblockCommunityMember(graphene.Mutation):
+    class Arguments:
+        user_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, user_id):
+        return UnblockCommunityMember(success=community.unblock_member(info.context.user, user_id))
+
+
 class Query(graphene.ObjectType):
     message_inbox = graphene.Field(MessageInboxType, context_key=graphene.String(required=False))
     message_inbox_unread_count = graphene.Int(context_key=graphene.String(required=False))
@@ -1437,6 +1506,8 @@ class Query(graphene.ObjectType):
         content_item_id=graphene.ID(required=True),
     )
     my_profile_picture = graphene.Field(MyProfilePictureType, required=True)
+    community_rules = graphene.Field(CommunityRulesType, required=True)
+    my_blocked_members = graphene.List(graphene.NonNull(CommunityParticipantType), required=True)
     community_comment_counts = graphene.List(
         graphene.NonNull(CommunityCommentCountType),
         required=True,
@@ -1509,6 +1580,11 @@ class Query(graphene.ObjectType):
             .order_by('-surfaces__is_pinned', 'surfaces__rank', '-published_at', '-created_at')
         )
         section = section or 'for_you'
+        # Mutual invisibility: members in a block with the viewer do not
+        # appear in any feed.
+        blocked_ids = community.block_relation_ids(user)
+        if blocked_ids:
+            queryset = queryset.exclude(owner_type=OwnerType.USER, owner_user_id__in=blocked_ids)
         if section in LEGACY_DISCOVER_SECTION_KINDS:
             queryset = queryset.filter(channel__kind__in=LEGACY_DISCOVER_SECTION_KINDS[section])
         elif section not in DISCOVER_FEED_SECTIONS:
@@ -1561,6 +1637,7 @@ class Query(graphene.ObjectType):
         counts = dict(
             community.visible_comments_any_post()
             .filter(content_item_id__in=[item.id for item in items])
+            .exclude(author_id__in=community.block_relation_ids(info.context.user))
             .values('content_item_id')
             .annotate(total=Count('id'))
             .values_list('content_item_id', 'total')
@@ -1575,19 +1652,27 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_community_post_viewer(self, info, content_item_id):
         user = info.context.user
-        item = ContentItem.objects.filter(id=content_item_id).select_related('community_review').first()
+        item = ContentItem.objects.filter(id=content_item_id).select_related('community_review', 'owner_user').first()
         review = getattr(item, 'community_review', None) if item else None
         max_chars = settings.COMMUNITY_COMMENT_MAX_CHARS
+        # Someone else's post says nothing (not even who wrote it) unless it is
+        # live and readable to this viewer; ids are sequential and guessable.
+        if review is not None and item.owner_user_id != user.id \
+                and community.published_community_post(item.id, viewer=user) is None:
+            review = None
         if review is None:
             return CommunityPostViewerType(
                 is_community=False, is_own=False, can_report=False, viewer_reported=False,
                 can_comment=False, comment_block_message=None, comment_max_chars=max_chars,
+                comment_block_code=None, author_id=None, author_name=None,
             )
         is_own = item.owner_user_id == user.id
         reported = CommunityPostReport.objects.filter(content_item=item, reporter=user).exists()
         live = review.status == CommunityReviewStatus.APPROVED and item.status == ContentStatus.PUBLISHED
         _, _, business, _ = get_context_models(info)
         block = community.commenting_block(user, business) if live else None
+        if live and community.is_blocked_between(user.id, item.owner_user_id):
+            live = False
         return CommunityPostViewerType(
             is_community=True,
             is_own=is_own,
@@ -1596,14 +1681,37 @@ class Query(graphene.ObjectType):
             can_comment=live and block is None,
             comment_block_message=community.BLOCK_MESSAGES.get(block) if block else None,
             comment_max_chars=max_chars,
+            comment_block_code=block,
+            author_id=None if is_own else str(item.owner_user_id),
+            author_name=None if is_own else community.author_display_name(item.owner_user),
         )
+
+    @login_required
+    def resolve_community_rules(self, info):
+        return CommunityRulesType(
+            version=community.COMMUNITY_RULES_VERSION,
+            accepted=community.has_accepted_rules(info.context.user),
+            rules=community.COMMUNITY_RULES,
+        )
+
+    @login_required
+    def resolve_my_blocked_members(self, info):
+        members = community.blocked_members(info.context.user)
+        avatars = profile_pictures.picture_urls([m.id for m in members])
+        return [
+            CommunityParticipantType(
+                id=str(m.id), name=community.author_display_name(m), is_post_author=False, avatar_url=avatars.get(m.id),
+            )
+            for m in members
+        ]
 
     @login_required
     def resolve_community_comments(self, info, content_item_id, offset=0, limit=20, expanded_thread_ids=None):
         user = info.context.user
-        item = community.published_community_post(content_item_id)
+        item = community.published_community_post(content_item_id, viewer=user)
         if item is None:
             return CommunityCommentPageType(items=[], has_more=False, total_count=0)
+        blocked_ids = community.block_relation_ids(user)
         offset = max(offset or 0, 0)
         # The app re-reads everything it has loaded (offset 0, growing limit)
         # so polling and deletes never leave a stale later page.
@@ -1643,7 +1751,7 @@ class Query(graphene.ObjectType):
         for reply in replies:
             replies_by_parent.setdefault(reply.parent_id, []).append(reply)
         reply_counts = dict(
-            community.visible_comments(item.id).filter(parent_id__in=thread_ids)
+            community.visible_comments(item.id).filter(parent_id__in=thread_ids).exclude(author_id__in=blocked_ids)
             .values('parent_id').annotate(total=Count('id')).values_list('parent_id', 'total')
         )
         page_ids = thread_ids + [r.id for r in replies]
@@ -1663,24 +1771,26 @@ class Query(graphene.ObjectType):
                 replies=[
                     build_community_comment_payload(
                         reply, user, post_author_id, reported_ids, avatars=avatars, reactions=reactions,
+                        blocked_ids=blocked_ids,
                     )
                     for reply in replies_by_parent.get(comment.id, [])
                 ],
                 avatars=avatars,
                 reactions=reactions,
                 reply_count=reply_counts.get(comment.id, 0),
+                blocked_ids=blocked_ids,
             )
             for comment in top_level
         ]
         return CommunityCommentPageType(
             items=items,
             has_more=has_more,
-            total_count=community.visible_comments(item.id).count(),
+            total_count=community.visible_comments(item.id).exclude(author_id__in=blocked_ids).count(),
         )
 
     @login_required
     def resolve_community_post_participants(self, info, content_item_id):
-        item = community.published_community_post(content_item_id)
+        item = community.published_community_post(content_item_id, viewer=info.context.user)
         if item is None:
             return []
         participants = community.post_participants(item.id, exclude_user=info.context.user)
@@ -1709,9 +1819,12 @@ class Query(graphene.ObjectType):
                 ids.append(int(raw))
             except (TypeError, ValueError):
                 continue
+        blocked_ids = community.block_relation_ids(info.context.user)
         counts = dict(
             community.visible_comments_any_post()
-            .filter(content_item_id__in=ids)
+            .filter(content_item_id__in=ids, content_item__owner_user__deleted_at__isnull=True)
+            .exclude(author_id__in=blocked_ids)
+            .exclude(content_item__owner_user_id__in=blocked_ids)
             .values('content_item_id')
             .annotate(total=Count('id'))
             .values_list('content_item_id', 'total')
@@ -2349,3 +2462,6 @@ class Mutation(graphene.ObjectType):
     request_profile_picture_upload = RequestProfilePictureUpload.Field()
     submit_profile_picture = SubmitProfilePicture.Field()
     remove_profile_picture = RemoveProfilePicture.Field()
+    accept_community_rules = AcceptCommunityRules.Field()
+    block_community_member = BlockCommunityMember.Field()
+    unblock_community_member = UnblockCommunityMember.Field()

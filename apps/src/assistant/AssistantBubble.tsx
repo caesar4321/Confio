@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
+  Image,
   Keyboard,
   NativeModules,
   PanResponder,
@@ -21,7 +22,7 @@ import { Text } from '../components/common/AppText';
 import { GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
-import { GET_ASSISTANT_THREAD, UPDATE_ASSISTANT_PROFILE } from './api';
+import { GET_ASSISTANT_THREAD, UPDATE_ASSISTANT_PROFILE, GET_ASSISTANT_SUGGESTIONS, type AssistantSuggestion } from './api';
 import AssistantMascot from './AssistantMascot';
 import { useAssistant } from './AssistantContext';
 import { DOCK_ROUTES, TAB_ROUTES, hintFor, type ScreenHint } from './suggestions';
@@ -40,16 +41,23 @@ const HINT_VISIBLE_MS = 7000;
 const HINT_COOLDOWN_MS = 45_000;
 const MAX_HINTS_PER_SESSION = 4;
 
-type Hint = ScreenHint & { kind: 'screen' | 'unread' };
+type Hint = ScreenHint & { kind: 'screen' | 'unread' | 'note' | 'probe' };
+// What the chat said when it moved the app ("Abrí Recargar: …").
+const NOTE_VISIBLE_MS = 10_000;
+// Longest the bubble waits for a custom pet photo before appearing anyway.
+const PHOTO_WAIT_MS = 2500;
+const NOTE_MAX_CHARS = 180;
 
 export default function AssistantBubble() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy } = useAssistant();
+  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy, navNote } = useAssistant();
   const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
   const { activeAccount } = useAccount();
   const [keyboardUp, setKeyboardUp] = useState(false);
   const [hint, setHint] = useState<Hint | null>(null);
+  const hintRef = useRef<Hint | null>(null);
+  hintRef.current = hint;
   const [side, setSide] = useState<'left' | 'right'>('right');
   const [heightFraction, setHeightFraction] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -69,14 +77,51 @@ export default function AssistantBubble() {
     skip: !enabled,
   });
   // Profile only (mascot, color, position). Fails quietly on servers without Confio Assistant.
-  const { data: threadData } = useQuery(GET_ASSISTANT_THREAD, {
+  const { data: threadData, loading: threadLoading } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: 1, contextKey },
     fetchPolicy: 'cache-and-network',
     skip: !enabled,
     errorPolicy: 'ignore',
   });
+  // Hints ranked for this person on the server; the built-in list is the fallback.
+  const { data: suggestionData } = useQuery(GET_ASSISTANT_SUGGESTIONS, {
+    variables: { screen: route ?? null, contextKey },
+    skip: !enabled || !threadData?.assistantThread?.enabled,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'ignore',
+  });
+  const serverHintsRef = useRef<AssistantSuggestion[] | null>(null);
+  serverHintsRef.current = suggestionData?.assistantSuggestions?.hints ?? null;
   const [saveProfile] = useMutation(UPDATE_ASSISTANT_PROFILE);
   const profile = threadData?.assistantThread?.profile;
+  // Appear only once we know what to show and where: before the profile
+  // arrives the bubble would be the generic icon at the default spot, then
+  // jump to the user's pet and saved position. A custom pet's photo is
+  // fetched first (at most PHOTO_WAIT_MS) so it never shows an empty circle.
+  const settled = !!threadData || !threadLoading;
+  const petUrl = profile?.mascot === 'CUSTOM' ? profile?.customPetUrl : null;
+  const [photoReady, setPhotoReady] = useState(false);
+  useEffect(() => {
+    if (!petUrl || photoReady) {
+      return undefined;
+    }
+    let done = false;
+    const finish = () => {
+      if (!done) {
+        done = true;
+        setPhotoReady(true);
+      }
+    };
+    const timer = setTimeout(finish, PHOTO_WAIT_MS);
+    Image.prefetch(petUrl).then(finish, finish);
+    return () => {
+      done = true;
+      clearTimeout(timer);
+    };
+  }, [petUrl, photoReady]);
+  // The saved side/height land one render after the profile (an effect).
+  const [positionApplied, setPositionApplied] = useState(false);
+  const ready = settled && (!profile || positionApplied) && (!petUrl || photoReady);
   // The support chat exists (server knows it) / is answered by Confio Assistant.
   const chatAvailable = !!threadData?.assistantThread;
   const iaAvailable = !!threadData?.assistantThread?.enabled;
@@ -92,6 +137,7 @@ export default function AssistantBubble() {
       positionLoaded.current = true;
       setSide(profile.bubbleSide === 'left' ? 'left' : 'right');
       setHeightFraction(Math.min(Math.max(Number(profile.bubbleHeight) || 0, 0), 1));
+      setPositionApplied(true);
     }
   }, [profile]);
 
@@ -118,7 +164,7 @@ export default function AssistantBubble() {
   const range = Math.max(bottomLimit - topLimit, 0);
   // On money screens the bubble rests mostly behind the edge (still tappable,
   // draggable and holdable); it comes fully out while dragged or recording.
-  const docked = !!route && DOCK_ROUTES.has(route) && !dragging && !talking;
+  const docked = !!route && DOCK_ROUTES.has(route) && !dragging && !talking && hint?.kind !== 'note';
   const peek = SIZE * 0.4;
   const restX = docked
     ? (side === 'right' ? width - peek : peek - SIZE)
@@ -130,11 +176,23 @@ export default function AssistantBubble() {
   }, [restX, restY, setBubbleAnchor]);
 
   const pan = useRef(new Animated.ValueXY({ x: restX, y: restY })).current;
+  const placed = useRef(false);
+  const fade = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    if (!placed.current) {
+      // First appearance: straight at the saved spot, fading in.
+      placed.current = true;
+      pan.setValue({ x: restX, y: restY });
+      Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: false }).start();
+      return;
+    }
     if (!dragging) {
       Animated.spring(pan, { toValue: { x: restX, y: restY }, useNativeDriver: false, friction: 7 }).start();
     }
-  }, [restX, restY, dragging, pan]);
+  }, [ready, restX, restY, dragging, pan, fade]);
 
   // Hold to talk: press and hold still → record a voice note; release →
   // send it to Confio Assistant; slide away → cancel.
@@ -175,9 +233,11 @@ export default function AssistantBubble() {
     endTalk();
     void cancelVoiceNote();
   };
-  // An account switch mid-hold drops the note.
+  // An account switch mid-hold drops the note, and the previous account's
+  // post-navigation note goes too.
   useEffect(() => {
     cancelTalking();
+    setHint((prev) => (prev?.kind === 'note' ? null : prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccount?.id]);
 
@@ -264,14 +324,28 @@ export default function AssistantBubble() {
 
   const visible = enabled && !isOpen && !keyboardUp;
 
+  // The chat just moved the app: say here what it said there. Not a
+  // suggestion, so no cooldown or session cap, and it survives the route change.
+  useEffect(() => {
+    const text = navNote?.text.trim();
+    if (!text) {
+      return;
+    }
+    const short = text.length > NOTE_MAX_CHARS ? `${text.slice(0, NOTE_MAX_CHARS - 1).trimEnd()}…` : text;
+    setHint({ kind: 'note', hint: short, prompt: '' });
+  }, [navNote]);
+
   // Suggest at most one thing per screen visit, rarely, and never twice.
   useEffect(() => {
-    setHint(null);
+    setHint((prev) => (prev?.kind === 'note' ? prev : null));
     if (!visible || inCall || docked || hintsShown.current >= MAX_HINTS_PER_SESSION) {
       return undefined;
     }
     const timer = setTimeout(() => {
       if (Date.now() - lastHintAt.current < HINT_COOLDOWN_MS) {
+        return;
+      }
+      if (hintRef.current?.kind === 'note') {
         return;
       }
       let next: Hint | null = null;
@@ -283,8 +357,15 @@ export default function AssistantBubble() {
           prompt: '',
         };
       } else if (iaAvailable) {
-        const screenHint = hintFor(route, seenHints.current);
-        next = screenHint ? { ...screenHint, kind: 'screen' } : null;
+        const fromServer = serverHintsRef.current?.find((h) => !seenHints.current.has(h.text));
+        if (fromServer) {
+          next = fromServer.kind === 'probe'
+            ? { kind: 'probe', hint: fromServer.text, prompt: '' }
+            : { kind: 'screen', hint: fromServer.text, prompt: fromServer.kind === 'picker' ? '' : fromServer.prompt };
+        } else {
+          const screenHint = hintFor(route, seenHints.current);
+          next = screenHint ? { ...screenHint, kind: 'screen' } : null;
+        }
       }
       if (!next) {
         return;
@@ -301,11 +382,11 @@ export default function AssistantBubble() {
     if (!hint) {
       return undefined;
     }
-    const timer = setTimeout(() => setHint(null), HINT_VISIBLE_MS);
+    const timer = setTimeout(() => setHint(null), hint.kind === 'note' ? NOTE_VISIBLE_MS : HINT_VISIBLE_MS);
     return () => clearTimeout(timer);
   }, [hint]);
 
-  if (!visible) {
+  if (!visible || !ready) {
     return null;
   }
 
@@ -320,8 +401,11 @@ export default function AssistantBubble() {
     if (!current) {
       return;
     }
-    if (current.kind === 'unread') {
-      // The box shows a red dot on whichever chat head has news.
+    if (current.kind === 'probe') {
+      open({ probe: true });
+    } else if (current.kind === 'unread' || current.kind === 'note') {
+      // Unread: the box shows a red dot on whichever chat head has news.
+      // Note: back to the conversation that moved the app.
       open();
     } else if (current.prompt) {
       open({ prompt: current.prompt });
@@ -335,7 +419,7 @@ export default function AssistantBubble() {
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       <Animated.View
-        style={[styles.bubbleWrap, { transform: pan.getTranslateTransform() }]}
+        style={[styles.bubbleWrap, { opacity: fade, transform: pan.getTranslateTransform() }]}
         {...responder.panHandlers}
       >
         {hint && !dragging ? (

@@ -83,11 +83,12 @@ export function navigateWhenReady(name: string, params?: any, tries = 40) {
   setTimeout(() => navigateWhenReady(name, params, tries - 1), 150);
 }
 
-// Screens where a banned user is already where they belong. Firing the ban
-// navigation while one of these is focused is NOT idempotent: from
-// EmergencyExit, navigate('BlockedAccount') pops back to the announcement,
-// yanking the user out of their own withdrawal mid-flow — every background
-// poll's 403 (GetUserAccounts, notification count) did exactly that.
+// Screens where a banned user is already where they belong, so re-firing the
+// ban navigation (every background poll's 403) must not re-push it or yank
+// them away. EmergencyExit is included: BlockedAccount links to it once the
+// heartbeat says the exit is open, and a server that still answers 403 after
+// Confío stopped beating must not pull the user out mid-exit. Being on that
+// screen while the exit is closed moves nothing — the gate is on-chain.
 const BAN_SURFACE = new Set(['BlockedAccount', 'EmergencyExit']);
 
 /**

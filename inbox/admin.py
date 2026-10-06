@@ -17,11 +17,13 @@ from .models import (
     AvatarType,
     Channel,
     ChannelMembership,
+    CommunityBlock,
     CommunityComment,
     CommunityCommentReaction,
     CommunityCommentReport,
     CommunityPostReport,
     CommunityPostReview,
+    CommunityRulesAcceptance,
     ContentItem,
     ContentPlatformClick,
     ContentPlatformClickDailyStat,
@@ -955,7 +957,7 @@ class CommunityPostReviewAdmin(admin.ModelAdmin):
         'verdicts', 'attempts', 'reviewed_at', 'removed_at', 'removed_by', 'rereviewed_at',
         'created_at', 'updated_at', 'post_body', 'post_image',
     )
-    actions = ('take_down_posts', 'restore_posts', 'rereview_posts')
+    actions = ('take_down_posts', 'restore_posts', 'rereview_posts', 'remove_all_from_author')
 
     def has_add_permission(self, request):
         return False
@@ -1014,6 +1016,15 @@ class CommunityPostReviewAdmin(admin.ModelAdmin):
         messages.success(request, f'Published {restored} post(s).')
         if skipped:
             messages.warning(request, f'Skipped {skipped}: never approved by the AI review. Use "Re-review" instead.')
+
+    @admin.action(description="Remove ALL Comunidad content of the selected posts' authors")
+    def remove_all_from_author(self, request, queryset):
+        from .community import remove_member_content
+
+        author_ids = set(queryset.values_list('content_item__owner_user_id', flat=True)) - {None}
+        for author_id in author_ids:
+            remove_member_content(author_id, category='staff', reason='Retirada por el equipo de Confío.')
+        messages.success(request, f'Removed all Comunidad content of {len(author_ids)} member(s).')
 
     @admin.action(description='Re-review selected rejected/failed posts with the AI')
     def rereview_posts(self, request, queryset):
@@ -1156,6 +1167,32 @@ class PublicObjectAdmin(admin.ModelAdmin):
     list_filter = ('state', 'bucket')
     search_fields = ('key',)
     readonly_fields = ('bucket', 'key', 'state', 'created_at', 'updated_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(CommunityBlock)
+class CommunityBlockAdmin(admin.ModelAdmin):
+    list_display = ('blocker', 'blocked', 'created_at')
+    search_fields = ('blocker__username', 'blocked__username')
+    list_select_related = ('blocker', 'blocked')
+    readonly_fields = ('blocker', 'blocked', 'created_at')
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(CommunityRulesAcceptance)
+class CommunityRulesAcceptanceAdmin(admin.ModelAdmin):
+    list_display = ('user', 'version', 'accepted_at')
+    list_filter = ('version',)
+    search_fields = ('user__username', 'user__email')
+    list_select_related = ('user',)
+    readonly_fields = ('user', 'version', 'accepted_at')
 
     def has_add_permission(self, request):
         return False

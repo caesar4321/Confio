@@ -37,6 +37,8 @@ import { StockTradeSuccessContent } from '../components/common/StockTradeSuccess
 import { StockTradeLoadingOverlay } from '../components/common/StockTradeLoadingOverlay';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { useAccount } from '../contexts/AccountContext';
+import { openTuMesNow } from '../hooks/useStockMonthNow';
 import { CUSD_CONVERSION_UI_ENABLED, STOCKS_TRADING_UI_ENABLED } from '../config/features';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
@@ -55,6 +57,8 @@ type Phase = 'input' | 'processing' | 'success';
 
 export const BuyStockScreen = () => {
   const navigation = useNavigation<NavProp>();
+  // Tu mes is owners only (employees never see the month).
+  const canOpenMonth = !useAccount().activeAccount?.isEmployee;
   const route = useRoute<BuyRoute>();
   const { formatNumber } = useNumberFormat();
   const { savings, stocks, refetch } = useSavingsPortfolio();
@@ -198,6 +202,16 @@ export const BuyStockScreen = () => {
           >
             <Text style={styles.successCtaText}>Ver mi posición</Text>
           </TouchableOpacity>
+          {canOpenMonth && (
+          <TouchableOpacity
+            style={styles.successMonthLink}
+            onPress={() => { void openTuMesNow(navigation); }}
+            accessibilityRole="button"
+            testID="stock-success-month-link"
+          >
+            <Text style={styles.successMonthLinkText}>Ver cómo va en Tu mes</Text>
+          </TouchableOpacity>
+          )}
         </StockTradeSuccessContent>
       </View>
     );
@@ -473,5 +487,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     marginTop: 32,
   },
+  successMonthLink: { marginTop: 8, minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
+  successMonthLinkText: { color: colors.primaryDark, fontSize: 15, fontWeight: '600' },
   successCtaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

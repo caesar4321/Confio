@@ -50,6 +50,43 @@ def _find_asset(market, query):
     return by_name
 
 
+def listed_asset(query):
+    """(ticker, name) of a stock or ETF listed in Confío, or None. Forgiving
+    about how the model writes it: "SPY", "Apple (AAPL)", "S&P 500"."""
+    from cusd_plus import gm_api
+    from cusd_plus.schema import _gm_listing
+
+    market = gm_api.all_market()
+    listings = [listing for listing in map(_gm_listing, market) if listing]
+    query = (query or '').strip()
+    tries = [query, *re.findall(r'\(([^)]+)\)', query), re.sub(r'\([^)]*\)', '', query)]
+    # An exact ticker anywhere in what the model wrote wins.
+    for attempt in tries:
+        wanted = _norm(attempt)
+        for symbol, ticker, name in listings:
+            if wanted and wanted in {_norm(ticker), _norm(symbol)}:
+                return ticker, name or ticker
+    # Then a name, only when it points at exactly one asset ("iShares" is many).
+    for attempt in tries:
+        wanted = _norm(attempt)
+        matches = {ticker: name for _, ticker, name in listings
+                   if wanted and (_norm(name) == wanted or _norm(name).startswith(wanted))}
+        if len(matches) == 1:
+            (ticker, name), = matches.items()
+            return ticker, name or ticker
+    # Last resort: the words inside a longer name ("Berkshire" in "Berkshire
+    # Hathaway"), only when exactly one asset matches: "S&P 500" is in many
+    # fund names, and opening the wrong fund is worse than opening none.
+    wanted = _norm(re.sub(r'\([^)]*\)', '', query))
+    if len(wanted) >= 4:
+        matches = {listing[1]: listing for listing in map(_gm_listing, market)
+                   if listing and wanted in _norm(listing[2])}
+        if len(matches) == 1:
+            (_, ticker, name), = matches.values()
+            return ticker, name or ticker
+    return None
+
+
 def _pct(first, last):
     if not first:
         return None

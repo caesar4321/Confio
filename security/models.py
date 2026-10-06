@@ -53,6 +53,26 @@ class PrimaryIdentityManager(SoftDeleteManager):
         return super().only_deleted().filter(is_additional_document=False)
 
 
+# A person who passed KYC with this document: verified now, or verified and
+# later expired (Didit "Kyc Expired"). Links between people (bans, duplicate
+# identities, rewards, same-person binding, Confío Face) use this; features
+# that need a CURRENT document filter status='verified' only.
+PASSED_KYC = Q(status='verified') | Q(status='expired', verified_at__isnull=False)
+
+# Didit's raw status → why an attempt we store as 'expired' ended.
+DIDIT_EXPIRED_REASONS = {
+    'expired': 'session_timed_out',
+    'abandoned': 'abandoned',
+    'kyc expired': 'document_expired',
+}
+EXPIRED_DETAILS = {
+    'session_timed_out': 'Tu sesión de verificación venció antes de completarse. Empieza una nueva cuando quieras.',
+    'abandoned': 'Dejaste la verificación sin terminar. Empieza una nueva para continuar.',
+    'document_expired': 'Tu documento venció. Verifícate de nuevo con un documento vigente.',
+    '': 'La verificación expiró. Inicia una nueva sesión para continuar.',
+}
+
+
 class IdentityVerification(SoftDeleteModel):
     """Model for storing KYC/AML verification documents and information"""
 
@@ -285,8 +305,19 @@ class IdentityVerification(SoftDeleteModel):
                 return 'Se necesita información adicional. Continúa la verificación de tu negocio en Didit.'
             return 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.'
         if self.status == 'expired':
-            return 'La verificación expiró. Inicia una nueva sesión para continuar.'
+            return EXPIRED_DETAILS.get(self.expired_reason, EXPIRED_DETAILS[''])
         return 'Todavía no iniciaste una verificación de identidad.'
+
+    @property
+    def expired_reason(self) -> str:
+        """Why an 'expired' attempt ended, from Didit's own status:
+        'session_timed_out' (Expired: nothing was submitted in time),
+        'abandoned' (Abandoned: left mid-flow) or 'document_expired' (Kyc
+        Expired: the document's validity date passed). '' when unknown."""
+        if self.status != 'expired':
+            return ''
+        raw = str(((self.risk_factors or {}).get('didit') or {}).get('raw_status') or '').strip().lower()
+        return DIDIT_EXPIRED_REASONS.get(raw, '')
     
     def approve_verification(self, approved_by):
         """Approve the verification and sync verified name with user profile"""
@@ -370,8 +401,7 @@ def flag_duplicate_personal_identity_verifications(sender, instance: 'IdentityVe
 
         # all_documents: the default manager hides additional documents, and a
         # passport verified as an extra document is still that person's identity.
-        duplicate_qs = IdentityVerification.all_documents.filter(
-            status='verified',
+        duplicate_qs = IdentityVerification.all_documents.filter(PASSED_KYC).filter(
             document_number_normalized=instance.document_number_normalized,
             document_issuing_country=instance.document_issuing_country,
         ).filter(
@@ -1237,6 +1267,8 @@ class IntegrityVerdict(models.Model):
         ('payment', 'Payment'),
         ('face_check_start', 'Confío Face start'),
         ('face_check_complete', 'Confío Face grading'),
+        # Legacy: the emergency-exit ban route was removed 2026-10-05 (the exit
+        # now opens only after ConfioHeartbeat goes silent). Kept for old rows.
         ('emergency_exit_face', 'Emergency exit (ban route)'),
     ]
     
@@ -1402,6 +1434,8 @@ class FaceCheck(models.Model):
         ('app_unlock', 'App unlock'),
         ('on_ramp', 'Deposit order'),
         ('withdrawal', 'Withdrawal'),
+        # Legacy: no longer started (emergency-exit ban route removed
+        # 2026-10-05). Kept for old rows; removing it needs a migration.
         ('emergency_exit', 'Emergency exit'),
         ('payin_release', 'Receive held pay-in'),
         # Granting payroll delegation / setup: someone else may then move the

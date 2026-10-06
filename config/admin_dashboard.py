@@ -1851,11 +1851,13 @@ from payroll.models import PayrollRun, PayrollItem, PayrollRecipient
 from inbox.models import (
     Channel,
     ChannelMembership,
+    CommunityBlock,
     CommunityComment,
     CommunityCommentReaction,
     CommunityCommentReport,
     CommunityPostReport,
     CommunityPostReview,
+    CommunityRulesAcceptance,
     ProfilePictureSubmission,
     PublicObject,
     ContentItem,
@@ -1872,11 +1874,13 @@ from inbox.models import (
 from inbox.admin import (
     ChannelAdmin,
     ChannelMembershipAdmin,
+    CommunityBlockAdmin,
     CommunityCommentAdmin,
     CommunityCommentReactionAdmin,
     CommunityCommentReportAdmin,
     CommunityPostReportAdmin,
     CommunityPostReviewAdmin,
+    CommunityRulesAcceptanceAdmin,
     ContentItemAdmin,
     ContentPlatformClickAdmin,
     ContentPlatformClickDailyStatAdmin,
@@ -2146,6 +2150,8 @@ confio_admin_site.register(CommunityCommentReport, CommunityCommentReportAdmin)
 confio_admin_site.register(CommunityCommentReaction, CommunityCommentReactionAdmin)
 confio_admin_site.register(ProfilePictureSubmission, ProfilePictureSubmissionAdmin)
 confio_admin_site.register(PublicObject, PublicObjectAdmin)
+confio_admin_site.register(CommunityBlock, CommunityBlockAdmin)
+confio_admin_site.register(CommunityRulesAcceptance, CommunityRulesAcceptanceAdmin)
 confio_admin_site.register(ContentPlatformClick, ContentPlatformClickAdmin)
 confio_admin_site.register(ContentPlatformClickDailyStat, ContentPlatformClickDailyStatAdmin)
 confio_admin_site.register(SupportConversation, SupportConversationAdmin)
@@ -2154,8 +2160,10 @@ confio_admin_site.register(SupportConversationState, SupportConversationStateAdm
 
 # Blockchain models (events and processing logs removed); add indexer cursor + processed markers
 from blockchain.models import Balance, ProcessedIndexerTransaction, IndexerAssetCursor
-from blockchain.admin import BalanceAdmin, ProcessedIndexerTransactionAdmin, IndexerAssetCursorAdmin
+from blockchain.admin import BalanceAdmin, ProcessedIndexerTransactionAdmin, IndexerAssetCursorAdmin, StockHoldingsAdmin
+from blockchain.models import StockHoldings
 confio_admin_site.register(Balance, BalanceAdmin)
+confio_admin_site.register(StockHoldings, StockHoldingsAdmin)
 confio_admin_site.register(ProcessedIndexerTransaction, ProcessedIndexerTransactionAdmin)
 confio_admin_site.register(IndexerAssetCursor, IndexerAssetCursorAdmin)
 
@@ -2259,3 +2267,9 @@ from assistant.admin import AssistantProfileAdmin, AssistantThreadStateAdmin, As
 confio_admin_site.register(AssistantTurn, AssistantTurnAdmin)
 confio_admin_site.register(AssistantThreadState, AssistantThreadStateAdmin)
 confio_admin_site.register(AssistantProfile, AssistantProfileAdmin)
+from assistant.models import ProbeAnswer
+from assistant.admin import ProbeAnswerAdmin
+confio_admin_site.register(ProbeAnswer, ProbeAnswerAdmin)
+from assistant.models import AssistantNeed
+from assistant.admin import AssistantNeedAdmin
+confio_admin_site.register(AssistantNeed, AssistantNeedAdmin)

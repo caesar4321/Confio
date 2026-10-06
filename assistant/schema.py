@@ -24,7 +24,10 @@ HEX_COLOR = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
 class AssistantActionType(graphene.ObjectType):
     type = graphene.String(required=True)
-    destination = graphene.String()
+    destination = graphene.String(description='A screen key every build knows (the fallback for `target`)')
+    target = graphene.String(description='A newer screen key; builds that know it open it instead of `destination`')
+    ticker = graphene.String(description='For target "stock": the stock or ETF to open')
+    label = graphene.String(description='Chip text, e.g. "Ver SPDR S&P 500 ETF"')
 
 
 class AssistantMessageType(graphene.ObjectType):
@@ -109,7 +112,8 @@ def message_payload(message):
         sender_name=name,
         modality=metadata.get('modality'),
         actions=[
-            AssistantActionType(type=a.get('type', ''), destination=a.get('destination'))
+            AssistantActionType(type=a.get('type', ''), destination=a.get('destination'), target=a.get('target'),
+                                ticker=a.get('ticker'), label=a.get('label'))
             for a in (metadata.get('actions') or []) if isinstance(a, dict)
         ],
     )
@@ -159,7 +163,56 @@ def pet_payload(pet):
     return AssistantPetType(id=str(pet.id), image_url=pets.pet_url(pet), idea=pet.idea, source=pet.source)
 
 
+class AssistantSuggestionType(graphene.ObjectType):
+    id = graphene.String(required=True)
+    text = graphene.String(required=True)
+    prompt = graphene.String(required=True)
+    kind = graphene.String(required=True, description='prompt | probe | picker')
+
+
+class AssistantProbeAnswerOptionType(graphene.ObjectType):
+    key = graphene.String(required=True)
+    label = graphene.String(required=True)
+
+
+class AssistantProbeType(graphene.ObjectType):
+    id = graphene.String(required=True)
+    question = graphene.String(required=True)
+    answers = graphene.List(graphene.NonNull(AssistantProbeAnswerOptionType), required=True)
+
+
+class AssistantSuggestionsType(graphene.ObjectType):
+    hints = graphene.List(graphene.NonNull(AssistantSuggestionType), required=True,
+                          description='Bubble hints for this screen, most important first')
+    starters = graphene.List(graphene.NonNull(AssistantSuggestionType), required=True,
+                             description='Chips shown when the chat opens (max 4)')
+    probe = graphene.Field(AssistantProbeType, description='Set while the one-time question is pending')
+
+
 class Query(graphene.ObjectType):
+    assistant_suggestions = graphene.Field(
+        AssistantSuggestionsType, screen=graphene.String(),
+        context_key=graphene.String(description='Active account id; only keys the client cache per account'),
+        description='Ranked by the person\'s situation. Null when unavailable: the app uses its built-in list.')
+
+    @login_required
+    def resolve_assistant_suggestions(self, info, screen=None, context_key=None):
+        from . import suggestions as suggestion_rules
+
+        user, account, business, jwt_context = get_context_models(info)
+        try:
+            viewer = service._viewer(user, account, business, jwt_context, screen=screen or '')
+            result = suggestion_rules.build(viewer, (screen or '')[:64], getattr(info.context, 'META', {}))
+        except Exception:  # noqa: BLE001 - the app falls back to its own list
+            logger.exception('assistant suggestions failed')
+            return None
+        as_type = lambda s: AssistantSuggestionType(id=s.id, text=s.text, prompt=s.prompt, kind=s.kind)  # noqa: E731
+        probe = result.probe and AssistantProbeType(
+            id=result.probe['id'], question=result.probe['question'],
+            answers=[AssistantProbeAnswerOptionType(**a) for a in result.probe['answers']])
+        return AssistantSuggestionsType(hints=[as_type(s) for s in result.hints],
+                                        starters=[as_type(s) for s in result.starters], probe=probe)
+
     assistant_pets = graphene.List(graphene.NonNull(AssistantPetType), required=True)
 
     @login_required
@@ -241,7 +294,8 @@ class AskAssistant(graphene.Mutation):
         try:
             # Transcription happens inside, after the quota/human-mode checks.
             outcome = service.ask(user, account, business, jwt_context, None if audio else body, audio=audio,
-                                  screen=screen or '', tz_name=timezone)
+                                  screen=screen or '', tz_name=timezone,
+                                  request_meta=getattr(info.context, 'META', None))
         except ValueError as exc:
             return AskAssistant(success=False, error=str(exc), actions=[], mode='AI')
         except AssistantUnavailable as exc:
@@ -253,7 +307,8 @@ class AskAssistant(graphene.Mutation):
             transcript=outcome.transcript,
             user_message=message_payload(outcome.user_message),
             reply=message_payload(outcome.reply_message) if outcome.reply_message else None,
-            actions=[AssistantActionType(type=a['type'], destination=a.get('destination')) for a in outcome.actions],
+            actions=[AssistantActionType(type=a['type'], destination=a.get('destination'), target=a.get('target'),
+                                         ticker=a.get('ticker'), label=a.get('label')) for a in outcome.actions],
             mode=outcome.mode,
             remaining_turns=outcome.remaining_turns,
             data_changed=outcome.data_changed,
@@ -373,7 +428,8 @@ class StartAssistantVoice(graphene.Mutation):
     @login_required
     def mutate(cls, root, info, screen=None, timezone=None):
         user, account, business, jwt_context = get_context_models(info)
-        viewer = service._viewer(user, account, business, jwt_context, screen=screen or '', tz_name=timezone)
+        viewer = service._viewer(user, account, business, jwt_context, screen=screen or '', tz_name=timezone,
+                                 request_meta=getattr(info.context, 'META', None))
         conversation = get_or_create_support_conversation(user, account, business)
         try:
             session, left = voice.start_session(
@@ -439,7 +495,7 @@ class RunAssistantVoiceTool(graphene.Mutation):
             voice.hang_up(session)
             return cls(output=ended, handed_off=False, keep_going=False)
         viewer = service._viewer(user, account, business, jwt_context, screen=session.screen,
-                                 tz_name=session.tz_name)
+                                 tz_name=session.tz_name, request_meta=getattr(info.context, 'META', None))
         # Analyses reserve their slot under the user's lock inside run_tool;
         # the slow work itself runs unlocked.
         output, result = voice.run_tool(session, viewer, name, arguments)
@@ -547,7 +603,36 @@ class DeleteAssistantPet(graphene.Mutation):
         return cls(success=True)
 
 
+class AnswerAssistantProbe(graphene.Mutation):
+    """Record the one-time question's answer (first answer wins)."""
+
+    class Arguments:
+        probe_id = graphene.String(required=True)
+        answer = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    label = graphene.String(description='The chosen answer, to send on as the user\'s message')
+
+    @login_required
+    def mutate(self, info, probe_id, answer):
+        from . import suggestions as suggestion_rules
+
+        user, account, business, jwt_context = get_context_models(info)
+        try:
+            viewer = service._viewer(user, account, business, jwt_context)
+            state = suggestion_rules._state(viewer, getattr(info.context, 'META', {}))
+            if not suggestion_rules.wants_probe(state):
+                # Not asked of this person (business context, funded, answered).
+                return AnswerAssistantProbe(success=False, error='Pregunta no disponible')
+            suggestion_rules.record_probe_answer(user, probe_id, answer, funded=state.funded)
+        except ValueError as exc:
+            return AnswerAssistantProbe(success=False, error=str(exc))
+        return AnswerAssistantProbe(success=True, label=suggestion_rules.answer_label(answer))
+
+
 class Mutation(graphene.ObjectType):
+    answer_assistant_probe = AnswerAssistantProbe.Field()
     create_assistant_pet = CreateAssistantPet.Field()
     use_assistant_pet = UseAssistantPet.Field()
     delete_assistant_pet = DeleteAssistantPet.Field()

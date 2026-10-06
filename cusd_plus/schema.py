@@ -823,29 +823,19 @@ class Query(graphene.ObjectType):
         # first mint; the ledger for earned_today/month lands with leg C).
         bsc_address = _active_bsc_address(info)
         balance_usd = vault.position_usd(bsc_address) if bsc_address else 0.0
+        # Display balances from the stored rows (BscBalanceService: Postgres
+        # + Redis, re-read from the chain when stale or older than 5 min).
         # Raw wallet USDT: transient settlement money that landed but has not
-        # yet auto-converted. Eligible holders receive cUSD+; ineligible
-        # holders receive cUSD. One cached read serves both display fields;
-        # money-moving paths always re-read balanceOf live.
-        usdt_wei_int = vault.usdt_balance_raw(bsc_address) if bsc_address else 0
-        cusd_wei_int = 0
-        cusd_token = getattr(settings, 'CUSD_VAULT_ADDRESS', None)
-        if bsc_address and cusd_token:
-            try:
-                cusd_wei_int = vault.erc20_balance_raw(cusd_token, bsc_address)
-            except Exception:  # noqa: BLE001
-                cusd_wei_int = 0
+        # yet auto-converted (eligible holders receive cUSD+; ineligible,
+        # cUSD). BEP-20 CONFIO is the token count for the send screen. An
+        # unknown balance shows 0; money-moving paths always re-read
+        # balanceOf live.
+        from blockchain.bsc_balance_service import BscBalanceService
+        stored = BscBalanceService.balances_raw(bsc_address) if bsc_address else {}
+        usdt_wei_int = stored.get('USDT_BSC', 0)
+        cusd_wei_int = stored.get('CUSD_BSC', 0)
+        confio_wei_int = stored.get('CONFIO_BSC', 0)
         sweepable_wei_int = _sweepable_usdt_wei(user, bsc_address)
-        # BEP-20 CONFIO (token count) for the send screen. Never blocks the
-        # summary: an RPC hiccup shows 0 here while the dollar fields keep
-        # their own cache fallbacks.
-        confio_wei_int = 0
-        confio_token = getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', None)
-        if bsc_address and confio_token:
-            try:
-                confio_wei_int = vault.erc20_balance_raw(confio_token, bsc_address)
-            except Exception:  # noqa: BLE001
-                confio_wei_int = 0
         # SERVER-DERIVED live: the oracle's on-chain daily rate compounded
         # over a year (gross) and at the vault's kept share (net) — floats
         # with US Treasuries, never hardcoded. Falls back to last-known,
@@ -1476,7 +1466,10 @@ class SubmitBscTransaction(graphene.Mutation):
                 # address recipient) — first word, from calldata we validated,
                 # never from the client. Recorded after broadcast.
                 mint_amount_wei = int(data_hex[8:72], 16)
-                from .vault import is_safe_mint_amount
+                from .vault import incoming_local_arrival_in_flight, is_safe_mint_amount
+                if incoming_local_arrival_in_flight(active_addr):
+                    # A local pay-in is still bridging; retried next foreground.
+                    return SubmitBscTransaction(success=False, error='local_arrival_in_flight')
                 if not is_safe_mint_amount(mint_amount_wei):
                     # The money stays transient raw USDT and remains
                     # recoverable. Close a bridge saga if one owns this
@@ -1559,6 +1552,9 @@ class SubmitBscTransaction(graphene.Mutation):
                 _addr = _active_bsc_address(info)
                 if _addr:
                     _vault.invalidate_position(_addr)
+                    # And again once mined: no sponsored batch marks it.
+                    from .tasks import mark_relay_balances_stale
+                    mark_relay_balances_stale.apply_async(args=[_addr, tx_hash], countdown=5, retry=False)
             except Exception:  # noqa: BLE001 — cache hygiene must not fail the relay
                 pass
             return SubmitBscTransaction(success=True, tx_hash=tx_hash)
@@ -1867,13 +1863,19 @@ class SponsorBscBatch(graphene.Mutation):
                                 else None))
             broadcast_tx_hash = tx_hash  # past the point of no return
             if kind in ('stock_buy', 'stock_sell'):
-                # Drop only fresh values. If the tx later reverts, the next
-                # scan simply observes the unchanged chain; if it executes,
-                # the client's receipt-triggered refetch sees the new state.
-                from django.core.cache import cache as _cache
+                # Drop only fresh values (no scan is cached while this trade
+                # is on the wire: gm_holdings asks the database). Not if it
+                # already confirmed (receipt task at +3s, this request held by
+                # the early-receipt wait): the warm post-trade scan stays.
                 from . import vault as _vault
+                from .gm_holdings import drop_fresh_holdings, stock_batches_in_flight
                 _vault.invalidate_position(user_addr)
-                _cache.delete(f'gm_hold:{user_addr.lower()}')
+                try:
+                    confirmed_already = not stock_batches_in_flight(user_addr).exists()
+                except Exception:  # noqa: BLE001 — past the broadcast: never raise
+                    confirmed_already = False
+                if not confirmed_already:
+                    drop_fresh_holdings(user_addr)
             if mint_call is not None and mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
                 # Gate passed and the batch is on the wire: record the mint as
                 # history. subscribeAndMint(uint256 usdtAmount, ...) — first

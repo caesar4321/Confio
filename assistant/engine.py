@@ -11,18 +11,22 @@ open a screen; every transfer is still confirmed by the user in-flow.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 import requests
 from django.conf import settings
 from django.utils import timezone
 
+from users.models_cashflow import CATEGORY_CHOICES
+
 from . import conf, market
-from .destinations import DESTINATIONS, OWNER_ONLY, PERSONAL_ONLY
+from .destinations import DESTINATIONS, FALLBACKS, OWNER_ONLY, PERSONAL_ONLY
 from .prompts import ANALYSIS_PROMPT, build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,9 @@ class Viewer:
     is_business_owner: bool
     tz: object
     screen: str = ''
+    # The request's META (IP, headers) for request-aware eligibility; empty
+    # where there is no request (then eligibility is "unknown").
+    request_meta: dict = field(default_factory=dict, repr=False)
 
     @property
     def is_employee(self):
@@ -64,6 +71,8 @@ class TurnResult:
     cost_usd: Decimal = Decimal('0')
     handoff_reason: str = ''
     writes: list = field(default_factory=list)
+    # categorize_transactions proposal awaiting the user's "sí".
+    pending_categorization: dict | None = None
 
     def add_usage(self, model, usage):
         usage = usage or {}
@@ -88,6 +97,20 @@ class TurnResult:
         ) / million
 
 
+# Text written by other people (names they chose, remitter names): data, never
+# instructions. One line, no control/bidi characters, short.
+_UNSAFE_CHARS = re.compile(r'[\x00-\x1f\x7f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]')
+THIRD_PARTY_MAX_CHARS = 40
+# Only real staff replies carry this prefix in the model's history.
+STAFF_PREFIX = '[Equipo Confío, persona]'
+_STAFF_PREFIX_SPOOF = re.compile(r'\[\s*equipo\s+conf[ií]o[^\]]*\]', re.IGNORECASE)
+
+
+def third_party_text(value, limit=THIRD_PARTY_MAX_CHARS):
+    text = ' '.join(_UNSAFE_CHARS.sub(' ', value or '').split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
+
+
 def allowed_destinations(viewer: Viewer):
     keys = list(DESTINATIONS)
     if viewer.is_employee:
@@ -95,7 +118,20 @@ def allowed_destinations(viewer: Viewer):
     if viewer.account_type == 'business':
         # Business pay-ins are never held for Confío Face (payin_hold.needs_face).
         keys = [k for k in keys if k not in PERSONAL_ONLY]
+    if not _phone_eligible(viewer):
+        # A single stock's page only where stocks are offered. This is the
+        # cheap phone check; navigate('stock') adds the request-aware one.
+        keys = [k for k in keys if k != 'stock']
     return keys
+
+
+def _phone_eligible(viewer):
+    try:
+        from cusd_plus.eligibility import is_ondo_eligible
+        return viewer.user is not None and bool(is_ondo_eligible(viewer.user))
+    except Exception:  # noqa: BLE001 - unknown: don't offer it
+        logger.warning('Confio Assistant: phone eligibility unavailable', exc_info=True)
+        return False
 
 
 # --------------------------------------------------------------------------- #
@@ -180,7 +216,8 @@ def month_summary_data(viewer: Viewer, months_back=0):
             **_totals_dict(result.previous),
         },
         'principales_contactos': [
-            {'nombre': c.name or 'Sin nombre', 'recibido_usd': _usd(c.received), 'enviado_usd': _usd(c.sent)}
+            {'nombre': third_party_text(c.name) or 'Sin nombre', 'recibido_usd': _usd(c.received),
+             'enviado_usd': _usd(c.sent)}
             for c in result.counterparties
         ],
     }
@@ -194,8 +231,8 @@ KIND_LABELS = {
     'investment_in': 'compra de inversión', 'investment_out': 'venta de inversión',
 }
 MOVEMENT_GROUPS = {'income': 'income', 'spending': 'spending', 'own_money': 'own_money'}
-CATEGORY_LABELS = {'food': 'Comida', 'transport': 'Transporte', 'home': 'Casa',
-                   'family': 'Familia', 'work': 'Trabajo', 'other': 'Otro'}
+# The same categories as "Tu mes" (one source: adding one there adds it here).
+CATEGORY_LABELS = dict(CATEGORY_CHOICES)
 
 
 def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=30):
@@ -230,7 +267,7 @@ def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=
                 'tipo': KIND_LABELS.get(m.kind, m.kind),
                 'sentido': {'received': 'entró', 'sent': 'salió'}.get(m.direction, m.direction),
                 'monto_usd': _usd(m.amount),
-                'contraparte': m.counterparty_name or '',
+                'contraparte': third_party_text(m.counterparty_name),
                 'categoria': CATEGORY_LABELS.get(m.category) if m.category else (
                     'sin categoría' if m.kind in {'merchant', 'p2p_send', 'payroll_out', 'donation'} else None),
             }
@@ -239,8 +276,116 @@ def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=
     }
 
 
-def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
-    """Label the user's own spending movements, exactly like the Tu mes chips."""
+def _known_usd(value):
+    return _usd(value) if value is not None else 'desconocido'
+
+
+def portfolio_data(viewer: Viewer):
+    """What the user holds and spends, from the same cached sources the app
+    shows. A value we couldn't read is "desconocido", never a confident 0."""
+    if viewer.is_employee:
+        return {'disponible': False, 'motivo': 'Solo el dueño del negocio ve el saldo.'}
+    address = getattr(viewer.account, 'bsc_address', '') or ''
+    result = {'disponible': True, 'acciones_y_confio_dollar_plus_disponibles': _ondo_allowed(viewer)}
+    if not address:
+        result.update(confio_dollar_usd='desconocido', confio_dollar_plus_usd='desconocido', acciones='desconocido')
+    else:
+        from blockchain.bsc_balance_service import BscBalanceService
+
+        raw = BscBalanceService.balances_raw(address)
+        cusd = raw.get('CUSD_BSC')
+        result['confio_dollar_usd'] = _known_usd(Decimal(cusd) / Decimal(10 ** 18) if cusd is not None else None)
+        result['confio_dollar_plus_usd'] = _plus_usd(raw.get('CUSD_PLUS'))
+        # Holdings regardless of eligibility: someone whose country changed
+        # still owns their stocks (eligibility only gates buying).
+        result['acciones'] = _holdings(address)
+    # Only full months the account existed: a month before it opened is not
+    # a month of $0 spending.
+    opened = getattr(viewer.account, 'created_at', None)
+    local_now = timezone.now().astimezone(viewer.tz)
+    spent = []
+    for back in (1, 2, 3):
+        year, month = _shift_month(local_now.year, local_now.month, -back)
+        if opened is not None and opened.astimezone(viewer.tz).date() > date(year, month, 1):
+            break
+        summary = month_summary_data(viewer, back)
+        if summary.get('disponible') and summary.get('actual'):
+            spent.append(Decimal(summary['actual']['salio_usd'].replace(',', '')))
+    result['gasto_mensual_promedio_usd'] = _usd(sum(spent) / len(spent)) if spent else 'sin datos'
+    result['meses_completos_considerados'] = len(spent)
+    result['nota'] = 'El rendimiento ganado este mes en Confío Dollar+ aún no está disponible: no lo menciones.'
+    return result
+
+
+def _ondo_allowed(viewer):
+    """Stocks and Confío Dollar+ offered to this person: request-aware (IP
+    and phone), like every screen. No request in hand means "unknown"."""
+    if not viewer.request_meta:
+        return 'desconocido'
+    try:
+        from cusd_plus.eligibility import ONDO_POLICY
+        return bool(ONDO_POLICY.evaluate(viewer.user, viewer.request_meta).allowed)
+    except Exception:  # noqa: BLE001 - unknown, not "no"
+        logger.warning('Confio Assistant: Ondo eligibility unavailable', exc_info=True)
+        return 'desconocido'
+
+
+def _plus_usd(shares):
+    """Confío Dollar+ value from the shares already read; any piece we can't
+    read (shares, vault, price with no last-known) is "desconocido"."""
+    from django.core.cache import cache
+
+    from cusd_plus import vault
+
+    if shares is None:
+        return 'desconocido'
+    if not shares:
+        return _usd(Decimal(0))
+    if not vault.vault_address():
+        return 'desconocido'
+    try:
+        price = vault.p_plus_wad()
+    except Exception:  # noqa: BLE001 - fall back to the last price, never to 0
+        logger.warning('Confio Assistant: Confío Dollar+ price unavailable', exc_info=True)
+        price = cache.get('cusd_plus_pplus_last')
+        if price is None:
+            return 'desconocido'
+    return _usd(Decimal(shares) * Decimal(price) / Decimal(10 ** 36))
+
+
+def _holdings(address):
+    from cusd_plus import gm_api
+    from cusd_plus.gm_holdings import known_holdings_units
+    from cusd_plus.schema import _gm_listing
+
+    # No chain scan inside a chat turn: what the app last read (minutes old
+    # at most after any visit to the stocks screen), else "desconocido".
+    units = known_holdings_units(address)
+    if units is None:
+        return 'desconocido'
+    if not units:
+        return []
+    try:
+        market = {(item.get('primaryMarket') or {}).get('symbol'): item for item in gm_api.all_market()}
+    except Exception:  # noqa: BLE001 - unknown, not empty
+        logger.warning('Confio Assistant: market unavailable for holdings', exc_info=True)
+        return 'desconocido'
+    rows = []
+    for symbol, amount in units.items():
+        pm = (market.get(symbol) or {}).get('primaryMarket') or {}
+        if pm.get('price') is None:
+            continue
+        listing = _gm_listing(market.get(symbol) or {}) or (symbol, symbol.removesuffix('on'), '')
+        ticker, name = listing[1], third_party_text(listing[2], 40)
+        rows.append({'ticker': ticker, 'nombre': name or ticker,
+                     'valor_usd': _usd(Decimal(str(amount)) * Decimal(str(pm['price'])))})
+    rows.sort(key=lambda r: Decimal(r['valor_usd'].replace(',', '')), reverse=True)
+    return rows[:15]
+
+
+def categorize_movements(viewer: Viewer, movement_ids, category, apply_to, *, dry_run=False):
+    """Label the user's own spending movements, exactly like the Tu mes chips.
+    dry_run: validate and count only (the proposal the user must confirm)."""
     if viewer.is_employee:
         return {'ok': False, 'motivo': 'Solo el dueño del negocio puede clasificar movimientos.'}
     if category not in CATEGORY_LABELS or apply_to not in ('counterparty', 'movement'):
@@ -250,7 +395,7 @@ def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
         from users.models_cashflow import CounterpartyRule, MovementOverride
     except ImportError:
         return {'ok': False, 'motivo': 'La clasificación aún no está disponible.'}
-    done, skipped, counterparties = [], [], set()
+    done, skipped, counterparties, names = [], [], set(), []
     for movement_id in list(dict.fromkeys(movement_ids or []))[:50]:
         # Scoped lookup: an id outside this account resolves to nothing.
         row, movement = resolve_movement(viewer.user, viewer.account, viewer.account_type,
@@ -258,16 +403,21 @@ def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
         if row is None or movement is None or movement.kind not in SPENDING_KINDS:
             skipped.append(movement_id)
             continue
+        name = third_party_text(getattr(movement, 'counterparty_name', ''), 24)
+        if name and name not in names:
+            names.append(name)
         if apply_to == 'counterparty':
             if not movement.counterparty_key:
                 skipped.append(movement_id)
                 continue
-            if movement.counterparty_key not in counterparties:
+            if dry_run:
+                counterparties.add(movement.counterparty_key)
+            elif movement.counterparty_key not in counterparties:
                 CounterpartyRule.objects.update_or_create(
                     account=viewer.account, counterparty_key=movement.counterparty_key,
                     defaults={'category': category, 'created_by': viewer.user})
                 counterparties.add(movement.counterparty_key)
-        else:
+        elif not dry_run:
             MovementOverride.objects.update_or_create(
                 account=viewer.account, movement=row,
                 defaults={'category': category, 'created_by': viewer.user})
@@ -279,7 +429,19 @@ def categorize_movements(viewer: Viewer, movement_ids, category, apply_to):
         'categoria': CATEGORY_LABELS[category],
         'alcance': 'todos los pagos pasados y futuros a esos contactos' if apply_to == 'counterparty'
                    else 'solo esos movimientos',
+        'contactos': names[:5],
     }
+
+
+# Public documents in this repo (also on GitHub) the model may read in full.
+PUBLIC_DOCUMENTS = {
+    'tokenomics': 'docs/tokenomics/README.md',
+    'whitepaper': 'docs/whitepaper/README.md',
+}
+PUBLIC_DOCUMENT_MAX_CHARS = 60_000
+# Facts newer than a document's text, verified on-chain; returned first so the
+# model never repeats a stale passage. Empty while the documents are current.
+PUBLIC_DOCUMENT_ERRATA: dict[str, str] = {}
 
 
 class Toolbelt:
@@ -296,6 +458,9 @@ class Toolbelt:
         # realtime voice has its own server-tool list).
         self.reserve_news = reserve_news
         self.saw_web = False
+        self.docs_read = set()
+        # Paid tools run at most once per user message, whatever the model asks.
+        self.paid_used = set()
         self.can_navigate = can_navigate
         self.destinations = allowed_destinations(viewer)
 
@@ -304,11 +469,16 @@ class Toolbelt:
             {
                 'type': 'function',
                 'name': 'navigate',
-                'description': 'Abre una pantalla de la app Confío para el usuario.',
+                'description': 'Abre una pantalla de la app Confío para el usuario. Para una acción o ETF '
+                               'concreto usa destination "stock", su ticker en `asset` y en `label` un nombre corto '
+                               'como lo conoce una persona (máx. 22 caracteres, p. ej. "S&P 500 (SPY)"); si no, '
+                               'asset y label = null.',
                 'parameters': {
                     'type': 'object',
-                    'properties': {'destination': {'type': 'string', 'enum': self.destinations}},
-                    'required': ['destination'],
+                    'properties': {'destination': {'type': 'string', 'enum': self.destinations},
+                                   'asset': {'type': ['string', 'null']},
+                                   'label': {'type': ['string', 'null']}},
+                    'required': ['destination', 'asset', 'label'],
                     'additionalProperties': False,
                 },
                 'strict': True,
@@ -407,6 +577,37 @@ class Toolbelt:
                     'strict': True,
                 },
             ]
+        if not self.viewer.is_employee:
+            specs += [{
+                'type': 'function',
+                'name': 'get_portfolio',
+                'description': (
+                    'Lo que el usuario tiene y gasta: saldo en Confío Dollar y Confío Dollar+, sus acciones, '
+                    'gasto mensual promedio de los últimos meses y si acciones/Confío Dollar+ están disponibles '
+                    'en su país. Úsala antes de orientar sobre inversiones o ahorro.'
+                ),
+                'parameters': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False},
+                'strict': True,
+            }]
+        specs += [
+            {
+                'type': 'function',
+                'name': 'read_public_document',
+                'description': (
+                    'Lee un documento público de Confío publicado en GitHub, para detalles que no están en las '
+                    'respuestas aprobadas: "tokenomics" ($CONFIO: suministro, distribución, preventa, recompensas, '
+                    'vesting, riesgos) o "whitepaper" (la empresa, el producto, BNB Smart Chain, contratos, modelo '
+                    'de negocio, cumplimiento, hoja de ruta). Edición en inglés (la oficial).'
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {'document': {'type': 'string', 'enum': list(PUBLIC_DOCUMENTS)}},
+                    'required': ['document'],
+                    'additionalProperties': False,
+                },
+                'strict': True,
+            },
+        ]
         if self.reserve_news is not None:
             specs += [
                 {
@@ -457,6 +658,8 @@ class Toolbelt:
             'categorize_transactions': self.categorize_transactions,
             'analyze_finances': self.analyze_finances,
             'get_stock_quote': self.get_stock_quote,
+            'read_public_document': self.read_public_document,
+            'get_portfolio': self.get_portfolio,
             'search_market_news': self.search_market_news,
         }.get(name)
         if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
@@ -465,13 +668,35 @@ class Toolbelt:
             return {'error': f'herramienta desconocida: {name}'}
         return handler(**args)
 
-    def navigate(self, destination):
+    def navigate(self, destination, asset=None, label=None):
         if not self.can_navigate or destination not in self.destinations:
             return {'ok': False, 'error': 'pantalla no disponible'}
-        action = {'type': 'navigate', 'destination': destination}
+        # `destination` stays a key every build knows; newer builds open
+        # `target` (and `ticker`) instead.
+        action = {'type': 'navigate', 'destination': FALLBACKS.get(destination, destination)}
+        # What actually opened, for the model to describe (not the fallback key).
+        reply = {'ok': True, 'pantalla_abierta': DESTINATIONS[destination]}
+        if destination in FALLBACKS:
+            action['target'] = destination
+        if destination == 'stock':
+            if _ondo_allowed(self.viewer) is not True:
+                return {'ok': False, 'error': 'Las acciones no están disponibles para este usuario.'}
+            found = market.listed_asset(asset)
+            if found is None:
+                return {'ok': False, 'error': 'No encontré esa acción o ETF entre las que muestra Confío.'}
+            ticker, name = found
+            # The model's short label only when it names this exact ticker, so
+            # the chip can't promise one fund and open another.
+            short = third_party_text(label or '', 22)
+            if '…' in short or not re.search(rf'\b{re.escape(ticker)}\b', short, re.I):
+                short = ''
+            if not short:
+                short = name if len(name) <= 22 else ticker
+            action.update(ticker=ticker, label=f'Ver {short}')
+            reply['activo'] = f'{name} ({ticker})'
         if action not in self.result.actions:
             self.result.actions.append(action)
-        return {'ok': True}
+        return {**reply, **{k: v for k, v in action.items() if k != 'type'}}
 
     def escalate_to_human(self, reason):
         self.result.handoff_reason = (reason or '').strip()[:280] or 'Solicitud del usuario'
@@ -488,13 +713,30 @@ class Toolbelt:
         return movements_data(self.viewer, months_back, group, search, limit)
 
     def categorize_transactions(self, ids, category, apply_to):
-        result = categorize_movements(self.viewer, ids, category, apply_to)
-        if result.get('ok'):
-            self.result.writes.append({'type': 'categorize', 'count': result['clasificados'],
-                                       'category': category, 'apply_to': apply_to})
-        return result
+        # Never written here: text in tool data (a sender's name) could have
+        # asked for it. The proposal is kept and applied only if the user's
+        # next message says yes (service.confirm_pending_categorization).
+        if self.result.pending_categorization is not None:
+            return {'ok': False, '_denied': True, 'motivo': 'Una propuesta de clasificación por mensaje.'}
+        result = categorize_movements(self.viewer, ids, category, apply_to, dry_run=True)
+        if not result.get('ok'):
+            return result
+        self.result.pending_categorization = {
+            'ids': list(dict.fromkeys(ids or []))[:50], 'category': category, 'apply_to': apply_to,
+            'count': result['clasificados'], 'label': result['categoria'], 'contacts': result.get('contactos') or []}
+        return {
+            'pendiente_de_confirmacion': True,
+            'movimientos': result['clasificados'],
+            'omitidos': result['omitidos'],
+            'categoria': result['categoria'],
+            'alcance': result['alcance'],
+            'instruccion': 'Todavía NO está guardado. La app agrega debajo de tu respuesta la pregunta de '
+                           'confirmación exacta; no hagas otra pregunta distinta en este mensaje.',
+        }
 
     def analyze_finances(self, question):
+        if 'analyze_finances' in self.paid_used:
+            return {'disponible': False, '_denied': True, 'motivo': 'Un análisis por mensaje.'}
         if self.viewer.is_employee:
             return {'disponible': False, 'motivo': 'Solo el dueño del negocio puede analizar la cuenta.'}
         if self.reserve_analysis is not None:
@@ -505,6 +747,7 @@ class Toolbelt:
         if not allowed:
             return {'disponible': False, '_denied': True,
                     'motivo': 'Llegaste al límite de análisis de hoy. Mañana puedes pedir otro.'}
+        self.paid_used.add('analyze_finances')
         months = [month_summary_data(self.viewer, back) for back in range(3)]
         if not any(m.get('disponible') for m in months):
             return months[0]
@@ -532,6 +775,27 @@ class Toolbelt:
         self.result.add_usage(model, data.get('usage'))
         return {'analisis': _output_text(data) or 'Sin análisis.'}
 
+    def get_portfolio(self):
+        return portfolio_data(self.viewer)
+
+    def read_public_document(self, document):
+        path = PUBLIC_DOCUMENTS.get(document)
+        if path is None:
+            return {'error': 'Documento no disponible.'}
+        # The transcript is re-sent every step: one copy per turn is enough.
+        if document in self.docs_read:
+            return {'documento': document, 'nota': 'Ya lo leíste en este turno; usa ese texto.'}
+        self.docs_read.add(document)
+        text = (Path(settings.BASE_DIR) / path).read_text(encoding='utf-8')
+        result = {
+            'documento': document,
+            'fuente': f'https://github.com/caesar4321/Confio/blob/main/{path}',
+        }
+        if document in PUBLIC_DOCUMENT_ERRATA:
+            result['correccion_mas_reciente'] = PUBLIC_DOCUMENT_ERRATA[document]
+        result['texto'] = text[:PUBLIC_DOCUMENT_MAX_CHARS]
+        return result
+
     def get_stock_quote(self, query):
         return market.stock_quote(query, user=self.viewer.user)
 
@@ -539,9 +803,12 @@ class Toolbelt:
         if market.resolve_topic(topic) is None:
             return {'encontrado': False, '_denied': True,
                     'motivo': 'Solo puedo buscar noticias de una empresa, ticker o índice.'}
+        if 'search_market_news' in self.paid_used:
+            return {'disponible': False, '_denied': True, 'motivo': 'Una búsqueda de noticias por mensaje.'}
         if not self.reserve_news():
             return {'disponible': False, '_denied': True,
                     'motivo': 'Llegaste al límite de búsquedas de noticias de hoy.'}
+        self.paid_used.add('search_market_news')
         try:
             found = market.market_news(topic, timeframe=timeframe, language=language)
         except AssistantUnavailable:
@@ -570,10 +837,22 @@ def history_items(messages):
         body = (message.body or '').strip()
         if not body:
             continue
+        metadata = message.metadata or {}
+        if metadata.get('client_reported') or metadata.get('handoff_note'):
+            # Lines a client relayed (voice captions) and handoff notes for the
+            # team are not things the user or the assistant said in this chat.
+            continue
+        is_staff = (message.sender_type == 'AGENT' and not metadata.get('ai')
+                    and getattr(message, 'sender_user_id', None) is not None)
+        if not is_staff:
+            # Only a real person on the team may speak as the team.
+            body = _STAFF_PREFIX_SPOOF.sub('', body).strip()
+            if not body:
+                continue
         if message.sender_type == 'USER':
             items.append({'role': 'user', 'content': body})
-        elif message.sender_type == 'AGENT' and not (message.metadata or {}).get('ai'):
-            items.append({'role': 'assistant', 'content': f'[Equipo Confío, persona] {body}'})
+        elif is_staff:
+            items.append({'role': 'assistant', 'content': f'{STAFF_PREFIX} {body}'})
         else:
             items.append({'role': 'assistant', 'content': body})
     return items
@@ -668,8 +947,10 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             input_items.append({
                 'type': 'function_call_output',
                 'call_id': call.get('call_id'),
+                # Public documents are read whole; everything else stays small.
                 'output': json.dumps({k: v for k, v in tool_output.items() if not str(k).startswith('_')},
-                                     ensure_ascii=False)[:12000],
+                                     ensure_ascii=False)[:(PUBLIC_DOCUMENT_MAX_CHARS + 2000
+                                                          if name == 'read_public_document' else 12000)],
             })
         payload = {**payload, 'input': input_items}
         if belt.saw_web:

@@ -1168,3 +1168,99 @@ class DiditWebhookSignatureTests(TestCase):
         signature = hmac.new(b'super-secret', body, hashlib.sha256).hexdigest()
         self.assertTrue(verify_didit_webhook_signature(body, signature))
         self.assertFalse(verify_didit_webhook_signature(body, 'invalid'))
+
+
+class DiditDeadSessionTests(TestCase):
+    def test_expired_and_abandoned_sessions_are_not_in_review(self):
+        from security.didit import _map_didit_status
+        self.assertEqual(_map_didit_status({'status': 'Expired'}), 'expired')
+        self.assertEqual(_map_didit_status({'status': 'Abandoned'}), 'expired')
+        self.assertEqual(_map_didit_status({'status': 'Kyc Expired'}), 'expired')
+        self.assertEqual(_map_didit_status({'status': 'In Review'}), 'pending')
+        self.assertEqual(_map_didit_status({'status': 'Not Started'}), 'pending')
+        self.assertEqual(_map_didit_status({'status': 'Approved'}), 'verified')
+
+    def test_backfill_only_touches_dead_never_verified_sessions(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        from django.utils import timezone
+
+        user = User.objects.create_user(username='dead1', email='dead1@example.com', password='x',
+                                        firebase_uid='fb-dead1')
+
+        def row(raw, verified_at=None, n=[0]):
+            n[0] += 1
+            return IdentityVerification.all_objects.create(
+                user=user, status='pending', verified_at=verified_at, document_type='national_id',
+                verified_first_name='A', verified_last_name='B', verified_date_of_birth='1990-01-01',
+                verified_nationality='PE', verified_address='', verified_city='', verified_state='',
+                verified_country='', document_number=f'didit:s{n[0]}',
+                risk_factors={'provider': 'didit', 'didit': {'raw_status': raw}})
+
+        expired, abandoned = row('Expired'), row('Abandoned')
+        review, kyc_expired = row('In Review'), row('Kyc Expired', verified_at=timezone.now())
+        odd = row('Abandoned', verified_at=timezone.now())  # was verified once: not a dead session
+        out = StringIO()
+        call_command('expire_dead_didit_sessions', stdout=out)
+        self.assertEqual(IdentityVerification.all_objects.filter(status='expired').count(), 0)  # dry run
+        call_command('expire_dead_didit_sessions', '--apply', stdout=out)
+        statuses = dict(IdentityVerification.all_objects.values_list('pk', 'status'))
+        self.assertEqual((statuses[expired.pk], statuses[abandoned.pk]), ('expired', 'expired'))
+        self.assertEqual((statuses[review.pk], statuses[odd.pk]), ('pending', 'pending'))
+        self.assertEqual(statuses[kyc_expired.pk], 'expired')
+        reasons = {r.pk: (r.expired_reason, r.status_detail) for r in IdentityVerification.all_objects.all()}
+        self.assertEqual(reasons[expired.pk][0], 'session_timed_out')
+        self.assertEqual(reasons[abandoned.pk][0], 'abandoned')
+        self.assertEqual(reasons[kyc_expired.pk][0], 'document_expired')
+        self.assertIn('documento venció', reasons[kyc_expired.pk][1])
+        self.assertIn('sin terminar', reasons[abandoned.pk][1])
+
+
+class ExpiredDocumentKeepsKycBindingTests(TestCase):
+    """A document that was verified and later expired (Didit "Kyc Expired")
+    must keep the account's security bindings: the Face gate stays on and a
+    re-verification must be the same person."""
+
+    def setUp(self):
+        from django.utils import timezone
+        self.user = User.objects.create_user(username='kx1', email='kx1@example.com', password='x',
+                                             firebase_uid='fb-kx1')
+        self.old = IdentityVerification.all_objects.create(
+            user=self.user, status='expired', verified_at=timezone.now(), document_type='national_id',
+            verified_first_name='Ana', verified_last_name='Perez', verified_date_of_birth='1990-01-01',
+            verified_nationality='PER', verified_address='', verified_city='', verified_state='',
+            verified_country='PER', document_number='12345678',
+            risk_factors={'provider': 'didit', 'didit': {'raw_status': 'Kyc Expired'}})
+
+    def test_face_gate_stays_on_after_the_document_expires(self):
+        from security.face_step_up import step_up_applies
+        self.assertFalse(self.user.has_verified_identity_document)
+        self.assertTrue(self.user.has_passed_identity_verification)
+        with patch('security.face_step_up.face_enforced', return_value=True):
+            self.assertTrue(step_up_applies(self.user))
+
+    def test_expired_document_still_anchors_the_person(self):
+        from security.didit import _anchor_for
+        new = IdentityVerification.all_objects.create(
+            user=self.user, status='pending', document_type='national_id',
+            verified_first_name='Otra', verified_last_name='Persona', verified_date_of_birth='1985-05-05',
+            verified_nationality='PER', verified_address='', verified_city='', verified_state='',
+            verified_country='PER', document_number='didit:new')
+        self.assertEqual(_anchor_for(new), self.old)
+
+    def test_never_verified_dead_session_is_not_an_anchor(self):
+        from security.didit import _anchor_for
+        user = User.objects.create_user(username='kx2', email='kx2@example.com', password='x', firebase_uid='fb-kx2')
+        dead = IdentityVerification.all_objects.create(
+            user=user, status='expired', document_type='national_id', verified_first_name='P',
+            verified_last_name='V', verified_date_of_birth='1900-01-01', verified_nationality='UNK',
+            verified_address='', verified_city='', verified_state='', verified_country='',
+            document_number='didit:dead', risk_factors={'didit': {'raw_status': 'Expired'}})
+        self.assertFalse(user.has_passed_identity_verification)
+        new = IdentityVerification.all_objects.create(
+            user=user, status='pending', document_type='national_id', verified_first_name='P',
+            verified_last_name='V', verified_date_of_birth='1900-01-01', verified_nationality='UNK',
+            verified_address='', verified_city='', verified_state='', verified_country='',
+            document_number='didit:new2')
+        self.assertIsNone(_anchor_for(new))

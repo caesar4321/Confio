@@ -56,6 +56,12 @@ def mint_policy_calls(calls, user, wallet, request_id):
         if minimum < int(fee['units']) + int(fee['minimum_net_units']):
             raise PolicyError('local_mint_net_below_minimum')
         return base
+    # A generic sweep (no request identity, any client version) waits while a
+    # local pay-in is still bridging: its USDT can land before delivery is
+    # recorded, and minting it here would leave the journey unlinked forever.
+    if not request_id and vault.incoming_local_arrival_in_flight(wallet) and any(
+            c['data'][2:10] in (SEL_CUSD_MINT, SEL_SUBSCRIBE_AND_MINT) for c in calls):
+        raise PolicyError('local_arrival_in_flight')
     # Modified/old clients cannot mint reserved local dollars under a generic
     # request identity to omit the collector call. Existing unrelated balances
     # remain usable. Apply this guard only while fee-bearing arrivals are pending.

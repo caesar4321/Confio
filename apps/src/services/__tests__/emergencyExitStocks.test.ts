@@ -90,6 +90,19 @@ describe('Emergency Exit Ondo Stocks', () => {
       isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
       setBscTransport: () => {},
     }));
+    // Exit sends go through the heartbeat gate (gatedTx.ts); here the gate is
+    // open and each gated send is the stubbed sendCall, so these tests keep
+    // pinning the engine's legs. Gate behavior has its own suite.
+    jest.doMock('../emergencyExit/gatedTx', () => ({
+      sendGatedCall: (p: any) => (sendCall as any)(p),
+      GATE_GAS_OVERHEAD: 60_000n,
+      AUTH_GAS_OVERHEAD: 30_000n,
+    }));
+    jest.doMock('../emergencyExit/heartbeat', () => ({
+      BUNDLED_HEARTBEAT: { address: '', owner: '' },
+      assertExitOpen: async () => ({ state: 'open' }),
+      isConfioAlive: (e: any) => e?.name === 'ConfioAliveError',
+    }));
     return { mod: require('../emergencyExit/bscExit'), sendCall };
   };
 
@@ -106,8 +119,9 @@ describe('Emergency Exit Ondo Stocks', () => {
       ],
       steps: ['redeemCusdPlus', 'transferUsdt', 'transferConfio', 'transferOndoStocks'],
     };
-    // 1.38m gas units × 0.12 gwei (floor plus 20% headroom).
-    await expect(mod.estimateBscExitGasWei(plan)).resolves.toBe(165_600_000_000_000n);
+    // 1.38m leg units + 5 gated sends × 60k + one 7702 authorization 30k
+    // = 1.71m units × 0.12 gwei (floor plus 20% headroom).
+    await expect(mod.estimateBscExitGasWei(plan)).resolves.toBe(205_200_000_000_000n);
   });
 
   it('discovers only positive balances from the bundled allowlist', async () => {
@@ -169,7 +183,12 @@ describe('Emergency Exit Ondo Stocks', () => {
 
     // Once mined, reconciliation records the original hash and proceeds
     // without broadcasting the same stock transfer again.
-    mined = { status: '0x1', transactionHash: '0x1234', blockNumber: '0x1', logs: [] };
+    // A gated send that executed always carries the delegate's BatchExecuted
+    // log; an empty log list would be a 7702 no-op (nothing ran).
+    mined = {
+      status: '0x1', transactionHash: '0x1234', blockNumber: '0x1',
+      logs: [{ address: WALLET.address, topics: ['0xbatch'], data: '0x' }],
+    };
     balances[0] = 0n;
     balances[1] = 0n;
     const reconciled = await mod.executeBscExit({
@@ -195,6 +214,19 @@ describe('Emergency Exit Ondo Stocks', () => {
       encodeAddress: (address: string) => address.slice(2).padStart(64, '0'),
       isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
       setBscTransport: setTransport,
+    }));
+    // Exit sends go through the heartbeat gate (gatedTx.ts); here the gate is
+    // open and each gated send is the stubbed sendCall, so these tests keep
+    // pinning the engine's legs. Gate behavior has its own suite.
+    jest.doMock('../emergencyExit/gatedTx', () => ({
+      sendGatedCall: () => { throw new Error("no send expected"); },
+      GATE_GAS_OVERHEAD: 60_000n,
+      AUTH_GAS_OVERHEAD: 30_000n,
+    }));
+    jest.doMock('../emergencyExit/heartbeat', () => ({
+      BUNDLED_HEARTBEAT: { address: '', owner: '' },
+      assertExitOpen: async () => ({ state: 'open' }),
+      isConfioAlive: (e: any) => e?.name === 'ConfioAliveError',
     }));
     const mod = require('../emergencyExit/bscExit');
     const storageError = new Error('storage unavailable');

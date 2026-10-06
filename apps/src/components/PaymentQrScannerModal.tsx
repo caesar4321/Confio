@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from './common/AppText';
 import { Camera, type CameraDevice, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
-import { launchImageLibrary } from 'react-native-image-picker';
+import { pickFromLibrary } from '../services/systemPicker';
 import RNQRGenerator from 'rn-qr-generator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -88,7 +88,7 @@ export const PaymentQrScannerModal: React.FC<PaymentQrScannerModalProps> = ({ vi
   const handleGallery = async () => {
     const session = sessionRef.current;
     try {
-      const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 });
+      const result = await pickFromLibrary({ mediaType: 'photo', selectionLimit: 1 });
       const uri = result.assets?.[0]?.uri;
       if (result.didCancel || !uri) return;
       const detected = await RNQRGenerator.detect({ uri });
