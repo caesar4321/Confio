@@ -92,7 +92,7 @@ def main() -> int:
         last = int(rpc('eth_call', [{'to': hb, 'data': _selector('lastBeat()')}, tag]), 16)
         silence = int(rpc('eth_call', [{'to': hb, 'data': _selector('silenceRequired()')}, tag]), 16)
     except Exception as exc:  # noqa: BLE001
-        telegram(f'🟠 Heartbeat watchdog (GitHub Actions) cannot read BSC: {exc}')
+        telegram(f'🟠 Vigilante externo (GitHub Actions): no puede leer BSC: {exc}')
         print('::error::chain read failed:', exc)
         return 1
     age = now - last
@@ -100,9 +100,9 @@ def main() -> int:
     if not last or not silence or age > stale_after:
         opens_in = ((last + silence) - now) / 3600 if last and silence else 0.0
         telegram(
-            f'🚨 [watchdog] Confío heartbeat STALE: no beat on chain for {age / 3600:.1f}h.\n'
-            f'Salida de emergencia opens for EVERY user (frozen accounts included) in {opens_in:.1f}h '
-            f'unless beat() lands. Contract {hb}')
+            f'🚨 [vigilante externo] Latido de Confío ATRASADO: {age / 3600:.1f} h sin latido.\n'
+            'La Salida de emergencia se abrirá para TODOS los usuarios (incluidas las cuentas '
+            f'congeladas) en {opens_in:.1f} h si no llega un latido. Contrato {hb}')
         print('::error::heartbeat stale')
         return 1
     return 0
