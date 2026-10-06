@@ -44,8 +44,8 @@ no. Users will ask exactly this, and a refusal plus generic facts is useless to 
 
 - **Eligibility:** stocks and Confío Dollar+ only for Ondo-eligible users. For others, the
   assistant explains why it isn't available and never promotes it.
-- **Disclosure** whenever an answer touches Confío's own products: "Confío cobra 0,30% por
-  operación de acciones; en Confío Dollar+ se queda con el 15% del rendimiento."
+- **Fees** only when the person asks about costs (Julian, 2026-10-06): the app shows the exact cost
+  before every confirmation, so the assistant doesn't repeat it in other answers.
 - **New tool `get_portfolio`** (read-only, JWT-scoped), so guidance uses real numbers
   instead of guesses:
   - Confío Dollar or Confío Dollar+ balance;
