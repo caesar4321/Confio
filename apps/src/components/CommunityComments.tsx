@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -8,7 +8,9 @@ import { Text, TextInput } from './common/AppText';
 import { colors } from '../config/theme';
 import { ReportReasonSheet } from './ReportReasonSheet';
 import { ReactionBar } from './ReactionBar';
+import { CommunityRulesSheet } from './CommunityRulesSheet';
 import {
+  BLOCK_COMMUNITY_MEMBER,
   CREATE_COMMUNITY_COMMENT,
   DELETE_COMMUNITY_COMMENT,
   REACT_TO_COMMUNITY_COMMENT,
@@ -112,10 +114,15 @@ type Props = {
   contentItemId: number;
   canComment: boolean;
   blockMessage?: string | null;
+  /** e.g. 'rules_required': offer the rules right here. */
+  blockCode?: string | null;
+  onRulesAccepted?: () => void;
   maxChars: number;
 };
 
-export function CommunityComments({ contentItemId, canComment, blockMessage, maxChars }: Props) {
+export function CommunityComments({
+  contentItemId, canComment, blockMessage, blockCode, onRulesAccepted, maxChars,
+}: Props) {
   const client = useApolloClient();
   const variables = { contentItemId: String(contentItemId) };
   // One query for everything loaded: "Ver más" grows the limit, so every
@@ -138,6 +145,8 @@ export function CommunityComments({ contentItemId, canComment, blockMessage, max
   const [deleteComment] = useMutation(DELETE_COMMUNITY_COMMENT);
   const [reportComment] = useMutation(REPORT_COMMUNITY_COMMENT);
   const [reactToComment] = useMutation(REACT_TO_COMMUNITY_COMMENT);
+  const [blockMember] = useMutation(BLOCK_COMMUNITY_MEMBER);
+  const [rulesOpen, setRulesOpen] = useState(false);
   // Reactions answered by the server, shown until the next refetch has them.
   const [reactionOverrides, setReactionOverrides] = useState<
     Record<string, { reactionSummary: Array<{ emoji: string; count: number }>; viewerReaction?: string | null }>
@@ -247,6 +256,10 @@ export function CommunityComments({ contentItemId, canComment, blockMessage, max
       });
       const outcome = result?.createCommunityComment;
       if (!outcome?.success) {
+        if (outcome?.errorCode === 'rules_required') {
+          setRulesOpen(true);
+          return;
+        }
         setError(outcome?.error || 'No pudimos enviar tu comentario.');
         return;
       }
@@ -316,13 +329,47 @@ export function CommunityComments({ contentItemId, canComment, blockMessage, max
     }
   };
 
+  const confirmBlock = (comment: CommunityComment) => {
+    Alert.alert(
+      `¿Bloquear a ${comment.authorName}?`,
+      'No verás sus publicaciones ni comentarios, y no podrá ver los tuyos ni mencionarte. Puedes desbloquear cuando quieras desde Mis publicaciones.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Bloquear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { data: result } = await blockMember({ variables: { userId: comment.authorId } });
+              if (!result?.blockCommunityMember?.success) {
+                Alert.alert('No pudimos bloquear', result?.blockCommunityMember?.error || 'Inténtalo de nuevo.');
+                return;
+              }
+              await refetch();
+            } catch {
+              Alert.alert('No pudimos bloquear', 'Revisa tu conexión e inténtalo de nuevo.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const openMenu = (comment: CommunityComment) => {
-    const buttons: any[] = [];
-    if (comment.canReport) buttons.push({ text: 'Reportar', onPress: () => setReportingId(comment.id) });
-    if (comment.canDelete) buttons.push({ text: 'Eliminar', style: 'destructive', onPress: () => remove(comment) });
-    if (!buttons.length) return;
-    buttons.push({ text: 'Cancelar', style: 'cancel' });
-    Alert.alert('Comentario', undefined, buttons);
+    const actions: any[] = [];
+    if (comment.canReport) actions.push({ text: 'Reportar', onPress: () => setReportingId(comment.id) });
+    if (comment.canDelete) actions.push({ text: 'Eliminar', style: 'destructive', onPress: () => remove(comment) });
+    if (!comment.isOwn) actions.push({ text: 'Bloquear', style: 'destructive', onPress: () => confirmBlock(comment) });
+    if (!actions.length) return;
+    // Android dialogs hold at most three buttons: with three actions, a tap
+    // outside cancels instead of a Cancel button.
+    const withCancel = Platform.OS !== 'android' || actions.length < 3;
+    Alert.alert(
+      'Comentario',
+      undefined,
+      withCancel ? [...actions, { text: 'Cancelar', style: 'cancel' }] : actions,
+      { cancelable: true },
+    );
   };
 
   const renderComment = (comment: CommunityComment, isReply = false) => {
@@ -454,9 +501,22 @@ export function CommunityComments({ contentItemId, canComment, blockMessage, max
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {remaining < 50 ? <Text style={styles.hint}>{remaining} caracteres restantes</Text> : null}
         </View>
+      ) : blockCode === 'rules_required' ? (
+        <Pressable onPress={() => setRulesOpen(true)} style={styles.rulesPrompt} accessibilityRole="button">
+          <Icon name="book-open" size={14} color={colors.primaryDark} />
+          <Text style={styles.linkText}>Acepta las normas de la comunidad para comentar</Text>
+        </Pressable>
       ) : blockMessage ? (
         <Text style={styles.blocked}>{blockMessage}</Text>
       ) : null}
+      <CommunityRulesSheet
+        visible={rulesOpen}
+        onAccepted={() => {
+          setRulesOpen(false);
+          onRulesAccepted?.();
+        }}
+        onClose={() => setRulesOpen(false)}
+      />
 
       {loading && !page ? (
         <ActivityIndicator style={styles.loading} size="small" color={colors.primary} />
@@ -592,6 +652,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 13,
     color: colors.error.text,
+  },
+  rulesPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingVertical: 4,
   },
   blocked: {
     fontSize: 13,

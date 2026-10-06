@@ -4747,6 +4747,9 @@ export const GET_COMMUNITY_POST_VIEWER = gql`
       canComment
       commentBlockMessage
       commentMaxChars
+      commentBlockCode
+      authorId
+      authorName
     }
   }
 `;
@@ -4841,6 +4844,27 @@ export const GET_MY_PROFILE_PICTURE = gql`
       latestStatus
       latestReason
       blockMessage
+      rulesRequired
+    }
+  }
+`;
+
+export const GET_COMMUNITY_RULES = gql`
+  query GetCommunityRules {
+    communityRules {
+      version
+      accepted
+      rules
+    }
+  }
+`;
+
+export const GET_MY_BLOCKED_MEMBERS = gql`
+  query GetMyBlockedMembers {
+    myBlockedMembers {
+      id
+      name
+      avatarUrl
     }
   }
 `;

@@ -196,6 +196,17 @@ export const MyCommunityPostsScreen = () => {
         windowSize={11}
         refreshing={networkStatus === NetworkStatus.refetch}
         onRefresh={() => { refetch().catch(() => {}); }}
+        ListHeaderComponent={
+          <Pressable
+            style={styles.blockedLink}
+            onPress={() => navigation.navigate('BlockedMembers')}
+            accessibilityRole="button"
+          >
+            <Icon name="slash" size={14} color={colors.textSecondary} />
+            <Text style={styles.blockedLinkText}>Personas bloqueadas</Text>
+            <Icon name="chevron-right" size={14} color={colors.textSecondary} />
+          </Pressable>
+        }
         ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.loading} color={colors.primary} /> : null}
         ListEmptyComponent={
           error ? (
@@ -237,6 +248,18 @@ const styles = StyleSheet.create({
   },
   emptyList: {
     flexGrow: 1,
+  },
+  blockedLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  blockedLinkText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
   },
   card: {
     backgroundColor: colors.white,

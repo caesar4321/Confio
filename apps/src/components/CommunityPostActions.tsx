@@ -5,7 +5,7 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
-import { DELETE_COMMUNITY_POST, REPORT_COMMUNITY_POST } from '../apollo/mutations';
+import { BLOCK_COMMUNITY_MEMBER, DELETE_COMMUNITY_POST, REPORT_COMMUNITY_POST } from '../apollo/mutations';
 import { GET_COMMUNITY_POST_VIEWER } from '../apollo/queries';
 import { ReportReasonSheet } from './ReportReasonSheet';
 import { CommunityComments } from './CommunityComments';
@@ -20,6 +20,7 @@ function PostActionRow({ contentItemId, onDeleted, viewer, refetch }: Props & { 
   const variables = { contentItemId: String(contentItemId) };
   const [reportPost, { loading: reporting }] = useMutation(REPORT_COMMUNITY_POST);
   const [deletePost, { loading: deleting }] = useMutation(DELETE_COMMUNITY_POST);
+  const [blockMember, { loading: blocking }] = useMutation(BLOCK_COMMUNITY_MEMBER);
   const [picking, setPicking] = useState(false);
 
   const report = async (reason: string) => {
@@ -67,32 +68,64 @@ function PostActionRow({ contentItemId, onDeleted, viewer, refetch }: Props & { 
     );
   }
 
-  if (viewer.viewerReported) {
-    return (
-      <View style={styles.action}>
-        <Icon name="flag" size={14} color={colors.textTertiary} />
-        <Text style={[styles.actionText, styles.muted]}>Reportaste esta publicación</Text>
-      </View>
+  const confirmBlock = () => {
+    if (!viewer.authorId) return;
+    Alert.alert(
+      `¿Bloquear a ${viewer.authorName}?`,
+      'No verás sus publicaciones ni comentarios, y no podrá ver los tuyos ni mencionarte. Puedes desbloquear cuando quieras desde Mis publicaciones.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Bloquear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { data: result } = await blockMember({ variables: { userId: viewer.authorId } });
+              if (!result?.blockCommunityMember?.success) {
+                Alert.alert('No pudimos bloquear', result?.blockCommunityMember?.error || 'Inténtalo de nuevo.');
+                return;
+              }
+              Alert.alert('Bloqueado', `Ya no verás contenido de ${viewer.authorName}.`);
+              onDeleted();
+            } catch {
+              Alert.alert('No pudimos bloquear', 'Revisa tu conexión e inténtalo de nuevo.');
+            }
+          },
+        },
+      ],
     );
-  }
-
-  if (!viewer.canReport) return null;
+  };
 
   return (
-    <>
-      <Pressable style={styles.action} onPress={() => setPicking(true)} disabled={reporting} accessibilityRole="button">
-        {reporting ? <ActivityIndicator size="small" color={colors.textSecondary} /> : (
-          <Icon name="flag" size={14} color={colors.textSecondary} />
-        )}
-        <Text style={styles.actionText}>Reportar publicación</Text>
-      </Pressable>
+    <View style={styles.actionRow}>
+      {viewer.viewerReported ? (
+        <View style={styles.action}>
+          <Icon name="flag" size={14} color={colors.textTertiary} />
+          <Text style={[styles.actionText, styles.muted]}>Reportaste esta publicación</Text>
+        </View>
+      ) : viewer.canReport ? (
+        <Pressable style={styles.action} onPress={() => setPicking(true)} disabled={reporting} accessibilityRole="button">
+          {reporting ? <ActivityIndicator size="small" color={colors.textSecondary} /> : (
+            <Icon name="flag" size={14} color={colors.textSecondary} />
+          )}
+          <Text style={styles.actionText}>Reportar</Text>
+        </Pressable>
+      ) : null}
+      {viewer.authorId ? (
+        <Pressable style={styles.action} onPress={confirmBlock} disabled={blocking} accessibilityRole="button">
+          {blocking ? <ActivityIndicator size="small" color={colors.textSecondary} /> : (
+            <Icon name="slash" size={14} color={colors.textSecondary} />
+          )}
+          <Text style={styles.actionText}>Bloquear a {viewer.authorName}</Text>
+        </Pressable>
+      ) : null}
       <ReportReasonSheet
         visible={picking}
         title="¿Por qué la reportas?"
         onPick={(reason) => { void report(reason); }}
         onClose={() => setPicking(false)}
       />
-    </>
+    </View>
   );
 }
 
@@ -114,6 +147,8 @@ export function CommunityPostActions({ contentItemId, onDeleted }: Props) {
         contentItemId={contentItemId}
         canComment={Boolean(viewer.canComment)}
         blockMessage={viewer.commentBlockMessage}
+        blockCode={viewer.commentBlockCode}
+        onRulesAccepted={() => { refetch(); }}
         maxChars={viewer.commentMaxChars || 500}
       />
     </>
@@ -121,6 +156,11 @@ export function CommunityPostActions({ contentItemId, onDeleted }: Props) {
 }
 
 const styles = StyleSheet.create({
+  actionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: 20,
+  },
   action: {
     marginTop: 16,
     flexDirection: 'row',

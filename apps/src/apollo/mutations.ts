@@ -1231,6 +1231,7 @@ const MY_PROFILE_PICTURE_FIELDS = `
   latestStatus
   latestReason
   blockMessage
+  rulesRequired
 `;
 
 export const REQUEST_PROFILE_PICTURE_UPLOAD = gql`
@@ -1266,6 +1267,32 @@ export const REMOVE_PROFILE_PICTURE = gql`
       picture {
         ${MY_PROFILE_PICTURE_FIELDS}
       }
+    }
+  }
+`;
+
+export const ACCEPT_COMMUNITY_RULES = gql`
+  mutation AcceptCommunityRules($version: String!) {
+    acceptCommunityRules(version: $version) {
+      success
+      error
+    }
+  }
+`;
+
+export const BLOCK_COMMUNITY_MEMBER = gql`
+  mutation BlockCommunityMember($userId: ID!) {
+    blockCommunityMember(userId: $userId) {
+      success
+      error
+    }
+  }
+`;
+
+export const UNBLOCK_COMMUNITY_MEMBER = gql`
+  mutation UnblockCommunityMember($userId: ID!) {
+    unblockCommunityMember(userId: $userId) {
+      success
     }
   }
 `;
