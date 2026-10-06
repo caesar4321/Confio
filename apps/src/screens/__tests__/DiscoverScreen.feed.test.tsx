@@ -17,6 +17,10 @@ jest.mock('@apollo/client', () => ({
   useMutation: () => [jest.fn()],
   useApolloClient: () => ({ query: mockClientQuery }),
   useQuery: (document: string) => {
+    // The Comunidad compose-button query is not a feed rung.
+    if (document === 'POSTING' || document === 'COUNTS') {
+      return { data: undefined, loading: false, refetch: () => Promise.resolve() };
+    }
     mockDocuments.push(document);
     return {
       ...(mockFeedFor ? mockFeedFor(document) : mockFeed),
@@ -28,7 +32,10 @@ jest.mock('@apollo/client', () => ({
 }));
 jest.mock('../../apollo/queries', () => ({
   GET_DISCOVER_FEED: 'LEGACY', GET_DISCOVER_FEED_SECTIONED: 'SECTIONED', GET_DISCOVER_FEED_CARDS: 'CARDS',
+  GET_COMMUNITY_POSTING_STATUS: 'POSTING', GET_COMMUNITY_COMMENT_COUNTS: 'COUNTS',
 }));
+jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+jest.mock('../../components/CommunityComposePrompt', () => ({ CommunityComposePrompt: 'CommunityComposePrompt' }));
 jest.mock('../../apollo/mutations', () => ({ REACT_TO_MESSAGE_CONTENT: 'REACT' }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: jest.fn() }),

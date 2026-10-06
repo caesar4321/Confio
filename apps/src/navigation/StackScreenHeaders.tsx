@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { StyleSheet, TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useMutation, useQuery } from '@apollo/client';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
@@ -8,6 +8,8 @@ import { GET_NOTIFICATION_PREFERENCES } from '../apollo/queries';
 import { UPDATE_NOTIFICATION_PREFERENCES } from '../apollo/mutations';
 import { useAuth } from '../contexts/AuthContext';
 import { RootStackParamList } from '../types/navigation';
+import { colors } from '../config/theme';
+import { useCommunityComposeEntry } from '../hooks/useCommunityComposeEntry';
 import { Header } from './Header';
 
 // Descubrir shares its announcement controls between tab and stack entry.
@@ -20,6 +22,8 @@ export const DiscoverStackHeader = ({ showBackButton = true }: { showBackButton?
   });
   const [updateNotificationPreferences] = useMutation(UPDATE_NOTIFICATION_PREFERENCES);
   const muted = !data?.notificationPreferences?.pushAnnouncements;
+  // Always-reachable way to post to Comunidad, even deep in the feed.
+  const canCompose = useCommunityComposeEntry(isAuthenticated && !authLoading);
   const toggleMute = useCallback(() => {
     void updateNotificationPreferences({ variables: { pushAnnouncements: muted } });
   }, [muted, updateNotificationPreferences]);
@@ -35,6 +39,18 @@ export const DiscoverStackHeader = ({ showBackButton = true }: { showBackButton?
       unreadNotifications={0}
       currentAccountAvatar="U"
       rightAccessory={(
+        <View style={styles.headerActions}>
+          {canCompose ? (
+            <TouchableOpacity
+              onPress={() => (navigation as any).navigate('CommunityCompose')}
+              style={styles.headerIconButton}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel="Publicar en Comunidad"
+            >
+              <Icon name="edit-3" size={16} color={colors.primaryDark} />
+            </TouchableOpacity>
+          ) : null}
         <TouchableOpacity
           onPress={toggleMute}
           style={[styles.headerIconButton, muted && styles.headerIconButtonActive]}
@@ -44,6 +60,7 @@ export const DiscoverStackHeader = ({ showBackButton = true }: { showBackButton?
         >
           <Icon name={muted ? 'volume-x' : 'bell-off'} size={16} color={muted ? '#FFFFFF' : '#667085'} />
         </TouchableOpacity>
+        </View>
       )}
     />
   );
@@ -83,6 +100,11 @@ export const ReceiveStackHeader = () => {
 };
 
 const styles = StyleSheet.create({
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerIconButton: {
     width: 36,
     height: 36,

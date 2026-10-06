@@ -2,7 +2,9 @@ import { ContentPoll, ContentPollData } from '../components/ContentPoll';
 import React from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleProp,
@@ -25,6 +27,7 @@ import { ResponsiveImage } from '../components/ResponsiveImage';
 import { EmptyState } from '../components/EmptyState';
 import { PostByline } from '../components/PostByline';
 import { ReactionBar } from '../components/ReactionBar';
+import { CommunityPostActions } from '../components/CommunityPostActions';
 import { formatLocalDate } from '../utils/dateUtils';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 import { trackContentPlatformClick } from '../services/contentClickTrackingService';
@@ -84,13 +87,15 @@ function normalizeDetailBlocks(
   | { id?: string; type: 'quote'; text?: string }
   | { id?: string; type: 'image'; image?: { url?: string; width?: number; height?: number } }
 > {
-  if (Array.isArray(blocks)) {
+  // An empty list is "no blocks", not "no content": fall back to the body and
+  // image (a member post sent by an older server has [] here).
+  if (Array.isArray(blocks) && blocks.length) {
     return blocks;
   }
   if (typeof blocks === 'string') {
     try {
       const parsedBlocks = JSON.parse(blocks);
-      if (Array.isArray(parsedBlocks)) {
+      if (Array.isArray(parsedBlocks) && parsedBlocks.length) {
         return parsedBlocks;
       }
     } catch (error) {
@@ -286,7 +291,8 @@ export const DiscoverPostDetailScreen = () => {
     .filter((item): item is NonNullable<typeof item> => Boolean(item?.url));
 
   return (
-    <View style={styles.container}>
+    // Comunidad posts carry a comment box; keep it above the iOS keyboard.
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Header
         title="Publicación"
         navigation={navigation as any}
@@ -294,7 +300,7 @@ export const DiscoverPostDetailScreen = () => {
         backgroundColor={colors.background}
         isLight={false}
       />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           {post.tag ? <Text style={styles.topic}>{post.tag}</Text> : null}
           <Text style={styles.title}>{post.title}</Text>
@@ -414,9 +420,10 @@ export const DiscoverPostDetailScreen = () => {
               }}
             />
           </View>
+          <CommunityPostActions contentItemId={contentItemId} onDeleted={() => navigation.goBack()} />
         </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 

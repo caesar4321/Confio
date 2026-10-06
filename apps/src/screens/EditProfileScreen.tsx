@@ -14,6 +14,7 @@ import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
+import { ProfilePictureEditor } from '../components/ProfilePictureEditor';
 
 // Colors from the design
 type EditProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -264,6 +265,7 @@ export const EditProfileScreen = () => {
             onDismiss={dismissBanner}
           />
         )}
+        <ProfilePictureEditor initial={(firstName || userProfile?.username || 'U').charAt(0).toUpperCase()} />
         {isVerified && (
           <View style={styles.verifiedBanner}>
             <View style={styles.verifiedHeader}>

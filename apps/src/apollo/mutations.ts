@@ -1129,3 +1129,143 @@ export const VOTE_ON_CONTENT_POLL = gql`
     }
   }
 `;
+
+export const REQUEST_COMMUNITY_IMAGE_UPLOAD = gql`
+  mutation RequestCommunityImageUpload($contentType: String) {
+    requestCommunityImageUpload(contentType: $contentType) {
+      success
+      error
+      upload {
+        url
+        key
+        fields
+      }
+    }
+  }
+`;
+
+export const CREATE_COMMUNITY_POST = gql`
+  mutation CreateCommunityPost($body: String!, $imageKey: String) {
+    createCommunityPost(body: $body, imageKey: $imageKey) {
+      success
+      error
+      errorCode
+      post {
+        id
+        status
+        reason
+      }
+    }
+  }
+`;
+
+export const DELETE_COMMUNITY_POST = gql`
+  mutation DeleteCommunityPost($contentItemId: ID!) {
+    deleteCommunityPost(contentItemId: $contentItemId) {
+      success
+    }
+  }
+`;
+
+export const REPORT_COMMUNITY_POST = gql`
+  mutation ReportCommunityPost($contentItemId: ID!, $reason: String!) {
+    reportCommunityPost(contentItemId: $contentItemId, reason: $reason) {
+      success
+      error
+    }
+  }
+`;
+
+export const CREATE_COMMUNITY_COMMENT = gql`
+  mutation CreateCommunityComment($contentItemId: ID!, $body: String!, $parentId: ID, $mentionUserIds: [ID!]) {
+    createCommunityComment(
+      contentItemId: $contentItemId
+      body: $body
+      parentId: $parentId
+      mentionUserIds: $mentionUserIds
+    ) {
+      success
+      error
+      errorCode
+      comment {
+        id
+        status
+      }
+    }
+  }
+`;
+
+export const DELETE_COMMUNITY_COMMENT = gql`
+  mutation DeleteCommunityComment($commentId: ID!) {
+    deleteCommunityComment(commentId: $commentId) {
+      success
+    }
+  }
+`;
+
+export const REPORT_COMMUNITY_COMMENT = gql`
+  mutation ReportCommunityComment($commentId: ID!, $reason: String!) {
+    reportCommunityComment(commentId: $commentId, reason: $reason) {
+      success
+      error
+    }
+  }
+`;
+
+export const REACT_TO_COMMUNITY_COMMENT = gql`
+  mutation ReactToCommunityComment($commentId: ID!, $emoji: String!) {
+    reactToCommunityComment(commentId: $commentId, emoji: $emoji) {
+      success
+      error
+      viewerReaction
+      reactionSummary {
+        emoji
+        count
+      }
+    }
+  }
+`;
+
+const MY_PROFILE_PICTURE_FIELDS = `
+  url
+  latestStatus
+  latestReason
+  blockMessage
+`;
+
+export const REQUEST_PROFILE_PICTURE_UPLOAD = gql`
+  mutation RequestProfilePictureUpload($contentType: String) {
+    requestProfilePictureUpload(contentType: $contentType) {
+      success
+      error
+      upload {
+        url
+        key
+        fields
+      }
+    }
+  }
+`;
+
+export const SUBMIT_PROFILE_PICTURE = gql`
+  mutation SubmitProfilePicture($imageKey: String!) {
+    submitProfilePicture(imageKey: $imageKey) {
+      success
+      error
+      picture {
+        ${MY_PROFILE_PICTURE_FIELDS}
+      }
+    }
+  }
+`;
+
+export const REMOVE_PROFILE_PICTURE = gql`
+  mutation RemoveProfilePicture {
+    removeProfilePicture {
+      success
+      picture {
+        ${MY_PROFILE_PICTURE_FIELDS}
+      }
+    }
+  }
+`;
