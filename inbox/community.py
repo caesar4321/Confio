@@ -89,6 +89,7 @@ BLOCK_BANNED = 'banned'
 BLOCK_NOT_VERIFIED = 'not_verified'
 BLOCK_DAILY_LIMIT = 'daily_limit'
 BLOCK_COMMENT_LIMIT = 'comment_limit'
+BLOCK_RULES = 'rules_required'
 MAX_MENTIONS = 5
 MAX_PARTICIPANTS = 200
 
@@ -99,6 +100,7 @@ BLOCK_MESSAGES = {
     BLOCK_NOT_VERIFIED: 'Verifica tu identidad para publicar en la comunidad.',
     BLOCK_DAILY_LIMIT: 'Llegaste al límite de publicaciones de hoy. Vuelve mañana.',
     BLOCK_COMMENT_LIMIT: 'Llegaste al límite de comentarios de hoy. Vuelve mañana.',
+    BLOCK_RULES: 'Acepta las normas de la comunidad para publicar.',
 }
 
 FAILED_REASON = 'No pudimos revisar tu publicación en este momento. Inténtalo de nuevo en unos minutos.'
@@ -174,6 +176,9 @@ def is_community_item(item: ContentItem) -> bool:
 # people by flipping ContentItem.status.
 READABLE = Q(owner_type__in=[OwnerType.SYSTEM, OwnerType.BUSINESS]) | Q(
     community_review__status=CommunityReviewStatus.APPROVED,
+    # A deleted account's content disappears at once; the removal task then
+    # takes it down for good (images included).
+    owner_user__deleted_at__isnull=True,
 )
 # Editorial tools only ever see editorial content.
 EDITORIAL = Q(owner_type__in=[OwnerType.SYSTEM, OwnerType.BUSINESS]) & ~Q(channel__slug=COMMUNITY_CHANNEL_SLUG)
@@ -210,6 +215,8 @@ def posting_block(user, business) -> str | None:
         return BLOCK_BANNED
     if not is_verified_member(user):
         return BLOCK_NOT_VERIFIED
+    if not has_accepted_rules(user):
+        return BLOCK_RULES
     if _submissions_last_24h(user) >= settings.COMMUNITY_DAILY_POST_LIMIT:
         return BLOCK_DAILY_LIMIT
     return None
@@ -1140,6 +1147,9 @@ def notify_comment_published(comment_id: int):
     for mentioned in comment.mentions.all():
         recipients[mentioned.id] = (mentioned, NotificationType.COMMUNITY_MENTION, f'{name} te mencionó')
     recipients.pop(comment.author_id, None)
+    # Nobody hears from someone they are in a block with.
+    for blocked_id in block_relation_ids(comment.author):
+        recipients.pop(blocked_id, None)
     data = {'content_item_id': comment.content_item_id, 'comment_id': comment.id}
     for user, notification_type, title in recipients.values():
         _notify(user, notification_type, title, snippet, action_url=_post_link(comment.content_item_id), data=data)
@@ -1162,10 +1172,11 @@ def published_community_post(content_item_id):
 
 def visible_comments(content_item_id):
     """Approved comments whose thread is still standing (a removed top-level
-    comment takes its replies with it)."""
+    comment takes its replies with it), by authors whose account still exists."""
     return CommunityComment.objects.filter(
         content_item_id=content_item_id,
         status=CommunityReviewStatus.APPROVED,
+        author__deleted_at__isnull=True,
     ).exclude(parent__status=CommunityReviewStatus.REMOVED)
 
 
@@ -1190,6 +1201,8 @@ def post_participants(content_item_id, exclude_user=None):
         ids.add(item['owner_user_id'])
     if exclude_user is not None:
         ids.discard(exclude_user.id)
+        # People in a block with the viewer are never suggested.
+        ids -= block_relation_ids(exclude_user)
     users = list(User.objects.filter(id__in=ids))
     # The post author first, then by name.
     users.sort(key=lambda u: (u.id != item['owner_user_id'], author_display_name(u)))
@@ -1230,13 +1243,14 @@ def create_comment(user, business, content_item_id, body, parent_id=None, mentio
     if URL_RE.search(body):
         raise CommunityPostError('links', LINK_REASON)
     item = published_community_post(content_item_id)
-    if item is None:
+    if item is None or is_blocked_between(user.id, item.owner_user_id):
         raise CommunityPostError('not_found', 'Esta publicación ya no está disponible.')
+    blocked_ids = block_relation_ids(user)
 
     parent = None
     if parent_id:
         parent = visible_comments(item.id).filter(id=parent_id).select_related('author').first()
-        if parent is None:
+        if parent is None or parent.author_id in blocked_ids:
             raise CommunityPostError('not_found', 'Ese comentario ya no está disponible.')
         if parent.parent_id:
             # One level deep: a reply to a reply joins the same thread.
@@ -1261,6 +1275,7 @@ def create_comment(user, business, content_item_id, body, parent_id=None, mentio
     if item.owner_user_id in requested:
         allowed.add(item.owner_user_id)
     allowed.discard(user.id)
+    allowed -= blocked_ids
     if not requested <= allowed:
         raise CommunityPostError('bad_mention', 'Solo puedes mencionar a quienes participan en esta publicación.')
 
@@ -1463,6 +1478,7 @@ def visible_comments_any_post():
         status=CommunityReviewStatus.APPROVED,
         content_item__status=ContentStatus.PUBLISHED,
         content_item__community_review__status=CommunityReviewStatus.APPROVED,
+        author__deleted_at__isnull=True,
     ).exclude(parent__status=CommunityReviewStatus.REMOVED)
 
 
@@ -1494,7 +1510,7 @@ def react_to_comment(user, comment_id, emoji: str) -> CommunityComment:
     if reaction_type is None:
         raise CommunityPostError('bad_reaction', 'Reacción no disponible.')
     comment = visible_comments_any_post().filter(id=comment_id).first()
-    if comment is None:
+    if comment is None or is_blocked_between(user.id, comment.author_id):
         raise CommunityPostError('not_found', 'Este comentario ya no está disponible.')
     with transaction.atomic():
         existing = (
@@ -1515,3 +1531,122 @@ def react_to_comment(user, comment_id, emoji: str) -> CommunityComment:
                 # A double tap raced us; the first one stands.
                 pass
     return comment
+
+
+# ── Community rules (Terms §11) ──────────────────────────────────────────────
+
+# Bump when the rules change materially: everyone accepts again.
+COMMUNITY_RULES_VERSION = '2026-10-05'
+COMMUNITY_RULES = [
+    'Comparte experiencias, preguntas y consejos con respeto.',
+    'Nada de estafas, promesas de ganancias ni invitaciones a invertir.',
+    'No pidas dinero ni compres o vendas dólares o cripto fuera de la app.',
+    'Sin teléfonos, redes, enlaces ni datos para continuar en privado.',
+    'No compartas datos personales tuyos ni de otras personas.',
+    'Cero tolerancia con el odio, el acoso, el contenido sexual o violento y lo ilegal.',
+    'Revisamos todo antes de publicarlo. Puedes reportar contenido y bloquear a otros miembros.',
+    'Si incumples las normas, retiramos el contenido y podemos suspender tu cuenta.',
+]
+
+
+def has_accepted_rules(user) -> bool:
+    from .models import CommunityRulesAcceptance
+
+    return CommunityRulesAcceptance.objects.filter(user=user, version=COMMUNITY_RULES_VERSION).exists()
+
+
+def accept_rules(user, version: str) -> None:
+    from .models import CommunityRulesAcceptance
+
+    if version != COMMUNITY_RULES_VERSION:
+        # The app showed an older text; it must show the current one.
+        raise CommunityPostError('stale_rules', 'Las normas se actualizaron. Revísalas de nuevo.')
+    CommunityRulesAcceptance.objects.get_or_create(user=user, version=COMMUNITY_RULES_VERSION)
+
+
+# ── Blocking ─────────────────────────────────────────────────────────────────
+
+def block_relation_ids(user) -> set:
+    """Everyone in a block with this person, either direction: Comunidad is
+    mutually invisible between them."""
+    from .models import CommunityBlock
+
+    if user is None or not getattr(user, 'pk', None):
+        return set()
+    made = CommunityBlock.objects.filter(blocker=user).values_list('blocked_id', flat=True)
+    received = CommunityBlock.objects.filter(blocked=user).values_list('blocker_id', flat=True)
+    return set(made) | set(received)
+
+
+def is_blocked_between(a_id, b_id) -> bool:
+    from .models import CommunityBlock
+
+    if not a_id or not b_id:
+        return False
+    return CommunityBlock.objects.filter(
+        Q(blocker_id=a_id, blocked_id=b_id) | Q(blocker_id=b_id, blocked_id=a_id)
+    ).exists()
+
+
+def block_member(user, target_id) -> None:
+    from users.models import User
+
+    from .models import CommunityBlock
+
+    try:
+        target_id = int(target_id)
+    except (TypeError, ValueError):
+        raise CommunityPostError('not_found', 'No encontramos a esa persona.')
+    if target_id == user.id:
+        raise CommunityPostError('self', 'No puedes bloquearte a ti.')
+    if not User.objects.filter(id=target_id).exists():
+        raise CommunityPostError('not_found', 'No encontramos a esa persona.')
+    CommunityBlock.objects.get_or_create(blocker=user, blocked_id=target_id)
+
+
+def unblock_member(user, target_id) -> bool:
+    from .models import CommunityBlock
+
+    try:
+        target_id = int(target_id)
+    except (TypeError, ValueError):
+        return False
+    deleted, _ = CommunityBlock.objects.filter(blocker=user, blocked_id=target_id).delete()
+    return bool(deleted)
+
+
+def blocked_members(user):
+    from users.models import User
+
+    from .models import CommunityBlock
+
+    ids = list(CommunityBlock.objects.filter(blocker=user).order_by('-created_at').values_list('blocked_id', flat=True))
+    users = {u.id: u for u in User.all_objects.filter(id__in=ids)}
+    return [users[i] for i in ids if i in users]
+
+
+# ── Removing someone's content (account deleted or banned) ───────────────────
+
+def remove_member_content(user_id: int, *, category: str, reason: str) -> dict:
+    """Take down everything a person has in Comunidad: posts (their public
+    images are hidden through the ledger), comments and profile picture."""
+    from . import profile_pictures
+
+    posts = list(
+        CommunityPostReview.objects.filter(
+            content_item__owner_user_id=user_id,
+        ).exclude(status=CommunityReviewStatus.REMOVED).values_list('id', flat=True)
+    )
+    for review_id in posts:
+        take_down(review_id, category=category, reason=reason)
+    comments = list(
+        CommunityComment.objects.filter(author_id=user_id)
+        .exclude(status=CommunityReviewStatus.REMOVED).values_list('id', flat=True)
+    )
+    for comment_id in comments:
+        take_down_comment(comment_id, category=category, reason=reason)
+    from users.models import User
+
+    user = User.all_objects.filter(id=user_id).first()
+    pictures = profile_pictures.remove_picture(user) if user else False
+    return {'posts': len(posts), 'comments': len(comments), 'picture': pictures}

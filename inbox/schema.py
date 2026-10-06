@@ -575,6 +575,8 @@ def get_accessible_content_item(info, content_item_id):
     )
     if item is None:
         raise GraphQLError('Content item not found')
+    if item.owner_type == OwnerType.USER and item.owner_user_id in community.block_relation_ids(user):
+        raise GraphQLError('Content item not found')
 
     has_discover_surface = item.surfaces.filter(surface=ContentSurfaceType.DISCOVER).exists()
     if has_discover_surface:
@@ -922,6 +924,17 @@ class CommunityPostViewerType(graphene.ObjectType):
     # Why not, when can_comment is false (e.g. "Verifica tu identidad…").
     comment_block_message = graphene.String()
     comment_max_chars = graphene.Int(required=True)
+    # e.g. 'rules_required': the app offers to accept the rules right there.
+    comment_block_code = graphene.String()
+    # The post's author, for "Bloquear a María G." (None on your own post).
+    author_id = graphene.ID()
+    author_name = graphene.String()
+
+
+class CommunityRulesType(graphene.ObjectType):
+    version = graphene.String(required=True)
+    accepted = graphene.Boolean(required=True)
+    rules = graphene.List(graphene.NonNull(graphene.String), required=True)
 
 
 class CommunityParticipantType(graphene.ObjectType):
@@ -1072,6 +1085,9 @@ def comments_seen_by(viewer, content_item_id):
             )
         )
         .exclude(parent__status=CommunityReviewStatus.REMOVED)
+        # Members in a block with the viewer, and deleted accounts, vanish.
+        .exclude(author_id__in=community.block_relation_ids(viewer))
+        .filter(author__deleted_at__isnull=True)
         .select_related('author')
         .prefetch_related('mentions')
         .order_by('created_at', 'id')
@@ -1299,16 +1315,20 @@ class MyProfilePictureType(graphene.ObjectType):
     latest_reason = graphene.String()
     # Why this context cannot change it right now, if so.
     block_message = graphene.String()
+    # True when the only thing missing is accepting the community rules.
+    rules_required = graphene.Boolean(required=True)
 
 
 def build_my_profile_picture(user, business):
     current = profile_pictures.picture_urls([user.id]).get(user.id)
     latest = profile_pictures.latest_submission(user)
+    block_message = profile_pictures.upload_block(user, business)
     return MyProfilePictureType(
         url=current or None,
         latest_status=latest.status if latest else None,
         latest_reason=(latest.reason or None) if latest else None,
-        block_message=profile_pictures.upload_block(user, business),
+        block_message=block_message,
+        rules_required=block_message == profile_pictures.RULES_REQUIRED_MESSAGE,
     )
 
 
@@ -1380,6 +1400,52 @@ class RemoveProfilePicture(graphene.Mutation):
         return RemoveProfilePicture(success=removed, picture=build_my_profile_picture(user, business))
 
 
+class AcceptCommunityRules(graphene.Mutation):
+    class Arguments:
+        version = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, version):
+        try:
+            community.accept_rules(info.context.user, version)
+        except community.CommunityPostError as error:
+            return AcceptCommunityRules(success=False, error=error.message)
+        return AcceptCommunityRules(success=True, error=None)
+
+
+class BlockCommunityMember(graphene.Mutation):
+    class Arguments:
+        user_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, user_id):
+        try:
+            community.block_member(info.context.user, user_id)
+        except community.CommunityPostError as error:
+            return BlockCommunityMember(success=False, error=error.message)
+        return BlockCommunityMember(success=True, error=None)
+
+
+class UnblockCommunityMember(graphene.Mutation):
+    class Arguments:
+        user_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, user_id):
+        return UnblockCommunityMember(success=community.unblock_member(info.context.user, user_id))
+
+
 class Query(graphene.ObjectType):
     message_inbox = graphene.Field(MessageInboxType, context_key=graphene.String(required=False))
     message_inbox_unread_count = graphene.Int(context_key=graphene.String(required=False))
@@ -1437,6 +1503,8 @@ class Query(graphene.ObjectType):
         content_item_id=graphene.ID(required=True),
     )
     my_profile_picture = graphene.Field(MyProfilePictureType, required=True)
+    community_rules = graphene.Field(CommunityRulesType, required=True)
+    my_blocked_members = graphene.List(graphene.NonNull(CommunityParticipantType), required=True)
     community_comment_counts = graphene.List(
         graphene.NonNull(CommunityCommentCountType),
         required=True,
@@ -1509,6 +1577,11 @@ class Query(graphene.ObjectType):
             .order_by('-surfaces__is_pinned', 'surfaces__rank', '-published_at', '-created_at')
         )
         section = section or 'for_you'
+        # Mutual invisibility: members in a block with the viewer do not
+        # appear in any feed.
+        blocked_ids = community.block_relation_ids(user)
+        if blocked_ids:
+            queryset = queryset.exclude(owner_type=OwnerType.USER, owner_user_id__in=blocked_ids)
         if section in LEGACY_DISCOVER_SECTION_KINDS:
             queryset = queryset.filter(channel__kind__in=LEGACY_DISCOVER_SECTION_KINDS[section])
         elif section not in DISCOVER_FEED_SECTIONS:
@@ -1582,12 +1655,15 @@ class Query(graphene.ObjectType):
             return CommunityPostViewerType(
                 is_community=False, is_own=False, can_report=False, viewer_reported=False,
                 can_comment=False, comment_block_message=None, comment_max_chars=max_chars,
+                comment_block_code=None, author_id=None, author_name=None,
             )
         is_own = item.owner_user_id == user.id
         reported = CommunityPostReport.objects.filter(content_item=item, reporter=user).exists()
         live = review.status == CommunityReviewStatus.APPROVED and item.status == ContentStatus.PUBLISHED
         _, _, business, _ = get_context_models(info)
         block = community.commenting_block(user, business) if live else None
+        if live and community.is_blocked_between(user.id, item.owner_user_id):
+            live = False
         return CommunityPostViewerType(
             is_community=True,
             is_own=is_own,
@@ -1596,7 +1672,29 @@ class Query(graphene.ObjectType):
             can_comment=live and block is None,
             comment_block_message=community.BLOCK_MESSAGES.get(block) if block else None,
             comment_max_chars=max_chars,
+            comment_block_code=block,
+            author_id=None if is_own else str(item.owner_user_id),
+            author_name=None if is_own else community.author_display_name(item.owner_user),
         )
+
+    @login_required
+    def resolve_community_rules(self, info):
+        return CommunityRulesType(
+            version=community.COMMUNITY_RULES_VERSION,
+            accepted=community.has_accepted_rules(info.context.user),
+            rules=community.COMMUNITY_RULES,
+        )
+
+    @login_required
+    def resolve_my_blocked_members(self, info):
+        members = community.blocked_members(info.context.user)
+        avatars = profile_pictures.picture_urls([m.id for m in members])
+        return [
+            CommunityParticipantType(
+                id=str(m.id), name=community.author_display_name(m), is_post_author=False, avatar_url=avatars.get(m.id),
+            )
+            for m in members
+        ]
 
     @login_required
     def resolve_community_comments(self, info, content_item_id, offset=0, limit=20, expanded_thread_ids=None):
@@ -2349,3 +2447,6 @@ class Mutation(graphene.ObjectType):
     request_profile_picture_upload = RequestProfilePictureUpload.Field()
     submit_profile_picture = SubmitProfilePicture.Field()
     remove_profile_picture = RemoveProfilePicture.Field()
+    accept_community_rules = AcceptCommunityRules.Field()
+    block_community_member = BlockCommunityMember.Field()
+    unblock_community_member = UnblockCommunityMember.Field()

@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.4.0',
-    'last_updated': '2026-08-04',
+    'version': '1.5.0',
+    'last_updated': '2026-10-05',
     'is_legally_binding': True,
     'sections': [
         {
@@ -114,11 +114,22 @@ TERMS = {
             ]
         },
         {
-            'title': '11. Modificaciones',
+            'title': '11. Normas de la Comunidad',
+            'content': [
+                'Comunidad, dentro de Descubrir, permite a personas con identidad verificada publicar textos y fotos, comentar, reaccionar y usar una foto de perfil. Su contenido se muestra a otros miembros junto con su nombre y la inicial de su apellido.',
+                'Tenemos tolerancia cero con el contenido ofensivo y con los usuarios abusivos. No está permitido publicar estafas o fraudes; promesas de ganancias o invitaciones a invertir; pedidos de dinero o la compra y venta de dólares o criptomonedas fuera de la app; datos de contacto o enlaces para continuar en privado; datos personales propios o de terceros; suplantación de Confío, de bancos o de autoridades; spam; odio, acoso o amenazas; contenido sexual; violencia; ni contenido ilegal.',
+                'Revisamos con sistemas automáticos todo el contenido antes de publicarlo y podemos rechazarlo. Usted puede reportar contenido y bloquear a otros miembros desde la app. Revisamos los reportes y podemos retirar contenido en cualquier momento.',
+                'Si incumple estas normas podemos retirar su contenido y suspender o cancelar su acceso a Comunidad o a su cuenta.',
+                'Usted conserva los derechos sobre lo que publica y nos otorga una licencia no exclusiva y gratuita para mostrarlo dentro de Confío mientras permanezca publicado. Puede eliminar sus publicaciones, comentarios y foto de perfil en cualquier momento.',
+                'Debe aceptar estas normas antes de publicar o comentar por primera vez.'
+            ]
+        },
+        {
+            'title': '12. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '12. Contacto',
+            'title': '13. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'
@@ -129,8 +140,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.7.1',
-    'last_updated': '2026-10-02',
+    'version': '1.8.0',
+    'last_updated': '2026-10-05',
     'is_legally_binding': True,
     'sections': [
         {
@@ -180,7 +191,8 @@ PRIVACY = {
                 'support_and_content': [
                     'Conversaciones y mensajes de soporte',
                     'Preferencias y estados de lectura de notificaciones o contenido dentro de la app',
-                    'Reacciones, suscripciones a canales y otra interacción con contenido publicado en la plataforma'
+                    'Reacciones, suscripciones a canales y otra interacción con contenido publicado en la plataforma',
+                    'Publicaciones, comentarios, fotos y foto de perfil que usted comparte en Comunidad, junto con su nombre y la inicial de su apellido, que son visibles para otros miembros; los bloqueos y reportes que realiza; y el resultado de la revisión automática de ese contenido'
                 ],
                 'business_and_payroll': [
                     'Datos de negocios, roles de empleados, permisos, notas internas y configuraciones operativas',
@@ -271,8 +283,8 @@ PRIVACY = {
 
 DELETION = {
     'title': 'Eliminación de Datos',
-    'version': '1.1.0',
-    'last_updated': '2026-03-19',
+    'version': '1.2.0',
+    'last_updated': '2026-10-05',
     'is_legally_binding': True,
     'sections': [
         {
@@ -290,6 +302,7 @@ DELETION = {
             'content': [
                 'Cuando la ley y nuestras obligaciones regulatorias lo permitan, eliminaremos o anonimizaremos datos de perfil, preferencias, información de contacto y otros datos no esenciales para cumplimiento',
                 'También podremos desactivar su acceso, cerrar la cuenta y eliminar o desvincular configuraciones operativas asociadas a la cuenta',
+                'Sus publicaciones, comentarios, fotos y foto de perfil en Comunidad dejan de mostrarse y se eliminan de nuestro almacenamiento público; también puede eliminarlos usted mismo en cualquier momento desde la app',
                 'Cuando técnicamente o legalmente no sea posible una eliminación inmediata, restringiremos el uso de los datos y los conservaremos solo para fines permitidos'
             ]
         },

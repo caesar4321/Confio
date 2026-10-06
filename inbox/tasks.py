@@ -180,3 +180,16 @@ def delete_public_object_task(self, object_id: int):
     from .public_objects import delete_owed
 
     return delete_owed(object_id)
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=10, retry_kwargs={'max_retries': 5})
+def remove_member_content_task(self, user_id: int, kind: str):
+    """A deleted or banned account's Comunidad content comes down for good."""
+    from .community import remove_member_content
+
+    reasons = {
+        'deleted': ('account_deleted', 'Cuenta eliminada.'),
+        'banned': ('account_banned', 'Cuenta suspendida.'),
+    }
+    category, reason = reasons.get(kind, ('account_removed', 'Contenido retirado.'))
+    return remove_member_content(user_id, category=category, reason=reason)

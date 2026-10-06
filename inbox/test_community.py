@@ -12,6 +12,7 @@ from users.models import Account, Business, User
 from . import community
 from .models import (
     Channel,
+    CommunityComment,
     CommunityPostReport,
     ProfilePictureSubmission,
     CommunityPostReview,
@@ -40,7 +41,7 @@ SOL_REJECT = {'decision': 'reject', 'category': 'scam', 'confidence': 0.9,
 counter = iter(range(10_000))
 
 
-def make_user(name='maría', last='gonzález', verified=True):
+def make_user(name='maría', last='gonzález', verified=True, rules=True):
     n = next(counter)
     user = User.objects.create_user(
         username=f'cm-{n}', email=f'cm{n}@example.com', firebase_uid=f'cm-{n}',
@@ -54,6 +55,8 @@ def make_user(name='maría', last='gonzález', verified=True):
             verified_city='Caracas', verified_state='DC', verified_country='VEN', document_type='national_id',
             document_number=f'V-{n}', document_issuing_country='VEN', status='verified',
         )
+    if rules:
+        community.accept_rules(user, community.COMMUNITY_RULES_VERSION)
     return user
 
 
@@ -1391,3 +1394,138 @@ class MemberPostDetailTests(CommunityTestBase):
         self.run_review(item, APPROVE)
         item.refresh_from_db()
         self.assertEqual(community.member_post_blocks(item), [{'id': 'body', 'type': 'paragraph', 'text': 'Solo texto'}])
+
+
+class CommunityRulesTests(CommunityTestBase):
+    def test_posting_requires_the_current_rules(self):
+        user = make_user(rules=False)
+        self.assertEqual(community.posting_block(user, None), community.BLOCK_RULES)
+        with self.assertRaises(community.CommunityPostError) as ctx:
+            self.post(user)
+        self.assertEqual(ctx.exception.code, community.BLOCK_RULES)
+        with self.assertRaises(community.CommunityPostError):
+            community.accept_rules(user, '1999-01-01')  # an outdated text
+        community.accept_rules(user, community.COMMUNITY_RULES_VERSION)
+        self.assertIsNone(community.posting_block(user, None))
+
+    def test_commenting_and_profile_pictures_also_require_them(self):
+        from . import profile_pictures
+
+        item = self.post(make_user())
+        self.run_review(item, APPROVE)
+        newcomer = make_user(rules=False)
+        self.assertEqual(community.commenting_block(newcomer, None), community.BLOCK_RULES)
+        self.assertEqual(profile_pictures.upload_block(newcomer, None), profile_pictures.RULES_REQUIRED_MESSAGE)
+
+
+class CommunityBlockTests(CommunityTestBase):
+    def setUp(self):
+        super().setUp()
+        patch('inbox.community.enqueue_comment_review').start()
+        self.notify = patch('notifications.utils.create_notification').start()
+        self.addCleanup(patch.stopall)
+        self.alice, self.bob = make_user('alice', 'a'), make_user('bob', 'b')
+        self.post_by_bob = self.post(self.bob)
+        self.run_review(self.post_by_bob, APPROVE)
+
+    def feed(self, viewer):
+        account = Account.objects.get(user=viewer)
+        with patch('inbox.schema.get_context_models', return_value=(viewer, account, None, {})):
+            return [c.id for c in Query().resolve_discover_feed(MockInfo(viewer), limit=20, section='community').items]
+
+    def test_blocking_is_mutual_invisibility(self):
+        self.assertEqual(self.feed(self.alice), [str(self.post_by_bob.id)])
+        community.block_member(self.alice, self.bob.id)
+        self.assertEqual(self.feed(self.alice), [])
+        self.assertEqual(self.feed(self.bob), [str(self.post_by_bob.id)])  # his own still shows to him
+        carol_post = self.post(self.alice)
+        self.run_review(carol_post, APPROVE)
+        self.assertNotIn(str(carol_post.id), self.feed(self.bob))  # and alice is hidden from bob
+        from graphql import GraphQLError
+        from .schema import get_accessible_content_item
+
+        with patch('inbox.schema.get_context_models',
+                   return_value=(self.alice, Account.objects.get(user=self.alice), None, {})):
+            with self.assertRaises(GraphQLError):
+                get_accessible_content_item(MockInfo(self.alice), self.post_by_bob.id)
+
+    def test_blocked_people_cannot_comment_mention_or_notify(self):
+        community.block_member(self.bob, self.alice.id)
+        with self.assertRaises(community.CommunityPostError):
+            community.create_comment(self.alice, None, self.post_by_bob.id, 'Hola')
+        carol = make_user('carol', 'c')
+        top = community.create_comment(carol, None, self.post_by_bob.id, 'Hola')
+        with patch('inbox.community._first_pass', return_value=APPROVE):
+            community.run_comment_review(top.id)
+        self.assertNotIn(self.alice.id, {u.id for u in community.post_participants(self.post_by_bob.id, exclude_user=self.bob)})
+        with self.assertRaises(community.CommunityPostError):
+            community.create_comment(carol, None, self.post_by_bob.id, '@Alice A.', mention_user_ids=[str(self.alice.id)])
+        # A comment by someone bob blocked never notifies bob.
+        dave = make_user('dave', 'd')
+        community.block_member(self.bob, dave.id)
+        self.notify.reset_mock()
+        comment = CommunityComment.objects.create(content_item=self.post_by_bob, author=dave, body='x', status='APPROVED')
+        community.notify_comment_published(comment.id)
+        self.assertNotIn(self.bob.id, {c.kwargs['user'].id for c in self.notify.call_args_list})
+
+    def test_unblock_restores_and_only_the_blocker_can_undo(self):
+        community.block_member(self.alice, self.bob.id)
+        self.assertFalse(community.unblock_member(self.bob, self.alice.id))
+        self.assertEqual([u.id for u in community.blocked_members(self.alice)], [self.bob.id])
+        self.assertTrue(community.unblock_member(self.alice, self.bob.id))
+        self.assertEqual(self.feed(self.alice), [str(self.post_by_bob.id)])
+
+    def test_cannot_block_yourself(self):
+        with self.assertRaises(community.CommunityPostError):
+            community.block_member(self.alice, self.alice.id)
+
+
+class RemovedAccountContentTests(CommunityTestBase):
+    def setUp(self):
+        super().setUp()
+        patch('inbox.community.enqueue_comment_review').start()
+        self.addCleanup(patch.stopall)
+
+    def test_deleting_an_account_hides_at_once_and_queues_removal(self):
+        author = make_user()
+        item = self.post(author)
+        self.run_review(item, APPROVE)
+        with patch('inbox.tasks.remove_member_content_task.delay') as remove, \
+                self.captureOnCommitCallbacks(execute=True):
+            author.soft_delete()
+        remove.assert_called_once_with(author.id, 'deleted')
+        self.assertFalse(ContentItem.objects.filter(community.READABLE, id=item.id).exists())
+
+    def test_a_ban_queues_removal_and_removal_takes_everything_down(self):
+        author = make_user()
+        item = self.post(author)
+        self.run_review(item, APPROVE)
+        with patch('inbox.tasks.remove_member_content_task.delay') as remove, \
+                self.captureOnCommitCallbacks(execute=True):
+            UserBan.objects.create(user=author, reason='abuse', ban_type='permanent')
+        remove.assert_called_once_with(author.id, 'banned')
+        result = community.remove_member_content(author.id, category='account_banned', reason='Cuenta suspendida.')
+        self.assertEqual(result['posts'], 1)
+        self.assertEqual(self.review_of(item).status, CommunityReviewStatus.REMOVED)
+
+    def test_ordinary_user_saves_do_not_queue_anything(self):
+        author = make_user()
+        with patch('inbox.tasks.remove_member_content_task.delay') as remove, \
+                self.captureOnCommitCallbacks(execute=True):
+            author.first_name = 'Ana'
+            author.save()
+        remove.assert_not_called()
+
+
+    def test_hard_deleting_a_user_takes_their_posts_and_dooms_images(self):
+        from .models import PublicObject
+
+        author = make_user()
+        item = self.post(author, image_key=community.pending_image_prefix(author) + 'a.jpg')
+        url = 'https://confio-publications.s3.eu-central-2.amazonaws.com/community/images/2026/10/z.jpg'
+        with patch('inbox.community.load_pending_image', return_value=community.ReviewImage('image/jpeg', b'x')), \
+                patch('inbox.community.publish_image', return_value=url):
+            self.run_review(item, APPROVE)
+        author.hard_delete()
+        self.assertFalse(ContentItem.objects.filter(id=item.id).exists())
+        self.assertTrue(PublicObject.objects.filter(key='community/images/2026/10/z.jpg', state='DOOMED').exists())
