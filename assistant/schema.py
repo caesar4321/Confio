@@ -24,7 +24,10 @@ HEX_COLOR = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
 class AssistantActionType(graphene.ObjectType):
     type = graphene.String(required=True)
-    destination = graphene.String()
+    destination = graphene.String(description='A screen key every build knows (the fallback for `target`)')
+    target = graphene.String(description='A newer screen key; builds that know it open it instead of `destination`')
+    ticker = graphene.String(description='For target "stock": the stock or ETF to open')
+    label = graphene.String(description='Chip text, e.g. "Ver SPDR S&P 500 ETF"')
 
 
 class AssistantMessageType(graphene.ObjectType):
@@ -109,7 +112,8 @@ def message_payload(message):
         sender_name=name,
         modality=metadata.get('modality'),
         actions=[
-            AssistantActionType(type=a.get('type', ''), destination=a.get('destination'))
+            AssistantActionType(type=a.get('type', ''), destination=a.get('destination'), target=a.get('target'),
+                                ticker=a.get('ticker'), label=a.get('label'))
             for a in (metadata.get('actions') or []) if isinstance(a, dict)
         ],
     )
@@ -303,7 +307,8 @@ class AskAssistant(graphene.Mutation):
             transcript=outcome.transcript,
             user_message=message_payload(outcome.user_message),
             reply=message_payload(outcome.reply_message) if outcome.reply_message else None,
-            actions=[AssistantActionType(type=a['type'], destination=a.get('destination')) for a in outcome.actions],
+            actions=[AssistantActionType(type=a['type'], destination=a.get('destination'), target=a.get('target'),
+                                         ticker=a.get('ticker'), label=a.get('label')) for a in outcome.actions],
             mode=outcome.mode,
             remaining_turns=outcome.remaining_turns,
             data_changed=outcome.data_changed,
@@ -423,7 +428,8 @@ class StartAssistantVoice(graphene.Mutation):
     @login_required
     def mutate(cls, root, info, screen=None, timezone=None):
         user, account, business, jwt_context = get_context_models(info)
-        viewer = service._viewer(user, account, business, jwt_context, screen=screen or '', tz_name=timezone)
+        viewer = service._viewer(user, account, business, jwt_context, screen=screen or '', tz_name=timezone,
+                                 request_meta=getattr(info.context, 'META', None))
         conversation = get_or_create_support_conversation(user, account, business)
         try:
             session, left = voice.start_session(

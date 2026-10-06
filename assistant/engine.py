@@ -26,7 +26,7 @@ from django.utils import timezone
 from users.models_cashflow import CATEGORY_CHOICES
 
 from . import conf, market
-from .destinations import DESTINATIONS, OWNER_ONLY, PERSONAL_ONLY
+from .destinations import DESTINATIONS, FALLBACKS, OWNER_ONLY, PERSONAL_ONLY
 from .prompts import ANALYSIS_PROMPT, build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,20 @@ def allowed_destinations(viewer: Viewer):
     if viewer.account_type == 'business':
         # Business pay-ins are never held for Confío Face (payin_hold.needs_face).
         keys = [k for k in keys if k not in PERSONAL_ONLY]
+    if not _phone_eligible(viewer):
+        # A single stock's page only where stocks are offered. This is the
+        # cheap phone check; navigate('stock') adds the request-aware one.
+        keys = [k for k in keys if k != 'stock']
     return keys
+
+
+def _phone_eligible(viewer):
+    try:
+        from cusd_plus.eligibility import is_ondo_eligible
+        return viewer.user is not None and bool(is_ondo_eligible(viewer.user))
+    except Exception:  # noqa: BLE001 - unknown: don't offer it
+        logger.warning('Confio Assistant: phone eligibility unavailable', exc_info=True)
+        return False
 
 
 # --------------------------------------------------------------------------- #
@@ -343,6 +356,7 @@ def _plus_usd(shares):
 def _holdings(address):
     from cusd_plus import gm_api
     from cusd_plus.gm_holdings import known_holdings_units
+    from cusd_plus.schema import _gm_listing
 
     # No chain scan inside a chat turn: what the app last read (minutes old
     # at most after any visit to the stocks screen), else "desconocido".
@@ -361,8 +375,10 @@ def _holdings(address):
         pm = (market.get(symbol) or {}).get('primaryMarket') or {}
         if pm.get('price') is None:
             continue
-        ticker = ((market.get(symbol) or {}).get('underlyingMarket') or {}).get('ticker') or symbol.removesuffix('on')
-        rows.append({'ticker': ticker, 'valor_usd': _usd(Decimal(str(amount)) * Decimal(str(pm['price'])))})
+        listing = _gm_listing(market.get(symbol) or {}) or (symbol, symbol.removesuffix('on'), '')
+        ticker, name = listing[1], third_party_text(listing[2], 40)
+        rows.append({'ticker': ticker, 'nombre': name or ticker,
+                     'valor_usd': _usd(Decimal(str(amount)) * Decimal(str(pm['price'])))})
     rows.sort(key=lambda r: Decimal(r['valor_usd'].replace(',', '')), reverse=True)
     return rows[:15]
 
@@ -453,11 +469,16 @@ class Toolbelt:
             {
                 'type': 'function',
                 'name': 'navigate',
-                'description': 'Abre una pantalla de la app Confío para el usuario.',
+                'description': 'Abre una pantalla de la app Confío para el usuario. Para una acción o ETF '
+                               'concreto usa destination "stock", su ticker en `asset` y en `label` un nombre corto '
+                               'como lo conoce una persona (máx. 22 caracteres, p. ej. "S&P 500 (SPY)"); si no, '
+                               'asset y label = null.',
                 'parameters': {
                     'type': 'object',
-                    'properties': {'destination': {'type': 'string', 'enum': self.destinations}},
-                    'required': ['destination'],
+                    'properties': {'destination': {'type': 'string', 'enum': self.destinations},
+                                   'asset': {'type': ['string', 'null']},
+                                   'label': {'type': ['string', 'null']}},
+                    'required': ['destination', 'asset', 'label'],
                     'additionalProperties': False,
                 },
                 'strict': True,
@@ -647,13 +668,35 @@ class Toolbelt:
             return {'error': f'herramienta desconocida: {name}'}
         return handler(**args)
 
-    def navigate(self, destination):
+    def navigate(self, destination, asset=None, label=None):
         if not self.can_navigate or destination not in self.destinations:
             return {'ok': False, 'error': 'pantalla no disponible'}
-        action = {'type': 'navigate', 'destination': destination}
+        # `destination` stays a key every build knows; newer builds open
+        # `target` (and `ticker`) instead.
+        action = {'type': 'navigate', 'destination': FALLBACKS.get(destination, destination)}
+        # What actually opened, for the model to describe (not the fallback key).
+        reply = {'ok': True, 'pantalla_abierta': DESTINATIONS[destination]}
+        if destination in FALLBACKS:
+            action['target'] = destination
+        if destination == 'stock':
+            if _ondo_allowed(self.viewer) is not True:
+                return {'ok': False, 'error': 'Las acciones no están disponibles para este usuario.'}
+            found = market.listed_asset(asset)
+            if found is None:
+                return {'ok': False, 'error': 'No encontré esa acción o ETF entre las que muestra Confío.'}
+            ticker, name = found
+            # The model's short label only when it names this exact ticker, so
+            # the chip can't promise one fund and open another.
+            short = third_party_text(label or '', 22)
+            if '…' in short or not re.search(rf'\b{re.escape(ticker)}\b', short, re.I):
+                short = ''
+            if not short:
+                short = name if len(name) <= 22 else ticker
+            action.update(ticker=ticker, label=f'Ver {short}')
+            reply['activo'] = f'{name} ({ticker})'
         if action not in self.result.actions:
             self.result.actions.append(action)
-        return {'ok': True, 'destination': destination}
+        return {**reply, **{k: v for k, v in action.items() if k != 'type'}}
 
     def escalate_to_human(self, reason):
         self.result.handoff_reason = (reason or '').strip()[:280] or 'Solicitud del usuario'

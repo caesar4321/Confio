@@ -440,7 +440,8 @@ class VoiceTests(TestCase):
     def test_voice_navigation_is_approved_by_the_server(self):
         session = VoiceSession.objects.create(user=self.user, conversation=self.conversation, model='m')
         output, _ = voice.run_tool(session, self.viewer, 'navigate', '{"destination": "home"}', 5)
-        self.assertEqual(json.loads(output), {'ok': True, 'destination': 'home'})
+        approved = json.loads(output)
+        self.assertEqual((approved['ok'], approved['destination']), (True, 'home'))
         output, _ = voice.run_tool(session, self.viewer, 'navigate', '{"destination": "constructor"}', 5)
         self.assertFalse(json.loads(output)['ok'])
         employee = Viewer(user=self.user, account=self.viewer.account, account_type='business', business_id=1,
@@ -1558,3 +1559,70 @@ class PetUrlReuseTests(TestCase):
             creds._expiry_time = timezone.now() + timedelta(minutes=4)  # about to rotate
             self.assertEqual(pets.pet_url(pet), 'u2')
             self.assertEqual(pets.pet_url(pet), 'u3')  # not cached: it would die with the credentials
+
+
+class SpecificNavigationTests(TestCase):
+    def setUp(self):
+        allowed = patch('assistant.engine._ondo_allowed', return_value=True)
+        self.allowed = allowed.start()
+        self.addCleanup(allowed.stop)
+
+    def _belt(self, phone=True):
+        viewer = Viewer(user=None, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        with patch('assistant.engine._phone_eligible', return_value=phone):
+            return Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)
+
+    def test_stock_page_carries_ticker_friendly_label_and_old_build_fallback(self):
+        belt = self._belt()
+        with patch('assistant.market.listed_asset', return_value=('SPY', 'State Street SPDR S&P 500 ETF Trust')):
+            out = belt.navigate('stock', 'SPY', 'S&P 500 (SPY)')
+        self.assertTrue(out['ok'])
+        self.assertEqual(belt.result.actions, [{'type': 'navigate', 'destination': 'stocks', 'target': 'stock',
+                                                'ticker': 'SPY', 'label': 'Ver S&P 500 (SPY)'}])
+
+    def test_long_name_without_label_falls_back_to_ticker(self):
+        belt = self._belt()
+        with patch('assistant.market.listed_asset', return_value=('SPY', 'State Street SPDR S&P 500 ETF Trust')):
+            belt.navigate('stock', 'SPY', None)
+        self.assertEqual(belt.result.actions[0]['label'], 'Ver SPY')
+
+    def test_unknown_asset_opens_nothing(self):
+        belt = self._belt()
+        with patch('assistant.market.listed_asset', return_value=None):
+            self.assertFalse(belt.navigate('stock', 'zzzz', None)['ok'])
+        self.assertEqual(belt.result.actions, [])
+
+    def test_stock_page_only_where_stocks_are_offered(self):
+        self.assertNotIn('stock', self._belt(phone=False).destinations)
+        belt = self._belt()
+        self.allowed.return_value = 'desconocido'  # request-aware check can't confirm
+        with patch('assistant.market.listed_asset', return_value=('SPY', 'SPY')) as lookup:
+            self.assertFalse(belt.navigate('stock', 'SPY', None)['ok'])
+        lookup.assert_not_called()
+
+    def test_label_must_name_the_ticker_it_opens(self):
+        belt = self._belt()
+        with patch('assistant.market.listed_asset', return_value=('IVV', 'iShares Core S&P 500 ETF')):
+            belt.navigate('stock', 'iShares', 'Vanguard (VOO)')
+        self.assertEqual(belt.result.actions[0]['label'], 'Ver IVV')
+
+    def test_new_screens_fall_back_and_report_what_opened(self):
+        belt = self._belt()
+        out = belt.navigate('emergency_exit')
+        self.assertEqual(belt.result.actions, [{'type': 'navigate', 'destination': 'profile', 'target': 'emergency_exit'}])
+        self.assertIn('Salida de emergencia', out['pantalla_abierta'])
+        employee = Viewer(user=None, account=None, account_type='business', business_id=7,
+                          is_business_owner=False, tz=ZoneInfo('UTC'))
+        scoped = Toolbelt(employee, TurnResult(reply=''), analyses_left=0).destinations
+        self.assertNotIn('month_summary', scoped)
+        self.assertNotIn('emergency_exit', scoped)
+
+    def test_ambiguous_name_matches_nothing(self):
+        rows = [{'primaryMarket': {'symbol': f'{t}on', 'price': 1}, 'underlyingMarket': {'ticker': t, 'name': n}}
+                for t, n in (('SPY', 'SPDR S&P 500 ETF Trust'), ('XYLD', 'Global X S&P 500 Covered Call ETF'))]
+        with patch('cusd_plus.gm_api.all_market', return_value=rows), \
+                patch('cusd_plus.schema._gm_highlights', return_value={}):
+            self.assertIsNone(market.listed_asset('S&P 500'))
+            self.assertEqual(market.listed_asset('Apple (SPY)')[0], 'SPY')
+            self.assertEqual(market.listed_asset('Global X')[0], 'XYLD')

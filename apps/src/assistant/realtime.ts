@@ -15,7 +15,7 @@ import {
   RUN_ASSISTANT_VOICE_TOOL,
   START_ASSISTANT_VOICE,
 } from './api';
-import { openDestination } from './destinations';
+import { openDestination, resolveNavigate, type NavigateAction } from './destinations';
 
 const FLUSH_MS = 8000;
 
@@ -231,14 +231,15 @@ export class VoiceCall {
         if (name === 'navigate') {
           // Only a screen the server approved for this user (employees and
           // business accounts have fewer): never the model's raw choice.
-          let approved: { ok?: boolean; destination?: string } = {};
+          let approved: NavigateAction & { ok?: boolean } = {};
           try {
             approved = JSON.parse(output);
           } catch {
             approved = {};
           }
-          if (!this.ended && approved.ok && approved.destination
-              && openDestination(approved.destination, { isBusiness: this.opts.isBusiness })) {
+          const open = approved.ok ? resolveNavigate(approved) : null;
+          if (!this.ended && open
+              && openDestination(open.key, { isBusiness: this.opts.isBusiness, ticker: open.ticker })) {
             this.cb.onNavigate?.();
           }
         }

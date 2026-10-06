@@ -42,7 +42,7 @@ import {
 } from './api';
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
-import { DESTINATION_LABELS, isKnownDestination, openDestination } from './destinations';
+import { openDestination, resolveNavigate } from './destinations';
 import MascotPicker from './MascotPicker';
 import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
@@ -82,21 +82,26 @@ function formatClock(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function ActionChips({ actions, onPress }: { actions: AssistantAction[]; onPress: (key: string) => void }) {
-  const known = actions.filter((a) => a.type === 'navigate' && isKnownDestination(a.destination));
+type OpenTarget = { key: string; ticker?: string; label: string };
+
+function ActionChips({ actions, onPress }: { actions: AssistantAction[]; onPress: (target: OpenTarget) => void }) {
+  const known = actions
+    .filter((a) => a.type === 'navigate')
+    .map(resolveNavigate)
+    .filter((t): t is OpenTarget => t !== null);
   if (!known.length) {
     return null;
   }
   return (
     <View style={styles.chipsRow}>
-      {known.map((a) => (
+      {known.map((t) => (
         <Pressable
-          key={a.destination!}
-          onPress={() => onPress(a.destination!)}
+          key={`${t.key}:${t.ticker ?? ''}`}
+          onPress={() => onPress(t)}
           style={styles.actionChip}
           accessibilityRole="button"
         >
-          <Text style={styles.actionChipText}>{DESTINATION_LABELS[a.destination!]}</Text>
+          <Text style={styles.actionChipText}>{t.label}</Text>
           <Icon name="arrow-up-right" size={14} color={EMERALD} />
         </Pressable>
       ))}
@@ -135,7 +140,7 @@ function TypingDots() {
   );
 }
 
-function Bubble({ message, onAction, pet }: { message: AssistantMessage; onAction: (key: string) => void; pet: PetFace }) {
+function Bubble({ message, onAction, pet }: { message: AssistantMessage; onAction: (target: OpenTarget) => void; pet: PetFace }) {
   const mine = message.role === 'user';
   const team = message.role === 'team';
   const ai = message.role === 'assistant';
@@ -380,14 +385,14 @@ export default function AssistantSheet() {
   );
 
   const runAction = useCallback(
-    (key: string) => {
+    ({ key, ticker }: { key: string; ticker?: string }) => {
       if (key === 'messages') {
         // Mensajes lives here: show Julian's channel instead of leaving.
         setChannel('julian');
         return;
       }
       close();
-      setTimeout(() => openDestination(key, { isBusiness }), 250);
+      setTimeout(() => openDestination(key, { isBusiness, ticker }), 250);
     },
     [close, isBusiness],
   );
@@ -454,18 +459,19 @@ export default function AssistantSheet() {
           setTimeout(() => setSpeaking(false), 1600);
         }
         // "Confío, abre QR para pagar": the answer moves the app.
-        const navigateTo = (payload.actions as AssistantAction[]).find(
-          (a) => a.type === 'navigate' && isKnownDestination(a.destination),
-        );
-        if (navigateTo?.destination) {
+        const navigateTo = (payload.actions as AssistantAction[])
+          .filter((a) => a.type === 'navigate')
+          .map(resolveNavigate)
+          .find((t) => t !== null);
+        if (navigateTo) {
           setTimeout(() => {
             // Closed, switched channel or reopened since asking: leave the
             // chip in the thread (a tap still works) instead of moving the app.
             if (gen === accountGen.current && isOpenRef.current && channelRef.current === 'ia'
                 && openSeqRef.current === visit) {
-              runAction(navigateTo.destination!);
+              runAction(navigateTo);
               const replyText = payload.reply?.body;
-              if (typeof replyText === 'string' && replyText.trim() && navigateTo.destination !== 'messages') {
+              if (typeof replyText === 'string' && replyText.trim() && navigateTo.key !== 'messages') {
                 showNavNote(replyText);
               }
             }
