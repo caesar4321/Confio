@@ -30,7 +30,7 @@ from django.core.cache import cache
 from django.db import close_old_connections, connection
 from eth_utils import keccak
 
-from config.ops_alerts import send_ops_alert
+from config.ops_alerts import send_ops_alert, send_public_notice
 
 from .tasks import _rpc
 
@@ -51,7 +51,9 @@ def _fecha_utc(ts: int) -> str:
 
 
 def daily_report(result: dict) -> bool:
-    """Post the daily 'all normal' status to the ops group (Spanish).
+    """Post the daily status to the ops group and, if configured, a short
+    public notice (only "today's heartbeat is on chain" + link) to the public
+    community group (Spanish).
 
     Sent after a confirmed beat (or when the chain already had a fresh one),
     so the team sees the heartbeat every day — silence in the group is itself
@@ -77,13 +79,21 @@ def daily_report(result: dict) -> bool:
     linea_tx = (f'Transacción: https://bscscan.com/tx/{tx}' if tx
                 else f'Ya había un latido reciente (hace {(now - last) / 3600:.1f} h).')
     saldo = 'desconocido' if balance is None else f'{balance / 1e18:.4f} BNB'
+    day = now // 86400
+    # Public community group: only the fact that today's heartbeat is on
+    # chain, verifiable by anyone. Nothing internal.
+    proof = (f'https://bscscan.com/tx/{tx}' if tx
+             else f'https://bscscan.com/address/{heartbeat}#events')
+    send_public_notice(
+        f'💚 Confío publicó su latido de hoy en la blockchain.\nVerifícalo: {proof}',
+        dedupe_key=f'heartbeat_daily:{day}', dedupe_seconds=36 * 3600)
     return send_ops_alert(
         f'{headline}\n'
         f'{linea_tx}\n'
         'Salida de emergencia: cerrada. Solo se abriría el '
         f'{_fecha_utc(last + silence)} si Confío dejara de publicar su latido.\n'
         f'Saldo del emisor del latido: {saldo}.',
-        dedupe_key=f'heartbeat_daily:{now // 86400}', dedupe_seconds=36 * 3600)
+        dedupe_key=f'heartbeat_daily:{day}', dedupe_seconds=36 * 3600)
 
 
 def _chat_safe(exc) -> str:

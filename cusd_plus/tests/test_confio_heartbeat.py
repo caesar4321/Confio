@@ -11,6 +11,23 @@ from django.test import SimpleTestCase, override_settings
 from cusd_plus import heartbeat as hb
 
 HEARTBEAT = '0x' + 'ab' * 20
+
+_NO_REAL_SECRET = None
+
+
+def setUpModule():
+    # No test in this module may read the real Telegram secret (and so post to
+    # the real ops or PUBLIC group). Tests that need a secret patch get_secret
+    # themselves; everything else gets "no secret" = log-only.
+    global _NO_REAL_SECRET
+    _NO_REAL_SECRET = mock.patch('config.ops_alerts.get_secret',
+                                 side_effect=RuntimeError('no real secrets in tests'))
+    _NO_REAL_SECRET.start()
+
+
+def tearDownModule():
+    _NO_REAL_SECRET.stop()
+
 BEATER = '0x' + 'cd' * 20
 TX_HASH = '0x' + '12' * 32
 NOW = 1_800_000_000
@@ -476,3 +493,51 @@ class DailyReportEdgeTests(SimpleTestCase):
                 mock.patch.object(hb, 'send_ops_alert') as alert:
             self.assertFalse(hb.daily_report({'beat': '0x1'}))
         alert.assert_not_called()
+
+
+class PublicNoticeTests(SimpleTestCase):
+    def setUp(self):
+        from config import ops_alerts
+        self.ops = ops_alerts
+        self.resp = mock.MagicMock(ok=True)
+        self.resp.json.return_value = {'ok': True}
+
+    def _post(self, secret, fn, text='x'):
+        with mock.patch.object(self.ops, 'get_secret', return_value=secret), \
+                mock.patch.object(self.ops.requests, 'post', return_value=self.resp) as post:
+            ok = fn(text)
+        return ok, post
+
+    def test_public_notice_goes_only_to_the_public_group(self):
+        secret = {'bot_token': 'T', 'chat_id': '-100ops', 'public_chat_id': '-100pub'}
+        ok, post = self._post(secret, self.ops.send_public_notice)
+        self.assertTrue(ok)
+        self.assertEqual(post.call_args.kwargs['json']['chat_id'], '-100pub')
+        ok, post = self._post(secret, self.ops.send_ops_alert)
+        self.assertEqual(post.call_args.kwargs['json']['chat_id'], '-100ops')
+
+    def test_no_public_group_configured_sends_nothing(self):
+        ok, post = self._post({'bot_token': 'T', 'chat_id': '-100ops'}, self.ops.send_public_notice)
+        self.assertFalse(ok)
+        post.assert_not_called()
+
+    @override_settings(CONFIO_HEARTBEAT_ADDRESS=HEARTBEAT)
+    def test_daily_public_notice_carries_no_internal_details(self):
+        with mock.patch.object(hb, '_rpc', FakeChain(last_beat=NOW - 60, balance=10**15)), \
+                mock.patch.object(hb, 'send_ops_alert', return_value=True), \
+                mock.patch.object(hb, 'send_public_notice', return_value=True) as public:
+            hb.daily_report({'beat': '0x' + 'ab' * 32})
+        text = public.call_args.args[0]
+        self.assertIn('https://bscscan.com/tx/0x' + 'ab' * 32, text)
+        for internal in ('BNB', 'emisor', 'congelad', BEATER, 'Salida de emergencia', 'poco'):
+            self.assertNotIn(internal.lower(), text.lower())
+
+    @override_settings(CONFIO_HEARTBEAT_ADDRESS=HEARTBEAT)
+    def test_failed_beat_posts_nothing_public(self):
+        with mock.patch.object(hb, 'post_heartbeat', side_effect=hb.HeartbeatError('x')), \
+                mock.patch.object(hb, 'send_ops_alert'), \
+                mock.patch.object(hb, 'send_public_notice') as public, \
+                mock.patch.object(hb.post_confio_heartbeat, 'retry', side_effect=RuntimeError('retry')):
+            with self.assertRaises(RuntimeError):
+                hb.post_confio_heartbeat.run()
+        public.assert_not_called()
