@@ -82,7 +82,13 @@ def upload_block(user, business) -> str | None:
         return 'Tu cuenta no puede cambiar la foto de perfil.'
     if _submissions_last_24h(user) >= settings.PROFILE_PICTURE_DAILY_LIMIT:
         return 'Llegaste al límite de cambios de foto de hoy. Vuelve mañana.'
+    # Shown to other members in Comunidad, so the same rules apply.
+    if not community.has_accepted_rules(user):
+        return RULES_REQUIRED_MESSAGE
     return None
+
+
+RULES_REQUIRED_MESSAGE = 'Acepta las normas de la comunidad para usar una foto de perfil.'
 
 
 def request_upload(user, business, content_type: str) -> dict:
