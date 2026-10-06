@@ -1300,3 +1300,18 @@ class AuditHardeningTests(TestCase):
     def test_audio_with_more_samples_than_timed_is_rejected(self):
         self.assertIsNone(service.mp4_duration_seconds(fake_m4a(5, extra_samples=100000)))
         self.assertAlmostEqual(service.mp4_duration_seconds(fake_m4a(5)), 5, places=2)
+
+
+
+class CategoryAlignmentTests(TestCase):
+    def test_assistant_uses_the_tu_mes_categories(self):
+        from users.models_cashflow import CATEGORY_CHOICES
+
+        from .engine import CATEGORY_LABELS
+        self.assertEqual(CATEGORY_LABELS, dict(CATEGORY_CHOICES))
+        self.assertEqual(len(CATEGORY_LABELS), 12)
+        viewer = Viewer(user=None, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        spec = next(s for s in Toolbelt(viewer, TurnResult(reply=''), analyses_left=0).specs()
+                    if s['name'] == 'categorize_transactions')
+        self.assertEqual(set(spec['parameters']['properties']['category']['enum']), set(dict(CATEGORY_CHOICES)))
