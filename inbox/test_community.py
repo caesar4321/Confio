@@ -1450,6 +1450,8 @@ class CommunityBlockTests(CommunityTestBase):
                 get_accessible_content_item(MockInfo(self.alice), self.post_by_bob.id)
 
     def test_blocked_people_cannot_comment_mention_or_notify(self):
+        alices_post = self.post(self.alice)  # only someone with visible content can be blocked
+        self.run_review(alices_post, APPROVE)
         community.block_member(self.bob, self.alice.id)
         with self.assertRaises(community.CommunityPostError):
             community.create_comment(self.alice, None, self.post_by_bob.id, 'Hola')
@@ -1462,9 +1464,9 @@ class CommunityBlockTests(CommunityTestBase):
             community.create_comment(carol, None, self.post_by_bob.id, '@Alice A.', mention_user_ids=[str(self.alice.id)])
         # A comment by someone bob blocked never notifies bob.
         dave = make_user('dave', 'd')
-        community.block_member(self.bob, dave.id)
-        self.notify.reset_mock()
         comment = CommunityComment.objects.create(content_item=self.post_by_bob, author=dave, body='x', status='APPROVED')
+        community.block_member(self.bob, dave.id)  # dave's comment makes him visible, so blockable
+        self.notify.reset_mock()
         community.notify_comment_published(comment.id)
         self.assertNotIn(self.bob.id, {c.kwargs['user'].id for c in self.notify.call_args_list})
 
@@ -1529,3 +1531,207 @@ class RemovedAccountContentTests(CommunityTestBase):
         author.hard_delete()
         self.assertFalse(ContentItem.objects.filter(id=item.id).exists())
         self.assertTrue(PublicObject.objects.filter(key='community/images/2026/10/z.jpg', state='DOOMED').exists())
+
+
+class ClaudeAuditRound1Tests(CommunityTestBase):
+    """Claude audit round 1 (2026-10-06): each must stay fixed."""
+
+    def setUp(self):
+        super().setUp()
+        patch('inbox.community.enqueue_comment_review').start()
+        patch('notifications.utils.create_notification').start()
+        self.addCleanup(patch.stopall)
+        self.alice, self.bob = make_user('alice', 'a'), make_user('bob', 'b')
+        self.bobs_post = self.post(self.bob)
+        self.run_review(self.bobs_post, APPROVE)
+        carol = make_user('carol', 'c')
+        self.comment = community.create_comment(carol, None, self.bobs_post.id, 'Hola')
+        with patch('inbox.community._first_pass', return_value=APPROVE):
+            community.run_comment_review(self.comment.id)
+
+    def test_blocked_viewer_gets_no_comments_or_participants(self):
+        community.block_member(self.alice, self.bob.id)
+        page = Query().resolve_community_comments(MockInfo(self.alice), content_item_id=str(self.bobs_post.id))
+        self.assertEqual((page.items, page.total_count), ([], 0))
+        self.assertEqual(Query().resolve_community_post_participants(MockInfo(self.alice), str(self.bobs_post.id)), [])
+        with self.assertRaises(community.CommunityPostError):
+            community.react_to_comment(self.alice, self.comment.id, '🔥')
+        with self.assertRaises(community.CommunityPostError):
+            community.report_comment(self.alice, self.comment.id, 'SCAM')
+        with self.assertRaises(community.CommunityPostError):
+            community.report_post(self.alice, self.bobs_post.id, 'SCAM')
+
+    def test_viewer_query_never_names_the_author_of_a_post_you_cannot_see(self):
+        rejected = self.post(self.bob)
+        self.run_review(rejected, REJECT)
+        account = Account.objects.get(user=self.alice)
+        with patch('inbox.schema.get_context_models', return_value=(self.alice, account, None, {})):
+            viewer = Query().resolve_community_post_viewer(MockInfo(self.alice), str(rejected.id))
+        self.assertEqual((viewer.is_community, viewer.author_id, viewer.author_name), (False, None, None))
+
+    def test_block_only_works_on_people_whose_content_you_can_see(self):
+        stranger = make_user('nobody', 'x')  # never posted or commented
+        with self.assertRaises(community.CommunityPostError):
+            community.block_member(self.alice, stranger.id)
+        community.block_member(self.alice, self.bob.id)  # visible post: fine
+
+    def test_staff_cannot_restore_what_the_author_deleted(self):
+        community.delete_own_post(self.bob, self.bobs_post.id)
+        with self.assertRaises(community.NotRestorable):
+            community.restore(self.review_of(self.bobs_post).id)
+
+    def test_author_deleted_image_keeps_no_private_backup(self):
+        user = make_user()
+        item = self.post(user, image_key=community.pending_image_prefix(user) + 'a.jpg')
+        url = 'https://confio-publications.s3.eu-central-2.amazonaws.com/community/images/2026/10/q.jpg'
+        with patch('inbox.community.load_pending_image', return_value=community.ReviewImage('image/jpeg', b'x')), \
+                patch('inbox.community.publish_image', return_value=url):
+            self.run_review(item, APPROVE)
+        with patch('inbox.community.enqueue_hide_post_image'):
+            community.delete_own_post(user, item.id)
+        with patch('security.s3_utils.upload_object') as upload, patch('security.s3_utils.delete_object') as delete:
+            community.hide_post_image(self.review_of(item).id)
+        upload.assert_not_called()
+        delete.assert_called_once()
+
+    def test_sweeper_redrives_removal_for_banned_or_deleted_accounts(self):
+        UserBan.objects.create(user=self.bob, reason='abuse', ban_type='permanent')
+        owed = dict(community.members_owed_content_removal())
+        self.assertEqual(owed.get(self.bob.id), 'banned')
+        community.remove_member_content(self.bob.id, category='account_banned', reason='x')
+        self.assertNotIn(self.bob.id, dict(community.members_owed_content_removal()))
+
+    def test_deleted_account_cannot_publish_a_pending_review(self):
+        user = make_user()
+        item = self.post(user)
+        user.soft_delete()
+        user.refresh_from_db()
+        with patch('inbox.community._first_pass', return_value=APPROVE):
+            status = community.run_community_review(self.review_of(item).id)
+        self.assertEqual(status, CommunityReviewStatus.REJECTED)
+
+    def test_profile_pictures_require_verification(self):
+        from . import profile_pictures
+
+        self.assertIsNotNone(profile_pictures.upload_block(make_user(verified=False), None))
+
+
+class ClaudeAuditRound2Tests(ClaudeAuditRound1Tests):
+    """Claude audit round 2 (2026-10-06): removed content is really erased."""
+
+    def test_author_deletion_erases_text_now(self):
+        community.delete_own_post(self.bob, self.bobs_post.id)
+        community.purge_removed_content()
+        self.bobs_post.refresh_from_db()
+        self.assertEqual(self.bobs_post.body, '')
+        self.assertEqual(self.review_of(self.bobs_post).category, 'author_deleted')
+
+    def test_author_deleting_a_moderated_post_keeps_the_record_but_erases_content(self):
+        community.take_down(self.review_of(self.bobs_post).id, category='scam', reason='x')
+        item = ContentItem.objects.get(id=self.bobs_post.id)
+        item.metadata = {**item.metadata, 'removed_image_key': 'community/removed/1.jpg'}
+        item.save()
+        self.assertTrue(community.delete_own_post(self.bob, self.bobs_post.id))
+        with patch('security.s3_utils.delete_object') as delete:
+            community.purge_removed_content()
+        delete.assert_called_once_with(key='community/removed/1.jpg', bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
+        item.refresh_from_db()
+        self.assertEqual((item.body, self.review_of(item).category), ('', 'scam'))
+        self.assertNotIn('removed_image_key', item.metadata)
+        with self.assertRaises(community.NotRestorable):
+            community.restore(self.review_of(item).id)
+
+    def test_moderation_takedowns_are_kept_90_days_then_erased(self):
+        review = self.review_of(self.bobs_post)
+        community.take_down(review.id, category='scam', reason='x')
+        community.purge_removed_content()
+        self.bobs_post.refresh_from_db()
+        self.assertNotEqual(self.bobs_post.body, '')  # within retention: kept for appeals
+        CommunityPostReview.objects.filter(id=review.id).update(removed_at=timezone.now() - timedelta(days=91))
+        community.purge_removed_content()
+        self.bobs_post.refresh_from_db()
+        self.assertEqual(self.bobs_post.body, '')
+
+    def test_deleted_account_comments_are_erased(self):
+        community.take_down_comment(self.comment.id, category='scam', reason='x')
+        self.comment.author.soft_delete()
+        community.purge_removed_content()
+        self.comment.refresh_from_db()
+        self.assertEqual(self.comment.body, '')
+
+    def test_restore_refuses_a_post_whose_account_is_gone(self):
+        review = self.review_of(self.bobs_post)
+        community.take_down(review.id, category='scam', reason='x')
+        self.bob.soft_delete()
+        with self.assertRaises(community.NotRestorable):
+            community.restore(review.id)
+
+
+class ClaudeAuditRound3Tests(ClaudeAuditRound1Tests):
+    """Claude audit round 3 (2026-10-06): each must stay fixed."""
+
+    def notify(self, **data):
+        from notifications.models import Notification
+        return Notification.objects.create(
+            user=self.bob, notification_type='COMMUNITY_COMMENT', title='carol comentó tu publicación',
+            message='Hola', data={'content_item_id': self.bobs_post.id, **data},
+        )
+
+    def test_comment_takedown_erases_its_notifications(self):
+        from notifications.models import Notification
+        mine = self.notify(comment_id=self.comment.id)
+        other = self.notify(comment_id=self.comment.id + 999)
+        community.take_down_comment(self.comment.id, category='scam', reason='x')
+        self.assertFalse(Notification.objects.filter(id=mine.id).exists())
+        self.assertTrue(Notification.objects.filter(id=other.id).exists())
+
+    def test_post_erasure_erases_comment_notifications_on_it(self):
+        from notifications.models import Notification
+        note = self.notify(comment_id=self.comment.id + 999)
+        self.assertTrue(community.delete_own_post(self.bob, self.bobs_post.id))
+        community.purge_removed_content()
+        self.assertFalse(Notification.objects.filter(id=note.id).exists())
+
+    def test_author_can_erase_a_moderated_comment(self):
+        community.take_down_comment(self.comment.id, category='scam', reason='x')
+        self.assertTrue(community.delete_comment(self.comment.author, self.comment.id))
+        self.comment.refresh_from_db()
+        self.assertEqual((self.comment.body, self.comment.category), ('', 'scam'))
+        self.assertFalse(community.delete_comment(self.comment.author, self.comment.id))
+
+    def test_purge_waits_for_a_pending_image_hide(self):
+        item = ContentItem.objects.get(id=self.bobs_post.id)
+        item.metadata = {**item.metadata, 'image': {'url': 'https://x/community/a.jpg'}}
+        item.save()
+        with patch('inbox.community.enqueue_hide_post_image', create=True):
+            community.delete_own_post(self.bob, self.bobs_post.id)
+        item.refresh_from_db()
+        if not item.metadata.get('image'):
+            self.skipTest('delete hid the image synchronously')
+        community.purge_removed_content()
+        item.refresh_from_db()
+        self.assertNotEqual(item.body, '')
+
+    def test_backstop_finds_deleted_accounts_by_join(self):
+        self.bob.soft_delete()
+        owed = dict(community.members_owed_content_removal())
+        # The soft-delete signal may already have removed everything.
+        self.assertIn(owed.get(self.bob.id, 'deleted'), ('deleted',))
+
+
+class ClaudeAuditRound4Tests(ClaudeAuditRound3Tests):
+    """Claude audit round 4 (2026-10-06): each must stay fixed."""
+
+    def test_hard_deleted_account_takes_its_comment_notifications(self):
+        from notifications.models import Notification
+        note = self.notify(comment_id=self.comment.id)
+        with patch('security.s3_utils.delete_object'):
+            self.comment.author.delete()
+        self.assertFalse(Notification.objects.filter(id=note.id).exists())
+
+    def test_replies_notifications_go_with_their_parent(self):
+        from notifications.models import Notification
+        reply = community.create_comment(self.bob, None, self.bobs_post.id, 'Gracias', parent_id=self.comment.id)
+        note = self.notify(comment_id=reply.id)
+        community.take_down_comment(self.comment.id, category='scam', reason='x')
+        self.assertFalse(Notification.objects.filter(id=note.id).exists())

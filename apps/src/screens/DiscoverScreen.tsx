@@ -19,7 +19,8 @@ import {
 } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
-import { useCommunityComposeEntry } from '../hooks/useCommunityComposeEntry';
+import { useCommunityEntryState } from '../hooks/useCommunityComposeEntry';
+import { memberBlockVersion } from '../services/communityEvents';
 import { CommunityComposePrompt } from '../components/CommunityComposePrompt';
 
 const PAGE_SIZE = 10;
@@ -84,10 +85,10 @@ export const DiscoverScreen = () => {
   // and Comunidad; Oficial is Confío's and verified sources only. The header
   // pencil (DiscoverStackHeader) is the always-reachable entry.
   const composeSection = section === 'for_you' || section === 'community';
-  const canCompose = useCommunityComposeEntry(!legacyServer);
+  const { canCompose, supported: communitySupported } = useCommunityEntryState(!legacyServer);
   const showPrompt = canCompose && composeSection;
   // Mis publicaciones travels with the composer card (Para ti and Comunidad).
-  const showMyPosts = showPrompt;
+  const showMyPosts = communitySupported && composeSection;
 
   // Stepping down is not a failure: the next rung is already on its way.
   const steppingDown = tier < LAST_TIER && isSchemaMismatch(feedError, OLD_SECTIONS_SERVER);
@@ -169,16 +170,26 @@ export const DiscoverScreen = () => {
   const focusRefreshing = useRef(false);
   paginating.current = isFetchingMore;
   const focusedOnce = useRef(false);
+  const seenBlockVersion = useRef(0);
   useFocusEffect(
     useCallback(() => {
       if (!focusedOnce.current) {
         focusedOnce.current = true;
+        seenBlockVersion.current = memberBlockVersion();
         return;
       }
-      if (loadedCount.current > PAGE_SIZE || paginating.current) return;
+      // After blocking someone, re-read from the top even if scrolled deep:
+      // their posts must disappear, and the new generation drops any page
+      // still in flight for the old list.
+      const currentBlockVersion = memberBlockVersion();
+      const blockedSince = currentBlockVersion !== seenBlockVersion.current;
+      if (!blockedSince && (loadedCount.current > PAGE_SIZE || paginating.current)) return;
       focusRefreshing.current = true;
       feedGeneration.current += 1;
       refetch({ offset: 0, limit: PAGE_SIZE })
+        // Marked seen only once the re-read lands: offline, the next focus
+        // tries again instead of leaving the blocked member's posts up.
+        .then(() => { seenBlockVersion.current = currentBlockVersion; })
         .catch(() => {})
         .finally(() => { focusRefreshing.current = false; });
     }, [refetch]),

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useMutation, useQuery } from '@apollo/client';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { Text } from './common/AppText';
@@ -22,6 +22,7 @@ type Props = {
  */
 export function CommunityRulesSheet({ visible, onAccepted, onClose }: Props) {
   const navigation = useNavigation<any>();
+  const focused = useIsFocused();
   const { data, loading, refetch } = useQuery(GET_COMMUNITY_RULES, {
     skip: !visible,
     fetchPolicy: 'network-only',
@@ -48,7 +49,9 @@ export function CommunityRulesSheet({ visible, onAccepted, onClose }: Props) {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    // Hidden while the Terms screen is on top (it is not focused then), and
+    // back when the person returns: reading the Terms never cancels the flow.
+    <Modal visible={visible && focused} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <Text style={styles.title}>Normas de la comunidad</Text>
@@ -64,10 +67,7 @@ export function CommunityRulesSheet({ visible, onAccepted, onClose }: Props) {
                 </View>
               ))}
               <Pressable
-                onPress={() => {
-                  onClose();
-                  navigation.navigate('LegalDocument', { docType: 'terms' });
-                }}
+                onPress={() => navigation.navigate('LegalDocument', { docType: 'terms' })}
                 accessibilityRole="link"
               >
                 <Text style={styles.link}>Leer los Términos de Servicio completos</Text>

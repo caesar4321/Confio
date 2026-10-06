@@ -190,7 +190,7 @@ export function DiscoverFeed({
               onPress={() => onOpenItem?.(item)}
               style={styles.commentCount}
               accessibilityRole="button"
-              accessibilityLabel={`${commentCounts[item.id]} comentarios`}
+              accessibilityLabel={`${commentCounts[item.id]} ${commentCounts[item.id] === 1 ? 'comentario' : 'comentarios'}`}
             >
               <Icon name="message-circle" size={14} color={colors.textSecondary} />
               <Text style={styles.commentCountText}>{commentCounts[item.id]}</Text>

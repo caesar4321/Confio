@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, View, InteractionManager } from 'react-native';
 import { useMutation, useQuery } from '@apollo/client';
 import { pickFromLibrary } from '../services/systemPicker';
 import Icon from 'react-native-vector-icons/Feather';
@@ -14,6 +15,7 @@ import {
 import { GET_MY_PROFILE_PICTURE } from '../apollo/queries';
 import { uploadFileToPresignedForm } from '../services/uploadService';
 import { usePollWhile } from '../hooks/usePollWhile';
+import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 import { CommunityRulesSheet } from './CommunityRulesSheet';
 
 const POLL_MS = 3000;
@@ -48,6 +50,17 @@ export function ProfilePictureEditor({ initial }: Props) {
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  // A ref, so the deferred pick reads focus at fire time, not render time.
+  const focusedRef = useRef(true);
+  focusedRef.current = useIsFocused();
+  const mounted = useRef(true);
+  const pendingPick = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTask = useRef<{ cancel: () => void } | null>(null);
+  useEffect(() => () => {
+    mounted.current = false;
+    pendingTask.current?.cancel();
+    if (pendingPick.current) clearTimeout(pendingPick.current);
+  }, []);
 
   const picture: MyPicture | undefined = data?.myProfilePicture;
   const pending = picture?.latestStatus === 'PENDING';
@@ -59,9 +72,13 @@ export function ProfilePictureEditor({ initial }: Props) {
     if (!pending) setLocalPreview(null);
   }, [pending]);
 
-  if (error || !picture) return null;
+  // Only a server without profile pictures hides the editor; a dropped poll
+  // keeps showing the last known state.
+  if (isSchemaMismatch(error) || !picture) return null;
 
   const pick = async (rulesJustAccepted = false) => {
+    // A pick is already on its way right after the rules were accepted.
+    if (!rulesJustAccepted && (pendingPick.current || pendingTask.current)) return;
     if (picture.rulesRequired && !rulesJustAccepted) {
       // A photo is shown to other members, so the community rules apply.
       setRulesOpen(true);
@@ -71,13 +88,23 @@ export function ProfilePictureEditor({ initial }: Props) {
       setMessage(picture.blockMessage);
       return;
     }
-    const result = await pickFromLibrary({
-      mediaType: 'photo',
-      selectionLimit: 1,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      quality: 0.8,
-    });
+    let result;
+    try {
+      result = await pickFromLibrary({
+        mediaType: 'photo',
+        selectionLimit: 1,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        quality: 0.8,
+      });
+    } catch {
+      setMessage('No pudimos abrir tu galería.');
+      return;
+    }
+    if (result.errorCode) {
+      setMessage('No pudimos abrir tu galería. Revisa el permiso de fotos en Ajustes.');
+      return;
+    }
     const asset = result.assets?.[0];
     if (result.didCancel || !asset?.uri) return;
     const type = asset.type === 'image/png' || asset.type === 'image/webp' ? asset.type : 'image/jpeg';
@@ -154,7 +181,17 @@ export function ProfilePictureEditor({ initial }: Props) {
         onAccepted={() => {
           setRulesOpen(false);
           refetch().catch(() => {});
-          void pick(true);
+          // Let the sheet finish closing first: iOS cannot present the
+          // picker over a modal that is still dismissing.
+          // Cancelled if the person leaves first (see the unmount cleanup).
+          const task = InteractionManager.runAfterInteractions(() => {
+            pendingPick.current = setTimeout(() => {
+              pendingPick.current = null;
+              pendingTask.current = null;
+              if (mounted.current && focusedRef.current) void pick(true);
+            }, 450);
+          });
+          pendingTask.current = task;
         }}
         onClose={() => setRulesOpen(false)}
       />

@@ -21,7 +21,7 @@ export const BlockedMembersScreen = () => {
   const members: Member[] = data?.myBlockedMembers || [];
 
   const confirmUnblock = (member: Member) => {
-    Alert.alert(`¿Desbloquear a ${member.name}?`, 'Volverán a ver sus publicaciones y comentarios.', [
+    Alert.alert(`¿Desbloquear a ${member.name}?`, 'Volverás a ver sus publicaciones y comentarios, y podrá ver los tuyos.', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Desbloquear',

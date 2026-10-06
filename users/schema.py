@@ -2872,8 +2872,10 @@ class UpdateUserProfile(graphene.Mutation):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return UpdateUserProfile(success=False, error="Authentication required", user=None)
 
-		# Check if user is verified - if so, don't allow name changes
-		if user.is_identity_verified:
+		# A verified person's name is the verified one: no changes after ANY
+		# verified personal document (an additional ID counts too), or a member
+		# could rename themselves on Comunidad bylines after verifying.
+		if user.is_identity_verified or user.has_verified_identity_document:
 			return UpdateUserProfile(success=False, error="No se puede modificar el nombre de un usuario verificado", user=None)
 
 		# Validate input

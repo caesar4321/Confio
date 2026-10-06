@@ -18,6 +18,7 @@ import {
 } from '../apollo/mutations';
 import { GET_COMMUNITY_COMMENTS, GET_COMMUNITY_POST_PARTICIPANTS } from '../apollo/queries';
 import { usePollWhile } from '../hooks/usePollWhile';
+import { notifyMemberBlocked } from '../services/communityEvents';
 
 type Participant = { id: string; name: string; isPostAuthor?: boolean; avatarUrl?: string | null };
 
@@ -345,6 +346,7 @@ export function CommunityComments({
                 Alert.alert('No pudimos bloquear', result?.blockCommunityMember?.error || 'Inténtalo de nuevo.');
                 return;
               }
+              notifyMemberBlocked();
               await refetch();
             } catch {
               Alert.alert('No pudimos bloquear', 'Revisa tu conexión e inténtalo de nuevo.');
@@ -384,7 +386,7 @@ export function CommunityComments({
             <Text style={styles.authorName}>{comment.authorName}</Text>
             {comment.isPostAuthor ? <Text style={styles.authorBadge}>Autor</Text> : null}
             <Text style={styles.time}>{comment.time}</Text>
-            {(comment.canReport || comment.canDelete) && !refused ? (
+            {(comment.canReport || comment.canDelete || !comment.isOwn) && !refused ? (
               <Pressable
                 onPress={() => openMenu(comment)}
                 hitSlop={10}

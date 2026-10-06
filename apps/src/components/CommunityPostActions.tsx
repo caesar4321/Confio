@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { useMutation, useQuery } from '@apollo/client';
+import { notifyMemberBlocked } from '../services/communityEvents';
+import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { Text } from './common/AppText';
@@ -86,6 +88,9 @@ function PostActionRow({ contentItemId, onDeleted, viewer, refetch }: Props & { 
                 return;
               }
               Alert.alert('Bloqueado', `Ya no verás contenido de ${viewer.authorName}.`);
+              // Descubrir re-reads its feed on return, so their other posts
+              // disappear too (nothing else in the app refetches).
+              notifyMemberBlocked();
               onDeleted();
             } catch {
               Alert.alert('No pudimos bloquear', 'Revisa tu conexión e inténtalo de nuevo.');
@@ -139,7 +144,9 @@ export function CommunityPostActions({ contentItemId, onDeleted }: Props) {
     fetchPolicy: 'network-only',
   });
   const viewer = data?.communityPostViewer;
-  if (error || !viewer?.isCommunity) return null;
+  // A transient error keeps the last state (and any comment being typed);
+  // only a server without Comunidad hides this.
+  if (isSchemaMismatch(error) || !viewer?.isCommunity) return null;
   return (
     <>
       <PostActionRow contentItemId={contentItemId} onDeleted={onDeleted} viewer={viewer} refetch={refetch} />
