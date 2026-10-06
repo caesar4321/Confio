@@ -21,7 +21,7 @@ import { Text } from '../components/common/AppText';
 import { GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
-import { GET_ASSISTANT_THREAD, UPDATE_ASSISTANT_PROFILE } from './api';
+import { GET_ASSISTANT_THREAD, UPDATE_ASSISTANT_PROFILE, GET_ASSISTANT_SUGGESTIONS, type AssistantSuggestion } from './api';
 import AssistantMascot from './AssistantMascot';
 import { useAssistant } from './AssistantContext';
 import { DOCK_ROUTES, TAB_ROUTES, hintFor, type ScreenHint } from './suggestions';
@@ -40,7 +40,7 @@ const HINT_VISIBLE_MS = 7000;
 const HINT_COOLDOWN_MS = 45_000;
 const MAX_HINTS_PER_SESSION = 4;
 
-type Hint = ScreenHint & { kind: 'screen' | 'unread' | 'note' };
+type Hint = ScreenHint & { kind: 'screen' | 'unread' | 'note' | 'probe' };
 // What the chat said when it moved the app ("Abrí Recargar: …").
 const NOTE_VISIBLE_MS = 10_000;
 const NOTE_MAX_CHARS = 180;
@@ -80,6 +80,15 @@ export default function AssistantBubble() {
     skip: !enabled,
     errorPolicy: 'ignore',
   });
+  // Hints ranked for this person on the server; the built-in list is the fallback.
+  const { data: suggestionData } = useQuery(GET_ASSISTANT_SUGGESTIONS, {
+    variables: { screen: route ?? null, contextKey },
+    skip: !enabled || !threadData?.assistantThread?.enabled,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'ignore',
+  });
+  const serverHintsRef = useRef<AssistantSuggestion[] | null>(null);
+  serverHintsRef.current = suggestionData?.assistantSuggestions?.hints ?? null;
   const [saveProfile] = useMutation(UPDATE_ASSISTANT_PROFILE);
   const profile = threadData?.assistantThread?.profile;
   // The support chat exists (server knows it) / is answered by Confio Assistant.
@@ -304,8 +313,15 @@ export default function AssistantBubble() {
           prompt: '',
         };
       } else if (iaAvailable) {
-        const screenHint = hintFor(route, seenHints.current);
-        next = screenHint ? { ...screenHint, kind: 'screen' } : null;
+        const fromServer = serverHintsRef.current?.find((h) => !seenHints.current.has(h.text));
+        if (fromServer) {
+          next = fromServer.kind === 'probe'
+            ? { kind: 'probe', hint: fromServer.text, prompt: '' }
+            : { kind: 'screen', hint: fromServer.text, prompt: fromServer.kind === 'picker' ? '' : fromServer.prompt };
+        } else {
+          const screenHint = hintFor(route, seenHints.current);
+          next = screenHint ? { ...screenHint, kind: 'screen' } : null;
+        }
       }
       if (!next) {
         return;
@@ -341,7 +357,9 @@ export default function AssistantBubble() {
     if (!current) {
       return;
     }
-    if (current.kind === 'unread' || current.kind === 'note') {
+    if (current.kind === 'probe') {
+      open({ probe: true });
+    } else if (current.kind === 'unread' || current.kind === 'note') {
       // Unread: the box shows a red dot on whichever chat head has news.
       // Note: back to the conversation that moved the app.
       open();
