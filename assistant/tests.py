@@ -1431,6 +1431,15 @@ class VerificationNudgeTests(TestCase):
         self._doc(user, 'expired', 3, raw='Expired')
         self.assertTrue(self._pending(user))
 
+    def test_expired_document_nudges_without_time_limit(self):
+        from . import suggestions
+        user = User.objects.create_user(username='vn7', email='vn7@example.com', password='x', firebase_uid='fb-vn7')
+        self._doc(user, 'expired', 120, raw='Kyc Expired')
+        viewer = Viewer(user=user, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.assertTrue(self._pending(user))
+        self.assertIn('documento venció', suggestions.build(viewer, 'Home', {}).hints[0].text)
+
     def test_old_abandoned_attempt_stops_nudging(self):
         user = User.objects.create_user(username='vn3', email='vn3@example.com', password='x', firebase_uid='fb-vn3')
         self._doc(user, 'pending', 30)

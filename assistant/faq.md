@@ -104,6 +104,7 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - Si no tienes un documento del país de tu teléfono, puedes verificarte con tu pasaporte o un documento de otro país. Algunas funciones lo aceptan y otras (como recargar y retirar) piden el del país de tu teléfono: la app te dice cuál necesitas.
 <!-- Julian 2026-10-06: an unfinished attempt stays "pending"; many verify with a second document instead. all_documents readers: rewards, community, Face step-up, Bolivia QR (ramps/stereum_customers.py); Recargar/Retirar read the primary only (User.is_identity_verified). Never nag about a pending attempt when any document is verified. -->
 - Para un límite mayor en cuentas locales se pide un comprobante de domicilio y unas preguntas sobre tus ingresos y el origen de tus fondos.
+- Si tu documento venció, la verificación deja de valer: verifícate de nuevo con un documento vigente.
 - Fotografía tu documento original (no una foto de pantalla ni un escaneo) y evita reflejos sobre el holograma.
 <!-- support: latest 2026-05-25, 3 threads. -->
 

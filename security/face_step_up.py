@@ -126,9 +126,15 @@ def step_up_applies(user) -> bool:
     personal verification, not a stored selfie: a KYC'd user whose selfie
     copy is missing is asked to verify again, never waved through.
     Any verified personal document counts, primary or additional: a passport
-    verified for a local-money rail opens that rail on its own.
+    verified for a local-money rail opens that rail on its own. So does one
+    that was verified and later expired.
     """
-    return face_enforced() and bool(getattr(user, 'has_verified_identity_document', False))
+    # Ever KYC'd, not "currently": an expired document must not switch the
+    # gate off (the money that came in through that KYC can still leave).
+    passed = getattr(user, 'has_passed_identity_verification', None)
+    if passed is None:
+        passed = getattr(user, 'has_verified_identity_document', False)
+    return face_enforced() and bool(passed)
 
 
 def checks_available() -> bool:
@@ -226,9 +232,13 @@ def store_face_reference_from_didit(verification, response_payload: dict) -> Fac
 
 def _active_reference(user) -> FaceReference | None:
     """Only while its KYC stands: a selfie from a session later rejected (a
-    borrowed document) proves only that the same impostor is at the phone."""
-    return FaceReference.objects.filter(user=user, is_active=True,
-                                        identity_verification__status='verified').first()
+    borrowed document) proves only that the same impostor is at the phone.
+    A document that was verified and then expired still stands for this: the
+    face is the same person's, and the owner keeps sending while they renew."""
+    return FaceReference.objects.filter(user=user, is_active=True).filter(
+        Q(identity_verification__status='verified')
+        | Q(identity_verification__status='expired', identity_verification__verified_at__isnull=False)
+    ).first()
 
 
 def _reference_bytes(reference: FaceReference) -> bytes:

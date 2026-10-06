@@ -17,7 +17,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import IdentityVerification, SuspiciousActivity, UserBan, banned_phone_hash
+from .models import PASSED_KYC, IdentityVerification, SuspiciousActivity, UserBan, banned_phone_hash
 
 TRIGGER = 'identity_reuse_active_ban'
 PHONE_TRIGGER = 'phone_reuse_active_ban'
@@ -146,7 +146,8 @@ def require_identity_for_autoswap(user, ordered_bytes, actor_address):
 
 
 def _personal_documents():
-    return IdentityVerification.all_objects.filter(status='verified').filter(
+    # PASSED_KYC: an expired document still ties the person to their bans.
+    return IdentityVerification.all_objects.filter(PASSED_KYC).filter(
         Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')
     ).exclude(document_number_normalized='').exclude(document_issuing_country__in=['', 'UNK'])
 

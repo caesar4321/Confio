@@ -429,6 +429,16 @@ class User(AbstractUser, SoftDeleteModel):
         ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
 
     @property
+    def has_passed_identity_verification(self):
+        """Ever passed KYC as a person: a verified personal document, or one
+        that was verified and then expired (Didit "Kyc Expired"). Security
+        gates that exist because someone went through KYC (Confío Face) read
+        this, so a document expiring never switches them off; features that
+        need a CURRENT document keep has_verified_identity_document."""
+        from security.models import PASSED_KYC, IdentityVerification
+        return IdentityVerification.all_documents.filter(user=self).filter(PASSED_KYC).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
+
+    @property
     def is_identity_verified(self):
         """Check if user has any verified identity records (personal context only)
         Excludes business-context verifications so personal accounts are not

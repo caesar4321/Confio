@@ -92,7 +92,8 @@ class _State:
     ondo_eligible: bool
     probe_answered: bool
     # Didit's own word for the open attempt: 'unfinished' (not started,
-    # abandoned, expired) or '' when unknown. In review never nudges.
+    # abandoned, timed out), 'document_expired' (Kyc Expired) or '' when
+    # unknown. In review never nudges.
     verification_stage: str = ''
 
 
@@ -124,8 +125,11 @@ def _state(viewer, request_meta) -> _State:
     now = timezone.now()
     stage = _didit_stage(latest)
     # 'expired' is a dead session (abandoned or timed out): still worth a nudge.
-    pending = bool(latest and latest.status in ('pending', 'expired') and stage != 'in_review'
-                   and now - timedelta(days=VERIFICATION_NUDGE_DAYS) <= latest.created_at <= now - timedelta(hours=24)
+    # A document that expired blocks someone who was verified: no time limit.
+    recent = (stage == 'document_expired'
+              or now - timedelta(days=VERIFICATION_NUDGE_DAYS) <= latest.created_at <= now - timedelta(hours=24)) \
+        if latest else False
+    pending = bool(latest and latest.status in ('pending', 'expired') and stage != 'in_review' and recent
                    and not personal_docs.filter(status='verified').exists())
     try:
         from cusd_plus.eligibility import ONDO_POLICY
@@ -148,7 +152,8 @@ def _state(viewer, request_meta) -> _State:
 
 # Didit's raw statuses (risk_factors['didit']['raw_status']); our `status`
 # column folds most of them into 'pending' (Expired/Abandoned into 'expired').
-DIDIT_UNFINISHED = {'not started', 'in progress', 'abandoned', 'expired', 'kyc expired'}
+DIDIT_UNFINISHED = {'not started', 'in progress', 'abandoned', 'expired'}
+DIDIT_DOCUMENT_EXPIRED = {'kyc expired'}
 DIDIT_IN_REVIEW = {'in review'}
 
 
@@ -161,6 +166,8 @@ def _didit_stage(verification):
         return 'in_review'
     if raw in DIDIT_UNFINISHED:
         return 'unfinished'
+    if raw in DIDIT_DOCUMENT_EXPIRED:
+        return 'document_expired'
     return ''
 
 
@@ -181,7 +188,10 @@ def build(viewer, screen: str = '', request_meta=None) -> Suggestions:
         attention.append(_s('attention.topup', '¿Cómo va tu recarga? Te digo en qué estado está.',
                             '¿En qué estado está mi recarga?'))
     if state.verification_pending and state.personal:
-        if state.verification_stage == 'unfinished':
+        if state.verification_stage == 'document_expired':
+            attention.append(_s('attention.verification', 'Tu documento venció. ¿Te ayudo a verificarte de nuevo?',
+                                'Mi documento de identidad venció, ¿cómo me verifico de nuevo?'))
+        elif state.verification_stage == 'unfinished':
             attention.append(_s('attention.verification', '¿Te ayudo a terminar tu verificación de identidad?',
                                 'Empecé mi verificación de identidad y no la terminé, ¿qué hago?'))
         else:  # Didit's status unknown: words that fit an attempt in any state
