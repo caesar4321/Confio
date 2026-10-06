@@ -219,6 +219,29 @@ it.each([
   }
 });
 
+it('claims no identity and no conversion when the documents cannot be refreshed', async () => {
+  const {AnalyticsService} = jest.requireMock('../../services/analyticsService');
+  AnalyticsService.logEvent.mockClear();
+  mockSyncSession.mockReset().mockResolvedValue({data: {syncDiditVerificationSession: {
+    success: true, verificationStatus: 'verified', statusDetail: 'Tu identidad quedó verificada correctamente.', verification: {id: 42}}}});
+  mockRefetch.mockResolvedValueOnce({}).mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('Network request failed'));
+  mockRouteParams = {verificationSessionId: 'web-doc'};
+  const banners: any[] = [];
+  const banner = jest.requireMock('../../components/common/InlineBanner');
+  const original = banner.InlineBanner;
+  banner.InlineBanner = (props: any) => { banners.push(props.message); return null; };
+  try {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<VerificationScreen />); });
+    expect(banners).toContain('Listo: tu verificación quedó registrada.');
+    expect(AnalyticsService.logEvent).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
+  } finally {
+    banner.InlineBanner = original;
+    mockRefetch.mockReset().mockResolvedValue({});
+  }
+});
+
 it('ignores a malformed redirected session id', async () => {
   mockSyncSession.mockReset();
   mockRouteParams = {verificationSessionId: '../admin'};
