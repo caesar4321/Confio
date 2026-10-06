@@ -283,7 +283,10 @@ const VerificationScreen = () => {
   React.useEffect(() => {
     const handle = (url: string | null) => {
       if (!url || !DIDIT_REDIRECT.test(url)) return;
-      const sessionId = diditRedirectSessionId(url) || browserSessionRef.current;
+      // Only the session the redirect names: a bare confio://verification link
+      // (e.g. a plain navigation to this screen) must not sync, and so mark as
+      // seen, a browser session the user has not finished yet.
+      const sessionId = diditRedirectSessionId(url);
       if (!sessionId || syncedDiditRedirects.has(sessionId)) return;
       syncedDiditRedirects.add(sessionId);
       // A business redirect is only marked seen, so switching to the personal
@@ -293,7 +296,9 @@ const VerificationScreen = () => {
       syncSessionAndRefresh(sessionId).catch((error: any) => {
         // A transport failure may be retried by a later redirect.
         if (error?.networkError) syncedDiditRedirects.delete(sessionId);
-        setBanner({ variant: 'error', message: error?.message || 'No se pudo sincronizar la decisión de Didit.' });
+        // Never show a raw GraphQL/transport error; the server's own message is fine.
+        const message = error?.graphQLErrors?.length || error?.networkError ? null : error?.message;
+        setBanner({ variant: 'error', message: message || 'No se pudo sincronizar la decisión de Didit.' });
       });
     };
     Linking.getInitialURL().then(handle).catch(() => {});
