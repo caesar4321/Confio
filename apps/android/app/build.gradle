@@ -262,7 +262,11 @@ dependencies {
 
     // Native modules come from autolinking (react-native.config.js governs
     // exclusions). Only the deliberately-manual Didit SDK stays explicit.
-    implementation project(':didit-sdk-react-native')
+    implementation(project(':didit-sdk-react-native')) {
+        // 4.x's full `didit-sdk` adds the WalletConnect/Reown wallet module (OkHttp 4,
+        // jitpack deps). Didit loads it only if present; we never use wallet ownership.
+        exclude group: 'me.didit', module: 'didit-sdk-wallet'
+    }
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'

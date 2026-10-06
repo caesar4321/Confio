@@ -73,6 +73,9 @@ allprojects {
         google()
         maven {
             url = uri("https://raw.githubusercontent.com/didit-protocol/sdk-android/main/repository")
+            // Only Didit's artifacts: unfiltered, Gradle probes this host for every
+            // dependency and a 429 disables the repository mid-build.
+            content { includeGroup "me.didit" }
         }
         maven { url 'https://www.jitpack.io' }
     }

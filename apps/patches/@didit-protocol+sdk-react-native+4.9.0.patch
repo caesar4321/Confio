@@ -11,7 +11,7 @@ index b5d106a..3f9db92 100644
  
  @end
 diff --git a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
-index 9a20595..ca249d9 100644
+index 9a20595..0f7ec52 100644
 --- a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
 +++ b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
 @@ -1,4 +1,5 @@
@@ -41,45 +41,26 @@ index 9a20595..ca249d9 100644
  // MARK: - Codegen Struct → NSDictionary Helpers
  
  - (NSDictionary *)configDictFrom:(JS::NativeSdkReactNative::VerificationConfig &)config
-@@ -192,9 +200,39 @@ static NSError *DiditTransactionNSError(NSString *message, NSDictionary *userInf
+@@ -192,9 +200,20 @@ static NSError *DiditTransactionNSError(NSString *message, NSDictionary *userInf
      return std::make_shared<facebook::react::NativeSdkReactNativeSpecJSI>(params);
  }
  
 -+ (NSString *)moduleName
-+// Old-architecture (bridge) entry points: the app runs with
++// Old-architecture (bridge) entry point: the app runs with
 +// RCT_NEW_ARCH_ENABLED=0, where the TurboModule spec methods above are not
-+// reachable from NativeModules.
++// reachable from NativeModules. Only startVerification(token) is used.
 +RCT_REMAP_METHOD(startVerification,
 +                 startVerificationLegacy:(NSString *)token
 +                 config:(NSDictionary * _Nullable)config
 +                 resolver:(RCTPromiseResolveBlock)resolve
 +                 rejecter:(RCTPromiseRejectBlock)reject)
-+{
+ {
+-    return @"SdkReactNative";
 +    [_bridge startVerificationWithToken:token
 +                                 config:config
 +                             completion:^(NSDictionary *result) {
 +        resolve(result);
 +    }];
-+}
-+
-+RCT_REMAP_METHOD(startVerificationWithWorkflow,
-+                 startVerificationWithWorkflowLegacy:(NSString *)workflowId
-+                 vendorData:(NSString * _Nullable)vendorData
-+                 metadata:(NSString * _Nullable)metadata
-+                 contactDetails:(NSDictionary * _Nullable)contactDetails
-+                 expectedDetails:(NSDictionary * _Nullable)expectedDetails
-+                 config:(NSDictionary * _Nullable)config
-+                 resolver:(RCTPromiseResolveBlock)resolve
-+                 rejecter:(RCTPromiseRejectBlock)reject)
- {
--    return @"SdkReactNative";
-+    [_bridge startVerificationWithWorkflowWithWorkflowId:workflowId
-+                                              vendorData:vendorData
-+                                                metadata:metadata
-+                                          contactDetails:contactDetails
-+                                         expectedDetails:expectedDetails
-+                                                  config:config
-+                                              completion:^(NSDictionary *result) { resolve(result); }];
  }
  
  @end

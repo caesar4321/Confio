@@ -12,7 +12,7 @@ import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
-import { getDiditResultSessionId, startDiditVerification } from '../services/diditService';
+import { getDiditErrorMessage, getDiditResultSessionId, startDiditVerification } from '../services/diditService';
 import { createAdditionalDocumentSession, syncAdditionalDocument } from '../services/localMoney';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'AdditionalDocument'>;
@@ -61,7 +61,7 @@ export default function AdditionalDocumentScreen() {
         return;
       }
       if (sdk?.type === 'failed') {
-        throw new Error(sdk?.errorMessage || 'No se pudo completar la verificación.');
+        throw new Error(getDiditErrorMessage(sdk) || 'No se pudo completar la verificación.');
       }
       const outcome = await syncAdditionalDocument(getDiditResultSessionId(sdk, session.sessionId) || session.sessionId);
       if (outcome.status === 'verified') {

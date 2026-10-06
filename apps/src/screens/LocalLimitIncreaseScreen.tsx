@@ -24,7 +24,7 @@ import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
-import { getDiditResultSessionId, startDiditVerification } from '../services/diditService';
+import { getDiditErrorMessage, getDiditResultSessionId, startDiditVerification } from '../services/diditService';
 import {
   LIMIT_INCREASE_REQUEST,
   LIMIT_INCREASE_REQUIREMENTS,
@@ -134,7 +134,7 @@ export default function LocalLimitIncreaseScreen() {
         return;
       }
       if (sdk?.type === 'failed') {
-        throw new Error(sdk?.errorMessage || 'No se pudo completar la verificación.');
+        throw new Error(getDiditErrorMessage(sdk) || 'No se pudo completar la verificación.');
       }
       await syncLimitIncreaseVerification(getDiditResultSessionId(sdk, session.sessionId) || session.sessionId);
       setStartNewFrom(null);
