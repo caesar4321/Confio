@@ -2,6 +2,8 @@
 
 ## Qué es Confío
 - Confío es una app de dólares digitales para guardar, enviar, recibir y pagar. Tú controlas tu dinero.
+
+## Lo que Confío no ofrece (dilo solo cuando pregunten por eso)
 - Confío no ofrece préstamos, créditos ni adelantos de dinero.
 - Ninguna opción de ahorro o inversión en Confío tiene ganancias garantizadas.
 
@@ -10,6 +12,16 @@
 - Empezó al ver cómo la hiperinflación en Venezuela dejaba a la gente sin poder comprar comida ni gasolina: quiso que los dólares digitales sirvieran a las personas.
 - Julian explica Confío en español en redes sociales (en TikTok: @julianmoonluna), con una audiencia de unas 480.000 personas.
 - Confío es de código abierto: la app, el servidor y los contratos están publicados en GitHub (github.com/caesar4321/Confio) y los contratos están verificados en BscScan.
+
+## Por qué confiar en Confío
+- Tu dinero lo controlas tú: las claves de tu billetera están en tu teléfono y en el respaldo de tu propia cuenta de Google o Apple; Confío no las tiene. Cada envío lo firmas tú: Confío no puede firmar movimientos desde tu billetera.
+- Si algún día la app o los servidores de Confío no funcionaran, la Salida de emergencia en Perfil te deja mover tu dinero sin depender de ellos.
+- Para mover tu dinero siempre confirmas tú, con tu huella o Confío Face.
+- Todo es público y verificable: el código de la app, el servidor y los contratos está en GitHub, y los contratos están verificados en BscScan.
+- Confío Dollar está respaldado 1 a 1 por USDT, y Confío Dollar+ por USDY de Ondo, respaldado por bonos del Tesoro de EE.UU.
+- Julian Moon da la cara: su nombre, su historia y su rostro son públicos, construye la app desde 2019 y la explica en español en redes sociales ante una audiencia de unas 480.000 personas.
+- Si preguntan si Confío puede congelar o bloquear su dinero: los contratos de Confío Dollar y Confío Dollar+ tienen controles de emergencia que solo puede usar la tesorería multifirma de Confío: pausar o congelar una dirección (por ejemplo ante un hackeo o una orden legal) y actualizar el código de esos contratos. Todo lo que hace la multifirma queda público en BscScan. Mientras un contrato esté en pausa, tampoco funciona la Salida de emergencia.
+
 
 ## Comisiones de Confío
 - Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir. Es decir, 0,9% cuando tus dólares entran al sistema de Confío (recarga o depósito de USDT) y 0,9% cuando salen (retiro o envío a una billetera externa).
@@ -70,8 +82,8 @@
 
 ## Seguridad
 - Confío Face (una selfie en vivo) confirma que eres tú cuando mueves dinero.
-- Tu billetera se respalda cifrada en tu cuenta personal: Google Drive en Android, llavero de iCloud en iPhone. Si cambias de teléfono, entra con la misma cuenta de Google o Apple.
-- La Salida de emergencia, siempre en Perfil, te deja mover tu dinero sin depender de Confío.
+- Tu billetera se respalda en tu cuenta personal: Google Drive en Android, llavero de iCloud en iPhone. Protege bien esa cuenta (contraseña fuerte y verificación en dos pasos): quien entre en ella podría recuperar tu billetera. Si cambias de teléfono, entra con la misma cuenta de Google o Apple.
+- La Salida de emergencia, siempre en Perfil, te deja mover tu dinero sin depender de la app ni de los servidores de Confío.
 - Confío nunca te pide contraseñas, códigos ni frases secretas. Si alguien te los pide, es una estafa.
 - No tienes una frase semilla que guardar: si recuperas tu cuenta de Google o Apple, recuperas tu cuenta de Confío.
 

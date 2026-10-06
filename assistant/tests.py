@@ -1535,3 +1535,26 @@ class PortfolioAndNeedsTests(TestCase):
         out = StringIO()
         call_command('assistant_needs_report', '--days', '7', stdout=out)
         self.assertIn('Needs in the last 7 days', out.getvalue())
+
+
+class PetUrlReuseTests(TestCase):
+    def test_same_url_until_credentials_near_expiry(self):
+        from datetime import timedelta
+
+        from django.core.cache import cache
+        from django.utils import timezone
+
+        from . import pets
+        pet = SimpleNamespace(id=1, image_key='assistant/pets/1/abc.png', deleted_at=None)
+        cache.delete('assistant_pet_url:assistant/pets/1/abc.png')
+        creds = SimpleNamespace(_expiry_time=timezone.now() + timedelta(minutes=60))
+        with patch('security.s3_utils.generate_presigned_get', side_effect=['u1', 'u2', 'u3']), \
+                patch('boto3._get_default_session') as session, \
+                self.settings(AWS_ACCESS_KEY_ID='', AWS_SESSION_TOKEN=''):
+            session.return_value.get_credentials.return_value = creds
+            self.assertEqual(pets.pet_url(pet), 'u1')
+            self.assertEqual(pets.pet_url(pet), 'u1')  # reused: the app keeps its loaded image
+            cache.delete('assistant_pet_url:assistant/pets/1/abc.png')
+            creds._expiry_time = timezone.now() + timedelta(minutes=4)  # about to rotate
+            self.assertEqual(pets.pet_url(pet), 'u2')
+            self.assertEqual(pets.pet_url(pet), 'u3')  # not cached: it would die with the credentials
