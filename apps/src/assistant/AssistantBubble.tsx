@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
+  Image,
   Keyboard,
   NativeModules,
   PanResponder,
@@ -43,6 +44,8 @@ const MAX_HINTS_PER_SESSION = 4;
 type Hint = ScreenHint & { kind: 'screen' | 'unread' | 'note' | 'probe' };
 // What the chat said when it moved the app ("Abrí Recargar: …").
 const NOTE_VISIBLE_MS = 10_000;
+// Longest the bubble waits for a custom pet photo before appearing anyway.
+const PHOTO_WAIT_MS = 2500;
 const NOTE_MAX_CHARS = 180;
 
 export default function AssistantBubble() {
@@ -74,7 +77,7 @@ export default function AssistantBubble() {
     skip: !enabled,
   });
   // Profile only (mascot, color, position). Fails quietly on servers without Confio Assistant.
-  const { data: threadData } = useQuery(GET_ASSISTANT_THREAD, {
+  const { data: threadData, loading: threadLoading } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: 1, contextKey },
     fetchPolicy: 'cache-and-network',
     skip: !enabled,
@@ -91,6 +94,34 @@ export default function AssistantBubble() {
   serverHintsRef.current = suggestionData?.assistantSuggestions?.hints ?? null;
   const [saveProfile] = useMutation(UPDATE_ASSISTANT_PROFILE);
   const profile = threadData?.assistantThread?.profile;
+  // Appear only once we know what to show and where: before the profile
+  // arrives the bubble would be the generic icon at the default spot, then
+  // jump to the user's pet and saved position. A custom pet's photo is
+  // fetched first (at most PHOTO_WAIT_MS) so it never shows an empty circle.
+  const settled = !!threadData || !threadLoading;
+  const petUrl = profile?.mascot === 'CUSTOM' ? profile?.customPetUrl : null;
+  const [photoReady, setPhotoReady] = useState(false);
+  useEffect(() => {
+    if (!petUrl || photoReady) {
+      return undefined;
+    }
+    let done = false;
+    const finish = () => {
+      if (!done) {
+        done = true;
+        setPhotoReady(true);
+      }
+    };
+    const timer = setTimeout(finish, PHOTO_WAIT_MS);
+    Image.prefetch(petUrl).then(finish, finish);
+    return () => {
+      done = true;
+      clearTimeout(timer);
+    };
+  }, [petUrl, photoReady]);
+  // The saved side/height land one render after the profile (an effect).
+  const [positionApplied, setPositionApplied] = useState(false);
+  const ready = settled && (!profile || positionApplied) && (!petUrl || photoReady);
   // The support chat exists (server knows it) / is answered by Confio Assistant.
   const chatAvailable = !!threadData?.assistantThread;
   const iaAvailable = !!threadData?.assistantThread?.enabled;
@@ -106,6 +137,7 @@ export default function AssistantBubble() {
       positionLoaded.current = true;
       setSide(profile.bubbleSide === 'left' ? 'left' : 'right');
       setHeightFraction(Math.min(Math.max(Number(profile.bubbleHeight) || 0, 0), 1));
+      setPositionApplied(true);
     }
   }, [profile]);
 
@@ -144,11 +176,23 @@ export default function AssistantBubble() {
   }, [restX, restY, setBubbleAnchor]);
 
   const pan = useRef(new Animated.ValueXY({ x: restX, y: restY })).current;
+  const placed = useRef(false);
+  const fade = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    if (!placed.current) {
+      // First appearance: straight at the saved spot, fading in.
+      placed.current = true;
+      pan.setValue({ x: restX, y: restY });
+      Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: false }).start();
+      return;
+    }
     if (!dragging) {
       Animated.spring(pan, { toValue: { x: restX, y: restY }, useNativeDriver: false, friction: 7 }).start();
     }
-  }, [restX, restY, dragging, pan]);
+  }, [ready, restX, restY, dragging, pan, fade]);
 
   // Hold to talk: press and hold still → record a voice note; release →
   // send it to Confio Assistant; slide away → cancel.
@@ -342,7 +386,7 @@ export default function AssistantBubble() {
     return () => clearTimeout(timer);
   }, [hint]);
 
-  if (!visible) {
+  if (!visible || !ready) {
     return null;
   }
 
@@ -375,7 +419,7 @@ export default function AssistantBubble() {
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       <Animated.View
-        style={[styles.bubbleWrap, { transform: pan.getTranslateTransform() }]}
+        style={[styles.bubbleWrap, { opacity: fade, transform: pan.getTranslateTransform() }]}
         {...responder.panHandlers}
       >
         {hint && !dragging ? (
