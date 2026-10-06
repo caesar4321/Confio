@@ -278,3 +278,12 @@ it('offers no browser fallback on a document under review', async () => {
   expect(browserLink(tree)).toHaveLength(0);
   await act(async () => tree.unmount());
 });
+
+it('offers the browser fallback on an expired country document', async () => {
+  mockDocuments = [{id: '1', documentType: 'national_id', issuingCountry: 'PY', status: 'expired',
+    isAdditional: false, localCountries: [], rejectedReason: null}];
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  expect(browserLink(tree)).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
