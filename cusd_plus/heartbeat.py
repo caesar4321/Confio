@@ -28,7 +28,7 @@ from celery import shared_task
 from django.conf import settings
 from django.core.cache import cache
 from django.db import close_old_connections, connection
-from eth_utils import keccak
+from eth_utils import keccak, to_checksum_address
 
 from config.ops_alerts import send_ops_alert, send_public_notice
 
@@ -272,7 +272,9 @@ def post_heartbeat() -> dict:
             raise HeartbeatError(f'beater {sender} BNB too low ({balance} wei) — refill needed')
         raw, tx_hash = signer.sign_transaction({
             'chainId': settings.BSC_CHAIN_ID, 'nonce': nonce, 'gasPrice': gas_price,
-            'gas': gas_limit, 'to': heartbeat, 'value': 0, 'data': SEL_BEAT,
+            # eth_account rejects a lowercase (non-checksum) 'to' — the cause of
+            # the first production beat failing on 2026-10-06.
+            'gas': gas_limit, 'to': to_checksum_address(heartbeat), 'value': 0, 'data': SEL_BEAT,
         })
         try:
             _rpc('eth_sendRawTransaction', [raw])

@@ -6,6 +6,8 @@ ConfioHeartbeat keeper + monitor (cusd_plus/heartbeat.py), RPC and KMS mocked.
 """
 from unittest import mock
 
+from eth_utils import to_checksum_address
+
 from django.test import SimpleTestCase, override_settings
 
 from cusd_plus import heartbeat as hb
@@ -49,6 +51,13 @@ class FakeSigner:
         self.signed = []
 
     def sign_transaction(self, tx):
+        # Validate exactly as the real KMS signer does (eth_account), so a
+        # field the real signer rejects fails here too — a lowercase 'to'
+        # slipped through a permissive fake and failed the first prod beat.
+        from eth_account._utils.legacy_transactions import (
+            serializable_unsigned_transaction_from_dict,
+        )
+        serializable_unsigned_transaction_from_dict(dict(tx))
         self.signed.append(tx)
         return '0xraw', TX_HASH
 
@@ -151,7 +160,7 @@ class PostHeartbeatTests(SimpleTestCase):
         self.assertEqual(result['beat'], TX_HASH)
         self.assertEqual(len(self.signer.signed), 1)
         tx = self.signer.signed[0]
-        self.assertEqual(tx['to'], HEARTBEAT)
+        self.assertEqual(tx['to'], to_checksum_address(HEARTBEAT))
         self.assertEqual(tx['data'], hb.SEL_BEAT)
         self.assertEqual(tx['nonce'], 7)
         self.lock.assert_called_once()
