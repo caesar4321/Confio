@@ -201,7 +201,7 @@ class PostHeartbeatTests(SimpleTestCase):
             finally:
                 hb.post_confio_heartbeat.pop_request()
         alert.assert_called_once()
-        self.assertIn('FAILED after every retry', alert.call_args.args[0])
+        self.assertIn('FALLÓ tras todos los reintentos', alert.call_args.args[0])
 
 
 class SystemHealthTests(SimpleTestCase):
@@ -280,7 +280,7 @@ class CheckHeartbeatTests(SimpleTestCase):
         self.assertIn('STALE', logs.output[0])
         # Pages the team on Telegram, not only the log.
         self.alert.assert_called_once()
-        self.assertIn('STALE', self.alert.call_args.args[0])
+        self.assertIn('ATRASADO', self.alert.call_args.args[0])
         self.assertEqual(self.alert.call_args.kwargs['dedupe_key'], 'heartbeat_stale')
 
     def test_recovery_is_announced_once_after_a_stale_alert(self):
@@ -289,7 +289,7 @@ class CheckHeartbeatTests(SimpleTestCase):
         self.alert.reset_mock()
         self._run(FakeChain(last_beat=NOW - 3600, balance=10**17))
         self.alert.assert_called_once()
-        self.assertIn('recovered', self.alert.call_args.args[0])
+        self.assertIn('recuperado', self.alert.call_args.args[0])
         self.alert.reset_mock()
         self._run(FakeChain(last_beat=NOW - 3600, balance=10**17))
         self.alert.assert_not_called()
@@ -418,3 +418,61 @@ class ChatSafeTests(SimpleTestCase):
                 mock.patch.object(hb, '_rpc', side_effect=RuntimeError('boom https://rpc.example/key/SECRET')):
             hb.check_heartbeat()
         self.assertNotIn('SECRET', alert.call_args.args[0])
+
+
+@override_settings(CONFIO_HEARTBEAT_ADDRESS=HEARTBEAT)
+class DailyReportTests(SimpleTestCase):
+    def test_success_posts_spanish_daily_status(self):
+        with mock.patch.object(hb, '_rpc', FakeChain(last_beat=NOW - 60, balance=48 * 10**15)), \
+                mock.patch.object(hb, 'send_ops_alert', return_value=True) as alert:
+            self.assertTrue(hb.daily_report({'beat': '0x' + 'ab' * 32}))
+        text = alert.call_args.args[0]
+        self.assertIn('todo normal', text)
+        self.assertIn('https://bscscan.com/tx/0x' + 'ab' * 32, text)
+        self.assertIn('Salida de emergencia: cerrada', text)
+        self.assertIn(hb._fecha_utc(NOW - 60 + 14 * 86400), text)
+        self.assertIn('0.0480 BNB', text)
+        self.assertEqual(alert.call_args.kwargs['dedupe_key'], f'heartbeat_daily:{NOW // 86400}')
+
+    def test_spanish_date(self):
+        self.assertEqual(hb._fecha_utc(1792453731), '19 oct 2026, 23:48 UTC')
+
+    def test_task_reports_after_a_beat_and_after_a_recent_skip_only(self):
+        for result, expected in (({'beat': '0x1'}, True), ({'skipped': 'recent'}, True),
+                                 ({'skipped': 'unconfigured'}, False)):
+            with mock.patch.object(hb, 'post_heartbeat', return_value=result), \
+                    mock.patch.object(hb, 'daily_report') as report:
+                self.assertEqual(hb.post_confio_heartbeat.run(), result)
+            self.assertEqual(report.called, expected, result)
+
+    def test_failed_beat_never_reports_normal(self):
+        with mock.patch.object(hb, 'post_heartbeat', side_effect=hb.HeartbeatError('x')), \
+                mock.patch.object(hb, 'daily_report') as report, \
+                mock.patch.object(hb, 'send_ops_alert'), \
+                mock.patch.object(hb.post_confio_heartbeat, 'retry', side_effect=RuntimeError('retry')):
+            with self.assertRaises(RuntimeError):
+                hb.post_confio_heartbeat.run()
+        report.assert_not_called()
+
+
+@override_settings(CONFIO_HEARTBEAT_ADDRESS=HEARTBEAT,
+                   CONFIO_HEARTBEAT_BEATER_MIN_BALANCE_WEI=10**16)
+class DailyReportEdgeTests(SimpleTestCase):
+    def test_low_beater_balance_is_never_reported_as_normal(self):
+        with mock.patch.object(hb, '_rpc', FakeChain(last_beat=NOW - 60, balance=10**15)), \
+                mock.patch.object(hb, 'send_ops_alert', return_value=True) as alert:
+            hb.daily_report({'beat': '0x1'})
+        text = alert.call_args.args[0]
+        self.assertNotIn('todo normal', text)
+        self.assertIn('poco BNB', text)
+
+    def test_report_failures_never_fail_the_beat_task(self):
+        with mock.patch.object(hb, 'post_heartbeat', return_value={'beat': '0x1'}), \
+                mock.patch.object(hb, 'daily_report', side_effect=OverflowError('bad date')):
+            self.assertEqual(hb.post_confio_heartbeat.run(), {'beat': '0x1'})
+
+    def test_unreadable_chain_skips_the_report(self):
+        with mock.patch.object(hb, '_rpc', side_effect=RuntimeError('rpc down')), \
+                mock.patch.object(hb, 'send_ops_alert') as alert:
+            self.assertFalse(hb.daily_report({'beat': '0x1'}))
+        alert.assert_not_called()

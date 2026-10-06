@@ -40,6 +40,52 @@ logger = logging.getLogger(__name__)
 STALE_FLAG_KEY = 'confio_heartbeat:stale_alerted'
 
 
+_MESES = ('ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic')
+
+
+def _fecha_utc(ts: int) -> str:
+    """'19 oct 2026, 14:40 UTC' — chain time is UTC; the team spans timezones."""
+    import datetime
+    d = datetime.datetime.fromtimestamp(int(ts), tz=datetime.timezone.utc)
+    return f'{d.day} {_MESES[d.month - 1]} {d.year}, {d:%H:%M} UTC'
+
+
+def daily_report(result: dict) -> bool:
+    """Post the daily 'all normal' status to the ops group (Spanish).
+
+    Sent after a confirmed beat (or when the chain already had a fresh one),
+    so the team sees the heartbeat every day — silence in the group is itself
+    a signal. Deduped per day so retries and a second scheduler don't repeat it.
+    """
+    heartbeat = heartbeat_address()
+    try:
+        last = _call_uint(heartbeat, SEL_LAST_BEAT)
+        silence = _call_uint(heartbeat, SEL_SILENCE_REQUIRED)
+        now = _chain_time()
+        beater = _call_address(heartbeat, SEL_BEATER)
+        balance = int(_rpc('eth_getBalance', [beater, 'latest']), 16) if beater else None
+    except Exception as exc:  # noqa: BLE001 — the beat itself already succeeded
+        logger.warning('Confío heartbeat daily report: chain read failed: %s', exc)
+        return False
+    min_balance = int(getattr(settings, 'CONFIO_HEARTBEAT_BEATER_MIN_BALANCE_WEI',
+                              10_000_000_000_000_000))
+    low = balance is None or balance < min_balance
+    headline = ('⚠️ Latido diario de Confío: latido OK, pero al emisor le queda poco BNB. '
+                'Recárgalo antes de que fallen los latidos.' if low
+                else '💚 Latido diario de Confío: todo normal.')
+    tx = result.get('beat')
+    linea_tx = (f'Transacción: https://bscscan.com/tx/{tx}' if tx
+                else f'Ya había un latido reciente (hace {(now - last) / 3600:.1f} h).')
+    saldo = 'desconocido' if balance is None else f'{balance / 1e18:.4f} BNB'
+    return send_ops_alert(
+        f'{headline}\n'
+        f'{linea_tx}\n'
+        'Salida de emergencia: cerrada. Solo se abriría el '
+        f'{_fecha_utc(last + silence)} si Confío dejara de publicar su latido.\n'
+        f'Saldo del emisor del latido: {saldo}.',
+        dedupe_key=f'heartbeat_daily:{now // 86400}', dedupe_seconds=36 * 3600)
+
+
 def _chat_safe(exc) -> str:
     """Exception text for the team chat: URLs reduced to their host, since
     RPC errors embed full endpoint URLs and a paid endpoint's key lives in its
@@ -248,19 +294,27 @@ def post_heartbeat() -> dict:
 @shared_task(name='cusd_plus.post_confio_heartbeat', bind=True, max_retries=BEAT_MAX_RETRIES)
 def post_confio_heartbeat(self):
     try:
-        return post_heartbeat()
+        result = post_heartbeat()
     except HeartbeatError as exc:
         logger.error('Confío heartbeat beat FAILED (attempt %s/%s): %s — Emergency Exit '
                      'opens for every user if beats stay missing for silenceRequired',
                      self.request.retries + 1, BEAT_MAX_RETRIES + 1, exc)
         if self.request.retries >= BEAT_MAX_RETRIES:
             send_ops_alert(
-                '🔴 Confío heartbeat: today\'s beat() FAILED after every retry.\n'
-                f'Last error: {_chat_safe(exc)}\n'
-                'If beats stay missing for silenceRequired (14 days), Salida de emergencia '
-                'opens for EVERY user, frozen accounts included.',
+                '🔴 Latido de Confío: el latido de hoy FALLÓ tras todos los reintentos.\n'
+                f'Último error: {_chat_safe(exc)}\n'
+                'Si faltan latidos durante 14 días, la Salida de emergencia se abre para '
+                'TODOS los usuarios, incluidas las cuentas congeladas.',
                 dedupe_key='heartbeat_beat_failed', dedupe_seconds=6 * 3600)
         raise self.retry(exc=exc, countdown=BEAT_RETRY_COUNTDOWN_S)
+    if 'beat' in result or result.get('skipped') == 'recent':
+        # The beat already succeeded; the report must never turn it into a
+        # task failure.
+        try:
+            daily_report(result)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('Confío heartbeat daily report failed: %s', exc)
+    return result
 
 
 def check_heartbeat() -> dict:
@@ -277,8 +331,8 @@ def check_heartbeat() -> dict:
     except Exception as exc:  # noqa: BLE001 — a blind monitor is itself an alert
         logger.error('Confío heartbeat monitor: chain read failed: %s', exc)
         send_ops_alert(
-            f'🟠 Confío heartbeat monitor cannot read the chain: {_chat_safe(exc)}\n'
-            'It cannot tell whether beats are landing. Check the BSC RPC pool.',
+            f'🟠 El monitor del latido de Confío no puede leer la blockchain: {_chat_safe(exc)}\n'
+            'No puede confirmar si los latidos están llegando. Revisa los RPC de BSC.',
             dedupe_key='heartbeat_read_failed', dedupe_seconds=3 * 3600)
         return {'skipped': 'read_failed'}
 
@@ -299,10 +353,10 @@ def check_heartbeat() -> dict:
         # Hourly while stale (the monitor runs hourly; the dedupe only stops
         # two workers double-posting the same run).
         send_ops_alert(
-            f'🚨 Confío heartbeat STALE: no beat on chain for {age / 3600:.1f}h.\n'
-            f'Salida de emergencia opens for EVERY user (frozen accounts included) in '
-            f'{opens_in_h:.1f}h unless beat() lands.\n'
-            f'Contract {heartbeat}\nBeater {beater or "?"}',
+            f'🚨 Latido de Confío ATRASADO: {age / 3600:.1f} h sin latido en la blockchain.\n'
+            'La Salida de emergencia se abrirá para TODOS los usuarios (incluidas las cuentas '
+            f'congeladas) en {opens_in_h:.1f} h si no llega un latido.\n'
+            f'Contrato {heartbeat}\nEmisor {beater or "?"}',
             dedupe_key='heartbeat_stale', dedupe_seconds=50 * 60)
         try:
             cache.set(STALE_FLAG_KEY, 1, timeout=30 * 24 * 3600)
@@ -316,7 +370,7 @@ def check_heartbeat() -> dict:
         except Exception:  # noqa: BLE001
             was_stale = None
         if was_stale:
-            send_ops_alert(f'✅ Confío heartbeat recovered: last beat {age / 3600:.1f}h ago.')
+            send_ops_alert(f'✅ Latido de Confío recuperado: último latido hace {age / 3600:.1f} h.')
 
     min_balance = int(getattr(settings, 'CONFIO_HEARTBEAT_BEATER_MIN_BALANCE_WEI',
                               10_000_000_000_000_000))
@@ -327,9 +381,9 @@ def check_heartbeat() -> dict:
                      beater or '?', 'unknown' if balance is None else f'{balance / 1e18:.6f}',
                      f'{min_balance / 1e18:.6f}')
         send_ops_alert(
-            f'🟠 Confío heartbeat beater {beater or "?"} is low on BNB: '
-            f'{"unknown" if balance is None else f"{balance / 1e18:.6f}"} BNB '
-            f'(alert under {min_balance / 1e18:.6f}). Refill before beats start failing.',
+            f'🟠 Al emisor del latido {beater or "?"} le queda poco BNB: '
+            f'{"desconocido" if balance is None else f"{balance / 1e18:.6f} BNB"} '
+            f'(alerta bajo {min_balance / 1e18:.6f}). Recárgalo antes de que fallen los latidos.',
             dedupe_key='heartbeat_low_balance', dedupe_seconds=12 * 3600)
 
     if not result['stale'] and not result['low_balance']:
