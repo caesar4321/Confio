@@ -29,6 +29,7 @@ dependencyResolutionManagement {
         }
         maven {
             url("https://raw.githubusercontent.com/didit-protocol/sdk-android/main/repository")
+            content { includeGroup "me.didit" }
         }
         mavenCentral {
             // We don't want to fetch react-native from Maven Central as there are

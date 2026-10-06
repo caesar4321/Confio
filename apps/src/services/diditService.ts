@@ -77,3 +77,13 @@ export function getDiditResultSessionId(result: any, fallbackSessionId?: string 
     null
   );
 }
+
+// iOS resolves the native result ({ errorType, errorMessage }); the Android JS
+// wrapper maps it to { error: { type, message } }.
+export function getDiditErrorMessage(result: any): string | null {
+  const type = result?.errorType || result?.error?.type;
+  if (type === 'retryBlocked') {
+    return 'Alcanzaste el máximo de intentos de verificación. Contacta a soporte para continuar.';
+  }
+  return result?.errorMessage || result?.error?.message || null;
+}

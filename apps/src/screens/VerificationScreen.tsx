@@ -24,7 +24,7 @@ import {
 } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { useRampCountry } from '../hooks/useRampCountry';
-import { getDiditResultSessionId, startDiditVerification } from '../services/diditService';
+import { getDiditErrorMessage, getDiditResultSessionId, startDiditVerification } from '../services/diditService';
 import { countryName } from '../config/localRails';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
@@ -335,7 +335,7 @@ const VerificationScreen = () => {
         return;
       }
       if (sdkResult?.type === 'failed') {
-        throw new Error(sdkResult?.errorMessage || 'No se pudo completar la verificación con Didit.');
+        throw new Error(getDiditErrorMessage(sdkResult) || 'No se pudo completar la verificación con Didit.');
       }
       const resolvedSessionId = getDiditResultSessionId(sdkResult, createdSessionId);
       if (!resolvedSessionId) {
