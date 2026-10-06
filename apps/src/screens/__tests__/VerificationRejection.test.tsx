@@ -173,3 +173,27 @@ it('keeps the browser fallback off business accounts and additional documents', 
   expect(browserLink(tree)).toHaveLength(0);
   await act(async () => tree.unmount());
 });
+
+it('syncs only the browser session Didit redirects back with', async () => {
+  mockPersonalStatus = null;
+  mockSyncSession.mockReset().mockResolvedValue({data: {syncDiditVerificationSession: {success: true, verificationStatus: 'pending'}}});
+  mockBrowserSession.mockResolvedValue({data: {createDiditVerificationSession: {success: true,
+    session: {sessionId: 'web-1', sessionUrl: 'https://verify.didit.me/session/web-1'}}}});
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  const handlers: Array<(event: {url: string}) => void> = [];
+  const listen = jest.spyOn(Linking, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+    handlers.push(handler);
+    return {remove: jest.fn()};
+  }) as any);
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  await act(async () => { await browserLink(tree)[0].props.onPress(); });
+  await act(async () => { handlers.forEach(h => h({url: 'confio://verification?verificationSessionId=other&status=Approved'})); });
+  expect(mockSyncSession).not.toHaveBeenCalled();
+  await act(async () => { handlers.forEach(h => h({url: 'confio://verification?verificationSessionId=web-1&status=Approved'})); });
+  expect(mockSyncSession).toHaveBeenCalledTimes(1);
+  expect(mockSyncSession).toHaveBeenCalledWith({variables: {sessionId: 'web-1'}});
+  await act(async () => tree.unmount());
+  open.mockRestore();
+  listen.mockRestore();
+});

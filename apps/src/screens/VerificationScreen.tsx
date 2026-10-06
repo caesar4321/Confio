@@ -51,6 +51,11 @@ const MY_IDENTITY_DOCUMENTS = gql`
 // Only Didit's own hosted verification page is ever opened in the browser.
 const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/;
 
+const openDiditSessionUrl = async (url: unknown, unsafeMessage: string) => {
+  if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) throw new Error(unsafeMessage);
+  await Linking.openURL(url);
+};
+
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
 
 type IdentityDocument = {
@@ -259,6 +264,9 @@ const VerificationScreen = () => {
     const listener = Linking.addEventListener('url', ({ url }) => {
       const sessionId = browserSessionRef.current;
       if (!sessionId || !/^confio:\/\/verification(?:[/?#]|$)/.test(url)) return;
+      // Didit names the finished session in its redirect; never sync another one.
+      const redirected = /[?&]verificationSessionId=([^&#]+)/.exec(url)?.[1];
+      if (redirected && decodeURIComponent(redirected) !== sessionId) return;
       browserSessionRef.current = null;
       syncSessionAndRefresh(sessionId).catch((error: any) => {
         setBanner({ variant: 'error', message: error?.message || 'No se pudo sincronizar la decisión de Didit.' });
@@ -267,10 +275,14 @@ const VerificationScreen = () => {
     return () => listener.remove();
   }, [syncSessionAndRefresh]);
 
+  // A browser session belongs to the account that started it.
+  React.useEffect(() => { browserSessionRef.current = null; }, [isBusinessAccount]);
+
   // Business verification resumes its pending hosted session; personal
   // verification starts a new native session.
   const handleStartDidit = React.useCallback(async () => {
     setIsLaunchingDidit(true);
+    browserSessionRef.current = null;
     try {
       const { data } = await createDiditSession();
       const result = data?.createDiditVerificationSession;
@@ -279,11 +291,7 @@ const VerificationScreen = () => {
       }
       const createdSessionId = result.session.sessionId;
       if (isBusinessAccount) {
-        const url = result.session.sessionUrl;
-        if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) {
-          throw new Error('No se recibió un enlace seguro para verificar tu negocio.');
-        }
-        await Linking.openURL(url);
+        await openDiditSessionUrl(result.session.sessionUrl, 'No se recibió un enlace seguro para verificar tu negocio.');
         setBanner({ variant: 'info', message: 'Completa los datos del negocio, sus documentos y las verificaciones de sus representantes en Didit. Al volver, actualiza esta pantalla para ver el resultado.' });
         await refreshStatuses();
         return;
@@ -315,16 +323,12 @@ const VerificationScreen = () => {
     try {
       const { data } = await createDiditBrowserSession();
       const result = data?.createDiditVerificationSession;
-      const url = result?.session?.sessionUrl;
       const sessionId = result?.session?.sessionId;
       if (!result?.success || !sessionId) {
         throw new Error(result?.error || 'No se pudo crear la sesión de Didit.');
       }
-      if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) {
-        throw new Error('No se recibió un enlace seguro para verificarte en el navegador.');
-      }
       browserSessionRef.current = sessionId;
-      await Linking.openURL(url);
+      await openDiditSessionUrl(result.session.sessionUrl, 'No se recibió un enlace seguro para verificarte en el navegador.');
       setBanner({ variant: 'info', message: 'Termina la verificación en tu navegador. Al volver, actualizaremos tu estado.' });
     } catch (error: any) {
       browserSessionRef.current = null;
@@ -349,6 +353,8 @@ const VerificationScreen = () => {
   const verifiedCount = list.filter(doc => doc.status === 'verified').length;
   const hasPending = list.some(doc => doc.status === 'pending');
   const hasCountryAttempt = list.some(doc => !doc.isAdditional);
+  // One browser fallback per screen: on the first unverified country document.
+  const browserFallbackDocId = list.find(doc => !doc.isAdditional && normalizeStatus(doc.status) !== 'verified')?.id;
 
   // ─── Pieces ───
 
@@ -437,7 +443,7 @@ const VerificationScreen = () => {
               <Icon name="refresh-cw" size={15} color={colors.primaryDark} />
               <Text style={styles.inlineActionText}>¿Te equivocaste? Envía otra verificación</Text>
             </TouchableOpacity>
-            {doc.isAdditional ? null : browserFallback}
+            {doc.id === browserFallbackDocId ? browserFallback : null}
           </>
         ) : (
           <>
@@ -448,7 +454,7 @@ const VerificationScreen = () => {
               <Icon name="refresh-cw" size={15} color={colors.primaryDark} />
               <Text style={styles.inlineActionText}>Intentar de nuevo</Text>
             </TouchableOpacity>
-            {doc.isAdditional ? null : browserFallback}
+            {doc.id === browserFallbackDocId ? browserFallback : null}
           </>
         )}
       </View>
