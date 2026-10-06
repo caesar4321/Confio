@@ -245,9 +245,8 @@ const VerificationScreen = () => {
     // A document of another country, back from the browser: not the user's
     // identity verification, so neither its copy nor its conversion events.
     const verificationId = result.verification?.id;
-    const additional = verificationId
-      ? docs?.find(doc => doc.id === String(verificationId) && doc.isAdditional)
-      : undefined;
+    const synced = verificationId ? docs?.find(doc => doc.id === String(verificationId)) : undefined;
+    const additional = synced?.isAdditional ? synced : undefined;
     if (additional) {
       if (normalized === 'verified') {
         setBanner({ variant: 'success', message: 'Listo: tu documento quedó verificado.' });
@@ -259,7 +258,11 @@ const VerificationScreen = () => {
       return;
     }
     const detail = result.statusDetail || result.verification?.statusDetail;
-    if (normalized === 'verified') {
+    // Identity copy and conversion events only when the refreshed documents
+    // confirm the primary one; an unknown document (refetch failed) is neither.
+    if (normalized === 'verified' && !isBusinessAccount && !synced) {
+      setBanner({ variant: 'success', message: 'Listo: tu verificación quedó registrada.' });
+    } else if (normalized === 'verified') {
       const analyticsParams = { method: 'didit', provider: 'didit', verification_status: 'verified', session_id: sessionId };
       void AnalyticsService.logEvent('generate_lead', analyticsParams);
       void AnalyticsService.logEvent('didit_verified', analyticsParams);
