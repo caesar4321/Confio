@@ -61,6 +61,11 @@ const DIDIT_REDIRECT = /^confio:\/\/verification(?:[/?#]|$)/;
 // stays the same for the whole run, and the screen can mount many times.
 const syncedDiditRedirects = new Set<string>();
 
+// The server's own message, never a raw GraphQL or transport error.
+function userFacingMessage(error: any): string | null {
+  return error?.graphQLErrors?.length || error?.networkError ? null : error?.message || null;
+}
+
 function diditRedirectSessionId(url: string): string | null {
   const raw = /[?&]verificationSessionId=([^&#]+)/.exec(url)?.[1];
   if (!raw) return null;
@@ -204,10 +209,12 @@ const VerificationScreen = () => {
   const [createDiditSession] = useMutation(CREATE_DIDIT_VERIFICATION_SESSION);
   const [syncDiditSession] = useMutation(SYNC_DIDIT_VERIFICATION_SESSION);
   const [createDiditBrowserSession] = useMutation(CREATE_DIDIT_BROWSER_VERIFICATION_SESSION);
-  // The session the user is verifying on Didit's page in the browser. Returning
-  // to the app refreshes; Didit's redirect back (confio://verification) means
-  // the session finished, so it is synced without waiting for the webhook.
-  const browserSessionRef = React.useRef<string | null>(null);
+  // True while the user verifies on Didit's page in the browser: the next return
+  // to the app refreshes once. Didit's redirect back is synced separately below.
+  const awaitingBrowserRef = React.useRef(false);
+  // The active account is null until AccountContext loads; a redirect that
+  // cold-started the app must wait for it to know personal from business.
+  const accountReady = !!activeAccount;
 
   const [isLaunchingDidit, setIsLaunchingDidit] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
@@ -271,7 +278,9 @@ const VerificationScreen = () => {
 
   React.useEffect(() => {
     const listener = AppState.addEventListener('change', state => {
-      if (state === 'active' && (isBusinessAccount || browserSessionRef.current)) refreshStatuses().catch(() => {});
+      if (state !== 'active' || !(isBusinessAccount || awaitingBrowserRef.current)) return;
+      awaitingBrowserRef.current = false;
+      refreshStatuses().catch(() => {});
     });
     return () => listener.remove();
   }, [isBusinessAccount, refreshStatuses]);
@@ -281,6 +290,7 @@ const VerificationScreen = () => {
   // killed the app meanwhile (then it is the initial URL); the server checks
   // the session belongs to this user. Business keeps its webhook + refresh.
   React.useEffect(() => {
+    if (!accountReady) return undefined;
     const handle = (url: string | null) => {
       if (!url || !DIDIT_REDIRECT.test(url)) return;
       // Only the session the redirect names: a bare confio://verification link
@@ -292,28 +302,26 @@ const VerificationScreen = () => {
       // A business redirect is only marked seen, so switching to the personal
       // account later in this run never syncs it under the wrong context.
       if (isBusinessAccount) return;
-      browserSessionRef.current = null;
+      awaitingBrowserRef.current = false;
       syncSessionAndRefresh(sessionId).catch((error: any) => {
         // A transport failure may be retried by a later redirect.
         if (error?.networkError) syncedDiditRedirects.delete(sessionId);
-        // Never show a raw GraphQL/transport error; the server's own message is fine.
-        const message = error?.graphQLErrors?.length || error?.networkError ? null : error?.message;
-        setBanner({ variant: 'error', message: message || 'No se pudo sincronizar la decisión de Didit.' });
+        setBanner({ variant: 'error', message: userFacingMessage(error) || 'No se pudo sincronizar la decisión de Didit.' });
       });
     };
     Linking.getInitialURL().then(handle).catch(() => {});
     const listener = Linking.addEventListener('url', ({ url }) => handle(url));
     return () => listener.remove();
-  }, [isBusinessAccount, syncSessionAndRefresh]);
+  }, [accountReady, isBusinessAccount, syncSessionAndRefresh]);
 
   // A browser session belongs to the account that started it.
-  React.useEffect(() => { browserSessionRef.current = null; }, [isBusinessAccount]);
+  React.useEffect(() => { awaitingBrowserRef.current = false; }, [isBusinessAccount]);
 
   // Business verification resumes its pending hosted session; personal
   // verification starts a new native session.
   const handleStartDidit = React.useCallback(async () => {
     setIsLaunchingDidit(true);
-    browserSessionRef.current = null;
+    awaitingBrowserRef.current = false;
     try {
       const { data } = await createDiditSession();
       const result = data?.createDiditVerificationSession;
@@ -358,15 +366,14 @@ const VerificationScreen = () => {
       if (!result?.success || !sessionId) {
         throw new Error(result?.error || 'No se pudo crear la sesión de Didit.');
       }
-      browserSessionRef.current = sessionId;
+      awaitingBrowserRef.current = true;
       await openDiditSessionUrl(result.session.sessionUrl, 'No se recibió un enlace seguro para verificarte en el navegador.');
       setBanner({ variant: 'info', message: 'Termina la verificación en tu navegador. Al volver, actualizaremos tu estado.' });
     } catch (error: any) {
-      browserSessionRef.current = null;
+      awaitingBrowserRef.current = false;
       // A server without `inBrowser` rejects the document (HTTP 400, surfaced by
-      // Apollo as a network error): never show its raw GraphQL/transport error.
-      const message = error?.graphQLErrors?.length || error?.networkError ? null : error?.message;
-      setBanner({ variant: 'error', message: message || 'No se pudo abrir la verificación en el navegador.' });
+      // Apollo as a network error).
+      setBanner({ variant: 'error', message: userFacingMessage(error) || 'No se pudo abrir la verificación en el navegador.' });
     } finally {
       setIsLaunchingDidit(false);
     }
