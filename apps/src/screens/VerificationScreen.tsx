@@ -298,11 +298,17 @@ const VerificationScreen = () => {
     const title = verifiedCount
       ? (verifiedCount === 1 ? 'Tienes 1 documento verificado' : `Tienes ${verifiedCount} documentos verificados`)
       : hasPending ? 'Estamos revisando tu documento' : 'Verifica tu identidad';
+    // The last attempt ended without a result: say why (the session timed
+    // out, it was left unfinished, or the document expired).
+    const ended = !isBusinessAccount
+      && (personalKycData?.myPersonalKycStatus?.status || '').toLowerCase() === 'expired'
+      ? effectiveDetail
+      : null;
     const body = verifiedCount
       ? 'Abajo ves qué habilita cada uno. Puedes agregar otro documento cuando quieras.'
       : hasPending
         ? 'Suele tardar pocos minutos. Mientras tanto, puedes enviar otra verificación si te equivocaste.'
-        : 'Con un documento verificado desbloqueas recompensas, recargas y retiros, y cuentas locales.';
+        : ended || 'Con un documento verificado desbloqueas recompensas, recargas y retiros, y cuentas locales.';
     return (
       <View style={styles.summaryCard}>
         <View style={styles.summaryTop}>
