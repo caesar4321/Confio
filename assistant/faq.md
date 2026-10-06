@@ -23,12 +23,12 @@
 - Si preguntan si Confío puede congelar o bloquear su dinero: los contratos de Confío Dollar y Confío Dollar+ tienen controles de emergencia que solo puede usar la tesorería multifirma de Confío: pausar o congelar una dirección (por ejemplo ante un hackeo o una orden legal) y actualizar el código de esos contratos. Todo lo que hace la multifirma queda público en BscScan. Mientras un contrato esté en pausa, tampoco funciona la Salida de emergencia.
 
 
-## Comisiones de Confío
+## Comisiones de Confío (dilas solo cuando pregunten qué cobra Confío, cuánto cuesta o por qué reciben menos)
 - Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir. Es decir, 0,9% cuando tus dólares entran al sistema de Confío (recarga o depósito de USDT) y 0,9% cuando salen (retiro o envío a una billetera externa).
 - Gratis dentro de Confío: enviar a otro usuario y pasar entre Confío Dollar y Confío Dollar+. Confío paga la comisión de la red.
 - Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
 - Acciones: 0,30% de Confío en cada compra y venta.
-- Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti. El rendimiento es variable y no está garantizado.
+- Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti.
 - El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
 
 ## $CONFIO
@@ -72,6 +72,8 @@
 ## Verificación de identidad
 - Te verificas dentro de la app con tu documento y una selfie. Hace falta para recargar, retirar y abrir cuentas locales.
 - Tu nombre y fecha de nacimiento deben coincidir en todos tus documentos.
+- Si no tienes un documento del país de tu teléfono, puedes verificarte con tu pasaporte o un documento de otro país. Algunas funciones lo aceptan y otras (como recargar y retirar) piden el del país de tu teléfono: la app te dice cuál necesitas.
+
 - Para un límite mayor en cuentas locales se pide un comprobante de domicilio y unas preguntas sobre tus ingresos y el origen de tus fondos.
 - Fotografía tu documento original (no una foto de pantalla ni un escaneo) y evita reflejos sobre el holograma.
 
