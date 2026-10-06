@@ -3134,9 +3134,13 @@ class CreateDiditVerificationSession(graphene.Mutation):
             )
         except (DiditConfigurationError, DiditAPIError) as e:
             return CreateDiditVerificationSession(success=False, error=str(e), session=None, verification=None)
-        except Exception as e:
+        except Exception:
+            # Logged in full; the app shows its own message, never internal text.
             logger.exception("CreateDiditVerificationSession failed")
-            return CreateDiditVerificationSession(success=False, error=str(e), session=None, verification=None)
+            return CreateDiditVerificationSession(
+                success=False, error='No se pudo iniciar la verificación. Inténtalo de nuevo.',
+                session=None, verification=None,
+            )
 
 
 class SyncDiditVerificationSession(graphene.Mutation):
