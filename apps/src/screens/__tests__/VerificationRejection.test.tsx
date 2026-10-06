@@ -218,11 +218,21 @@ it('syncs a redirect that cold-started the app', async () => {
 it('leaves business redirects to the webhook', async () => {
   mockBusiness = true;
   mockSyncSession.mockReset();
+  const initial = jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('confio://verification?verificationSessionId=kyb-8&status=Approved');
   const urls = listenForUrls();
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
   await urls.fire('confio://verification?verificationSessionId=kyb-9&status=Approved');
   expect(mockSyncSession).not.toHaveBeenCalled();
   await act(async () => tree.unmount());
+
+  // Switching to the personal account later in the same run never syncs the
+  // business session that cold-started the app.
+  mockBusiness = false;
+  mockPersonalStatus = null;
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  expect(mockSyncSession).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+  initial.mockRestore();
   urls.restore();
 });
