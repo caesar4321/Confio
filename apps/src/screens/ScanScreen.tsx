@@ -3,7 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linkin
 import { Text } from '../components/common/AppText';
 import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
 import type { Code } from 'react-native-vision-camera';
-import { launchImageLibrary } from 'react-native-image-picker';
+import { pickFromLibrary } from '../services/systemPicker';
 import RNQRGenerator from 'rn-qr-generator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -327,7 +327,7 @@ export const ScanScreen = () => {
     if (isProcessing) return;
     const session = scanSession.current;
     try {
-      const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 });
+      const result = await pickFromLibrary({ mediaType: 'photo', selectionLimit: 1 });
       if (session !== scanSession.current) return;
       if (result.didCancel) return;
       if (result.errorCode) {
