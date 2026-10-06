@@ -2,7 +2,6 @@ import React from 'react';
 import {
   ActivityIndicator,
   AppState,
-  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -24,7 +23,7 @@ import {
 } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { useRampCountry } from '../hooks/useRampCountry';
-import { getDiditErrorMessage, getDiditResultSessionId, startDiditVerification } from '../services/diditService';
+import { getDiditErrorMessage, getDiditResultSessionId, openDiditSessionUrl, startDiditVerification } from '../services/diditService';
 import { countryName } from '../config/localRails';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
@@ -47,19 +46,6 @@ const MY_IDENTITY_DOCUMENTS = gql`
     }
   }
 `;
-
-// Only Didit's own hosted verification page is ever opened in the browser.
-const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me(?::443)?\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/i;
-
-const openDiditSessionUrl = async (url: unknown, unsafeMessage: string) => {
-  if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) throw new Error(unsafeMessage);
-  try {
-    await Linking.openURL(url);
-  } catch {
-    // The native error quotes the URL, a bearer link: never show it.
-    throw new Error('No encontramos un navegador para abrir la verificación.');
-  }
-};
 
 const DIDIT_SESSION_ID = /^[A-Za-z0-9_-]+$/;
 
@@ -386,10 +372,11 @@ const VerificationScreen = () => {
   const verifiedCount = list.filter(doc => doc.status === 'verified').length;
   const hasPending = list.some(doc => doc.status === 'pending');
   const hasCountryAttempt = list.some(doc => !doc.isAdditional);
-  // One browser fallback per screen: on the first unverified country document.
-  // Not under a pending review: a second primary session would race it.
+  // One browser fallback per screen: on the first country document not yet
+  // verified. Under review too: "¿Te equivocaste?" already starts a second
+  // session there, and a camera that will not open needs the same way out.
   const browserFallbackDocId = list.find(doc => !doc.isAdditional
-    && !['verified', 'pending'].includes(normalizeStatus(doc.status)))?.id;
+    && normalizeStatus(doc.status) !== 'verified')?.id;
 
   // ─── Pieces ───
 

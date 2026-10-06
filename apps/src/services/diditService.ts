@@ -5,7 +5,20 @@ type DiditSdkModule = {
   };
 };
 
-import { NativeModules, Platform } from 'react-native';
+import { Linking, NativeModules, Platform } from 'react-native';
+
+// Only Didit's own hosted verification page is ever opened in the browser.
+const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me(?::443)?\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/i;
+
+export async function openDiditSessionUrl(url: unknown, unsafeMessage: string): Promise<void> {
+  if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) throw new Error(unsafeMessage);
+  try {
+    await Linking.openURL(url);
+  } catch {
+    // The native error quotes the URL, a bearer link: never show it.
+    throw new Error('No encontramos un navegador para abrir la verificación.');
+  }
+}
 
 function normalizeDiditSessionToken(sessionToken: unknown): string {
   if (typeof sessionToken === 'string') {

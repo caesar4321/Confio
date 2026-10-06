@@ -12,8 +12,12 @@ import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
-import { getDiditErrorMessage, getDiditResultSessionId, startDiditVerification } from '../services/diditService';
-import { createAdditionalDocumentSession, syncAdditionalDocument } from '../services/localMoney';
+import { getDiditErrorMessage, getDiditResultSessionId, openDiditSessionUrl, startDiditVerification } from '../services/diditService';
+import {
+  createAdditionalDocumentBrowserSession,
+  createAdditionalDocumentSession,
+  syncAdditionalDocument,
+} from '../services/localMoney';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'AdditionalDocument'>;
 type Route = RouteProp<MainStackParamList, 'AdditionalDocument'>;
@@ -79,6 +83,24 @@ export default function AdditionalDocumentScreen() {
     }
   };
 
+  // For devices where the in-app camera stays black: the same document on
+  // Didit's page. Didit's redirect back lands on Verificación, which syncs it.
+  const verifyInBrowser = async () => {
+    if (busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const session = await createAdditionalDocumentBrowserSession(idCountry, documentTypes);
+      if (!navigation.isFocused()) return;
+      await openDiditSessionUrl(session.sessionUrl, 'No se recibió un enlace seguro para verificarte en el navegador.');
+      setResult({ variant: 'info', message: 'Termina la verificación en tu navegador. Al terminar, verás el resultado en Verificación.' });
+    } catch (error: any) {
+      setResult({ variant: 'error', message: error?.message || 'No se pudo abrir la verificación en el navegador.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const rows: [string, string, string][] = [
     ['file-text', 'Documento aceptado', acceptedDocument(idCountry, documentTypes)],
     ['user-check', 'Tus mismos datos', 'El nombre y la fecha de nacimiento deben coincidir con tu verificación actual.'],
@@ -132,6 +154,8 @@ export default function AdditionalDocumentScreen() {
           onPrimaryPress={done ? () => navigation.goBack() : verify}
           primaryLoading={busy}
           primaryIconName={done ? 'chevron-right' : 'shield'}
+          secondaryLabel={done ? undefined : '¿La cámara no se abre? Verifícate en el navegador'}
+          onSecondaryPress={done ? undefined : verifyInBrowser}
         />
       </ScrollView>
     </SafeAreaView>
