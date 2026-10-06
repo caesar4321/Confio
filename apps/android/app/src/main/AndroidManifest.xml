@@ -67,6 +67,14 @@
             <category android:name="android.intent.category.DEFAULT" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="com.Confio.Confio" android:host="oauth2redirect" />
+        </intent-filter>
+        <!-- confio:// links (e.g. Didit's redirect to confio://verification). Their
+             own filter: <data> in one filter combine, so sharing the oauth2redirect
+             filter restricted every confio:// link to host oauth2redirect. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="confio" />
             <data android:scheme="Confio" />
         </intent-filter>
