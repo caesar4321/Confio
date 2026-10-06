@@ -9,7 +9,7 @@ const MESSAGE_FIELDS = `
   createdAt
   senderName
   modality
-  actions { type destination }
+  actions { type destination target ticker label }
 `;
 
 const PROFILE_FIELDS =
@@ -153,7 +153,7 @@ export const ASK_ASSISTANT = gql`
       transcript
       userMessage { ${MESSAGE_FIELDS} }
       reply { ${MESSAGE_FIELDS} }
-      actions { type destination }
+      actions { type destination target ticker label }
       mode
       remainingTurns
       dataChanged
@@ -190,7 +190,13 @@ export const UPDATE_ASSISTANT_PROFILE = gql`
   }
 `;
 
-export type AssistantAction = { type: string; destination?: string | null };
+export type AssistantAction = {
+  type: string;
+  destination?: string | null;
+  target?: string | null;
+  ticker?: string | null;
+  label?: string | null;
+};
 
 export type AssistantMessage = {
   id: string;
