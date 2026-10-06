@@ -281,14 +281,18 @@ const VerificationScreen = () => {
   // killed the app meanwhile (then it is the initial URL); the server checks
   // the session belongs to this user. Business keeps its webhook + refresh.
   React.useEffect(() => {
-    if (isBusinessAccount) return undefined;
     const handle = (url: string | null) => {
       if (!url || !DIDIT_REDIRECT.test(url)) return;
       const sessionId = diditRedirectSessionId(url) || browserSessionRef.current;
       if (!sessionId || syncedDiditRedirects.has(sessionId)) return;
       syncedDiditRedirects.add(sessionId);
+      // A business redirect is only marked seen, so switching to the personal
+      // account later in this run never syncs it under the wrong context.
+      if (isBusinessAccount) return;
       browserSessionRef.current = null;
       syncSessionAndRefresh(sessionId).catch((error: any) => {
+        // A transport failure may be retried by a later redirect.
+        if (error?.networkError) syncedDiditRedirects.delete(sessionId);
         setBanner({ variant: 'error', message: error?.message || 'No se pudo sincronizar la decisión de Didit.' });
       });
     };
@@ -466,7 +470,6 @@ const VerificationScreen = () => {
               <Icon name="refresh-cw" size={15} color={colors.primaryDark} />
               <Text style={styles.inlineActionText}>¿Te equivocaste? Envía otra verificación</Text>
             </TouchableOpacity>
-            {doc.id === browserFallbackDocId ? browserFallback : null}
           </>
         ) : (
           <>
@@ -477,9 +480,9 @@ const VerificationScreen = () => {
               <Icon name="refresh-cw" size={15} color={colors.primaryDark} />
               <Text style={styles.inlineActionText}>Intentar de nuevo</Text>
             </TouchableOpacity>
-            {doc.id === browserFallbackDocId ? browserFallback : null}
           </>
         )}
+        {doc.id === browserFallbackDocId ? browserFallback : null}
       </View>
     );
   };
