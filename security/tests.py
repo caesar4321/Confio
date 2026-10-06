@@ -622,6 +622,24 @@ class DiditIntegrationTests(TestCase):
         kwargs = mock_request.call_args.kwargs
         self.assertEqual(kwargs['json']['workflow_id'], 'workflow-argentina')
 
+    @patch('security.didit.requests.request')
+    def test_hosted_personal_session_requires_a_safe_link(self, mock_request):
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_web', 'session_token': 'token_web',
+            'url': 'https://verify.didit.me/session/sess_web', 'status': 'Not Started',
+        })
+        session = create_didit_session(user=self.user, account_type='personal',
+                                       callback_url='confio://verification', hosted=True)
+        self.assertEqual(session['session_url'], 'https://verify.didit.me/session/sess_web')
+        self.assertEqual(mock_request.call_args.kwargs['json']['callback'], 'confio://verification')
+
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_bad', 'session_token': 'token_bad',
+            'url': 'https://evil.example/session/sess_bad', 'status': 'Not Started',
+        })
+        with self.assertRaises(DiditAPIError):
+            create_didit_session(user=self.user, account_type='personal', hosted=True)
+
     def test_create_session_rejects_unsupported_phone_country(self):
         self.user.phone_country = 'JP'
 

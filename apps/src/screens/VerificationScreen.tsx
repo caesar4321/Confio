@@ -17,7 +17,11 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { GET_BUSINESS_KYC_STATUS, GET_ME, GET_MY_PERSONAL_KYC_STATUS } from '../apollo/queries';
-import { CREATE_DIDIT_VERIFICATION_SESSION, SYNC_DIDIT_VERIFICATION_SESSION } from '../apollo/mutations';
+import {
+  CREATE_DIDIT_BROWSER_VERIFICATION_SESSION,
+  CREATE_DIDIT_VERIFICATION_SESSION,
+  SYNC_DIDIT_VERIFICATION_SESSION,
+} from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { useRampCountry } from '../hooks/useRampCountry';
 import { getDiditResultSessionId, startDiditVerification } from '../services/diditService';
@@ -43,6 +47,9 @@ const MY_IDENTITY_DOCUMENTS = gql`
     }
   }
 `;
+
+// Only Didit's own hosted verification page is ever opened in the browser.
+const DIDIT_SESSION_URL = /^https:\/\/verify\.didit\.me\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/;
 
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
 
@@ -175,6 +182,10 @@ const VerificationScreen = () => {
 
   const [createDiditSession] = useMutation(CREATE_DIDIT_VERIFICATION_SESSION);
   const [syncDiditSession] = useMutation(SYNC_DIDIT_VERIFICATION_SESSION);
+  const [createDiditBrowserSession] = useMutation(CREATE_DIDIT_BROWSER_VERIFICATION_SESSION);
+  // Set while the user verifies on Didit's page in the browser; the decision
+  // arrives by webhook, so returning to the app only needs a refresh.
+  const awaitingBrowserRef = React.useRef(false);
 
   const [isLaunchingDidit, setIsLaunchingDidit] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
@@ -238,7 +249,7 @@ const VerificationScreen = () => {
 
   React.useEffect(() => {
     const listener = AppState.addEventListener('change', state => {
-      if (state === 'active' && isBusinessAccount) refreshStatuses().catch(() => {});
+      if (state === 'active' && (isBusinessAccount || awaitingBrowserRef.current)) refreshStatuses().catch(() => {});
     });
     return () => listener.remove();
   }, [isBusinessAccount, refreshStatuses]);
@@ -256,7 +267,7 @@ const VerificationScreen = () => {
       const createdSessionId = result.session.sessionId;
       if (isBusinessAccount) {
         const url = result.session.sessionUrl;
-        if (typeof url !== 'string' || !/^https:\/\/verify\.didit\.me\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/.test(url)) {
+        if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) {
           throw new Error('No se recibió un enlace seguro para verificar tu negocio.');
         }
         await Linking.openURL(url);
@@ -283,6 +294,37 @@ const VerificationScreen = () => {
       setIsLaunchingDidit(false);
     }
   }, [createDiditSession, isBusinessAccount, refreshStatuses, syncSessionAndRefresh]);
+
+  // Fallback for devices where the in-app camera stays black: the same
+  // verification on Didit's page, using the browser's camera.
+  const handleStartDiditInBrowser = React.useCallback(async () => {
+    setIsLaunchingDidit(true);
+    try {
+      const { data } = await createDiditBrowserSession();
+      const result = data?.createDiditVerificationSession;
+      const url = result?.session?.sessionUrl;
+      if (!result?.success) {
+        throw new Error(result?.error || 'No se pudo crear la sesión de Didit.');
+      }
+      if (typeof url !== 'string' || !DIDIT_SESSION_URL.test(url)) {
+        throw new Error('No se recibió un enlace seguro para verificarte en el navegador.');
+      }
+      await Linking.openURL(url);
+      awaitingBrowserRef.current = true;
+      setBanner({ variant: 'info', message: 'Termina la verificación en tu navegador. Al volver, actualizaremos tu estado.' });
+    } catch (error: any) {
+      setBanner({ variant: 'error', message: error?.message || 'No se pudo abrir la verificación en el navegador.' });
+    } finally {
+      setIsLaunchingDidit(false);
+    }
+  }, [createDiditBrowserSession]);
+
+  const browserFallback = (
+    <TouchableOpacity onPress={handleStartDiditInBrowser} disabled={isBusy} accessibilityRole="button" style={styles.inlineAction}>
+      <Icon name="globe" size={15} color={colors.primaryDark} />
+      <Text style={styles.inlineActionText}>¿La cámara no se abre? Verifícate en el navegador</Text>
+    </TouchableOpacity>
+  );
 
   const openOtherDocument = () => (navigation as any).navigate('AdditionalDocument', { idCountry: '', documentTypes: ['P', 'ID'] });
 
@@ -378,6 +420,7 @@ const VerificationScreen = () => {
               <Icon name="refresh-cw" size={15} color={colors.primaryDark} />
               <Text style={styles.inlineActionText}>¿Te equivocaste? Envía otra verificación</Text>
             </TouchableOpacity>
+            {doc.isAdditional ? null : browserFallback}
           </>
         ) : (
           <>
@@ -388,6 +431,7 @@ const VerificationScreen = () => {
               <Icon name="refresh-cw" size={15} color={colors.primaryDark} />
               <Text style={styles.inlineActionText}>Intentar de nuevo</Text>
             </TouchableOpacity>
+            {doc.isAdditional ? null : browserFallback}
           </>
         )}
       </View>
@@ -413,6 +457,7 @@ const VerificationScreen = () => {
           <Icon name="chevron-right" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       ) : null}
+      {!hasCountryAttempt ? browserFallback : null}
       <TouchableOpacity style={styles.optionCard} onPress={openOtherDocument} disabled={isBusy} accessibilityRole="button">
         <View style={styles.documentIcon}>
           <Icon name="book" size={18} color={colors.primaryDark} />
@@ -515,6 +560,7 @@ const VerificationScreen = () => {
           icon={<Icon name="arrow-up-right" size={18} color={colors.white} />}
         />
       ) : null}
+      {effectiveStatus !== 'verified' ? browserFallback : null}
     </View>
   );
 
