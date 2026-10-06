@@ -8,10 +8,11 @@ ENV['RCT_NEW_ARCH_ENABLED'] = '0'
 
 platform :ios, '15.1'
 
-# Didit iOS SDK: 'all' = auto-capture + NFC, as before 4.x. Set before
-# use_native_modules!, which loads the wrapper's podspec that reads it.
+# Didit iOS SDK: 'autodetection' = auto-capture without NFC passport reading
+# (no NFC step ever ran in production, and iOS lacks the NFC entitlement).
+# Set before use_native_modules!, which loads the wrapper's podspec that reads it.
 require 'json'
-$DiditSdkIosVariant = 'all'
+$DiditSdkIosVariant = 'autodetection'
 didit_sdk_ios_version = JSON.parse(
   File.read(File.join(__dir__, '../node_modules/@didit-protocol/sdk-react-native/package.json'))
 ).dig('diditNativeSdkVersions', 'ios')
@@ -29,7 +30,7 @@ target 'Confio' do
 
   # The release the wrapper depends on (its diditNativeSdkVersions.ios), not
   # `main`, which drifts from it and breaks `pod install`.
-  pod 'DiditSDK/All', :podspec => "https://raw.githubusercontent.com/didit-protocol/sdk-ios/#{didit_sdk_ios_version}/DiditSDK.podspec"
+  pod 'DiditSDK/AutoDetection', :podspec => "https://raw.githubusercontent.com/didit-protocol/sdk-ios/#{didit_sdk_ios_version}/DiditSDK.podspec"
   
   use_react_native!(
     :path => config[:reactNativePath],

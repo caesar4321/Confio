@@ -10,7 +10,7 @@ PODS:
     - GoogleUtilities/UserDefaults (~> 8.0)
     - PromisesObjC (~> 2.4)
   - boost (1.84.0)
-  - DiditSDK/All (4.9.0)
+  - DiditSDK/AutoDetection (4.9.0)
   - DoubleConversion (1.1.6)
   - fast_float (6.1.4)
   - FBLazyVector (0.79.7)
@@ -2210,7 +2210,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - Yoga
   - SdkReactNative (4.9.0):
-    - DiditSDK/All (= 4.9.0)
+    - DiditSDK/AutoDetection (= 4.9.0)
     - DoubleConversion
     - glog
     - hermes-engine
@@ -2248,7 +2248,7 @@ PODS:
 
 DEPENDENCIES:
   - boost (from `../node_modules/react-native/third-party-podspecs/boost.podspec`)
-  - DiditSDK/All (from `https://raw.githubusercontent.com/didit-protocol/sdk-ios/4.9.0/DiditSDK.podspec`)
+  - DiditSDK/AutoDetection (from `https://raw.githubusercontent.com/didit-protocol/sdk-ios/4.9.0/DiditSDK.podspec`)
   - DoubleConversion (from `../node_modules/react-native/third-party-podspecs/DoubleConversion.podspec`)
   - fast_float (from `../node_modules/react-native/third-party-podspecs/fast_float.podspec`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
@@ -2722,12 +2722,12 @@ SPEC CHECKSUMS:
   RNShare: 0dac72e20459446eb729243e40d3ad7fc866a16b
   RNSVG: 4d6e9f0087980e36e14e1739b9c1760e63de5b8c
   RNVectorIcons: d111d680b1629da748b7c40de18a246d9d585aab
-  SdkReactNative: f2c48b797981df1b39d00cb0e00654e279789243
+  SdkReactNative: acbb75c9fdcc61c99a6bdd4fb5c335c67293518c
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   VisionCamera: 9a8f98ae344fe5d148f84bb45829f9e4caab9d2f
   Yoga: fce72270ebed754904bbe5e18bb05cda3c3075db
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 
-PODFILE CHECKSUM: d3c2d62a18bc29855e0ef1c8b6fb09116bb8901b
+PODFILE CHECKSUM: 5dfad5763551b7ad6879d073194f7bfb9f69da1c
 
 COCOAPODS: 1.16.2
