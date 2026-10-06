@@ -77,6 +77,11 @@ final class ReactRootViewController: UIViewController {
     fatalError("init(coder:) is not supported")
   }
 
+  // react-native-screens swizzles UIViewController so the status bar comes
+  // from the top RNSScreen, which only knows native-stack options (unused
+  // here). <StatusBar> requests land on this controller, so it keeps it.
+  override var childForStatusBarStyle: UIViewController? { nil }
+  override var childForStatusBarHidden: UIViewController? { nil }
   override var preferredStatusBarStyle: UIStatusBarStyle { statusBarStyle }
   override var prefersStatusBarHidden: Bool { statusBarHidden }
   override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { hiddenAnimation }
