@@ -62,7 +62,7 @@ def _resolve_tz(tz_name, phone_country):
             return ZoneInfo('UTC')
 
 
-def _viewer(user, account, business, jwt_context, *, screen='', tz_name=None):
+def _viewer(user, account, business, jwt_context, *, screen='', tz_name=None, request_meta=None):
     from users.models import Account
 
     account_type = jwt_context.get('account_type', 'personal')
@@ -86,6 +86,7 @@ def _viewer(user, account, business, jwt_context, *, screen='', tz_name=None):
         is_business_owner=is_owner,
         tz=_resolve_tz(tz_name, getattr(user, 'phone_country', None)),
         screen=(screen or '')[:64],
+        request_meta=dict(request_meta or {}),
     )
 
 
@@ -212,7 +213,7 @@ def _route_to_team(message):
 
 
 def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='', tz_name=None,
-        can_navigate=True):
+        can_navigate=True, request_meta=None):
     """Answer `body` (or a voice note: audio=(base64, mime, duration_ms)) in
     the user's support thread.
 
@@ -295,7 +296,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                                                 screen=screen, modality=modality, error='pending')
 
     # 4. Answer (no lock; analyses reserve their own slot).
-    viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name)
+    viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name,
+                     request_meta=request_meta)
     confirmed = confirm_pending_categorization(conversation, viewer, clean, proposal, user_message)
     if confirmed is not None:
         applied, reply_text = confirmed

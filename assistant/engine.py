@@ -16,7 +16,7 @@ from pathlib import Path
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 import requests
@@ -50,6 +50,9 @@ class Viewer:
     is_business_owner: bool
     tz: object
     screen: str = ''
+    # The request's META (IP, headers) for request-aware eligibility; empty
+    # where there is no request (then eligibility is "unknown").
+    request_meta: dict = field(default_factory=dict, repr=False)
 
     @property
     def is_employee(self):
@@ -260,6 +263,110 @@ def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=
     }
 
 
+def _known_usd(value):
+    return _usd(value) if value is not None else 'desconocido'
+
+
+def portfolio_data(viewer: Viewer):
+    """What the user holds and spends, from the same cached sources the app
+    shows. A value we couldn't read is "desconocido", never a confident 0."""
+    if viewer.is_employee:
+        return {'disponible': False, 'motivo': 'Solo el dueño del negocio ve el saldo.'}
+    address = getattr(viewer.account, 'bsc_address', '') or ''
+    result = {'disponible': True, 'acciones_y_confio_dollar_plus_disponibles': _ondo_allowed(viewer)}
+    if not address:
+        result.update(confio_dollar_usd='desconocido', confio_dollar_plus_usd='desconocido', acciones='desconocido')
+    else:
+        from blockchain.bsc_balance_service import BscBalanceService
+
+        raw = BscBalanceService.balances_raw(address)
+        cusd = raw.get('CUSD_BSC')
+        result['confio_dollar_usd'] = _known_usd(Decimal(cusd) / Decimal(10 ** 18) if cusd is not None else None)
+        result['confio_dollar_plus_usd'] = _plus_usd(raw.get('CUSD_PLUS'))
+        # Holdings regardless of eligibility: someone whose country changed
+        # still owns their stocks (eligibility only gates buying).
+        result['acciones'] = _holdings(address)
+    # Only full months the account existed: a month before it opened is not
+    # a month of $0 spending.
+    opened = getattr(viewer.account, 'created_at', None)
+    local_now = timezone.now().astimezone(viewer.tz)
+    spent = []
+    for back in (1, 2, 3):
+        year, month = _shift_month(local_now.year, local_now.month, -back)
+        if opened is not None and opened.astimezone(viewer.tz).date() > date(year, month, 1):
+            break
+        summary = month_summary_data(viewer, back)
+        if summary.get('disponible') and summary.get('actual'):
+            spent.append(Decimal(summary['actual']['salio_usd'].replace(',', '')))
+    result['gasto_mensual_promedio_usd'] = _usd(sum(spent) / len(spent)) if spent else 'sin datos'
+    result['meses_completos_considerados'] = len(spent)
+    result['nota'] = 'El rendimiento ganado este mes en Confío Dollar+ aún no está disponible: no lo menciones.'
+    return result
+
+
+def _ondo_allowed(viewer):
+    """Stocks and Confío Dollar+ offered to this person: request-aware (IP
+    and phone), like every screen. No request in hand means "unknown"."""
+    if not viewer.request_meta:
+        return 'desconocido'
+    try:
+        from cusd_plus.eligibility import ONDO_POLICY
+        return bool(ONDO_POLICY.evaluate(viewer.user, viewer.request_meta).allowed)
+    except Exception:  # noqa: BLE001 - unknown, not "no"
+        logger.warning('Confio Assistant: Ondo eligibility unavailable', exc_info=True)
+        return 'desconocido'
+
+
+def _plus_usd(shares):
+    """Confío Dollar+ value from the shares already read; any piece we can't
+    read (shares, vault, price with no last-known) is "desconocido"."""
+    from django.core.cache import cache
+
+    from cusd_plus import vault
+
+    if shares is None:
+        return 'desconocido'
+    if not shares:
+        return _usd(Decimal(0))
+    if not vault.vault_address():
+        return 'desconocido'
+    try:
+        price = vault.p_plus_wad()
+    except Exception:  # noqa: BLE001 - fall back to the last price, never to 0
+        logger.warning('Confio Assistant: Confío Dollar+ price unavailable', exc_info=True)
+        price = cache.get('cusd_plus_pplus_last')
+        if price is None:
+            return 'desconocido'
+    return _usd(Decimal(shares) * Decimal(price) / Decimal(10 ** 36))
+
+
+def _holdings(address):
+    from cusd_plus import gm_api
+    from cusd_plus.gm_holdings import known_holdings_units
+
+    # No chain scan inside a chat turn: what the app last read (minutes old
+    # at most after any visit to the stocks screen), else "desconocido".
+    units = known_holdings_units(address)
+    if units is None:
+        return 'desconocido'
+    if not units:
+        return []
+    try:
+        market = {(item.get('primaryMarket') or {}).get('symbol'): item for item in gm_api.all_market()}
+    except Exception:  # noqa: BLE001 - unknown, not empty
+        logger.warning('Confio Assistant: market unavailable for holdings', exc_info=True)
+        return 'desconocido'
+    rows = []
+    for symbol, amount in units.items():
+        pm = (market.get(symbol) or {}).get('primaryMarket') or {}
+        if pm.get('price') is None:
+            continue
+        ticker = ((market.get(symbol) or {}).get('underlyingMarket') or {}).get('ticker') or symbol.removesuffix('on')
+        rows.append({'ticker': ticker, 'valor_usd': _usd(Decimal(str(amount)) * Decimal(str(pm['price'])))})
+    rows.sort(key=lambda r: Decimal(r['valor_usd'].replace(',', '')), reverse=True)
+    return rows[:15]
+
+
 def categorize_movements(viewer: Viewer, movement_ids, category, apply_to, *, dry_run=False):
     """Label the user's own spending movements, exactly like the Tu mes chips.
     dry_run: validate and count only (the proposal the user must confirm)."""
@@ -449,6 +556,18 @@ class Toolbelt:
                     'strict': True,
                 },
             ]
+        if not self.viewer.is_employee:
+            specs += [{
+                'type': 'function',
+                'name': 'get_portfolio',
+                'description': (
+                    'Lo que el usuario tiene y gasta: saldo en Confío Dollar y Confío Dollar+, sus acciones, '
+                    'gasto mensual promedio de los últimos meses y si acciones/Confío Dollar+ están disponibles '
+                    'en su país. Úsala antes de orientar sobre inversiones o ahorro.'
+                ),
+                'parameters': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False},
+                'strict': True,
+            }]
         specs += [
             {
                 'type': 'function',
@@ -519,6 +638,7 @@ class Toolbelt:
             'analyze_finances': self.analyze_finances,
             'get_stock_quote': self.get_stock_quote,
             'read_public_document': self.read_public_document,
+            'get_portfolio': self.get_portfolio,
             'search_market_news': self.search_market_news,
         }.get(name)
         if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
@@ -611,6 +731,9 @@ class Toolbelt:
         data = _openai_post(payload)
         self.result.add_usage(model, data.get('usage'))
         return {'analisis': _output_text(data) or 'Sin análisis.'}
+
+    def get_portfolio(self):
+        return portfolio_data(self.viewer)
 
     def read_public_document(self, document):
         path = PUBLIC_DOCUMENTS.get(document)
