@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 import requests
+from botocore.exceptions import ClientError
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Max, Q
@@ -227,7 +228,7 @@ def author_block(user) -> str | None:
     personal KYC since submission means it never goes up."""
     from security.utils import check_user_banned
 
-    if user is None:
+    if user is None or user.deleted_at is not None:
         return BLOCK_BANNED
     banned, _ = check_user_banned(user)
     if banned:
@@ -340,6 +341,14 @@ def delete_own_post(user, content_item_id) -> bool:
         )
         if review is None:
             return False
+        if review.status == CommunityReviewStatus.REMOVED:
+            # Already taken down by moderation: keep that record (category,
+            # removed_by), but the author's deletion still erases the text and
+            # any private image copy (purge_removed_content).
+            item = review.content_item
+            item.metadata = {**(item.metadata or {}), ERASE_FLAG: True}
+            item.save(update_fields=['metadata', 'updated_at'])
+            return True
         _take_down(review, removed_by=user, category='author_deleted', reason='Eliminada por ti.')
     return True
 
@@ -808,15 +817,25 @@ def hide_post_image(review_id: int) -> bool:
         key = key_from_url(url) if url else None
         if not key:
             return False
-        if not metadata.get('removed_image_key'):
+        if not metadata.get('removed_image_key') and review.category not in NEVER_RESTORE_CATEGORIES:
+            # Moderation takedowns keep a private copy for a staff restore
+            # (expired by the bucket lifecycle). What the author or account
+            # removal deletes is never kept.
             backup_key = removed_image_backup_key(review_id)
-            obj = get_object_bytes(key=key, max_bytes=settings.COMMUNITY_IMAGE_MAX_BYTES,
-                                   bucket=settings.AWS_PUBLICATIONS_BUCKET)
-            upload_object(key=backup_key, body=obj['body'], content_type='image/jpeg',
-                          metadata={'uploaded-for': 'community-removed'}, bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
-            metadata['removed_image_key'] = backup_key
-            item.metadata = metadata
-            item.save(update_fields=['metadata', 'updated_at'])
+            try:
+                obj = get_object_bytes(key=key, max_bytes=settings.COMMUNITY_IMAGE_MAX_BYTES,
+                                       bucket=settings.AWS_PUBLICATIONS_BUCKET)
+            except ClientError as exc:
+                if exc.response.get('Error', {}).get('Code') not in ('NoSuchKey', '404'):
+                    raise
+                obj = None  # already gone from public: nothing to keep, go hide
+            if obj is not None:
+                upload_object(key=backup_key, body=obj['body'], content_type='image/jpeg',
+                              metadata={'uploaded-for': 'community-removed'},
+                              bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
+                metadata['removed_image_key'] = backup_key
+                item.metadata = metadata
+                item.save(update_fields=['metadata', 'updated_at'])
 
     with transaction.atomic():
         review = locked_review()
@@ -860,6 +879,19 @@ class NotRestorable(Exception):
     pass
 
 
+# Removed by the person (or their post's author, or with their account):
+# staff can never bring it back, and no private copy is kept.
+NEVER_RESTORE_CATEGORIES = frozenset({
+    'author_deleted', 'post_author_removed', 'account_deleted', 'account_banned',
+})
+# What the person deleted (or deleted with their account) is erased at once:
+# text blanked, private image copy deleted. Everything else removed is kept
+# privately for MODERATION_RETENTION and then erased (Privacy §6).
+ERASE_NOW_CATEGORIES = frozenset({'author_deleted', 'account_deleted'})
+ERASE_FLAG = 'erase_requested'
+MODERATION_RETENTION = timedelta(days=90)
+
+
 def _initially_approved(verdicts) -> bool:
     """Whether the first, gating review ended in approval. Re-reviews of
     reports are marked and do not count."""
@@ -892,6 +924,9 @@ def restore(review_id: int):
         if review.status != CommunityReviewStatus.REMOVED or not _initially_approved(review.verdicts) \
                 or item.published_at is None:
             raise NotRestorable(f'Post review {review_id} was never approved; re-review it instead.')
+        if review.category in NEVER_RESTORE_CATEGORIES or (item.metadata or {}).get(ERASE_FLAG) \
+                or not item.body or (item.owner_user and item.owner_user.deleted_at is not None):
+            raise NotRestorable(f'Post review {review_id} was deleted by its author, erased, or its account is gone.')
         if author_block(item.owner_user):
             raise NotRestorable(f'Post review {review_id}: its author can no longer publish (ban or KYC).')
         metadata = dict(item.metadata or {})
@@ -962,15 +997,8 @@ def _verified_reporter_count(content_item_id) -> int:
 def report_post(user, content_item_id, reason: str) -> None:
     if reason not in CommunityReportReason.values:
         raise CommunityPostError('bad_reason', 'Elige un motivo.')
-    review = (
-        CommunityPostReview.objects.select_related('content_item')
-        .filter(
-            content_item_id=content_item_id,
-            status=CommunityReviewStatus.APPROVED,
-            content_item__status=ContentStatus.PUBLISHED,
-        )
-        .first()
-    )
+    item = published_community_post(content_item_id, viewer=user)
+    review = item.community_review if item is not None else None
     if review is None:
         raise CommunityPostError('not_found', 'Esta publicación ya no está disponible.')
     if review.content_item.owner_user_id == user.id:
@@ -1153,21 +1181,30 @@ def notify_comment_published(comment_id: int):
     data = {'content_item_id': comment.content_item_id, 'comment_id': comment.id}
     for user, notification_type, title in recipients.values():
         _notify(user, notification_type, title, snippet, action_url=_post_link(comment.content_item_id), data=data)
+    # Taken down while these were going out: its takedown found nothing to
+    # erase yet, so erase them here.
+    if not visible_comments_any_post().filter(id=comment.id).exists():
+        erase_comment_notifications([comment.id])
 
 
 # ── Comments ─────────────────────────────────────────────────────────────────
 
-def published_community_post(content_item_id):
-    """The post, only while it is live in Comunidad."""
-    return (
+def published_community_post(content_item_id, viewer=None):
+    """The post, only while it is live in Comunidad and readable (owner's
+    account not deleted), and, given a viewer, not in a block with them."""
+    item = (
         ContentItem.objects.select_related('owner_user', 'community_review')
         .filter(
+            READABLE,
             id=content_item_id,
             status=ContentStatus.PUBLISHED,
             community_review__status=CommunityReviewStatus.APPROVED,
         )
         .first()
     )
+    if item is not None and viewer is not None and is_blocked_between(viewer.id, item.owner_user_id):
+        return None
+    return item
 
 
 def visible_comments(content_item_id):
@@ -1255,6 +1292,8 @@ def create_comment(user, business, content_item_id, body, parent_id=None, mentio
         if parent.parent_id:
             # One level deep: a reply to a reply joins the same thread.
             parent = CommunityComment.objects.select_related('author').get(id=parent.parent_id)
+            if parent.author_id in blocked_ids:
+                raise CommunityPostError('not_found', 'Ese comentario ya no está disponible.')
 
     raw_mentions = list(mention_user_ids or [])
     if len(raw_mentions) > MAX_MENTIONS:
@@ -1380,6 +1419,33 @@ def _take_down_comment(comment, *, removed_by=None, category='', reason=''):
     if reason:
         comment.reason = reason[:280]
     comment.save()
+    # Its text and the commenter's name also sit in other members'
+    # notifications: those go with the comment.
+    # Its replies disappear with it (the thread is gone), and so do theirs.
+    # Again after commit: a notifier racing this transaction may insert one late.
+    ids = [comment.id, *comment.replies.values_list('id', flat=True)]
+    erase_comment_notifications(ids)
+    transaction.on_commit(lambda: erase_comment_notifications(ids))
+
+
+COMMUNITY_COMMENT_NOTIFICATION_TYPES = ('COMMUNITY_COMMENT', 'COMMUNITY_REPLY', 'COMMUNITY_MENTION')
+
+
+def erase_comment_notifications(comment_ids=None, *, content_item_ids=None) -> int:
+    """Delete the comment/reply/mention notifications that quote these
+    comments (or any comment on these posts)."""
+    from notifications.models import Notification
+
+    qs = Notification.objects.filter(notification_type__in=COMMUNITY_COMMENT_NOTIFICATION_TYPES)
+    q = Q()
+    if comment_ids:
+        q |= Q(data__comment_id__in=list(comment_ids))
+    if content_item_ids:
+        q |= Q(data__content_item_id__in=list(content_item_ids))
+    if not q:
+        return 0
+    deleted, _ = qs.filter(q).delete()
+    return deleted
 
 
 def delete_comment(user, comment_id) -> bool:
@@ -1391,7 +1457,16 @@ def delete_comment(user, comment_id) -> bool:
             .filter(id=comment_id)
             .first()
         )
-        if comment is None or comment.status == CommunityReviewStatus.REMOVED:
+        if comment is None:
+            return False
+        if comment.status == CommunityReviewStatus.REMOVED:
+            # Taken down by moderation earlier: the record stays, but the
+            # author's deletion erases its text now (as for posts).
+            if comment.author_id == user.id and comment.body:
+                comment.body = ''
+                comment.save(update_fields=['body', 'updated_at'])
+                erase_comment_notifications([comment.id])
+                return True
             return False
         if comment.author_id == user.id:
             _take_down_comment(comment, removed_by=user, category='author_deleted', reason='Eliminado por ti.')
@@ -1413,9 +1488,12 @@ def take_down_comment(comment_id: int, *, removed_by=None, category='', reason='
 def restore_comment(comment_id: int):
     """Staff overturn of a takedown, only for a comment the AI approved."""
     with transaction.atomic():
-        comment = CommunityComment.objects.select_for_update().get(id=comment_id)
+        comment = CommunityComment.objects.select_for_update().select_related('author').get(id=comment_id)
         if comment.status != CommunityReviewStatus.REMOVED or not _initially_approved(comment.verdicts):
             raise NotRestorable(f'Comment {comment_id} was never approved; re-review it instead.')
+        if comment.category in NEVER_RESTORE_CATEGORIES or not comment.body \
+                or comment.author.deleted_at is not None:
+            raise NotRestorable(f'Comment {comment_id} was deleted by its author, erased, or its account is gone.')
         if author_block(comment.author):
             raise NotRestorable(f'Comment {comment_id}: its author can no longer publish (ban or KYC).')
         comment.status = CommunityReviewStatus.APPROVED
@@ -1423,6 +1501,13 @@ def restore_comment(comment_id: int):
         comment.removed_at = None
         comment.removed_by = None
         comment.save()
+
+
+def _blocked_from_comment(user, comment) -> bool:
+    """A comment is out of reach if its author, or the author of the post it
+    is on, is in a block with the user."""
+    blocked = block_relation_ids(user)
+    return comment.author_id in blocked or comment.content_item.owner_user_id in blocked
 
 
 def rereview_comment(comment_id: int) -> bool:
@@ -1443,8 +1528,8 @@ def rereview_comment(comment_id: int) -> bool:
 def report_comment(user, comment_id, reason: str) -> None:
     if reason not in CommunityReportReason.values:
         raise CommunityPostError('bad_reason', 'Elige un motivo.')
-    comment = visible_comments_any_post().filter(id=comment_id).first()
-    if comment is None:
+    comment = visible_comments_any_post().filter(id=comment_id).select_related('content_item').first()
+    if comment is None or _blocked_from_comment(user, comment):
         raise CommunityPostError('not_found', 'Este comentario ya no está disponible.')
     if comment.author_id == user.id:
         raise CommunityPostError('own_comment', 'No puedes reportar tu propio comentario.')
@@ -1509,8 +1594,8 @@ def react_to_comment(user, comment_id, emoji: str) -> CommunityComment:
     reaction_type = ReactionType.objects.filter(emoji=emoji, is_active=True, is_selectable=True).first()
     if reaction_type is None:
         raise CommunityPostError('bad_reaction', 'Reacción no disponible.')
-    comment = visible_comments_any_post().filter(id=comment_id).first()
-    if comment is None or is_blocked_between(user.id, comment.author_id):
+    comment = visible_comments_any_post().filter(id=comment_id).select_related('content_item').first()
+    if comment is None or _blocked_from_comment(user, comment):
         raise CommunityPostError('not_found', 'Este comentario ya no está disponible.')
     with transaction.atomic():
         existing = (
@@ -1598,8 +1683,16 @@ def block_member(user, target_id) -> None:
     except (TypeError, ValueError):
         raise CommunityPostError('not_found', 'No encontramos a esa persona.')
     if target_id == user.id:
-        raise CommunityPostError('self', 'No puedes bloquearte a ti.')
-    if not User.objects.filter(id=target_id).exists():
+        raise CommunityPostError('self', 'No puedes bloquearte.')
+    # Only someone whose Comunidad content you can see right now. Otherwise
+    # block + myBlockedMembers would look up any Confío user's name by id.
+    if not take_upload_ticket(user, 'block'):
+        raise CommunityPostError('rate_limited', 'Demasiados bloqueos seguidos. Inténtalo más tarde.')
+    visible_post = ContentItem.objects.filter(
+        READABLE, owner_type=OwnerType.USER, owner_user_id=target_id,
+        status=ContentStatus.PUBLISHED, community_review__status=CommunityReviewStatus.APPROVED,
+    ).exists()
+    if not visible_post and not visible_comments_any_post().filter(author_id=target_id).exists():
         raise CommunityPostError('not_found', 'No encontramos a esa persona.')
     CommunityBlock.objects.get_or_create(blocker=user, blocked_id=target_id)
 
@@ -1621,7 +1714,8 @@ def blocked_members(user):
     from .models import CommunityBlock
 
     ids = list(CommunityBlock.objects.filter(blocker=user).order_by('-created_at').values_list('blocked_id', flat=True))
-    users = {u.id: u for u in User.all_objects.filter(id__in=ids)}
+    # Deleted accounts drop off the list (their content is gone anyway).
+    users = {u.id: u for u in User.objects.filter(id__in=ids)}
     return [users[i] for i in ids if i in users]
 
 
@@ -1639,6 +1733,8 @@ def remove_member_content(user_id: int, *, category: str, reason: str) -> dict:
     )
     for review_id in posts:
         take_down(review_id, category=category, reason=reason)
+    # Posts moderation removed earlier need no flag here: purge_removed_content
+    # erases every removed post of a deleted account (owner_user__deleted_at).
     comments = list(
         CommunityComment.objects.filter(author_id=user_id)
         .exclude(status=CommunityReviewStatus.REMOVED).values_list('id', flat=True)
@@ -1650,3 +1746,111 @@ def remove_member_content(user_id: int, *, category: str, reason: str) -> dict:
     user = User.all_objects.filter(id=user_id).first()
     pictures = profile_pictures.remove_picture(user) if user else False
     return {'posts': len(posts), 'comments': len(comments), 'picture': pictures}
+
+
+
+def members_owed_content_removal(limit: int = 100) -> list:
+    """(user_id, kind) for deleted or banned accounts that still have live
+    Comunidad content: the sweeper re-drives removal until it lands, so a lost
+    task or a broker outage never leaves it up. Starts from the small sets
+    (deleted accounts, active bans), in a stable order, then checks content."""
+    from security.models import UserBan
+
+    from .models import ProfilePictureStatus, ProfilePictureSubmission
+
+    now = timezone.now()
+    banned_ids = set(
+        UserBan.objects.filter(deleted_at__isnull=True)
+        .exclude(ban_type='temporary', expires_at__lt=now)
+        .values_list('user_id', flat=True)
+    )
+    # Deleted accounts are matched by join, not by an ever-growing id list.
+    posts = CommunityPostReview.objects.exclude(status=CommunityReviewStatus.REMOVED)
+    comments = CommunityComment.objects.exclude(status=CommunityReviewStatus.REMOVED)
+    pictures = ProfilePictureSubmission.objects.filter(
+        status__in=[ProfilePictureStatus.ACTIVE, ProfilePictureStatus.PENDING],
+    )
+    deleted = (
+        set(posts.filter(content_item__owner_user__deleted_at__isnull=False)
+            .values_list('content_item__owner_user_id', flat=True))
+        | set(comments.filter(author__deleted_at__isnull=False).values_list('author_id', flat=True))
+        | set(pictures.filter(user__deleted_at__isnull=False).values_list('user_id', flat=True))
+    )
+    banned = set()
+    if banned_ids:
+        banned = (
+            set(posts.filter(content_item__owner_user_id__in=banned_ids)
+                .values_list('content_item__owner_user_id', flat=True))
+            | set(comments.filter(author_id__in=banned_ids).values_list('author_id', flat=True))
+            | set(pictures.filter(user_id__in=banned_ids).values_list('user_id', flat=True))
+        )
+    deleted.discard(None)
+    banned.discard(None)
+    owing = deleted | banned
+    return [(uid, 'deleted' if uid in deleted else 'banned') for uid in sorted(owing)[:limit]]
+
+
+def purge_removed_content(limit: int = 200) -> dict:
+    """Erase the text (and any private image copy) of removed Comunidad
+    content: at once for what people deleted themselves or with their account,
+    after MODERATION_RETENTION for moderation takedowns (Privacy §6). The row
+    stays as the moderation record, without the content."""
+    from security.s3_utils import delete_object
+
+    old = timezone.now() - MODERATION_RETENTION
+    erase_post = (
+        Q(community_review__category__in=ERASE_NOW_CATEGORIES)
+        | Q(metadata__has_key=ERASE_FLAG)
+        | Q(owner_user__deleted_at__isnull=False)
+        | Q(community_review__removed_at__lt=old)
+    )
+    owed = (
+        ContentItem.objects.filter(owner_type=OwnerType.USER, community_review__status=CommunityReviewStatus.REMOVED)
+        .filter(erase_post)
+        .filter(Q(body__gt='') | Q(metadata__has_key='removed_image_key'))
+    )
+    # Oldest-touched first; a failing row is touched, so it can't starve the rest.
+    posts = list(owed.order_by('updated_at').values_list('id', flat=True)[:limit])
+    erased_post_ids = []
+    for item_id in posts:
+        with transaction.atomic():
+            # Locked (with its review) and re-checked: a restore or an image
+            # hide may have changed it since the batch was read.
+            # Review first, as restore and take_down do.
+            locked = list(CommunityPostReview.objects.select_for_update()
+                          .filter(content_item_id=item_id).values_list('id', flat=True))
+            item = owed.select_for_update(of=('self',)).filter(id=item_id).first()
+            if not locked or item is None:
+                continue
+            metadata = dict(item.metadata or {})
+            if metadata.get('image'):
+                continue  # its image is still being hidden; next sweep
+            backup = metadata.pop('removed_image_key', None)
+            if backup:
+                try:
+                    delete_object(key=backup, bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
+                except Exception:
+                    logger.exception('Could not delete removed image copy %s; retried next sweep', backup)
+                    ContentItem.objects.filter(id=item.id).update(updated_at=timezone.now())
+                    continue
+            item.body = ''
+            item.title = ''
+            item.metadata = metadata
+            item.save(update_fields=['body', 'title', 'metadata', 'updated_at'])
+            erased_post_ids.append(item.id)
+    if erased_post_ids:
+        erase_comment_notifications(content_item_ids=erased_post_ids)
+    erase_comment = (
+        Q(category__in=ERASE_NOW_CATEGORIES)
+        | Q(author__deleted_at__isnull=False)
+        | Q(removed_at__lt=old)
+    )
+    comments = (
+        CommunityComment.objects.filter(status=CommunityReviewStatus.REMOVED, body__gt='')
+        .filter(erase_comment)
+        .values_list('id', flat=True)[:limit]
+    )
+    erased_comments = CommunityComment.objects.filter(
+        id__in=list(comments), status=CommunityReviewStatus.REMOVED,
+    ).update(body='', updated_at=timezone.now())
+    return {'posts': len(erased_post_ids), 'comments': erased_comments}

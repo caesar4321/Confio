@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
@@ -86,6 +87,11 @@ def _remove_member_content_after_commit(user_id, kind):
 def _remember_user_deleted_at(sender, instance, **kwargs):
     # Only a save that marks the account deleted needs the previous value; the
     # many ordinary user saves (logins, profile edits) cost no extra query.
+    # A deferred deleted_at isn't being saved, and reading it would load it:
+    # treat it as unchanged.
+    if 'deleted_at' in instance.get_deferred_fields():
+        instance._community_was_deleted = True
+        return
     if instance.deleted_at is None or not instance.pk:
         instance._community_was_deleted = False
         return
@@ -95,7 +101,9 @@ def _remember_user_deleted_at(sender, instance, **kwargs):
 
 @receiver(post_save, sender='users.User')
 def remove_content_of_deleted_account(sender, instance, created, **kwargs):
-    if instance.deleted_at is not None and not getattr(instance, '_community_was_deleted', False):
+    if getattr(instance, '_community_was_deleted', True):
+        return
+    if instance.deleted_at is not None:
         _remove_member_content_after_commit(instance.pk, 'deleted')
 
 
@@ -113,14 +121,36 @@ def delete_member_content_with_account(sender, instance, **kwargs):
     from django.conf import settings
     from security.s3_utils import key_from_url
 
-    from . import public_objects
-    from .models import ContentItem, OwnerType, ProfilePictureSubmission
+    from . import community, public_objects
+    from .models import CommunityComment, ContentItem, OwnerType, ProfilePictureSubmission
 
     items = ContentItem.objects.filter(owner_type=OwnerType.USER, owner_user=instance)
+    # Comment text (theirs, and others' on their posts) also sits in
+    # members' notifications.
+    community.erase_comment_notifications(
+        list(CommunityComment.objects.filter(Q(author=instance) | Q(parent__author=instance))
+             .values_list('id', flat=True)),
+        content_item_ids=list(items.values_list('id', flat=True)),
+    )
+    backups = []
     for metadata in items.values_list('metadata', flat=True):
         url = ((metadata or {}).get('image') or {}).get('url')
         if url:
             public_objects.doom(settings.AWS_PUBLICATIONS_BUCKET, key_from_url(url))
+        if (metadata or {}).get('removed_image_key'):
+            backups.append(metadata['removed_image_key'])
+    if backups:
+        # Private moderation copies go too (the bucket lifecycle is the backstop).
+        def delete_backups():
+            from security.s3_utils import delete_object
+
+            for key in backups:
+                try:
+                    delete_object(key=key, bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
+                except Exception:
+                    pass
+
+        transaction.on_commit(delete_backups)
     for url in ProfilePictureSubmission.objects.filter(user=instance).exclude(public_url='').values_list('public_url', flat=True):
         public_objects.doom(settings.AWS_PROFILE_PICTURES_BUCKET, key_from_url(url))
     items.delete()

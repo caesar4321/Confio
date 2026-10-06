@@ -148,6 +148,11 @@ def sweep_stuck_community_reviews_task():
 
     for object_id in owed():
         delete_public_object_task.delay(object_id)
+    from .community import members_owed_content_removal, purge_removed_content
+
+    for user_id, kind in members_owed_content_removal():
+        remove_member_content_task.delay(user_id, kind)
+    purge_removed_content()
     from .community import lost_rereview_ids
     from .models import CommunityComment, CommunityPostReview
 

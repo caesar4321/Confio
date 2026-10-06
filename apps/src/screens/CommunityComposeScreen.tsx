@@ -51,6 +51,7 @@ export const CommunityComposeScreen = () => {
   const [body, setBody] = useState(route.params?.initialBody || '');
   const [image, setImage] = useState<PickedImage | null>(null);
   const [phase, setPhase] = useState<Phase>('editing');
+  const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
@@ -274,6 +275,23 @@ export const CommunityComposeScreen = () => {
                 <Text style={styles.primaryButtonText}>Verificar identidad</Text>
               </Pressable>
             </>
+          ) : !status ? (
+            <Pressable
+              style={[styles.primaryButton, retrying && styles.primaryButtonDisabled]}
+              disabled={retrying}
+              onPress={() => {
+                setRetrying(true);
+                refetchStatus().catch(() => {}).finally(() => setRetrying(false));
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ busy: retrying }}
+            >
+              {retrying ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.primaryButtonText}>Reintentar</Text>
+              )}
+            </Pressable>
           ) : null}
         </View>
       </View>

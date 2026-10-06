@@ -1012,8 +1012,10 @@ def reaction_payload(comment_id, maps):
 
 def build_community_comment_payload(
     comment, viewer, post_author_id, reported_ids, replies=None, avatars=None, reactions=None, reply_count=0,
+    blocked_ids=None,
 ):
     is_own = comment.author_id == viewer.id
+    hidden_ids = blocked_ids if blocked_ids is not None else community.block_relation_ids(viewer)
     avatars = avatars if avatars is not None else profile_pictures.picture_urls(
         [comment.author_id, *[user.id for user in comment.mentions.all()]]
     )
@@ -1046,6 +1048,7 @@ def build_community_comment_payload(
                 avatar_url=avatars.get(user.id),
             )
             for user in comment.mentions.all()
+            if user.id not in hidden_ids
         ],
         replies=replies or [],
         reply_count=reply_count,
@@ -1634,6 +1637,7 @@ class Query(graphene.ObjectType):
         counts = dict(
             community.visible_comments_any_post()
             .filter(content_item_id__in=[item.id for item in items])
+            .exclude(author_id__in=community.block_relation_ids(info.context.user))
             .values('content_item_id')
             .annotate(total=Count('id'))
             .values_list('content_item_id', 'total')
@@ -1648,9 +1652,14 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_community_post_viewer(self, info, content_item_id):
         user = info.context.user
-        item = ContentItem.objects.filter(id=content_item_id).select_related('community_review').first()
+        item = ContentItem.objects.filter(id=content_item_id).select_related('community_review', 'owner_user').first()
         review = getattr(item, 'community_review', None) if item else None
         max_chars = settings.COMMUNITY_COMMENT_MAX_CHARS
+        # Someone else's post says nothing (not even who wrote it) unless it is
+        # live and readable to this viewer; ids are sequential and guessable.
+        if review is not None and item.owner_user_id != user.id \
+                and community.published_community_post(item.id, viewer=user) is None:
+            review = None
         if review is None:
             return CommunityPostViewerType(
                 is_community=False, is_own=False, can_report=False, viewer_reported=False,
@@ -1699,9 +1708,10 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_community_comments(self, info, content_item_id, offset=0, limit=20, expanded_thread_ids=None):
         user = info.context.user
-        item = community.published_community_post(content_item_id)
+        item = community.published_community_post(content_item_id, viewer=user)
         if item is None:
             return CommunityCommentPageType(items=[], has_more=False, total_count=0)
+        blocked_ids = community.block_relation_ids(user)
         offset = max(offset or 0, 0)
         # The app re-reads everything it has loaded (offset 0, growing limit)
         # so polling and deletes never leave a stale later page.
@@ -1741,7 +1751,7 @@ class Query(graphene.ObjectType):
         for reply in replies:
             replies_by_parent.setdefault(reply.parent_id, []).append(reply)
         reply_counts = dict(
-            community.visible_comments(item.id).filter(parent_id__in=thread_ids)
+            community.visible_comments(item.id).filter(parent_id__in=thread_ids).exclude(author_id__in=blocked_ids)
             .values('parent_id').annotate(total=Count('id')).values_list('parent_id', 'total')
         )
         page_ids = thread_ids + [r.id for r in replies]
@@ -1761,24 +1771,26 @@ class Query(graphene.ObjectType):
                 replies=[
                     build_community_comment_payload(
                         reply, user, post_author_id, reported_ids, avatars=avatars, reactions=reactions,
+                        blocked_ids=blocked_ids,
                     )
                     for reply in replies_by_parent.get(comment.id, [])
                 ],
                 avatars=avatars,
                 reactions=reactions,
                 reply_count=reply_counts.get(comment.id, 0),
+                blocked_ids=blocked_ids,
             )
             for comment in top_level
         ]
         return CommunityCommentPageType(
             items=items,
             has_more=has_more,
-            total_count=community.visible_comments(item.id).count(),
+            total_count=community.visible_comments(item.id).exclude(author_id__in=blocked_ids).count(),
         )
 
     @login_required
     def resolve_community_post_participants(self, info, content_item_id):
-        item = community.published_community_post(content_item_id)
+        item = community.published_community_post(content_item_id, viewer=info.context.user)
         if item is None:
             return []
         participants = community.post_participants(item.id, exclude_user=info.context.user)
@@ -1807,9 +1819,12 @@ class Query(graphene.ObjectType):
                 ids.append(int(raw))
             except (TypeError, ValueError):
                 continue
+        blocked_ids = community.block_relation_ids(info.context.user)
         counts = dict(
             community.visible_comments_any_post()
-            .filter(content_item_id__in=ids)
+            .filter(content_item_id__in=ids, content_item__owner_user__deleted_at__isnull=True)
+            .exclude(author_id__in=blocked_ids)
+            .exclude(content_item__owner_user_id__in=blocked_ids)
             .values('content_item_id')
             .annotate(total=Count('id'))
             .values_list('content_item_id', 'total')

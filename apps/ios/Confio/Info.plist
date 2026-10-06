@@ -82,7 +82,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Confío usa el micrófono para los audios que le mandas a Confio Assistant y para la verificación de identidad en video.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Confío usa tus fotos solo cuando eliges una: para publicar en Comunidad, para tu foto de perfil o para leer un código QR.</string>
+	<string>Confío usa tus fotos solo cuando eliges una: para publicar en Comunidad, para tu foto de perfil, para leer un código QR o para personalizar tu asistente.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Confío guarda en tus fotos los comprobantes que decides descargar.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
