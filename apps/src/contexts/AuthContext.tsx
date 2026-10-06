@@ -519,6 +519,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           resetAuthReady();
           setIsAuthenticated(false);
           setProfileData(null);
+          // A server-ended session is a sign-out too: the next person must
+          // not see this one's cached data.
+          void clearSignedOutCache();
           explainSessionEnded();
 
           // Navigate directly to Login screen (not phone verification)
@@ -1221,6 +1224,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               resetAuthReady();
               setIsAuthenticated(false);
               setProfileData(null);
+              void clearSignedOutCache();
               explainSessionEnded();
               navigateToScreen('Auth');
               return;
@@ -1322,6 +1326,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     return true;
   };
 
+  // The next person to sign in on this phone must never see the last one's
+  // cached data (balances, history, unpublished posts). clearStore() also
+  // cancels in-flight queries and does not refetch.
+  const clearSignedOutCache = async () => {
+    try {
+      await apolloClient.clearStore();
+    } catch (error) {
+      console.error('Error clearing the Apollo cache on sign-out:', error);
+    }
+  };
+
   const signOut = async () => {
     // Resume can still be refreshing/persisting this account's tokens. Do not
     // let an account switch race that work and resurrect the old session.
@@ -1334,11 +1349,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       resetAuthReady();
       const authService = AuthService.getInstance();
       await authService.signOut();
+      await clearSignedOutCache();
       setIsAuthenticated(false);
       setProfileData(null);
       navigateToScreen('Auth');
     } catch (error) {
       console.error('Error signing out:', error);
+      await clearSignedOutCache();
       resetAuthReady();
       setIsAuthenticated(false);
       setProfileData(null);
