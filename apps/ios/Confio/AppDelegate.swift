@@ -57,6 +57,52 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
   }
 }
 
+// Owns the status bar for React Native's <StatusBar>. Apps linked against the
+// iOS 27 SDK can no longer set it through UIApplication, so the patched
+// RCTStatusBarManager (patches/react-native+0.79.7.patch) posts each request
+// here and UIKit reads it back from this controller.
+final class ReactRootViewController: UIViewController {
+  private var statusBarStyle: UIStatusBarStyle = .default
+  private var statusBarHidden = false
+  private var hiddenAnimation: UIStatusBarAnimation = .none
+
+  override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
+    super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
+    NotificationCenter.default.addObserver(self, selector: #selector(applyStatusBarRequest(_:)),
+                                           name: Notification.Name("RCTStatusBarAppearanceRequest"),
+                                           object: nil)
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
+  override var preferredStatusBarStyle: UIStatusBarStyle { statusBarStyle }
+  override var prefersStatusBarHidden: Bool { statusBarHidden }
+  override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { hiddenAnimation }
+
+  // Posted on the main queue by RCTStatusBarManager.
+  @objc private func applyStatusBarRequest(_ notification: Notification) {
+    let info = notification.userInfo ?? [:]
+    var animated = false
+    if let raw = (info["style"] as? NSNumber)?.intValue, let style = UIStatusBarStyle(rawValue: raw) {
+      statusBarStyle = style
+      animated = (info["animated"] as? NSNumber)?.boolValue ?? false
+    }
+    if let hidden = (info["hidden"] as? NSNumber)?.boolValue {
+      statusBarHidden = hidden
+      let raw = (info["animation"] as? NSNumber)?.intValue ?? 0
+      hiddenAnimation = UIStatusBarAnimation(rawValue: raw) ?? .none
+      animated = hiddenAnimation != .none
+    }
+    if animated {
+      UIView.animate(withDuration: 0.25) { self.setNeedsStatusBarAppearanceUpdate() }
+    } else {
+      setNeedsStatusBarAppearanceUpdate()
+    }
+  }
+}
+
 // Under the scene life cycle, links arrive here instead of the AppDelegate
 // methods above: a cold start through `connectionOptions`, a warm one through
 // the scene callbacks.
@@ -91,7 +137,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
       }
       let rootView = RCTRootView(bridge: bridge, moduleName: "Confio", initialProperties: nil)
       rootView.backgroundColor = .systemBackground
-      rootVC = UIViewController()
+      rootVC = ReactRootViewController()
       rootVC.view = rootView
       appDelegate.bridge = bridge
       appDelegate.reactRootViewController = rootVC

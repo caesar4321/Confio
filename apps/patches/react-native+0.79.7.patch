@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js b/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js
-index c0d7459..b975a33 100644
+index c0d7459..4c9ea4b 100644
 --- a/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js
 +++ b/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js
 @@ -25,6 +25,154 @@ export type ModuleConfig = [
@@ -157,7 +157,7 @@ index c0d7459..b975a33 100644
  function genModule(
    config: ?ModuleConfig,
    moduleID: number,
-@@ -62,7 +213,13 @@ function genModule(
+@@ -62,7 +210,13 @@ function genModule(
          'Cannot have a method that is both async and a sync hook',
        );
        const methodType = isPromise ? 'promise' : isSync ? 'sync' : 'async';
@@ -172,7 +172,7 @@ index c0d7459..b975a33 100644
      });
  
    Object.assign(module, constants);
-@@ -95,10 +252,21 @@ function loadModule(name: string, moduleID: number): ?{...} {
+@@ -95,10 +249,21 @@ function loadModule(name: string, moduleID: number): ?{...} {
    return info && info.module;
  }
  
@@ -195,7 +195,7 @@ index c0d7459..b975a33 100644
        // In case we reject, capture a useful stack trace here.
        /* $FlowFixMe[class-object-subtyping] added when improving typing for
         * this parameters */
-@@ -108,7 +276,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
+@@ -108,7 +273,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
          BatchedBridge.enqueueNativeCall(
            moduleID,
            methodID,
@@ -204,7 +204,7 @@ index c0d7459..b975a33 100644
            data => resolve(data),
            errorData =>
              reject(
-@@ -142,7 +310,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
+@@ -142,7 +307,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
          return BatchedBridge.callNativeSyncHook(
            moduleID,
            methodID,
@@ -213,7 +213,7 @@ index c0d7459..b975a33 100644
            onFail,
            onSuccess,
          );
-@@ -150,7 +318,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
+@@ -150,7 +315,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
          BatchedBridge.enqueueNativeCall(
            moduleID,
            methodID,
@@ -223,10 +223,45 @@ index c0d7459..b975a33 100644
            onSuccess,
          );
 diff --git a/node_modules/react-native/Libraries/Network/RCTNetworking.mm b/node_modules/react-native/Libraries/Network/RCTNetworking.mm
+index 482a3e1..4c006d4 100644
 --- a/node_modules/react-native/Libraries/Network/RCTNetworking.mm
 +++ b/node_modules/react-native/Libraries/Network/RCTNetworking.mm
-@@ -337,3 +337,3 @@
+@@ -335,7 +335,7 @@ - (RCTURLRequestCancellationBlock)buildRequest:(NSDictionary<NSString *, id> *)q
+ 
+   request.timeoutInterval = [RCTConvert NSTimeInterval:query[@"timeout"]];
    NSDictionary<NSString *, id> *data = [RCTConvert NSDictionary:RCTNilIfNull(query[@"data"])];
 -  NSString *trackingName = data[@"trackingName"];
 +  NSString *trackingName = [RCTConvert NSString:RCTNilIfNull(data[@"trackingName"])];
    if (trackingName) {
+     [NSURLProtocol setProperty:trackingName forKey:@"trackingName" inRequest:request];
+   }
+diff --git a/node_modules/react-native/React/CoreModules/RCTStatusBarManager.mm b/node_modules/react-native/React/CoreModules/RCTStatusBarManager.mm
+index 5762334..9264669 100644
+--- a/node_modules/react-native/React/CoreModules/RCTStatusBarManager.mm
++++ b/node_modules/react-native/React/CoreModules/RCTStatusBarManager.mm
+@@ -137,8 +137,11 @@ - (void)applicationWillChangeStatusBarFrame:(NSNotification *)notification
+   dispatch_async(dispatch_get_main_queue(), ^{
+     UIStatusBarStyle statusBarStyle = [RCTConvert UIStatusBarStyle:style];
+     if (RCTViewControllerBasedStatusBarAppearance()) {
+-      RCTLogError(@"RCTStatusBarManager module requires that the \
+-                UIViewControllerBasedStatusBarAppearance key in the Info.plist is set to NO");
++      // Confío: the SDK 27 UIApplication setters are no-ops, so the app's root
++      // view controller applies the style (see AppDelegate.swift).
++      [[NSNotificationCenter defaultCenter] postNotificationName:@"RCTStatusBarAppearanceRequest"
++                                                          object:nil
++                                                        userInfo:@{@"style" : @(statusBarStyle), @"animated" : @(animated)}];
+     } else {
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+@@ -153,8 +156,9 @@ - (void)applicationWillChangeStatusBarFrame:(NSNotification *)notification
+   dispatch_async(dispatch_get_main_queue(), ^{
+     UIStatusBarAnimation animation = [RCTConvert UIStatusBarAnimation:withAnimation];
+     if (RCTViewControllerBasedStatusBarAppearance()) {
+-      RCTLogError(@"RCTStatusBarManager module requires that the \
+-                UIViewControllerBasedStatusBarAppearance key in the Info.plist is set to NO");
++      [[NSNotificationCenter defaultCenter] postNotificationName:@"RCTStatusBarAppearanceRequest"
++                                                          object:nil
++                                                        userInfo:@{@"hidden" : @(hidden), @"animation" : @(animation)}];
+     } else {
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wdeprecated-declarations"
