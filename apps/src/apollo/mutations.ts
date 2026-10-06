@@ -465,6 +465,21 @@ export const CREATE_DIDIT_VERIFICATION_SESSION = gql`
   }
 `;
 
+// Separate document so an older server without `inBrowser` fails only this
+// fallback, never the in-app verification.
+export const CREATE_DIDIT_BROWSER_VERIFICATION_SESSION = gql`
+  mutation CreateDiditBrowserVerificationSession {
+    createDiditVerificationSession(inBrowser: true) {
+      success
+      error
+      session {
+        sessionId
+        sessionUrl
+      }
+    }
+  }
+`;
+
 export const SYNC_DIDIT_VERIFICATION_SESSION = gql`
   mutation SyncDiditVerificationSession($sessionId: String!) {
     syncDiditVerificationSession(sessionId: $sessionId) {

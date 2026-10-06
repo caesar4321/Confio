@@ -3071,6 +3071,9 @@ class CreateDiditVerificationSession(graphene.Mutation):
         purpose = graphene.String(required=False)
         id_country = graphene.String(required=False)
         document_types = graphene.List(graphene.String, required=False)
+        # Verify on Didit's hosted page in the phone's browser instead of the
+        # native SDK (fallback when the SDK camera fails on a device).
+        in_browser = graphene.Boolean(required=False)
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -3078,7 +3081,7 @@ class CreateDiditVerificationSession(graphene.Mutation):
     verification = graphene.Field(IdentityVerificationType)
 
     @classmethod
-    def mutate(cls, root, info, purpose=None, id_country=None, document_types=None):
+    def mutate(cls, root, info, purpose=None, id_country=None, document_types=None, in_browser=False):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return CreateDiditVerificationSession(success=False, error="Authentication required", session=None, verification=None)
@@ -3110,8 +3113,12 @@ class CreateDiditVerificationSession(graphene.Mutation):
                 user=user,
                 account_type=account_type,
                 business_id=business_id,
-                callback_url='confio://verification' if account_type == 'business' else build_didit_callback_url(info.context),
+                # Didit sends the browser to `callback` when it finishes; the app's
+                # deep link brings the user back to the Verification screen.
+                callback_url=('confio://verification' if account_type == 'business' or in_browser
+                              else build_didit_callback_url(info.context)),
                 document_request=document_request,
+                hosted=bool(in_browser),
             )
             return CreateDiditVerificationSession(
                 success=True,

@@ -763,7 +763,8 @@ def _start_session(payload: dict[str, Any]) -> dict[str, Any]:
 
 def create_didit_session(*, user, account_type: str = 'personal', business_id: str | None = None,
                          callback_url: str | None = None,
-                         document_request: dict[str, Any] | None = None) -> dict[str, Any]:
+                         document_request: dict[str, Any] | None = None,
+                         hosted: bool = False) -> dict[str, Any]:
     account_type = str(account_type or '').strip().lower()
     if account_type not in {'personal', 'business'}:
         raise DiditConfigurationError('Unsupported Didit account context')
@@ -835,8 +836,10 @@ def create_didit_session(*, user, account_type: str = 'personal', business_id: s
                         'session_url': _validated_didit_session_url(decision.get('session_url')),
                         'status': decision.get('status'), 'vendor_data': vendor_data}
     session = _start_session(payload)
-    if account_type == 'business':
+    if account_type == 'business' or hosted:
+        # The app opens this link in the browser; never hand it anything else.
         session['session_url'] = _validated_didit_session_url(session.get('session_url'))
+    if account_type == 'business':
         ensure_pending_didit_verification(user=user, session_id=session['session_id'],
                                           account_type='business', business_id=business_id)
     if document_request is not None:

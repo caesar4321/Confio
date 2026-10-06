@@ -10,12 +10,13 @@ let mockAnyStatus: string | null = null;
 let mockPersonalStatus: string | null = 'rejected';
 const mockCreateSession = jest.fn();
 const mockSyncSession = jest.fn();
+const mockBrowserSession = jest.fn();
 const mockRefetch = jest.fn().mockResolvedValue({});
 const mockReason = 'El documento no coincide con tu identidad verificada.';
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('@apollo/client', () => ({
   gql: (parts: TemplateStringsArray) => parts.join(''),
-  useMutation: (query: string) => [query === 'create' ? mockCreateSession : mockSyncSession],
+  useMutation: (query: string) => [query === 'create' ? mockCreateSession : query === 'browser' ? mockBrowserSession : mockSyncSession],
   useQuery: (query: string) => ({loading: false, refetch: mockRefetch, data:
     query.includes('MyIdentityDocuments') ? (mockDocuments === null ? {} : {myIdentityDocuments: mockDocuments})
       : query === 'personal' ? {myPersonalKycStatus: {status: mockPersonalStatus, statusDetail: mockPersonalStatus ? mockReason : null}}
@@ -29,7 +30,9 @@ jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAcc
 }})}));
 jest.mock('../../hooks/useRampCountry', () => ({useRampCountry: () => ({countryCode: 'PY', isBlocked: false})}));
 jest.mock('../../apollo/queries', () => ({GET_ME: 'me', GET_MY_KYC_STATUS: 'any', GET_MY_PERSONAL_KYC_STATUS: 'personal', GET_BUSINESS_KYC_STATUS: 'business'}));
-jest.mock('../../apollo/mutations', () => ({CREATE_DIDIT_VERIFICATION_SESSION: 'create', SYNC_DIDIT_VERIFICATION_SESSION: 'sync'}));
+jest.mock('../../apollo/mutations', () => ({
+  CREATE_DIDIT_VERIFICATION_SESSION: 'create', CREATE_DIDIT_BROWSER_VERIFICATION_SESSION: 'browser', SYNC_DIDIT_VERIFICATION_SESSION: 'sync',
+}));
 jest.mock('../../services/diditService', () => ({getDiditResultSessionId: jest.fn(), startDiditVerification: jest.fn()}));
 jest.mock('../../services/analyticsService', () => ({AnalyticsService: {logEvent: jest.fn()}}));
 jest.mock('../../navigation/Header', () => ({Header: () => null}));
@@ -118,5 +121,55 @@ it('never uses latest business verification for an unverified personal account',
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
   expect(tree.root.findAllByType(Text).map(n => n.props.children)).toContain('Sin verificar');
+  await act(async () => tree.unmount());
+});
+
+const browserLink = (tree: renderer.ReactTestRenderer) =>
+  tree.root.findAll(n => n.props.accessibilityRole === 'button' && typeof n.props.onPress === 'function'
+    && n.findAllByType(Text).some(t => String(t.props.children).includes('navegador')), {deep: false});
+
+it('offers personal verification on Didit\'s page in the browser', async () => {
+  mockPersonalStatus = null;
+  mockBrowserSession.mockResolvedValue({data: {createDiditVerificationSession: {success: true,
+    session: {sessionId: 'web-1', sessionUrl: 'https://verify.didit.me/session/web-1'}}}});
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  const links = browserLink(tree);
+  expect(links).toHaveLength(1);
+  await act(async () => { await links[0].props.onPress(); });
+  expect(open).toHaveBeenCalledWith('https://verify.didit.me/session/web-1');
+  expect(startDiditVerification).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+  open.mockRestore();
+});
+
+it('never opens an untrusted link from the browser fallback', async () => {
+  mockPersonalStatus = null;
+  mockBrowserSession.mockResolvedValue({data: {createDiditVerificationSession: {success: true,
+    session: {sessionId: 'web-1', sessionUrl: 'https://evil.example/session/web-1'}}}});
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  await act(async () => { await browserLink(tree)[0].props.onPress(); });
+  expect(open).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+  open.mockRestore();
+});
+
+it('keeps the browser fallback off business accounts and additional documents', async () => {
+  mockBusiness = true;
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  expect(browserLink(tree)).toHaveLength(0);
+  await act(async () => tree.unmount());
+
+  mockBusiness = false;
+  mockDocuments = [{id: '1', documentType: 'passport', issuingCountry: 'CO', status: 'rejected',
+    isAdditional: true, localCountries: [], rejectedReason: mockReason},
+  {id: '2', documentType: 'national_id', issuingCountry: 'PY', status: 'verified',
+    isAdditional: false, localCountries: [], rejectedReason: null}];
+  await act(async () => { tree = renderer.create(<VerificationScreen />); });
+  expect(browserLink(tree)).toHaveLength(0);
   await act(async () => tree.unmount());
 });
