@@ -510,7 +510,8 @@ const VerificationScreen = () => {
           <Icon name="chevron-right" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       ) : null}
-      {!hasCountryAttempt ? browserFallback : null}
+      {/* Not before the documents load: a primary under review must not race a new session. */}
+      {!hasCountryAttempt && !isInitialLoading ? browserFallback : null}
       <TouchableOpacity style={styles.optionCard} onPress={openOtherDocument} disabled={isBusy} accessibilityRole="button">
         <View style={styles.documentIcon}>
           <Icon name="book" size={18} color={colors.primaryDark} />
@@ -613,7 +614,7 @@ const VerificationScreen = () => {
           icon={<Icon name="arrow-up-right" size={18} color={colors.white} />}
         />
       ) : null}
-      {effectiveStatus !== 'verified' ? browserFallback : null}
+      {(effectiveStatus === 'unverified' || effectiveStatus === 'rejected') && !isInitialLoading ? browserFallback : null}
     </View>
   );
 
