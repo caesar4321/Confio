@@ -205,6 +205,9 @@ class CustomPet(models.Model):
     cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+    # Why a creation was refused (pets.PetRejected.reason), e.g. 'person' or
+    # 'no_animal'; empty for pets that were made.
+    rejected_reason = models.CharField(max_length=32, blank=True, default='')
 
     class Meta:
         indexes = [models.Index(fields=['user', '-created_at'], name='assistant_pet_user_idx')]

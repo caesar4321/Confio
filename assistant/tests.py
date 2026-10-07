@@ -447,7 +447,7 @@ class PetTests(TestCase):
         with patch('assistant.pets.requests.post', side_effect=post) as mocked:
             with self.assertRaises(pets.PetError) as ctx:
                 pets.create_pet(self.user, photo_base64=photo, photo_mime='image/jpeg')
-        self.assertIn('sin personas', str(ctx.exception))
+        self.assertIn('cara', str(ctx.exception))
         self.assertFalse(any('/images/' in c.args[0] for c in mocked.call_args_list))
 
     @override_settings(OPENAI_API_KEY='k')
@@ -1319,6 +1319,10 @@ class PortfolioAndNeedsTests(TestCase):
         self.account = SimpleNamespace(id=1, bsc_address='0xabc')
         self.viewer = Viewer(user=self.user, account=self.account, account_type='personal', business_id=None,
                              is_business_owner=False, tz=ZoneInfo('UTC'))
+        # The yield is read live from the chain; covered in ConversationReviewFixTests.
+        apy = patch('assistant.engine._plus_net_apy', return_value='desconocido')
+        apy.start()
+        self.addCleanup(apy.stop)
 
     def test_portfolio_reads_balances_and_marks_unknowns(self):
         from .engine import portfolio_data
@@ -1570,3 +1574,121 @@ class SpecificNavigationTests(TestCase):
             self.assertIsNone(market.listed_asset('S&P 500'))
             self.assertEqual(market.listed_asset('Apple (SPY)')[0], 'SPY')
             self.assertEqual(market.listed_asset('Global X')[0], 'XYLD')
+
+
+class ConversationReviewFixTests(TestCase):
+    """Fixes from the 2026-10-07 review of every conversation since launch."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='cr', email='cr@example.com', password='x', firebase_uid='fb-cr')
+
+    def test_portfolio_reports_todays_net_yield_and_never_a_fallback_zero(self):
+        from django.core.cache import cache
+
+        from .engine import _plus_net_apy
+        cache.delete_many(['cusd_plus_apy', 'cusd_plus_apy_last'])
+        cache.set('cusd_plus_apy', (4.4, 3.74), 60)
+        with patch('cusd_plus.vault.apy_split', return_value=(4.4, 3.74)):
+            self.assertEqual(_plus_net_apy(), '3,74% anual (variable, no garantizado)')
+        cache.delete('cusd_plus_apy')
+        # Nothing read from the chain: unknown, never a confident 0%.
+        with patch('cusd_plus.vault.apy_split', return_value=(0.0, 0.0)):
+            self.assertEqual(_plus_net_apy(), 'desconocido')
+        with patch('cusd_plus.vault.apy_split', side_effect=RuntimeError('rpc')):
+            self.assertEqual(_plus_net_apy(), 'desconocido')
+
+    @override_settings(OPENAI_API_KEY='k')
+    def test_voice_notes_carry_a_language_hint_by_phone_country(self):
+        response = SimpleNamespace(status_code=200, json=lambda: {'text': '¿Y el oro y la plata?'})
+        note = base64.b64encode(fake_m4a(3)).decode()
+        with patch('assistant.service.requests.post', return_value=response) as post:
+            service.transcribe(note, 'audio/mp4', 3000, country='PE')
+            self.assertIn('acciones', post.call_args.kwargs['data']['prompt'])
+            service.transcribe(note, 'audio/mp4', 3000, country='BR')
+            self.assertIn('ações', post.call_args.kwargs['data']['prompt'])
+            service.transcribe(note, 'audio/mp4', 3000)
+            self.assertIn('acciones', post.call_args.kwargs['data']['prompt'])
+
+    @override_settings(OPENAI_API_KEY='k', CONFIO_ASSISTANT_PET_FREE_PER_WEEK=2)
+    def test_rejected_photo_keeps_its_reason_and_says_photo(self):
+        from . import pets
+        from .models import CustomPet
+
+        def post(url, **kwargs):
+            if url.endswith('/moderations'):
+                return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+                                       json=lambda: {'results': [{'flagged': False}]})
+            verdict = json.dumps({'persona': True, 'animal_o_objeto': True})
+            return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+                                   json=lambda: {'output_text': verdict})
+
+        photo = base64.b64encode(b'jpg').decode()
+        with patch('assistant.pets.requests.post', side_effect=post):
+            with self.assertRaises(pets.PetRejected) as raised:
+                pets.create_pet(self.user, photo_base64=photo, photo_mime='image/jpeg')
+        self.assertIn('cara', str(raised.exception))
+        slot = CustomPet.objects.get(user=self.user)
+        self.assertEqual(slot.rejected_reason, 'person')
+        self.assertIsNotNone(slot.deleted_at)
+
+        flagged = SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+                                  json=lambda: {'results': [{'flagged': True}]})
+        with patch('assistant.pets.requests.post', return_value=flagged):
+            with self.assertRaises(pets.PetRejected) as raised:
+                pets.create_pet(self.user, photo_base64=photo, photo_mime='image/jpeg')
+        self.assertIn('foto', str(raised.exception))
+        self.assertEqual(CustomPet.objects.filter(user=self.user, rejected_reason='moderation_photo').count(), 1)
+
+    def test_faq_names_the_only_network_and_promises_no_recovery(self):
+        self.assertIn('BNB Smart Chain (BEP20)', FAQ)
+        self.assertIn('Ethereum (ERC20)', FAQ)
+        self.assertIn('sin prometer una recuperación', FAQ)
+
+    def test_hint_echo_on_silence_is_an_empty_note(self):
+        from .prompts import TRANSCRIBE_HINTS, prompt_echo
+        self.assertTrue(prompt_echo(TRANSCRIBE_HINTS['es']))
+        self.assertTrue(prompt_echo(TRANSCRIBE_HINTS['pt']))
+        self.assertTrue(prompt_echo(TRANSCRIBE_HINTS['es'].rsplit(',', 3)[0]))  # most of the hint
+        # Real short commands made of hint words are notes, not echoes.
+        for note in ('Enviar Confío Dollar', 'Retirar Confío Dollar+', 'Recargar Pix QR',
+                     'Confío Dollar+ acciones', '¿Cuánto rinde Confío Dollar+?', 'Confío'):
+            self.assertFalse(prompt_echo(note), note)
+
+    def test_yield_is_only_a_rate_read_from_the_chain(self):
+        from django.core.cache import cache
+
+        from .engine import _plus_net_apy
+        cache.delete_many(['cusd_plus_apy', 'cusd_plus_apy_last', 'cusd_plus_apy_failed'])
+        # A hand-set settings fallback served on an RPC failure is never "today's rate".
+        with patch('cusd_plus.vault.apy_split', return_value=(0.0, 4.0)):
+            self.assertEqual(_plus_net_apy(), 'desconocido')
+        cache.set('cusd_plus_apy_last', (4.5, 3.8), 60)
+        with patch('cusd_plus.vault.apy_split', return_value=(4.5, 3.8)):
+            self.assertEqual(_plus_net_apy(), '3,80% anual (variable, no garantizado)')
+        cache.delete('cusd_plus_apy_last')
+
+    def test_failed_apy_read_is_remembered_so_turns_dont_wait(self):
+        from django.core.cache import cache
+
+        from cusd_plus import vault
+        cache.delete_many(['cusd_plus_apy', 'cusd_plus_apy_last', 'cusd_plus_apy_failed'])
+        with patch('cusd_plus.vault.oracle_address', return_value='0xoracle'), \
+                patch('cusd_plus.vault.usdy_daily_rate', side_effect=RuntimeError('rpc down')) as read:
+            vault.apy_split()
+            vault.apy_split()
+        self.assertEqual(read.call_count, 1)
+        cache.delete('cusd_plus_apy_failed')
+
+    @override_settings(OPENAI_API_KEY='k', CONFIO_ASSISTANT_PLUS_VOICE_MINUTES=10, CONFIO_ASSISTANT_REALTIME_ENABLED=True)
+    def test_realtime_transcription_gets_the_same_hint(self):
+        from .prompts import TRANSCRIBE_HINTS
+        account = Account.objects.create(user=self.user, account_type='personal', account_index=0)
+        conversation = SupportConversation.objects.create(user=self.user, account=account, status='OPEN')
+        viewer = Viewer(user=self.user, account=account, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        with patch('assistant.billing.has_plus', return_value=True), \
+                patch('assistant.voice.requests.post') as post:
+            post.return_value = SimpleNamespace(status_code=200, json=lambda: {'value': 'ek_test'})
+            voice.start_session(viewer, conversation, first_name='V', account_label='personal', country='BR')
+        sent = post.call_args.kwargs['json']['session']['audio']['input']['transcription']
+        self.assertEqual(sent['prompt'], TRANSCRIBE_HINTS['pt'])

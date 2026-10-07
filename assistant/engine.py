@@ -313,8 +313,30 @@ def portfolio_data(viewer: Viewer):
             spent.append(Decimal(summary['actual']['salio_usd'].replace(',', '')))
     result['gasto_mensual_promedio_usd'] = _usd(sum(spent) / len(spent)) if spent else 'sin datos'
     result['meses_completos_considerados'] = len(spent)
+    if result['acciones_y_confio_dollar_plus_disponibles'] is not False:
+        result['confio_dollar_plus_rendimiento_anual_hoy'] = _plus_net_apy()
     result['nota'] = 'El rendimiento ganado este mes en Confío Dollar+ aún no está disponible: no lo menciones.'
     return result
+
+
+def _plus_net_apy():
+    """Today's net annual yield of Confío Dollar+ (after Confío's share), the
+    same live number the Confío Dollar+ screen shows. Only a rate actually read
+    from the chain is quoted: apy_split() caches every real read, and on a
+    failure serves the settings fallback (0% or a hand-set number), which is
+    never presented as today's rate."""
+    from django.core.cache import cache
+
+    from cusd_plus import vault
+    try:
+        vault.apy_split()  # warms the cache; a failure is remembered briefly, so turns don't stall
+    except Exception:  # noqa: BLE001 - the rate must never break the portfolio answer
+        logger.warning('Confio Assistant: Confío Dollar+ APY read failed', exc_info=True)
+    read = cache.get('cusd_plus_apy') or cache.get('cusd_plus_apy_last')
+    net = read[1] if read else None
+    if not net or net <= 0:
+        return 'desconocido'
+    return f'{net:.2f}'.replace('.', ',') + '% anual (variable, no garantizado)'
 
 
 def _ondo_allowed(viewer):
@@ -583,8 +605,9 @@ class Toolbelt:
                 'name': 'get_portfolio',
                 'description': (
                     'Lo que el usuario tiene y gasta: saldo en Confío Dollar y Confío Dollar+, sus acciones, '
-                    'gasto mensual promedio de los últimos meses y si acciones/Confío Dollar+ están disponibles '
-                    'en su país. Úsala antes de orientar sobre inversiones o ahorro.'
+                    'gasto mensual promedio de los últimos meses, el rendimiento anual de hoy de Confío Dollar+ '
+                    'y si acciones/Confío Dollar+ están disponibles en su país. Úsala antes de orientar sobre '
+                    'inversiones o ahorro, y cuando pregunten cuánto rinde Confío Dollar+.'
                 ),
                 'parameters': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False},
                 'strict': True,

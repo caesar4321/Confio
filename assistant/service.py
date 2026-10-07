@@ -23,6 +23,7 @@ from inbox.schema import get_or_create_support_conversation
 from . import conf
 from .engine import AssistantUnavailable, Viewer, categorize_movements, human_mode_active, run_turn, third_party_text
 from .models import AssistantProfile, AssistantThreadState, AssistantTurn, TurnModality
+from .prompts import prompt_echo, transcribe_hint
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +248,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     modality, audio_seconds, transcript = TurnModality.TEXT, 0, None
     if audio:
         try:
-            transcript, audio_seconds = transcribe(*audio)
+            transcript, audio_seconds = transcribe(*audio, country=getattr(user, 'phone_country', '') or '')
         except Exception as exc:
             turn.error = str(exc)[:280] or 'transcription failed'
             turn.save(update_fields=['error'])
@@ -652,7 +653,7 @@ def transcription_cost(seconds):
     return Decimal(str(seconds)) / Decimal(60) * per_minute
 
 
-def transcribe(audio_base64, mime_type, duration_ms):
+def transcribe(audio_base64, mime_type, duration_ms, *, country=''):
     """Voice note → text. The audio is never stored; only the transcript is."""
     extension = AUDIO_EXTENSIONS.get((mime_type or '').lower())
     if extension is None:
@@ -686,7 +687,8 @@ def transcribe(audio_base64, mime_type, duration_ms):
             'https://api.openai.com/v1/audio/transcriptions',
             headers={'Authorization': f'Bearer {api_key}'},
             files={'file': (f'nota.{extension}', audio, mime_type)},
-            data={'model': conf.get('CONFIO_ASSISTANT_TRANSCRIBE_MODEL'), 'response_format': 'json'},
+            data={'model': conf.get('CONFIO_ASSISTANT_TRANSCRIBE_MODEL'), 'response_format': 'json',
+                  'prompt': transcribe_hint(country)},
             timeout=conf.get('CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS'),
         )
     except requests.RequestException as exc:
@@ -702,4 +704,6 @@ def transcribe(audio_base64, mime_type, duration_ms):
     if usage.get('type') == 'duration' and usage.get('seconds'):
         # The provider measured the audio: meter what it actually billed.
         seconds = max(seconds, float(usage['seconds']))
-    return (data.get('text') or '').strip(), seconds
+    text = (data.get('text') or '').strip()
+    # On a silent note the transcriber can return its own hint: no question was asked.
+    return ('' if prompt_echo(text) else text), seconds

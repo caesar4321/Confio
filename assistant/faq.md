@@ -57,10 +57,12 @@
 - En Venezuela, Nicaragua, Panamá y Cuba no hay Recargar ni Retirar en la app. En Recibir verás un directorio de financieras para convertir efectivo.
 - Venezuela: estamos trabajando para habilitar Pago Móvil. Todavía no tiene fecha; no prometas una.
 - Antes de confirmar una recarga o un retiro siempre ves el costo y el tipo de cambio.
+- Recargas en tu moneda local (soles, pesos, bolivianos, reales): no necesitas cambiar a dólares en tu banco antes. Confío convierte al recargar y ves el tipo de cambio antes de confirmar. Si tienes efectivo, primero ponlo en tu cuenta o billetera local en tu moneda y desde ahí recargas.
 - Recargar está dentro de Recibir.
 - En recargas por transferencia, primero creas la orden con el monto y luego haces una sola transferencia por exactamente ese monto. No transfieras sin orden ni dividas el pago en varias transferencias.
 - Las cuentas desde las que recargas y a las que retiras deben estar a tu nombre. Si otra persona quiere mandarte dinero, que abra su cuenta Confío y te envíe a tu número.
-- Si recibes dólares digitales desde un exchange o una billetera externa, usa exactamente la moneda y la red que te muestra la app. Con otra red puedes perder el dinero.
+- Si recibes dólares digitales desde un exchange (como Binance) o una billetera externa, usa exactamente la moneda y la red que te muestra la app en Recibir: BNB Smart Chain (BEP20). Al retirar desde Binance u otro exchange, elige esa red; otras redes como Ethereum (ERC20), Tron (TRC20), Polygon o Arbitrum no llegan a Confío.
+- Si ya se envió por otra red, Confío no puede verlo ni moverlo desde la app; dilo con claridad, sin prometer una recuperación ni sugerir que otro soporte (Binance u otro exchange) pueda recuperarlo. Lo útil es cómo enviar bien la próxima vez.
 
 - En cuentas de negocio, solo el dueño puede recargar, retirar y gestionar cuentas bancarias.
 

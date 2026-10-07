@@ -481,6 +481,8 @@ def usdy_daily_rate() -> float:
 # keeps summary queries free while still tracking rate changes same-day.
 APY_TTL = 3600
 APY_LAST_TTL = 7 * 24 * 3600
+# After a failed read, callers get last-good/fallback without retrying for this long.
+APY_FAILED_TTL = 300
 
 
 def apy_split() -> tuple[float, float]:
@@ -500,6 +502,10 @@ def apy_split() -> tuple[float, float]:
     cached = cache.get('cusd_plus_apy')
     if cached is not None:
         return cached
+    if cache.get('cusd_plus_apy_failed'):
+        # A read just failed: don't make every caller wait on the RPC timeout again.
+        last = cache.get('cusd_plus_apy_last')
+        return last if last is not None else fallback
     try:
         daily = usdy_daily_rate()
         kept = 1.0 - confio_yield_share_bps() / 10_000.0
@@ -507,6 +513,7 @@ def apy_split() -> tuple[float, float]:
         net = ((1.0 + daily * kept) ** 365 - 1.0) * 100.0
     except Exception:  # noqa: BLE001 — read failure must not break the screen
         logger.warning('cUSD+ APY read failed', exc_info=True)
+        cache.set('cusd_plus_apy_failed', True, APY_FAILED_TTL)
         last = cache.get('cusd_plus_apy_last')
         return last if last is not None else fallback
     cache.set('cusd_plus_apy', (gross, net), APY_TTL)
