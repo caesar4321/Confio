@@ -37,36 +37,16 @@ DEFAULTS = {
 
     # ---- Launch switches (2026-10-04: free launch) ----
     # Confio Assistant ships free: text, voice notes, analysis, pets. Realtime voice
-    # (and the wake word, which opens a call) and Assistant+ sales stay built but
-    # dark: Duende Limited can't be a Google Play merchant (Seychelles), and
-    # realtime is the only cost that matters (see assistant_economics).
+    # (and the wake word, which opens a call) stay built but dark: realtime is
+    # the only cost that matters (see assistant_economics).
     'CONFIO_ASSISTANT_REALTIME_ENABLED': False,
-    # Keep False: the app no longer has in-app purchases (2026-10-06), and
-    # turning this on would let OLD builds sell again.
-    'CONFIO_ASSISTANT_PLUS_SALES_ENABLED': False,
 
-    # ---- Assistant+ (US$9.99/month; regional prices are set in each store) ----
-    'CONFIO_ASSISTANT_PLUS_PRODUCT_ID': 'confio_ia_plus_monthly',
+    # ---- Assistant+ (no store purchases since 2026-10-07: Confío grants and
+    # bills AssistantSubscription rows itself) ----
     'CONFIO_ASSISTANT_PLUS_DAILY_TURNS': 300,
     'CONFIO_ASSISTANT_PLUS_DAILY_ANALYSES': 30,
     'CONFIO_ASSISTANT_PLUS_DAILY_NEWS_SEARCHES': 30,
     'CONFIO_ASSISTANT_PLUS_VOICE_MINUTES': 100,  # realtime minutes per calendar month
-    # Apple: bundle id + numeric App Store id (required to verify production).
-    'CONFIO_ASSISTANT_IOS_BUNDLE_ID': 'com.Confio.Confio',
-    # Public (App Store listing id6472662314, iTunes lookup by bundle id).
-    'CONFIO_ASSISTANT_APPLE_APP_ID': 6472662314,
-    # Sandbox purchases (TestFlight, App Review) are verified and recorded, flagged
-    # environment=Sandbox (Google: Test). They are free, so they unlock
-    # Assistant+ only for staff and these user ids (e.g. the App Review demo
-    # account) — never for any TestFlight tester or Play license tester.
-    'CONFIO_ASSISTANT_ACCEPT_APPLE_SANDBOX': True,
-    'CONFIO_ASSISTANT_TEST_PURCHASE_USER_IDS': [],
-    'CONFIO_ASSISTANT_ANDROID_PACKAGE': 'com.Confio.Confio',
-    # Service-account JSON (string or dict) with Play Console financial access.
-    'CONFIO_ASSISTANT_GOOGLE_PLAY_CREDENTIALS': None,
-    # Pub/Sub push subscription for RTDN: OIDC audience + the push service account.
-    'CONFIO_ASSISTANT_RTDN_AUDIENCE': None,
-    'CONFIO_ASSISTANT_RTDN_SERVICE_ACCOUNT': None,
 
     # ---- Realtime voice (Assistant+) ----
     # mini: ~1/3 of the full model's audio price, so 100 min/month fits US$9.99.

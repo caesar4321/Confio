@@ -1,8 +1,8 @@
-// Confio Assistant+. The app has no in-app purchases: this panel only shows
-// what Assistant+ includes and, for anyone the server already marks as Plus,
-// its status. Subscriptions are managed in the store's own page.
+// Confio Assistant+ (hidden for now). There are no store purchases: the
+// server grants and bills Assistant+ itself, and this panel shows anyone it
+// already marks as Plus what's included and their status.
 import React from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from '../components/common/AppText';
 import type { AssistantPlan } from './api';
@@ -15,14 +15,6 @@ const PERKS: { icon: string; title: string; body: string }[] = [
   { icon: 'phone-call', title: 'Habla con Confio Assistant', body: 'Conversación por voz en tiempo real, como una llamada.' },
   { icon: 'bar-chart-2', title: 'Más análisis', body: 'Análisis de tus movimientos y muchos más mensajes al día.' },
 ];
-
-// The store the subscription was bought in (it may differ from this phone's).
-function storeOf(plan: AssistantPlan | null) {
-  const platform = (plan?.platform || Platform.OS).toLowerCase();
-  return platform === 'ios' || platform === 'apple' || platform === 'app_store'
-    ? { name: 'App Store', url: 'https://apps.apple.com/account/subscriptions' }
-    : { name: 'Google Play', url: 'https://play.google.com/store/account/subscriptions?package=com.Confio.Confio' };
-}
 
 type Props = {
   plan: AssistantPlan | null;
@@ -50,8 +42,6 @@ export default function AssistantPlusPanel({ plan, profile, onClose, onLeave }: 
     setTimeout(() => (navigationRef as any).navigate('Main', { screen: 'LegalDocument', params: { docType } }), 250);
   };
 
-  const { name: store, url: storeUrl } = storeOf(plan);
-
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.hero}>
@@ -60,7 +50,7 @@ export default function AssistantPlusPanel({ plan, profile, onClose, onLeave }: 
         {plan?.isPlus ? (
           <Text style={styles.subtitle}>
             {plan.inGrace
-              ? `Tu pago está pendiente en ${store}. Mantienes Assistant+ mientras se resuelve.`
+              ? 'Tu pago está pendiente. Mantienes Assistant+ mientras se resuelve.'
               : plan.autoRenew === false
                 ? `Activo hasta el ${formatDate(plan.expiresAt)}. No se renovará.`
                 : `Activo. Se renueva el ${formatDate(plan.expiresAt)}.`}
@@ -83,14 +73,9 @@ export default function AssistantPlusPanel({ plan, profile, onClose, onLeave }: 
       ))}
 
       {plan?.isPlus ? (
-        <>
-          <Text style={styles.allowance}>
-            Este mes te quedan {plan.voiceMinutesLeft} de {plan.voiceMinutes} minutos de voz.
-          </Text>
-          <Pressable style={styles.secondaryButton} onPress={() => Linking.openURL(storeUrl).catch(() => {})}>
-            <Text style={styles.secondaryText}>Administrar suscripción</Text>
-          </Pressable>
-        </>
+        <Text style={styles.allowance}>
+          Este mes te quedan {plan.voiceMinutesLeft} de {plan.voiceMinutes} minutos de voz.
+        </Text>
       ) : (
         <Text style={styles.message}>Assistant+ todavía no está disponible.</Text>
       )}
@@ -129,15 +114,6 @@ const styles = StyleSheet.create({
   perkBody: { fontSize: 14, color: '#6B7280', marginTop: 2 },
   allowance: { fontSize: 14, color: '#065F46', marginTop: 12, textAlign: 'center' },
   message: { fontSize: 14, color: '#6B7280', marginTop: 16, textAlign: 'center' },
-  secondaryButton: {
-    marginTop: 20,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryText: { color: '#374151', fontSize: 15, fontWeight: '600' },
   links: { flexDirection: 'row', justifyContent: 'center', gap: 20, marginTop: 18 },
   link: { fontSize: 13, color: EMERALD, fontWeight: '600' },
   back: { alignSelf: 'center', marginTop: 18, padding: 8 },

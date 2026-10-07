@@ -33,10 +33,6 @@ class AssistantProfile(models.Model):
     bubble_side = models.CharField(max_length=5, default='right')
     bubble_height = models.FloatField(default=0.0)
     wake_word_enabled = models.BooleanField(default=False)
-    # Opaque id the stores carry with every purchase (Apple appAccountToken,
-    # Google obfuscatedAccountId): binds a store subscription to this user
-    # without sharing who they are. Assigned on first use.
-    billing_token = models.UUIDField(null=True, blank=True, unique=True)
     # The pet the user created, when mascot == CUSTOM.
     custom_pet = models.ForeignKey('assistant.CustomPet', on_delete=models.SET_NULL, null=True, blank=True,
                                    related_name='+')
@@ -115,11 +111,11 @@ ENTITLED_STATUSES = (SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE)
 
 
 class AssistantSubscription(models.Model):
-    """One store subscription (Assistant+), as last verified with Apple or Google.
-
-    store_key is the stable store identity: Apple originalTransactionId, or
-    the Google purchase token (a resubscribe gets a new token; the old one is
-    marked superseded via linked_purchase_token).
+    """One Assistant+ subscription. Store purchases were dropped on
+    2026-10-07 (none was ever sold); Confío now grants and bills these rows
+    itself. The store-shaped fields (platform, store_key, product_id,
+    latest_transaction_id, acknowledged, last_signed_ms, superseded_by) are
+    kept for that internal billing to reuse or replace when it is designed.
     """
     PLATFORMS = [('ios', 'App Store'), ('android', 'Google Play')]
 
@@ -156,23 +152,6 @@ class AssistantSubscription(models.Model):
             return False
         until = max(t for t in (self.expires_at, self.grace_until) if t) if (self.expires_at or self.grace_until) else None
         return until is not None and until > now
-
-
-class StoreNotification(models.Model):
-    """Every store server notification, deduplicated, for audit and replay."""
-    platform = models.CharField(max_length=8)
-    notification_id = models.CharField(max_length=128)
-    notification_type = models.CharField(max_length=64, blank=True, default='')
-    store_key = models.CharField(max_length=512, blank=True, default='')
-    payload = models.JSONField(default=dict, blank=True)
-    processed = models.BooleanField(default=False)
-    error = models.CharField(max_length=280, blank=True, default='')
-    received_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(fields=['platform', 'notification_id'], name='assistant_store_notif_uniq'),
-        ]
 
 
 class VoiceSession(models.Model):
