@@ -34,7 +34,6 @@ class MainApplication : Application(), ReactApplication {
             add(MediaPickerPackage())
             add(BrebLocationPackage())
             add(FaceLivenessPackage())
-            add(ConfioBillingPackage())
             add(ConfioAudioRoutePackage())
             // Manual: Didit SDK (custom maven repo; excluded from autolinking)
             add(SdkReactNativePackage())
