@@ -35,11 +35,12 @@ SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 
 # Reglas firmes
 - Nunca mueves dinero. No envías, pagas, retiras ni compras. Como mucho abres la pantalla; el usuario confirma siempre con su huella o Confío Face.
+- Si no queda claro a qué se refiere (un banco o una cuenta que no conoces, una persona, si el dinero entra o sale), pregunta en una frase antes de dar pasos. No supongas una operación que en su país no existe.
 - No dices saldos de memoria: para ver saldos, abre `home`. Solo citas cifras que devuelve una herramienta.
 - Comisiones y costos: háblalos solo cuando la persona pregunta por ellos (cuánto cuesta, qué comisión cobra Confío, por qué recibió menos). No los agregues por tu cuenta a otras respuestas: una pregunta por la tasa, el rendimiento o cuánto gana NO es una pregunta por comisiones (no menciones el 15% de Confío salvo que pregunte qué cobra Confío o por qué recibe menos rendimiento). Cuando pregunte, cita solo las comisiones propias de Confío que están en las respuestas aprobadas, aplicando la regla de entrar/salir a la operación concreta; nunca digas que algo es gratis o que Confío no cobra si las respuestas aprobadas no lo dicen de esa operación; las de proveedores, tipos de cambio, tasas y rendimientos varían y la app las muestra antes de confirmar. Si cree que le cobraron de más o que le falta dinero, o la diferencia no se explica solo con esas comisiones, además escala con `escalate_to_human`.
-{invest_rules}- No predices precios, tipos de cambio ni rendimientos ("¿Apple va a subir?", "¿cuánto ganaré?", "¿a cuánto llega el dólar?"): di que nadie puede saberlo y ofrece explicar cómo funciona o qué riesgos tiene. Explicar lo que YA pasó, con cifras y fuentes, sí está permitido y es útil; no termines con un consejo de comprar, vender o esperar.
+{invest_rules}- No predices precios, tipos de cambio ni rendimientos ("¿Apple va a subir?", "¿cuánto ganaré?", "¿a cuánto llega el dólar?"): di que nadie puede saberlo y ofrece explicar cómo funciona o qué riesgos tiene. Si preguntan cuánto rinde Confío Dollar+, usa `get_portfolio` y di el rendimiento anual de hoy que devuelve, aclarando que es variable y no garantizado (no es una predicción); si devuelve "desconocido", di que lo ven en la pantalla de Confío Dollar+. Explicar lo que YA pasó, con cifras y fuentes, sí está permitido y es útil; no termines con un consejo de comprar, vender o esperar.
 - Si a una cuenta personal le enviaron dinero a su cuenta local (Pix, Bre-B, CLABE) y no aparece en su saldo, dile que puede estar esperando su confirmación con Confío Face y abre `pending_incoming` (si está disponible). Esto se suma a escalar, no lo reemplaza: escala igual si fue ayer o antes, si ya confirmó, si aparece "en revisión", si no sabes cuándo fue, o si lo pide. Solo si acaba de llegar y sabe que no ha confirmado, basta con abrir la pantalla.
-- Escala a humano (`escalate_to_human`) SIEMPRE que haya dinero atascado o perdido (envío, recarga, retiro, pago o compra que no llegó o está pendiente demasiado tiempo), cargos no reconocidos, sospecha de fraude o estafa, cuenta bloqueada, problemas de verificación que no puedes resolver, o si el usuario pide hablar con una persona. No intentes diagnosticar transacciones tú mismo.
+- Escala a humano (`escalate_to_human`) SIEMPRE que haya dinero atascado o perdido (envío, recarga, retiro, pago o compra que no llegó o está pendiente demasiado tiempo), cargos no reconocidos, sospecha de fraude o estafa, cuenta bloqueada, problemas de verificación que no puedes resolver, o si el usuario pide hablar con una persona. No intentes diagnosticar transacciones tú mismo. Excepción: si dice que envió por otra red (ERC20, TRC20, Polygon, Arbitrum u otra que no es BNB Smart Chain/BEP20), no escales: explica que Confío solo recibe por BNB Smart Chain (BEP20) y que no puede verlo ni moverlo desde la app, sin prometer una recuperación. Escala solo si no sabe qué red usó, si dice que usó BEP20 o si pide hablar con una persona. Esta excepción vale aunque diga que le falta dinero.
 - Nunca pidas ni aceptes contraseñas, códigos de verificación, frases semilla ni claves privadas. Confío nunca los pide. Si alguien se los pidió al usuario, es una estafa: dilo claro.
 - No tienes acceso a otras cuentas ni a datos internos de la empresa. Si no sabes algo, dilo y ofrece pasar con el equipo.
 - No inventes funciones. Si no está en la lista de pantallas, no existe en la app.
@@ -110,3 +111,37 @@ Reglas:
 - Nada de recomendaciones de inversión (qué comprar/vender). Sí hábitos: presupuesto, colchón de emergencia, gastos recurrentes.
 - Responde en español, 3-6 oraciones, con montos en formato US$1.234,56 solo cuando estén en los datos.
 """
+
+
+# Words the model hears in Confío voice notes. Without a hint, short Spanish
+# notes were sometimes heard as another language ("¿Y el oro y la plata?" came
+# back as "Kia i te oro i plata"). A prompt biases language and vocabulary
+# without forcing it, so a note in English still transcribes as English. It is
+# a bare word list, not a sentence: on silence a transcriber can echo its
+# prompt, and a list is easy to recognize (prompt_echo) instead of reading as
+# a question nobody asked.
+TRANSCRIBE_HINTS = {
+    'es': 'Confío, Confío Dollar, Confío Dollar+, acciones, ETF, recargar, retirar, enviar, Bre-B, Pix, QR, Confío Face',
+    'pt': 'Confío, Confío Dollar, Confío Dollar+, ações, ETF, recarregar, sacar, enviar, Pix, QR, Confío Face',
+}
+_HINT_SEQUENCES = [re.findall(r'[\w+-]+', hint.lower()) for hint in TRANSCRIBE_HINTS.values()]
+
+
+def transcribe_hint(country):
+    return TRANSCRIBE_HINTS['pt' if (country or '').upper() == 'BR' else 'es']
+
+
+def prompt_echo(transcript):
+    """True when a transcript reproduces most of the hint itself (the
+    transcriber repeating its prompt on silence), so it is treated as an empty
+    note. A short real command made of hint words ("Enviar Confío Dollar") is
+    not an echo: it must be a run of the hint covering at least 60% of it."""
+    words = re.findall(r'[\w+-]+', (transcript or '').lower())
+    if not words:
+        return False
+    for hint in _HINT_SEQUENCES:
+        if len(words) < 0.6 * len(hint):
+            continue
+        if any(hint[i:i + len(words)] == words for i in range(len(hint) - len(words) + 1)):
+            return True
+    return False

@@ -40,7 +40,14 @@ class PetError(Exception):
 
 
 class PetRejected(PetError):
-    """The idea/photo was refused after paid checks: the attempt counts."""
+    """The idea/photo was refused after paid checks: the attempt counts.
+
+    `reason` is stored on the slot (CustomPet.rejected_reason) so a wrong
+    refusal can be told apart from a right one; the photo itself is never kept."""
+
+    def __init__(self, message, reason=''):
+        super().__init__(message)
+        self.reason = reason
 
 
 def _headers():
@@ -81,7 +88,9 @@ def _moderate(text=None, image_data_url=None):
             or any(not isinstance(x, dict) or not isinstance(x.get('flagged'), bool) for x in results)):
         raise PetError('No pudimos revisar tu idea ahora. Inténtalo en un momento.')
     if any(x['flagged'] for x in results):
-        raise PetRejected('Esa idea no se puede usar. Prueba con otra.')
+        if image_data_url:
+            raise PetRejected('Esa foto no se puede usar. Prueba con otra.', reason='moderation_photo')
+        raise PetRejected('Esa idea no se puede usar. Prueba con otra.', reason='moderation_idea')
 
 
 def _photo_is_a_pet(data_url):
@@ -91,7 +100,8 @@ def _photo_is_a_pet(data_url):
         'input': [{'role': 'user', 'content': [
             {'type': 'input_text', 'text': (
                 'Responde solo JSON {"persona": bool, "animal_o_objeto": bool}. '
-                'persona = aparece una persona real (cara o cuerpo). '
+                'persona = se ve la cara de una persona real. Una mano, un brazo o una persona '
+                'de espaldas sin cara visible NO cuentan. '
                 'animal_o_objeto = aparece un animal, peluche o dibujo.')},
             {'type': 'input_image', 'image_url': data_url},
         ]}],
@@ -114,9 +124,9 @@ def _photo_is_a_pet(data_url):
     if not isinstance(person, bool) or not isinstance(animal, bool):
         raise PetError('No pudimos revisar la foto ahora. Inténtalo en un momento.')
     if person:
-        raise PetRejected('Usa una foto de tu mascota, sin personas.')
+        raise PetRejected('Usa una foto de tu mascota en la que no se vea la cara de nadie.', reason='person')
     if not animal:
-        raise PetRejected('No vimos un animal en la foto. Prueba con otra.')
+        raise PetRejected('No vimos un animal en la foto. Prueba con otra.', reason='no_animal')
 
 
 def create_pet(user, *, idea='', photo_base64=None, photo_mime=None):
@@ -136,11 +146,12 @@ def create_pet(user, *, idea='', photo_base64=None, photo_mime=None):
                                         model=conf.get('CONFIO_ASSISTANT_PET_IMAGE_MODEL'))
     try:
         return _create_pet(user, slot, idea=idea, photo_base64=photo_base64, photo_mime=photo_mime)
-    except PetRejected:
+    except PetRejected as exc:
         # Refused after paid checks: the attempt counts (hidden from the list),
         # so a rejected photo can't be retried for free forever.
         slot.deleted_at = timezone.now()
-        slot.save(update_fields=['deleted_at'])
+        slot.rejected_reason = exc.reason
+        slot.save(update_fields=['deleted_at', 'rejected_reason'])
         raise
     except Exception:
         # Our failure (outage, upload): give the slot back.
@@ -164,7 +175,9 @@ def _create_pet(user, slot, *, idea='', photo_base64=None, photo_mime=None):
         if not photo or len(photo) > MAX_PHOTO_BYTES:
             raise PetError('La foto es demasiado grande.')
         data_url = f'data:{photo_mime};base64,{photo_base64}'
-        _moderate(text=idea or None, image_data_url=data_url)
+        # Separately, so a refusal names what was refused (the idea or the photo).
+        _moderate(text=idea or None)
+        _moderate(image_data_url=data_url)
         _photo_is_a_pet(data_url)
         prompt = PHOTO_STYLE + (f' Detalle extra del usuario: {idea}' if idea else '')
         try:
@@ -197,7 +210,9 @@ def _create_pet(user, slot, *, idea='', photo_base64=None, photo_mime=None):
     if response.status_code >= 400:
         logger.warning('Pet image failed: %s %s', response.status_code, response.text[:300])
         if 'moderation' in response.text or 'safety' in response.text:
-            raise PetRejected('Esa idea no se puede usar. Prueba con otra.')
+            if source == 'photo':
+                raise PetRejected('Esa foto no se puede usar. Prueba con otra.', reason='image_safety_photo')
+            raise PetRejected('Esa idea no se puede usar. Prueba con otra.', reason='image_safety_idea')
         raise PetError('No pudimos crear tu asistente ahora.')
     data = response.json()
     image = base64.b64decode(data['data'][0]['b64_json'])

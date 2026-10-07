@@ -24,7 +24,7 @@ from django.utils import timezone
 from . import billing, conf
 from .engine import AssistantUnavailable, Toolbelt, TurnResult, allowed_destinations
 from .models import TurnModality, VoiceSession
-from .prompts import build_system_prompt
+from .prompts import build_system_prompt, transcribe_hint
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,11 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
             'instructions': instructions,
             'audio': {
                 'input': {
-                    'transcription': {'model': conf.get('CONFIO_ASSISTANT_REALTIME_TRANSCRIBE_MODEL')},
+                    'transcription': {
+                        'model': conf.get('CONFIO_ASSISTANT_REALTIME_TRANSCRIBE_MODEL'),
+                        # Same vocabulary hint as voice notes.
+                        'prompt': transcribe_hint(country),
+                    },
                     'turn_detection': {'type': 'semantic_vad'},
                 },
                 'output': {'voice': conf.get('CONFIO_ASSISTANT_REALTIME_VOICE')},

@@ -84,10 +84,12 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - En Venezuela, Nicaragua, Panamá y Cuba no hay Recargar ni Retirar en la app. En Recibir verás un directorio de financieras para convertir efectivo.
 - Venezuela: estamos trabajando para habilitar Pago Móvil. Todavía no tiene fecha; no prometas una.
 - Antes de confirmar una recarga o un retiro siempre ves el costo y el tipo de cambio.
+- Recargas en tu moneda local (soles, pesos, bolivianos, reales): no necesitas cambiar a dólares en tu banco antes. Confío convierte al recargar y ves el tipo de cambio antes de confirmar. Si tienes efectivo, primero ponlo en tu cuenta o billetera local en tu moneda y desde ahí recargas.
 - Recargar está dentro de Recibir.
 - En recargas por transferencia, primero creas la orden con el monto y luego haces una sola transferencia por exactamente ese monto. No transfieras sin orden ni dividas el pago en varias transferencias.
 - Las cuentas desde las que recargas y a las que retiras deben estar a tu nombre. Si otra persona quiere mandarte dinero, que abra su cuenta Confío y te envíe a tu número.
-- Si recibes dólares digitales desde un exchange o una billetera externa, usa exactamente la moneda y la red que te muestra la app. Con otra red puedes perder el dinero.
+- Si recibes dólares digitales desde un exchange (como Binance) o una billetera externa, usa exactamente la moneda y la red que te muestra la app en Recibir: BNB Smart Chain (BEP20). Al retirar desde Binance u otro exchange, elige esa red; otras redes como Ethereum (ERC20), Tron (TRC20), Polygon o Arbitrum no llegan a Confío.
+- Si ya se envió por otra red, Confío no puede verlo ni moverlo desde la app; dilo con claridad, sin prometer una recuperación ni sugerir que otro soporte (Binance u otro exchange) pueda recuperarlo. Lo útil es cómo enviar bien la próxima vez.
 <!-- support: one order = one exact transfer (latest 2026-08-06, 5 threads; multi-transfer cases ended stuck); own-name (2026-09-14); external deposit network warning (2026-09-24; older Algorand instructions are obsolete). -->
 - En cuentas de negocio, solo el dueño puede recargar, retirar y gestionar cuentas bancarias.
 <!-- Koywe countries: ramps/koywe.py:16-326, apps/.env.mainnet; prod KOYWE_ON_RAMP_PAUSED_COUNTRIES is empty (CO top-ups live, 2026-10-04). Bolivia no off-ramp: ramps/schema.py:1120. No-ramp countries: apps/src/config/env.ts:111. -->
