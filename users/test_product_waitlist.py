@@ -135,9 +135,11 @@ class PaidOfferPreviewTests(TestCase):
         self.assertTrue(paid_offers.available('smart_account', is_employee=False, meta=NEW_BUILD, user_id=7))
         self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=NEW_BUILD, user_id=55))
         self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=NEW_BUILD))
-        # A preview never bypasses the employee or old-build rules.
+        # A preview never bypasses the employee rule; it does skip the build
+        # floor (a pre-release test build), for listed ids only.
         self.assertFalse(paid_offers.available('ia_plus', is_employee=True, meta=NEW_BUILD, user_id=5))
-        self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=OLD_BUILD, user_id=5))
+        self.assertTrue(paid_offers.available('ia_plus', is_employee=False, meta=OLD_BUILD, user_id=5))
+        self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=OLD_BUILD, user_id=55))
 
 
 @override_settings(**PROBES_ON)

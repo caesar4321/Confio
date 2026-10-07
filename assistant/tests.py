@@ -1810,3 +1810,17 @@ class PaidChipAuditFixTests(TestCase):
         result = TurnResult(reply='ok', actions=[{'type': 'navigate', 'destination': 'home', 'target': 'ia_plus'}])
         self.assertEqual(paid_chips.choose(self.viewer, 'quiero algo más avanzado', result, {'ia_plus'}),
                          ('ia_plus', 'model'))
+
+    @override_settings(PAID_OFFER_PREVIEW_USER_IDS='')
+    def test_shown_chips_are_logged_except_for_preview_testers(self):
+        from users.models import FunnelEvent
+
+        from . import paid_chips
+        with self.captureOnCommitCallbacks(execute=True):
+            paid_chips.log_shown(self.viewer, ('ia_plus', 'investing'))
+        self.assertTrue(paid_chips.capped(self.user, 'ia_plus'))
+        FunnelEvent.objects.all().delete()
+        with override_settings(PAID_OFFER_PREVIEW_USER_IDS=str(self.user.pk)), \
+                self.captureOnCommitCallbacks(execute=True):
+            paid_chips.log_shown(self.viewer, ('ia_plus', 'investing'))
+        self.assertFalse(FunnelEvent.objects.exists())

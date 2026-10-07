@@ -85,7 +85,12 @@ def log_shown(viewer, chosen):
     from users.funnel import emit_event
     from users.paid_offers import EVENT
 
+    from users.paid_offers import previewing
+
     key, trigger = chosen
+    if previewing(getattr(viewer.user, 'pk', None)):
+        # A preview tester's chips are neither counted nor capped.
+        return
     emit_event(EVENT, user=viewer.user, country=(getattr(viewer.user, 'phone_country', '') or '')[:2],
                source_type=PAID_OFFERS[key],
                properties={'stage': 'door_shown', 'offer': PAID_OFFERS[key], 'door': 'chip',
