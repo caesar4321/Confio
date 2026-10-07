@@ -41,6 +41,8 @@ DEFAULTS = {
     # dark: Duende Limited can't be a Google Play merchant (Seychelles), and
     # realtime is the only cost that matters (see assistant_economics).
     'CONFIO_ASSISTANT_REALTIME_ENABLED': False,
+    # Keep False: the app no longer has in-app purchases (2026-10-06), and
+    # turning this on would let OLD builds sell again.
     'CONFIO_ASSISTANT_PLUS_SALES_ENABLED': False,
 
     # ---- Assistant+ (US$9.99/month; regional prices are set in each store) ----

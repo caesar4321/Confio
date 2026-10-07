@@ -1,22 +1,18 @@
 // Background duties of Confio Assistant while the user is signed in:
 //  - load the Assistant+ plan,
-//  - hand store transactions (renewals, purchases finished later) to the
-//    server for verification,
 //  - run the "Confío" wake word (Assistant+, opted in, app in foreground, no call,
 //    chat closed so the mic is free for voice notes).
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
-import { useApolloClient, useQuery } from '@apollo/client';
+import { useQuery } from '@apollo/client';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { GET_ASSISTANT_PLAN, GET_ASSISTANT_THREAD, GET_ASSISTANT_WAKE_WORD } from './api';
-import { listenForStoreTransactions } from './billingClient';
 import { hangUp, useCall } from './callStore';
 import { useAssistant } from './AssistantContext';
 import { WakeWordListener } from './wakeWord';
 
 export default function AssistantServices() {
-  const client = useApolloClient();
   const { isAuthenticated, isLoading } = useAuth();
   const { plan, setPlan, isOpen, open, setInCall, aiEnabled, micBusy } = useAssistant();
   const call = useCall();
@@ -35,15 +31,6 @@ export default function AssistantServices() {
       setPlan(planData.assistantPlan);
     }
   }, [planData, setPlan]);
-
-  // Store transactions only matter while Assistant+ is on sale.
-  const salesOn = !!plan?.plusSalesEnabled;
-  useEffect(() => {
-    if (!enabled || !salesOn) {
-      return undefined;
-    }
-    return listenForStoreTransactions(client, setPlan);
-  }, [enabled, salesOn, client, setPlan]);
 
   const live = call.state !== 'idle' && call.state !== 'ended';
 

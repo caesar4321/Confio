@@ -1,13 +1,11 @@
-// Confio Assistant+: US$9.99/month, priced per country by the stores. The price
-// shown is the store's own localized price (never hardcoded), and the
-// server decides entitlement after verifying the purchase with the store.
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useApolloClient } from '@apollo/client';
+// Confio Assistant+. The app has no in-app purchases: this panel only shows
+// what Assistant+ includes and, for anyone the server already marks as Plus,
+// its status. Subscriptions are managed in the store's own page.
+import React from 'react';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from '../components/common/AppText';
 import type { AssistantPlan } from './api';
-import { buy, isBillingAvailable, loadProduct, manageSubscriptions, restore, type StoreProduct } from './billingClient';
 import AssistantMascot from './AssistantMascot';
 import { navigationRef } from '../navigation/RootNavigation';
 
@@ -17,6 +15,14 @@ const PERKS: { icon: string; title: string; body: string }[] = [
   { icon: 'phone-call', title: 'Habla con Confio Assistant', body: 'Conversación por voz en tiempo real, como una llamada.' },
   { icon: 'bar-chart-2', title: 'Más análisis', body: 'Análisis de tus movimientos y muchos más mensajes al día.' },
 ];
+
+// The store the subscription was bought in (it may differ from this phone's).
+function storeOf(plan: AssistantPlan | null) {
+  const platform = (plan?.platform || Platform.OS).toLowerCase();
+  return platform === 'ios' || platform === 'apple' || platform === 'app_store'
+    ? { name: 'App Store', url: 'https://apps.apple.com/account/subscriptions' }
+    : { name: 'Google Play', url: 'https://play.google.com/store/account/subscriptions?package=com.Confio.Confio' };
+}
 
 type Props = {
   plan: AssistantPlan | null;
@@ -38,71 +44,13 @@ function formatDate(iso?: string | null) {
   }
 }
 
-export default function AssistantPlusPanel({ plan, profile, onPlan, onClose, onLeave }: Props) {
-  const client = useApolloClient();
-  const [product, setProduct] = useState<StoreProduct | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'buy' | 'restore' | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    if (!plan?.productId || !isBillingAvailable) {
-      setLoading(false);
-      return undefined;
-    }
-    loadProduct(plan.productId)
-      .then((p) => alive && setProduct(p))
-      .catch(() => alive && setProduct(null))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [plan?.productId]);
-
-  const subscribe = async () => {
-    if (!plan) {
-      return;
-    }
-    setBusy('buy');
-    setMessage(null);
-    try {
-      const outcome = await buy(client, plan.productId, plan.billingToken);
-      if (outcome.ok) {
-        onPlan(outcome.plan);
-      } else if (outcome.reason !== 'cancelled') {
-        setMessage(outcome.message || 'No pudimos completar la compra.');
-      }
-    } catch {
-      setMessage('No pudimos completar la compra.');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const doRestore = async () => {
-    setBusy('restore');
-    setMessage(null);
-    try {
-      const outcome = await restore(client);
-      if (outcome.ok) {
-        onPlan(outcome.plan);
-      } else {
-        setMessage(outcome.message || 'No encontramos una suscripción.');
-      }
-    } catch {
-      setMessage('No pudimos consultar tus compras.');
-    } finally {
-      setBusy(null);
-    }
-  };
-
+export default function AssistantPlusPanel({ plan, profile, onClose, onLeave }: Props) {
   const openLegal = (docType: 'terms' | 'privacy') => {
     onLeave();
     setTimeout(() => (navigationRef as any).navigate('Main', { screen: 'LegalDocument', params: { docType } }), 250);
   };
 
-  const store = Platform.OS === 'ios' ? 'App Store' : 'Google Play';
+  const { name: store, url: storeUrl } = storeOf(plan);
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
@@ -135,45 +83,19 @@ export default function AssistantPlusPanel({ plan, profile, onPlan, onClose, onL
       ))}
 
       {plan?.isPlus ? (
-        <Text style={styles.allowance}>
-          Este mes te quedan {plan.voiceMinutesLeft} de {plan.voiceMinutes} minutos de voz.
-        </Text>
-      ) : null}
-
-      {message ? <Text style={styles.message}>{message}</Text> : null}
-
-      {plan?.isPlus ? (
-        <Pressable style={styles.secondaryButton} onPress={() => manageSubscriptions()}>
-          <Text style={styles.secondaryText}>Administrar suscripción</Text>
-        </Pressable>
-      ) : !isBillingAvailable ? (
-        <Text style={styles.message}>Actualiza la app para suscribirte.</Text>
-      ) : loading ? (
-        <ActivityIndicator color={EMERALD} style={styles.loader} />
-      ) : !product ? (
-        <Text style={styles.message}>Assistant+ todavía no está disponible en tu tienda.</Text>
-      ) : (
         <>
-          <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={subscribe} disabled={!!busy}>
-            {busy === 'buy' ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryText}>Suscribirme · {product.displayPrice} al mes</Text>
-            )}
-          </Pressable>
-          <Text style={styles.fine}>
-            Se cobra a tu cuenta de {store} y se renueva cada mes por {product.displayPrice} hasta que la canceles.
-            Puedes cancelar cuando quieras desde {store}, al menos 24 horas antes de la renovación.
+          <Text style={styles.allowance}>
+            Este mes te quedan {plan.voiceMinutesLeft} de {plan.voiceMinutes} minutos de voz.
           </Text>
+          <Pressable style={styles.secondaryButton} onPress={() => Linking.openURL(storeUrl).catch(() => {})}>
+            <Text style={styles.secondaryText}>Administrar suscripción</Text>
+          </Pressable>
         </>
+      ) : (
+        <Text style={styles.message}>Assistant+ todavía no está disponible.</Text>
       )}
 
       <View style={styles.links}>
-        {!plan?.isPlus && isBillingAvailable ? (
-          <Pressable onPress={doRestore} disabled={!!busy}>
-            <Text style={styles.link}>{busy === 'restore' ? 'Restaurando…' : 'Restaurar compras'}</Text>
-          </Pressable>
-        ) : null}
         <Pressable onPress={() => openLegal('terms')}>
           <Text style={styles.link}>Términos</Text>
         </Pressable>
@@ -206,18 +128,7 @@ const styles = StyleSheet.create({
   perkTitle: { fontSize: 15, fontWeight: '600', color: '#111827' },
   perkBody: { fontSize: 14, color: '#6B7280', marginTop: 2 },
   allowance: { fontSize: 14, color: '#065F46', marginTop: 12, textAlign: 'center' },
-  message: { fontSize: 14, color: '#B91C1C', marginTop: 12, textAlign: 'center' },
-  loader: { marginTop: 20 },
-  primaryButton: {
-    marginTop: 20,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: EMERALD,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  disabled: { opacity: 0.6 },
+  message: { fontSize: 14, color: '#6B7280', marginTop: 16, textAlign: 'center' },
   secondaryButton: {
     marginTop: 20,
     height: 48,
@@ -227,7 +138,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryText: { color: '#374151', fontSize: 15, fontWeight: '600' },
-  fine: { fontSize: 12, color: '#6B7280', marginTop: 10, textAlign: 'center', lineHeight: 17 },
   links: { flexDirection: 'row', justifyContent: 'center', gap: 20, marginTop: 18 },
   link: { fontSize: 13, color: EMERALD, fontWeight: '600' },
   back: { alignSelf: 'center', marginTop: 18, padding: 8 },

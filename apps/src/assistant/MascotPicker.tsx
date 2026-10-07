@@ -218,9 +218,7 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
                 {left === 0
                   ? profile?.petCreationsPeriod === 'day'
                     ? 'Ya creaste tus personajes de hoy.'
-                    : plan?.plusSalesEnabled
-                      ? 'Ya creaste tus personajes de esta semana. Con Assistant+ puedes crear más.'
-                      : 'Ya creaste tus personajes de esta semana. La próxima semana puedes crear más.'
+                    : 'Ya creaste tus personajes de esta semana. La próxima semana puedes crear más.'
                   : `Te quedan ${left} ${profile?.petCreationsPeriod === 'day' ? 'hoy' : 'esta semana'}.`}
               </Text>
             ) : null}

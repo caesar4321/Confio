@@ -309,7 +309,9 @@ export default function AssistantSheet() {
     if (consumePicker()) {
       setPickerOpen(true);
     }
-    if (consumePlus() && plan?.plusSalesEnabled) {
+    // No in-app purchases: the panel is only for people who already have
+    // Assistant+ (status, voice minutes, managing it in their store).
+    if (consumePlus() && plan?.isPlus) {
       setShowPlus(true);
     }
     if (consumeCall()) {
@@ -850,7 +852,7 @@ export default function AssistantSheet() {
               <Text style={styles.petChipText}>✨ Tu asistente</Text>
             </Pressable>
           ) : null}
-          {aiEnabled && plan?.plusSalesEnabled ? (
+          {aiEnabled && plan?.isPlus ? (
             <Pressable
               onPress={() => setShowPlus((v) => !v)}
               style={[styles.plusChip, plan.isPlus && styles.plusChipActive]}
@@ -866,7 +868,7 @@ export default function AssistantSheet() {
           ) : null}
         </View>
 
-        {showPlus && plan?.plusSalesEnabled ? (
+        {showPlus && plan?.isPlus ? (
           <AssistantPlusPanel
             plan={plan}
             profile={profile}
