@@ -63,9 +63,9 @@ describe('rail ordering', () => {
     const fallback = getSendRails(null);
     expect(fallback.length).toBeGreaterThan(0);
     expect(getSendRails('ZZ')).toEqual(fallback);
-    // Ecuador is a real country with no corridor listed — the case that
+    // Costa Rica is a real country with no corridor listed — the case that
     // matters, since an unlisted country must not reorder anything.
-    expect(getSendRails('EC')).toEqual(fallback);
+    expect(getSendRails('CR')).toEqual(fallback);
   });
 
   it('drops no rails and duplicates none when hoisting', () => {
@@ -177,5 +177,42 @@ describe('unavailable-rail wording survives app review', () => {
 
   it('tells the user what tapping does, so the row is never a dead end', () => {
     expect(COMING_SOON_NOTE).toMatch(/aviso|avisar|avisamos/i);
+  });
+});
+
+describe('Venezuela Pago móvil and Ecuador bank transfer', () => {
+  it('lists both in Enviar and in Recibir, hoisted for their own country', () => {
+    expect(getSendRails('VE')[0]).toMatchObject({ id: 'send_ve_pagomovil', title: 'Pago móvil' });
+    expect(getReceiveRails('VEN')[0]).toMatchObject({ id: 'receive_ve_pagomovil', title: 'Pago móvil' });
+    expect(getSendRails('EC')[0]).toMatchObject({ id: 'send_ec_bank', country: 'EC' });
+    expect(getReceiveRails('ECU')[0]).toMatchObject({ id: 'receive_ec_bank', country: 'EC' });
+  });
+
+  it('stays a waitlist: neither can start a transfer yet', () => {
+    const rails = [...getSendRails(null), ...getReceiveRails(null)]
+      .filter(rail => rail.country === 'VE' || rail.country === 'EC');
+    expect(rails).toHaveLength(4);
+    expect(rails.every(rail => rail.status === 'probe')).toBe(true);
+  });
+});
+
+
+// The server only lets someone join a waitlist for a rail it knows
+// (KNOWN_RAIL_IDS in users/models_rail_waitlist.py). A rail added here but
+// not there would show "¡Anotado!" while the join is refused.
+describe('waitlist rail ids match the server allowlist', () => {
+  it('lists exactly the same probe rails on both sides', () => {
+    const {readFileSync} = require('fs');
+    const {resolve} = require('path');
+    const server: string = readFileSync(
+      resolve(__dirname, '../../../../users/models_rail_waitlist.py'), 'utf8');
+    const block = server.slice(server.indexOf('KNOWN_RAIL_IDS = frozenset({'));
+    const serverIds = new Set(
+      (block.slice(0, block.indexOf('})')).match(/'[a-z0-9_]+'/g) || []).map(id => id.slice(1, -1)));
+    const clientIds = new Set(
+      [...getSendRails(null), ...getReceiveRails(null)]
+        .filter(rail => rail.status === 'probe')
+        .map(rail => rail.id));
+    expect([...clientIds].sort()).toEqual([...serverIds].sort());
   });
 });

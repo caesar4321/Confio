@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { Alert } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
-import { useQuery } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import type { RouteOption } from '../components/RouteSheet';
@@ -15,7 +15,13 @@ import {
   type LocalRail,
 } from '../config/localRails';
 import { AnalyticsService } from '../services/analyticsService';
-import { isIdentityBlocked, showIdentityBlockedInterest, LOCAL_MONEY_METHODS, type LocalMethod } from '../services/localMoney';
+import {
+  isIdentityBlocked,
+  showIdentityBlockedInterest,
+  JOIN_LOCAL_RAIL_WAITLIST,
+  LOCAL_MONEY_METHODS,
+  type LocalMethod,
+} from '../services/localMoney';
 import { useLocalPaymentAccounts } from './useLocalPaymentAccounts';
 import { useRampCountry } from './useRampCountry';
 
@@ -52,6 +58,10 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
   const { data: receiveMethodsData, refetch: refetchReceiveMethods } = useQuery(LOCAL_MONEY_METHODS, {
     variables: { direction: 'receive' }, fetchPolicy: 'cache-and-network', errorPolicy: 'all',
   });
+  // "Sí, avísame" joins the server-side waitlist (who to notify when a rail
+  // opens). Write-only: counts are admin analytics, never shown here.
+  const [joinWaitlist] = useMutation(JOIN_LOCAL_RAIL_WAITLIST, { errorPolicy: 'all' });
+
   // Re-read the rails on every focus, so a document
   // verified elsewhere (Verificación, AdditionalDocument) shows up at once.
   useFocusEffect(
@@ -115,8 +125,13 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
     showIdentityBlockedInterest(`${method.title} · ${countryName(method.country)}`, stage => {
       AnalyticsService.logFunnelEvent('local_rail_blocked_interest', { ...event, stage },
         { sourceType: 'rail_interest', channel: method.direction });
+      // "Registramos tu interés" is a promise too: keep it past the 90-day
+      // funnel retention. Fire and forget, like the probe join below.
+      if (stage === 'confirmed') {
+        joinWaitlist({ variables: { railId: method.id, kind: 'nationality_blocked' } }).catch(() => {});
+      }
     });
-  }, [onSelect]);
+  }, [onSelect, joinWaitlist]);
 
   const methodToOption = useCallback((method: LocalMethod) => ({
     id: method.id,
@@ -184,6 +199,9 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
               direction,
               stage: 'confirmed',
             }, { sourceType: 'rail_interest', channel: direction });
+            // Fire and forget: an older server without the mutation still
+            // has the funnel event above, and the reply must never wait.
+            joinWaitlist({ variables: { railId: rail.id, kind: 'coming_soon' } }).catch(() => {});
             Alert.alert(
               '¡Anotado!',
               'Te avisamos apenas esté listo. Si lo necesitas pronto, escríbenos al soporte y te damos prioridad.',
@@ -192,7 +210,7 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
         },
       ],
     );
-  }, [onSelect]);
+  }, [onSelect, joinWaitlist]);
 
   const railToOption = useCallback(
     (rail: LocalRail, direction: 'send' | 'receive') => ({

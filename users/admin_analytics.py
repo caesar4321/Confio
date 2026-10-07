@@ -474,3 +474,17 @@ class FunnelDailyRollupAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+
+class LocalRailWaitlistEntryAdmin(admin.ModelAdmin):
+    """Who is waiting for which rail — a "Próximamente" corridor or one
+    blocked for their nationality. The list to notify when it opens; its
+    size is the demand signal."""
+
+    list_display = ('created_at', 'rail_id', 'kind', 'direction', 'country', 'user', 'notified_at')
+    list_filter = ('kind', 'direction', 'country', 'rail_id', 'notified_at')
+    search_fields = ('rail_id', 'user__username', 'user__phone_number')
+    date_hierarchy = 'created_at'
+    ordering = ('-created_at',)
+    raw_id_fields = ('user',)
+    readonly_fields = ('created_at',)

@@ -328,6 +328,12 @@ def document_for(owner, country):
     return next((doc for doc in _verified_documents(owner) if accepts_identity(doc, country)), None)
 
 
+# Refusals for who the person IS (a seeded eligibility policy's reason code),
+# not for a missing document. Mirrors IDENTITY_BLOCKED_REASONS in
+# apps/src/services/localMoney.ts, which lists these rails as blocked.
+IDENTITY_BLOCKED_REASONS = frozenset({'infinia_nationality_not_supported'})
+
+
 def rail_status(owner, primary, method):
     """(status, reason, document requirement) for this person and rail.
 

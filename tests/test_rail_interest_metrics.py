@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from unittest import TestCase
 
-from users.rail_interest_metrics import build_rail_interest_metrics
+from users.rail_interest_metrics import build_rail_interest_metrics, merge_waitlist_counts
 
 
 class RailInterestMetricsTests(TestCase):
@@ -72,3 +72,27 @@ class RailInterestMetricsTests(TestCase):
             'rails': 2,
             'unidentified_events': 1,
         })
+
+
+class MergeWaitlistCountsTests(TestCase):
+    def test_attaches_counts_and_keeps_rails_with_no_recent_probe_row(self):
+        rows = merge_waitlist_counts(
+            [{'rail': 'send_co_breb', 'direction': 'send', 'taps': 4, 'confirmed': 2}],
+            {
+                'send_co_breb': {'count': 7, 'direction': 'send', 'kind': 'coming_soon'},
+                'receive_ve_pagomovil': {'count': 3, 'direction': 'receive', 'kind': 'coming_soon'},
+                'co_breb_receive': {'count': 9, 'direction': 'receive', 'kind': 'nationality_blocked'},
+            },
+        )
+        by_rail = {row['rail']: row for row in rows}
+        self.assertEqual((by_rail['send_co_breb']['waitlist'], by_rail['send_co_breb']['taps']), (7, 4))
+        # Waitlist-only rails follow, biggest first, direction from the entry
+        # (a method id like co_breb_receive has no direction prefix).
+        self.assertEqual([r['rail'] for r in rows[1:]], ['co_breb_receive', 'receive_ve_pagomovil'])
+        self.assertEqual(
+            (by_rail['co_breb_receive']['direction'], by_rail['co_breb_receive']['waitlist_kind']),
+            ('receive', 'nationality_blocked'))
+
+    def test_a_rail_with_taps_but_no_waitlist_shows_zero(self):
+        rows = merge_waitlist_counts([{'rail': 'send_mx_clabe'}], {})
+        self.assertEqual(rows, [{'rail': 'send_mx_clabe', 'waitlist': 0, 'waitlist_kind': ''}])
