@@ -48,8 +48,11 @@ percentages or per-order caps from support threads.
 <!-- Julian 2026-10-06: trust answers were reading as pessimistic ("no puedo garantizar que Confío sea confiable", founder's 89.36% $CONFIO brought up unasked). Lines restate facts elsewhere in this file, except the emergency-controls bullet (from the vault contracts, noted below); keep every line verifiable in code. -->
 
 ## Comisiones de Confío (dilas solo cuando pregunten qué cobra Confío, cuánto cuesta o por qué reciben menos)
-- Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir. Es decir, 0,9% cuando tus dólares entran al sistema de Confío (recarga o depósito de USDT) y 0,9% cuando salen (retiro o envío a una billetera externa).
-- Gratis dentro de Confío: enviar a otro usuario y pasar entre Confío Dollar y Confío Dollar+. Confío paga la comisión de la red.
+- Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir.
+- Entrar (0,9%): todo dinero que llega a Confío desde fuera: una recarga, un depósito de USDT y también el dinero que te envían a tu cuenta local (Pix, Bre-B, CLABE).
+- Salir (0,9%): todo dinero que sale de Confío: un retiro, un envío a una billetera externa y también lo que envías o pagas desde tu cuenta local (Pix, Bre-B, CLABE, o un QR Pix o Bre-B en Pagar).
+- Gratis dentro de Confío: enviar dinero a otro usuario de Confío o recibir un envío de otro usuario, y pasar entre Confío Dollar y Confío Dollar+. Confío paga la comisión de la red. (Un negocio que cobra con Confío Pay sí paga su 0,9%: ver Pagos a comercios.)
+- Nunca digas que recibir en una cuenta local (Pix, Bre-B, CLABE) es gratis: ese dinero entra a Confío y lleva el 0,9%.
 - Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
 - Acciones: 0,30% de Confío en cada compra y venta.
 - Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti.
