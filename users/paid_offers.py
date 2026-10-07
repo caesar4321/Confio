@@ -27,15 +27,18 @@ PRICES = {
 EVENT = 'paid_offer_interest'
 
 
-def enabled(product, user_id=None):
-    """The probe's flag, or a preview for listed people (the founder checking
-    it on a real phone before it reaches anyone else)."""
-    if product not in PRODUCTS:
-        return False
-    if getattr(settings, FLAGS[product], False):
-        return True
+def previewing(user_id):
+    """Listed people (the founder testing a pre-release build on a real
+    phone) see both probes whatever the flags and the build number say."""
     preview = str(getattr(settings, 'PAID_OFFER_PREVIEW_USER_IDS', '') or '')
     return user_id is not None and str(user_id) in {p.strip() for p in preview.split(',') if p.strip()}
+
+
+def enabled(product, user_id=None):
+    """The probe's flag, or a preview for listed people."""
+    if product not in PRODUCTS:
+        return False
+    return bool(getattr(settings, FLAGS[product], False)) or previewing(user_id)
 
 
 def price(product):
@@ -69,7 +72,7 @@ def _has_plus(user_id):
 def available(product, *, is_employee, meta, user_id=None):
     """Can this person open the pitch at all (from any door)? Someone who
     already has Assistant+ is never pitched Confío IA+."""
-    if not (enabled(product, user_id) and not is_employee and client_supports(meta)):
+    if not (enabled(product, user_id) and not is_employee and (client_supports(meta) or previewing(user_id))):
         return False
     return not (product == PRODUCT_IA_PLUS and user_id is not None and _has_plus(user_id))
 
