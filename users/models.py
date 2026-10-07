@@ -1349,6 +1349,9 @@ from .models_analytics import (  # noqa: F401
     FunnelDailyRollup,
 )
 
+# Waitlist behind the "Próximamente" local rail rows
+from .models_rail_waitlist import LocalRailWaitlistEntry  # noqa: F401,E402
+
 # Month-summary ("Tu mes") spending categories
 from .models_cashflow import (  # noqa: F401,E402
     CounterpartyRule,

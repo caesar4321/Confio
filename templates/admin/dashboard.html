@@ -847,6 +847,7 @@
                 · {{ rail_interest_totals.rails|default:"0" }} rails
                 · {{ rail_interest_totals.taps|default:"0"|intcomma }} users tapped
                 · {{ rail_interest_totals.confirmed|default:"0"|intcomma }} users confirmed
+                · {{ rail_interest_totals.waitlist|default:"0"|intcomma }} users on a waitlist (all-time)
                 {% if rail_interest_totals.unidentified_events %}
                     · {{ rail_interest_totals.unidentified_events|intcomma }} unidentified events ignored
                 {% endif %}
@@ -860,6 +861,7 @@
                     <th style="text-align: right;">Users tapped</th>
                     <th style="text-align: right;">Users confirmed</th>
                     <th style="text-align: right;">User conversion</th>
+                    <th style="text-align: right;">On waitlist (all-time)</th>
                     <th>Countries</th>
                     <th>Last seen</th>
                 </tr>
@@ -867,18 +869,19 @@
             <tbody>
                 {% for row in rail_interest %}
                 <tr>
-                    <td>{{ row.rail }}</td>
+                    <td>{{ row.rail }}{% if row.waitlist_kind == 'nationality_blocked' %} <span style="color:#6b7280;">· blocked by nationality</span>{% endif %}</td>
                     <td>{{ row.direction }}</td>
                     <td style="text-align: right;">{{ row.taps|intcomma }}</td>
                     <td style="text-align: right;">{{ row.confirmed|intcomma }}</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.conversion_pct|floatformat:1 }}%</td>
+                    <td style="text-align: right;">{{ row.waitlist|default:"0"|intcomma }}</td>
                     <td>{{ row.countries }}</td>
                     <td>{{ row.last_seen|date:"Y-m-d H:i" }}</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="7" style="padding: 16px; color: #6b7280;">
-                        No rail interest recorded in the last 90 days.
+                    <td colspan="8" style="padding: 16px; color: #6b7280;">
+                        No rail interest in the last 90 days and nobody on a waitlist.
                     </td>
                 </tr>
                 {% endfor %}

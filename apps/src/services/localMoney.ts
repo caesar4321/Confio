@@ -769,3 +769,17 @@ export function heldReasonCopy(reason: string): string {
   }
   return 'Lo estamos revisando.';
 }
+
+// Joins the waitlist behind a "Próximamente" rail row (kind 'coming_soon',
+// catalog id) or a rail refused for the person's nationality (kind
+// 'nationality_blocked', server method id). Its own document: an older server
+// that lacks it loses only the server-side row, never the menus. Counts are
+// server analytics only; the app never reads them.
+export const JOIN_LOCAL_RAIL_WAITLIST = gql`
+  mutation JoinLocalRailWaitlist($railId: String!, $kind: String) {
+    joinLocalRailWaitlist(railId: $railId, kind: $kind) {
+      success
+      error
+    }
+  }
+`;

@@ -33,7 +33,7 @@ from send.models import SendTransaction
 from payments.models import PaymentTransaction
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 from inbox.models import ContentPlatformClick
-from users.rail_interest_metrics import build_rail_interest_metrics
+from users.rail_interest_metrics import build_rail_interest_metrics, merge_waitlist_counts
 
 
 def get_fcm_reachability_metrics(now=None):
@@ -438,6 +438,18 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         )
 
         rail_interest, rail_interest_totals = build_rail_interest_metrics(rail_interest_rows)
+        # The durable waitlist (LocalRailWaitlistEntry) outlives the 90-day raw
+        # events, so its size is all-time; a rail whose taps aged out still
+        # keeps the people to notify.
+        from users.models_rail_waitlist import LocalRailWaitlistEntry
+        waitlist_by_rail = {
+            row['rail_id']: row
+            for row in LocalRailWaitlistEntry.objects.values('rail_id', 'direction', 'kind')
+            .annotate(count=Count('id'))
+        }
+        rail_interest = merge_waitlist_counts(rail_interest, waitlist_by_rail)
+        rail_interest_totals['rails'] = len(rail_interest)
+        rail_interest_totals['waitlist'] = LocalRailWaitlistEntry.objects.values('user_id').distinct().count()
         context['rail_interest'] = rail_interest
         context['rail_interest_totals'] = rail_interest_totals
 
@@ -2005,6 +2017,9 @@ confio_admin_site.register(DailyMetrics, DailyMetricsAdmin)
 confio_admin_site.register(CountryMetrics, CountryMetricsAdmin)
 confio_admin_site.register(FunnelEvent, FunnelEventAdmin)
 confio_admin_site.register(FunnelDailyRollup, FunnelDailyRollupAdmin)
+from users.models_rail_waitlist import LocalRailWaitlistEntry
+from users.admin_analytics import LocalRailWaitlistEntryAdmin
+confio_admin_site.register(LocalRailWaitlistEntry, LocalRailWaitlistEntryAdmin)
 
 # P2P models
 from p2p_exchange.models import (

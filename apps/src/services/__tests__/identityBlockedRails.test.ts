@@ -40,3 +40,22 @@ it('records confirmation only after Sí, avísame, then acknowledges it', () => 
   expect(alert.mock.calls[1][0]).toBe('¡Anotado!');
   alert.mockRestore();
 });
+
+// The server only accepts a nationality-blocked waitlist join when its own
+// IDENTITY_BLOCKED_REASONS (payment_accounts/local_money.py) agrees; a reason
+// listed here but not there would show "Registramos tu interés" for a join
+// the server refuses.
+it('lists the same identity-blocked reasons as the server', () => {
+  const {readFileSync} = require('fs');
+  const {resolve} = require('path');
+  const pick = (source: string, start: string, end: string) => {
+    const block = source.slice(source.indexOf(start));
+    return [...block.slice(0, block.indexOf(end)).matchAll(/'([a-z_]+)'/g)].map(m => m[1]).sort();
+  };
+  const client = pick(readFileSync(resolve(__dirname, '../localMoney.ts'), 'utf8'),
+    'const IDENTITY_BLOCKED_REASONS', ']);');
+  const server = pick(readFileSync(resolve(__dirname, '../../../../payment_accounts/local_money.py'), 'utf8'),
+    'IDENTITY_BLOCKED_REASONS = frozenset({', '})');
+  expect(client.length).toBeGreaterThan(0);
+  expect(client).toEqual(server);
+});

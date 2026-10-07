@@ -58,6 +58,18 @@ const SEND_RAILS: LocalRail[] = [
     subtitle: 'Mercado Pago, Ualá, Naranja X y bancos',
     status: 'probe',
   },
+  // Pago móvil is THE way bolívares move person to person: phone, cédula and
+  // bank, instant between any two Venezuelan banks. No payout provider we
+  // use serves it yet (Infinia has no Venezuela schema; PagoASAP's off-ramp
+  // is to the user's OWN account), so it is a waitlist — and its size is the
+  // number we take to a provider.
+  {
+    id: 'send_ve_pagomovil',
+    country: 'VE',
+    title: 'Pago móvil',
+    subtitle: 'Teléfono, cédula y banco · en bolívares',
+    status: 'probe',
+  },
   // Ids keep their historical `_qr` suffix (funnel history hangs off them),
   // but the copy promises only what a payout can do: Infinia's Create Payout
   // schema has Peru bank accounts and Bolivia ACH only — no Yape/QR payout.
@@ -73,6 +85,15 @@ const SEND_RAILS: LocalRail[] = [
     country: 'BO',
     title: 'Cuenta bancaria',
     subtitle: 'Transferencia ACH a bancos en Bolivia',
+    status: 'probe',
+  },
+  // Ecuador is dollarized: no FX leg, just a bank transfer in dollars —
+  // which is why it is worth counting despite being a smaller corridor.
+  {
+    id: 'send_ec_bank',
+    country: 'EC',
+    title: 'Cuenta bancaria',
+    subtitle: 'Transferencia en dólares a bancos de Ecuador',
     status: 'probe',
   },
   {
@@ -183,6 +204,13 @@ const RECEIVE_RAILS: LocalRail[] = [
     status: 'probe',
   },
   {
+    id: 'receive_ve_pagomovil',
+    country: 'VE',
+    title: 'Pago móvil',
+    subtitle: 'Tus propios datos para que te paguen en bolívares',
+    status: 'probe',
+  },
+  {
     id: 'receive_pe_qr',
     country: 'PE',
     title: 'Cuenta y QR',
@@ -194,6 +222,13 @@ const RECEIVE_RAILS: LocalRail[] = [
     country: 'BO',
     title: 'Cuenta y QR',
     subtitle: 'Tu propio QR para que te paguen',
+    status: 'probe',
+  },
+  {
+    id: 'receive_ec_bank',
+    country: 'EC',
+    title: 'Cuenta bancaria',
+    subtitle: 'Tus propios datos para recibir dólares en Ecuador',
     status: 'probe',
   },
   {
@@ -263,7 +298,7 @@ const RECEIVE_RAILS: LocalRail[] = [
 // rather than a general-purpose dependency.
 const ISO3_TO_ISO2: Record<string, string> = {
   ARG: 'AR', BOL: 'BO', BRA: 'BR', CHL: 'CL', COL: 'CO',
-  MEX: 'MX', PER: 'PE', PRY: 'PY', URY: 'UY', VEN: 'VE',
+  MEX: 'MX', PER: 'PE', PRY: 'PY', URY: 'UY', VEN: 'VE', ECU: 'EC',
   GBR: 'GB', USA: 'US',
   // Infinia opens the euro account in Luxembourg, but nobody thinks of their
   // IBAN as "a Luxembourg account" — the product is the euro area. Presenting

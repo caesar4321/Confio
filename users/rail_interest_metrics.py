@@ -78,3 +78,31 @@ def build_rail_interest_metrics(rows):
         'unidentified_events': unidentified_events,
     }
     return rail_interest, totals
+
+
+def merge_waitlist_counts(rail_interest, waitlist_by_rail):
+    """Attach the all-time waitlist size to each 90-day rail row.
+
+    `waitlist_by_rail` maps rail_id → {'count', 'direction', 'kind'}. Rails
+    with no 90-day probe row still have people waiting — taps that aged out,
+    or nationality-blocked rails, whose events this panel does not read — so
+    they get a row of their own instead of vanishing.
+    """
+    remaining = dict(waitlist_by_rail)
+    rows = []
+    for row in rail_interest:
+        entry = remaining.pop(row['rail'], None) or {}
+        rows.append({**row, 'waitlist': entry.get('count', 0), 'waitlist_kind': entry.get('kind', '')})
+    for rail_id, entry in sorted(remaining.items(), key=lambda kv: (-kv[1]['count'], kv[0])):
+        rows.append({
+            'rail': rail_id,
+            'direction': entry.get('direction') or '—',
+            'taps': 0,
+            'confirmed': 0,
+            'conversion_pct': 0.0,
+            'countries': '—',
+            'last_seen': None,
+            'waitlist': entry['count'],
+            'waitlist_kind': entry.get('kind', ''),
+        })
+    return rows
