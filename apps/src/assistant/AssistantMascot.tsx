@@ -1,7 +1,7 @@
 // Confio Assistant's face: Confi (the default) or the pet the user picked.
 // Drawn in SVG on a 100x100 canvas so it stays crisp from the 56pt bubble
 // to the picker; the body color is the user's choice, features stay fixed.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Image, View } from 'react-native';
 import Svg, { Circle, Ellipse, G, Path, Rect } from 'react-native-svg';
 import Animated, {
@@ -185,7 +185,7 @@ type Props = {
 export default function AssistantMascot(props: Props) {
   if (props.kind === 'CUSTOM' && props.imageUrl) {
     return (
-      <CustomPetMascot imageUrl={props.imageUrl} size={props.size ?? 56} mood={props.mood ?? 'idle'}
+      <CustomPetMascot imageUrl={props.imageUrl} color={props.color} size={props.size ?? 56} mood={props.mood ?? 'idle'}
         animated={props.animated ?? true} />
     );
   }
@@ -262,34 +262,61 @@ function BuiltInMascot({ kind = 'CONFI', color, size = 56, mood = 'idle', animat
 // the old URL stops loading (expired).
 const imagePath = (url: string) => url.split('?')[0];
 
-function CustomPetMascot({ imageUrl, size, mood, animated }: { imageUrl: string; size: number; mood: MascotMood; animated: boolean }) {
+// Behind a pet photo that hasn't arrived yet (or failed to): a soft circle in
+// the pet's own color, never another character. A pet briefly turning into
+// Confi reads as the assistant changing identity.
+function tint(hex?: string) {
+  const base = hex && /^#[0-9A-Fa-f]{6}$/.test(hex) ? hex : '#10B981';
+  // A light color (cream) at low alpha on the white bubble would read as the
+  // very empty white circle this replaces: darken it and tint more.
+  return isLight(base) ? `${shade(base, -60)}55` : `${base}33`;
+}
+
+// Quiet retries for a photo that failed to load, then the next return to the app.
+const RETRY_DELAYS_MS = [3000, 10000, 30000];
+
+function CustomPetMascot({ imageUrl, color, size, mood, animated }: {
+  imageUrl: string; color?: string; size: number; mood: MascotMood; animated: boolean;
+}) {
   const [shownUrl, setShownUrl] = useState(imageUrl);
-  // The current URL itself failed (expired, or the image is gone): show Confi
-  // rather than an empty circle until a new URL arrives.
-  const [failed, setFailed] = useState(false);
-  // Until the photo has actually arrived, Confi shows underneath: a slow or
+  // Until the photo has actually arrived the tinted circle shows: a slow or
   // stalled download (React Native's has no read timeout) must never look
-  // like an empty circle. Coming back to the app retries a stalled one.
+  // like an empty white circle. Coming back to the app retries a stalled one.
   const [loaded, setLoaded] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const failures = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fade = useSharedValue(0);
+  const loadedRef = useRef(false);
+  loadedRef.current = loaded;
   useEffect(() => {
-    setFailed(false);
-    setShownUrl((current) => (imagePath(current) === imagePath(imageUrl) ? current : imageUrl));
+    failures.current = 0;
+    // Keep the URL on screen only once it has loaded (a re-signed URL for
+    // the same pet must not reload the photo); a URL that hasn't loaded,
+    // maybe expired, gives way to the fresh one at once.
+    setShownUrl((current) => (loadedRef.current && imagePath(current) === imagePath(imageUrl) ? current : imageUrl));
   }, [imageUrl]);
   useEffect(() => {
     setLoaded(false);
-  }, [shownUrl]);
+    fade.value = 0;
+  }, [shownUrl, fade]);
   useEffect(() => {
     if (loaded) {
       return undefined;
     }
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
+        failures.current = 0;
         setAttempt((n) => n + 1);
       }
     });
     return () => sub.remove();
   }, [loaded]);
+  useEffect(() => () => {
+    if (retryTimer.current) {
+      clearTimeout(retryTimer.current);
+    }
+  }, []);
   const lift = useSharedValue(0);
   const scale = useSharedValue(1);
   const tilt = useSharedValue(0);
@@ -332,32 +359,47 @@ function CustomPetMascot({ imageUrl, size, mood, animated }: { imageUrl: string;
       { rotate: `${tilt.value}deg` },
     ],
   }));
+  const photoStyle = useAnimatedStyle(() => ({ opacity: fade.value }));
 
-  if (failed) {
-    return <BuiltInMascot size={size} mood={mood} animated={animated} />;
-  }
+  const onError = () => {
+    if (shownUrl !== imageUrl) {
+      // The kept URL expired: the newer one for the same pet.
+      setShownUrl(imageUrl);
+      return;
+    }
+    const delay = RETRY_DELAYS_MS[failures.current];
+    failures.current += 1;
+    if (delay !== undefined) {
+      if (retryTimer.current) {
+        clearTimeout(retryTimer.current);
+      }
+      retryTimer.current = setTimeout(() => setAttempt((n) => n + 1), delay);
+    }
+  };
+
   return (
     <View style={{ width: size, height: size }} accessible={false}>
-      {!loaded ? (
-        <View style={{ position: 'absolute' }} pointerEvents="none">
-          <BuiltInMascot size={size} mood={mood} animated={animated} />
-        </View>
-      ) : null}
       <Animated.View style={style}>
-        <Image
-          key={attempt}
-          source={{ uri: shownUrl }}
-          style={{ width: size, height: size, borderRadius: size / 2, opacity: loaded ? 1 : 0 }}
-          resizeMode="cover"
-          onLoad={() => setLoaded(true)}
-          onError={() => {
-            if (shownUrl === imageUrl) {
-              setFailed(true);
-            } else {
-              setShownUrl(imageUrl);
-            }
-          }}
-        />
+        {!loaded ? (
+          <View
+            pointerEvents="none"
+            style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, backgroundColor: tint(color) }}
+          />
+        ) : null}
+        <Animated.View style={photoStyle}>
+          <Image
+            key={attempt}
+            source={{ uri: shownUrl }}
+            style={{ width: size, height: size, borderRadius: size / 2 }}
+            resizeMode="cover"
+            onLoad={() => {
+              failures.current = 0;
+              setLoaded(true);
+              fade.value = withTiming(1, { duration: 220 });
+            }}
+            onError={onError}
+          />
+        </Animated.View>
       </Animated.View>
     </View>
   );
