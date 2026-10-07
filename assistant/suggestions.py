@@ -102,7 +102,7 @@ def _state(viewer, request_meta) -> _State:
     from django.db.models import Q
 
     from security.models import IdentityVerification
-    from users.models_unified import UnifiedTransactionTable
+    from users.funding import has_funded
 
     from .models import ProbeAnswer
 
@@ -110,9 +110,7 @@ def _state(viewer, request_meta) -> _State:
     on_ramps = RampTransaction.objects.filter(actor_user=user, direction='on_ramp')
     # Money that actually arrived: a confirmed incoming row (top-ups, sends,
     # pay-ins all write one, but start PENDING; failed or unclaimed ones don't count).
-    funded = UnifiedTransactionTable.objects.filter(
-        counterparty_user=user, status='CONFIRMED', deleted_at__isnull=True,
-    ).exclude(is_invitation=True, invitation_claimed=False).exists()
+    funded = has_funded(user)
     in_progress = on_ramps.filter(status__in=['PENDING', 'PROCESSING', 'AML_REVIEW'],
                                   created_at__gte=timezone.now() - timedelta(days=3)).exists()
     # "pending" also covers attempts started and never finished, and people

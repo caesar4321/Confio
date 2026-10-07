@@ -26,7 +26,7 @@ from django.utils import timezone
 from users.models_cashflow import CATEGORY_CHOICES
 
 from . import conf, market
-from .destinations import DESTINATIONS, FALLBACKS, OWNER_ONLY, PERSONAL_ONLY
+from .destinations import DESTINATIONS, FALLBACKS, OWNER_ONLY, PAID_OFFERS, PERSONAL_ONLY
 from .prompts import ANALYSIS_PROMPT, build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -111,8 +111,11 @@ def third_party_text(value, limit=THIRD_PARTY_MAX_CHARS):
     return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
 
 
-def allowed_destinations(viewer: Viewer):
+def allowed_destinations(viewer: Viewer, *, paid_offers_allowed=True):
     keys = list(DESTINATIONS)
+    if not paid_offers_allowed:
+        # Realtime voice: a pitch is only ever opened by a tap on its chip.
+        keys = [k for k in keys if k not in PAID_OFFERS]
     if viewer.is_employee:
         keys = [k for k in keys if k not in OWNER_ONLY]
     if viewer.account_type == 'business':
@@ -122,6 +125,12 @@ def allowed_destinations(viewer: Viewer):
         # A single stock's page only where stocks are offered. This is the
         # cheap phone check; navigate('stock') adds the request-aware one.
         keys = [k for k in keys if k != 'stock']
+    # Paid-offer pitches only while that probe is on and on builds that have
+    # the screen (old builds would land on Home with nothing to tap).
+    from users import paid_offers
+    keys = [k for k in keys if k not in PAID_OFFERS or paid_offers.available(
+        PAID_OFFERS[k], is_employee=viewer.is_employee, meta=viewer.request_meta,
+        user_id=getattr(viewer.user, 'pk', None))]
     return keys
 
 
@@ -470,7 +479,7 @@ class Toolbelt:
     """The model's tools for one turn, bound to one viewer."""
 
     def __init__(self, viewer: Viewer, result: TurnResult, *, analyses_left: int, can_navigate: bool = True,
-                 reserve_analysis=None, reserve_news=None):
+                 reserve_analysis=None, reserve_news=None, paid_offers_allowed: bool = True):
         self.viewer = viewer
         self.result = result
         self.analyses_left = analyses_left
@@ -484,7 +493,7 @@ class Toolbelt:
         # Paid tools run at most once per user message, whatever the model asks.
         self.paid_used = set()
         self.can_navigate = can_navigate
-        self.destinations = allowed_destinations(viewer)
+        self.destinations = allowed_destinations(viewer, paid_offers_allowed=paid_offers_allowed)
 
     def specs(self):
         specs = [] if not self.can_navigate else [
@@ -694,6 +703,13 @@ class Toolbelt:
     def navigate(self, destination, asset=None, label=None):
         if not self.can_navigate or destination not in self.destinations:
             return {'ok': False, 'error': 'pantalla no disponible'}
+        if destination in PAID_OFFERS:
+            from .paid_chips import capped
+            if self.viewer.user is not None and capped(self.viewer.user, destination):
+                # Shown this week already: no chip, so the reply must not pitch it
+                # again either (if the person asks by name, the server adds it).
+                return {'ok': False, 'error': 'Ya se la ofreciste esta semana: no la vuelvas a ofrecer en esta '
+                                              'respuesta, salvo que la persona pregunte por ella.'}
         # `destination` stays a key every build knows; newer builds open
         # `target` (and `ticker`) instead.
         action = {'type': 'navigate', 'destination': FALLBACKS.get(destination, destination)}

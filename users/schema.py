@@ -1349,7 +1349,10 @@ class VerifiedTransactionType(graphene.ObjectType):
 	metadata = graphene.JSONString()
 
 
-class Query(EmployeeQueries, graphene.ObjectType):
+from users.product_waitlist_schema import PaidOfferQueries  # noqa: E402
+
+
+class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 	me = graphene.Field(UserType)
 	user = graphene.Field(UserType, id=graphene.ID(required=True))
 	business = graphene.Field(BusinessType, id=graphene.ID(required=True))
@@ -6145,9 +6148,10 @@ from notifications.schema import UpdateNotificationPreferences
 
 from users.funnel_schema import FunnelMutations
 from users.rail_waitlist_schema import LocalRailWaitlistMutations
+from users.product_waitlist_schema import PaidOfferMutations
 
 
-class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, graphene.ObjectType):
+class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, PaidOfferMutations, graphene.ObjectType):
     report_backup_status = ReportBackupStatus.Field()
 
     update_phone_number = UpdatePhoneNumber.Field()

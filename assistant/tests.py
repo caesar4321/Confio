@@ -343,6 +343,10 @@ class VoiceTests(TestCase):
         self.assertEqual((approved['ok'], approved['destination']), (True, 'home'))
         output, _ = voice.run_tool(session, self.viewer, 'navigate', '{"destination": "constructor"}', 5)
         self.assertFalse(json.loads(output)['ok'])
+        # A pitch is only ever opened by a tap: never from a call, even if offered.
+        with patch('users.paid_offers.available', return_value=True):
+            output, _ = voice.run_tool(session, self.viewer, 'navigate', '{"destination": "ia_plus"}', 5)
+        self.assertFalse(json.loads(output)['ok'])
         employee = Viewer(user=self.user, account=self.viewer.account, account_type='business', business_id=1,
                           is_business_owner=False, tz=ZoneInfo('UTC'))
         output, _ = voice.run_tool(session, employee, 'navigate', '{"destination": "withdraw"}', 5)
@@ -1309,7 +1313,7 @@ class SuggestionQueryContractTests(TestCase):
             self.assertFalse(suggestions._state(viewer, {}).funded)
             kwargs = rows.filter.call_args.kwargs
         self.assertEqual(kwargs['status'], 'CONFIRMED')
-        self.assertEqual(kwargs['counterparty_user'], user)
+        self.assertEqual(kwargs['counterparty_user_id'], user.pk)
 
 
 class PortfolioAndNeedsTests(TestCase):
@@ -1692,3 +1696,117 @@ class ConversationReviewFixTests(TestCase):
             voice.start_session(viewer, conversation, first_name='V', account_label='personal', country='BR')
         sent = post.call_args.kwargs['json']['session']['audio']['input']['transcription']
         self.assertEqual(sent['prompt'], TRANSCRIBE_HINTS['pt'])
+
+
+class PaidChipTests(TestCase):
+    """At most one paid-offer chip per reply, chosen and capped by the server."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='pc', email='pc@example.com', password='x', firebase_uid='fb-pc')
+        self.viewer = Viewer(user=self.user, account=None, account_type='personal', business_id=None,
+                             is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.allowed = {'home', 'ia_plus', 'cuenta_inteligente'}
+
+    def _result(self, actions=(), tools=(), handoff=''):
+        return TurnResult(reply='ok', actions=list(actions), tools=list(tools), handoff_reason=handoff)
+
+    def _shown(self, key):
+        from users.models import FunnelEvent
+        FunnelEvent.objects.create(event_name='paid_offer_interest', user=self.user,
+                                   source_type={'ia_plus': 'ia_plus', 'cuenta_inteligente': 'smart_account'}[key],
+                                   properties={'stage': 'door_shown', 'door': 'chip'})
+
+    def test_investing_tools_bring_ia_plus_once_a_week(self):
+        from . import paid_chips
+        result = self._result(tools=[{'name': 'get_portfolio', 'ok': True}])
+        self.assertEqual(paid_chips.choose(self.viewer, '¿qué acción compro?', result, self.allowed),
+                         ('ia_plus', 'investing'))
+        self.assertEqual(result.actions[-1], {'type': 'navigate', 'destination': 'home', 'target': 'ia_plus',
+                                              'label': 'Conoce Confío IA+', 'source': 'chip:investing'})
+        self._shown('ia_plus')
+        capped = self._result(tools=[{'name': 'get_stock_quote', 'ok': True}])
+        self.assertIsNone(paid_chips.choose(self.viewer, 'precio de SPY', capped, self.allowed))
+        self.assertEqual(capped.actions, [])
+
+    def test_asked_beats_the_cap_and_a_model_chip_respects_it(self):
+        from . import paid_chips
+        self._shown('cuenta_inteligente')
+        model = {'type': 'navigate', 'destination': 'home', 'target': 'cuenta_inteligente'}
+        result = self._result(actions=[model])
+        self.assertIsNone(paid_chips.choose(self.viewer, 'pago el alquiler a mano', result, self.allowed))
+        asked = self._result(actions=[model])
+        self.assertEqual(paid_chips.choose(self.viewer, '¿Qué es la Cuenta inteligente?', asked, self.allowed),
+                         ('cuenta_inteligente', 'asked'))
+        self.assertEqual(len(asked.actions), 1)
+
+    def test_one_chip_never_after_escalation_never_when_not_allowed(self):
+        from . import paid_chips
+        both = self._result(actions=[{'type': 'navigate', 'destination': 'home', 'target': 'cuenta_inteligente'}],
+                            tools=[{'name': 'get_portfolio', 'ok': True}])
+        self.assertEqual(paid_chips.choose(self.viewer, 'pago todo a mano', both, self.allowed),
+                         ('cuenta_inteligente', 'pain_point'))
+        self.assertEqual([a['target'] for a in both.actions], ['cuenta_inteligente'])
+        escalated = self._result(tools=[{'name': 'get_portfolio', 'ok': True}], handoff='dinero atascado')
+        self.assertIsNone(paid_chips.choose(self.viewer, 'mi plata no llega', escalated, self.allowed))
+        off = self._result(tools=[{'name': 'get_portfolio', 'ok': True}])
+        self.assertIsNone(paid_chips.choose(self.viewer, 'acciones', off, {'home'}))
+        failed_tool = self._result(tools=[{'name': 'get_portfolio', 'ok': False}])
+        self.assertIsNone(paid_chips.choose(self.viewer, 'acciones', failed_tool, self.allowed))
+
+    @override_settings(IA_PLUS_PROBE_ENABLED=True, SMART_ACCOUNT_PROBE_ENABLED=False, PAID_OFFER_MIN_APP_VERSION='5.1.10')
+    def test_destinations_and_prompt_follow_the_flags_and_the_build(self):
+        from .engine import allowed_destinations
+        new = Viewer(user=self.user, account=None, account_type='personal', business_id=None,
+                     is_business_owner=False, tz=ZoneInfo('UTC'), request_meta={'HTTP_X_CONFIO_VERSION': '5.1.10'})
+        old = Viewer(user=self.user, account=None, account_type='personal', business_id=None,
+                     is_business_owner=False, tz=ZoneInfo('UTC'), request_meta={'HTTP_X_CONFIO_VERSION': '5.1.9'})
+        employee = Viewer(user=self.user, account=None, account_type='business', business_id=3,
+                          is_business_owner=False, tz=ZoneInfo('UTC'), request_meta={'HTTP_X_CONFIO_VERSION': '5.1.10'})
+        with patch('assistant.engine._phone_eligible', return_value=True):
+            keys = allowed_destinations(new)
+            self.assertIn('ia_plus', keys)
+            self.assertNotIn('cuenta_inteligente', keys)  # its flag is off
+            self.assertNotIn('ia_plus', allowed_destinations(old))
+            self.assertNotIn('ia_plus', allowed_destinations(employee))
+        prompt = build_system_prompt(first_name='A', account_label='personal', country='PE', screen='Home',
+                                     local_now='now', destinations=keys)
+        self.assertIn('Confío IA+ (lista de espera)', prompt)
+        self.assertIn('por US$9.99 al mes', prompt)
+        self.assertNotIn('Cuenta inteligente (lista de espera)', prompt)
+
+
+class PaidChipAuditFixTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='pa', email='pa@example.com', password='x', firebase_uid='fb-pa')
+        self.viewer = Viewer(user=self.user, account=None, account_type='personal', business_id=None,
+                             is_business_owner=False, tz=ZoneInfo('UTC'))
+
+    def test_a_capped_offer_is_refused_to_the_model_too(self):
+        from users.models import FunnelEvent
+        belt = Toolbelt(self.viewer, TurnResult(reply=''), analyses_left=0)
+        belt.destinations = ['home', 'cuenta_inteligente']
+        self.assertTrue(belt.navigate('cuenta_inteligente')['ok'])
+        FunnelEvent.objects.create(event_name='paid_offer_interest', user=self.user, source_type='smart_account',
+                                   properties={'stage': 'door_shown', 'door': 'chip'})
+        refused = belt.navigate('cuenta_inteligente')
+        self.assertFalse(refused['ok'])
+        self.assertIn('esta semana', refused['error'])
+
+    def test_voice_calls_never_get_paid_offers(self):
+        from .engine import allowed_destinations
+        with patch('users.paid_offers.available', return_value=True), \
+                patch('assistant.engine._phone_eligible', return_value=True):
+            self.assertIn('ia_plus', allowed_destinations(self.viewer))
+            keys = allowed_destinations(self.viewer, paid_offers_allowed=False)
+        self.assertNotIn('ia_plus', keys)
+        self.assertNotIn('cuenta_inteligente', keys)
+
+    def test_ia_plus_regex_and_model_trigger(self):
+        from . import paid_chips
+        self.assertTrue(paid_chips.ASKED['ia_plus'].search('¿Qué es Confío IA+?'))
+        self.assertTrue(paid_chips.ASKED['ia_plus'].search('cuánto cuesta ia plus'))
+        self.assertFalse(paid_chips.ASKED['ia_plus'].search('¿Tengo Assistant+?'))
+        self.assertFalse(paid_chips.ASKED['ia_plus'].search('mi día'))
+        result = TurnResult(reply='ok', actions=[{'type': 'navigate', 'destination': 'home', 'target': 'ia_plus'}])
+        self.assertEqual(paid_chips.choose(self.viewer, 'quiero algo más avanzado', result, {'ia_plus'}),
+                         ('ia_plus', 'model'))

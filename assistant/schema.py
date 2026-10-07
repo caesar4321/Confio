@@ -28,6 +28,7 @@ class AssistantActionType(graphene.ObjectType):
     target = graphene.String(description='A newer screen key; builds that know it open it instead of `destination`')
     ticker = graphene.String(description='For target "stock": the stock or ETF to open')
     label = graphene.String(description='Chip text, e.g. "Ver SPDR S&P 500 ETF"')
+    source = graphene.String(description='Paid-offer chips: why it was shown, e.g. "chip:investing"')
 
 
 class AssistantMessageType(graphene.ObjectType):
@@ -115,7 +116,7 @@ def message_payload(message):
         modality=metadata.get('modality'),
         actions=[
             AssistantActionType(type=a.get('type', ''), destination=a.get('destination'), target=a.get('target'),
-                                ticker=a.get('ticker'), label=a.get('label'))
+                                ticker=a.get('ticker'), label=a.get('label'), source=a.get('source'))
             for a in (metadata.get('actions') or []) if isinstance(a, dict)
         ],
     )
@@ -310,7 +311,8 @@ class AskAssistant(graphene.Mutation):
             user_message=message_payload(outcome.user_message),
             reply=message_payload(outcome.reply_message) if outcome.reply_message else None,
             actions=[AssistantActionType(type=a['type'], destination=a.get('destination'), target=a.get('target'),
-                                         ticker=a.get('ticker'), label=a.get('label')) for a in outcome.actions],
+                                         ticker=a.get('ticker'), label=a.get('label'), source=a.get('source'))
+                     for a in outcome.actions],
             mode=outcome.mode,
             remaining_turns=outcome.remaining_turns,
             data_changed=outcome.data_changed,

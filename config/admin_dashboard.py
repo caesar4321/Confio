@@ -2020,6 +2020,9 @@ confio_admin_site.register(FunnelDailyRollup, FunnelDailyRollupAdmin)
 from users.models_rail_waitlist import LocalRailWaitlistEntry
 from users.admin_analytics import LocalRailWaitlistEntryAdmin
 confio_admin_site.register(LocalRailWaitlistEntry, LocalRailWaitlistEntryAdmin)
+from users.models_product_waitlist import ProductWaitlistEntry
+from users.admin_analytics import ProductWaitlistEntryAdmin
+confio_admin_site.register(ProductWaitlistEntry, ProductWaitlistEntryAdmin)
 
 # P2P models
 from p2p_exchange.models import (

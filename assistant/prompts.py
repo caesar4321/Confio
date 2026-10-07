@@ -85,9 +85,45 @@ NO_NAVIGATION_NOTE = (
 )
 
 
+# The paid-offer probes (waitlists, nothing is sold). Each block is in the
+# prompt only while its probe is on, so the model never advertises an offer
+# the person can't open. The price is the server's value, never app copy.
+PAID_OFFER_SECTIONS = {
+    'ia_plus': (
+        '\n## Confío IA+ (lista de espera)\n'
+        '- Confío IA+ es una versión más avanzada de Confío IA que estamos preparando: respuestas más avanzadas, '
+        'conversación por voz, más uso cada día, análisis de tus gastos, ahorros e inversiones y seguimiento de tus '
+        'metas{price}. Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame".\n'
+        '- Si preguntan por Confío IA+, responde con esto y abre `ia_plus`. Nunca des una fecha, nunca prometas '
+        'beneficios fuera de esta lista y nunca digas que se puede pagar o reservar ahora.\n'),
+    'cuenta_inteligente': (
+        '\n## Cuenta inteligente (lista de espera)\n'
+        '- Cuenta inteligente es una cuenta que estamos preparando: pagos automáticos a Pix, Bre-B, CLABE y Alias, '
+        'suscripciones con comercios, transferencias programadas, control de tus débitos y aviso antes de cada '
+        'cobro{price}. Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame".\n'
+        '- Si la persona cuenta que paga a mano cada mes (alquiler, familia, servicios), que quiere que su dinero se '
+        'mueva solo, o que le cuesta mover dinero cada mes, menciónala en una frase y abre `cuenta_inteligente`. Si '
+        'pregunta por ella, responde con esto y ábrela. Nunca des una fecha, nunca prometas beneficios fuera de esta '
+        'lista y nunca digas que se puede pagar o reservar ahora.\n'),
+}
+
+
+def _paid_offer_sections(destinations):
+    from users import paid_offers
+
+    from .destinations import PAID_OFFERS
+    out = ''
+    for key, section in PAID_OFFER_SECTIONS.items():
+        if key in destinations:
+            amount = paid_offers.price(PAID_OFFERS[key])
+            out += section.format(price=f', por US${amount} al mes' if amount else '')
+    return out
+
+
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
     prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', FAQ)
+              + _paid_offer_sections(destinations)
               + DESTINATIONS_SECTION.format(destinations=lines))
     if not can_navigate:
         prompt += NO_NAVIGATION_NOTE

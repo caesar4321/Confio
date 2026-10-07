@@ -317,6 +317,8 @@ export type MainStackParamList = {
   PayrollRun: undefined;
   // "Tu mes": month summary and the movement lists behind each number
   MonthSummary: { year?: number; month?: number; masked?: boolean } | undefined;
+  // Paid-offer probe pitch (waitlist only): which offer, and where it was opened.
+  PaidOffer: { offer: 'ia_plus' | 'smart_account'; door?: 'billeteras' | 'assistant_header' | 'chip'; trigger?: string };
   MonthMovements: {
     year: number;
     month: number;

@@ -37,7 +37,10 @@ export type ClientFunnelEvent =
     | 'category_chip_shown'
     | 'category_chip_answered'
     | 'category_chip_skipped'
-    | 'category_chip_dismissed';
+    | 'category_chip_dismissed'
+    // Paid-offer probes (Confío IA+, Cuenta inteligente): one event, the step
+    // in `stage` (door_shown, detail_opened, solo_miraba).
+    | 'paid_offer_interest';
 
 export const AnalyticsService = {
     /**

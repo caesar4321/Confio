@@ -35,6 +35,8 @@ CLIENT_EMITTABLE_EVENTS = frozenset({
     'category_chip_answered',
     'category_chip_skipped',
     'category_chip_dismissed',
+    # Paid-offer probes (Confío IA+, Cuenta inteligente); `stage` in properties.
+    'paid_offer_interest',
 })
 
 
@@ -59,6 +61,13 @@ def _cached_ip_country(meta):
     country = IPAddress.objects.filter(ip_address=client_ip).values_list(
         'country_code', flat=True).first()
     return normalize_country(country) or ''
+
+
+def _client_paid_offer_stage(properties):
+    stage = properties.get('stage')
+    if stage == 'door_shown':
+        return properties.get('door') in ('billeteras', 'assistant_header')
+    return stage in ('detail_opened', 'solo_miraba')
 
 
 class TrackFunnelEvent(graphene.Mutation):
@@ -120,9 +129,27 @@ class TrackFunnelEvent(graphene.Mutation):
         else:
             properties = {}
 
+        if event_name == 'paid_offer_interest' and not _client_paid_offer_stage(properties):
+            # Joins, answers and chip impressions are written by the server
+            # (with the waitlist row as the authority); a client can't add them.
+            logger.info('[funnel] rejected client paid_offer_interest stage %r', properties.get('stage'))
+            return cls(success=True, recorded=False)
+
         user = getattr(info.context, 'user', None)
         if user is not None and not getattr(user, 'is_authenticated', False):
             user = None
+
+        if (event_name == 'paid_offer_interest' and user is not None and properties.get('door') == 'chip'
+                and not properties.get('trigger')):
+            # The app doesn't carry a chip's reason; the server logged it when
+            # it showed the chip ('' = chip, reason unknown).
+            try:
+                from users.product_waitlist_schema import _last_chip_trigger
+                properties['trigger'] = _last_chip_trigger(
+                    user, str(source_type or properties.get('offer', '')).lower())
+            except Exception:  # noqa: BLE001 - analytics never fail the request
+                logger.warning('[funnel] paid offer chip trigger lookup failed', exc_info=True)
+                properties['trigger'] = ''
 
         # If authenticated and country not provided, fall back to user's phone_country.
         if not country and user is not None:

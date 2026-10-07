@@ -3,16 +3,13 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 // The Acciones de EE.UU. wallet mark.
 //
-// It sits in a column of coin logos (cUSD+, cUSD, CONFIO) that are flat brand
-// marks: a mint disc with a heavy off-white glyph filling it. A thin Feather
-// arrow on a darker emerald disc read as a UI button among them. This draws the
-// category in the coins' own language — same fill, same glyph weight as the $ —
-// while the glyph itself (a trend, not a currency sign, and no bite out of the
-// disc) keeps it from reading as one more Confío coin.
-//
-// Colors are sampled from cUSD.png / CONFIO.png; no theme token matches them.
-const MINT = '#72D9BC';
-const OFF_WHITE = '#F9F7F4';
+// A category mark, not a coin: the slot holds 400+ tickers. It keeps the
+// trend-arrow glyph people already know, on its own navy disc (design review
+// decision 12, S1, 2026-10-07): each category mark has its own color (mint
+// coins, emerald Cuenta inteligente bulb, navy stocks), so the rows read as
+// different kinds of wallet at a glance.
+const NAVY = '#1E3A8A';
+const TREND = '#34D399';
 
 interface StocksMarkProps {
   size?: number;
@@ -20,11 +17,11 @@ interface StocksMarkProps {
 
 const StocksMark: React.FC<StocksMarkProps> = ({ size = 44 }) => (
   <Svg width={size} height={size} viewBox="0 0 100 100">
-    <Circle cx={50} cy={50} r={50} fill={MINT} />
+    <Circle cx={50} cy={50} r={50} fill={NAVY} />
     <Path
       d="M17 71 L39 49 L53 61 L78 34"
       fill="none"
-      stroke={OFF_WHITE}
+      stroke={TREND}
       strokeWidth={12.5}
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -32,7 +29,7 @@ const StocksMark: React.FC<StocksMarkProps> = ({ size = 44 }) => (
     <Path
       d="M60 32 H80 V52"
       fill="none"
-      stroke={OFF_WHITE}
+      stroke={TREND}
       strokeWidth={12.5}
       strokeLinecap="round"
       strokeLinejoin="round"
