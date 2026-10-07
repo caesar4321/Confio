@@ -145,7 +145,7 @@ the build.
 > *Tu dinero se mueve según tus reglas.*
 > - **Pagos y débitos automáticos:** envíos programados a Pix, Bre-B, CLABE y Alias que tú autorizas y cancelas cuando quieras.
 > - **Suscripciones** con comercios, con el monto y la frecuencia que tú apruebas.
-> - **Confío IA con tus datos:** análisis de tus gastos, ahorro e inversiones con tus números reales.
+> - **Análisis de IA más profundo:** más consultas y conversación por voz con Confío IA sobre tus gastos, ahorro e inversiones.
 > - **Atención prioritaria** del equipo de Confío.
 > **Activa tu Cuenta inteligente — US$9.99/mes** · [Avísame cuando esté]
 
@@ -187,11 +187,20 @@ the build.
   human and is not in human mode. Never on the daily message limit (that would read as
   an AI unlock priced outside the stores).
 - **Frequency cap:** at most once per user per 7 days.
-- Shown to anyone who triggers it (funded or not); the event records `funded`.
+- Shown to anyone who triggers it (funded or not); the event records `funded`. Never
+  to employees (6B): the trigger checks `viewer.is_employee` on the server, because
+  `get_stock_quote` is offered to employees (only `get_portfolio` is gated,
+  `assistant/engine.py:580`). Only on app builds that have the pitch screen (minimum app
+  version check, as `security/face_client.py` does); older builds never get the chip and
+  are never counted as shown.
+- The pitch screen, price, `onWaitlist` and the join work for anyone who reached it from
+  the chip, funded or not; only the Billeteras row is gated on funded.
 - The reply carries the offer as a chip → the same detail screen.
 - **Chip (decision 15):** a new navigate destination `cuenta_inteligente` (FALLBACKS key
   `home` for old builds), rendered by the existing ActionChips as "Conoce Cuenta
-  inteligente". No new chip component.
+  inteligente". No new chip component. The action carries its source (a new optional
+  `source` field on `NavigateAction`, e.g. `ia:investing`), so the pitch screen logs
+  `door=ia` with the trigger; opened from Billeteras it logs `door=billeteras`.
 - **Three triggers, one chip, logged separately** (`trigger` = `investing` /
   `pain_point` / `asked`):
   - `investing`: the tool-based trigger above.
@@ -220,7 +229,7 @@ wallet section):
  │ tus reglas.        (headline) │
  │ ✓ Pagos y débitos automáticos │
  │ ✓ Suscripciones               │
- │ ✓ Confío IA con tus datos     │
+ │ ✓ Análisis de IA más profundo │
  │ ✓ Atención prioritaria        │
  │ Próximamente · US$9.99/mes    │
  │ al lanzar                     │
@@ -291,11 +300,17 @@ wallet section):
 ### Event log (needed to compute anything)
 Reuses the rail-probe pipeline (eng review D9): every step is a `FunnelEvent` logged
 through `AnalyticsService.logFunnelEvent` (client) or the server equivalent (IA door),
-with `sourceType: 'smart_account_interest'` and `door`, `trigger`, `stage`,
-`account_type`, `funded`, `country`, `range` in its metadata. Stages: `door_shown`,
-`detail_opened`, `avisame_tapped`, `solo_miraba`, `volume_answered`. The promise lives in
-one new model, `ProductWaitlistEntry` (user, product=`smart_account`, volume_range,
-created_at; unique per user + product), in `users/` beside the rail waitlist, joined by
+as ONE event name, `smart_account_interest`, with `stage` = `door_shown` /
+`detail_opened` / `avisame_tapped` / `solo_miraba` / `volume_answered` and `door`,
+`trigger`, `account_type`, `funded`, `country`, `range` in its properties (the rail
+probe's one-name-plus-stage shape). The name goes into both `CLIENT_EMITTABLE_EVENTS`
+(`users/funnel_schema.py`) and the `ClientFunnelEvent` TypeScript union
+(`apps/src/services/analyticsService.ts`); daily `door_shown` dedupe uses the existing
+`dedupe_key` → `emit_once` path. The promise lives in one new model,
+`ProductWaitlistEntry` (user, product=`smart_account`, door and trigger of the first
+join, volume_range, created_at; unique per user + product); the "Sí, avísame" numerator
+per door is computed from these rows, not from client events (client events can fail
+silently), in `users/` beside the rail waitlist, joined by
 a mutation shaped like `JoinLocalRailWaitlist` (get_or_create absorbs double taps). `door_shown` is logged once per user per door per day. **The rate is unique
 users who tapped "Sí, avísame" ÷ unique users shown that door in the window, computed
 for each door separately.**
@@ -309,6 +324,16 @@ for each door separately.**
 
 ### For Build B (launch only; nothing below is built for the probe)
 Decisions made during the reviews that apply when the real account is built:
+- **The IA benefit at launch (founder, after the second Claude review):** Cuenta
+  inteligente grants the Assistant+ entitlement already on the server
+  (`assistant/billing.py`; more turns and analyses, `assistant/conf.py:46-49`) plus
+  real-time voice conversation. Deeper analysis is built afterwards; the offer advertises
+  it as "Análisis de IA más profundo". Before launch: (1) the launch copy must match what
+  is live then; (2) store risk: a US$9.99/month charge that raises AI quotas and unlocks
+  voice reads as a digital-feature subscription billed outside IAP / Play Billing
+  (Apple 3.1.1). The plan's defence is that the SKU is a financial account and the AI is
+  a perk (the Nubank+ pattern); confirm that position before launch, together with the
+  trademark and terms checks.
 - The account parks **Confío Dollar+ (cUSD+)** so it keeps earning; only at payment time
   does it move cUSD+ → cUSD (→ USDT when the payee's rail needs it) (decision 8, revised).
   Users not eligible for Confío Dollar+ hold Confío Dollar (cUSD) (eng review D3).
@@ -325,7 +350,7 @@ Decisions made during the reviews that apply when the real account is built:
 ### Confío IA's answer about Cuenta inteligente (approved FAQ line)
 "Cuenta inteligente es una cuenta que estamos preparando: tu dinero se mueve según tus
 reglas, con pagos y débitos automáticos a Pix, Bre-B, CLABE y Alias, suscripciones,
-Confío IA con tus datos y atención prioritaria, por US$9.99 al mes. Todavía no está disponible y no tiene fecha; si te interesa, toca
+análisis de IA más profundo y atención prioritaria, por US$9.99 al mes. Todavía no está disponible y no tiene fecha; si te interesa, toca
 'Avísame' y te contamos cuando esté." The answer always attaches the `cuenta_inteligente` chip, so
 "toca 'Avísame'" never points to a button the user can't see (decision 15). The price in
 this line comes from the same server value as the app (decision 14A). Guardrail: never a date, never benefits beyond
@@ -338,6 +363,13 @@ this list, never that it can be paid or reserved now.
   within 48 hours to ask what they'd use it for and whether they'd pay the first month.
 - "Which door pulled" is read from those conversations plus the per-door rates, not
   from significance tests.
+- **Cross-door overlap (founder, after the second Claude review):** the strongest read
+  at this traffic is per person, not per rate: who showed interest on the Billeteras row
+  AND in the IA conversation (chip shown, pitch opened, "Sí, avísame" from either). A
+  person who says yes in both places, or who raised a pain point in the IA and then
+  opens the row, is a stronger lead than any rate. The founder's 48h messages start
+  with them. The door and trigger on every event and waitlist row make this a simple
+  per-user join.
 
 ## Open Questions
 
@@ -889,7 +921,7 @@ Gated by the Assignment (Success Criteria 1). Ratios: features ~30x, tests ~50x.
   - Verify: commitments list exists with 1–2 commitments before T2 starts
 - [ ] **T2 (P1, human: ~1 day / CC: ~1h)** — server — `ProductWaitlistEntry`, probe resolver, join mutation, funnel allowlist
   - Surfaced by: D7, D9, Section 1 (funded helper, JWT visibility), Section 2 (allowlist)
-  - Files: `users/models_product_waitlist.py`, `users/product_waitlist_schema.py`, `users/funnel_schema.py`, migration, admin on `confio_admin_site`, one shared funded helper used by `assistant/suggestions.py`
+  - Files: `users/models_product_waitlist.py` (door + trigger on the row), `users/product_waitlist_schema.py`, `users/funnel_schema.py` + `apps/src/services/analyticsService.ts` (one `smart_account_interest` event), migration, admin on `confio_admin_site`, one shared funded helper used by `assistant/suggestions.py`
   - Verify: `AWS_PROFILE=Julian CONFIO_ENV=testnet myvenv/bin/python manage.py test users.test_product_waitlist users.test_funnel_events --keepdb`
 - [ ] **T3 (P1, human: ~2 days / CC: ~1h)** — app — Billeteras row ("Próximamente") + pitch screen probe
   - Surfaced by: D7, D8, design 3C/4A/5A/13A/14A/16A/17A/21A, Section 1 (no fire-and-forget)
@@ -901,7 +933,7 @@ Gated by the Assignment (Success Criteria 1). Ratios: features ~30x, tests ~50x.
   - Verify: visual check at 44px on device; InvestScreen test passes
 - [ ] **T5 (P2, human: ~1 day / CC: ~45 min)** — assistant — `cuenta_inteligente` destination + three triggers + FAQ
   - Surfaced by: design 15, Section 3 eval
-  - Files: `assistant/destinations.py`, app destinations, `assistant/prompts.py`, `assistant/faq.md`, engine cap/exclusions
+  - Files: `assistant/destinations.py`, app destinations (`NavigateAction.source`), `assistant/prompts.py`, `assistant/faq.md`, engine cap/exclusions (employees, minimum app version)
   - Verify: `manage.py test assistant --keepdb` + the 20-message pain_point eval
 - [ ] **T6 (P2, human: ~30 min / CC: ~5 min)** — release — App Review note (probe wording) in both stores
   - Surfaced by: design 20A as rewritten for the probe
@@ -923,12 +955,32 @@ Gated by the Assignment (Success Criteria 1). Ratios: features ~30x, tests ~50x.
 - Parallelization: 3 steps, 0 parallel / 3 sequential (always-main)
 - Lake Score: 6/7 answers picked the complete option (D1–D4, D7–D9 scored; D6 answered outside the options)
 
+### Second Claude opinion (on request, 2026-10-07)
+A fresh Claude subagent (native, not outside coverage) reviewed the current spec. Its
+headline was "don't build the probe; message all funded users with a refundable
+prepayment". Dispositions (founder):
+- Willingness to pay is not measured (prepayment): not adopted; the founder's "commit
+  now, charge at launch" stands.
+- Door can't decide at this traffic: kept; the read becomes per person across both
+  doors (How to read it, "Cross-door overlap"). The row and the chip are cheap and harm
+  nothing.
+- IA benefit already free / Assistant+ collision: decided; launch benefit = Assistant+
+  quotas + real-time voice, deeper analysis later, advertised as "Análisis de IA más
+  profundo"; store position to confirm before launch (Build B notes).
+- Code gaps, all adopted as implementation of approved behavior: employee exclusion on
+  the IA trigger; door + trigger stored on the waitlist row (per-door numerator from
+  rows); `NavigateAction.source` for IA attribution; minimum-app-version gate on the
+  chip; one `smart_account_interest` event with `stage`, in both the Python allowlist and
+  the TypeScript union; `emit_once` dedupe; pitch screen works for unfunded IA users.
+- Not adopted / unchanged: decision-table edge cases (3%–<10% with ≥3 payers) and the
+  unattended-payments feasibility note stay as Build B questions.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
-| Outside Review | Codex via `/plan-eng-review` (native fallback unavailable) | Independent 2nd opinion | 1 | unavailable | Codex out of credits until 2026-10-11; design-phase Claude subagent completed earlier (11 findings) |
+| Outside Review | Codex via `/plan-eng-review`; Claude subagent on request | Independent 2nd opinion | 2 | Codex unavailable; Claude subagent completed (native) | Codex out of credits until 2026-10-11; Claude subagent: 12 findings, dispositions in "Second Claude opinion" |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 for this plan | issues_open (mapped to tasks) | 23 issues, 0 critical gaps |
 | Design Review | `/plan-design-review` | UI/UX gaps | 2 | clean | score: 2/10 → 8/10, 21 decisions (several superseded by eng D7) |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
