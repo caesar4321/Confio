@@ -99,10 +99,8 @@ def _classify(batch):
 
 
 def _funded(user_id):
-    from users.models_unified import UnifiedTransactionTable
-    return UnifiedTransactionTable.objects.filter(
-        counterparty_user_id=user_id, status='CONFIRMED', deleted_at__isnull=True,
-    ).exclude(is_invitation=True, invitation_claimed=False).exists()
+    from users.funding import has_funded
+    return has_funded(user_id)
 
 
 def tag_recent(hours=72):

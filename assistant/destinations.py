@@ -26,10 +26,18 @@ DESTINATIONS = {
     'notifications': 'Notificaciones.',
     'achievements': 'Logros y recompensas.',
     'pending_incoming': 'Dinero por recibir: transferencias a tu cuenta local que esperan tu confirmación con Confío Face.',
+    # Paid-offer probes: a pitch with "Sí, avísame". Only offered while each
+    # probe is on (users/paid_offers.py); chips are capped by the server.
+    'ia_plus': 'Confío IA+: la versión más avanzada de Confío IA que estamos preparando (lista de espera).',
+    'cuenta_inteligente': 'Cuenta inteligente: pagos y débitos automáticos que estamos preparando (lista de espera).',
 }
 
+# Paid-offer probe keys and the waitlist product each one opens.
+PAID_OFFERS = {'ia_plus': 'ia_plus', 'cuenta_inteligente': 'smart_account'}
+
 # Screens only the account owner sees (employees never get bank rails).
-OWNER_ONLY = {'receive', 'top_up', 'withdraw', 'pending_incoming', 'month_summary', 'emergency_exit'}
+OWNER_ONLY = {'receive', 'top_up', 'withdraw', 'pending_incoming', 'month_summary', 'emergency_exit',
+              'ia_plus', 'cuenta_inteligente'}
 # Screens that only exist for personal accounts.
 PERSONAL_ONLY = {'pending_incoming'}
 # Keys newer builds open directly. The action also carries this older key, so
@@ -39,4 +47,6 @@ FALLBACKS = {
     'month_summary': 'home',
     'emergency_exit': 'profile',
     'tokenomics': 'invest',
+    'ia_plus': 'home',
+    'cuenta_inteligente': 'home',
 }

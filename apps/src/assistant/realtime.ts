@@ -15,7 +15,7 @@ import {
   RUN_ASSISTANT_VOICE_TOOL,
   START_ASSISTANT_VOICE,
 } from './api';
-import { openDestination, resolveNavigate, type NavigateAction } from './destinations';
+import { PAID_OFFER_KEYS, openDestination, resolveNavigate, type NavigateAction } from './destinations';
 
 const FLUSH_MS = 8000;
 
@@ -237,7 +237,10 @@ export class VoiceCall {
           } catch {
             approved = {};
           }
-          const open = approved.ok ? resolveNavigate(approved) : null;
+          // A paid-offer pitch is only ever opened by a tap (the server
+          // doesn't offer it to calls either).
+          const resolved = approved.ok ? resolveNavigate(approved) : null;
+          const open = resolved && !PAID_OFFER_KEYS.has(resolved.key) ? resolved : null;
           if (!this.ended && open
               && openDestination(open.key, { isBusiness: this.opts.isBusiness, ticker: open.ticker })) {
             this.cb.onNavigate?.();

@@ -37,7 +37,15 @@ export const DESTINATION_TARGETS: Record<string, Target> = {
   month_summary: { screen: 'MonthSummary' },
   emergency_exit: { screen: 'EmergencyExit' },
   tokenomics: { screen: 'ConfioTokenomics' },
+  // Paid-offer probes (waitlist pitches); the server only offers them on
+  // builds that have this screen.
+  ia_plus: { screen: 'PaidOffer', params: { offer: 'ia_plus' } },
+  cuenta_inteligente: { screen: 'PaidOffer', params: { offer: 'smart_account' } },
 };
+
+// Keys whose screen is a paid-offer pitch: opened only by a tap, never by a
+// voice answer moving the app on its own.
+export const PAID_OFFER_KEYS = new Set(['ia_plus', 'cuenta_inteligente']);
 
 export const DESTINATION_LABELS: Record<string, string> = {
   home: 'Ir a Inicio',
@@ -61,6 +69,8 @@ export const DESTINATION_LABELS: Record<string, string> = {
   month_summary: 'Ver Tu mes',
   emergency_exit: 'Salida de emergencia',
   tokenomics: 'Ver tokenomics',
+  ia_plus: 'Conoce Confío IA+',
+  cuenta_inteligente: 'Conoce Cuenta inteligente',
 };
 
 export type NavigateAction = { destination?: string | null; target?: string | null; ticker?: string | null; label?: string | null };
@@ -87,6 +97,11 @@ export function openDestination(key: string, opts: { isBusiness?: boolean; ticke
   let target = isKnownDestination(key) ? DESTINATION_TARGETS[key] : undefined;
   if (key === 'stock') {
     target = opts.ticker ? { screen: 'StockDetail', params: { ticker: opts.ticker } } : undefined;
+  }
+  if (target && 'screen' in target && PAID_OFFER_KEYS.has(key)) {
+    // From Confio Assistant a pitch is always a chip; the server knows why it
+    // showed it and records that on the waitlist row.
+    target = { screen: target.screen, params: { ...(target.params ?? {}), door: 'chip' } };
   }
   if (!target || !navigationRef.isReady()) {
     return false;

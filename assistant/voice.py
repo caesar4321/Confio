@@ -99,12 +99,12 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         raise VoiceUnavailable('La voz no está disponible ahora.')
 
 
-    belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)
+    belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0, paid_offers_allowed=False)
     local_now = timezone.now().astimezone(viewer.tz)
     instructions = build_system_prompt(
         first_name=first_name, account_label=account_label, country=country,
         screen=viewer.screen, local_now=f'{local_now:%Y-%m-%d %H:%M} ({viewer.tz})',
-        destinations=allowed_destinations(viewer),
+        destinations=allowed_destinations(viewer, paid_offers_allowed=False),
     ) + VOICE_NOTE
     model = conf.get('CONFIO_ASSISTANT_REALTIME_MODEL')
     # The secret only has to live until the call connects.
@@ -316,7 +316,7 @@ def run_tool(session, viewer, name, arguments, analyses_left=0):
             row.save(update_fields=['tools'])
             return True
 
-    belt = Toolbelt(viewer, result, analyses_left=0, reserve_analysis=reserve)
+    belt = Toolbelt(viewer, result, analyses_left=0, reserve_analysis=reserve, paid_offers_allowed=False)
     try:
         output = belt.call(name, args)
     except AssistantUnavailable:

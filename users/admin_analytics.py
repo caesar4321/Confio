@@ -476,6 +476,20 @@ class FunnelDailyRollupAdmin(admin.ModelAdmin):
         return False
 
 
+class ProductWaitlistEntryAdmin(admin.ModelAdmin):
+    """Who said "Sí, avísame" to a paid offer (Confío IA+, Cuenta inteligente),
+    from which door, and whether they'd pay today: the probe's demand read."""
+
+    list_display = ('created_at', 'product', 'door', 'trigger', 'would_pay', 'volume_range',
+                    'funded', 'account_type', 'country', 'user', 'notified_at')
+    list_filter = ('product', 'door', 'trigger', 'would_pay', 'funded', 'account_type', 'country')
+    search_fields = ('user__username', 'user__phone_number')
+    date_hierarchy = 'created_at'
+    ordering = ('-created_at',)
+    raw_id_fields = ('user',)
+    readonly_fields = ('created_at', 'updated_at')
+
+
 class LocalRailWaitlistEntryAdmin(admin.ModelAdmin):
     """Who is waiting for which rail — a "Próximamente" corridor or one
     blocked for their nationality. The list to notify when it opens; its

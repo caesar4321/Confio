@@ -360,6 +360,15 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                           remaining_turns=remaining - 1, transcript=transcript,
                           data_changed=bool(result.writes))
 
+    # At most one paid-offer chip, chosen and capped by the server.
+    paid_chip = None
+    try:
+        from . import paid_chips
+        from .engine import allowed_destinations
+        paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)))
+    except Exception:  # noqa: BLE001 - a probe must never break the answer
+        logger.exception('Confio Assistant: paid chip selection failed')
+        result.actions = [a for a in result.actions if a.get('target') not in ('ia_plus', 'cuenta_inteligente')]
     body = result.reply
     if result.pending_categorization:
         # The question the user answers is written by code from the stored
@@ -367,6 +376,11 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         body = f'{body}\n\n{confirmation_question(result.pending_categorization)}'
     reply = _append(conversation, sender_type='AGENT', body=body,
                     metadata={'ai': True, 'actions': result.actions})
+    if paid_chip is not None:
+        try:
+            paid_chips.log_shown(viewer, paid_chip)
+        except Exception:  # noqa: BLE001 - analytics never break the reply
+            logger.exception('Confio Assistant: paid chip logging failed')
     if result.pending_categorization:
         _store_pending_categorization(conversation, viewer, result.pending_categorization, reply)
     turn.reply_message = reply

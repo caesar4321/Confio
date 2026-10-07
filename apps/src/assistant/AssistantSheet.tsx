@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, TextInput } from '../components/common/AppText';
 import { useAccount } from '../contexts/AccountContext';
 import { navigationRef } from '../navigation/RootNavigation';
+import { logDoorShown, usePaidOffers } from '../services/paidOffers';
 import { MARK_MESSAGE_CHANNEL_SEEN } from '../apollo/mutations';
 import { GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import { MessageInboxContent } from '../components/MessageInboxContent';
@@ -42,7 +43,7 @@ import {
 } from './api';
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
-import { openDestination, resolveNavigate } from './destinations';
+import { PAID_OFFER_KEYS, openDestination, resolveNavigate } from './destinations';
 import MascotPicker from './MascotPicker';
 import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
@@ -374,6 +375,27 @@ export default function AssistantSheet() {
     queuedVoice.current = null;
   }, [activeAccount?.id]);
 
+  // Confío IA+ probe pill (waitlist only): the server decides who sees it.
+  const iaPlusOffer = usePaidOffers().ia_plus;
+  const showIaPlusPill = iaPlusOffer?.available === true && !plan?.isPlus;
+  // Counted only when the pill is actually on screen (Confio Assistant's own
+  // header, with the AI on), never for Soporte or Julian's channel.
+  useEffect(() => {
+    if (isOpen && showIaPlusPill && aiEnabled && channel === 'ia') {
+      logDoorShown('ia_plus', 'assistant_header');
+    }
+  }, [isOpen, showIaPlusPill, aiEnabled, channel]);
+  const openIaPlus = useCallback(() => {
+    close();
+    setTimeout(
+      () => (navigationRef as any).navigate('Main', {
+        screen: 'PaidOffer',
+        params: { offer: 'ia_plus', door: 'assistant_header' },
+      }),
+      250,
+    );
+  }, [close]);
+
   // A post from Julian/News: close the box, then open it in the main stack.
   const openPost = useCallback(
     (contentItemId: number) => {
@@ -461,10 +483,11 @@ export default function AssistantSheet() {
           setTimeout(() => setSpeaking(false), 1600);
         }
         // "Confío, abre QR para pagar": the answer moves the app.
+        // A paid-offer pitch is only ever opened by a tap on its chip.
         const navigateTo = (payload.actions as AssistantAction[])
           .filter((a) => a.type === 'navigate')
           .map(resolveNavigate)
-          .find((t) => t !== null);
+          .find((t) => t !== null && !PAID_OFFER_KEYS.has(t.key));
         if (navigateTo) {
           setTimeout(() => {
             // Closed, switched channel or reopened since asking: leave the
@@ -852,6 +875,17 @@ export default function AssistantSheet() {
               <Text style={styles.petChipText}>✨ Tu asistente</Text>
             </Pressable>
           ) : null}
+          {aiEnabled && showIaPlusPill ? (
+            <Pressable
+              onPress={openIaPlus}
+              style={styles.iaPlusPill}
+              accessibilityRole="button"
+              accessibilityLabel="Confío IA+, próximamente"
+              hitSlop={6}
+            >
+              <Text style={styles.iaPlusPillText}>IA+ · Próximamente</Text>
+            </Pressable>
+          ) : null}
           {aiEnabled && plan?.isPlus ? (
             <Pressable
               onPress={() => setShowPlus((v) => !v)}
@@ -1207,6 +1241,18 @@ const styles = StyleSheet.create({
     borderColor: '#A7F3D0',
   },
   petChipText: { fontSize: 12, fontWeight: '700', color: EMERALD },
+  // Confío IA+ probe: same quiet pill language as the pet chip, never violet
+  // (violet reads as an AI unlock, design review 11).
+  iaPlusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginLeft: 6,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  iaPlusPillText: { fontSize: 12, fontWeight: '700', color: '#065F46' },
   starterPet: { borderColor: '#A7F3D0', backgroundColor: '#ECFDF5' },
   starterPetText: { fontSize: 13, color: EMERALD, fontWeight: '600' },
   bubbleTeam: { backgroundColor: '#EEF2FF', borderBottomLeftRadius: 6 },

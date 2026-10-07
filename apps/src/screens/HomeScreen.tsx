@@ -75,6 +75,8 @@ import { PendingIncomingCard, usePendingIncoming } from '../components/PendingIn
 import { HeroMonthSlot } from '../components/HeroMonthLine';
 import { useMonthHeroLine } from '../hooks/useMonthHeroLine';
 import { AnalyticsService } from '../services/analyticsService';
+import { logDoorShown, usePaidOffers } from '../services/paidOffers';
+import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
 import { formatDecimal } from '../utils/numberLocale';
 import { formatMinorMoney } from '../utils/currencies';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
@@ -224,6 +226,14 @@ export const HomeScreen = () => {
   // Ahorros e Inversiones portfolio total for the wallet-row entry (stubbed
   // until the cUSD+/stocks backend lands; single wiring point in the hook).
   const savingsPortfolio = useSavingsPortfolio();
+  // Cuenta inteligente probe row (waitlist only): the server decides who sees
+  // it (flag on, ever funded, never employees, this build or newer).
+  const smartAccountRow = usePaidOffers().smart_account?.rowVisible === true;
+  useEffect(() => {
+    if (smartAccountRow) {
+      logDoorShown('smart_account', 'billeteras');
+    }
+  }, [smartAccountRow]);
   // Reached through a ref so focus/pull-to-refresh can refresh the BSC
   // dollar row without either callback taking a dependency on it. Null
   // until auth is ready — refetch would bypass the hook's own gate.
@@ -1641,6 +1651,39 @@ export const HomeScreen = () => {
                 </Pressable>
               )}
 
+              {/* Cuenta inteligente — a probe, not a wallet yet: no money can be
+                  put in it before launch, so the balance slot says
+                  "Próximamente" and never shows a number (eng review D8). */}
+              {smartAccountRow && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.walletCard,
+                    pressed && { opacity: 0.7 }
+                  ]}
+                  onPress={() => navigation.navigate('PaidOffer', { offer: 'smart_account', door: 'billeteras' })}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cuenta inteligente, próximamente, pagos y débitos automáticos"
+                >
+                  <View style={styles.walletCardContent}>
+                    <View
+                      style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}
+                      accessibilityElementsHidden
+                      importantForAccessibility="no-hide-descendants"
+                    >
+                      <CuentaInteligenteMark size={44} />
+                    </View>
+                    <View style={styles.walletInfo}>
+                      <Text style={styles.walletName} numberOfLines={1}>Cuenta inteligente</Text>
+                      <Text style={styles.walletSymbol} numberOfLines={2}>Pagos y débitos automáticos</Text>
+                    </View>
+                    <View style={styles.walletBalanceContainer}>
+                      <Text style={styles.comingSoonText} numberOfLines={1}>Próximamente</Text>
+                      <Icon name="chevron-right" size={20} color={colors.text.light} />
+                    </View>
+                  </View>
+                </Pressable>
+              )}
+
               {/* CONFIO Wallet */}
               <Pressable
                 style={({ pressed }) => [
@@ -1690,11 +1733,10 @@ export const HomeScreen = () => {
                   <View style={styles.walletCardContent}>
                     {/* NOT a token logo: this slot holds 400+ tickers, not one
                         asset — it once wore the cUSD+ mark and read as a
-                        second Confío Dollar+ row. It is a category mark drawn
-                        in the coins' own language (mint disc, heavy off-white
-                        glyph), so it belongs in the column without posing as
-                        a coin; the plain Feather arrow it replaced read as a
-                        button. Ondo's logo is deliberately not it: they issue
+                        second Confío Dollar+ row. It is a category mark with
+                        its own navy disc (design review 12, S1), so it belongs
+                        in the column without posing as a coin; the plain
+                        Feather arrow it replaced read as a button. Ondo's logo is deliberately not it: they issue
                         the shares, they don't own the slot (attribution stays
                         the "En alianza con" line inside the hub). */}
                     <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
@@ -2011,6 +2053,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: colors.text.primary,
+    marginRight: 8,
+  },
+  // Cuenta inteligente probe: the balance slot never shows a number.
+  comingSoonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.secondary,
     marginRight: 8,
   },
   inviteClaimCard: {

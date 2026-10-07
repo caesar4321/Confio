@@ -285,7 +285,11 @@ One `FunnelEvent` name, `paid_offer_interest`, through the rail-probe pipeline (
 `door` (`billeteras` / `assistant_header` / `chip`), `trigger`, `account_type`,
 `funded`, `country`, `answer` in its properties. The name goes into both
 `CLIENT_EMITTABLE_EVENTS` (`users/funnel_schema.py`) and the `ClientFunnelEvent`
-TypeScript union; daily `door_shown` dedupe uses `dedupe_key` → `emit_once`. The
+TypeScript union; daily `door_shown` dedupe uses `dedupe_key` → `emit_once`. For chips the
+app carries no reason: the server fills `trigger` on chip events and on the
+waitlist row from the latest chip it showed for that offer in the last 24
+hours, so `''` means "chip, reason unknown" (an older chip, or one tapped
+after a newer chip for the same offer). The
 promise lives in `ProductWaitlistEntry` (user, product = `ia_plus` / `smart_account`,
 door and trigger of the first join, would_pay, volume_range, created_at; unique per
 user + product), in `users/` beside the rail waitlist; numerators come from these rows,

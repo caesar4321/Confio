@@ -68,6 +68,7 @@ import PayrollRunsHistoryScreen from '../screens/PayrollRunsHistoryScreen';
 import PayrollRunScreen from '../screens/PayrollRunScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { MonthSummaryScreen } from '../screens/MonthSummaryScreen';
+import { PaidOfferScreen } from '../screens/PaidOfferScreen';
 import { MonthMovementsScreen } from '../screens/MonthMovementsScreen';
 import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
@@ -522,6 +523,11 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="MonthSummary"
           component={MonthSummaryScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PaidOffer"
+          component={PaidOfferScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen
