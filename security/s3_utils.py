@@ -262,6 +262,25 @@ def get_object_bytes(*, key: str, max_bytes: int, bucket: Optional[str] = None) 
     return {'body': body, 'content_type': resp.get('ContentType') or ''}
 
 
+def object_exists(*, key: str, bucket: Optional[str] = None) -> bool:
+    """True when the object exists (a HEAD request; nothing is downloaded).
+    A missing object answers 404, or 403 when the role can't list the bucket,
+    so both read as "missing"; any other failure raises."""
+    from botocore.exceptions import ClientError
+
+    _ensure_bucket(bucket)
+    region = settings.AWS_S3_REGION or 'eu-central-2'
+    s3 = boto3.client('s3', **_build_s3_client_params(region))
+    try:
+        s3.head_object(Bucket=_resolve_bucket(bucket), Key=key)
+    except ClientError as exc:
+        if exc.response.get('Error', {}).get('Code', '') in ('404', 'NoSuchKey', 'NotFound',
+                                                              '403', 'Forbidden', 'AccessDenied'):
+            return False
+        raise
+    return True
+
+
 def delete_object(*, key: str, bucket: Optional[str] = None) -> None:
     """Delete one object. Deleting a key that does not exist is not an error."""
     _ensure_bucket(bucket)

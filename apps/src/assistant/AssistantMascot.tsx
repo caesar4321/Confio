@@ -2,7 +2,7 @@
 // Drawn in SVG on a 100x100 canvas so it stays crisp from the 56pt bubble
 // to the picker; the body color is the user's choice, features stay fixed.
 import React, { useEffect, useState } from 'react';
-import { Image, View } from 'react-native';
+import { AppState, Image, View } from 'react-native';
 import Svg, { Circle, Ellipse, G, Path, Rect } from 'react-native-svg';
 import Animated, {
   Easing,
@@ -267,10 +267,29 @@ function CustomPetMascot({ imageUrl, size, mood, animated }: { imageUrl: string;
   // The current URL itself failed (expired, or the image is gone): show Confi
   // rather than an empty circle until a new URL arrives.
   const [failed, setFailed] = useState(false);
+  // Until the photo has actually arrived, Confi shows underneath: a slow or
+  // stalled download (React Native's has no read timeout) must never look
+  // like an empty circle. Coming back to the app retries a stalled one.
+  const [loaded, setLoaded] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     setFailed(false);
     setShownUrl((current) => (imagePath(current) === imagePath(imageUrl) ? current : imageUrl));
   }, [imageUrl]);
+  useEffect(() => {
+    setLoaded(false);
+  }, [shownUrl]);
+  useEffect(() => {
+    if (loaded) {
+      return undefined;
+    }
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        setAttempt((n) => n + 1);
+      }
+    });
+    return () => sub.remove();
+  }, [loaded]);
   const lift = useSharedValue(0);
   const scale = useSharedValue(1);
   const tilt = useSharedValue(0);
@@ -319,11 +338,18 @@ function CustomPetMascot({ imageUrl, size, mood, animated }: { imageUrl: string;
   }
   return (
     <View style={{ width: size, height: size }} accessible={false}>
+      {!loaded ? (
+        <View style={{ position: 'absolute' }} pointerEvents="none">
+          <BuiltInMascot size={size} mood={mood} animated={animated} />
+        </View>
+      ) : null}
       <Animated.View style={style}>
         <Image
+          key={attempt}
           source={{ uri: shownUrl }}
-          style={{ width: size, height: size, borderRadius: size / 2 }}
+          style={{ width: size, height: size, borderRadius: size / 2, opacity: loaded ? 1 : 0 }}
           resizeMode="cover"
+          onLoad={() => setLoaded(true)}
           onError={() => {
             if (shownUrl === imageUrl) {
               setFailed(true);

@@ -1611,6 +1611,7 @@ class PetUrlReuseTests(TestCase):
         cache.delete('assistant_pet_url:assistant/pets/1/abc.png')
         creds = SimpleNamespace(_expiry_time=timezone.now() + timedelta(minutes=60))
         with patch('security.s3_utils.generate_presigned_get', side_effect=['u1', 'u2', 'u3']), \
+                patch('assistant.pets._display_key', return_value='assistant/pets/1/abc.png'), \
                 patch('boto3._get_default_session') as session, \
                 self.settings(AWS_ACCESS_KEY_ID='', AWS_SESSION_TOKEN=''):
             session.return_value.get_credentials.return_value = creds
@@ -1620,6 +1621,56 @@ class PetUrlReuseTests(TestCase):
             creds._expiry_time = timezone.now() + timedelta(minutes=4)  # about to rotate
             self.assertEqual(pets.pet_url(pet), 'u2')
             self.assertEqual(pets.pet_url(pet), 'u3')  # not cached: it would die with the credentials
+
+
+class PetThumbnailTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.delete('assistant_pet_thumb:assistant/pets/1/big.png')
+        self.pet = SimpleNamespace(id=1, image_key='assistant/pets/1/big.png', deleted_at=None)
+
+    def _png(self, size):
+        import io
+
+        from PIL import Image
+        out = io.BytesIO()
+        Image.new('RGBA', (size, size), (16, 185, 129, 255)).save(out, format='PNG')
+        return out.getvalue()
+
+    def test_thumbnail_is_small(self):
+        import io
+
+        from PIL import Image
+
+        from . import pets
+        thumb = pets._thumbnail(self._png(1024))
+        with Image.open(io.BytesIO(thumb)) as image:
+            self.assertEqual(image.size, (512, 512))
+
+    def test_existing_pet_gets_a_thumbnail_once(self):
+        from . import pets
+        with patch('security.s3_utils.get_object_bytes', return_value={'body': self._png(1024)}) as get, \
+                patch('security.s3_utils.object_exists', return_value=False), \
+                patch('security.s3_utils.upload_object') as upload:
+            self.assertEqual(pets._display_key(self.pet), 'assistant/pets/1/big.thumb.png')
+            self.assertEqual(pets._display_key(self.pet), 'assistant/pets/1/big.thumb.png')
+        self.assertEqual(get.call_count, 1)
+        self.assertEqual(upload.call_args.kwargs['key'], 'assistant/pets/1/big.thumb.png')
+
+    def test_existing_thumbnail_is_not_rebuilt(self):
+        from . import pets
+        with patch('security.s3_utils.object_exists', return_value=True), \
+                patch('security.s3_utils.get_object_bytes') as get:
+            self.assertEqual(pets._display_key(self.pet), 'assistant/pets/1/big.thumb.png')
+        get.assert_not_called()
+
+    def test_failure_serves_the_original(self):
+        from . import pets
+        with patch('security.s3_utils.object_exists', side_effect=RuntimeError('s3 down')), \
+                patch('security.s3_utils.upload_object') as upload:
+            self.assertEqual(pets._display_key(self.pet), 'assistant/pets/1/big.png')
+            self.assertEqual(pets._display_key(self.pet), 'assistant/pets/1/big.png')  # not retried at once
+        upload.assert_not_called()
 
 
 class SpecificNavigationTests(TestCase):

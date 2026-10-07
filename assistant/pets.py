@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import requests
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 
 from . import billing, conf
@@ -206,12 +207,67 @@ def _create_pet(user, slot, *, idea='', photo_base64=None, photo_mime=None):
     from security.s3_utils import build_s3_key, upload_object
     key = build_s3_key(conf.get('CONFIO_ASSISTANT_PET_PREFIX') + str(user.id), 'pet.png')
     upload_object(key=key, body=image, content_type='image/png')
+    try:
+        upload_object(key=thumb_key(key), body=_thumbnail(image), content_type='image/png')
+        cache.set(f'assistant_pet_thumb:{key}', 1, THUMB_FLAG_SECONDS)
+    except Exception:  # noqa: BLE001 - pet_url makes it later, or serves the original
+        logger.warning('Pet thumbnail failed for %s', key, exc_info=True)
     slot.source, slot.idea, slot.image_key, slot.model, slot.cost_usd = source, idea, key, model, cost
     slot.save(update_fields=['source', 'idea', 'image_key', 'model', 'cost_usd'])
     return slot
 
 
 PET_URL_REUSE_SECONDS = 40 * 60
+
+# The app shows the pet at up to 140 pt (the voice-call panel), ~420 px on a
+# 3x screen: a 512 px copy stays sharp at a fraction of the ~1 MB original,
+# so a slow or stalling connection can't leave the bubble blank (React
+# Native's image download has no read timeout).
+THUMB_SIZE = 512
+THUMB_FLAG_SECONDS = 30 * 24 * 3600
+THUMB_RETRY_SECONDS = 5 * 60
+
+
+def thumb_key(image_key):
+    base = image_key[:-4] if image_key.endswith('.png') else image_key
+    return f'{base}.thumb.png'
+
+
+def _thumbnail(image: bytes) -> bytes:
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(image)) as source:
+        copy = source.convert('RGBA')
+    copy.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.LANCZOS)
+    out = io.BytesIO()
+    copy.save(out, format='PNG', optimize=True)
+    return out.getvalue()
+
+
+def _display_key(pet):
+    """The thumbnail's key, making it once for pets created before thumbnails
+    (manage.py assistant_pet_thumbnails does all of them ahead of time); the
+    original's key whenever that can't be done (never a broken image)."""
+    from security.s3_utils import get_object_bytes, object_exists, upload_object
+
+    flag = f'assistant_pet_thumb:{pet.image_key}'
+    state = cache.get(flag)
+    if state == 1:
+        return thumb_key(pet.image_key)
+    if state == 0:  # failed recently: don't retry on every profile fetch
+        return pet.image_key
+    try:
+        if not object_exists(key=thumb_key(pet.image_key)):
+            original = get_object_bytes(key=pet.image_key, max_bytes=20 * 1024 * 1024)['body']
+            upload_object(key=thumb_key(pet.image_key), body=_thumbnail(original), content_type='image/png')
+    except Exception:  # noqa: BLE001 - serve the original instead
+        logger.warning('Pet thumbnail backfill failed for %s', pet.id, exc_info=True)
+        cache.set(flag, 0, THUMB_RETRY_SECONDS)
+        return pet.image_key
+    cache.set(flag, 1, THUMB_FLAG_SECONDS)
+    return thumb_key(pet.image_key)
 
 
 def _reuse_seconds():
@@ -237,20 +293,19 @@ def _reuse_seconds():
 def pet_url(pet):
     if pet is None or pet.deleted_at:
         return None
-    from django.core.cache import cache
-
     from security.s3_utils import generate_presigned_get
     # The same URL for a while: a freshly signed one on every profile fetch is
     # a "new" image to the app, which drops the photo and downloads it again
     # (the bubble flickers to its empty circle). Reused well inside its life,
     # since a URL signed with rotating role credentials can die with them
     # (about an hour), whatever its ExpiresIn says.
-    cache_key = f'assistant_pet_url:{pet.image_key}'
+    key = _display_key(pet)
+    cache_key = f'assistant_pet_url:{key}'
     cached = cache.get(cache_key)
     if cached:
         return cached
     try:
-        url = generate_presigned_get(key=pet.image_key, expires_in_seconds=conf.get('CONFIO_ASSISTANT_PET_URL_SECONDS'))
+        url = generate_presigned_get(key=key, expires_in_seconds=conf.get('CONFIO_ASSISTANT_PET_URL_SECONDS'))
         reuse = _reuse_seconds()
         if reuse > 0:
             cache.set(cache_key, url, reuse)
