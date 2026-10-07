@@ -134,7 +134,10 @@ the build.
 - **Before launch (conditions):** a formal trademark check for "Cuenta Inteligente" /
   "Conta Inteligente" in financial classes at IMPI (MX), SIC (CO) and INPI (BR) (web
   search found Bankinter's "Cuenta Inteligente Digital" in Spain and Conta Simples'
-  "Cartão Inteligente" in Brazil, nothing identical in LATAM); one line in the terms that
+  "Cartão Inteligente" in Brazil, nothing identical in LATAM; Nubank's Croma tier,
+  launched 2026-07-28, is described as a "smart account"/"conta inteligente", so the
+  INPI search and a check of how Brazilian users read the name are required; the founder
+  keeps one name everywhere, and the app UI is Spanish-only anyway); one line in the terms that
   it is a self-custodial account, not a bank account; the subtitle and the activation
   screen describe financial functions only (so "inteligente" never reads as an AI
   unlock to store review).
@@ -144,10 +147,26 @@ the build.
 > **Cuenta inteligente** · Próximamente
 > *Tu dinero se mueve según tus reglas.*
 > - **Pagos y débitos automáticos:** envíos programados a Pix, Bre-B, CLABE y Alias que tú autorizas y cancelas cuando quieras.
-> - **Suscripciones** con comercios, con el monto y la frecuencia que tú apruebas.
-> - **Análisis de IA más profundo:** más consultas y conversación por voz con Confío IA sobre tus gastos, ahorro e inversiones.
-> - **Atención prioritaria** del equipo de Confío.
-> **Activa tu Cuenta inteligente — US$9.99/mes** · [Avísame cuando esté]
+> - **Suscripciones con comercios:** con el monto y la frecuencia que tú apruebas.
+> - **Confío IA vigila tus pagos:** detecta gastos recurrentes y te avisa antes de cada débito, y si un cobro viene más alto de lo normal.
+> - **Resolución prioritaria de pagos:** si un pago o débito falla, lo resolvemos primero.
+> **US$9.99/mes al lanzar** · [Sí, avísame] · [Solo miraba]
+
+- **The paid offer never sells AI usage (benefits review 2026-10-07, after comparing
+  Nubank+/Croma and Apple 3.1.1):** no quotas, message counts, voice or "deeper AI mode"
+  in any paid copy. Apple 3.1.1 requires IAP to "unlock features or functionality
+  within your app" and names "cryptocurrencies and cryptocurrency wallets" among the
+  forbidden mechanisms. Confío IA appears only as how the account works (watching the
+  user's own payments and debits), the same kind of money-management feature Nubank
+  includes in its tiers. Nubank Croma (R$39/month, launched 2026-07-28) sells financial
+  benefits plus third-party perks (ChatGPT Go, HBO Max), never usage of its own app.
+  Assistant+ quotas stay a separate, non-purchased entitlement; balance-gated AI unlocks
+  are ruled out (a crypto balance acting as the key is closer to what 3.1.1 bans).
+- **Priority support is scoped to payments** ("Resolución prioritaria de pagos"), so it
+  is part of the financial service, not a general support tier.
+- **Heavy-mover waiver: decided at launch** (founder). The probe and the Assignment show
+  only US$9.99/mes; the Assignment asks the 6 heavy movers directly whether they'd pay,
+  and a usage waiver (Croma-style) is added at launch only if they push back.
 
 - **No fee or yield discount** (premise 1): the 6 heavy movers keep paying today's
   per-transaction fees; a "yes" must mean they value automation and IA, not arbitrage.
@@ -228,9 +247,10 @@ wallet section):
  │ Tu dinero se mueve según      │
  │ tus reglas.        (headline) │
  │ ✓ Pagos y débitos automáticos │
- │ ✓ Suscripciones               │
- │ ✓ Análisis de IA más profundo │
- │ ✓ Atención prioritaria        │
+ │ ✓ Suscripciones con comercios │
+ │ ✓ Confío IA vigila tus pagos  │
+ │ ✓ Resolución prioritaria de   │
+ │   pagos                       │
  │ Próximamente · US$9.99/mes    │
  │ al lanzar                     │
  │                               │
@@ -324,16 +344,16 @@ for each door separately.**
 
 ### For Build B (launch only; nothing below is built for the probe)
 Decisions made during the reviews that apply when the real account is built:
-- **The IA benefit at launch (founder, after the second Claude review):** Cuenta
-  inteligente grants the Assistant+ entitlement already on the server
-  (`assistant/billing.py`; more turns and analyses, `assistant/conf.py:46-49`) plus
-  real-time voice conversation. Deeper analysis is built afterwards; the offer advertises
-  it as "Análisis de IA más profundo". Before launch: (1) the launch copy must match what
-  is live then; (2) store risk: a US$9.99/month charge that raises AI quotas and unlocks
-  voice reads as a digital-feature subscription billed outside IAP / Play Billing
-  (Apple 3.1.1). The plan's defence is that the SKU is a financial account and the AI is
-  a perk (the Nubank+ pattern); confirm that position before launch, together with the
-  trademark and terms checks.
+- **The IA benefit at launch (revised in the benefits review):** the paid account
+  includes Confío IA watching the user's own payments and debits (recurring-charge
+  detection, an alert before each debit, a flag when a charge is higher than usual).
+  It does NOT grant Assistant+ quotas or real-time voice: selling those for US$9.99
+  outside IAP is a feature unlock under Apple 3.1.1. Assistant+ stays a separate
+  entitlement Confío grants without a purchase; any rule for granting it (for example,
+  by verification) is a new decision, since today only an `AssistantSubscription` row
+  enables it (`assistant/service.py:148`). The superseded version (Assistant+ quotas +
+  voice, advertised as "Análisis de IA más profundo") is recorded in "Second Claude
+  opinion".
 - The account parks **Confío Dollar+ (cUSD+)** so it keeps earning; only at payment time
   does it move cUSD+ → cUSD (→ USDT when the payee's rail needs it) (decision 8, revised).
   Users not eligible for Confío Dollar+ hold Confío Dollar (cUSD) (eng review D3).
@@ -350,7 +370,7 @@ Decisions made during the reviews that apply when the real account is built:
 ### Confío IA's answer about Cuenta inteligente (approved FAQ line)
 "Cuenta inteligente es una cuenta que estamos preparando: tu dinero se mueve según tus
 reglas, con pagos y débitos automáticos a Pix, Bre-B, CLABE y Alias, suscripciones,
-análisis de IA más profundo y atención prioritaria, por US$9.99 al mes. Todavía no está disponible y no tiene fecha; si te interesa, toca
+Confío IA vigilando tus pagos y avisándote antes de cada débito, y resolución prioritaria de pagos, por US$9.99 al mes. Todavía no está disponible y no tiene fecha; si te interesa, toca
 'Avísame' y te contamos cuando esté." The answer always attaches the `cuenta_inteligente` chip, so
 "toca 'Avísame'" never points to a button the user can't see (decision 15). The price in
 this line comes from the same server value as the app (decision 14A). Guardrail: never a date, never benefits beyond
@@ -967,6 +987,11 @@ prepayment". Dispositions (founder):
 - IA benefit already free / Assistant+ collision: decided; launch benefit = Assistant+
   quotas + real-time voice, deeper analysis later, advertised as "Análisis de IA más
   profundo"; store position to confirm before launch (Build B notes).
+  **Superseded the same day by the benefits review** (Nubank+/Croma comparison, Apple
+  3.1.1, plus Claude and ChatGPT opinions): the paid offer never sells AI usage; Confío
+  IA is offered only as "Confío IA vigila tus pagos"; support narrowed to "Resolución
+  prioritaria de pagos"; heavy-mover waiver decided at launch; one name everywhere with
+  the INPI check.
 - Code gaps, all adopted as implementation of approved behavior: employee exclusion on
   the IA trigger; door + trigger stored on the waitlist row (per-door numerator from
   rows); `NavigateAction.source` for IA attribution; minimum-app-version gate on the
