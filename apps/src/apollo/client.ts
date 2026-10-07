@@ -234,9 +234,9 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   // Sensitive location evidence must never enter error/telemetry logs.
   const isMembershipClaim = ['ClaimInstitutionMembership', 'ApplyCobreBreb', 'BrebLocationChallenge', 'VerifyBrebLocation'].includes(operation.operationName);
   // Confio Assistant traffic carries message text, voice notes, pet photos,
-  // transcripts and store receipts: never log its variables.
+  // and transcripts: never log its variables.
   const redactVariables = isMembershipClaim || [
-    'AskAssistant', 'SendSupportMessage', 'CreateAssistantPet', 'VerifyAssistantPurchase',
+    'AskAssistant', 'SendSupportMessage', 'CreateAssistantPet',
     'StartAssistantVoice', 'ConnectAssistantVoice', 'RunAssistantVoiceTool', 'LogAssistantVoice',
     'UpdateAssistantProfile', 'UseAssistantPet', 'DeleteAssistantPet',
   ].includes(operation.operationName);

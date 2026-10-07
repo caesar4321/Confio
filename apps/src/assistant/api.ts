@@ -17,9 +17,6 @@ const PROFILE_FIELDS =
 
 const PLAN_FIELDS = `
   isPlus
-  productId
-  billingToken
-  platform
   expiresAt
   autoRenew
   inGrace
@@ -29,7 +26,6 @@ const PLAN_FIELDS = `
   voiceMinutesLeft
   wakeWordAvailable
   voiceCallsEnabled
-  plusSalesEnabled
 `;
 
 export const GET_ASSISTANT_PLAN = gql`
@@ -41,16 +37,6 @@ export const GET_ASSISTANT_PLAN = gql`
 export const GET_ASSISTANT_WAKE_WORD = gql`
   query GetAssistantWakeWord {
     assistantWakeWord { accessKey }
-  }
-`;
-
-export const VERIFY_ASSISTANT_PURCHASE = gql`
-  mutation VerifyAssistantPurchase($platform: String!, $signedTransaction: String, $purchaseToken: String) {
-    verifyAssistantPurchase(platform: $platform, signedTransaction: $signedTransaction, purchaseToken: $purchaseToken) {
-      success
-      error
-      plan { ${PLAN_FIELDS} }
-    }
   }
 `;
 
@@ -102,9 +88,6 @@ export const LOG_ASSISTANT_VOICE = gql`
 
 export type AssistantPlan = {
   isPlus: boolean;
-  productId: string;
-  billingToken: string;
-  platform?: string | null;
   expiresAt?: string | null;
   autoRenew?: boolean | null;
   inGrace: boolean;
@@ -115,7 +98,6 @@ export type AssistantPlan = {
   wakeWordAvailable: boolean;
   // Launch switches: when off, the app shows no call button / no Assistant+ at all.
   voiceCallsEnabled: boolean;
-  plusSalesEnabled: boolean;
 };
 
 export const GET_ASSISTANT_THREAD = gql`

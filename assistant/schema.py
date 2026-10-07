@@ -63,9 +63,11 @@ class AssistantPetType(graphene.ObjectType):
 
 class AssistantPlanType(graphene.ObjectType):
     is_plus = graphene.Boolean(required=True)
-    product_id = graphene.String(required=True, description='Store product to sell (same id on both stores)')
-    billing_token = graphene.String(required=True, description='Pass to the store: appAccountToken / obfuscatedAccountId')
-    platform = graphene.String(description='Store of the active subscription')
+    # No store purchases since 2026-10-07. Kept (always empty / False) only
+    # because older builds still request them in this query.
+    product_id = graphene.String(required=True, deprecation_reason='No store purchases')
+    billing_token = graphene.String(required=True, deprecation_reason='No store purchases')
+    platform = graphene.String(description='Where the active subscription is billed')
     expires_at = graphene.DateTime()
     auto_renew = graphene.Boolean()
     in_grace = graphene.Boolean(required=True)
@@ -75,7 +77,7 @@ class AssistantPlanType(graphene.ObjectType):
     voice_minutes_left = graphene.Int(required=True)
     wake_word_available = graphene.Boolean(required=True)
     voice_calls_enabled = graphene.Boolean(required=True, description='Realtime calls offered at all')
-    plus_sales_enabled = graphene.Boolean(required=True, description='Show Assistant+ / purchase UI at all')
+    plus_sales_enabled = graphene.Boolean(required=True, deprecation_reason='No store purchases')
 
 
 class AssistantWakeWordType(graphene.ObjectType):
@@ -142,8 +144,8 @@ def plan_payload(user):
     plus = sub is not None
     return AssistantPlanType(
         is_plus=plus,
-        product_id=conf.get('CONFIO_ASSISTANT_PLUS_PRODUCT_ID'),
-        billing_token=str(billing.billing_token_for(user)),
+        product_id='',
+        billing_token='',
         platform=sub.platform if sub else None,
         expires_at=sub.expires_at if sub else None,
         auto_renew=sub.auto_renew if sub else None,
@@ -155,7 +157,7 @@ def plan_payload(user):
         # Free for everyone: "Confío" opens a voice note (cheap), never a call.
         wake_word_available=bool(conf.get('CONFIO_ASSISTANT_ENABLED')) and bool(conf.get('CONFIO_ASSISTANT_PICOVOICE_ACCESS_KEY')),
         voice_calls_enabled=bool(conf.get('CONFIO_ASSISTANT_REALTIME_ENABLED')),
-        plus_sales_enabled=bool(conf.get('CONFIO_ASSISTANT_PLUS_SALES_ENABLED')),
+        plus_sales_enabled=False,
     )
 
 
@@ -376,36 +378,6 @@ class UpdateAssistantProfile(graphene.Mutation):
         if fields:
             profile.save(update_fields=fields + ['updated_at'])
         return UpdateAssistantProfile(success=True, profile=profile_payload(profile))
-
-
-class VerifyAssistantPurchase(graphene.Mutation):
-    """Hand a store purchase to the server; Assistant+ unlocks only if the store confirms it."""
-
-    class Arguments:
-        platform = graphene.String(required=True, description='ios | android')
-        signed_transaction = graphene.String(description='iOS: StoreKit 2 JWS')
-        purchase_token = graphene.String(description='Android: Play purchase token')
-
-    success = graphene.Boolean(required=True)
-    error = graphene.String()
-    plan = graphene.Field(AssistantPlanType)
-
-    @classmethod
-    @login_required
-    def mutate(cls, root, info, platform, signed_transaction=None, purchase_token=None):
-        user = info.context.user
-        if not conf.get('CONFIO_ASSISTANT_PLUS_SALES_ENABLED'):
-            return cls(success=False, error='Assistant+ no está disponible.', plan=plan_payload(user))
-        try:
-            if platform == 'ios' and signed_transaction:
-                billing.verify_apple_purchase(user, signed_transaction)
-            elif platform == 'android' and purchase_token:
-                billing.verify_google_purchase(user, purchase_token)
-            else:
-                return cls(success=False, error='Compra inválida.')
-        except billing.BillingError as exc:
-            return cls(success=False, error=str(exc), plan=plan_payload(user))
-        return cls(success=True, plan=plan_payload(user))
 
 
 class AssistantTranscriptInput(graphene.InputObjectType):
@@ -636,7 +608,6 @@ class Mutation(graphene.ObjectType):
     create_assistant_pet = CreateAssistantPet.Field()
     use_assistant_pet = UseAssistantPet.Field()
     delete_assistant_pet = DeleteAssistantPet.Field()
-    verify_assistant_purchase = VerifyAssistantPurchase.Field()
     start_assistant_voice = StartAssistantVoice.Field()
     connect_assistant_voice = ConnectAssistantVoice.Field()
     run_assistant_voice_tool = RunAssistantVoiceTool.Field()

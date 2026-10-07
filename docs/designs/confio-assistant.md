@@ -18,8 +18,8 @@ Replaces "Soporte" in Mensajes with an assistant that answers first and hands mo
 ## Launch decision (2026-10-04): free, no realtime
 
 - **Ships free:** text, voice notes, analysis of the user's own transactions, pets, and the floating box.
-- **Built but dark:** realtime voice, the wake word and Assistant+ sales. Switches: `CONFIO_ASSISTANT_REALTIME_ENABLED` and `CONFIO_ASSISTANT_PLUS_SALES_ENABLED`, both False.
-- **Why:** Duende Limited (Seychelles) can't register as a Google Play merchant. Realtime was 52–82% of simulated AI cost.
+- **Built but dark:** realtime voice and the wake word (`CONFIO_ASSISTANT_REALTIME_ENABLED` False). Realtime was 52–82% of simulated AI cost.
+- **No store purchases (2026-10-07):** Apple/Google in-app purchases were removed from the app and the server (none was ever sold; Duende Limited, Seychelles, can't be a Google Play merchant). `AssistantSubscription` stays, for Confío to grant and bill Assistant+ itself (direction: a Cuenta Confío-style membership).
 - **Simulated cost without realtime** (`manage.py assistant_economics --simulate`): $0.03 per IA user per month on average, which needs $3.4/month of boundary volume at 0.9% to break even. The capped worst case is $2.38.
 - **Measured Sol analysis cost:** $0.019 with two months of movements. Cut to the current month only, it is **$0.012** (4.7k input tokens). Free cap is now 3 analyses a day, so the capped worst case is **$1.97 a month** (messages $0.24, voice-note transcription $0.54, analyses $1.10, pets $0.10).
 - **No control group** (Julian, 2026-10-04): everyone gets Confio Assistant plus pets. Read `assistant_economics` cohorts as correlation only.
@@ -30,7 +30,7 @@ Replaces "Soporte" in Mensajes with an assistant that answers first and hands mo
   - Pet entry points: "🐾 Mi mascota" in the IA header, a "🐾 Crea tu mascota" starter, and long-pressing the bubble.
 - **Guardrail eval:** `manage.py assistant_eval` checks escalation of money problems, no advice or price predictions (including Confío's own products), no claims of moving money, no secrets. 45/45 passed on 2026-10-04. Re-run on every prompt or model change.
 
-## Plans (if sales are ever enabled)
+## Plans (if Assistant+ is ever offered)
 
 | | Free | Assistant+ (US$9.99) |
 |---|---|---|
@@ -58,30 +58,18 @@ Employees get no money tools. The AI never moves money and never states balances
   - The app connects over WebRTC (`react-native-webrtc`) and relays every non-navigate tool call to `runAssistantVoiceTool`, which uses the same Toolbelt as text.
   - `logAssistantVoice` saves transcripts into the thread (modality `REALTIME`) and acts as a heartbeat. Minutes are counted from server timestamps, and the call is cut when the month's minutes run out.
   - Audio goes to the loudspeaker via `ConfioAudioRoute`.
-- **Billing.**
-  - iOS: StoreKit 2. Each purchase carries `appAccountToken` = the user's `billing_token`. The server verifies the JWS against the pinned Apple Root CA G3 (`assistant/certs/`) using Apple's `app-store-server-library`, and the transaction is finished only after the server has recorded it.
-  - Android: Play Billing 8 with `obfuscatedAccountId` = `billing_token`. The server reads `subscriptionsv2.get` and acknowledges server-side.
-  - Renewals, refunds and cancellations come in at `/webhooks/app-store/` (Apple-signed JWS) and `/webhooks/google-play/` (Pub/Sub OIDC, then a re-read from the Play API).
-  - A subscription can never move between users.
+- **Entitlement.** Assistant+ is whatever an entitled `AssistantSubscription` row says (`assistant/billing.py`). There is no store billing; how Confío bills it is still to be designed.
 - **Wake word.** Porcupine 3.0.4 (iOS 13+, keeps iOS 15 users), on-device, foreground only. It pauses while the chat is open or a call is live. The AccessKey is served only to Assistant+ users.
 
 ## Setup only Julian can do (the features stay dark until done)
 
-1. **Secrets Manager `prod/confio-assistant`** (JSON): `google_play_service_account` (the JSON key), `rtdn_audience`, `rtdn_service_account`, `picovoice_access_key`. The Apple app id (6472662314) is public and set in `assistant/conf.py`; iOS verification needs no secret.
-2. **App Store Connect:**
-   - Create the subscription group "Confio Assistant+", product `confio_ia_plus_monthly`, at US$9.99 (Apple sets the regional prices). Add a Spanish localization and the review screenshot.
-   - Set App Store Server Notifications V2 to `https://confio.lat/webhooks/app-store/` for both production and sandbox.
-3. **Play Console:**
-   - Create subscription `confio_ia_plus_monthly` with one monthly auto-renewing base plan at US$9.99 (Google sets the regional prices).
-   - Create a service account with *View financial data* and *Manage orders and subscriptions*.
-   - Set up RTDN: a Pub/Sub topic plus a push subscription to `https://confio.lat/webhooks/google-play/`, with OIDC auth (that service account, audience = the URL).
-4. **Picovoice:**
+1. **Secrets Manager `prod/confio-assistant`** (JSON): `picovoice_access_key`.
+2. **Picovoice:**
    - Get an AccessKey. Commercial use needs a paid plan.
    - Train the Spanish keyword "Confío" for **Porcupine v3.0** for iOS and Android, and download `porcupine_params_es.pv` (v3).
    - Add `confio_es_ios.ppn` and `porcupine_params_es.pv` to the iOS app's bundle resources, and `confio_es_android.ppn` and `porcupine_params_es.pv` to `android/app/src/main/assets/`.
-5. **Prod deploy:** `pip install -r requirements.txt` (adds `app-store-server-library`), `migrate assistant`, then a new app build (new native modules: `ConfioBilling`, `ConfioAudioRoute`, WebRTC, Porcupine, the recorder).
+3. **Store cleanup (no in-app purchases since 2026-10-07):** archive any `confio_ia_plus_monthly` product in App Store Connect / Play Console, and remove the App Store Server Notifications URL and the Play RTDN push subscription if they were set (those webhooks are gone).
 
 ## Open
 
 - Daily macro/FX briefing in the prompt versus per-question web search ($0.01 per call).
-- Reconcile job using the App Store Server API (needs an API key), in case a notification is missed. The app's restore and Transaction.updates path already self-heals on next launch.

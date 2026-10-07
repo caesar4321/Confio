@@ -257,7 +257,7 @@ class DestinationContractTests(TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# Assistant+ billing
+# Assistant+ entitlement
 # --------------------------------------------------------------------------- #
 
 from datetime import datetime, timezone as dt_timezone  # noqa: E402
@@ -266,132 +266,31 @@ from . import billing, voice  # noqa: E402
 from .models import AssistantSubscription, VoiceSession  # noqa: E402
 
 
-def _ms(dt):
-    return int(dt.timestamp() * 1000)
+class EntitlementTests(TestCase):
+    """Assistant+ is whatever an entitled AssistantSubscription row says; there
+    are no store purchases (dropped 2026-10-07)."""
 
-
-_SIGNED = [1_000_000]
-
-
-def apple_tx(user_token, *, expires_in=timedelta(days=30), product='confio_ia_plus_monthly', revoked=False,
-             original='1000', tx='2000', signed_ms=None, environment='Production'):
-    now = timezone.now()
-    _SIGNED[0] += 1000
-    return SimpleNamespace(
-        signedDate=signed_ms if signed_ms is not None else _SIGNED[0],
-        productId=product, appAccountToken=str(user_token) if user_token else None,
-        originalTransactionId=original, transactionId=tx, expiresDate=_ms(now + expires_in),
-        revocationDate=_ms(now) if revoked else None, rawEnvironment=environment, rawType='Auto-Renewable Subscription',
-    )
-
-
-class BillingTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='u1', email='u1@example.com', password='x', firebase_uid='fb-u1')
-        self.other = User.objects.create_user(username='u2', email='u2@example.com', password='x', firebase_uid='fb-u2')
-        self.token = billing.billing_token_for(self.user)
 
-    def verify(self, tx, user=None):
-        with patch('assistant.billing._apple_decode', return_value=tx):
-            return billing.verify_apple_purchase(user or self.user, 'jws')
+    def sub(self, **fields):
+        defaults = dict(user=self.user, platform='ios', store_key='internal-1', product_id='assistant_plus',
+                        status='ACTIVE', expires_at=timezone.now() + timedelta(days=30))
+        defaults.update(fields)
+        return AssistantSubscription.objects.create(**defaults)
 
-    def test_apple_purchase_unlocks_plus(self):
+    def test_an_entitled_row_grants_plus_and_an_expired_one_does_not(self):
         self.assertFalse(billing.has_plus(self.user))
-        sub = self.verify(apple_tx(self.token))
-        self.assertEqual(sub.status, 'ACTIVE')
-        self.assertTrue(billing.has_plus(self.user))
-        self.assertEqual(service.daily_turn_cap(self.user), 300)
-
-    def test_purchase_bound_to_another_user_is_refused(self):
-        with self.assertRaises(billing.BillingError):
-            self.verify(apple_tx(self.token), user=self.other)
-        self.assertFalse(billing.has_plus(self.other))
-
-    def test_purchase_without_our_token_is_refused(self):
-        with self.assertRaises(billing.BillingError):
-            self.verify(apple_tx(None))
-
-    def test_other_products_are_refused(self):
-        with self.assertRaises(billing.BillingError):
-            self.verify(apple_tx(self.token, product='something_else'))
-
-    def test_expired_and_refunded_lose_access(self):
-        self.verify(apple_tx(self.token, expires_in=-timedelta(minutes=1)))
+        sub = self.sub()
+        self.assertEqual(billing.active_subscription(self.user), sub)
+        sub.expires_at = timezone.now() - timedelta(minutes=1)
+        sub.save()
         self.assertFalse(billing.has_plus(self.user))
-        self.verify(apple_tx(self.token, tx='2001'))
-        self.assertTrue(billing.has_plus(self.user))
-        self.verify(apple_tx(self.token, revoked=True, tx='2002'))
-        self.assertFalse(billing.has_plus(self.user))
-        self.assertEqual(AssistantSubscription.objects.count(), 1)
 
-    def test_notification_renews_and_is_idempotent(self):
-        self.verify(apple_tx(self.token, expires_in=timedelta(days=1)))
-        note = SimpleNamespace(
-            notificationUUID='n-1', rawNotificationType='DID_RENEW', rawSubtype=None,
-            data=SimpleNamespace(signedTransactionInfo='tx', signedRenewalInfo=None),
-        )
-        renewed = apple_tx(self.token, expires_in=timedelta(days=31), tx='2003')
-
-        def decode(method, signed):
-            return note if method == 'verify_and_decode_notification' else renewed
-
-        with patch('assistant.billing._apple_decode', side_effect=decode):
-            billing.handle_apple_notification('payload')
-            billing.handle_apple_notification('payload')
-        sub = AssistantSubscription.objects.get()
-        self.assertEqual(sub.latest_transaction_id, '2003')
-        self.assertGreater(sub.expires_at, timezone.now() + timedelta(days=30))
-
-    def test_google_purchase_is_read_from_play_and_acknowledged(self):
-        expiry = (timezone.now() + timedelta(days=30)).astimezone(dt_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        purchase = {
-            'subscriptionState': 'SUBSCRIPTION_STATE_ACTIVE',
-            'lineItems': [{'productId': 'confio_ia_plus_monthly', 'expiryTime': expiry,
-                           'autoRenewingPlan': {'autoRenewEnabled': True}}],
-            'externalAccountIdentifiers': {'obfuscatedExternalAccountId': str(self.token)},
-            'acknowledgementState': 'ACKNOWLEDGEMENT_STATE_PENDING',
-            'latestOrderId': 'GPA.1',
-        }
-        service_mock = unittest_mock_play(purchase)
-        with patch('assistant.billing._play_service', return_value=service_mock):
-            sub = billing.verify_google_purchase(self.user, 'tok-1')
-        self.assertTrue(sub.acknowledged)
-        self.assertTrue(billing.has_plus(self.user))
-        service_mock.purchases().subscriptions().acknowledge.assert_called_once()
-
-        with patch('assistant.billing._play_service', return_value=unittest_mock_play(purchase)):
-            with self.assertRaises(billing.BillingError):
-                billing.verify_google_purchase(self.other, 'tok-1')
-
-    def test_purchases_are_refused_while_sales_are_dark(self):
-        from .schema import VerifyAssistantPurchase
-        info = SimpleNamespace(context=SimpleNamespace(user=self.user))
-        with patch('assistant.billing.verify_apple_purchase') as verify:
-            result = VerifyAssistantPurchase.mutate.__wrapped__(VerifyAssistantPurchase, None, info,
-                                                               platform='ios', signed_transaction='jws')
-        verify.assert_not_called()
-        self.assertFalse(result.success)
-        self.assertFalse(result.plan.plus_sales_enabled)
-        self.assertFalse(result.plan.voice_calls_enabled)
-
-    def test_rtdn_requires_a_verified_pubsub_token(self):
-        from django.test import RequestFactory
-
-        from .views import google_play_notifications
-        request = RequestFactory().post('/webhooks/google-play/', data='{}', content_type='application/json')
-        self.assertEqual(google_play_notifications(request).status_code, 403)
-        request = RequestFactory().post('/webhooks/google-play/', data='{}', content_type='application/json',
-                                        HTTP_AUTHORIZATION='Bearer forged')
-        with override_settings(CONFIO_ASSISTANT_RTDN_AUDIENCE='https://confio.lat/webhooks/google-play/',
-                               CONFIO_ASSISTANT_RTDN_SERVICE_ACCOUNT='rtdn@confio.iam.gserviceaccount.com'):
-            self.assertEqual(google_play_notifications(request).status_code, 403)
-
-
-def unittest_mock_play(purchase):
-    from unittest.mock import MagicMock
-    service_mock = MagicMock()
-    service_mock.purchases().subscriptionsv2().get().execute.return_value = purchase
-    return service_mock
+    def test_old_builds_get_empty_purchase_fields(self):
+        from .schema import plan_payload
+        plan = plan_payload(self.user)
+        self.assertEqual((plan.product_id, plan.billing_token, plan.plus_sales_enabled), ('', '', False))
 
 
 class VoiceTests(TestCase):
@@ -603,22 +502,6 @@ class AuditFixTests(TestCase):
         recent = list(conversation.messages.order_by('-created_at'))
         self.assertTrue(service.awaiting_team(conversation, recent))
 
-    def test_billing_token_is_set_once(self):
-        first = billing.billing_token_for(self.user)
-        self.assertEqual(billing.billing_token_for(self.user), first)
-
-    def test_older_apple_payload_cannot_undo_a_refund(self):
-        token = billing.billing_token_for(self.user)
-        with patch('assistant.billing._apple_decode', return_value=apple_tx(token, signed_ms=5_000)):
-            billing.verify_apple_purchase(self.user, 'jws')
-        with patch('assistant.billing._apple_decode', return_value=apple_tx(token, revoked=True, signed_ms=9_000)):
-            billing.verify_apple_purchase(self.user, 'jws')
-        self.assertFalse(billing.has_plus(self.user))
-        # The original purchase JWS, replayed after the refund.
-        with patch('assistant.billing._apple_decode', return_value=apple_tx(token, signed_ms=5_000)):
-            billing.verify_apple_purchase(self.user, 'jws')
-        self.assertFalse(billing.has_plus(self.user))
-
     @override_settings(OPENAI_API_KEY='k')
     def test_malformed_moderation_verdicts_are_not_clean(self):
         from . import pets
@@ -627,19 +510,6 @@ class AuditFixTests(TestCase):
                     status_code=200, json=lambda p=payload: p, raise_for_status=lambda: None)):
                 with self.assertRaises(pets.PetError):
                     pets._moderate(text='una llama')
-
-    def test_transient_play_failures_are_not_acknowledged(self):
-        from django.test import RequestFactory
-
-        from .views import google_play_notifications
-        envelope = {'message': {'messageId': 'm1', 'data': base64.b64encode(json.dumps({
-            'packageName': 'com.Confio.Confio',
-            'subscriptionNotification': {'purchaseToken': 't', 'notificationType': 2}}).encode()).decode()}}
-        request = RequestFactory().post('/webhooks/google-play/', data=json.dumps(envelope),
-                                        content_type='application/json')
-        with patch('assistant.billing.verify_rtdn_push', return_value=True), \
-                patch('assistant.billing._play_apply', side_effect=billing.BillingTransient('down')):
-            self.assertEqual(google_play_notifications(request).status_code, 503)
 
     @override_settings(CONFIO_ASSISTANT_REALTIME_ENABLED=True)
     def test_voice_tools_stay_on_the_account_the_call_started_on(self):
@@ -839,18 +709,6 @@ class ThirdPassTests(TestCase):
                 pets.create_pet(self.user, idea='una llama')
         self.assertEqual(pets.creations_left(self.user)[0], 0)
 
-    def test_replaying_the_same_apple_transaction_keeps_renewal_state(self):
-        token = billing.billing_token_for(self.user)
-        tx = apple_tx(token, signed_ms=7_000)
-        renewal = SimpleNamespace(gracePeriodExpiresDate=None, autoRenewStatus=0, isInBillingRetryPeriod=False)
-        with patch('assistant.billing._apple_decode', return_value=tx):
-            billing._apple_apply(tx, renewal=renewal)
-            billing.verify_apple_purchase(self.user, 'jws')  # same transaction, no renewal info
-        sub = AssistantSubscription.objects.get()
-        self.assertFalse(sub.auto_renew)
-
-
-
 class FourthPassTests(TestCase):
     """Regressions for the fourth Codex pass."""
 
@@ -884,20 +742,6 @@ class FourthPassTests(TestCase):
             voice.hang_up(stale)
         self.assertIn('/rtc_5/hangup', post.call_args.args[0])
         self.assertTrue(VoiceSession.objects.get(pk=session.pk).remote_ended)
-
-    def test_bare_apple_verification_keeps_a_granted_grace_period(self):
-        token = billing.billing_token_for(self.user)
-        expired = apple_tx(token, expires_in=-timedelta(hours=1), signed_ms=1_000)
-        renewal = SimpleNamespace(gracePeriodExpiresDate=int((timezone.now() + timedelta(days=3)).timestamp() * 1000),
-                                  autoRenewStatus=1, isInBillingRetryPeriod=True)
-        billing._apple_apply(expired, renewal=renewal)
-        self.assertTrue(billing.has_plus(self.user))
-        newer = apple_tx(token, expires_in=-timedelta(hours=1), signed_ms=2_000)
-        with patch('assistant.billing._apple_decode', return_value=newer):
-            billing.verify_apple_purchase(self.user, 'jws')
-        self.assertTrue(billing.has_plus(self.user))
-
-
 
 class FifthPassTests(TestCase):
     def test_real_sample_duration_beats_a_decoy_header(self):
@@ -1285,18 +1129,6 @@ class AuditHardeningTests(TestCase):
             belt.call('search_market_news', {'topic': 'Apple', 'timeframe': 'hoy', 'language': 'español'})
             again = belt.call('search_market_news', {'topic': 'Apple', 'timeframe': 'hoy', 'language': 'español'})
         self.assertTrue(again['_denied'])
-
-    def test_store_test_purchases_unlock_only_allowlisted_users(self):
-        from datetime import timedelta as td
-        from .models import AssistantSubscription
-        AssistantSubscription.objects.create(user=self.user, platform=AssistantSubscription.PLATFORMS[0][0],
-                                             store_key='o1', product_id='confio_ia_plus_monthly',
-                                             environment='Sandbox', expires_at=timezone.now() + td(days=30),
-                                             status='ACTIVE')
-        from . import billing
-        self.assertFalse(billing.has_plus(self.user))
-        with override_settings(CONFIO_ASSISTANT_TEST_PURCHASE_USER_IDS=[self.user.pk]):
-            self.assertTrue(billing.has_plus(self.user))
 
     def test_audio_with_more_samples_than_timed_is_rejected(self):
         self.assertIsNone(service.mp4_duration_seconds(fake_m4a(5, extra_samples=100000)))
