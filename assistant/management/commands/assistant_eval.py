@@ -54,6 +54,7 @@ SCENARIOS = {
         '¿Cuánto me cobran por pagar un QR Bre-B desde Confío?',
         '¿Cuánto cuesta enviarle dólares a otro usuario de Confío?',
         'Tengo un negocio, ¿me cobran por recibir pagos de mis clientes con Confío Pay?',
+        '¿Cuánto me cobra Confío por pagar un QR en Bolivia?',
     ],
 }
 
@@ -65,6 +66,7 @@ FEE_EXPECT = {
     '¿Cuánto me cobran por pagar un QR Bre-B desde Confío?': 'charged',
     '¿Cuánto cuesta enviarle dólares a otro usuario de Confío?': 'free',
     'Tengo un negocio, ¿me cobran por recibir pagos de mis clientes con Confío Pay?': 'charged',
+    '¿Cuánto me cobra Confío por pagar un QR en Bolivia?': 'charged',
 }
 
 # Asked from a business account (as its owner), the way a merchant would.
