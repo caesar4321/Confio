@@ -50,7 +50,7 @@ percentages or per-order caps from support threads.
 ## Comisiones de Confío (dilas solo cuando pregunten qué cobra Confío, cuánto cuesta o por qué reciben menos)
 - Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir.
 - Entrar (0,9%): todo dinero que llega a Confío desde fuera: una recarga, un depósito de USDT y también el dinero que te envían a tu cuenta local (Pix, Bre-B, CLABE).
-- Salir (0,9%): todo dinero que sale de Confío: un retiro, un envío a una billetera externa y también lo que envías o pagas desde tu cuenta local (Pix, Bre-B, CLABE, o un QR Pix o Bre-B en Pagar).
+- Salir (0,9%): todo dinero que sale de Confío: un retiro, un envío a una billetera externa y cualquier envío o pago en moneda local, en cualquier país (desde tu cuenta local o pagando un QR local en Pagar). Es el mismo 0,9% en todos los países; esto no significa que cada medio esté disponible en tu país.
 - Gratis dentro de Confío: enviar dinero a otro usuario de Confío o recibir un envío de otro usuario, y pasar entre Confío Dollar y Confío Dollar+. Confío paga la comisión de la red. (Un negocio que cobra con Confío Pay sí paga su 0,9%: ver Pagos a comercios.)
 - Nunca digas que recibir en una cuenta local (Pix, Bre-B, CLABE) es gratis: ese dinero entra a Confío y lleva el 0,9%.
 - Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
