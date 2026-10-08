@@ -20,7 +20,7 @@ class SmsSendErrorTests(SimpleTestCase):
         blocked = {'code': 60410, 'message': '59177612 prefix is blocked for the SMS channel', 'status': 403}
         with patch('sms_verification.twilio_verify.requests.post', return_value=self._post(403, blocked)):
             with self.assertRaises(twilio_verify.TwilioVerifyError) as raised:
-                twilio_verify.send_verification_sms('+59177612254')
+                twilio_verify.send_verification_sms('+59177612000')
         self.assertEqual(raised.exception.code, 60410)
 
     def test_unreadable_error_body_has_no_code(self):
@@ -29,7 +29,7 @@ class SmsSendErrorTests(SimpleTestCase):
         resp = SimpleNamespace(status_code=500, text='oops', json=broken)
         with patch('sms_verification.twilio_verify.requests.post', return_value=resp):
             with self.assertRaises(twilio_verify.TwilioVerifyError) as raised:
-                twilio_verify.send_verification_sms('+59177612254')
+                twilio_verify.send_verification_sms('+59177612000')
         self.assertIsNone(raised.exception.code)
 
     def test_messages_are_spanish_and_point_to_telegram(self):
@@ -48,11 +48,11 @@ class SmsSendErrorTests(SimpleTestCase):
         as_string = {'code': '60410', 'message': 'blocked'}
         with patch('sms_verification.twilio_verify.requests.post', return_value=self._post(403, as_string)):
             with self.assertRaises(twilio_verify.TwilioVerifyError) as raised:
-                twilio_verify.send_verification_sms('+59177612254')
+                twilio_verify.send_verification_sms('+59177612000')
         self.assertEqual(raised.exception.code, 60410)
         with patch('sms_verification.twilio_verify.requests.post', return_value=self._post(500, ['not', 'a', 'dict'])):
             with self.assertRaises(twilio_verify.TwilioVerifyError) as raised:
-                twilio_verify.send_verification_sms('+59177612254')
+                twilio_verify.send_verification_sms('+59177612000')
         self.assertIsNone(raised.exception.code)
 
 
@@ -71,9 +71,9 @@ class InitiateSmsMutationTests(TestCase):
         info = SimpleNamespace(context=SimpleNamespace(user=self.user, META={}, headers={}))
         with patch('security.integrity_service.app_check_enforcement_enabled', return_value=False), \
                 patch('sms_verification.schema.lookup_phone_with_line_type',
-                      return_value=(True, '+59177612254', 'BO', 'mobile')), \
+                      return_value=(True, '+59177612000', 'BO', 'mobile')), \
                 patch('sms_verification.schema.send_verification_sms', side_effect=error):
-            return InitiateSMSVerification.mutate(None, info, phone_number='77612254', country_code='BO')
+            return InitiateSMSVerification.mutate(None, info, phone_number='77612000', country_code='BO')
 
     def test_a_blocked_prefix_says_so_and_points_to_telegram(self):
         result = self._initiate(twilio_verify.TwilioVerifyError('403', code=60410))
