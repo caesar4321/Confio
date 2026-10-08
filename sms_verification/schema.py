@@ -80,6 +80,32 @@ class SMSVerificationType(DjangoObjectType):
         fields = ('id', 'phone_number', 'created_at', 'expires_at', 'is_verified')
 
 
+# Twilio Verify error codes → what the person can do about it (Spanish, the
+# app shows it as is). Telegram is the other way to get the code on the same
+# screen, so a refusal on the SMS side always points there.
+# The Telegram option sits on the method screen; a resend from the code screen
+# fails there, so the hint says to go back when it isn't on screen.
+_TELEGRAM = 'Elige "Recibir código por Telegram" (vuelve atrás si no lo ves).'
+SMS_SEND_ERRORS = {
+    # Twilio's fraud guard temporarily blocked the number's prefix (SMS pumping
+    # protection); nothing in Confío can lift it for this request.
+    60410: f'No pudimos enviar el SMS a este número por ahora: nuestro proveedor bloqueó temporalmente su prefijo. {_TELEGRAM}',
+    # Too many send attempts to the same number (our own hourly limit is
+    # stricter, so no promise of a wait time here).
+    60203: f'Demasiados intentos para este número. {_TELEGRAM}',
+    # The destination country/region isn't enabled for SMS.
+    60605: f'No podemos enviar SMS a este país por ahora. {_TELEGRAM}',
+    # A landline: it can't receive SMS. (60200 "invalid parameter" can be our
+    # own request, so it stays on the generic message.)
+    60205: f'Este número no puede recibir SMS. Revisa el número o {_TELEGRAM[0].lower()}{_TELEGRAM[1:]}',
+}
+SMS_SEND_GENERIC = f'No pudimos enviar el SMS. Inténtalo de nuevo más tarde o {_TELEGRAM[0].lower()}{_TELEGRAM[1:]}'
+
+
+def sms_send_error_message(code):
+    return SMS_SEND_ERRORS.get(code, SMS_SEND_GENERIC)
+
+
 class InitiateSMSVerification(graphene.Mutation):
     class Arguments:
         phone_number = graphene.String(required=True)
@@ -259,10 +285,10 @@ class InitiateSMSVerification(graphene.Mutation):
             return InitiateSMSVerification(success=True, error=None)
         except TwilioVerifyError as e:
             logger.exception("Twilio Verify error: %s", e)
-            return InitiateSMSVerification(success=False, error="Failed to send SMS")
+            return InitiateSMSVerification(success=False, error=sms_send_error_message(getattr(e, 'code', None)))
         except Exception as e:
             logger.exception("Failed to initiate SMS verification: %s", e)
-            return InitiateSMSVerification(success=False, error="Failed to send SMS")
+            return InitiateSMSVerification(success=False, error=sms_send_error_message(None))
 
 
 class VerifySMSCode(graphene.Mutation):
@@ -304,16 +330,16 @@ class VerifySMSCode(graphene.Mutation):
         review_code = next((c for p, c in review_test_pairs() if p == phone_e164), None)
         cached_approval = cached_code_approval(ver, code) if review_code is None else None
         if cached_approval is False:
-            return VerifySMSCode(success=False, error="Invalid verification code or maximum attempts exceeded")
+            return VerifySMSCode(success=False, error="Código incorrecto o demasiados intentos. Solicita un nuevo código.")
         if cached_approval is True:
             pass
         elif review_code is not None:
             if code != review_code:
-                return VerifySMSCode(success=False, error="Invalid verification code")
+                return VerifySMSCode(success=False, error="Código incorrecto. Revísalo e inténtalo de nuevo.")
         else:
             # Attempts control (retain local rate limit).
             if ver.attempts >= 5:
-                return VerifySMSCode(success=False, error="Maximum number of verification attempts exceeded")
+                return VerifySMSCode(success=False, error="Demasiados intentos. Solicita un nuevo código.")
             try:
                 approved, status = check_verification(phone_e164, code)
             except TwilioVerifyError as e:
@@ -321,7 +347,7 @@ class VerifySMSCode(graphene.Mutation):
                 approved = False
             if not approved:
                 SMSVerification.objects.filter(pk=ver.pk).update(attempts=F('attempts') + 1)
-                return VerifySMSCode(success=False, error="Invalid verification code")
+                return VerifySMSCode(success=False, error="Código incorrecto. Revísalo e inténtalo de nuevo.")
 
         if review_code is None and cached_approval is not True:
             if not record_code_approval(ver, code):
