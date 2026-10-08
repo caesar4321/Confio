@@ -7,7 +7,21 @@ from django.conf import settings
 
 
 class TwilioVerifyError(Exception):
-    pass
+    """`code` is Twilio's error code when the API returned one (e.g. 60410:
+    the number's prefix is temporarily blocked by Twilio's fraud guard)."""
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
+
+
+def _error_code(resp):
+    try:
+        body = resp.json()
+    except ValueError:
+        return None
+    code = body.get('code') if isinstance(body, dict) else None
+    return int(code) if isinstance(code, int) or (isinstance(code, str) and code.isdigit()) else None
 
 
 def _auth_header() -> str:
@@ -98,7 +112,7 @@ def send_verification_sms(phone_e164: str) -> Tuple[str, str]:
         data['Locale'] = locale
     resp = requests.post(url, headers=headers, data=data, timeout=10)
     if resp.status_code >= 400:
-        raise TwilioVerifyError(f"Twilio Verify error {resp.status_code}: {resp.text}")
+        raise TwilioVerifyError(f"Twilio Verify error {resp.status_code}: {resp.text}", code=_error_code(resp))
     j = resp.json()
     return j.get('sid', ''), j.get('status', '')
 
