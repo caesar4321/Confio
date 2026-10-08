@@ -73,7 +73,7 @@ class InitiateSmsMutationTests(TestCase):
                 patch('sms_verification.schema.lookup_phone_with_line_type',
                       return_value=(True, '+59177612000', 'BO', 'mobile')), \
                 patch('sms_verification.schema.send_verification_sms', side_effect=error):
-            return InitiateSMSVerification.mutate(None, info, phone_number='77612254', country_code='BO')
+            return InitiateSMSVerification.mutate(None, info, phone_number='77612000', country_code='BO')
 
     def test_a_blocked_prefix_says_so_and_points_to_telegram(self):
         result = self._initiate(twilio_verify.TwilioVerifyError('403', code=60410))
