@@ -79,8 +79,3 @@ export function logDoorShown(offer: PaidOfferKey, door: PaidOfferDoor) {
 export function logOfferStep(offer: PaidOfferKey, stage: 'detail_opened' | 'solo_miraba', door: string, trigger: string) {
   void AnalyticsService.logFunnelEvent('paid_offer_interest', { stage, offer, door, trigger }, { sourceType: offer });
 }
-
-// "9.99" → "US$9.99/mes"; null when the server sent no price.
-export function priceLabel(price: string | null | undefined): string | null {
-  return price ? `US$${price}/mes` : null;
-}

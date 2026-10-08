@@ -178,7 +178,7 @@ export default function AssistantSheet() {
     isOpen, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel, consumeVoiceNote,
     consumeVoiceNoteData, openSeq, route, plan,
     setPlan, available,
-    aiEnabled, bubbleAnchor, showNavNote, consumeProbe,
+    aiEnabled, bubbleAnchor, showNavNote, consumeProbe, setBoxShown,
   } = useAssistant();
   // Which chat head is open: Confio Assistant, Julian or Confío News.
   const [channel, setChannel] = useState<BoxChannel>('ia');
@@ -381,10 +381,10 @@ export default function AssistantSheet() {
   // Counted only when the pill is actually on screen (Confio Assistant's own
   // header, with the AI on), never for Soporte or Julian's channel.
   useEffect(() => {
-    if (isOpen && showIaPlusPill && aiEnabled && channel === 'ia') {
+    if (isOpen && showIaPlusPill && aiEnabled && available && channel === 'ia') {
       logDoorShown('ia_plus', 'assistant_header');
     }
-  }, [isOpen, showIaPlusPill, aiEnabled, channel]);
+  }, [isOpen, showIaPlusPill, aiEnabled, available, channel]);
   const openIaPlus = useCallback(() => {
     close();
     setTimeout(
@@ -701,12 +701,30 @@ export default function AssistantSheet() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+  // The floating bubble waits until this box (and its bubble gliding home)
+  // is gone, so two bubbles are never on screen at once.
+  useEffect(() => {
+    setBoxShown(shown);
+  }, [shown, setBoxShown]);
 
   // Android: with the keyboard up, sit right on top of it. The modal window may
   // already have shrunk (adjustResize) and the bubble may have moved too, so
   // anchoring to the bubble would lift the box twice; measure instead.
   const [modalH, setModalH] = useState(0);
   const [kbTop, setKbTop] = useState<number | null>(null);
+  // Either platform: with the keyboard up, the box's bubble (often docked at
+  // the bottom) would sit under it, so it steps away until the keyboard goes.
+  const [kbUp, setKbUp] = useState(false);
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvent, () => setKbUp(true));
+    const hide = Keyboard.addListener(hideEvent, () => setKbUp(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   useEffect(() => {
     if (Platform.OS !== 'android') {
       return undefined;
@@ -729,10 +747,19 @@ export default function AssistantSheet() {
     ? { top: topSafe + 12, bottom: Math.max(8, modalH - kbTop + 8) }
     : null;
 
-  const anchor = bubbleAnchor
+  // Where the bubble sits on the screen (the user drags it anywhere).
+  const rest = bubbleAnchor
     ? { ...bubbleAnchor, y: bubbleAnchor.y + statusShift }
     : { x: screenW - 62 - 12, y: boxH - insets.bottom - 62 - 76, size: 62 };
-  const below = anchor.y < boxH / 2; // bubble high on screen: open downward
+  const below = rest.y < boxH / 2; // bubble high on screen: open downward
+  // While the box is open the bubble glides to the nearer corner (top or
+  // bottom, same side), so the box always gets the whole height instead of
+  // only the part between the bubble and one edge; it glides back on close.
+  const anchor = {
+    ...rest,
+    y: below ? topSafe + 8 : boxH - Math.max(insets.bottom, 10) - rest.size - 8,
+  };
+  const dockShift = progress.interpolate({ inputRange: [0, 1], outputRange: [rest.y - anchor.y, 0] });
   const gap = 14;
   const area = keyboardArea ?? (below
     ? { top: anchor.y + anchor.size + gap, bottom: Math.max(insets.bottom, 10) + 6 }
@@ -875,17 +902,6 @@ export default function AssistantSheet() {
               <Text style={styles.petChipText}>✨ Tu asistente</Text>
             </Pressable>
           ) : null}
-          {aiEnabled && showIaPlusPill ? (
-            <Pressable
-              onPress={openIaPlus}
-              style={styles.iaPlusPill}
-              accessibilityRole="button"
-              accessibilityLabel="Confío IA+, próximamente"
-              hitSlop={6}
-            >
-              <Text style={styles.iaPlusPillText}>IA+ · Próximamente</Text>
-            </Pressable>
-          ) : null}
           {aiEnabled && plan?.isPlus ? (
             <Pressable
               onPress={() => setShowPlus((v) => !v)}
@@ -901,6 +917,25 @@ export default function AssistantSheet() {
             </Pressable>
           ) : null}
         </View>
+        {aiEnabled && showIaPlusPill ? (
+          // Its own line under the header (a pill inside the header row
+          // squeezed the title into a letter-per-line column on phones).
+          <Pressable
+            onPress={openIaPlus}
+            style={({ pressed }) => [styles.iaPlusStrip, pressed && styles.iaPlusStripPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Confío IA+, próximamente. Tu asistente financiero personal"
+          >
+            <View style={styles.iaPlusBadge}>
+              <Text style={styles.iaPlusBadgeText}>IA+</Text>
+            </View>
+            <View style={styles.iaPlusStripText}>
+              <Text style={styles.iaPlusStripTitle} numberOfLines={1}>Conoce Confío IA+</Text>
+              <Text style={styles.iaPlusStripSub} numberOfLines={1}>Próximamente · tu asistente financiero personal</Text>
+            </View>
+            <Icon name="chevron-right" size={18} color="#065F46" />
+          </Pressable>
+        ) : null}
 
         {showPlus && plan?.isPlus ? (
           <AssistantPlusPanel
@@ -1048,15 +1083,16 @@ export default function AssistantSheet() {
       </KeyboardAvoidingView>
 
       {/* The tail and the bubble itself tie the box to where it came from. */}
-      {keyboardArea ? null : (
+      {keyboardArea || kbUp ? null : (
       <Animated.View
         pointerEvents="none"
         style={[styles.tail, below ? styles.tailUp : styles.tailDown, { left: tailLeft, top: tailTop, opacity: progress }]}
       />
       )}
-      {keyboardArea ? null : (
+      {keyboardArea || kbUp ? null : (
       <Animated.View
-        style={[styles.anchor, { left: anchor.x, top: anchor.y, opacity: progress, transform: [{ scale: grow }] }]}
+        // No scale: it starts exactly where (and as big as) the floating bubble was.
+        style={[styles.anchor, { left: anchor.x, top: anchor.y, transform: [{ translateY: dockShift }] }]}
       >
         <Pressable onPress={close} style={styles.anchorButton} accessibilityLabel="Cerrar mensajes">
           {aiEnabled ? (
@@ -1241,18 +1277,34 @@ const styles = StyleSheet.create({
     borderColor: '#A7F3D0',
   },
   petChipText: { fontSize: 12, fontWeight: '700', color: EMERALD },
-  // Confío IA+ probe: same quiet pill language as the pet chip, never violet
+  // Confío IA+ probe: a quiet mint strip under the header, never violet
   // (violet reads as an AI unlock, design review 11).
-  iaPlusPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginLeft: 6,
-    borderRadius: 999,
-    backgroundColor: '#FFFFFF',
+  iaPlusStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: '#ECFDF5',
     borderWidth: 1,
     borderColor: '#A7F3D0',
   },
-  iaPlusPillText: { fontSize: 12, fontWeight: '700', color: '#065F46' },
+  iaPlusStripPressed: { backgroundColor: '#D1FAE5' },
+  iaPlusBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#065F46',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  iaPlusBadgeText: { fontSize: 12, fontWeight: '700', color: '#FCD34D' },
+  iaPlusStripText: { flex: 1 },
+  iaPlusStripTitle: { fontSize: 14, fontWeight: '700', color: '#065F46' },
+  iaPlusStripSub: { fontSize: 12, color: '#047857', marginTop: 1 },
   starterPet: { borderColor: '#A7F3D0', backgroundColor: '#ECFDF5' },
   starterPetText: { fontSize: 13, color: EMERALD, fontWeight: '600' },
   bubbleTeam: { backgroundColor: '#EEF2FF', borderBottomLeftRadius: 6 },
