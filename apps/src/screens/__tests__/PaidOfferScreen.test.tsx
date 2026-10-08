@@ -16,7 +16,8 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({goBack: mockGoBack}),
   useRoute: () => ({params: mockParams}),
 }));
-jest.mock('../../navigation/Header', () => ({Header: 'Header'}));
+jest.mock('react-native-safe-area-context', () => ({useSafeAreaInsets: () => ({top: 0, bottom: 0, left: 0, right: 0})}));
+jest.mock('../../components/svg/CuentaInteligenteMark', () => 'CuentaInteligenteMark');
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../../services/analyticsService', () => ({AnalyticsService: {logFunnelEvent: jest.fn()}}));
 import {AnalyticsService} from '../../services/analyticsService';
@@ -42,7 +43,9 @@ afterEach(async () => { if (tree) { await act(async () => tree.unmount()); } });
 it('shows the matched pitch with the server price and logs the open once', async () => {
   await mount();
   expect(texts(tree)).toContain('Cuenta inteligente');
-  expect(texts(tree)).toContain('Próximamente · US$9.99/mes al lanzar');
+  expect(texts(tree)).toContain('US$9.99');
+  expect(texts(tree)).toContain('/mes al lanzar');
+  expect(texts(tree)).toContain('Hoy no se cobra nada');
   const calls = (AnalyticsService.logFunnelEvent as jest.Mock).mock.calls;
   expect(calls).toHaveLength(1);
   expect(calls[0][1]).toMatchObject({stage: 'detail_opened', offer: 'smart_account', door: 'billeteras'});

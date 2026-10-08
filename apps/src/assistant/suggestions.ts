@@ -36,6 +36,10 @@ export const DOCK_ROUTES = new Set([
   'PayrollRunsHistory', 'PayeeDetail', 'FriendDetail', 'EmployeeDetail', 'PendingIncoming', 'Verification',
 ]);
 
+// Screens with their own pinned action bar where even a docked bubble would
+// cover a button: the bubble steps away entirely there.
+export const HIDDEN_ROUTES = new Set(['PaidOffer']);
+
 const HINTS: Record<string, ScreenHint[]> = {
   Home: [
     { hint: '¿Te cuento en qué se fue tu dinero este mes?', prompt: '¿En qué gasté más este mes?' },

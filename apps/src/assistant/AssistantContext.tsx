@@ -54,6 +54,10 @@ type AssistantState = {
   // Where the bubble rests, so the open box can grow out of it and point at it.
   bubbleAnchor: { x: number; y: number; size: number } | null;
   setBubbleAnchor: (anchor: { x: number; y: number; size: number } | null) => void;
+  // The box is on screen, closing animation included: the floating bubble
+  // stays hidden until the box's own bubble has glided back and gone.
+  boxShown: boolean;
+  setBoxShown: (shown: boolean) => void;
   // A voice call is live (the wake word pauses, the bubble shows it).
   inCall: boolean;
   setInCall: (inCall: boolean) => void;
@@ -74,6 +78,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [bubbleAnchor, setBubbleAnchor] = useState<{ x: number; y: number; size: number } | null>(null);
   const [plan, setPlan] = useState<AssistantPlan | null>(null);
   const [inCall, setInCall] = useState(false);
+  const [boxShown, setBoxShown] = useState(false);
   const [micBusy, setMicBusy] = useState(false);
   const [openSeq, setOpenSeq] = useState(0);
   const [navNote, setNavNote] = useState<{ text: string; seq: number } | null>(null);
@@ -154,11 +159,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     () => ({
       isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
       consumeVoiceNote, consumeVoiceNoteData, available, setAvailable, aiEnabled, setAiEnabled, plan, setPlan, inCall, setInCall,
-      bubbleAnchor, setBubbleAnchor, micBusy, setMicBusy, openSeq, navNote, showNavNote,
+      bubbleAnchor, setBubbleAnchor, micBusy, setMicBusy, openSeq, navNote, showNavNote, boxShown, setBoxShown,
     }),
     [isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
       consumeVoiceNote, consumeVoiceNoteData, available,
-      aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote],
+      aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote, boxShown],
   );
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }

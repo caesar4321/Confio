@@ -25,7 +25,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { GET_ASSISTANT_THREAD, UPDATE_ASSISTANT_PROFILE, GET_ASSISTANT_SUGGESTIONS, type AssistantSuggestion } from './api';
 import AssistantMascot from './AssistantMascot';
 import { useAssistant } from './AssistantContext';
-import { DOCK_ROUTES, TAB_ROUTES, hintFor, type ScreenHint } from './suggestions';
+import { DOCK_ROUTES, HIDDEN_ROUTES, TAB_ROUTES, hintFor, type ScreenHint } from './suggestions';
 import { MAX_VOICE_NOTE_MS, cancelVoiceNote, isVoiceNoteAvailable, startVoiceNote, stopVoiceNote } from './voiceNote';
 
 // Hold still this long to start talking; moving earlier is a drag.
@@ -51,7 +51,7 @@ const NOTE_MAX_CHARS = 180;
 export default function AssistantBubble() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy, navNote } = useAssistant();
+  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy, navNote, boxShown } = useAssistant();
   const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
   const { activeAccount } = useAccount();
   const [keyboardUp, setKeyboardUp] = useState(false);
@@ -322,7 +322,7 @@ export default function AssistantBubble() {
     [pan, saveProfile],
   );
 
-  const visible = enabled && !isOpen && !keyboardUp;
+  const visible = enabled && !isOpen && !boxShown && !keyboardUp && !(route && HIDDEN_ROUTES.has(route));
 
   // The chat just moved the app: say here what it said there. Not a
   // suggestion, so no cooldown or session cap, and it survives the route change.
