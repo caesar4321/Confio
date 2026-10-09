@@ -201,6 +201,74 @@ def sync_face_blocklist(user_id) -> None:
         raise failure
 
 
+FACE_IN_BLOCKLIST = 'FACE_IN_BLOCKLIST'
+AUTO_BAN_LOOKBACK_DAYS = 7
+
+
+def blocklisted_sessions_matched(decision) -> set[str]:
+    """Blocklisted sessions a Didit decision confirmed the face against.
+    Only Didit's confirmed match (FACE_IN_BLOCKLIST), never a POSSIBLE_*."""
+    matched = set()
+    for key in ('liveness_checks', 'face_matches'):
+        items = (decision or {}).get(key)
+        for item in items if isinstance(items, list) else []:
+            for warning in (item or {}).get('warnings') or []:
+                if isinstance(warning, dict) and warning.get('risk') == FACE_IN_BLOCKLIST:
+                    session_id = (warning.get('additional_data') or {}).get('blocklisted_session_id')
+                    if session_id:
+                        matched.add(str(session_id))
+    return matched
+
+
+def ban_if_face_blocklisted(verification):
+    """A new account showing the face of a permanently banned person is that
+    person back: ban it too, the way staff did by hand (Lucas Martins De
+    Souza, 2026-10-06/09). Only when the match is one of OUR entries whose
+    user is still banned, so a lifted ban or an unknown entry never bans."""
+    from django.contrib.auth import get_user_model
+    from django.db.models import F
+    didit = (verification.risk_factors or {}).get('didit') or {}
+    matched = blocklisted_sessions_matched(didit.get('session'))
+    if not matched:
+        return None
+    user_id = verification.user_id
+    sources = set(DiditFaceBlocklistEntry.objects.filter(session_id__in=matched, removed_at__isnull=True)
+                  .exclude(user_id=user_id).values_list('user_id', flat=True))
+    banned_sources = sorted(uid for uid in sources if blocks_face(uid))
+    if not banned_sources:
+        return None
+    User = get_user_model()
+    with transaction.atomic():
+        user = User.all_objects.select_for_update().filter(pk=user_id).first()
+        # Live: nothing to do. Lifted: staff decided, never re-ban it.
+        if user is None or UserBan.all_objects.filter(user_id=user_id, ban_type='permanent').exists():
+            return None
+        ban = UserBan.objects.create(
+            user=user, ban_type='permanent', reason='multiple_accounts',
+            reason_details=(
+                f'Restricción automática {timezone.now():%Y-%m-%d}. Observado en nuestros registros: la '
+                f"verificación de identidad (sesión Didit {didit.get('session_id') or '-'}) coincidió con el "
+                f"rostro de la(s) cuenta(s) restringida(s) de forma permanente {', '.join(map(str, banned_sources))}."))
+        User.all_objects.filter(pk=user_id).update(is_active=False, auth_token_version=F('auth_token_version') + 1)
+    logger.warning('Auto-banned: user=%s face matches permanently banned %s (session=%s)',
+                   user_id, banned_sources, didit.get('session_id'))
+    return ban
+
+
+def auto_ban_face_blocklisted() -> int:
+    """Hourly safety net for decisions whose immediate auto-ban failed."""
+    from datetime import timedelta
+    since = timezone.now() - timedelta(days=AUTO_BAN_LOOKBACK_DAYS)
+    banned = 0
+    for verification in IdentityVerification.all_objects.filter(
+            created_at__gte=since, risk_factors__didit__session__isnull=False).iterator():
+        try:
+            banned += bool(ban_if_face_blocklisted(verification))
+        except Exception:
+            logger.exception('Face blocklist auto-ban failed: verification=%s', verification.pk)
+    return banned
+
+
 LIFTED_CLEANUP_DAYS = 7
 
 
@@ -210,6 +278,7 @@ def reconcile_face_blocklist() -> int:
     (an untracked entry has no row to keep them listed). Returns how many
     failed (retried on the next run)."""
     from datetime import timedelta
+    auto_ban_face_blocklisted()
     now = timezone.now()
     banned = set(UserBan.objects.filter(ban_type='permanent').filter(
         Q(expires_at__isnull=True) | Q(expires_at__gt=now)).values_list('user_id', flat=True))

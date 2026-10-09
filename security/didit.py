@@ -1799,6 +1799,13 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
             # compares against. A failure here is logged, not raised: KYC
             # stands, and the backfill command can copy it later.
             transaction.on_commit(lambda: _store_face_reference(verification, response_payload))
+    try:
+        # The face of a permanently banned person: this account is them again.
+        from .didit_blocklist import ban_if_face_blocklisted
+        with transaction.atomic():  # a savepoint: a DB error here never aborts the KYC result
+            ban_if_face_blocklisted(verification)
+    except Exception:  # the hourly reconcile retries; KYC sync must not fail
+        logger.exception('Face blocklist auto-ban failed: verification=%s', verification.pk)
     if not verification.is_additional_document:
         # An extra document is not "your account was verified"; the flow that
         # asked for it reads the result itself.

@@ -665,3 +665,109 @@ class FaceBlocklistTests(TestCase):
                 with self.assertRaises(didit.DiditAPIError):
                     _all_rows(path)
                 self.assertEqual(call.call_count, 1)
+
+
+class FaceBlocklistAutoBanTests(TestCase):
+    """A new account showing a permanently banned face is that person back."""
+
+    def setUp(self):
+        from security.models import DiditFaceBlocklistEntry
+        User = get_user_model()
+        self.banned = User.objects.create_user(username='banned-face', firebase_uid='banned-face')
+        self.source_ban = self._ban(self.banned)
+        DiditFaceBlocklistEntry.objects.create(user=self.banned, session_id='blk-A', list_uuid='l', entry_uuid='e')
+        self.newcomer = User.objects.create_user(username='new-face', firebase_uid='new-face')
+
+    def _ban(self, user, **kwargs):
+        with mock.patch('security.tasks.sync_face_blocklist.delay'), self.captureOnCommitCallbacks(execute=True):
+            return UserBan.objects.create(user=user, reason='fraud', **{'ban_type': 'permanent', **kwargs})
+
+    def _decision(self, risk='FACE_IN_BLOCKLIST', blocklisted='blk-A'):
+        return _document(self.newcomer, 'N-1', status='rejected', risk_factors={'provider': 'didit', 'didit': {
+            'session_id': 'session-N-1', 'session': {'liveness_checks': [{'status': 'Declined', 'warnings': [
+                {'risk': risk, 'additional_data': {'blocklisted_session_id': blocklisted}}]}]}}})
+
+    def _auto_ban(self, verification):
+        from security.didit_blocklist import ban_if_face_blocklisted
+        with mock.patch('security.tasks.sync_face_blocklist.delay'), self.captureOnCommitCallbacks(execute=True):
+            return ban_if_face_blocklisted(verification)
+
+    def test_a_confirmed_match_to_a_banned_face_bans_the_new_account(self):
+        version = self.newcomer.auth_token_version
+        ban = self._auto_ban(self._decision())
+        self.assertEqual((ban.user_id, ban.ban_type, ban.expires_at), (self.newcomer.pk, 'permanent', None))
+        self.assertIn(str(self.banned.pk), ban.reason_details)
+        self.newcomer.refresh_from_db()
+        self.assertFalse(self.newcomer.is_active)
+        self.assertEqual(self.newcomer.auth_token_version, version + 1)  # logged out everywhere
+        self.assertIsNone(self._auto_ban(self._decision()))  # once
+
+    def test_a_possible_match_never_bans(self):
+        self.assertIsNone(self._auto_ban(self._decision(risk='POSSIBLE_FACE_IN_BLOCKLIST')))
+        self.assertFalse(UserBan.all_objects.filter(user=self.newcomer).exists())
+
+    def test_a_match_outside_our_entries_never_bans(self):
+        self.assertIsNone(self._auto_ban(self._decision(blocklisted='someone-elses-entry')))
+
+    def test_a_lifted_source_ban_never_bans(self):
+        UserBan.all_objects.filter(pk=self.source_ban.pk).update(deleted_at=timezone.now())
+        self.assertIsNone(self._auto_ban(self._decision()))
+
+    def test_staff_lifting_the_auto_ban_is_final(self):
+        ban = self._auto_ban(self._decision())
+        UserBan.all_objects.filter(pk=ban.pk).update(deleted_at=timezone.now())
+        from security.didit_blocklist import auto_ban_face_blocklisted
+        with mock.patch('security.tasks.sync_face_blocklist.delay'):
+            self.assertEqual(auto_ban_face_blocklisted(), 0)
+        self.assertEqual(UserBan.all_objects.filter(user=self.newcomer).count(), 1)
+
+    def test_the_hourly_reconcile_catches_a_missed_auto_ban(self):
+        self._decision()
+        from security.didit_blocklist import auto_ban_face_blocklisted
+        with mock.patch('security.tasks.sync_face_blocklist.delay'), self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(auto_ban_face_blocklisted(), 1)
+        self.assertTrue(UserBan.objects.filter(user=self.newcomer, ban_type='permanent').exists())
+
+    def test_a_match_against_the_users_own_entry_never_bans(self):
+        from security.didit_blocklist import ban_if_face_blocklisted
+        verification = _document(self.banned, 'B-1', status='rejected', risk_factors={'provider': 'didit', 'didit': {
+            'session_id': 'session-B-1', 'session': {'liveness_checks': [{'warnings': [
+                {'risk': 'FACE_IN_BLOCKLIST', 'additional_data': {'blocklisted_session_id': 'blk-A'}}]}]}}})
+        self.assertIsNone(ban_if_face_blocklisted(verification))
+        self.assertEqual(UserBan.all_objects.filter(user=self.banned).count(), 1)
+
+    def _sync_declined(self):
+        _document(self.newcomer, 'N-2', status='pending',
+                  risk_factors={'provider': 'didit', 'didit': {'session_id': 's-new'}})
+        declined = {
+            'session_id': 's-new', 'status': 'Declined',
+            'vendor_data': f'{{"user_id":{self.newcomer.id},"account_type":"personal"}}',
+            'first_name': 'Ana', 'last_name': 'Perez', 'date_of_birth': '1990-01-01',
+            'id_verifications': [{'nationality': 'BRA', 'document_type': 'ID', 'document_number': 'N-2',
+                                  'issuing_state': 'BRA', 'expiration_date': '2030-12-31'}],
+            'liveness_checks': [{'status': 'Declined', 'warnings': [
+                {'risk': 'FACE_IN_BLOCKLIST', 'additional_data': {'blocklisted_session_id': 'blk-A'}}]}],
+        }
+        with mock.patch('security.didit.retrieve_didit_decision', return_value=declined), \
+                mock.patch('security.didit._notify_verification_status_change') as notify, \
+                mock.patch('security.tasks.sync_face_blocklist.delay'), self.captureOnCommitCallbacks(execute=True):
+            didit.sync_didit_session(session_id='s-new', expected_user=self.newcomer)
+        return IdentityVerification.all_objects.get(user=self.newcomer, document_number='N-2'), notify
+
+    def test_the_didit_sync_bans_on_a_confirmed_match(self):
+        row, notify = self._sync_declined()
+        self.assertEqual(row.status, 'rejected')
+        self.assertTrue(UserBan.objects.filter(user=self.newcomer, ban_type='permanent').exists())
+        notify.assert_called_once()
+
+    def test_an_auto_ban_failure_never_loses_the_kyc_result(self):
+        from django.db import connection
+
+        def broken(verification):
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT 1/0')  # aborts the transaction it runs in
+        with mock.patch('security.didit_blocklist.ban_if_face_blocklisted', side_effect=broken):
+            row, notify = self._sync_declined()
+        self.assertEqual(row.status, 'rejected')
+        notify.assert_called_once()
+        self.assertFalse(UserBan.all_objects.filter(user=self.newcomer).exists())
