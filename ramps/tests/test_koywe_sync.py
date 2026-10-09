@@ -1405,6 +1405,173 @@ class KoyweAccountProfileTests(SimpleTestCase):
 
         self.assertTrue(client._account_profile_satisfies_payload(existing, payload))
 
+    MX_EXISTING = {
+        'document': {'documentNumber': 'NERM900101HMCRRR09', 'documentType': 'CURP', 'country': 'MEX'},
+        'personalInfo': {
+            'names': 'Martin',
+            'firstLastname': 'Neri',
+            'activity': 'OTHER',
+            'phoneNumber': '525512345678',
+            'dob': '1990-01-01',
+        },
+        'address': {
+            'addressStreet': 'Cuitláhuac S/N',
+            'addressCountry': 'MEX',
+            'addressZipCode': '54946',
+            'addressCity': 'Buenavista',
+            'addressState': 'Estado de México',
+            'addressNeighborhood': 'San Francisco Chilpan',
+        },
+    }
+
+    def _mx_payload(self, *, activity, neighborhood='San Francisco Chilpan'):
+        payload = {
+            'document': dict(self.MX_EXISTING['document']),
+            'personalInfo': {**self.MX_EXISTING['personalInfo'], 'activity': activity},
+            'address': {**self.MX_EXISTING['address'], 'addressNeighborhood': neighborhood},
+        }
+        return payload
+
+    def test_activity_filled_in_after_creation_is_not_satisfied_by_other(self):
+        # Koywe blocked a MX user whose profile kept OTHER after he picked a
+        # real activity: the address-only check never triggered the PUT.
+        client = KoyweClient()
+        payload = self._mx_payload(activity='Industria de la madera')
+        self.assertFalse(client._account_profile_satisfies_payload(self.MX_EXISTING, payload))
+
+    def test_matching_activity_and_neighborhood_satisfy_profile(self):
+        client = KoyweClient()
+        existing = {
+            **self.MX_EXISTING,
+            'personalInfo': {**self.MX_EXISTING['personalInfo'], 'activity': 'Industria de la madera'},
+        }
+        payload = self._mx_payload(activity='industria de la madera')
+        self.assertTrue(client._account_profile_satisfies_payload(existing, payload))
+
+    def test_other_activity_never_forces_an_update(self):
+        client = KoyweClient()
+        existing = {
+            **self.MX_EXISTING,
+            'personalInfo': {**self.MX_EXISTING['personalInfo'], 'activity': 'Industria de la madera'},
+        }
+        self.assertTrue(client._account_profile_satisfies_payload(existing, self._mx_payload(activity='OTHER')))
+
+    def test_changed_neighborhood_is_not_satisfied(self):
+        client = KoyweClient()
+        payload = self._mx_payload(activity='OTHER', neighborhood='Centro')
+        self.assertFalse(client._account_profile_satisfies_payload(self.MX_EXISTING, payload))
+
+    @mock.patch('ramps.koywe_client.cache.set')
+    @mock.patch('ramps.koywe_client.cache.get', return_value=None)
+    def test_new_activity_is_pushed_to_existing_account(self, _cache_get, _cache_set):
+        client = KoyweClient()
+        payload = self._mx_payload(activity='Industria de la madera')
+        with mock.patch.object(
+            client, '_build_account_profile_payload', return_value=payload,
+        ), mock.patch.object(
+            client, 'get_account', return_value=self.MX_EXISTING,
+        ), mock.patch.object(client, 'update_account') as update_account:
+            client.ensure_account_profile(
+                email='owner@example.com',
+                country_code='MX',
+                contact_profile={
+                    'email': 'owner@example.com',
+                    'documentNumber': 'NERM900101HMCRRR09',
+                    'documentType': 'CURP',
+                    'activity': 'Industria de la madera',
+                },
+            )
+
+        update_account.assert_called_once()
+        sent = update_account.call_args.kwargs['payload']
+        self.assertEqual(sent['personalInfo']['activity'], 'Industria de la madera')
+
+    def test_activity_change_busts_the_profile_sync_cache(self):
+        client = KoyweClient()
+        keys = []
+
+        def capture_get(key):
+            keys.append(key)
+            return True  # cached: ensure_account_profile returns before any I/O
+
+        base = {'email': 'owner@example.com', 'documentNumber': 'NERM900101HMCRRR09', 'documentType': 'CURP'}
+        with mock.patch('ramps.koywe_client.cache.get', side_effect=capture_get):
+            client.ensure_account_profile(email='owner@example.com', country_code='MX', contact_profile={**base, 'activity': 'OTHER'})
+            client.ensure_account_profile(email='owner@example.com', country_code='MX', contact_profile={**base, 'activity': 'Industria de la madera'})
+
+        self.assertEqual(len(keys), 2)
+        self.assertNotEqual(keys[0], keys[1])
+
+    def test_profile_sync_cache_key_is_stable_and_tracks_neighborhood(self):
+        client = KoyweClient()
+        keys = []
+
+        def capture_get(key):
+            keys.append(key)
+            return True
+
+        base = {'email': 'owner@example.com', 'documentNumber': 'NERM900101HMCRRR09', 'documentType': 'CURP', 'activity': 'Comercio'}
+        with mock.patch('ramps.koywe_client.cache.get', side_effect=capture_get):
+            for neighborhood in ('Centro', 'Centro', 'Roma'):
+                client.ensure_account_profile(
+                    email='owner@example.com', country_code='MX',
+                    contact_profile={**base, 'addressNeighborhood': neighborhood},
+                )
+
+        self.assertEqual(keys[0], keys[1])
+        self.assertNotEqual(keys[1], keys[2])
+
+    def test_unicode_normalization_differences_still_satisfy(self):
+        import unicodedata
+        client = KoyweClient()
+        existing = {
+            **self.MX_EXISTING,
+            'personalInfo': {**self.MX_EXISTING['personalInfo'], 'activity': unicodedata.normalize('NFD', 'Industria fílmica')},
+        }
+        payload = self._mx_payload(activity=unicodedata.normalize('NFC', 'Industria fílmica'))
+        self.assertTrue(client._account_profile_satisfies_payload(existing, payload))
+
+    @mock.patch('ramps.koywe_client.cache.set')
+    @mock.patch('ramps.koywe_client.cache.get', return_value=None)
+    def test_refused_activity_refresh_does_not_block_the_order(self, _cache_get, cache_set):
+        client = KoyweClient()
+        payload = self._mx_payload(activity='Industria de la madera')
+        with mock.patch.object(
+            client, '_build_account_profile_payload', return_value=payload,
+        ), mock.patch.object(
+            client, 'get_account', return_value=self.MX_EXISTING,
+        ), mock.patch.object(
+            client, 'update_account', side_effect=KoyweError('personalInfo cannot be modified'),
+        ) as update_account:
+            resolved = client.ensure_account_profile(
+                email='owner@example.com',
+                country_code='MX',
+                contact_profile={'email': 'owner@example.com', 'documentNumber': 'NERM900101HMCRRR09'},
+            )
+
+        self.assertIsNone(resolved)
+        update_account.assert_called_once()
+        cache_set.assert_called_once()
+
+    @mock.patch('ramps.koywe_client.cache.get', return_value=None)
+    def test_refused_identity_update_still_raises(self, _cache_get):
+        client = KoyweClient()
+        existing = {**self.MX_EXISTING, 'address': {}}  # core address missing
+        payload = self._mx_payload(activity='Industria de la madera')
+        with mock.patch.object(
+            client, '_build_account_profile_payload', return_value=payload,
+        ), mock.patch.object(
+            client, 'get_account', return_value=existing,
+        ), mock.patch.object(
+            client, 'update_account', side_effect=KoyweError('invalid address'),
+        ):
+            with self.assertRaisesRegex(KoyweError, 'invalid address'):
+                client.ensure_account_profile(
+                    email='owner@example.com',
+                    country_code='MX',
+                    contact_profile={'email': 'owner@example.com', 'documentNumber': 'NERM900101HMCRRR09'},
+                )
+
     def test_chile_rut_format_difference_does_not_request_document_update(self):
         client = KoyweClient()
         payload = client._build_migration_payload(
