@@ -132,6 +132,8 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - Confío Dollar (cUSD): el dólar para el día a día, respaldado 1 a 1 por USDT. No genera rendimiento.
 - Confío Dollar+ (cUSD+): el dólar para ahorrar, respaldado por USDY de Ondo (bonos del Tesoro de EE.UU.). Genera rendimiento diario con una tasa variable que ves en la app; no está garantizado.
 - Acciones de EE.UU.: acciones digitales emitidas por Ondo.
+- Monto mínimo: desde US$1,01 para comprar cualquier acción o ETF de la lista (igual para todas) y US$1 para vender.
+<!-- apps/src/screens/BuyStockScreen.tsx MIN_AMOUNT_USD 1.01 (leaves $1 net after 30 bps); SellStockScreen 1. -->
 - Confío Dollar+ y acciones no están disponibles en EE.UU., Canadá, Brasil, la Unión Europea, Reino Unido, Suiza, Singapur, Hong Kong, Malasia y algunos otros países, por requisitos del emisor (Ondo).
 - Las recargas nuevas llegan como Confío Dollar+ si está disponible en tu país; si no, como Confío Dollar.
 <!-- CUSD_DEPOSITS_PAUSED True; useRampFlows.tsx:39-50 (eligibility decides cUSD+ vs Confío Dollar); CUSD_PLUS_STOCK_TRADING_ENABLED True; eligibility by phone country: cusd_plus/eligibility.py:18-33. -->
