@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 import unicodedata
@@ -952,7 +953,14 @@ class KoyweClient:
         if not normalized_email or not document_number:
             return None
 
-        cache_key = f'koywe:account-profile:{normalized_email}:{country_code.upper()}:{document_number}'
+        # Fields the user can fill in later are part of the key, so editing them
+        # re-syncs on the next order instead of after the 24h TTL.
+        late_fields = '|'.join(
+            str(normalized_contact.get(field) or '').strip().casefold()
+            for field in ('activity', 'addressNeighborhood')
+        )
+        late_fields_digest = hashlib.sha256(late_fields.encode()).hexdigest()[:12]
+        cache_key = f'koywe:account-profile:{normalized_email}:{country_code.upper()}:{document_number}:{late_fields_digest}'
         if cache.get(cache_key):
             return None
 
@@ -983,7 +991,12 @@ class KoyweClient:
                     current_email=normalized_email,
                     new_email=None,
                 )
-                self.update_account(email=normalized_email, payload=update_payload)
+                self._update_account_profile(
+                    email=normalized_email,
+                    existing=existing,
+                    payload=payload,
+                    update_payload=update_payload,
+                )
             cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
             return None
 
@@ -1061,8 +1074,30 @@ class KoyweClient:
             current_email=email,
             new_email=None,
         )
-        self.update_account(email=email, payload=update_payload)
+        self._update_account_profile(
+            email=email,
+            existing=existing,
+            payload=payload,
+            update_payload=update_payload,
+        )
         return None
+
+    def _update_account_profile(self, *, email: str, existing: dict[str, Any], payload: dict[str, Any], update_payload: dict[str, Any]) -> None:
+        """PUT a profile update; a refused compliance-only refresh never blocks the order.
+
+        When identity and address already satisfy Koywe, the update only
+        carries late compliance fields (activity, colonia). The order worked
+        without them before, so a rejection is logged, not raised.
+        """
+        compliance_only = self._account_profile_core_satisfies_payload(existing, payload)
+        if compliance_only:
+            logger.info('Koywe profile refresh for %s: activity/neighborhood changed', email)
+        try:
+            self.update_account(email=email, payload=update_payload)
+        except KoyweError as exc:
+            if not compliance_only:
+                raise
+            logger.warning('Koywe refused the activity/neighborhood refresh for %s: %s', email, exc)
 
     def _build_migration_payload(self, *, existing: dict[str, Any], target_payload: dict[str, Any], country_code: str, current_email: str, new_email: str | None) -> dict[str, Any]:
         """Build a PUT payload with updateEmail/updateDocumentNumber/updateDocumentType as needed."""
@@ -1161,7 +1196,7 @@ class KoyweClient:
         payload['address'] = address_fields
         return payload
 
-    def _account_profile_satisfies_payload(self, existing: dict[str, Any], payload: dict[str, Any]) -> bool:
+    def _account_profile_core_satisfies_payload(self, existing: dict[str, Any], payload: dict[str, Any]) -> bool:
         if not isinstance(existing, dict):
             return False
 
@@ -1194,6 +1229,32 @@ class KoyweClient:
             for field in ('addressStreet', 'addressCountry', 'addressZipCode', 'addressCity', 'addressState')
         )
         return document_matches and personal_present and address_present
+
+    def _account_profile_satisfies_payload(self, existing: dict[str, Any], payload: dict[str, Any]) -> bool:
+        if not self._account_profile_core_satisfies_payload(existing, payload):
+            return False
+        # Compliance fields collected after the account was created (MX colonia,
+        # economic activity) must reach Koywe, or the profile keeps its OTHER /
+        # blank values and Koywe blocks the user for incomplete compliance data.
+        def same(left: Any, right: Any) -> bool:
+            def norm(value: Any) -> str:
+                return unicodedata.normalize('NFKC', str(value or '').strip()).casefold()
+            return norm(left) == norm(right)
+
+        existing_personal_info = existing.get('personalInfo') or {}
+        existing_address = existing.get('address') or {}
+        wanted_activity = str((payload.get('personalInfo') or {}).get('activity') or '').strip()
+        activity_matches = (
+            not wanted_activity
+            or wanted_activity.upper() == 'OTHER'
+            or same(existing_personal_info.get('activity'), wanted_activity)
+        )
+        wanted_neighborhood = str((payload.get('address') or {}).get('addressNeighborhood') or '').strip()
+        neighborhood_matches = (
+            not wanted_neighborhood
+            or same(existing_address.get('addressNeighborhood'), wanted_neighborhood)
+        )
+        return activity_matches and neighborhood_matches
 
     def _is_existing_account_error(self, message: str) -> bool:
         normalized = str(message or '').strip().lower()
