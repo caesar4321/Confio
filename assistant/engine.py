@@ -325,6 +325,11 @@ def portfolio_data(viewer: Viewer):
     if result['acciones_y_confio_dollar_plus_disponibles'] is not False:
         result['confio_dollar_plus_rendimiento_anual_hoy'] = _plus_net_apy()
     result['nota'] = 'El rendimiento ganado este mes en Confío Dollar+ aún no está disponible: no lo menciones.'
+    if not spent:
+        # New accounts: saying "no tengo datos de tus gastos" on every answer
+        # was the most repeated filler in real replies (2026-10-08 review).
+        result['nota'] += (' Todavía no tiene un mes completo de gastos: no menciones sus gastos ni cuánto '
+                           'dejar disponible; explica sus opciones.')
     return result
 
 
@@ -936,6 +941,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     effort = conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')
     specs = belt.specs()
+    if model.startswith('claude-'):
+        return _run_turn_claude(belt, result, history, system, model, effort, specs)
     payload = {
         'model': model,
         'instructions': system,
@@ -962,34 +969,14 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         # store=False: carry the whole transcript forward instead of previous_response_id.
         input_items.extend(item for item in output if item.get('type') in {'function_call', 'reasoning'})
         for call in calls:
-            name = call.get('name')
             try:
                 args = json.loads(call.get('arguments') or '{}')
             except (TypeError, ValueError):
                 args = {}
-            started = time.monotonic()
-            try:
-                tool_output = belt.call(name, args)
-            except AssistantUnavailable:
-                raise
-            except Exception:  # noqa: BLE001 - a broken tool must read as broken, not as "no data"
-                logger.exception('Confio Assistant tool %s failed', name)
-                tool_output = {'error': 'La herramienta falló. Dile al usuario que no pudiste consultarlo ahora.'}
-            denied = bool(tool_output.get('_denied'))
-            result.tools.append({
-                # Quotas count tool names; a refused call must not use a slot.
-                'name': f'{name}:denied' if denied else name,
-                'args': args,
-                'ok': 'error' not in tool_output,
-                'ms': int((time.monotonic() - started) * 1000),
-            })
             input_items.append({
                 'type': 'function_call_output',
                 'call_id': call.get('call_id'),
-                # Public documents are read whole; everything else stays small.
-                'output': json.dumps({k: v for k, v in tool_output.items() if not str(k).startswith('_')},
-                                     ensure_ascii=False)[:(PUBLIC_DOCUMENT_MAX_CHARS + 2000
-                                                          if name == 'read_public_document' else 12000)],
+                'output': _run_tool(belt, result, call.get('name'), args),
             })
         payload = {**payload, 'input': input_items}
         if belt.saw_web:
@@ -1000,6 +987,34 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         result.add_usage(model, data.get('usage'))
         result.reply = _output_text(data)
 
+    return _finish(result)
+
+
+def _run_tool(belt, result, name, args):
+    """Run one model tool call and return its output as the JSON text the model reads."""
+    started = time.monotonic()
+    try:
+        tool_output = belt.call(name, args)
+    except AssistantUnavailable:
+        raise
+    except Exception:  # noqa: BLE001 - a broken tool must read as broken, not as "no data"
+        logger.exception('Confio Assistant tool %s failed', name)
+        tool_output = {'error': 'La herramienta falló. Dile al usuario que no pudiste consultarlo ahora.'}
+    denied = bool(tool_output.get('_denied'))
+    result.tools.append({
+        # Quotas count tool names; a refused call must not use a slot.
+        'name': f'{name}:denied' if denied else name,
+        'args': args,
+        'ok': 'error' not in tool_output,
+        'ms': int((time.monotonic() - started) * 1000),
+    })
+    # Public documents are read whole; everything else stays small.
+    return json.dumps({k: v for k, v in tool_output.items() if not str(k).startswith('_')},
+                      ensure_ascii=False)[:(PUBLIC_DOCUMENT_MAX_CHARS + 2000
+                                           if name == 'read_public_document' else 12000)]
+
+
+def _finish(result):
     if not result.reply:
         if result.actions:
             result.reply = 'Listo.'
@@ -1009,6 +1024,93 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             raise AssistantUnavailable('empty reply')
     return result
 
+
+# --------------------------------------------------------------------------- #
+# Claude transport (evaluation; production stays on CONFIO_ASSISTANT_MODEL)
+# --------------------------------------------------------------------------- #
+
+def _claude_client():
+    import anthropic
+
+    api_key = getattr(settings, 'ANTHROPIC_API_KEY', '') or None
+    return anthropic.Anthropic(api_key=api_key, max_retries=1,
+                               timeout=conf.get('CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS'))
+
+
+_CLAUDE_STRICT_UNSUPPORTED = ('minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems')
+
+
+def _claude_schema(schema):
+    """Claude's strict mode rejects numeric/length bounds: keep them as words in the description."""
+    if isinstance(schema, list):
+        return [_claude_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {key: _claude_schema(value) for key, value in schema.items() if key not in _CLAUDE_STRICT_UNSUPPORTED}
+    bounds = ', '.join(f'{key}={schema[key]}' for key in _CLAUDE_STRICT_UNSUPPORTED if key in schema)
+    if bounds:
+        out['description'] = f"{schema.get('description', '')} ({bounds})".strip()
+    return out
+
+
+def _claude_tools(specs):
+    return [{'name': spec['name'], 'description': spec['description'],
+             'input_schema': _claude_schema(spec['parameters']) if spec.get('strict') else spec['parameters'],
+             **({'strict': True} if spec.get('strict') else {})} for spec in specs]
+
+
+def _claude_usage(usage):
+    """Anthropic usage in the Responses shape add_usage reads."""
+    read = getattr(usage, 'cache_read_input_tokens', 0) or 0
+    written = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+    return {'input_tokens': (usage.input_tokens or 0) + read + written,
+            'input_tokens_details': {'cached_tokens': read},
+            'output_tokens': usage.output_tokens or 0}
+
+
+def _run_turn_claude(belt, result, history, system, model, effort, specs):
+    import anthropic
+
+    client = _claude_client()
+    messages = [{'role': item['role'], 'content': item['content']} for item in history_items(history)]
+    while messages and messages[0]['role'] != 'user':
+        messages.pop(0)
+    request = {
+        'model': model,
+        'max_tokens': 4000,
+        'system': [{'type': 'text', 'text': system, 'cache_control': {'type': 'ephemeral'}}],
+        'tools': _claude_tools(specs),
+    }
+    if effort:
+        request['output_config'] = {'effort': effort}
+
+    def send(**extra):
+        try:
+            response = client.messages.create(**request, messages=messages, **extra)
+        except anthropic.APIError as exc:
+            raise AssistantUnavailable(f'Claude request failed: {exc}') from exc
+        result.add_usage(model, _claude_usage(response.usage))
+        if response.stop_reason == 'refusal':
+            raise AssistantUnavailable('Claude refused')
+        return response
+
+    def text_of(response):
+        return '\n'.join(b.text for b in response.content if b.type == 'text').strip()
+
+    for _ in range(conf.get('CONFIO_ASSISTANT_MAX_TOOL_STEPS')):
+        response = send(**({'tool_choice': {'type': 'none'}} if belt.saw_web else {}))
+        calls = [b for b in response.content if b.type == 'tool_use']
+        if not calls:
+            result.reply = text_of(response)
+            break
+        messages.append({'role': 'assistant', 'content': response.content})
+        messages.append({'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': call.id,
+             'content': _run_tool(belt, result, call.name, dict(call.input or {}))}
+            for call in calls]})
+    else:
+        result.reply = text_of(send(tool_choice={'type': 'none'}))
+    return _finish(result)
 
 def human_mode_active(state, last_staff_reply_at, now=None):
     """True while the human team owns the thread (see AssistantThreadState)."""

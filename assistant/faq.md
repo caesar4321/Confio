@@ -81,8 +81,10 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
   - México: transferencia (recargar y retirar).
   - Perú: QR para recargar, transferencia para retirar.
 - En otros países, Recargar y Retirar usan un proveedor internacional; la app te muestra si está disponible para ti.
-- En Venezuela, Nicaragua, Panamá y Cuba no hay Recargar ni Retirar en la app. En Recibir verás un directorio de financieras para convertir efectivo.
-- Venezuela: estamos trabajando para habilitar Pago Móvil. Todavía no tiene fecha; no prometas una.
+- En Venezuela, Nicaragua, Panamá y Cuba hoy no hay Recargar ni Retirar en la app. No digas que ahí se puede recargar o retirar con medios locales.
+- Venezuela: recargar y retirar con Pago Móvil llegará muy pronto. No des una fecha.
+- En todos los países, en Recibir hay un directorio de efectivo (casas de cambio y agentes) para convertir dólares en efectivo o efectivo en dólares.
+<!-- Julian 2026-10-09: Pago Móvil "coming very soon" (was: no date); the cash directory is for every country, not only the no-ramp ones. -->
 - Antes de confirmar una recarga o un retiro siempre ves el costo y el tipo de cambio.
 - Recargas en tu moneda local (soles, pesos, bolivianos, reales): no necesitas cambiar a dólares en tu banco antes. Confío convierte al recargar y ves el tipo de cambio antes de confirmar. Si tienes efectivo, primero ponlo en tu cuenta o billetera local en tu moneda y desde ahí recargas.
 - Recargar está dentro de Recibir.
