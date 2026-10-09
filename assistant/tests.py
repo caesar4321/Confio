@@ -1340,6 +1340,7 @@ class PortfolioAndNeedsTests(TestCase):
         self.assertEqual(result['confio_dollar_usd'], '12.00')
         self.assertEqual(result['confio_dollar_plus_usd'], 'desconocido')  # no share balance read: unknown, not 0
         self.assertEqual(result['gasto_mensual_promedio_usd'], '300.00')
+        self.assertNotIn('no menciones sus gastos', result['nota'])
         # No request in hand: eligibility is unknown, never a phone-only "yes".
         self.assertEqual(result['acciones_y_confio_dollar_plus_disponibles'], 'desconocido')
         employee = Viewer(user=self.user, account=self.account, account_type='business', business_id=1,
@@ -1374,6 +1375,8 @@ class PortfolioAndNeedsTests(TestCase):
         # Opened 20 days ago: no full month yet, so no $0 months dragging the average.
         self.assertEqual((result['gasto_mensual_promedio_usd'], result['meses_completos_considerados']),
                          ('sin datos', 0))
+        # ...and the model is told not to pad every answer with "no tengo datos de tus gastos".
+        self.assertIn('no menciones sus gastos', result['nota'])
         summary.assert_not_called()
         with patch('blockchain.bsc_balance_service.BscBalanceService.balances_raw', return_value=raw), \
                 patch('cusd_plus.vault.vault_address', return_value='0xvault'), \

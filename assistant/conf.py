@@ -32,6 +32,7 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_PRICES': {
         'gpt-6-luna': ('0.10', '0.01', '0.50'),
         'gpt-6.1-sol': ('2.00', '0.10', '10.00'),
+        'claude-haiku-5-5': ('0.10', '0.01', '0.50'),
     },
     'CONFIO_ASSISTANT_TRANSCRIBE_PRICE_PER_MINUTE': '0.0045',
 
