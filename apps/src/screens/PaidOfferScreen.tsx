@@ -45,7 +45,7 @@ const OFFERS: Record<PaidOfferKey, { title: string; headline: string; benefits: 
     headline: 'Tu asistente financiero personal.',
     benefits: [
       { icon: 'message-circle', name: 'Respuestas más avanzadas', line: 'Modelos de IA más capaces para tus preguntas de dinero.' },
-      { icon: 'mic', name: 'Conversación por voz', line: 'Habla con Confío IA en lugar de escribir.' },
+      { icon: 'phone-call', name: 'Voz en tiempo real', line: 'Habla con Confío IA como en una llamada, sin esperar audios.' },
       { icon: 'zap', name: 'Más uso de Confío IA', line: 'Más preguntas y análisis cada día.' },
       { icon: 'pie-chart', name: 'Análisis de tus gastos, ahorros e inversiones', line: 'Con tus números reales.' },
       { icon: 'target', name: 'Seguimiento personalizado', line: 'De tus metas y de cómo se mueve tu dinero.' },
