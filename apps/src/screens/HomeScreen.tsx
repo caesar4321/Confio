@@ -1652,8 +1652,9 @@ export const HomeScreen = () => {
               )}
 
               {/* Cuenta inteligente — a probe, not a wallet yet: no money can be
-                  put in it before launch, so the balance slot says
-                  "Próximamente" and never shows a number (eng review D8). */}
+                  put in it before launch, so the balance slot is empty, never a
+                  number (eng review D8). No "Próximamente" here: it truncated
+                  the name, and the pitch screen says it. */}
               {smartAccountRow && (
                 <Pressable
                   style={({ pressed }) => [
@@ -1662,7 +1663,7 @@ export const HomeScreen = () => {
                   ]}
                   onPress={() => navigation.navigate('PaidOffer', { offer: 'smart_account', door: 'billeteras' })}
                   accessibilityRole="button"
-                  accessibilityLabel="Cuenta inteligente, próximamente, pagos y débitos automáticos"
+                  accessibilityLabel="Cuenta inteligente, pagos y débitos automáticos"
                 >
                   <View style={styles.walletCardContent}>
                     <View
@@ -1677,7 +1678,6 @@ export const HomeScreen = () => {
                       <Text style={styles.walletSymbol} numberOfLines={2}>Pagos y débitos automáticos</Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
-                      <Text style={styles.comingSoonText} numberOfLines={1}>Próximamente</Text>
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>
                   </View>
@@ -2053,13 +2053,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: colors.text.primary,
-    marginRight: 8,
-  },
-  // Cuenta inteligente probe: the balance slot never shows a number.
-  comingSoonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text.secondary,
     marginRight: 8,
   },
   inviteClaimCard: {

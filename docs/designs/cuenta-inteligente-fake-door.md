@@ -156,7 +156,7 @@ priced AI subscription in the app (see Store safety).
 > **Confío IA+** · Próximamente
 > *Tu asistente financiero personal.*
 > - **Respuestas más avanzadas:** modelos de IA más capaces para tus preguntas de dinero.
-> - **Conversación por voz** con Confío IA.
+> - **Voz en tiempo real** con Confío IA, como una llamada (los audios ya son gratis).
 > - **Más uso de Confío IA** cada día.
 > - **Análisis de tus gastos, ahorros e inversiones** con tus números reales.
 > - **Seguimiento personalizado** de tus metas y de cómo se mueve tu dinero.

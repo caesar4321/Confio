@@ -105,7 +105,7 @@ PAID_OFFER_SECTIONS = {
     'ia_plus': (
         '\n## Confío IA+ (lista de espera)\n'
         '- Confío IA+ es una versión más avanzada de Confío IA que estamos preparando: respuestas más avanzadas, '
-        'conversación por voz, más uso cada día, análisis de tus gastos, ahorros e inversiones y seguimiento de tus '
+        'conversación por voz en tiempo real (como una llamada; los audios ya están en Confío IA), más uso cada día, análisis de tus gastos, ahorros e inversiones y seguimiento de tus '
         'metas{price}. Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame".\n'
         '- Si preguntan por Confío IA+, responde con esto y abre `ia_plus`. Nunca des una fecha, nunca prometas '
         'beneficios fuera de esta lista y nunca digas que se puede pagar o reservar ahora.\n'),
