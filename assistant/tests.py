@@ -873,7 +873,7 @@ class SeventeenthPassTests(TestCase):
         self.assertFalse(SupportMessage.objects.filter(body='Abre Pagar').exists())
 
 
-from .prompts import FAQ, build_system_prompt  # noqa: E402
+from .prompts import FAQ, build_system_prompt, faq_text  # noqa: E402
 
 
 class PromptTests(TestCase):
@@ -886,8 +886,9 @@ class PromptTests(TestCase):
     def test_approved_answers_are_in_the_prompt_without_reviewer_notes(self):
         prompt = self._prompt()
         self.assertTrue(FAQ)
-        self.assertIn(FAQ, prompt)
+        self.assertIn(faq_text(), prompt)
         self.assertNotIn('<!--', prompt)
+        self.assertNotIn('{local_account_fee}', prompt)
 
     def test_shared_prefix_then_per_user_line_last(self):
         a = self._prompt()
@@ -895,7 +896,7 @@ class PromptTests(TestCase):
         # Everything up to the per-user section is identical, so it caches.
         head = a.split('# Esta conversación')[0]
         self.assertTrue(b.startswith(head))
-        self.assertIn(FAQ, head)
+        self.assertIn(faq_text(), head)
         self.assertIn('Fecha y hora local: 2026-10-04 10:00.', a.split('# Esta conversación')[1])
 
 
@@ -1859,3 +1860,16 @@ class PaidChipAuditFixTests(TestCase):
                 self.captureOnCommitCallbacks(execute=True):
             paid_chips.log_shown(self.viewer, ('ia_plus', 'investing'))
         self.assertFalse(FunnelEvent.objects.exists())
+
+
+class FaqTextTests(TestCase):
+    def test_local_account_fee_comes_from_the_activation_constant(self):
+        from decimal import Decimal
+
+        from .prompts import faq_text
+        self.assertIn('costo único de US$10;', faq_text())
+        self.assertNotIn('{local_account_fee}', faq_text())
+        with patch('payment_accounts.activation.FEE', Decimal('7.50')):
+            self.assertIn('US$7,50', faq_text())
+        with patch('payment_accounts.activation.FEE', Decimal('0')):
+            self.assertIn('Abrir una cuenta local no tiene costo.', faq_text())
