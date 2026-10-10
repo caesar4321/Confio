@@ -29,7 +29,7 @@ from django.test import override_settings
 from assistant import conf
 from assistant.engine import AssistantUnavailable, Viewer, run_turn
 from assistant.management.commands.assistant_eval import JUDGE_MODEL, NEW_USER_PORTFOLIO
-from assistant.prompts import FAQ
+from assistant.prompts import faq_text
 
 NEW_USER_MONTH = {'disponible': True, 'mes': 'octubre 2026', 'mes_en_curso': True,
                   'actual': {'entro_usd': '0.00', 'salio_usd': '0.00', 'recargas_usd': '0.00', 'retiros_usd': '0.00',
@@ -79,7 +79,7 @@ def judge_pair(case, first, second):
         '(saldo US$0, sin gastos), así que no castigues que lo diga una vez si viene al caso. Las respuestas usan '
         'herramientas en vivo que no ves: el rendimiento anual de hoy de Confío Dollar+ (3,18%) y abrir pantallas de '
         'la app ("abrí Recargar") son reales, no inventos.\n\n'
-        f'=== FAQ ===\n{FAQ}\n\n=== País: {case["country"]} ===\n=== Conversación ===\n'
+        f'=== FAQ ===\n{faq_text()}\n\n=== País: {case["country"]} ===\n=== Conversación ===\n'
         f'{transcript(case["history"])}\n\n=== Respuesta A ===\n{first}\n\n=== Respuesta B ===\n{second}\n\n'
         'Devuelve solo JSON: {"ganador": "A"|"B"|"empate", '
         '"A": {"error_factual": bool, "no_responde_lo_preguntado": bool, "relleno": bool}, '

@@ -74,7 +74,7 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - Puedes crear tu cuenta con un teléfono de casi cualquier país. Recargar y Retirar dependen del país de tu teléfono.
 - En Argentina, Bolivia, Brasil, Chile, Colombia, México y Perú, recargas y retiras con medios locales:
   - Argentina: transferencia (recargar y retirar); Khipu y QR interoperable (solo recargar).
-  - Bolivia: QR interoperable, solo para recargar. Por ahora no se puede retirar a bolivianos.
+  - Bolivia: QR interoperable, solo para recargar: en Recargar eliges el monto y la app genera un QR para esa orden, que pagas desde la app de tu banco o billetera. Por ahora no se puede retirar a bolivianos.
   - Brasil: Pix.
   - Chile: transferencia (recargar y retirar); Khipu (solo recargar).
   - Colombia: PSE para recargar; Nequi, Bancolombia, Bre-B o transferencia para retirar.
@@ -90,6 +90,7 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - Recargar está dentro de Recibir.
 - En recargas por transferencia, primero creas la orden con el monto y luego haces una sola transferencia por exactamente ese monto. No transfieras sin orden ni dividas el pago en varias transferencias.
 - Las cuentas desde las que recargas y a las que retiras deben estar a tu nombre. Si otra persona quiere mandarte dinero, que abra su cuenta Confío y te envíe a tu número.
+- "QR para recibir": si quiere poner su propio dinero, en Bolivia Recargar le genera un QR para cada orden (lo paga desde su banco o billetera). Si quiere que otra persona le envíe, comparte su número Confío (está en Recibir); las cuentas personales no tienen un QR para recibir de otros. Los negocios cobran con un QR desde Cobrar.
 - Si recibes dólares digitales desde un exchange (como Binance) o una billetera externa, usa exactamente la moneda y la red que te muestra la app en Recibir: BNB Smart Chain (BEP20). Al retirar desde Binance u otro exchange, elige esa red; otras redes como Ethereum (ERC20), Tron (TRC20), Polygon o Arbitrum no llegan a Confío.
 - Si ya se envió por otra red, Confío no puede verlo ni moverlo desde la app; dilo con claridad, sin prometer una recuperación ni sugerir que otro soporte (Binance u otro exchange) pueda recuperarlo. Lo útil es cómo enviar bien la próxima vez.
 <!-- support: one order = one exact transfer (latest 2026-08-06, 5 threads; multi-transfer cases ended stuck); own-name (2026-09-14); external deposit network warning (2026-09-24; older Algorand instructions are obsolete). -->
@@ -97,7 +98,9 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 <!-- Koywe countries: ramps/koywe.py:16-326, apps/.env.mainnet; prod KOYWE_ON_RAMP_PAUSED_COUNTRIES is empty (CO top-ups live, 2026-10-04). Bolivia no off-ramp: ramps/schema.py:1120. No-ramp countries: apps/src/config/env.ts:111. -->
 
 ## Cuentas locales a tu nombre
-- En Brasil (Pix), Colombia (Llave Bre-B) y México (CLABE) puedes tener una cuenta local a tu nombre para recibir y pagar en moneda local desde tus dólares. En Argentina llegará pronto.
+- En Brasil (Pix), Colombia (Llave Bre-B) y México (CLABE) puedes tener una cuenta local a tu nombre para recibir y pagar en moneda local desde tus dólares, vivas donde vivas: no hace falta tener teléfono de ese país (por ejemplo, desde Bolivia puedes abrir una cuenta Pix de Brasil). Con ella puedes recibir de cualquier persona y enviar a la cuenta de otra persona en ese país. En Argentina llegará pronto.
+- {local_account_fee}
+<!-- Julian 2026-10-10: anyone can open them. The fee line is filled from payment_accounts.activation.FEE (prompts.faq_text), so a policy change is one constant. Mesa de pagos may make openings free. -->
 - Brasil: puedes tener tu propia chave Pix para recibir de cualquier persona, y enviar Pix a la chave de otra persona. También puedes recibir con el QR o los datos bancarios de tu cuenta.
 - En cuentas personales, cuando otra persona te envía dinero a tu cuenta local, llega a tu saldo cuando confirmas con Confío Face que eres tú. Una sola confirmación recibe todo lo pendiente. Si no lo confirmas en 24 horas, se devuelve automáticamente a quien lo envió.
 <!-- Julian 2026-10-04: own chave Pix for third-party send/receive enabled, gated by Confío Face (earlier caution was fraud-driven; the team's 2026-10-03 "not enabled" is superseded). Code: LocalReceiveScreen pix_key, LocalSendScreen br_pix, payin_hold.needs_face (personal accounts, 24h return), PendingIncomingScreen copy. Prod: explicit-grant countries empty, BR switches enabled. -->
@@ -133,6 +136,8 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - Confío Dollar+ (cUSD+): el dólar para ahorrar, respaldado por USDY de Ondo (bonos del Tesoro de EE.UU.). Genera rendimiento diario con una tasa variable que ves en la app; no está garantizado.
 - Acciones de EE.UU.: acciones digitales emitidas por Ondo.
 - Monto mínimo: desde US$1,01 para comprar cualquier acción o ETF de la lista (igual para todas) y US$1 para vender.
+- Ahorrar e invertir son distintos: Confío Dollar+ es ahorro (rendimiento diario variable, el saldo no sube y baja como una acción); las acciones y ETF son inversión (su precio sube y baja y puedes perder). Pasar dinero a Confío Dollar+ o de vuelta a Confío Dollar es desde US$1. Confío Dollar no tiene monto mínimo.
+<!-- ConvertSavingsScreen / WithdrawSavingsScreen MIN_AMOUNT_USD = 1; BuyStockScreen 1.01. -->
 <!-- apps/src/screens/BuyStockScreen.tsx MIN_AMOUNT_USD 1.01 (leaves $1 net after 30 bps); SellStockScreen 1. -->
 - Confío Dollar+ y acciones no están disponibles en EE.UU., Canadá, Brasil, la Unión Europea, Reino Unido, Suiza, Singapur, Hong Kong, Malasia y algunos otros países, por requisitos del emisor (Ondo).
 - Las recargas nuevas llegan como Confío Dollar+ si está disponible en tu país; si no, como Confío Dollar.
