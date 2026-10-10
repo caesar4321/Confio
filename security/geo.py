@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Callable, Mapping
 
+from security.request_utils import came_through_cloudflare
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,6 +117,35 @@ def get_country_for_ip(client_ip: str | None, header_country: str | None = None)
         logger.info('[GEO] live IP lookup failed for %s: %s', client_ip, exc)
 
     return None
+
+
+def remember_ip_country(ip_obj, meta: Mapping | None) -> None:
+    """Stamp the edge country (Cloudflare CF-IPCountry) on a tracked IP row.
+
+    Residence (`residence_country_for`) reads IPAddress.country_code, but the
+    header path above returns without caching and the ipapi.co write-back
+    never succeeds from EC2 — so on 2026-10-10 none of ~98K prod rows had a
+    country and every residence check fell back to the document. Writing
+    the header here, where IPs are tracked, costs one UPDATE only when the
+    stored value is missing or changed. Never raises: tracking must not
+    break a request.
+
+    Stored only for requests that arrived through Cloudflare: the row is
+    shared by every user seen on that IP, so a forged header from a direct
+    origin hit would otherwise poison their residence persistently.
+    """
+    if ip_obj is None or not getattr(ip_obj, 'pk', None):
+        return
+    if not came_through_cloudflare(meta):
+        return
+    country = normalize_country((meta or {}).get('HTTP_CF_IPCOUNTRY'))
+    if not country or ip_obj.country_code == country:
+        return
+    try:
+        type(ip_obj).objects.filter(pk=ip_obj.pk).update(country_code=country)
+        ip_obj.country_code = country
+    except Exception as exc:  # noqa: BLE001
+        logger.info('[GEO] could not store country for %s: %s', ip_obj.ip_address, exc)
 
 
 def country_for_request(meta: Mapping | None) -> str | None:

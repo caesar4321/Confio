@@ -106,11 +106,12 @@ class SecurityMiddleware:
             ip_obj.last_seen = timezone.now()
             ip_obj.save(update_fields=['last_seen'])
         
-        # Commented out automatic geo lookup to save API calls (1000/day limit)
-        # Geo info can be fetched manually from admin panel
-        # if created or not ip_obj.country_code:
-        #     self.update_ip_geo_info(ip_obj)
-        
+        # Country comes free from the Cloudflare edge header; residence
+        # (security.geo.residence_country_for) reads it from this row.
+        # The paid-quota ipapi.co lookup stays manual (admin panel).
+        from .geo import remember_ip_country
+        remember_ip_country(ip_obj, getattr(request, 'META', None))
+
         # Check IP reputation if new
         if created:
             self.check_and_update_ip_reputation(ip_obj)

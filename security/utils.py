@@ -487,7 +487,10 @@ def track_user_device(user, device_fingerprint_data: Dict, request=None):
                 if not ip_created:
                     ip_obj.last_seen = timezone.now()
                     ip_obj.save(update_fields=['last_seen'])
-                
+
+                from .geo import remember_ip_country
+                remember_ip_country(ip_obj, request.META)
+
                 # Get or create IP-Device-User association
                 ip_device_user, idu_created = IPDeviceUser.objects.get_or_create(
                     ip_address=ip_obj,

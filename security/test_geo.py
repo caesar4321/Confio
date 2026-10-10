@@ -9,7 +9,7 @@ behaviour-preserving on two legal controls.
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from security.geo import GeoDecision
 
@@ -129,3 +129,76 @@ class DecisionTests(SimpleTestCase):
     def test_decision_is_truthy_by_allowance(self):
         self.assertTrue(bool(GeoDecision(True)))
         self.assertFalse(bool(GeoDecision(False, 'nope', 'phone')))
+
+
+CF_PEER = {'HTTP_X_REAL_IP': '172.70.1.1'}  # a Cloudflare edge, as nginx reports it
+
+
+class RememberIpCountryTests(TestCase):
+    """Residence reads IPAddress.country_code; the edge header must land there."""
+
+    def _ip(self, ip='190.6.1.1', country=''):
+        from django.utils import timezone
+        from security.models import IPAddress
+        return IPAddress.objects.create(ip_address=ip, country_code=country,
+                                        first_seen=timezone.now(), last_seen=timezone.now())
+
+    def test_header_country_is_stored(self):
+        from security.geo import remember_ip_country
+        ip = self._ip()
+        remember_ip_country(ip, {'HTTP_CF_IPCOUNTRY': 've', **CF_PEER})
+        ip.refresh_from_db()
+        self.assertEqual(ip.country_code, 'VE')
+
+    def test_unknown_and_tor_codes_are_not_stored(self):
+        from security.geo import remember_ip_country
+        ip = self._ip(country='CO')
+        for code in ('XX', 'T1', '', None):
+            remember_ip_country(ip, {'HTTP_CF_IPCOUNTRY': code, **CF_PEER})
+        ip.refresh_from_db()
+        self.assertEqual(ip.country_code, 'CO')
+
+    def test_unchanged_country_does_not_write(self):
+        from security.geo import remember_ip_country
+        ip = self._ip(country='VE')
+        with self.assertNumQueries(0):
+            remember_ip_country(ip, {'HTTP_CF_IPCOUNTRY': 'VE', **CF_PEER})
+
+    def test_login_tracking_makes_residence_resolvable(self):
+        from django.contrib.auth import get_user_model
+        from django.test import RequestFactory
+        from security.geo import residence_country_for
+        from security.utils import track_user_device
+        user = get_user_model().objects.create(username='migrant', firebase_uid='migrant-uid')
+        request = RequestFactory().post('/graphql/', HTTP_CF_CONNECTING_IP='181.48.1.1',
+                                        HTTP_CF_IPCOUNTRY='CO', **CF_PEER)
+        self.assertIsNone(residence_country_for(user))
+        track_user_device(user, {'deviceId': 'dev-1'}, request=request)
+        self.assertEqual(residence_country_for(user), 'COL')
+
+    def test_direct_origin_request_cannot_set_another_ips_country(self):
+        # Forged CF headers from a peer that is not Cloudflare (or behind
+        # nginx: X-Real-IP is the attacker) must not touch the shared row.
+        from security.geo import remember_ip_country
+        victim = self._ip(ip='181.48.9.9', country='VE')
+        for peer in ({'HTTP_X_REAL_IP': '45.33.1.1'}, {'REMOTE_ADDR': '45.33.1.1'}, {}):
+            remember_ip_country(victim, {'HTTP_CF_CONNECTING_IP': '181.48.9.9',
+                                         'HTTP_CF_IPCOUNTRY': 'CO', **peer})
+        victim.refresh_from_db()
+        self.assertEqual(victim.country_code, 'VE')
+
+    def test_cloudflare_ranges(self):
+        from security.geo import came_through_cloudflare
+        for peer in ('172.70.1.1', '104.23.1.1', '2a06:98c0::1', '162.158.10.1'):
+            self.assertTrue(came_through_cloudflare({'HTTP_X_REAL_IP': peer}), peer)
+        for peer in ('127.0.0.1', '45.33.1.1', 'not-an-ip', ''):
+            self.assertFalse(came_through_cloudflare({'HTTP_X_REAL_IP': peer}), peer)
+
+    def test_client_ip_ignores_cf_headers_from_a_direct_peer(self):
+        # Otherwise a logged-in user could pin sessions on someone else's
+        # (already-countried) IP and fabricate residence history.
+        from security.request_utils import extract_client_ip_from_meta
+        forged = {'HTTP_CF_CONNECTING_IP': '181.48.9.9', 'HTTP_TRUE_CLIENT_IP': '181.48.9.9'}
+        self.assertEqual(extract_client_ip_from_meta({**forged, 'HTTP_X_REAL_IP': '45.33.1.1'}), '45.33.1.1')
+        self.assertEqual(extract_client_ip_from_meta({**forged, 'REMOTE_ADDR': '45.33.1.1'}), '45.33.1.1')
+        self.assertEqual(extract_client_ip_from_meta({**forged, **CF_PEER}), '181.48.9.9')
