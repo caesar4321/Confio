@@ -295,7 +295,10 @@ def portfolio_data(viewer: Viewer):
     if viewer.is_employee:
         return {'disponible': False, 'motivo': 'Solo el dueño del negocio ve el saldo.'}
     address = getattr(viewer.account, 'bsc_address', '') or ''
-    result = {'disponible': True, 'acciones_y_confio_dollar_plus_disponibles': _ondo_allowed(viewer)}
+    allowed, why_not = _ondo_decision(viewer)
+    result = {'disponible': True, 'acciones_y_confio_dollar_plus_disponibles': allowed}
+    if why_not:
+        result['motivo_no_disponible'] = why_not
     if not address:
         result.update(confio_dollar_usd='desconocido', confio_dollar_plus_usd='desconocido', acciones='desconocido')
     else:
@@ -353,17 +356,37 @@ def _plus_net_apy():
     return f'{net:.2f}'.replace('.', ',') + '% anual (variable, no garantizado)'
 
 
-def _ondo_allowed(viewer):
-    """Stocks and Confío Dollar+ offered to this person: request-aware (IP
+def _ondo_decision(viewer):
+    """(allowed, why-not) for stocks and Confío Dollar+: request-aware (IP
     and phone), like every screen. No request in hand means "unknown"."""
     if not viewer.request_meta:
-        return 'desconocido'
+        return 'desconocido', None
     try:
         from cusd_plus.eligibility import ONDO_POLICY
-        return bool(ONDO_POLICY.evaluate(viewer.user, viewer.request_meta).allowed)
+        decision = ONDO_POLICY.evaluate(viewer.user, viewer.request_meta)
     except Exception:  # noqa: BLE001 - unknown, not "no"
         logger.warning('Confio Assistant: Ondo eligibility unavailable', exc_info=True)
-        return 'desconocido'
+        return 'desconocido', None
+    if decision.allowed:
+        return True, None
+    if getattr(decision, 'blocked_by', None) == 'ip':
+        # A phone from an eligible country connecting from a blocked one (a
+        # Brazil IP, 2026-10-10): the model blamed the phone country.
+        from security.geo import country_for_request
+        try:
+            where = country_for_request(viewer.request_meta)
+        except Exception:  # noqa: BLE001
+            where = None
+        return False, (f'Se está conectando desde {where or "otro país"}, donde el emisor (Ondo) no permite estas '
+                       'inversiones; no es por el país de su teléfono.')
+    from security.geo import phone_country_of
+    if not phone_country_of(viewer.user):
+        return False, 'Su cuenta no tiene un país de teléfono verificado.'
+    return False, 'El emisor (Ondo) no permite estas inversiones en el país de su teléfono.'
+
+
+def _ondo_allowed(viewer):
+    return _ondo_decision(viewer)[0]
 
 
 def _plus_usd(shares):

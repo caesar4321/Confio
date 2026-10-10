@@ -1347,6 +1347,38 @@ class PortfolioAndNeedsTests(TestCase):
                           is_business_owner=False, tz=ZoneInfo('UTC'))
         self.assertFalse(portfolio_data(employee)['disponible'])
 
+    def test_portfolio_says_a_block_comes_from_the_connection_not_the_phone(self):
+        from .engine import portfolio_data
+        viewer = Viewer(user=self.user, account=SimpleNamespace(id=1, bsc_address='', created_at=None),
+                        account_type='personal', business_id=None, is_business_owner=False, tz=ZoneInfo('UTC'),
+                        request_meta={'REMOTE_ADDR': '1.2.3.4'})
+        with patch('cusd_plus.eligibility.ONDO_POLICY') as policy, \
+                patch('security.geo.country_for_request', return_value='BR'), \
+                patch('assistant.engine.month_summary_data', return_value={'disponible': False}):
+            policy.evaluate.return_value = SimpleNamespace(allowed=False, blocked_by='ip')
+            by_ip = portfolio_data(viewer)
+            policy.evaluate.return_value = SimpleNamespace(allowed=False, blocked_by='phone')
+            by_phone = portfolio_data(viewer)
+            policy.evaluate.return_value = SimpleNamespace(allowed=True, blocked_by=None)
+            allowed = portfolio_data(viewer)
+        self.assertIs(by_ip['acciones_y_confio_dollar_plus_disponibles'], False)
+        self.assertIn('desde BR', by_ip['motivo_no_disponible'])
+        self.assertIn('no es por el país de su teléfono', by_ip['motivo_no_disponible'])
+        self.assertIn('país de su teléfono', by_phone['motivo_no_disponible'])
+        self.assertNotIn('Se está conectando', by_phone['motivo_no_disponible'])
+        self.assertNotIn('motivo_no_disponible', allowed)
+        # An unresolvable connection country still refuses (the policy already did), without naming one.
+        with patch('cusd_plus.eligibility.ONDO_POLICY') as policy, \
+                patch('security.geo.country_for_request', side_effect=RuntimeError('geo down')), \
+                patch('assistant.engine.month_summary_data', return_value={'disponible': False}):
+            policy.evaluate.return_value = SimpleNamespace(allowed=False, blocked_by='ip')
+            self.assertIn('desde otro país', portfolio_data(viewer)['motivo_no_disponible'])
+            # A policy failure is "unknown", never a confident no, and gives no reason.
+            policy.evaluate.side_effect = RuntimeError('down')
+            unknown = portfolio_data(viewer)
+        self.assertEqual(unknown['acciones_y_confio_dollar_plus_disponibles'], 'desconocido')
+        self.assertNotIn('motivo_no_disponible', unknown)
+
     def test_portfolio_plus_value_eligibility_and_new_account_months(self):
         from datetime import timedelta
 
