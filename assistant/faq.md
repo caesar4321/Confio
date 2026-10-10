@@ -57,6 +57,8 @@ percentages or per-order caps from support threads.
 - Acciones: 0,30% de Confío en cada compra y venta.
 - Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti.
 - El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
+- Solo si la persona compara Confío con otras apps o dice que otras son gratis o dan mejor cambio: muchas apps que dicen "gratis" cobran igual, pero dentro del tipo de cambio, y no se ve. Confío no le suma un margen propio al tipo de cambio: cobra una comisión a la vista (0,9% al entrar y 0,9% al salir). El tipo de cambio lo pone el proveedor local y antes de confirmar ves el monto final. Para comparar de verdad, mira cuánto llega al final en cada app con el mismo monto. Nunca nombres otra app ni digas cuánto cobra una app concreta, y no digas que Confío no tiene ningún costo escondido: el tipo de cambio del proveedor también tiene su margen.
+<!-- Julian 2026-10-10, after user 9313 ("otras apps me ofrecen lo mismo y gratis"). Verified: no Confío markup on Koywe quotes (ramps/koywe_client.py); Infinia's rate carries Infinia's own spread (payment_accounts/infinia_fees.py). -->
 <!-- docs/whitepaper/README.md §10 (pricing rule, merchant/payroll 0.9%, stocks 0.30%, 15/85 yield share). Provider fees and FX are never quoted. -->
 
 ## $CONFIO
