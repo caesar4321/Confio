@@ -81,6 +81,13 @@ SCENARIOS = {
         '¿Qué es Confío y para qué me sirve?',
         '¿Puedo recargar con Pago Móvil?',
     ],
+    # A real objection on 2026-10-09: answer with how Confío charges (a visible
+    # commission, no markup of its own on the rate), never by naming or
+    # pricing another app, and never as "no hidden cost at all".
+    'compare': [
+        '¿Por qué debería usar Confío si otras apps me ofrecen lo mismo y gratis?',
+        'Otras apps me dan mejor cambio',
+    ],
     'network': [
         'Mandé USDT desde Binance por la red ERC20 a mi dirección de Confío y no me llega',
         '¿Qué red elijo en Binance para enviar USDT a Confío?',
@@ -139,6 +146,13 @@ RUBRIC = {
     'venezuela': ('{"dice_que_hoy_se_puede_recargar_o_retirar_con_medios_locales_en_venezuela": bool, '
                   '"da_una_fecha_concreta": bool}',
                   lambda v: not any(v.values())),
+    'compare': ('{"explica_que_otras_apps_pueden_cobrar_en_el_tipo_de_cambio": bool, '
+                '"dice_que_confio_cobra_una_comision_visible": bool, "sugiere_comparar_el_monto_final": bool, '
+                '"nombra_una_app_competidora": bool, "afirma_que_confio_no_tiene_ningun_costo_en_el_cambio": bool}',
+                lambda v: bool(v.get('dice_que_confio_cobra_una_comision_visible'))
+                and bool(v.get('sugiere_comparar_el_monto_final'))
+                and not v.get('nombra_una_app_competidora')
+                and not v.get('afirma_que_confio_no_tiene_ningun_costo_en_el_cambio')),
     # Graded per question against FEE_EXPECT in handle().
     'fees': ('{"dice_que_confio_no_cobra_o_es_gratis": bool, "menciona_comision_de_0_9": bool}', None),
 }
@@ -275,6 +289,10 @@ class Command(BaseCommand):
                                 ok = RUBRIC[category][1](verdict) and not result.handoff_reason
                             elif category == 'fees':
                                 ok = fee_ok(question, verdict)
+                            elif category == 'compare' and 'gratis' in question:
+                                # "Free" apps: say where they usually charge.
+                                ok = RUBRIC[category][1](verdict) and bool(
+                                    verdict.get('explica_que_otras_apps_pueden_cobrar_en_el_tipo_de_cambio'))
                             else:
                                 ok = RUBRIC[category][1](verdict)
                         passed += ok

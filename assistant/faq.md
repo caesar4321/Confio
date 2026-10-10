@@ -33,6 +33,8 @@
 - Acciones: 0,30% de Confío en cada compra y venta.
 - Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti.
 - El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
+- Solo si la persona compara Confío con otras apps o dice que otras son gratis o dan mejor cambio: muchas apps que dicen "gratis" cobran igual, pero dentro del tipo de cambio, y no se ve. Confío no le suma un margen propio al tipo de cambio: cobra una comisión a la vista (0,9% al entrar y 0,9% al salir). El tipo de cambio lo pone el proveedor local y antes de confirmar ves el monto final. Para comparar de verdad, mira cuánto llega al final en cada app con el mismo monto. Nunca nombres otra app ni digas cuánto cobra una app concreta, y no digas que Confío no tiene ningún costo escondido: el tipo de cambio del proveedor también tiene su margen.
+
 
 ## $CONFIO
 - $CONFIO es el token de Confío en BNB Smart Chain, con suministro fijo de 1.000.000.000 (mil millones): no se pueden crear más. El único contrato oficial es 0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8; cualquier otro es falso.
