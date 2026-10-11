@@ -215,8 +215,8 @@ class EmployeeScopeTests(TestCase):
                         is_business_owner=False, tz=ZoneInfo('UTC'))
         belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=5)
         names = {spec['name'] for spec in belt.specs()}
-        # Public documents are public: employees may read them too.
-        self.assertEqual(names, {'navigate', 'escalate_to_human', 'read_public_document'})
+        # Public documents and the reference exchange rate are public: employees get them too.
+        self.assertEqual(names, {'navigate', 'escalate_to_human', 'read_public_document', 'get_exchange_rate'})
         self.assertNotIn('withdraw', belt.destinations)
         self.assertFalse(belt.navigate('withdraw')['ok'])
         self.assertFalse(belt.get_month_summary(0)['disponible'])
@@ -1873,3 +1873,36 @@ class FaqTextTests(TestCase):
             self.assertIn('US$7,50', faq_text())
         with patch('payment_accounts.activation.FEE', Decimal('0')):
             self.assertIn('Abrir una cuenta local no tiene costo.', faq_text())
+
+
+class ExchangeRateToolTests(TestCase):
+    def setUp(self):
+        self.viewer = Viewer(user=SimpleNamespace(id=1, phone_country='BO'), account=None, account_type='personal',
+                             business_id=None, is_business_owner=False, tz=ZoneInfo('America/La_Paz'))
+
+    def test_uses_home_priority_and_the_country_currency(self):
+        from decimal import Decimal
+
+        from .engine import exchange_rate_data
+        from datetime import timedelta
+
+        from django.utils import timezone
+        fresh = SimpleNamespace(rate=Decimal('11.950000'), fetched_at=timezone.now())
+        old = SimpleNamespace(rate=Decimal('1027.000000'), fetched_at=timezone.now() - timedelta(days=5))
+        rows = {('BOB', 'official'): fresh, ('VES', 'parallel'): old}
+        with patch('exchange_rates.services.exchange_rate_service.get_current_rate_row',
+                   side_effect=lambda c, t, k: rows.get((c, k))):
+            data = exchange_rate_data(self.viewer, None)
+            ves = exchange_rate_data(self.viewer, 'VES')
+        self.assertEqual((data['moneda'], data['un_dolar_son'], data['tipo']), ('BOB', '11,95 BOB', 'oficial'))
+        self.assertNotIn('más de dos días', data['nota'])
+        # The age is the returned rate's own row: an old rate says so.
+        self.assertEqual(ves['un_dolar_son'], '1027 VES')
+        self.assertIn('más de dos días', ves['nota'])
+
+    def test_refuses_dollars_and_unknown_codes(self):
+        from .engine import exchange_rate_data
+        with patch('exchange_rates.services.exchange_rate_service.get_current_rate_row', return_value=None):
+            self.assertFalse(exchange_rate_data(self.viewer, 'usd')['disponible'])
+            self.assertFalse(exchange_rate_data(self.viewer, 'XYZ')['disponible'])
+            self.assertFalse(exchange_rate_data(self.viewer, 'bolivianos')['disponible'])

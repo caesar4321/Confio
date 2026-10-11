@@ -680,6 +680,12 @@ class ExchangeRateService:
         """
         Get the current exchange rate
         """
+        rate_obj = self.get_current_rate_row(source_currency, target_currency, rate_type)
+        return rate_obj.rate if rate_obj else None
+
+    def get_current_rate_row(self, source_currency: str, target_currency: str, rate_type: str):
+        """The ExchangeRate row get_current_rate reads (source priority, then
+        newest), so callers can show when that exact rate was fetched."""
         source_priority = RATE_SOURCE_PRIORITY.get(rate_type, [])
         queryset = ExchangeRate.objects.filter(
             source_currency=source_currency,
@@ -701,8 +707,7 @@ class ExchangeRateService:
         else:
             queryset = queryset.order_by('-fetched_at')
 
-        rate_obj = queryset.first()
-        return rate_obj.rate if rate_obj else None
+        return queryset.first()
     
     def get_rate_with_fallback(self, 
                               source_currency: str = 'VES', 

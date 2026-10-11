@@ -356,6 +356,42 @@ def _plus_net_apy():
     return f'{net:.2f}'.replace('.', ',') + '% anual (variable, no garantizado)'
 
 
+RATE_TYPES_ES = {'parallel': 'paralelo', 'average': 'promedio', 'official': 'oficial'}
+
+
+def exchange_rate_data(viewer: Viewer, currency=None):
+    """The reference rate Home shows (parallel → average → official, as
+    exchange_rates.services.get_rate_with_fallback), with which kind it is and
+    when it was read. Not a quote: a top-up or withdrawal uses the provider's
+    rate, shown before confirming."""
+    from exchange_rates.currency_mapping import get_currency_for_country
+
+    code = (currency or '').strip().upper() or get_currency_for_country(
+        getattr(viewer.user, 'phone_country', '') or '')
+    if not re.fullmatch(r'[A-Z]{3}', code) or code == 'USD':
+        return {'disponible': False, 'motivo': 'Dime de qué moneda quieres el tipo de cambio.'}
+    from exchange_rates.services import exchange_rate_service
+
+    for kind in ('parallel', 'average', 'official'):
+        # The exact row Home's rate comes from (source priority, then newest),
+        # so the age shown is that rate's own.
+        row = exchange_rate_service.get_current_rate_row(code, 'USD', kind)
+        if row and row.rate and row.rate > 0:
+            local = timezone.localtime(row.fetched_at, viewer.tz) if row.fetched_at else None
+            stale = not row.fetched_at or row.fetched_at < timezone.now() - timedelta(days=2)
+            return {
+                'disponible': True,
+                'moneda': code,
+                'un_dolar_son': f'{Decimal(row.rate).normalize():f} {code}'.replace('.', ','),
+                'tipo': RATE_TYPES_ES[kind],
+                'actualizado': f'{local:%Y-%m-%d %H:%M}' if local else 'desconocido',
+                'nota': ('Es el tipo de cambio de referencia que la app muestra en Inicio. En una recarga o un '
+                         'retiro el proveedor aplica su propio cambio, que ves antes de confirmar. No predigas '
+                         'cómo va a cambiar.' + (' Este dato tiene más de dos días: dilo.' if stale else '')),
+            }
+    return {'disponible': False, 'motivo': f'No tengo un tipo de cambio para {code}.'}
+
+
 def _ondo_decision(viewer):
     """(allowed, why-not) for stocks and Confío Dollar+: request-aware (IP
     and phone), like every screen. No request in hand means "unknown"."""
@@ -652,6 +688,22 @@ class Toolbelt:
         specs += [
             {
                 'type': 'function',
+                'name': 'get_exchange_rate',
+                'description': (
+                    'Tipo de cambio de referencia del dólar en una moneda local, el mismo que la app muestra en '
+                    'Inicio. Úsala para "¿a cuánto está el dólar?" o para pasar un monto a su moneda ("¿cuánto es en '
+                    'bolivianos?"). `currency` es el código ISO (BOB, VES, ARS…); null = la moneda de su país.'
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {'currency': {'type': ['string', 'null']}},
+                    'required': ['currency'],
+                    'additionalProperties': False,
+                },
+                'strict': True,
+            },
+            {
+                'type': 'function',
                 'name': 'read_public_document',
                 'description': (
                     'Lee un documento público de Confío publicado en GitHub, para detalles que no están en las '
@@ -720,6 +772,7 @@ class Toolbelt:
             'get_stock_quote': self.get_stock_quote,
             'read_public_document': self.read_public_document,
             'get_portfolio': self.get_portfolio,
+            'get_exchange_rate': self.get_exchange_rate,
             'search_market_news': self.search_market_news,
         }.get(name)
         if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
@@ -844,6 +897,9 @@ class Toolbelt:
 
     def get_portfolio(self):
         return portfolio_data(self.viewer)
+
+    def get_exchange_rate(self, currency=None):
+        return exchange_rate_data(self.viewer, currency)
 
     def read_public_document(self, document):
         path = PUBLIC_DOCUMENTS.get(document)
