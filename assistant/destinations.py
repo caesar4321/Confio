@@ -21,7 +21,7 @@ DESTINATIONS = {
     'discover': 'Descubrir: novedades y comunidad.',
     'profile': 'Perfil y configuración.',
     'verification': 'Verificación de identidad (KYC).',
-    'cash_directory': 'Directorio de efectivo (casas de cambio y agentes).',
+    'cash_directory': 'Efectivo con un agente (casas de cambio y agentes).',
     'messages': 'Mensajes: Julian, Confío News y Confio Assistant.',
     'notifications': 'Notificaciones.',
     'achievements': 'Logros y recompensas.',

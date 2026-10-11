@@ -51,7 +51,7 @@ percentages or per-order caps from support threads.
 - Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir.
 - Entrar (0,9%): todo dinero que llega a Confío desde fuera: una recarga, un depósito de USDT y también el dinero que te envían a tu cuenta local (Pix, Bre-B, CLABE).
 - Salir (0,9%): todo dinero que sale de Confío: un retiro, un envío a una billetera externa y cualquier envío o pago en moneda local, en cualquier país (desde tu cuenta local o pagando un QR local en Pagar). Es el mismo 0,9% en todos los países; esto no significa que cada medio esté disponible en tu país.
-- Gratis dentro de Confío: enviar dinero a otro usuario de Confío o recibir un envío de otro usuario, y pasar entre Confío Dollar y Confío Dollar+. Confío paga la comisión de la red. (Un negocio que cobra con Confío Pay sí paga su 0,9%: ver Pagos a comercios.)
+- Gratis dentro de Confío: enviar dinero a otro usuario de Confío o recibir un envío de otro usuario. Confío paga la comisión de la red. (Un negocio que cobra con Confío Pay sí paga su 0,9%: ver Pagos a comercios.)
 - Nunca digas que recibir en una cuenta local (Pix, Bre-B, CLABE) es gratis: ese dinero entra a Confío y lleva el 0,9%.
 - Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
 - Acciones: 0,30% de Confío en cada compra y venta.
@@ -76,7 +76,7 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - Puedes crear tu cuenta con un teléfono de casi cualquier país. Recargar y Retirar dependen del país de tu teléfono.
 - En Argentina, Bolivia, Brasil, Chile, Colombia, México y Perú, recargas y retiras con medios locales:
   - Argentina: transferencia (recargar y retirar); Khipu y QR interoperable (solo recargar).
-  - Bolivia: QR interoperable, solo para recargar: en Recargar eliges el monto y la app genera un QR para esa orden, que pagas desde la app de tu banco o billetera. Por ahora no se puede retirar a bolivianos.
+  - Bolivia: QR interoperable, solo para recargar: en Recargar eliges el monto y la app genera un QR para esa orden, que pagas desde la app de tu banco o billetera. Por ahora no se puede retirar a bolivianos ni pagar QR locales; retirar y pagar con QR en Bolivia llegará muy pronto (sin fecha).
   - Brasil: Pix.
   - Chile: transferencia (recargar y retirar); Khipu (solo recargar).
   - Colombia: PSE para recargar; Nequi, Bancolombia, Bre-B o transferencia para retirar.
@@ -85,7 +85,9 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - En otros países, Recargar y Retirar usan un proveedor internacional; la app te muestra si está disponible para ti.
 - En Venezuela, Nicaragua, Panamá y Cuba hoy no hay Recargar ni Retirar en la app. No digas que ahí se puede recargar o retirar con medios locales.
 - Venezuela: recargar y retirar con Pago Móvil llegará muy pronto. No des una fecha.
-- En todos los países, en Recibir hay un directorio de efectivo (casas de cambio y agentes) para convertir dólares en efectivo o efectivo en dólares.
+- Solo esas dos novedades se anuncian (Pago Móvil en Venezuela; retirar y pagar con QR en Bolivia). Para cualquier otro país o función que todavía no existe, di que por ahora no está disponible y que no hay fecha; no prometas que llegará y no lo pases al equipo.
+<!-- Julian 2026-10-11: roadmap questions are never escalated; only these two are announced. -->
+- En todos los países, en Recibir y en Enviar está "Efectivo con un agente": casas de cambio y agentes para convertir dólares en efectivo o efectivo en dólares.
 <!-- Julian 2026-10-09: Pago Móvil "coming very soon" (was: no date); the cash directory is for every country, not only the no-ramp ones. -->
 - Antes de confirmar una recarga o un retiro siempre ves el costo y el tipo de cambio.
 - Recargas en tu moneda local (soles, pesos, bolivianos, reales): no necesitas cambiar a dólares en tu banco antes. Confío convierte al recargar y ves el tipo de cambio antes de confirmar. Si tienes efectivo, primero ponlo en tu cuenta o billetera local en tu moneda y desde ahí recargas.
@@ -100,7 +102,7 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 <!-- Koywe countries: ramps/koywe.py:16-326, apps/.env.mainnet; prod KOYWE_ON_RAMP_PAUSED_COUNTRIES is empty (CO top-ups live, 2026-10-04). Bolivia no off-ramp: ramps/schema.py:1120. No-ramp countries: apps/src/config/env.ts:111. -->
 
 ## Cuentas locales a tu nombre
-- En Brasil (Pix), Colombia (Llave Bre-B) y México (CLABE) puedes tener una cuenta local a tu nombre para recibir y pagar en moneda local desde tus dólares, vivas donde vivas: no hace falta tener teléfono de ese país (por ejemplo, desde Bolivia puedes abrir una cuenta Pix de Brasil). Con ella puedes recibir de cualquier persona y enviar a la cuenta de otra persona en ese país. En Argentina llegará pronto.
+- En Brasil (Pix), Colombia (Llave Bre-B) y México (CLABE) puedes tener una cuenta local a tu nombre para recibir y pagar en moneda local desde tus dólares, vivas donde vivas: no hace falta tener teléfono de ese país (por ejemplo, desde Bolivia puedes abrir una cuenta Pix de Brasil). Con ella puedes recibir de cualquier persona y enviar a la cuenta de otra persona en ese país.
 - {local_account_fee}
 <!-- Julian 2026-10-10: anyone can open them. The fee line is filled from payment_accounts.activation.FEE (prompts.faq_text), so a policy change is one constant. Mesa de pagos may make openings free. -->
 - Brasil: puedes tener tu propia chave Pix para recibir de cualquier persona, y enviar Pix a la chave de otra persona. También puedes recibir con el QR o los datos bancarios de tu cuenta.
@@ -138,8 +140,9 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - Confío Dollar+ (cUSD+): el dólar para ahorrar, respaldado por USDY de Ondo (bonos del Tesoro de EE.UU.). Genera rendimiento diario con una tasa variable que ves en la app; no está garantizado.
 - Acciones de EE.UU.: acciones digitales emitidas por Ondo.
 - Monto mínimo: desde US$1,01 para comprar cualquier acción o ETF de la lista (igual para todas) y US$1 para vender.
-- Ahorrar e invertir son distintos: Confío Dollar+ es ahorro (rendimiento diario variable, el saldo no sube y baja como una acción); las acciones y ETF son inversión (su precio sube y baja y puedes perder). Pasar dinero a Confío Dollar+ o de vuelta a Confío Dollar es desde US$1. Confío Dollar no tiene monto mínimo.
-<!-- ConvertSavingsScreen / WithdrawSavingsScreen MIN_AMOUNT_USD = 1; BuyStockScreen 1.01. -->
+- Ahorrar e invertir son distintos: Confío Dollar+ es ahorro (rendimiento diario variable, el saldo no sube y baja como una acción); las acciones y ETF son inversión (su precio sube y baja y puedes perder). La app no tiene un botón para pasar Confío Dollar a Confío Dollar+: se ahorra en Confío Dollar+ al recargar con "Para ahorrar e invertir" (o al recibir USDT por BNB Smart Chain) si está disponible para ti.
+- Antiguo Confío Dollar (cUSD): no se convierte al nuevo. Para usar ese dinero, retíralo a tu cuenta (Enviar → A mi propia cuenta → "Desde mi cUSD") y vuelve a recargar (Recibir → Recargar ahora → "Para ahorrar e invertir"). Si lo que tienes es menos que el mínimo para retirar, complétalo con Recibir → Recargar ahora → "Al antiguo Confío Dollar". En Bolivia todavía no se puede retirar a bolivianos.
+<!-- Julian 2026-10-11: no conversion, withdraw then deposit. CUSD_CONVERSION_UI_ENABLED=false (apps/src/config/features.ts): ConvertSavings/WithdrawSavings have no entry point. BuyStockScreen 1.01. -->
 <!-- apps/src/screens/BuyStockScreen.tsx MIN_AMOUNT_USD 1.01 (leaves $1 net after 30 bps); SellStockScreen 1. -->
 - Confío Dollar+ y acciones no están disponibles en EE.UU., Canadá, Brasil, la Unión Europea, Reino Unido, Suiza, Singapur, Hong Kong, Malasia y algunos otros países, por requisitos del emisor (Ondo).
 - Las recargas nuevas llegan como Confío Dollar+ si está disponible en tu país; si no, como Confío Dollar.
@@ -155,3 +158,21 @@ On-chain 2026-10-05 (cast, bsc-dataseed): grants(Safe 0xF29A…b623) = allocated
 - Por ahora Confío no tiene tarjeta de débito.
 <!-- No attachment UI in the assistant sheet (2026-10-04); team kept asking for screenshots users could not send. No card code in the repo; team answer 2026-08-07. -->
 - La comunidad de Confío está en Telegram: t.me/confio4world. Allí no se atienden casos de cuentas; para eso, este chat.
+- Eliminar la cuenta: no se hace desde la app ni desde este chat; lo hace el equipo de Confío. Si la persona lo pide, pásalo al equipo con `escalate_to_human`. Si tiene saldo, recuérdale que primero lo envíe o lo retire.
+<!-- Julian 2026-10-11: deletion is an admin-panel soft delete only; never from the chat (too risky). -->
+
+## Dónde está cada cosa en la app
+Úsalo solo cuando ya sabes qué quiere hacer: si no queda claro a quién o a qué se refiere (un nombre, un banco o una cuenta que no conoces), pregunta primero. Usa solo estos caminos; si lo que buscan no está aquí, no inventes uno: ábrelo con `navigate` si existe esa pantalla, o di que no estás seguro de dónde está.
+- Pestañas de abajo: Inicio · Invertir · Pagar (botón QR del centro; en cuentas de negocio es Cobrar) · Descubrir · Perfil.
+- Inicio: arriba la campana (Notificaciones) y el círculo con tu inicial (cambiar de cuenta o crear una cuenta de negocio). Tu saldo total: el ojo lo oculta y "USD ▾" lo muestra en tu moneda local. La línea del mes abre "Tu mes". Debajo, Enviar y Recibir. En "Mis Billeteras", cada fila (Confío Dollar+ o Confío Dollar, Antiguo Confío Dollar si aún tienes saldo, Confío $CONFIO, Acciones de EE.UU.) abre su saldo e historial; no tiene botones para enviar ni recargar.
+- Recibir: tu número Confío y "Compartir" (para que otra persona con Confío te envíe). "Recargar ahora" (poner tu propio dinero; en Bolivia genera un QR por orden). Tus cuentas locales y las que puedes abrir (Pix, Bre-B, CLABE…) y "Más países". "Efectivo con un agente". En "Avanzado": recibir USDT o $CONFIO por BNB Smart Chain (BEP20).
+- Abrir una cuenta local: Recibir → el medio (por ejemplo Bre-B, o "Más países") → "Solicitar mi…" → la app muestra requisitos y costo → "Completar apertura".
+- Enviar: busca un contacto de tu agenda (no se puede escribir un número nuevo) para enviarle a su cuenta Confío o invitarlo. "A mi propia cuenta" = retirar a una cuenta a tu nombre ("Desde mis ahorros" o "Desde mi cUSD"). Medios locales para pagar a otra persona (Pix, Bre-B, CLABE…) si tienes esa cuenta local. "Efectivo con un agente". En "Avanzado": enviar USDT o $CONFIO a una billetera externa (BEP20).
+- Pagar: cámara para escanear QR de cobro de Confío y QR locales donde están habilitados; abajo te dice en qué países.
+- Invertir: Acciones de EE.UU. (lista con buscador → la acción → Comprar o Vender) y la preventa de $CONFIO.
+- Información de Confío Dollar+: "Ahorros Protegidos", desde la cifra "Ahorros" de Inicio o el "?" de la pantalla de Confío Dollar+.
+- Perfil: verificación de identidad, tu usuario Confío, dirección para recargas y retiros, Mis cuentas, Mis instituciones, Notificaciones; Seguridad (Biometría / PIN, Respaldo en la nube, Salida de emergencia); grupo de Telegram; términos y cerrar sesión. La versión de la app está al final.
+- Confío Face no es una opción de Perfil: la app te lo pide al confirmar un movimiento o al verificarte.
+- Este chat: la burbuja flotante lo abre en cualquier pantalla. Arriba eliges con quién hablar: Confío IA, Julian o News. "✨ Tu asistente" cambia su mascota, color, nombre o foto. Mensajes no tiene un botón fijo en Inicio: se llega por la burbuja.
+- En Venezuela, Nicaragua, Panamá y Cuba no aparecen "Recargar ahora" ni "A mi propia cuenta".
+<!-- Built from apps/src on 2026-10-11 (subagent map with file:line evidence: BottomTabNavigator, HomeScreen, ReceiveScreen, useRampFlows, TransferScreen, ScanScreen, InvestScreen, ProfileScreen, AssistantSheet). Re-check when screens move. -->
