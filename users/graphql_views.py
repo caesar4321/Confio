@@ -467,9 +467,8 @@ class UnifiedTransactionType(DjangoObjectType):
                 return 'Unknown'
                 
             # Get direction directly
-            user_address = getattr(self, '_user_address', None)
-            if user_address and hasattr(self, 'get_direction_for_address'):
-                direction = self.get_direction_for_address(user_address)
+            direction = UnifiedTransactionType.resolve_direction(self, info)
+            if direction in ('sent', 'received'):
                 # An EXTERNAL party has no display name by definition (money
                 # to/from a raw address), so falling through to "Unknown" was
                 # guaranteed for every external send and every inbound
@@ -513,9 +512,8 @@ class UnifiedTransactionType(DjangoObjectType):
                 
             if self.transaction_type == 'payment':
                 # Get direction directly
-                user_address = getattr(self, '_user_address', None)
-                if user_address and hasattr(self, 'get_direction_for_address'):
-                    direction = self.get_direction_for_address(user_address)
+                direction = UnifiedTransactionType.resolve_direction(self, info)
+                if direction in ('sent', 'received'):
                     if direction == 'sent':
                         return f"Pago a {self.counterparty_display_name or 'Unknown'}"
                     elif direction == 'received':
@@ -652,10 +650,31 @@ def row_direction(row, user):
 
     if user_address and hasattr(row, 'get_direction_for_address'):
         try:
-            return row.get_direction_for_address(user_address)
+            direction = row.get_direction_for_address(user_address)
+            if direction in ('sent', 'received'):
+                return direction
         except Exception as e:
             print(f"Error in resolve_direction: {e}")
+
+    # Historical transfers retain their old wallet addresses after migration.
+    # Fall back to the recorded account identity, not the current wallet. A
+    # business's owning user must never be mistaken for its personal account.
+    if row.transaction_type in ('send', 'payment') and user and user.is_authenticated:
+        account_type = getattr(row, '_account_type', 'personal')
+        business_id = getattr(row, '_account_business_id', None)
+        if account_type == 'business':
+            sent = bool(business_id and getattr(row, 'sender_business_id', None) == business_id)
+            received = bool(business_id and getattr(row, 'counterparty_business_id', None) == business_id)
+        elif account_type == 'personal':
+            sent = (getattr(row, 'sender_user_id', None) == user.id
+                    and not getattr(row, 'sender_business_id', None))
+            received = (getattr(row, 'counterparty_user_id', None) == user.id
+                        and not getattr(row, 'counterparty_business_id', None))
+        else:
             return 'unknown'
+        # Self transfers need a matching address to disambiguate accounts.
+        if sent != received:
+            return 'sent' if sent else 'received'
     return 'unknown'
 
 
@@ -1090,5 +1109,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Set the user's address on each transaction for the resolvers
         for transaction in transactions:
             transaction._user_address = _viewer_address_for(transaction, account)
-            
+            transaction._account_type = account.account_type
+            transaction._account_business_id = account.business_id if account.account_type == 'business' else None
+
         return transactions

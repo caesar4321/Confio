@@ -48,6 +48,7 @@ import { technicalFontFamily } from '../utils/fontFamily';
 import { inviteSendService } from '../services/inviteSendService';
 import { formatTokenLabel, explorerFor, conversionPair, isConversionIncoming, sendTokenParamFor } from '../utils/tokenDisplay';
 import { phoneKeyToE164, parsePhoneKey } from '../utils/phoneKey';
+import { transactionFriendRoute } from '../utils/transactionFriend';
 import { formatDecimal, formatPercent } from '../utils/numberLocale';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
@@ -1510,6 +1511,16 @@ export const TransactionDetailScreen = () => {
   } catch { }
 
 
+  const friendHistoryRoute = transactionFriendRoute(
+    currentTx,
+    counterpartyIdentityVerified,
+    currentTx?.type === 'received' ? displayFromName : displayToName,
+    currentTx?.type === 'received' ? senderPhone : recipientPhone,
+  );
+  const openFriendHistory = () => {
+    if (friendHistoryRoute) navigation.navigate('FriendDetail', friendHistoryRoute);
+  };
+
   const resolveConversionTokens = (tx?: any) => {
     const typeHint =
       tx?.conversion_type ||
@@ -2135,7 +2146,13 @@ export const TransactionDetailScreen = () => {
               )}
 
               {currentTx.type === 'received' && (
-                <View style={styles.participantInfo}>
+                <TouchableOpacity
+                  style={styles.participantInfo}
+                  onPress={openFriendHistory}
+                  disabled={!friendHistoryRoute}
+                  accessibilityRole={friendHistoryRoute ? 'button' : undefined}
+                  accessibilityLabel={friendHistoryRoute ? `Ver historial con ${friendHistoryRoute.friendName}` : undefined}
+                >
                   <View style={styles.avatarContainer}>
                     <Text style={styles.avatarText}>{currentTx.avatar}</Text>
                   </View>
@@ -2206,11 +2223,17 @@ export const TransactionDetailScreen = () => {
                       })()}
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               )}
 
               {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
-                <View style={styles.participantInfo}>
+                <TouchableOpacity
+                  style={styles.participantInfo}
+                  onPress={openFriendHistory}
+                  disabled={!friendHistoryRoute}
+                  accessibilityRole={friendHistoryRoute ? 'button' : undefined}
+                  accessibilityLabel={friendHistoryRoute ? `Ver historial con ${friendHistoryRoute.friendName}` : undefined}
+                >
                   <View style={styles.avatarContainer}>
                     <Text style={styles.avatarText}>
                       {currentTx.avatar || (isExternalRecipient ? '0' : 'U')}
@@ -2297,7 +2320,7 @@ export const TransactionDetailScreen = () => {
                       })()}
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               )}
 
               {currentTx.type === 'payment' && (
