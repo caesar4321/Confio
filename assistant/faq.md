@@ -90,6 +90,8 @@
 
 - Para un límite mayor en cuentas locales se pide un comprobante de domicilio y unas preguntas sobre tus ingresos y el origen de tus fondos.
 - Si tu documento venció, la verificación deja de valer: verifícate de nuevo con un documento vigente.
+- El país de tu cuenta es el de tu teléfono verificado y no se cambia desde la app. Qué productos tienes (por ejemplo Confío Dollar+ y acciones) depende de ese país y de desde dónde te conectas, por reglas del emisor: cambiar de país no es una forma de habilitarlos. No lo pases al equipo por eso.
+
 - Fotografía tu documento original (no una foto de pantalla ni un escaneo) y evita reflejos sobre el holograma.
 
 ## Enviar y pagar

@@ -1894,10 +1894,10 @@ class ExchangeRateToolTests(TestCase):
                    side_effect=lambda c, t, k: rows.get((c, k))):
             data = exchange_rate_data(self.viewer, None)
             ves = exchange_rate_data(self.viewer, 'VES')
-        self.assertEqual((data['moneda'], data['un_dolar_son'], data['tipo']), ('BOB', '11,95 BOB', 'oficial'))
+        self.assertEqual((data['moneda'], data['un_dolar_son'], data['tipo']), ('BOB', '11,95 bolivianos', 'oficial'))
         self.assertNotIn('más de dos días', data['nota'])
         # The age is the returned rate's own row: an old rate says so.
-        self.assertEqual(ves['un_dolar_son'], '1027 VES')
+        self.assertEqual(ves['un_dolar_son'], '1027 bolívares venezolanos')
         self.assertIn('más de dos días', ves['nota'])
 
     def test_refuses_dollars_and_unknown_codes(self):

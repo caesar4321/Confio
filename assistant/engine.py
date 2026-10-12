@@ -357,6 +357,15 @@ def _plus_net_apy():
 
 
 RATE_TYPES_ES = {'parallel': 'paralelo', 'average': 'promedio', 'official': 'oficial'}
+# Said in full so a mix-up shows ("bolívares" from Bolivia gets "bolívares
+# venezolanos" back, and the person can correct it).
+CURRENCY_NAMES_ES = {
+    'VES': 'bolívares venezolanos', 'BOB': 'bolivianos', 'ARS': 'pesos argentinos', 'PEN': 'soles peruanos',
+    'COP': 'pesos colombianos', 'MXN': 'pesos mexicanos', 'CLP': 'pesos chilenos', 'BRL': 'reales brasileños',
+    'PYG': 'guaraníes paraguayos', 'UYU': 'pesos uruguayos', 'GTQ': 'quetzales guatemaltecos',
+    'HNL': 'lempiras hondureñas', 'NIO': 'córdobas nicaragüenses', 'CRC': 'colones costarricenses',
+    'DOP': 'pesos dominicanos', 'CUP': 'pesos cubanos', 'EUR': 'euros', 'GBP': 'libras esterlinas',
+}
 
 
 def exchange_rate_data(viewer: Viewer, currency=None):
@@ -382,10 +391,12 @@ def exchange_rate_data(viewer: Viewer, currency=None):
             return {
                 'disponible': True,
                 'moneda': code,
-                'un_dolar_son': f'{Decimal(row.rate).normalize():f} {code}'.replace('.', ','),
+                'un_dolar_son': (f'{Decimal(row.rate).normalize():f}'.replace('.', ',')
+                                 + f' {CURRENCY_NAMES_ES.get(code, code)}'),
                 'tipo': RATE_TYPES_ES[kind],
                 'actualizado': f'{local:%Y-%m-%d %H:%M}' if local else 'desconocido',
-                'nota': ('Es el tipo de cambio de referencia que la app muestra en Inicio. En una recarga o un '
+                'nota': ('Nombra la moneda completa, como aparece en un_dolar_son. '
+                         'Es el tipo de cambio de referencia que la app muestra en Inicio. En una recarga o un '
                          'retiro el proveedor aplica su propio cambio, que ves antes de confirmar. No predigas '
                          'cómo va a cambiar.' + (' Este dato tiene más de dos días: dilo.' if stale else '')),
             }
@@ -692,7 +703,9 @@ class Toolbelt:
                 'description': (
                     'Tipo de cambio de referencia del dólar en una moneda local, el mismo que la app muestra en '
                     'Inicio. Úsala para "¿a cuánto está el dólar?" o para pasar un monto a su moneda ("¿cuánto es en '
-                    'bolivianos?"). `currency` es el código ISO (BOB, VES, ARS…); null = la moneda de su país.'
+                    'bolivianos?"). `currency` es el código ISO (BOB, VES, ARS…); null = la moneda de su país. Di siempre '
+                    'el nombre completo de la moneda que devuelve ("bolívares venezolanos", "pesos argentinos"), '
+                    'para que la persona note si quería otra.'
                 ),
                 'parameters': {
                     'type': 'object',
