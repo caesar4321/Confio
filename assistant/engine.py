@@ -595,8 +595,10 @@ class Toolbelt:
                 'type': 'function',
                 'name': 'escalate_to_human',
                 'description': (
-                    'Pasa la conversación al equipo humano de Confío. Úsalo para dinero atascado o '
-                    'perdido, fraude, cuenta bloqueada, o si el usuario pide una persona.'
+                    'Pasa la conversación al equipo humano de Confío: el chat queda con el equipo y tú dejas de '
+                    'responder. Úsalo solo para dinero atascado o perdido, un cobro que no entiende, fraude, cuenta '
+                    'bloqueada, eliminar la cuenta, o si el usuario pide una persona. Nunca para anotar qué vas a '
+                    'responder ni para preguntas que puedes contestar tú (comisiones, cómo funciona algo).'
                 ),
                 'parameters': {
                     'type': 'object',
