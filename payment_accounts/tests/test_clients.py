@@ -40,6 +40,59 @@ class ProviderClientTests(SimpleTestCase):
             self.assertTrue(call.args[1].endswith('/v1/accounts/internal-transfer/'))
             self.assertEqual(call.kwargs['params'], {'idempotency_key': 'exact-key'})
 
+    @override_settings(INFINIA_SECRET_ID='client', INFINIA_SECRET_PASSWORD='password')
+    def test_operation_lookup_returns_rows_carrying_the_key(self):
+        for kind, row in (('payout', {'id': 'p1', 'originId': 'exact-key'}),
+                          ('payin', {'id': 'p2', 'reference': 'exact-key'}),
+                          ('conversion', {'id': 'c1', 'idempotency_key': 'exact-key'})):
+            session = mock.Mock()
+            session.headers = {}
+            session.request.return_value = _Response(
+                200, {'status': 'success', 'data': [row], 'next_cursor': None, 'has_more': False})
+            self.assertEqual(InfiniaClient(session=session).find_operation(kind, 'exact-key'), [row])
+
+    @override_settings(INFINIA_SECRET_ID='client', INFINIA_SECRET_PASSWORD='password')
+    def test_operation_lookup_rejects_rows_for_other_keys(self):
+        # An ignored filter returns someone else's operation; never match it,
+        # and never let it read as "not found" (that resubmits the transfer).
+        for kind, row in (('payout', {'id': 'p1', 'originId': 'other'}),
+                          ('payin', {'id': 'p2'}),
+                          ('internal_transfer', {'id': 'c1', 'idempotency_key': 'other'})):
+            session = mock.Mock()
+            session.headers = {}
+            session.request.return_value = _Response(
+                200, {'status': 'success', 'data': [row], 'next_cursor': None, 'has_more': False})
+            with self.assertRaisesRegex(ProviderAPIError, 'ignored'):
+                InfiniaClient(session=session).find_operation(kind, 'exact-key')
+
+    @override_settings(INFINIA_SECRET_ID='client', INFINIA_SECRET_PASSWORD='password')
+    def test_operation_lookup_rejects_incomplete_or_malformed_lists(self):
+        # Each of these would otherwise read as "never submitted" and resubmit.
+        for body in ({'status': 'success', 'data': [], 'next_cursor': 'abc', 'has_more': True},
+                     {'status': 'success', 'data': [], 'next_cursor': 'abc'},
+                     {'status': 'success', 'data': None},
+                     {'status': 'success'},
+                     {'status': 'fail', 'message': 'try later', 'data': []},
+                     {'id': 'c1', 'idempotency_key': 'exact-key'},
+                     None):
+            session = mock.Mock()
+            session.headers = {}
+            session.request.return_value = _Response(200, body)
+            with self.assertRaisesRegex(ProviderAPIError, 'not a complete list'):
+                InfiniaClient(session=session).find_operation('conversion', 'exact-key')
+
+    @override_settings(INFINIA_SECRET_ID='client', INFINIA_SECRET_PASSWORD='password')
+    def test_list_lookups_use_cursor_limit_not_page_size(self):
+        session = mock.Mock()
+        session.headers = {}
+        session.request.return_value = _Response(
+            200, {'status': 'success', 'data': [], 'next_cursor': None, 'has_more': False})
+        client = InfiniaClient(session=session)
+        client.find_owner('key')
+        self.assertEqual(session.request.call_args.kwargs['params'], {'idempotency_key': 'key', 'limit': 1})
+        self.assertIsNone(client.find_deposit_refund('key'))
+        self.assertEqual(session.request.call_args.kwargs['params'], {'idempotency_key': 'key', 'limit': 5})
+
     def test_first_item_supports_cobre_paginated_contents(self):
         self.assertEqual(
             first_item({'contents': [{'id': 'acc_1'}], 'total_items': 1}),

@@ -213,7 +213,7 @@ class InfiniaClient(BaseProviderClient):
     def is_configured(self):
         return bool(self.secret_id and self.secret_password)
 
-    def request(self, method, path, *, payload=None, params=None, timeout=None):
+    def request(self, method, path, *, payload=None, params=None, timeout=None, unwrap=True):
         if not self.is_configured:
             raise ProviderConfigurationError('Infinia credentials are not configured')
         headers = {}
@@ -230,7 +230,8 @@ class InfiniaClient(BaseProviderClient):
             timeout=timeout,
         )
         if (
-            isinstance(parsed, dict)
+            unwrap
+            and isinstance(parsed, dict)
             and str(parsed.get('status') or '').lower() == 'success'
             and 'data' in parsed
         ):
@@ -244,7 +245,7 @@ class InfiniaClient(BaseProviderClient):
         return self.request(
             'GET',
             '/v1/accounts/owners/',
-            params={'idempotency_key': idempotency_key, 'page_size': 1},
+            params={'idempotency_key': idempotency_key, 'limit': 1},
         )
 
     def initiate_owner_document(self, *, document_type, double_sided=False):
@@ -342,22 +343,37 @@ class InfiniaClient(BaseProviderClient):
 
     def find_deposit_refund(self, idempotency_key):
         rows = self.request('GET', '/v1/accounts/movements/refund/',
-                            params={'idempotency_key': idempotency_key, 'page_size': 5})
+                            params={'idempotency_key': idempotency_key, 'limit': 5})
         if isinstance(rows, dict):
             rows = rows.get('results') or rows.get('items') or rows.get('data') or []
         return next((row for row in rows or [] if row.get('idempotency_key') == idempotency_key), None)
 
     def find_operation(self, operation_type, idempotency_key):
         if operation_type == 'payout':
-            path, params = '/v2/payouts/', {'origin_id': idempotency_key}
+            path, params, field = '/v2/payouts/', {'origin_id': idempotency_key}, 'originId'
         elif operation_type == 'payin':
-            path, params = '/v1/payments/', {'reference': idempotency_key}
+            path, params, field = '/v1/payments/', {'reference': idempotency_key}, 'reference'
         elif operation_type in {'internal_transfer', 'conversion'}:
             path = '/v1/accounts/internal-transfer/'
-            params = {'idempotency_key': idempotency_key}
+            params, field = {'idempotency_key': idempotency_key}, 'idempotency_key'
         else:
             raise ProviderAPIError(f'Infinia cannot reconcile {operation_type}')
-        return self.request('GET', path, params=params)
+        body = self.request('GET', path, params=params, unwrap=False)
+        # Callers take the first row or treat [] as "never submitted" (which
+        # resubmits), so anything but a complete, filtered list is unknown:
+        # a failure body, a missing data list, or more pages behind this one.
+        if isinstance(body, dict):
+            if (str(body.get('status') or '').lower() != 'success'
+                    or body.get('has_more') or body.get('next_cursor')):
+                raise ProviderAPIError(f'Infinia {path} lookup was not a complete list')
+            body = body.get('data')
+        if not isinstance(body, list):
+            raise ProviderAPIError(f'Infinia {path} lookup was not a complete list')
+        # An unfiltered list returns other operations first: a row without
+        # our key means the filter wasn't applied, not a match.
+        if any(not isinstance(row, dict) or row.get(field) != idempotency_key for row in body):
+            raise ProviderAPIError(f'Infinia {path} ignored the {field} filter')
+        return body
 
 
 def verify_cobre_signature(raw_body, timestamp, signature, secret):
