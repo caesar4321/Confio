@@ -85,6 +85,8 @@
 
 ## Verificación de identidad
 - Te verificas dentro de la app con tu documento y una selfie. Hace falta para recargar, retirar y abrir cuentas locales.
+- "Autenticación requerida" al recargar o retirar no es un error: la app te pide confirmar que eres tú. Si todavía no verificaste tu identidad, primero complétala (Perfil → Verificación) y vuelve a intentar. No hace falta pasarlo al equipo.
+
 - Tu nombre y fecha de nacimiento deben coincidir en todos tus documentos.
 - Si no tienes un documento del país de tu teléfono, puedes verificarte con tu pasaporte o un documento de otro país. Algunas funciones lo aceptan y otras (como recargar y retirar) piden el del país de tu teléfono: la app te dice cuál necesitas.
 
@@ -115,6 +117,7 @@
 - Antiguo Confío Dollar (cUSD): no se convierte al nuevo. Para usar ese dinero, retíralo a tu cuenta (Enviar → A mi propia cuenta → "Desde mi cUSD") y vuelve a recargar (Recibir → Recargar ahora → "Para ahorrar e invertir"). Si lo que tienes es menos que el mínimo para retirar, complétalo con Recibir → Recargar ahora → "Al antiguo Confío Dollar". En Bolivia todavía no se puede retirar a bolivianos.
 
 - Confío Dollar+ y acciones no están disponibles en EE.UU., Canadá, Brasil, la Unión Europea, Reino Unido, Suiza, Singapur, Hong Kong, Malasia y algunos otros países, por requisitos del emisor (Ondo).
+- En Latinoamérica están disponibles en todos los países salvo Brasil y Cuba: por ejemplo Argentina, Bolivia, Chile, Colombia, Ecuador, México, Paraguay, Perú, Uruguay, Venezuela y Centroamérica. Si preguntan por otro país, contesta con esta lista, no con lo que ves en su propia cuenta.
 - Las recargas nuevas llegan como Confío Dollar+ si está disponible en tu país; si no, como Confío Dollar.
 
 ## Negocios
