@@ -1,8 +1,15 @@
 """
-AWS Secrets Manager and SSM Parameter Store utilities.
+AWS SSM Parameter Store and Secrets Manager utilities.
 
 This module provides functions to fetch secrets from AWS at runtime.
 Secrets are cached in memory to avoid repeated API calls.
+
+App secrets live in SSM Parameter Store as SecureStrings under
+`/confio/secrets/<name>` (standard tier: free storage and reads, vs $0.40 per
+secret per month in Secrets Manager). `get_secret('prod/x')` reads
+`/confio/secrets/prod/x` and falls back to the Secrets Manager secret `prod/x`
+when no such parameter exists — which is still the case for `RDS_SECRET`
+(RDS Proxy only authenticates through Secrets Manager).
 """
 import os
 import json
@@ -23,10 +30,43 @@ except ImportError:
     logger.warning("boto3 not available - secrets will fall back to environment variables")
 
 
+# Kept apart from /confio/global and /confio/algorand key material, so loading
+# app secrets never pulls private keys into every process.
+PARAMETER_PREFIX = '/confio/secrets/'
+# Expected to be read from Secrets Manager; anything else falling back is a gap.
+SECRETS_MANAGER_ONLY = frozenset({'RDS_SECRET'})
+
+_parameter_secrets_cache: Dict[str, Dict[str, str]] = {}
+
+
+def _parameter_secrets(region_name: str) -> Dict[str, str]:
+    """
+    Every `/confio/secrets/*` parameter, decrypted, in one paginated
+    GetParametersByPath call per process. Each process reads ~27 secrets at
+    import time and a deploy restarts ~8 services at once; per-name
+    GetParameter calls would hit the 40 TPS standard throughput limit.
+
+    Only a successful load is cached, so a transient failure at boot is
+    retried on the next lookup instead of pinning the process to the fallback.
+    """
+    if region_name in _parameter_secrets_cache:
+        return _parameter_secrets_cache[region_name]
+    client = boto3.session.Session().client(service_name='ssm', region_name=region_name)
+    values = {}
+    for page in client.get_paginator('get_parameters_by_path').paginate(
+        Path=PARAMETER_PREFIX, Recursive=True, WithDecryption=True,
+    ):
+        for parameter in page['Parameters']:
+            values[parameter['Name'][len(PARAMETER_PREFIX):]] = parameter['Value']
+    _parameter_secrets_cache[region_name] = values
+    return values
+
+
 @lru_cache(maxsize=128)
 def get_secret(secret_name: str, region_name: str = "eu-central-2") -> Union[str, Dict[str, Any]]:
     """
-    Fetch secret from AWS Secrets Manager.
+    Fetch a secret: SSM Parameter Store `/confio/secrets/<name>` first, then
+    the Secrets Manager secret `<name>`.
 
     Args:
         secret_name: Name or ARN of the secret
@@ -51,6 +91,20 @@ def get_secret(secret_name: str, region_name: str = "eu-central-2") -> Union[str
                 return value
         else:
             raise Exception(f"boto3 not available and environment variable {env_var_name} not set")
+
+    try:
+        parameters = _parameter_secrets(region_name)
+    except ClientError as e:
+        logger.warning(f"Parameter Store load failed, reading {secret_name} from Secrets Manager: {e}")
+        parameters = {}
+    if secret_name in parameters:
+        value = parameters[secret_name]
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    if secret_name not in SECRETS_MANAGER_ONLY:
+        logger.warning(f"{PARAMETER_PREFIX}{secret_name} not in Parameter Store, reading Secrets Manager")
 
     session = boto3.session.Session()
     client = session.client(

@@ -3,7 +3,7 @@
 Proves that a self-custody wallet can buy and then sell an Ondo stock token
 through CoW Protocol solvers, with no Duende purchaser of record in between.
 
-The test wallet is a dedicated EOA whose key lives in AWS Secrets Manager
+The test wallet is a dedicated EOA whose key lives in SSM Parameter Store
 (never only on disk). Every step that spends funds asks for the literal
 `execute bsc` before broadcasting.
 
@@ -44,7 +44,8 @@ STOCK = to_checksum_address('0x390a684ef9cade28a7ad0dfa61ab1eb3842618c4')
 DECIMALS = 18
 SLIPPAGE_BPS = 100          # buyAmount floor = quote * (1 - 1%)
 ORDER_TTL_SECONDS = 20 * 60
-SECRET_NAME = 'ops/cow-solver-test-wallet'
+# SecureString outside /confio/secrets/, so app processes never load this key.
+SECRET_NAME = '/confio/ops/cow-solver-test-wallet'
 SECRET_REGION = 'eu-central-2'
 APP_DATA = json.dumps({'appCode': 'Confio', 'metadata': {}, 'version': '1.3.0'}, separators=(',', ':'))
 LOG = Path(__file__).with_name('cow_solver_roundtrip.log.json')
@@ -82,31 +83,32 @@ def fmt(amount, decimals=DECIMALS):
 
 # ---------------- wallet ----------------
 def secrets():
-    return boto3.client('secretsmanager', region_name=SECRET_REGION)
+    return boto3.client('ssm', region_name=SECRET_REGION)
 
 
 def load_account():
     try:
-        value = secrets().get_secret_value(SecretId=SECRET_NAME)['SecretString']
-    except secrets().exceptions.ResourceNotFoundException:
+        value = secrets().get_parameter(Name=SECRET_NAME, WithDecryption=True)['Parameter']['Value']
+    except secrets().exceptions.ParameterNotFound:
         sys.exit(f'No test wallet yet. Run `init` first ({SECRET_NAME} in {SECRET_REGION}).')
     return Account.from_key(json.loads(value)['private_key'])
 
 
 def cmd_init():
-    sm = secrets()
+    ssm = secrets()
     try:
-        sm.get_secret_value(SecretId=SECRET_NAME)
+        ssm.get_parameter(Name=SECRET_NAME, WithDecryption=True)
         acct = load_account()
         print(f'Test wallet already exists: {acct.address}')
         return
-    except sm.exceptions.ResourceNotFoundException:
+    except ssm.exceptions.ParameterNotFound:
         pass
     acct = Account.create()
-    sm.create_secret(
+    ssm.put_parameter(
         Name=SECRET_NAME,
         Description='Throwaway EOA for the CoW solver round-trip test (Ondo GM on BSC). Holds ~$11 at most.',
-        SecretString=json.dumps({'private_key': acct.key.hex(), 'address': acct.address}),
+        Value=json.dumps({'private_key': acct.key.hex(), 'address': acct.address}),
+        Type='SecureString',
     )
     # Prove custody before anyone funds it: read the key back and re-derive the address.
     again = load_account()

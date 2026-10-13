@@ -275,10 +275,12 @@ Subscription Form executed via Dropbox Sign; vault proxy registered via
 app.ondo.finance/account/wallets and whitelisted within minutes.
 On-chain proof: `IM.subscribe` eth_call as the vault no longer reverts
 `UserNotRegistered()` — it proceeds to the USDT balance pull ("BEP20:
-transfer amount exceeds balance" in simulation). Ondo GM write API key
-stored at Secrets Manager `prod/ondo-gm-api-key` (eu-central-2) —
-readable by the EC2 role (prod/* wildcard added 2026-07-31; the old
-per-ARN enumeration is gone). Unwired in code until GM trading lands.
+transfer amount exceeds balance" in simulation). Ondo GM keys
+are split by scope: read key `prod/ondo-gm-read-key`, write key
+`prod/ondo-gm-write-key` (since 2026-07-31; the older `prod/ondo-api-key`
+and `prod/ondo-gm-api-key` were retired). Stored as SSM SecureStrings
+`/confio/secrets/prod/ondo-gm-{read,write}-key` (eu-central-2), read via
+`config.secrets.get_secret`.
 
 ### Remaining checklist
 
