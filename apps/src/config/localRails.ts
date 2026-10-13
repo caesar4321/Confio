@@ -59,10 +59,10 @@ const SEND_RAILS: LocalRail[] = [
     status: 'probe',
   },
   // Pago móvil is THE way bolívares move person to person: phone, cédula and
-  // bank, instant between any two Venezuelan banks. No payout provider we
-  // use serves it yet (Infinia has no Venezuela schema; PagoASAP's off-ramp
-  // is to the user's OWN account), so it is a waitlist — and its size is the
-  // number we take to a provider.
+  // bank, instant between any two Venezuelan banks. No integrated provider
+  // serves it yet (Infinia has no Venezuela schema), so it is a waitlist —
+  // and its size is the number we take to a provider. PagoASAP and Bolívar
+  // Connect both pay third-party Pago Móvil and are being evaluated.
   {
     id: 'send_ve_pagomovil',
     country: 'VE',
