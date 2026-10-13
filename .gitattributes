@@ -65,3 +65,6 @@ venv/** linguist-vendored
 env/** linguist-vendored
 web/build/** linguist-generated
 contracts/**/build/** linguist-generated
+
+# Reviewer notes behind the assistant FAQ (internal sources and decisions)
+assistant/faq_notes.md filter=git-crypt diff=git-crypt
