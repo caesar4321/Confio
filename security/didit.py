@@ -1830,7 +1830,11 @@ def verify_didit_webhook_signature(
 ) -> bool:
     secret = (getattr(settings, 'DIDIT_WEBHOOK_SECRET', '') or '').strip()
     if not secret:
-        return True
+        # Fail closed outside local development: no secret must never mean
+        # "accept anything" for KYC decisions.
+        if not settings.DEBUG:
+            logger.error('Didit webhook rejected: DIDIT_WEBHOOK_SECRET is not configured')
+        return bool(settings.DEBUG)
 
     secret_bytes = secret.encode('utf-8')
 

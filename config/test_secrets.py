@@ -32,10 +32,31 @@ class GetSecretTests(unittest.TestCase):
         )
         self.sm.get_secret_value.assert_not_called()
 
+    def test_parameter_created_after_startup_is_found_without_restart(self):
+        secrets.get_secret('prod/twilio-api')  # snapshot loaded
+        self.ssm.get_parameter.return_value = {'Parameter': {'Value': '{"bot_token": "t"}'}}
+        self.assertEqual(secrets.get_secret('prod/ops-alert-telegram'), {'bot_token': 't'})
+        self.ssm.get_parameter.assert_called_once_with(
+            Name='/confio/secrets/prod/ops-alert-telegram', WithDecryption=True,
+        )
+        self.sm.get_secret_value.assert_not_called()
+
     def test_missing_parameter_falls_back_to_secrets_manager(self):
+        self.ssm.get_parameter.side_effect = ClientError(
+            {'Error': {'Code': 'ParameterNotFound', 'Message': ''}}, 'GetParameter',
+        )
         self.sm.get_secret_value.return_value = {'SecretString': '{"password": "pw"}'}
         self.assertEqual(secrets.get_secret('RDS_SECRET'), {'password': 'pw'})
         self.sm.get_secret_value.assert_called_once_with(SecretId='RDS_SECRET')
+        self.ssm.get_parameter.assert_not_called()  # Secrets Manager-only by design
+
+    def test_unknown_name_tries_parameter_then_secrets_manager(self):
+        self.ssm.get_parameter.side_effect = ClientError(
+            {'Error': {'Code': 'ParameterNotFound', 'Message': ''}}, 'GetParameter',
+        )
+        self.sm.get_secret_value.return_value = {'SecretString': 'legacy'}
+        self.assertEqual(secrets.get_secret('prod/not-migrated'), 'legacy')
+        self.ssm.get_parameter.assert_called_once()
 
     def test_failed_bulk_load_falls_back_and_is_not_cached(self):
         self.ssm.get_paginator.return_value.paginate.side_effect = ClientError(

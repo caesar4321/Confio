@@ -139,9 +139,10 @@ records.
 
 ## Configuration
 
-Production Infinia credentials are stored in AWS Secrets Manager in `eu-central-2`:
-`prod/infinia-secret-id`, `prod/infinia-secret-password`,
-and `prod/infinia-webhook-signing-key`. Explicit environment
+Production Infinia credentials are stored as SSM Parameter Store SecureStrings in
+`eu-central-2`: `/confio/secrets/prod/infinia-secret-id`,
+`/confio/secrets/prod/infinia-secret-password` and
+`/confio/secrets/prod/infinia-webhook-signing-key` (read by `config.secrets.get_secret`). Explicit environment
 overrides take precedence. Sandbox credentials use the `sandbox/` prefix.
 `INFINIA_ENV=production|sandbox` selects the API URL and all three secret names
 independently of `CONFIO_ENV`. The checked-in `.env.testnet` uses production

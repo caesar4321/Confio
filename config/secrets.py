@@ -110,6 +110,17 @@ def get_secret(secret_name: str, region_name: str = "eu-central-2") -> Union[str
     except ClientError as e:
         logger.warning(f"Parameter Store load failed, reading {secret_name} from Secrets Manager: {e}")
         parameters = {}
+    if secret_name not in parameters and parameters and secret_name not in SECRETS_MANAGER_ONLY:
+        # Created after this process loaded its snapshot (e.g. a new alert
+        # bot secret): one direct read keeps "create it, no restart needed".
+        try:
+            response = boto3.session.Session().client(service_name='ssm', region_name=region_name).get_parameter(
+                Name=f'{PARAMETER_PREFIX}{secret_name}', WithDecryption=True,
+            )
+            parameters[secret_name] = response['Parameter']['Value']
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'ParameterNotFound':
+                logger.warning(f"Parameter Store read failed for {secret_name}: {e}")
     if secret_name in parameters:
         value = parameters[secret_name]
         try:

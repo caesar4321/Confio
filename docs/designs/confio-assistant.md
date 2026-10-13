@@ -63,7 +63,7 @@ Employees get no money tools. The AI never moves money and never states balances
 
 ## Setup only Julian can do (the features stay dark until done)
 
-1. **Secrets Manager `prod/confio-assistant`** (JSON): `picovoice_access_key`.
+1. **SSM SecureString `/confio/secrets/prod/confio-assistant`** (JSON): `picovoice_access_key`.
 2. **Picovoice:**
    - Get an AccessKey. Commercial use needs a paid plan.
    - Train the Spanish keyword "Confío" for **Porcupine v3.0** for iOS and Android, and download `porcupine_params_es.pv` (v3).

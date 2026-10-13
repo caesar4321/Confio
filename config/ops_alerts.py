@@ -4,7 +4,8 @@ Sent by a dedicated Telegram BOT through the Bot API — never through the
 Confio Brain user session: a second Telethon client on that session kills the
 live listener (AuthKeyDuplicated).
 
-Secret (Secrets Manager, eu-central-2), name from settings.OPS_ALERT_TELEGRAM_SECRET
+Secret (SSM Parameter Store SecureString /confio/secrets/<name>, eu-central-2,
+via config.secrets.get_secret), name from settings.OPS_ALERT_TELEGRAM_SECRET
 (default 'prod/ops-alert-telegram'), JSON: {"bot_token": "...", "chat_id": "-100..."}
 plus optional "public_chat_id" for the public community group. Internal alerts
 go ONLY to chat_id; the public group gets only what send_public_notice sends.

@@ -89,7 +89,8 @@ open; while Confío beats, the ban keeps the funds frozen.
   every retry) and an outside watchdog, `.github/workflows/heartbeat-watchdog.yml`
   + `scripts/ops/heartbeat_watchdog.py`, hourly from GitHub so a dead
   backend still pages. Setup: create the bot, add it to the group, store
-  `prod/ops-alert-telegram` = {"bot_token","chat_id"} in Secrets Manager,
+  `prod/ops-alert-telegram` = {"bot_token","chat_id"} as SSM SecureString
+  `/confio/secrets/prod/ops-alert-telegram`,
   and the repo secrets OPS_ALERT_TELEGRAM_BOT_TOKEN / _CHAT_ID + repo
   variable CONFIO_HEARTBEAT_ADDRESS. GitHub disables scheduled workflows in
   public repos after 60 days without activity.

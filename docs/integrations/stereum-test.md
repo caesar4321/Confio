@@ -6,7 +6,7 @@ This is a provider test integration, not a customer-facing ramp. The existing mo
 
 ## Configuration
 
-Use `CONFIO_ENV=testnet` to load the ignored local `.env.stereum-test.local`. The supplied credentials have been placed there; no credential is committed. The application also supports the existing Secrets Manager helper with `sandbox/stereum-api-key` and `sandbox/stereum-secret-key` when enabled and environment values are absent.
+Use `CONFIO_ENV=testnet` to load the ignored local `.env.stereum-test.local`. The supplied credentials have been placed there; no credential is committed. The application also supports the existing `config.secrets.get_secret` helper (SSM SecureStrings `/confio/secrets/sandbox/stereum-api-key` and `/confio/secrets/sandbox/stereum-secret-key`) when enabled and environment values are absent.
 
 ```dotenv
 STEREUM_ENV=sandbox

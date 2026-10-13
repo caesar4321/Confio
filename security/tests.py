@@ -1308,3 +1308,19 @@ class ExpiredDocumentKeepsKycBindingTests(TestCase):
             verified_address='', verified_city='', verified_state='', verified_country='',
             document_number='didit:new2')
         self.assertIsNone(_anchor_for(new))
+
+
+class DiditWebhookMissingSecretTests(SimpleTestCase):
+    """No configured secret must reject webhooks outside DEBUG (fail closed)."""
+
+    @override_settings(DIDIT_WEBHOOK_SECRET='', DEBUG=False)
+    def test_missing_secret_rejects(self):
+        from security.didit import verify_didit_webhook_signature
+
+        self.assertFalse(verify_didit_webhook_signature(b'{}', 'anything'))
+
+    @override_settings(DIDIT_WEBHOOK_SECRET='', DEBUG=True)
+    def test_missing_secret_still_allowed_in_local_debug(self):
+        from security.didit import verify_didit_webhook_signature
+
+        self.assertTrue(verify_didit_webhook_signature(b'{}', None))
