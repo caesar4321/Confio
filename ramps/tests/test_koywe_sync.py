@@ -1630,3 +1630,13 @@ class KoyweQuoteLimitPreflightTests(SimpleTestCase):
             amount=Decimal('25000'),
             fiat_symbol='ARS',
         )
+
+
+class KoyweWebhookMissingSecretTests(SimpleTestCase):
+    """No configured secret must reject webhooks outside DEBUG (fail closed)."""
+
+    @override_settings(KOYWE_WEBHOOK_SECRET='', DEBUG=False)
+    def test_missing_secret_rejects(self):
+        from ramps.koywe_sync import verify_koywe_webhook_signature
+
+        self.assertFalse(verify_koywe_webhook_signature({'signature': 'anything'}))

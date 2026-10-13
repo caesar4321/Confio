@@ -43,7 +43,10 @@ _STATUS_ORDER = {'PENDING': 0, 'PROCESSING': 1, 'AML_REVIEW': 1, 'COMPLETED': 2,
 def verify_koywe_webhook_signature(payload: dict[str, Any]) -> bool:
     secret = (getattr(settings, 'KOYWE_WEBHOOK_SECRET', '') or '').strip()
     if not secret:
-        return True
+        # Fail closed outside local development, like the other provider webhooks.
+        if not settings.DEBUG:
+            logger.error('Koywe webhook rejected: KOYWE_WEBHOOK_SECRET is not configured')
+        return bool(settings.DEBUG)
     provided = str(payload.get('signature') or '').strip()
     if not provided:
         return False

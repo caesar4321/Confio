@@ -50,6 +50,13 @@ class GetSecretTests(unittest.TestCase):
         self.sm.get_secret_value.assert_called_once_with(SecretId='RDS_SECRET')
         self.ssm.get_parameter.assert_not_called()  # Secrets Manager-only by design
 
+    def test_direct_read_network_error_still_falls_back(self):
+        from botocore.exceptions import EndpointConnectionError
+
+        self.ssm.get_parameter.side_effect = EndpointConnectionError(endpoint_url='https://ssm')
+        self.sm.get_secret_value.return_value = {'SecretString': 'legacy'}
+        self.assertEqual(secrets.get_secret('prod/not-migrated'), 'legacy')
+
     def test_unknown_name_tries_parameter_then_secrets_manager(self):
         self.ssm.get_parameter.side_effect = ClientError(
             {'Error': {'Code': 'ParameterNotFound', 'Message': ''}}, 'GetParameter',

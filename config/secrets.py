@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 try:
     import boto3
     from botocore.config import Config
-    from botocore.exceptions import ClientError
+    from botocore.exceptions import BotoCoreError, ClientError
     BOTO3_AVAILABLE = True
 except ImportError:
     BOTO3_AVAILABLE = False
@@ -121,6 +121,8 @@ def get_secret(secret_name: str, region_name: str = "eu-central-2") -> Union[str
         except ClientError as e:
             if e.response['Error']['Code'] != 'ParameterNotFound':
                 logger.warning(f"Parameter Store read failed for {secret_name}: {e}")
+        except BotoCoreError as e:  # network/credential errors: still try Secrets Manager
+            logger.warning(f"Parameter Store read failed for {secret_name}: {e}")
     if secret_name in parameters:
         value = parameters[secret_name]
         try:
