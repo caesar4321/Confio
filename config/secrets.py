@@ -10,6 +10,11 @@ secret per month in Secrets Manager). `get_secret('prod/x')` reads
 `/confio/secrets/prod/x` and falls back to the Secrets Manager secret `prod/x`
 when no such parameter exists — which is still the case for `RDS_SECRET`
 (RDS Proxy only authenticates through Secrets Manager).
+
+Size limit: standard-tier parameters hold at most 4,096 bytes. The largest
+today is prod/didit-workflow-ids-by-phone-country at 3,651 bytes (2026-10-13);
+if a value outgrows 4 KB, `put-parameter` fails and that parameter needs
+`--tier Advanced` ($0.05/month, 8 KB limit). The bulk load reads both tiers.
 """
 import os
 import json
