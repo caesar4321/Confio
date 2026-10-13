@@ -42,6 +42,20 @@ from content_ingestion.telegram_client import _entity_identifier, get_client
 
 logger = logging.getLogger(__name__)
 
+
+async def _to_thread_db(func, /, *args, **kwargs):
+    """asyncio.to_thread that hands back any DB connection the worker thread
+    opened. With DB_POOL a thread that never closes keeps its pool connection
+    checked out for good; enough of them exhaust the pool (PoolTimeout)."""
+    def run():
+        close_old_connections()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            close_old_connections()
+
+    return await asyncio.to_thread(run)
+
 # Slash command -> canonical provider. Routes a single message to one model.
 PROVIDER_COMMANDS = {
     '/chatgpt': 'openai',
@@ -157,7 +171,7 @@ class Command(BaseCommand):
                     if authority not in {'owner', 'trusted'}:
                         await event.reply('No tienes permiso para revisar memoria canónica.')
                         return
-                    result = await asyncio.to_thread(canonical_promotion.list_review_candidates)
+                    result = await _to_thread_db(canonical_promotion.list_review_candidates)
                     for chunk in _telegram_chunks(result):
                         await event.reply(chunk)
                 elif command == MEMORY_APPROVE_COMMAND:
@@ -170,7 +184,7 @@ class Command(BaseCommand):
                         await event.reply(f'Usage: {MEMORY_APPROVE_COMMAND} <candidate-id>')
                         return
                     try:
-                        result = await asyncio.to_thread(
+                        result = await _to_thread_db(
                             canonical_promotion.approve_review_candidate,
                             candidate_id,
                         )
@@ -192,7 +206,7 @@ class Command(BaseCommand):
                         return
                     reason = re.sub(r'^\s*#?\d+\s*', '', prompt or '', count=1)
                     try:
-                        await asyncio.to_thread(
+                        await _to_thread_db(
                             canonical_promotion.reject_review_candidate,
                             candidate_id,
                             reason=reason,
@@ -245,7 +259,7 @@ class Command(BaseCommand):
             await client.disconnect()
             return
 
-        await asyncio.to_thread(_sync_memory_index_best_effort)
+        await _to_thread_db(_sync_memory_index_best_effort)
 
         # Background tasks: durable raw logs plus conservative canonical promotion.
         flush_task = asyncio.create_task(self._flush_loop())
@@ -321,7 +335,7 @@ class Command(BaseCommand):
         reply_to = await _reply_target(event)
         user_prompt = _compose_prompt(prompt, history, reply_to, sender_name=sender_name, authority=authority)
         routing_text = '\n'.join(part for part in (prompt, reply_to) if part)
-        system = await asyncio.to_thread(build_system_prompt, prompt)
+        system = await _to_thread_db(build_system_prompt, prompt)
         logger.info(
             'Telegram AI %s reply in chat %s',
             'debate' if debate_mode else provider_label(provider),
@@ -353,12 +367,12 @@ class Command(BaseCommand):
         for chunk in _telegram_chunks(answer):
             await event.reply(chunk)
 
-        await asyncio.to_thread(
+        await _to_thread_db(
             conversation_log.append_turn,
             event.chat_id, sender_name, event.raw_text or prompt, answer,
         )
         try:
-            await asyncio.to_thread(
+            await _to_thread_db(
                 canonical_promotion.record_turn,
                 chat_id=event.chat_id,
                 message_id=getattr(event, 'id', 0),
@@ -421,11 +435,11 @@ class Command(BaseCommand):
             and _is_longform_script_request(request_text)
         ):
             logger.info('Routing long-form script request to script writer')
-            script_system = await asyncio.to_thread(
+            script_system = await _to_thread_db(
                 build_script_system_prompt,
                 request_text,
             )
-            return await asyncio.to_thread(
+            return await _to_thread_db(
                 complete_script,
                 _script_writer_prompt(user_prompt),
                 system=script_system,
@@ -434,8 +448,8 @@ class Command(BaseCommand):
             )
         if youtube_urls and not debate_mode and not memory_write_request:
             logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
-            media_system = await asyncio.to_thread(build_media_system_prompt, routing_text)
-            return await asyncio.to_thread(
+            media_system = await _to_thread_db(build_media_system_prompt, routing_text)
+            return await _to_thread_db(
                 complete_with_youtube_video, user_prompt, system=media_system
             )
         if not debate_mode:
@@ -444,7 +458,7 @@ class Command(BaseCommand):
                     'Analyzing YouTube video before memory write: %s',
                     youtube_urls[:3],
                 )
-                media_system = await asyncio.to_thread(build_media_system_prompt, routing_text)
+                media_system = await _to_thread_db(build_media_system_prompt, routing_text)
                 user_prompt = await self._prompt_with_youtube_analysis(user_prompt, media_system)
             images = await _collect_image_inputs(client, event)
             videos = await _collect_video_inputs(client, event)
@@ -452,7 +466,7 @@ class Command(BaseCommand):
                 # Direct Gemini media analysis must not receive tool instructions. Build
                 # this prompt only for actual media turns to avoid a second retrieval call
                 # on every ordinary text message.
-                media_system = await asyncio.to_thread(
+                media_system = await _to_thread_db(
                     build_media_system_prompt,
                     routing_text,
                 )
@@ -477,7 +491,7 @@ class Command(BaseCommand):
                     len(images),
                     image_model or image_provider or 'Luna with Gemini fallback',
                 )
-                return await asyncio.to_thread(
+                return await _to_thread_db(
                     complete_with_images,
                     user_prompt,
                     images,
@@ -488,7 +502,7 @@ class Command(BaseCommand):
                 )
             if videos:
                 logger.info('Routing %s Telegram video(s) to Gemini video analysis', len(videos))
-                return await asyncio.to_thread(
+                return await _to_thread_db(
                     complete_with_video_files, user_prompt, videos, system=media_system
                 )
             loop = asyncio.get_running_loop()
@@ -513,7 +527,7 @@ class Command(BaseCommand):
                 # OpenAI turns intentionally stay on the cheaper daily Luna model.
                 agent_model = openai_model
                 reasoning_effort = openai_effort
-            return await asyncio.to_thread(
+            return await _to_thread_db(
                 run_with_tools,
                 user_prompt,
                 provider,
@@ -523,7 +537,7 @@ class Command(BaseCommand):
                 model=agent_model,
                 reasoning_effort=reasoning_effort,
             )
-        return await asyncio.to_thread(debate, user_prompt, system=system)
+        return await _to_thread_db(debate, user_prompt, system=system)
 
     async def _prompt_with_telegram_image_analysis(
         self,
@@ -543,7 +557,7 @@ class Command(BaseCommand):
             'indica exactamente qué parte es incierta.'
         )
         try:
-            analysis = await asyncio.to_thread(
+            analysis = await _to_thread_db(
                 complete_with_images,
                 analysis_prompt,
                 images,
@@ -575,7 +589,7 @@ class Command(BaseCommand):
             'incertidumbres. Evita frases genéricas sin evidencia.'
         )
         try:
-            analysis = await asyncio.to_thread(
+            analysis = await _to_thread_db(
                 complete_with_youtube_video, analysis_prompt, system=system
             )
         except AIClientError as exc:
@@ -602,7 +616,7 @@ class Command(BaseCommand):
             'incertidumbres. Evita frases genéricas sin evidencia.'
         )
         try:
-            analysis = await asyncio.to_thread(
+            analysis = await _to_thread_db(
                 complete_with_video_files, analysis_prompt, videos, system=system
             )
         except AIClientError as exc:
@@ -619,10 +633,10 @@ class Command(BaseCommand):
             await asyncio.sleep(interval)
             try:
                 close_old_connections()
-                result = await asyncio.to_thread(conversation_log.commit_and_push)
+                result = await _to_thread_db(conversation_log.commit_and_push)
                 if result not in ('no changes', 'skipped (git busy)', 'disabled', None):
                     logger.info('Conversation log: %s', result)
-                await asyncio.to_thread(_sync_memory_index_best_effort)
+                await _to_thread_db(_sync_memory_index_best_effort)
             except Exception:
                 logger.exception('Conversation log flush failed')
             finally:
@@ -635,7 +649,7 @@ class Command(BaseCommand):
             await asyncio.sleep(interval)
             try:
                 close_old_connections()
-                result = await asyncio.to_thread(canonical_promotion.process_pending_turns)
+                result = await _to_thread_db(canonical_promotion.process_pending_turns)
                 if result.get('turns') or result.get('promoted'):
                     logger.info('Canonical promotion loop: %s', result)
             except Exception:
