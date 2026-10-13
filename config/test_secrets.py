@@ -16,7 +16,7 @@ class GetSecretTests(unittest.TestCase):
         session = mock.patch('config.secrets.boto3.session.Session')
         self.ssm, self.sm = mock.Mock(), mock.Mock()
         clients = {'ssm': self.ssm, 'secretsmanager': self.sm}
-        session.start().return_value.client.side_effect = lambda service_name, region_name: clients[service_name]
+        session.start().return_value.client.side_effect = lambda service_name, region_name, **kw: clients[service_name]
         self.addCleanup(session.stop)
         self.pages = [{'Parameters': [
             {'Name': '/confio/secrets/prod/twilio-api', 'Value': '{"sid": "AC1"}'},

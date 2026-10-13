@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # This allows local development without boto3
 try:
     import boto3
+    from botocore.config import Config
     from botocore.exceptions import ClientError
     BOTO3_AVAILABLE = True
 except ImportError:
@@ -56,7 +57,14 @@ def _parameter_secrets(region_name: str) -> Dict[str, str]:
     """
     if region_name in _parameter_secrets_cache:
         return _parameter_secrets_cache[region_name]
-    client = boto3.session.Session().client(service_name='ssm', region_name=region_name)
+    # Adaptive retries absorb throttling while several services boot at once;
+    # without them one throttled page sent every later lookup back to retry
+    # the whole load, compounding the throttling.
+    client = boto3.session.Session().client(
+        service_name='ssm',
+        region_name=region_name,
+        config=Config(retries={'mode': 'adaptive', 'max_attempts': 10}),
+    )
     values = {}
     for page in client.get_paginator('get_parameters_by_path').paginate(
         Path=PARAMETER_PREFIX, Recursive=True, WithDecryption=True,
