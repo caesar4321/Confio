@@ -111,6 +111,27 @@ try:
                 conn.close()
             except Exception:
                 pass
+
+    # With DB_POOL, a pool opened in the prefork parent must not be inherited:
+    # its sockets and worker threads would be shared across processes. Close
+    # pools in the parent before it forks; in each child, forget anything
+    # inherited without closing it (closing would hang up the parent's sockets).
+    @signals.worker_init.connect
+    def _celery_parent_close_db_pools(*args, **kwargs):
+        for conn in connections.all():
+            try:
+                if getattr(conn, 'pool', None):
+                    conn.close_pool()
+                else:
+                    conn.close()
+            except Exception:
+                pass
+
+    @signals.worker_process_init.connect
+    def _celery_child_drop_inherited_db_state(*args, **kwargs):
+        for conn in connections.all(initialized_only=True):
+            conn.connection = None
+            getattr(type(conn), '_connection_pools', {}).clear()
 except Exception:
     # If imports fail during early startup, skip signals (app will still run)
     pass
