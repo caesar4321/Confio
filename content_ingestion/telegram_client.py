@@ -5,7 +5,9 @@ from pathlib import Path
 
 from django.conf import settings
 from django.utils import timezone
-from asgiref.sync import sync_to_async
+# Closes the DB connection before and after each call; plain sync_to_async left
+# one pool connection checked out per Celery child for good.
+from channels.db import database_sync_to_async as sync_to_async
 
 from .models import IngestionStatus, MediaAsset, MediaPlatform, TelegramChat
 
