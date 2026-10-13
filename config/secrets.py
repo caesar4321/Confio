@@ -107,7 +107,7 @@ def get_secret(secret_name: str, region_name: str = "eu-central-2") -> Union[str
 
     try:
         parameters = _parameter_secrets(region_name)
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
         logger.warning(f"Parameter Store load failed, reading {secret_name} from Secrets Manager: {e}")
         parameters = {}
     if secret_name not in parameters and parameters and secret_name not in SECRETS_MANAGER_ONLY:

@@ -57,6 +57,13 @@ class GetSecretTests(unittest.TestCase):
         self.sm.get_secret_value.return_value = {'SecretString': 'legacy'}
         self.assertEqual(secrets.get_secret('prod/not-migrated'), 'legacy')
 
+    def test_bulk_load_network_error_falls_back(self):
+        from botocore.exceptions import EndpointConnectionError
+
+        self.ssm.get_paginator.return_value.paginate.side_effect = EndpointConnectionError(endpoint_url='https://ssm')
+        self.sm.get_secret_value.return_value = {'SecretString': 'from-sm'}
+        self.assertEqual(secrets.get_secret('prod/telegram-bot'), 'from-sm')
+
     def test_unknown_name_tries_parameter_then_secrets_manager(self):
         self.ssm.get_parameter.side_effect = ClientError(
             {'Error': {'Code': 'ParameterNotFound', 'Message': ''}}, 'GetParameter',
