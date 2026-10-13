@@ -63,6 +63,7 @@
 - En todos los países, en Recibir y en Enviar está "Efectivo con un agente": casas de cambio y agentes para convertir dólares en efectivo o efectivo en dólares.
 
 - Antes de confirmar una recarga o un retiro siempre ves el costo y el tipo de cambio.
+- Montos mínimos de recarga: dependen del medio y del proveedor, y la app los muestra al elegir el monto. Si no deja un monto más bajo, es el mínimo de ese medio. No des una cifra ni le pidas que te diga qué ve en pantalla.
 - Recargas en tu moneda local (soles, pesos, bolivianos, reales): no necesitas cambiar a dólares en tu banco antes. Confío convierte al recargar y ves el tipo de cambio antes de confirmar. Si tienes efectivo, primero ponlo en tu cuenta o billetera local en tu moneda y desde ahí recargas.
 - Recargar está dentro de Recibir.
 - En recargas por transferencia, primero creas la orden con el monto y luego haces una sola transferencia por exactamente ese monto. No transfieras sin orden ni dividas el pago en varias transferencias.
@@ -139,7 +140,7 @@
 - Recibir: tu número Confío y "Compartir" (para que otra persona con Confío te envíe). "Recargar ahora" (poner tu propio dinero; en Bolivia genera un QR por orden). Tus cuentas locales y las que puedes abrir (Pix, Bre-B, CLABE…) y "Más países". "Efectivo con un agente". En "Avanzado": recibir USDT o $CONFIO por BNB Smart Chain (BEP20).
 - Abrir una cuenta local: Recibir → el medio (por ejemplo Bre-B, o "Más países") → "Solicitar mi…" → la app muestra requisitos y costo → "Completar apertura".
 - Enviar: busca un contacto de tu agenda (no se puede escribir un número nuevo) para enviarle a su cuenta Confío o invitarlo. "A mi propia cuenta" = retirar a una cuenta a tu nombre ("Desde mis ahorros" o "Desde mi cUSD"). Medios locales para pagar a otra persona (Pix, Bre-B, CLABE…) si tienes esa cuenta local. "Efectivo con un agente". En "Avanzado": enviar USDT o $CONFIO a una billetera externa (BEP20).
-- Pagar: cámara para escanear QR de cobro de Confío y QR locales donde están habilitados; abajo te dice en qué países.
+- Pagar: cámara para escanear QR de cobro de Confío y QR locales donde están habilitados; abajo te dice en qué países. En Bolivia hoy sirve para QR de cobro de Confío; pagar QR locales de Bolivia llegará muy pronto: dilo cuando abras Pagar desde Bolivia.
 - Invertir: Acciones de EE.UU. (lista con buscador → la acción → Comprar o Vender) y la preventa de $CONFIO.
 - Información de Confío Dollar+: "Ahorros Protegidos", desde la cifra "Ahorros" de Inicio o el "?" de la pantalla de Confío Dollar+.
 - Perfil: verificación de identidad, tu usuario Confío, dirección para recargas y retiros, Mis cuentas, Mis instituciones, Notificaciones; Seguridad (Biometría / PIN, Respaldo en la nube, Salida de emergencia); grupo de Telegram; términos y cerrar sesión. La versión de la app está al final.
