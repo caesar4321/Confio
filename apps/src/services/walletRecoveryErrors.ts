@@ -10,6 +10,37 @@ const messages: Record<WalletRecoveryFailure, string> = {
   unexpected: 'Ocurrió un error al recuperar tu billetera. Inténtalo de nuevo. Si continúa, contáctanos e indica el código RECOVERY-UNEXPECTED. No desinstales Confío ni borres los datos de la app.',
 };
 
+/**
+ * What the device saw before it gave up. Diagnostics only: entries are
+ * categorical by construction and whitelisted again by the server, which is
+ * why this is deliberately not typed to the classifier's own shape.
+ */
+export interface WalletRecoveryEvidence {
+  foundAny: boolean;
+  foundDecryptable: boolean;
+  inventory: unknown[];
+}
+
+/**
+ * Where an attempt leaves what it saw.
+ *
+ * Deliberately NOT a property on the thrown error: two attempts can reject
+ * with the same error object (a cached or shared rejection), and one
+ * attempt's inventory would then be reported as the other's. A frozen error
+ * would silently lose it instead. The sink belongs to the attempt, so it
+ * answers "what did THIS attempt see" regardless of what it threw.
+ */
+export interface RecoveryEvidenceSink {
+  current?: WalletRecoveryEvidence;
+  /**
+   * Set once a failure has been reported for this attempt. An operation
+   * can have an inner boundary that classifies a failure precisely and an
+   * outer one that catches everything; without this the pair would file
+   * the same lockout twice, under two different codes.
+   */
+  reported?: boolean;
+}
+
 export class WalletRecoveryError extends Error {
   constructor(public readonly code: WalletRecoveryFailure) {
     super(messages[code]);

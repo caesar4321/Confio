@@ -9,7 +9,12 @@ User=nginx
 WorkingDirectory=/opt/confio
 Environment=DJANGO_SETTINGS_MODULE=config.settings
 EnvironmentFile=/opt/confio/.env.mainnet
-ExecStart=/opt/confio/myvenv/bin/python -m daphne -b 127.0.0.1 -p 8000 config.asgi:application
+# --access-log /dev/null: Daphne's access log defaults to stdout, so every
+# request URI lands in the journal with its query string intact. GraphQL
+# accepts whole operations in the URL, which would put mutation arguments
+# there before any resolver can sanitize them. Nginx keeps the access log,
+# with the query string stripped.
+ExecStart=/opt/confio/myvenv/bin/python -m daphne -b 127.0.0.1 -p 8000 --access-log /dev/null config.asgi:application
 Restart=always
 RestartSec=3
 TimeoutStartSec=30

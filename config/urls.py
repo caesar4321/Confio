@@ -4,7 +4,7 @@ The `urlpatterns` list routes URLs to views. For more information please see:
     https://docs.djangoproject.com/en/3.0/topics/http/urls/
 """
 from django.contrib import admin
-from django.http import HttpResponseNotFound
+from django.http import HttpResponseBadRequest, HttpResponseNotFound
 from django.urls import path, include, re_path
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.admin.views.decorators import staff_member_required
@@ -85,15 +85,31 @@ class LoggingGraphQLView(GraphQLView):
         return context
     
     def dispatch(self, request, *args, **kwargs):
+        # Graphene accepts the operation in the URL as well as the body.
+        # Nothing we ship does that, and a URL carries the operation and its
+        # arguments into places no resolver can reach: nginx's access log,
+        # its error log when the upstream is down, the Referer of whatever
+        # the browser loads next. Refuse it here too, so the rule holds even
+        # where the edge config has not been deployed yet. GraphiQL needs it
+        # in development, and DEBUG is never on in production.
+        if not settings.DEBUG and ('query' in request.GET or 'variables' in request.GET):
+            return HttpResponseBadRequest('Send the GraphQL operation in the request body.')
         if request.method == 'POST':
             try:
                 body = json.loads(request.body)
                 query = body.get('query', '')
-                membership_claim = any(field in query for field in (
+                # Graphene also accepts the operation in the URL query string,
+                # so a body carrying only `variables` would otherwise look
+                # harmless here and get logged verbatim. Judge both.
+                routed_query = f"{query}\n{request.GET.get('query', '') or ''}"
+                membership_claim = any(field in routed_query for field in (
                     'claimInstitutionMembership', 'applyCobreBreb', 'brebLocationChallenge', 'verifyBrebLocation'))
+                # Wallet recovery diagnostics are sanitized in the resolver,
+                # but this log runs BEFORE that, on the raw body.
+                sensitive = membership_claim or 'reportWalletRecoveryDiagnostic' in routed_query
                 if _should_log_graphql_request_details():
-                    logger.info("GraphQL Query: %s", '[membership claim redacted]' if membership_claim else query)
-                    logger.info("GraphQL Variables: %s", '[redacted]' if membership_claim else body.get('variables', {}))
+                    logger.info("GraphQL Query: %s", '[redacted]' if sensitive else query)
+                    logger.info("GraphQL Variables: %s", '[redacted]' if sensitive else body.get('variables', {}))
 
                 # Derive and align request account context from JWT prior to logging
                 try:
@@ -134,8 +150,8 @@ class LoggingGraphQLView(GraphQLView):
                 ):
                     logger.info(
                         "CONVERSION MUTATION DETECTED - Query: %s, Variables: %s",
-                        '[membership claim redacted]' if membership_claim else query[:200],
-                        '[redacted]' if membership_claim else body.get('variables', {}),
+                        '[redacted]' if sensitive else query[:200],
+                        '[redacted]' if sensitive else body.get('variables', {}),
                     )
             except Exception as e:
                 logger.error("Error parsing GraphQL request: %s", str(e))

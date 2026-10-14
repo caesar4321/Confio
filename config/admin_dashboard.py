@@ -2291,3 +2291,28 @@ confio_admin_site.register(ProbeAnswer, ProbeAnswerAdmin)
 from assistant.models import AssistantNeed
 from assistant.admin import AssistantNeedAdmin
 confio_admin_site.register(AssistantNeed, AssistantNeedAdmin)
+
+
+# Wallet recovery diagnostics: what a device saw when sign-in recovery failed.
+# Read-only on purpose. These rows are evidence, not something to edit.
+from users.models import WalletRecoveryDiagnostic
+
+
+class WalletRecoveryDiagnosticAdmin(admin.ModelAdmin):
+    list_display = (
+        'created_at', 'user', 'code', 'found_any', 'found_decryptable',
+        'candidate_count',
+    )
+    list_filter = ('code', 'found_any', 'found_decryptable')
+    search_fields = ('user__email', 'user__username')
+    ordering = ('-created_at',)
+    readonly_fields = tuple(f.name for f in WalletRecoveryDiagnostic._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+confio_admin_site.register(WalletRecoveryDiagnostic, WalletRecoveryDiagnosticAdmin)

@@ -795,6 +795,25 @@ export const UPDATE_BUSINESS = gql`
 `;
 
 // Google Drive Backup Status Reporting
+export const REPORT_WALLET_RECOVERY_DIAGNOSTIC = gql`
+  mutation ReportWalletRecoveryDiagnostic(
+    $code: String!
+    $foundAny: Boolean
+    $foundDecryptable: Boolean
+    $inventory: String
+  ) {
+    reportWalletRecoveryDiagnostic(
+      code: $code
+      foundAny: $foundAny
+      foundDecryptable: $foundDecryptable
+      inventory: $inventory
+    ) {
+      success
+      error
+    }
+  }
+`;
+
 export const REPORT_BACKUP_STATUS = gql`
   mutation ReportBackupStatus($provider: String!, $device_name: String, $isVerified: Boolean!) {
     reportBackupStatus(provider: $provider, deviceName: $device_name, isVerified: $isVerified) {

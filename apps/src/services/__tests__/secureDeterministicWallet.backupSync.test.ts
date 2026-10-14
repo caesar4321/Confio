@@ -91,6 +91,10 @@ import {
   getDerivedEvmWallet,
   clearReconciledLegacyWallets,
   getOrCreateMasterSecret,
+  reportTerminalRecoveryFailure,
+} from '../secureDeterministicWallet';
+import type { RecoveryEvidenceSink } from '../walletRecoveryErrors';
+import {
   deriveV2AddressPure,
   reportBackupStatus,
   SecureDeterministicWalletService,
@@ -748,6 +752,20 @@ const encBackupUploads = () =>
   );
 
 describe('getOrCreateMasterSecret Drive backup sync contract', () => {
+  // What sign-in does around this call: recovery records what it saw, and
+  // the caller - the only one holding a session token that is certainly
+  // this operation's - reports whatever ended it.
+  const recoverAndReport = async (sub: string, token: string, options: any) => {
+    const { sessionToken, ...rest } = options;
+    const evidenceSink: RecoveryEvidenceSink = {};
+    try {
+      return await getOrCreateMasterSecret(sub, token, { ...rest, evidenceSink });
+    } catch (error) {
+      await reportTerminalRecoveryFailure(error, sessionToken, evidenceSink);
+      throw error;
+    }
+  };
+
   beforeEach(() => {
     mockMemoryStore.clear();
     jest.clearAllMocks();
@@ -775,6 +793,212 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
     // told the backup was verified.
     expect(encBackupUploads()).toHaveLength(1);
     expect(onCloudSyncResult).toHaveBeenCalledWith(true);
+  });
+
+  it('reports a Drive outage instead of failing recovery in silence', async () => {
+    // The search itself fails, so it never returns an inventory to report.
+    // That used to mean a user locked out by a Drive outage produced the
+    // same server-side silence this diagnostic exists to end.
+    const outage = Object.assign(new Error('listing failed'), { name: 'GoogleDriveStorageError' });
+    (googleDriveStorage.listFiles as jest.Mock).mockRejectedValue(outage);
+
+    await expect(recoverAndReport(USER_SUB, 'drive-token', {
+      provider: 'google',
+      expectedAddress,
+      sessionToken: 'session-jwt',
+    })).rejects.toBe(outage);
+
+    const diagnostics = (apolloClient.mutate as jest.Mock).mock.calls
+      .filter(([options]) => options?.variables?.code);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0][0].variables.code).toBe('drive_access');
+    expect(diagnostics[0][0].context.pinnedAuthToken).toBe('session-jwt');
+  });
+
+  it('reports a persistence failure, which blocks sign-in just as hard', async () => {
+    // Recovery found the secret; writing it to this device failed its
+    // read-back. The user is still locked out, and this used to be silent
+    // because the reporting wrapper ended when discovery returned.
+    const backup = require('crypto-js/aes')
+      .encrypt(bytesToBase64(MASTER_SECRET), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_t: string, name?: string) => {
+      if (name === 'confio_wallet_manifest_v2.json') return [{ id: 'manifest' }];
+      if (name === 'confio_wallet_v2_canonical.enc') return [{ id: 'canonical' }];
+      throw new Error('Unexpected Drive scan');
+    });
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t: string, id: string) =>
+      id === 'manifest' ? JSON.stringify({ wallets: [{ id: 'canonical' }] }) : backup);
+
+    const candidate = await getSignInWalletCandidate(USER_SUB, 'drive-token', {
+      reportAuthToken: 'persist-session-jwt',
+    });
+    expect(candidate?.algorandAddress).toBe(expectedAddress);
+
+    // A native Keychain rejection, NOT a WalletRecoveryError: the
+    // classifier cannot name this one, so without the fallback it reports
+    // nothing at all. Rethrown by identity, because callers tell these apart.
+    const { credentialStorage } = require('../credentialStorage');
+    const nativeFailure = new Error('User interaction is not allowed.');
+    credentialStorage.storeSecret.mockRejectedValueOnce(nativeFailure);
+    await expect(candidate!.persist()).rejects.toBe(nativeFailure);
+
+    const diagnostics = (apolloClient.mutate as jest.Mock).mock.calls
+      .filter(([options]) => options?.variables?.code);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0][0].variables.code).toBe('local_corrupt');
+    expect(diagnostics[0][0].context.pinnedAuthToken).toBe('persist-session-jwt');
+  });
+
+  it('describes a reserved payload it could not read, not an empty Drive', async () => {
+    // An interrupted provisioning leaves the payload uploaded with no
+    // manifest, so discovery finds nothing. The reserved read is the only
+    // thing that sees the file; without recording it the report said
+    // 'unreadable' over an empty Drive, which reads as a contradiction.
+    const { createMissingSignInWalletCandidate } = require('../secureDeterministicWallet');
+    (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([]);
+    (googleDriveStorage.downloadFile as jest.Mock).mockResolvedValue('not an encrypted backup');
+    (googleDriveStorage.generateRecoveryFileIds as jest.Mock).mockResolvedValue(['payload1234', 'manifest1234']);
+
+    const evidenceSink: RecoveryEvidenceSink = {};
+    await expect(createMissingSignInWalletCandidate(
+      USER_SUB, 'drive-token',
+      [{ accountType: 'personal', accountIndex: 0, algorandAddress: expectedAddress }],
+      async () => ['payload1234', 'manifest1234'],
+      undefined,
+      evidenceSink,
+    )).rejects.toMatchObject({ code: 'unreadable' });
+
+    expect(evidenceSink.current).toMatchObject({ foundAny: true, foundDecryptable: false });
+    expect(evidenceSink.current!.inventory).toHaveLength(1);
+  });
+
+  it('keeps what the manifest fast path read when the full listing then fails', async () => {
+    // The gap the fast path used to fall into: it downloads and classifies
+    // a real file BEFORE the scan's inventory existed, so a failure of the
+    // unfiltered listing reported an empty Drive.
+    const backup = require('crypto-js/aes')
+      .encrypt(bytesToBase64(MASTER_SECRET), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_t: string, name?: string) => {
+      if (name === 'confio_wallet_manifest_v2.json') return [{ id: 'manifest-1', name }];
+      if (name === 'confio_wallet_v2_w1.enc') return [{ id: 'enc-1', name }];
+      if (!name) throw new Error('drive listing unavailable');
+      return [];
+    });
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t: string, id: string) =>
+      id === 'manifest-1' ? JSON.stringify({ wallets: [{ id: 'w1' }] }) : backup);
+
+    await expect(recoverAndReport(USER_SUB, 'drive-token', {
+      provider: 'google',
+      expectedAddress: 'SOMEONE-ELSES-ADDRESS',
+      sessionToken: 'fastpath-session-jwt',
+    })).rejects.toBeDefined();
+
+    const diagnostics = (apolloClient.mutate as jest.Mock).mock.calls
+      .filter(([options]) => options?.variables?.code);
+    expect(diagnostics).toHaveLength(1);
+    const { variables } = diagnostics[0][0];
+    expect(variables.foundAny).toBe(true);
+    const inventory = JSON.parse(variables.inventory);
+    // Exactly one: the fast path read one file, and nothing double-counted it.
+    expect(inventory).toHaveLength(1);
+    expect(inventory[0]).toMatchObject({ shape: 'payload', outcome: 'anchor_mismatch' });
+  });
+
+  it('does not hold the master-secret queue open on a stalled backup report', async () => {
+    // These reports are awaited while the queue reservation is held, and
+    // the mutation has no deadline of its own. A report that never settles
+    // used to block every later master-secret call, for every identity.
+    seedLocalVerifiedSecret();
+    (apolloClient.mutate as jest.Mock).mockImplementation(() => new Promise(() => {}));
+    jest.useFakeTimers();
+    try {
+      const first = getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+        provider: 'google',
+        requireCloudSync: true,
+        expectedAddress,
+        backupReportAuthToken: 'stalled-jwt',
+      });
+      // Nothing else resolves these; only the deadline can.
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(60_000);
+      await expect(first).resolves.toEqual(MASTER_SECRET);
+
+      // And the queue is free for the next caller.
+      const second = getOrCreateMasterSecret(USER_SUB, undefined, {
+        provider: 'google', expectedAddress,
+      });
+      await jest.advanceTimersByTimeAsync(60_000);
+      await expect(second).resolves.toEqual(MASTER_SECRET);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('describes a file once, with the best look anyone got at it', async () => {
+    // The fast path and the full scan walk the same Drive. Listing one
+    // file twice spends two of the 25 slots a multi-backup Drive needs,
+    // and the scan's successful read must not be shadowed by the fast
+    // path's failed download of the same bytes.
+    const backup = require('crypto-js/aes')
+      .encrypt(bytesToBase64(MASTER_SECRET), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_t: string, name?: string) => {
+      if (name === 'confio_wallet_manifest_v2.json') return [{ id: 'manifest-1', name }];
+      if (name === 'confio_wallet_v2_w1.enc') return [{ id: 'enc-1', name }];
+      if (!name) return [{ id: 'enc-1', name: 'confio_wallet_v2_w1.enc' }];
+      return [];
+    });
+    let downloads = 0;
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t: string, id: string) => {
+      if (id === 'manifest-1') return JSON.stringify({ wallets: [{ id: 'w1' }] });
+      downloads += 1;
+      if (downloads === 1) throw new Error('transient download failure');
+      return backup;
+    });
+
+    await expect(recoverAndReport(USER_SUB, 'drive-token', {
+      provider: 'google',
+      expectedAddress: 'SOMEONE-ELSES-ADDRESS',
+      sessionToken: 'dedup-session-jwt',
+    })).rejects.toBeDefined();
+
+    const diagnostics = (apolloClient.mutate as jest.Mock).mock.calls
+      .filter(([options]) => options?.variables?.code);
+    expect(diagnostics).toHaveLength(1);
+    const inventory = JSON.parse(diagnostics[0][0].variables.inventory);
+    expect(inventory).toHaveLength(1);
+    // The scan read it; that is what the entry says, not download_failed.
+    expect(inventory[0]).toMatchObject({ shape: 'payload', outcome: 'anchor_mismatch' });
+  });
+
+  it('reports what a partly failed search did see, not an empty Drive', async () => {
+    // Files were listed and one was downloaded before the scan broke. The
+    // old catch reported foundAny:false, telling support the opposite.
+    const backup = require('crypto-js/aes')
+      .encrypt(bytesToBase64(MASTER_SECRET), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_t: string, name?: string) =>
+      name === 'confio_wallet_manifest_v2.json'
+        ? [{ id: 'manifest-1', name }]
+        : [{ id: 'enc-1', name: 'confio_wallet_v2_w1.enc' },
+           { id: 'enc-2', name: 'confio_wallet_v2_w2.enc' }]);
+    (googleDriveStorage.listRevisions as jest.Mock).mockRejectedValue(new Error('revisions unavailable'));
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t, id: string) =>
+      id === 'manifest-1' ? JSON.stringify({ wallets: [] }) : backup);
+
+    await expect(recoverAndReport(USER_SUB, 'drive-token', {
+      provider: 'google',
+      expectedAddress: 'SOMEONE-ELSES-ADDRESS',
+      // A different session than the outage test above: reporting is
+      // throttled per failure per identity, and these run in one tick.
+      sessionToken: 'other-session-jwt',
+    })).rejects.toMatchObject({ code: 'drive_access' });
+
+    const diagnostics = (apolloClient.mutate as jest.Mock).mock.calls
+      .filter(([options]) => options?.variables?.code);
+    expect(diagnostics).toHaveLength(1);
+    const { variables } = diagnostics[0][0];
+    expect(variables.code).toBe('drive_access');
+    expect(variables.foundAny).toBe(true);
+    expect(JSON.parse(variables.inventory).length).toBeGreaterThan(0);
   });
 
   it('pins every reenrollment backup report to the request-scoped login JWT', async () => {

@@ -1,5 +1,5 @@
-jest.mock('../secureDeterministicWallet', () => ({ createMissingSignInWalletCandidate: jest.fn(), getSignInWalletCandidate: jest.fn(), clearReconciledLegacyWallets: jest.fn().mockResolvedValue(undefined), reportBackupStatus: jest.fn().mockResolvedValue(true) }));
-import { createMissingSignInWalletCandidate, getSignInWalletCandidate, reportBackupStatus } from '../secureDeterministicWallet';
+jest.mock('../secureDeterministicWallet', () => ({ createMissingSignInWalletCandidate: jest.fn(), getSignInWalletCandidate: jest.fn(), clearReconciledLegacyWallets: jest.fn().mockResolvedValue(undefined), reportBackupStatus: jest.fn().mockResolvedValue(true), reportTerminalRecoveryFailure: jest.fn(async (_e: any, _t: any, sink: any) => { if (sink?.reported) return; if (sink) sink.reported = true; }) }));
+import { createMissingSignInWalletCandidate, getSignInWalletCandidate, reportBackupStatus, reportTerminalRecoveryFailure } from '../secureDeterministicWallet';
 import { reconcileSignInWallet } from '../signInWalletReconciliation';
 import { WalletRecoveryError } from '../walletRecoveryErrors';
 import { GoogleDriveStorageError } from '../googleDriveStorage';
@@ -42,10 +42,126 @@ it('retries Drive recovery with fresh authorization before committing once', asy
   const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue('fresh-drive-token') };
   expect(await reconcileSignInWallet(args)).toBe(true);
   expect(args.reauthorizeGoogleDrive).toHaveBeenCalledWith('drive-token');
-  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-drive-token');
+  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-drive-token', {
+    reportAuthToken: 'session', evidenceSink: expect.any(Object),
+  });
   expect(wallet.persist).toHaveBeenCalledTimes(1);
   expect(args.client.mutate.mock.calls.filter(([call]) => 'wallets' in call.variables)).toHaveLength(1);
   expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
+});
+
+it('reports a cancelled initial Drive authorization, not only a cancelled retry', async () => {
+  // The user never gets past the consent sheet. No cloud phase runs, so
+  // the boundary around it never sees anything - but the user is locked
+  // out all the same.
+  recover.mockResolvedValueOnce(null);
+  const args = { ...fixture(), getGoogleDriveToken: jest.fn().mockResolvedValue(null) };
+
+  await expect(reconcileSignInWallet(args)).rejects.toBeDefined();
+
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledWith(
+    expect.objectContaining({ code: 'drive_access' }), 'session', expect.any(Object),
+  );
+});
+
+it('reports a failure after recovery succeeded, which still blocks sign-in', async () => {
+  // Drive recovery and persistence both worked; the backup acknowledgement
+  // did not, so sign-in stops. Nowhere near the recovery code, and for the
+  // user it is the same locked door.
+  const wallet = candidate();
+  recover.mockResolvedValue(wallet);
+  (reportBackupStatus as jest.Mock).mockResolvedValueOnce(false);
+  const args = fixture();
+  (args.authData as any).requiresBackupCompletion = true;
+  wallet.hasPendingBackupReport.mockResolvedValue(true);
+
+  await expect(reconcileSignInWallet(args)).rejects.toThrow(/RECONCILE-BACKUP-REPORT/);
+
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledTimes(1);
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledWith(
+    expect.any(Error), 'session', expect.any(Object),
+  );
+});
+
+it('files one report per lockout when the caller has its own boundary too', async () => {
+  // Sign-in wraps reconciliation in a catch of its own. With separate
+  // sinks, a cancelled Drive authorization was filed twice: 'drive_access'
+  // here and 'unexpected' out there, spending two of the twelve hourly
+  // slots on one lockout and adding an empty inventory beside the real one.
+  const sharedSink: any = {};
+  recover.mockResolvedValueOnce(null);
+  const args = { ...fixture(), evidenceSink: sharedSink, getGoogleDriveToken: jest.fn().mockResolvedValue(null) };
+
+  await expect(reconcileSignInWallet(args)).rejects.toBeDefined();
+
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledTimes(1);
+  // And the caller can see it is already filed.
+  expect(sharedSink.reported).toBe(true);
+});
+
+it('reports an Apple account whose local key is simply gone', async () => {
+  // Discovery RETURNS null here, it does not throw, so no boundary above
+  // sees it - but a registered wallet with no local key is a lockout.
+  // fixture('apple'), not authData.provider: reconciliation reads
+  // options.provider, so setting the other one runs the Google branch and
+  // reaches the Apple-labelled error by accident.
+  const args = fixture('apple');
+  recover.mockResolvedValue(null);
+
+  await expect(reconcileSignInWallet(args)).rejects.toThrow(/RECOVERY-APPLE-KEYCHAIN/);
+
+  expect(args.getGoogleDriveToken).not.toHaveBeenCalled();
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledTimes(1);
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledWith(
+    expect.objectContaining({ code: 'missing' }), 'session', expect.any(Object),
+  );
+});
+
+it('reports a local discovery failure that nothing downstream can repair', async () => {
+  // Not a CorruptMasterSecretError, so there is no Drive repair path: this
+  // is where sign-in stops.
+  const locked = new Error('Keychain is locked');
+  recover.mockRejectedValueOnce(locked);
+
+  await expect(reconcileSignInWallet(fixture())).rejects.toBe(locked);
+
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledWith(locked, 'session', expect.any(Object));
+});
+
+it('reports the failure that actually ends the cloud phase, not the ones answered on the way', async () => {
+  // A Drive error the authorization retry cannot fix. The probes inside
+  // suppress what they are about to answer, so without a boundary here the
+  // lockout that really happened would reach the user and nobody else.
+  const terminal = new GoogleDriveStorageError('list', 500);
+  recover.mockResolvedValueOnce(null).mockRejectedValue(terminal);
+  const args = fixture();
+
+  await expect(reconcileSignInWallet(args)).rejects.toBe(terminal);
+
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledWith(terminal, 'session', expect.any(Object));
+});
+
+it('reports a cancelled reauthorization, which leaves the user just as locked out', async () => {
+  const rejected = new GoogleDriveStorageError('list', 401);
+  recover.mockResolvedValueOnce(null).mockRejectedValue(rejected);
+  const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue(null) };
+
+  await expect(reconcileSignInWallet(args)).rejects.toBeDefined();
+
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalled();
+});
+
+it('reports a provisioning failure, which the suppressed missing probes no longer cover', async () => {
+  recover.mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'));
+  const uploadFailed = new GoogleDriveStorageError('upload', 500);
+  (createMissingSignInWalletCandidate as jest.Mock).mockRejectedValueOnce(uploadFailed);
+  const args = fixture();
+
+  await expect(reconcileSignInWallet(args)).rejects.toBe(uploadFailed);
+
+  expect(reportTerminalRecoveryFailure).toHaveBeenCalledWith(uploadFailed, 'session', expect.any(Object));
 });
 
 it.each([401, 403])('stops after one refresh if Drive still rejects authorization (%i)', async status => {
@@ -93,7 +209,9 @@ it('restarts canonical discovery if legacy backup lookup rejects the token', asy
     .mockResolvedValueOnce(candidate());
   const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue('fresh-token') };
   expect(await reconcileSignInWallet(args)).toBe(true);
-  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-token');
+  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-token', {
+    reportAuthToken: 'session', evidenceSink: expect.any(Object),
+  });
   expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
 });
 
@@ -106,7 +224,9 @@ it('resumes an interrupted missing-backup upload through canonical discovery', a
   const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue('fresh-token') };
   expect(await reconcileSignInWallet(args)).toBe(true);
   expect(createMissingSignInWalletCandidate).toHaveBeenCalledTimes(1);
-  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-token');
+  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-token', {
+    reportAuthToken: 'session', evidenceSink: expect.any(Object),
+  });
 });
 
 it('does not retry the registration commit through the cloud recovery wrapper', async () => {
@@ -128,7 +248,10 @@ it('Google activates the canonical Drive wallet without checking old funds', asy
   recover.mockResolvedValueOnce(local).mockResolvedValueOnce(canonical);
   const args = fixture();
   expect(await reconcileSignInWallet(args)).toBe(true);
-  expect(recover.mock.calls).toEqual([['subject'], ['subject', 'drive-token']]);
+  expect(recover.mock.calls).toEqual([
+    ['subject', undefined, { reportAuthToken: 'session', evidenceSink: expect.any(Object) }],
+    ['subject', 'drive-token', { reportAuthToken: 'session', evidenceSink: expect.any(Object) }],
+  ]);
   expect(local.persist).not.toHaveBeenCalled();
   expect(canonical.persist).toHaveBeenCalledTimes(1);
   expect(args.beforeWalletChange.mock.invocationCallOrder[0]).toBeLessThan(canonical.persist.mock.invocationCallOrder[0]);
@@ -195,7 +318,7 @@ it.each([null, 'local'] as const)('replaces a confirmed missing Drive backup wit
   (createMissingSignInWalletCandidate as jest.Mock).mockResolvedValueOnce(wallet);
   const args = fixture();
   expect(await reconcileSignInWallet(args)).toBe(true);
-  expect(createMissingSignInWalletCandidate).toHaveBeenCalledWith('subject', 'drive-token', expect.any(Array), expect.any(Function));
+  expect(createMissingSignInWalletCandidate).toHaveBeenCalledWith('subject', 'drive-token', expect.any(Array), expect.any(Function), 'session', expect.any(Object));
   expect(wallet.persist).toHaveBeenCalledTimes(1);
   expect(args.authData.user.bscAddress).toBe('0xnew');
 });

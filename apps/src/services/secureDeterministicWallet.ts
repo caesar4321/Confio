@@ -20,7 +20,7 @@ import * as Keychain from 'react-native-keychain';
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
-import { REPORT_BACKUP_STATUS } from '../apollo/queries';
+import { REPORT_BACKUP_STATUS, REPORT_WALLET_RECOVERY_DIAGNOSTIC } from '../apollo/queries';
 import { gql } from '@apollo/client';
 import { secureRandomBytes } from '../setup/entropyGuard';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
@@ -28,7 +28,7 @@ import { deriveEvmKeyFromMasterSecret, DerivedEvmWallet, signEip191Message } fro
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, strictBase64ToBytes, NonCanonicalBase64Error } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
 import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
-import { WalletRecoveryError } from './walletRecoveryErrors';
+import { RecoveryEvidenceSink, WalletRecoveryError, WalletRecoveryEvidence, WalletRecoveryFailure } from './walletRecoveryErrors';
 
 const decodeUtf8 = (bytes: Uint8Array): string => {
   if (typeof TextDecoder !== 'undefined') {
@@ -500,6 +500,18 @@ interface DriveBackupCandidate {
   deviceHint?: string;
 }
 
+/** One Drive candidate, described by shape only. Never contains content. */
+export interface DriveCandidateReport {
+  shape: 'payload' | 'legacy' | 'manifest' | 'revision' | 'other';
+  format: BackupBodyFormat;
+  outcome:
+    | 'decrypted' | 'auth_failed' | 'bad_commitment' | 'bad_secret'
+    | 'not_v2' | 'empty' | 'parsed' | 'malformed'
+    | 'download_failed' | 'anchor_mismatch' | 'unknown';
+  bytes: number | null;
+  trashed: boolean;
+}
+
 interface OldestDriveBackupResult {
   foundAny: boolean;
   secret: Uint8Array | null;
@@ -518,6 +530,9 @@ interface OldestDriveBackupResult {
   // can't tell us about cross-identity entries — if Drive has more than
   // one distinct V2 file, somebody else's wallet is sitting next to ours.
   distinctV2FileCount?: number;
+  // What each candidate looked like, for the server-side diagnostic. Recovery
+  // runs on the device, so without this a lockout is invisible to support.
+  inventory?: DriveCandidateReport[];
 }
 
 function secretsEqual(a?: Uint8Array | null, b?: Uint8Array | null): boolean {
@@ -899,7 +914,9 @@ async function fetchManifest(googleDriveStorage: any, accessToken: string): Prom
       console.warn('[Manifest] Parsed content is not a manifest; treating as empty.');
     }
   } catch (e) {
-    console.warn('[Manifest] Fetch failed or empty:', e);
+    // The class, not the message: a JSON parser quotes the document it
+    // choked on, and that document is the user's backup manifest.
+    console.warn('[Manifest] Fetch failed or empty:', errorKind(e));
   }
   return { wallets: [] };
 }
@@ -1017,7 +1034,9 @@ async function findOldestRestorableDriveBackup(
   appBackupKey: string,
   Utf8: any,
   expectedAddress?: string | null,
-  expectedEvmAddress?: string | null
+  expectedEvmAddress?: string | null,
+  // Where this attempt leaves what it saw, win or lose.
+  evidenceSink?: RecoveryEvidenceSink,
 ): Promise<OldestDriveBackupResult> {
   // A candidate must derive to EVERY anchor the caller supplied, not any one
   // of them. Google login supplies both the Algorand and the BSC address, and
@@ -1031,6 +1050,31 @@ async function findOldestRestorableDriveBackup(
     matchesAnchors(decrypted, { expectedAddress, expectedEvmAddress });
   const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
   const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
+  // Declared before the first Drive call, not before the full scan: an
+  // error thrown between the two would otherwise report an empty Drive
+  // when the fast path had already downloaded and classified a backup.
+  const inventory: DriveCandidateReport[] = [];
+  let foundDecryptable = false;
+  // Files the fast path already described. The full scan below walks the
+  // same Drive, and listing one file twice would report two candidates and
+  // spend two of the 25 slots a multi-backup Drive needs.
+  // fileId -> its slot in the inventory. The full scan walks the same
+  // Drive, so a file the fast path already described must update its entry
+  // rather than add a second one: duplicates spend the 25 slots a
+  // multi-backup Drive needs, and the scan usually knows MORE.
+  const describedSlots = new Map<string, number>();
+  // Record what the scan learned WITHOUT touching what is thrown: callers
+  // tell a GoogleDriveStorageError apart by class and status to decide
+  // whether to reauthorize Drive, so converting one here would break the
+  // retry, and a shared or frozen error cannot carry evidence reliably.
+  const publishEvidence = <T,>(error: T): T => {
+    if (evidenceSink) {
+      evidenceSink.current = { foundAny: inventory.length > 0, foundDecryptable, inventory };
+    }
+    return error;
+  };
+  const abandon = (code: 'drive_access' | 'unexpected' | 'missing') =>
+    publishEvidence(new WalletRecoveryError(code));
   const manifest = await fetchManifest(googleDriveStorage, accessToken);
   const manifestById = new Map(
     manifest.wallets
@@ -1064,21 +1108,53 @@ async function findOldestRestorableDriveBackup(
       try {
         const matches = await googleDriveStorage.listFiles(accessToken, filename);
         if (matches.length === 0) continue;
-        const content = await googleDriveStorage.downloadFile(accessToken, matches[0].id);
-        const decrypted = decryptBackup(content, AES, appBackupKey, Utf8);
-        if (!decrypted) continue;
-        const candidateAddress = derivePersonalV2Address(decrypted);
-        if (candidateMatchesAnchor(decrypted)) {
-          console.log('[MasterSecret] Fast-path matched manifest entry HEAD:', {
-            id: entry.id,
-            deviceHint: entry.deviceHint || 'unknown',
+        // The fast path reads real files, so what it learns is evidence
+        // too: an error after this point must not report an empty Drive.
+        // Recorded on LISTING, because a download that never returns still
+        // means this user HAS a backup.
+        const slot = inventory.length < 25 ? inventory.length : -1;
+        if (slot >= 0) {
+          describedSlots.set(matches[0].id, slot);
+          inventory.push({
+            shape: 'payload', format: 'unknown', outcome: 'unknown', bytes: null, trashed: false,
           });
+        }
+        let content: string;
+        try {
+          content = await googleDriveStorage.downloadFile(accessToken, matches[0].id);
+        } catch (error) {
+          if (slot >= 0) inventory[slot] = { ...inventory[slot], outcome: 'download_failed' };
+          throw error;
+        }
+        const read = decryptBackupDetailed(content, AES, appBackupKey, Utf8);
+        const decrypted = read.secret;
+        if (slot >= 0) {
+          inventory[slot] = {
+            ...inventory[slot],
+            format: classifyBackupBody(content),
+            outcome: decrypted
+              ? (candidateMatchesAnchor(decrypted) ? 'decrypted' : 'anchor_mismatch')
+              : read.reason,
+            bytes: content.length,
+          };
+        }
+        if (decrypted) foundDecryptable = true;
+        if (!decrypted) continue;
+        if (candidateMatchesAnchor(decrypted)) {
+          console.log('[MasterSecret] Fast-path matched manifest entry HEAD.', {
+            hasDeviceHint: !!entry.deviceHint,
+          });
+          // Publish even on success: a later persistence or upload failure
+          // is reported by the caller, and "nothing found" would be the
+          // opposite of what just happened here.
+          publishEvidence(null);
           return {
             foundAny: true,
             secret: decrypted,
             walletId: entry.id,
             deviceHint: entry.deviceHint || null,
             foundDecryptable: true,
+            inventory,
             manifestHasAndroidEntry,
             manifestHasIosEntry,
             // Fast path can't see all Drive files, so leave the count
@@ -1087,18 +1163,23 @@ async function findOldestRestorableDriveBackup(
           };
         }
         console.log('[MasterSecret] Fast-path entry did not match expected anchors; continuing.', {
-          id: entry.id,
-          candidateAddress,
-          expectedAddress,
-          expectedEvmAddress,
+          hasDeviceHint: !!entry.deviceHint,
+          hasAlgoAnchor: !!expectedAddress,
+          hasEvmAnchor: !!expectedEvmAddress,
         });
       } catch (e) {
-        console.warn('[MasterSecret] Fast-path failed for manifest entry; falling back to full scan.', entry.id, e);
+        console.warn('[MasterSecret] Fast-path failed for manifest entry; falling back to full scan.', e);
       }
     }
   }
 
-  const activeFiles = await googleDriveStorage.listFiles(accessToken);
+  let activeFiles: any[];
+  try {
+    activeFiles = await googleDriveStorage.listFiles(accessToken);
+  } catch (error) {
+    // Whatever the fast path already learned travels with this failure.
+    throw publishEvidence(error);
+  }
   let trashedFiles: any[] = [];
   let incompleteSearch = false;
   try {
@@ -1112,6 +1193,7 @@ async function findOldestRestorableDriveBackup(
     (f.name && f.name.startsWith('confio_wallet_v2_')) ||
     f.name === legacyFilename
   );
+  const trashedIds = new Set((trashedFiles || []).map((f: any) => f.id));
 
   // Count distinct V2 base files on this Drive (ignoring revisions and the
   // legacy `confio_master_secret_v2_<sub>.json`). This survives an empty
@@ -1125,14 +1207,20 @@ async function findOldestRestorableDriveBackup(
   const distinctV2FileCount = v2WalletIds.size;
 
   if (files.length === 0) {
-    if (incompleteSearch) throw new WalletRecoveryError('drive_access');
+    if (incompleteSearch) throw abandon('drive_access');
+    publishEvidence(null);
     return {
-      foundAny: false,
+      foundAny: inventory.length > 0,
       secret: null,
       walletId: null,
       manifestHasAndroidEntry,
       manifestHasIosEntry,
       distinctV2FileCount,
+      // The fast path may have read a file that is gone by now. Saying
+      // foundAny without saying WHAT was found makes the caller report an
+      // empty inventory for a Drive it actually read.
+      foundDecryptable,
+      inventory,
     };
   }
 
@@ -1161,7 +1249,7 @@ async function findOldestRestorableDriveBackup(
         });
       }
     } catch (e) {
-      console.warn('[MasterSecret] Failed to list Drive backup revisions:', file.name, e);
+      console.warn('[MasterSecret] Failed to list Drive backup revisions:', e);
       incompleteSearch = true;
     }
   }
@@ -1173,10 +1261,45 @@ async function findOldestRestorableDriveBackup(
     return getBackupTime(a) - getBackupTime(b);
   });
 
-  let foundDecryptable = false;
   let candidateValidationFailed = false;
   for (const candidate of candidates) {
     let downloaded = false;
+    const shape: DriveCandidateReport['shape'] = candidate.revisionId
+      ? 'revision'
+      : candidate.name === legacyFilename
+        ? 'legacy'
+        : candidate.name.startsWith('confio_wallet_v2_')
+          ? 'payload'
+          : 'other';
+    // Device logs say the same categorical things the server report says.
+    // A log line naming the backup file, its address or its device hint
+    // identifies the wallet behind it, wherever those logs end up.
+    const label = () => ({
+      shape,
+      trashed: trashedIds.has(candidate.fileId),
+      hasWalletId: !!candidate.walletId,
+      hasDeviceHint: !!candidate.deviceHint,
+    });
+    const record = (outcome: DriveCandidateReport['outcome'], content?: string) => {
+      const entry: DriveCandidateReport = {
+        shape,
+        format: content === undefined ? 'unknown' : classifyBackupBody(content),
+        outcome,
+        bytes: content === undefined ? null : content.length,
+        trashed: trashedIds.has(candidate.fileId),
+      };
+      // Already described by the fast path. Replace that entry only when
+      // this observation actually read the file: a fast-path download that
+      // failed must not outrank the scan's successful read of the same
+      // bytes, and a scan that also failed adds nothing.
+      const described = candidate.revisionId ? undefined : describedSlots.get(candidate.fileId);
+      if (described !== undefined) {
+        if (content !== undefined) inventory[described] = entry;
+        return;
+      }
+      if (inventory.length >= 25) return;
+      inventory.push(entry);
+    };
     try {
       const content = await googleDriveStorage.downloadFile(
         accessToken,
@@ -1184,28 +1307,24 @@ async function findOldestRestorableDriveBackup(
         candidate.revisionId
       );
       downloaded = true;
-      const decrypted = decryptBackup(content, AES, appBackupKey, Utf8);
+      const read = decryptBackupDetailed(content, AES, appBackupKey, Utf8);
+      const decrypted = read.secret;
+      if (!decrypted) record(read.reason, content);
       if (decrypted) {
         foundDecryptable = true;
-        const candidateAddress = derivePersonalV2Address(decrypted);
         if (!candidateMatchesAnchor(decrypted)) {
-          console.log('[MasterSecret] Skipping Drive backup candidate with non-matching address:', {
-            name: candidate.name,
-            candidateAddress,
-            expectedAddress,
-            expectedEvmAddress,
-            deviceHint: candidate.deviceHint || 'unknown',
+          record('anchor_mismatch', content);
+          console.log('[MasterSecret] Skipping Drive backup candidate: no anchor match.', {
+            ...label(),
+            hasAlgoAnchor: !!expectedAddress,
+            hasEvmAnchor: !!expectedEvmAddress,
           });
           continue;
         }
 
-        console.log('[MasterSecret] Restored oldest Drive V2 backup:', {
-          name: candidate.name,
-          modifiedTime: candidate.modifiedTime,
-          walletId: candidate.walletId || 'legacy/no-id',
-          deviceHint: candidate.deviceHint || 'unknown',
-          address: candidateAddress,
-        });
+        record('decrypted', content);
+        console.log('[MasterSecret] Restored oldest Drive V2 backup.', label());
+        publishEvidence(null);
         return {
           foundAny: true,
           secret: decrypted,
@@ -1215,17 +1334,23 @@ async function findOldestRestorableDriveBackup(
           manifestHasAndroidEntry,
           manifestHasIosEntry,
           distinctV2FileCount,
+          inventory,
         };
       }
     } catch (e) {
-      console.warn('[MasterSecret] Failed to restore Drive backup candidate:', candidate.name, e);
+      console.warn('[MasterSecret] Failed to restore Drive backup candidate:', label(), e);
+      record(downloaded ? 'unknown' : 'download_failed');
       if (!downloaded) incompleteSearch = true;
       else candidateValidationFailed = true;
     }
   }
 
-  if (incompleteSearch) throw new WalletRecoveryError('drive_access');
-  if (candidateValidationFailed) throw new WalletRecoveryError('unexpected');
+  // Hand the caller what the scan DID see. It listed files, downloaded some
+  // and classified them; losing that on the way out would report a partial
+  // failure as an empty Drive.
+  if (incompleteSearch) throw abandon('drive_access');
+  if (candidateValidationFailed) throw abandon('unexpected');
+  publishEvidence(null);
   return {
     foundAny: true,
     secret: null,
@@ -1234,6 +1359,7 @@ async function findOldestRestorableDriveBackup(
     manifestHasAndroidEntry,
     manifestHasIosEntry,
     distinctV2FileCount,
+    inventory,
   };
 }
 
@@ -1702,8 +1828,10 @@ const missingBackupQueues = new Map<string, Promise<void>>();
 export async function createMissingSignInWalletCandidate(
   userSub: string,
   driveToken: string,
-  registrations: NonNullable<Parameters<typeof getSignInWalletCandidate>[2]>['legacyRegistrations'],
+  registrations: NonNullable<NonNullable<Parameters<typeof getSignInWalletCandidate>[2]>['legacyRegistrations']>,
   reserveFileIds: (proposed: string[]) => Promise<string[]>,
+  reportAuthToken?: string,
+  evidenceSink?: RecoveryEvidenceSink,
 ) {
   const previous = missingBackupQueues.get(userSub);
   let release!: () => void;
@@ -1711,7 +1839,8 @@ export async function createMissingSignInWalletCandidate(
   missingBackupQueues.set(userSub, current);
   if (previous) await previous;
   try {
-    return await provisionMissingSignInWalletCandidate(userSub, driveToken, registrations, reserveFileIds);
+    return await provisionMissingSignInWalletCandidate(
+      userSub, driveToken, registrations, reserveFileIds, reportAuthToken, evidenceSink);
   } finally {
     release();
     if (missingBackupQueues.get(userSub) === current) missingBackupQueues.delete(userSub);
@@ -1722,8 +1851,13 @@ export async function createMissingSignInWalletCandidate(
 async function provisionMissingSignInWalletCandidate(
   userSub: string,
   driveToken: string,
-  registrations: NonNullable<Parameters<typeof getSignInWalletCandidate>[2]>['legacyRegistrations'],
+  registrations: NonNullable<NonNullable<Parameters<typeof getSignInWalletCandidate>[2]>['legacyRegistrations']>,
   reserveFileIds: (proposed: string[]) => Promise<string[]>,
+  // The identity this provisioning belongs to. Without it the recovery
+  // probes below report under whatever JWT happens to be in Keychain,
+  // which during a sign-in is still the PREVIOUS user's.
+  reportAuthToken?: string,
+  evidenceSink?: RecoveryEvidenceSink,
 ) {
   if (!userSub || !driveToken || !registrations.some(row => row.algorandAddress || row.bscAddress)) {
     throw new WalletRecoveryError('unexpected');
@@ -1732,12 +1866,14 @@ async function provisionMissingSignInWalletCandidate(
   // malformed backups and legacy mismatches are never generation permission.
   const existing = async () => {
     try {
-      return await getSignInWalletCandidate(userSub, driveToken);
+      return await getSignInWalletCandidate(userSub, driveToken, { reportAuthToken, evidenceSink });
     } catch (error) {
       if (!(error instanceof WalletRecoveryError) || error.code !== 'missing') throw error;
     }
     try {
-      return await getSignInWalletCandidate(userSub, driveToken, { legacyRegistrations: registrations });
+      return await getSignInWalletCandidate(userSub, driveToken, {
+        legacyRegistrations: registrations, reportAuthToken, evidenceSink,
+      });
     } catch (error) {
       if (!(error instanceof WalletRecoveryError) || error.code !== 'missing') throw error;
     }
@@ -1758,10 +1894,41 @@ async function provisionMissingSignInWalletCandidate(
   }
   const [payloadId, manifestId] = reserved;
   const readReservedSecret = async () => {
-    const body = await googleDriveStorage.downloadFile(driveToken, payloadId);
-    const recovered = decryptBackup(body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
-    if (!recovered) throw new WalletRecoveryError('unreadable');
-    return recovered;
+    // An interrupted provisioning leaves this payload uploaded with no
+    // manifest, so discovery above found nothing and published an empty
+    // inventory. This read is the only thing that actually sees the file:
+    // without recording it, an unreadable reserved payload reports
+    // 'unreadable' over an empty Drive, which reads as a contradiction.
+    const record = (outcome: DriveCandidateReport['outcome'], body?: string) => {
+      if (!evidenceSink) return;
+      evidenceSink.current = {
+        foundAny: true,
+        foundDecryptable: outcome === 'decrypted',
+        inventory: [{
+          shape: 'payload',
+          format: body === undefined ? 'unknown' : classifyBackupBody(body),
+          outcome,
+          bytes: body === undefined ? null : body.length,
+          trashed: false,
+        }],
+      };
+    };
+    let body: string;
+    try {
+      body = await googleDriveStorage.downloadFile(driveToken, payloadId);
+    } catch (error) {
+      // A 404 is the ordinary "nothing was uploaded yet" case, and the
+      // caller treats it as such; it is not evidence of a backup.
+      if (!(error instanceof GoogleDriveStorageError) || error.status !== 404) {
+        record('download_failed');
+      }
+      throw error;
+    }
+    const read = decryptBackupDetailed(
+      body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+    record(read.secret ? 'decrypted' : read.reason, body);
+    if (!read.secret) throw new WalletRecoveryError('unreadable');
+    return read.secret;
   };
   let secret: Uint8Array | null = null;
   try {
@@ -1824,7 +1991,7 @@ async function provisionMissingSignInWalletCandidate(
     }
   }
   // Only a decryptable canonical read-back may proceed to server replacement.
-  const verified = await getSignInWalletCandidate(userSub, driveToken);
+  const verified = await getSignInWalletCandidate(userSub, driveToken, { reportAuthToken, evidenceSink });
   const expected = deriveEvmKeyFromMasterSecret(secret, { accountType: 'personal', accountIndex: 0 });
   if (!verified || verified.bscAddress.toLowerCase() !== expected.address.toLowerCase()) {
     throw new WalletRecoveryError('mismatch');
@@ -1837,14 +2004,131 @@ async function provisionMissingSignInWalletCandidate(
  * Drive manifest is authoritative, independently of the old server address.
  * The closure keeps key material inside this module.
  */
+/**
+ * Recovery that GATES sign-in: whatever this throws is what a locked-out user
+ * reads on the login screen. Report the shape of what Drive held before
+ * rethrowing — this is the path user 2785 actually hit on 2026-10-14, and it
+ * left no server-side trace beyond a repeated login.
+ */
+/**
+ * Report the failure that actually ended recovery.
+ *
+ * ONE report per lockout, and this is where it happens. Recovery is a
+ * sequence of attempts that answer each other: canonical discovery says
+ * 'missing' and the legacy read answers it; Drive says 401 and
+ * reauthorization answers it. An attempt that was answered is not a
+ * lockout, and reporting one files a failure that never happened and
+ * spends the hourly allowance a real lockout needs. So the attempts
+ * ATTACH what they saw to the error they throw, and only what escapes the
+ * whole sequence is reported, carrying the richest evidence collected on
+ * the way.
+ *
+ * Everything that escapes is a lockout, including errors this module
+ * cannot name - a cancelled reauthorization, a native storage failure, a
+ * reservation error. Those report 'unexpected' rather than nothing.
+ */
+export async function reportTerminalRecoveryFailure(
+  error: unknown,
+  authToken?: string,
+  evidence?: RecoveryEvidenceSink,
+): Promise<void> {
+  // An inner boundary that already named this failure precisely wins over
+  // an outer one that would only call it 'unexpected'.
+  if (evidence?.reported) return;
+  if (evidence) evidence.reported = true;
+  const code: WalletRecoveryFailure = error instanceof WalletRecoveryError
+    ? error.code
+    : (error as any)?.name === 'GoogleDriveStorageError' ? 'drive_access' : 'unexpected';
+  await reportWalletRecoveryDiagnostic(
+    code,
+    evidence?.current ?? { foundAny: false, foundDecryptable: false, inventory: [] },
+    authToken,
+  );
+}
+
 export async function getSignInWalletCandidate(userSub: string, driveToken?: string, options?: {
-  // Compatibility-only recovery of the old subject-named file. Every known
-  // registration must match; this path must never authorize replacement.
-  legacyRegistrations: Array<{
+  legacyRegistrations?: Array<{
     accountType: 'personal' | 'business'; accountIndex: number; businessId?: string | null;
     algorandAddress?: string | null; bscAddress?: string | null;
   }>;
+  reportAuthToken?: string;
+  /** Where this attempt leaves what it saw, for the caller's boundary. */
+  evidenceSink?: RecoveryEvidenceSink;
 }) {
+  const probe: DriveCandidateReport[] = [];
+  const sink = options?.evidenceSink;
+  // Discovery RECORDS, it does not report: this attempt may be answered by
+  // the next one, and only the caller's boundary knows whether it was.
+  const publish = () => {
+    if (!sink) return;
+    // The deeper search publishes a fuller picture of its own; this is the
+    // fallback for failures that never reached it.
+    if (probe.length || !sink.current) {
+      sink.current = {
+        foundAny: probe.length > 0,
+        foundDecryptable: probe.some(entry => entry.outcome === 'decrypted'),
+        inventory: probe,
+      };
+    }
+  };
+  let candidate: Awaited<ReturnType<typeof getSignInWalletCandidateInner>>;
+  if (sink) sink.current = undefined;
+  try {
+    candidate = await getSignInWalletCandidateInner(userSub, driveToken, options, probe);
+  } catch (error) {
+    publish();
+    throw error;
+  }
+  publish();
+  if (!candidate) return candidate;
+  return {
+    ...candidate,
+    // Finding the secret is not the end of the recovery: persisting it can
+    // fail its own read-back, and that throws local_corrupt and blocks
+    // sign-in just as hard. Outside this wrapper it reported nothing.
+    persist: async () => {
+      try {
+        return await candidate.persist();
+      } catch (error) {
+        // Persistence runs after the recovery sequence has already
+        // succeeded, so nothing answers this: it is terminal where it
+        // stands. Anything thrown here failed to write or read back this
+        // device's own storage, which the classifier cannot name, so the
+        // report says so explicitly.
+        const named = error instanceof WalletRecoveryError
+          ? error
+          : new WalletRecoveryError('local_corrupt');
+        // With what discovery found: it succeeded, so "nothing found" is
+        // the opposite of what happened.
+        await reportTerminalRecoveryFailure(named, options?.reportAuthToken, sink);
+        throw error;
+      }
+    },
+  };
+}
+
+async function getSignInWalletCandidateInner(userSub: string, driveToken?: string, options?: {
+  // Compatibility-only recovery of the old subject-named file. Every known
+  // registration must match; this path must never authorize replacement.
+  legacyRegistrations?: Array<{
+    accountType: 'personal' | 'business'; accountIndex: number; businessId?: string | null;
+    algorandAddress?: string | null; bscAddress?: string | null;
+  }>;
+  reportAuthToken?: string;
+}, probe: DriveCandidateReport[] = []) {
+  const note = (
+    shape: DriveCandidateReport['shape'],
+    extra?: Partial<DriveCandidateReport>,
+  ) => {
+    if (probe.length < 25) {
+      probe.push({ shape, format: 'unknown', outcome: 'unknown', bytes: null, trashed: false, ...extra });
+    }
+  };
+  // The file we actually read was already listed: describe THAT entry rather
+  // than adding a second one, so the report counts files, not visits.
+  const describe = (index: number, extra: Partial<DriveCandidateReport>) => {
+    if (probe[index]) probe[index] = { ...probe[index], ...extra };
+  };
   if (!userSub) throw new WalletRecoveryError('unexpected');
   const { credentialStorage } = await import('./credentialStorage');
   const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
@@ -1856,6 +2140,7 @@ export async function getSignInWalletCandidate(userSub: string, driveToken?: str
   if (driveToken) {
     const { googleDriveStorage } = await import('./googleDriveStorage');
     const manifests = await googleDriveStorage.listFiles(driveToken, MANIFEST_FILENAME);
+    manifests.forEach(() => note('manifest'));
     if (options?.legacyRegistrations) {
       // A canonical manifest, even an unreadable one, takes precedence. Do
       // not scan history, trash or unrelated files when repairing sign-in.
@@ -1863,34 +2148,75 @@ export async function getSignInWalletCandidate(userSub: string, driveToken?: str
         throw new WalletRecoveryError('missing');
       }
       const files = await googleDriveStorage.listFiles(driveToken, `${alias}.json`);
+      const legacyFirst = probe.length;
+      files.forEach(() => note('legacy'));
       if (!files.length) throw new WalletRecoveryError('missing');
       if (files.length !== 1) throw new WalletRecoveryError('unreadable');
-      secret = decryptBackup(await googleDriveStorage.downloadFile(driveToken, files[0].id),
-        require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+      let legacyBody: string;
+      try {
+        legacyBody = await googleDriveStorage.downloadFile(driveToken, files[0].id);
+      } catch (error) {
+        describe(legacyFirst, { outcome: 'download_failed' });
+        throw error;
+      }
+      const legacyRead = decryptBackupDetailed(
+        legacyBody, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+      describe(legacyFirst, {
+        format: classifyBackupBody(legacyBody),
+        outcome: legacyRead.reason,
+        bytes: legacyBody.length,
+      });
+      secret = legacyRead.secret;
       if (!secret) throw new WalletRecoveryError('unreadable');
     } else {
       if (!manifests.length) throw new WalletRecoveryError('missing');
       // Ambiguity is not permission to pick another wallet or generate a key.
       if (manifests.length !== 1) throw new WalletRecoveryError('unreadable');
+      let manifestBody: string;
+      try {
+        manifestBody = await googleDriveStorage.downloadFile(driveToken, manifests[0].id);
+      } catch (error) {
+        describe(0, { outcome: 'download_failed' });
+        throw error;
+      }
+      describe(0, { format: classifyBackupBody(manifestBody), bytes: manifestBody.length, outcome: 'parsed' });
       let manifest: any;
       try {
-        manifest = JSON.parse(await googleDriveStorage.downloadFile(driveToken, manifests[0].id));
+        manifest = JSON.parse(manifestBody);
       } catch (error) {
+        describe(0, { outcome: 'malformed' });
         if (error instanceof SyntaxError) throw new WalletRecoveryError('unreadable');
         throw error;
       }
       if (!Array.isArray(manifest?.wallets) || manifest.wallets.length !== 1) {
+        describe(0, { outcome: 'malformed' });
         throw new WalletRecoveryError('unreadable');
       }
       walletId = manifest.wallets[0]?.id;
       if (typeof walletId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(walletId)) {
+        describe(0, { outcome: 'malformed' });
         throw new WalletRecoveryError('unreadable');
       }
       const files = await googleDriveStorage.listFiles(driveToken, `confio_wallet_v2_${walletId}.enc`);
+      const payloadFirst = probe.length;
+      files.forEach(() => note('payload'));
       if (!files.length) throw new WalletRecoveryError('missing');
       if (files.length !== 1) throw new WalletRecoveryError('unreadable');
-      const body = await googleDriveStorage.downloadFile(driveToken, files[0].id);
-      secret = decryptBackup(body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+      let body: string;
+      try {
+        body = await googleDriveStorage.downloadFile(driveToken, files[0].id);
+      } catch (error) {
+        describe(payloadFirst, { outcome: 'download_failed' });
+        throw error;
+      }
+      const read = decryptBackupDetailed(
+        body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+      describe(payloadFirst, {
+        format: classifyBackupBody(body),
+        outcome: read.reason,
+        bytes: body.length,
+      });
+      secret = read.secret;
       if (!secret) throw new WalletRecoveryError('unreadable');
     }
   } else {
@@ -2019,6 +2345,19 @@ export async function getOrCreateMasterSecret(
      * cleanup from deleting the valid JWT persisted after reenrollment.
      */
     backupReportAuthToken?: string;
+    // Identity for RECOVERY DIAGNOSTICS only. Deliberately separate from
+    // backupReportAuthToken, which also decides whether the backup STATUS
+    // mutations are awaited: a caller that only wants its failures
+    // attributed must not thereby start waiting on unbounded telemetry
+    // while it holds the master-secret mutex.
+    /**
+     * Where this call leaves what it saw. The caller reports, because only
+     * the caller knows whether an outer retry answered this attempt:
+     * enableDriveBackup wraps this in runWithDriveAuthorizationRetry, so a
+     * report from in here would file a failure that fresh authorization
+     * then fixed.
+     */
+    evidenceSink?: RecoveryEvidenceSink;
     /**
      * Reports whether the Drive backup upload in this call actually completed.
      * Never called when no accessToken is provided or when the fast path
@@ -2043,10 +2382,29 @@ export async function getOrCreateMasterSecret(
 
 
 
-  // Mutex: wait for any in-progress creation to avoid race conditionsolveCurrentMutex: () => void;
-  await v2SecretMutex;
-  let resolveCurrentMutex: () => void;
-  v2SecretMutex = new Promise(resolve => { resolveCurrentMutex = resolve; });
+  // Mutex over secret generation, persistence and the canonical Drive
+  // write. The successor is installed BEFORE awaiting the predecessor, and
+  // those two statements run in one synchronous turn, so each caller
+  // appends itself to the queue exactly once.
+  //
+  // Awaiting first was not mutual exclusion at all: every waiter awaited
+  // the SAME promise and then overwrote the global, so when it resolved
+  // they all entered together and all but the last reservation was lost.
+  // Two sign-ins racing there can each generate a secret and each write a
+  // canonical backup.
+  const predecessor = v2SecretMutex;
+  let resolveCurrentMutex!: () => void;
+  v2SecretMutex = new Promise<void>(resolve => { resolveCurrentMutex = resolve; });
+  // A predecessor that rejected must not poison the queue behind it.
+  await predecessor.catch(() => {});
+
+  // A retry reuses the caller's sink; last attempt's findings are not this
+  // attempt's. Cleared after the queue, so a waiting caller cannot wipe the
+  // sink of the one currently running.
+  if (options?.evidenceSink) {
+    options.evidenceSink.current = undefined;
+    options.evidenceSink.reported = false;
+  }
 
   try {
     const { credentialStorage } = await import('./credentialStorage');
@@ -2131,8 +2489,8 @@ export async function getOrCreateMasterSecret(
       // fast-pathed, persisted and returned.
       if (!matchesAnchors(localSecret, options)) {
         console.warn('[MasterSecret] Local subject-bound V2 secret does not match the server anchors. Checking address-bound restore alias.', {
-          expectedAddress: options.expectedAddress,
-          expectedEvmAddress: options.expectedEvmAddress,
+          hasAlgoAnchor: !!options.expectedAddress,
+          hasEvmAnchor: !!options.expectedEvmAddress,
         });
         // A damaged SECONDARY alias must not abort anchored Drive recovery —
         // same reasoning as the corruption handler above, different branch.
@@ -2234,7 +2592,7 @@ export async function getOrCreateMasterSecret(
         options?.backupReportAuthToken,
       );
       if (options?.backupReportAuthToken) {
-        await iCloudReport;
+        await awaitBoundedReport(iCloudReport, 'iCloud report');
       } else {
         iCloudReport.catch(e => console.warn('[BackupHealth] iCloud report failed', e));
       }
@@ -2246,6 +2604,20 @@ export async function getOrCreateMasterSecret(
     // =================================================================================
     if (accessToken) {
       console.log('[MasterSecret] Drive available. Restoring oldest Drive V2 backup if present...');
+      // The scan already filled the sink; these two refusals happen after
+      // it returned, so they restate what it found.
+      const recordRestoreEvidence = (result: OldestDriveBackupResult) => {
+        if (!options?.evidenceSink) return;
+        options.evidenceSink.current = {
+          foundAny: !!result.foundAny,
+          foundDecryptable: !!result.foundDecryptable,
+          inventory: result.inventory ?? [],
+        };
+      };
+      // The search records into the caller's sink and rethrows untouched.
+      // A listing error or an incomplete trash/revision scan is as much a
+      // lockout as an unreadable backup, and the caller's boundary reports
+      // whichever one ends the operation.
       const restore = await findOldestRestorableDriveBackup(
         accessToken,
         userSub,
@@ -2254,7 +2626,8 @@ export async function getOrCreateMasterSecret(
         APP_BACKUP_KEY,
         Utf8,
         options?.expectedAddress,
-        options?.expectedEvmAddress
+        options?.expectedEvmAddress,
+        options?.evidenceSink,
       );
 
       if (restore.secret) {
@@ -2365,15 +2738,17 @@ export async function getOrCreateMasterSecret(
             // Reenrollment persists its JWT only after this function returns.
             // Finish the pinned report first so no auth cleanup can race that
             // later write even if the Apollo link behavior changes again.
-            await restoreReport;
+            await awaitBoundedReport(restoreReport, 'Drive restore report');
           } else {
             restoreReport.catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
           }
         }
       } else if (restore.foundAny) {
         if ((options?.expectedAddress || options?.expectedEvmAddress) && restore.foundDecryptable) {
+          recordRestoreEvidence(restore);
           throw new WalletRecoveryError('mismatch');
         }
+        recordRestoreEvidence(restore);
         throw new WalletRecoveryError('unreadable');
       }
     }
@@ -2585,7 +2960,7 @@ export async function getOrCreateMasterSecret(
           options?.backupReportAuthToken,
         );
         if (options?.backupReportAuthToken) {
-          await backupReport;
+          await awaitBoundedReport(backupReport, 'Drive backup report');
         } else {
           backupReport.catch(e => console.warn('[BackupHealth] Drive backup report failed', e));
         }
@@ -2666,14 +3041,61 @@ function encryptBackupV2(secret: Uint8Array, passphrase: string): string {
   return JSON.stringify(envelope);
 }
 
+/**
+ * Why a Drive candidate could not be read. Diagnostics only: these travel to
+ * the server as a shape, never with any part of the content.
+ */
+export type BackupReadReason =
+  | 'decrypted' | 'auth_failed' | 'bad_commitment' | 'bad_secret'
+  | 'not_v2' | 'empty' | 'unknown';
+
+export type BackupBodyFormat =
+  | 'v2_envelope' | 'legacy_aes' | 'header_only' | 'empty' | 'json' | 'unknown';
+
+/** Shape of a backup body, with no interest in what it decrypts to. */
+export function classifyBackupBody(content: string): BackupBodyFormat {
+  const raw = (content || '').trim();
+  if (!raw) return 'empty';
+  // Strip the warning header only when it is actually there. Taking the last
+  // line instead would classify a pretty-printed manifest by its closing
+  // brace and call a perfectly good file 'unknown'.
+  let body = raw;
+  if (body.startsWith('ADVERTENCIA')) {
+    const firstBreak = body.indexOf('\n');
+    body = firstBreak === -1 ? '' : body.slice(firstBreak + 1).trim();
+  }
+  // A file holding only the warning header never received a payload: that is
+  // an interrupted write, not an unreadable blob.
+  if (!body) return 'header_only';
+  if (body.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(body);
+      return parsed && parsed.v === 2 && parsed.alg === 'xsalsa20poly1305' ? 'v2_envelope' : 'json';
+    } catch {
+      return 'unknown';
+    }
+  }
+  if (body.startsWith('U2FsdGVkX1')) return 'legacy_aes';
+  return 'unknown';
+}
+
 function decryptBackupV2(body: string, passphrase: string): Uint8Array | null {
+  return decryptBackupV2Detailed(body, passphrase).secret;
+}
+
+function decryptBackupV2Detailed(
+  body: string,
+  passphrase: string,
+): { secret: Uint8Array | null; reason: BackupReadReason } {
   let envelope: any;
   try {
     envelope = JSON.parse(body);
   } catch {
-    return null; // not v2; caller falls back to the legacy format
+    return { secret: null, reason: 'not_v2' }; // caller falls back to v1
   }
-  if (!envelope || envelope.v !== 2 || envelope.alg !== 'xsalsa20poly1305') return null;
+  if (!envelope || envelope.v !== 2 || envelope.alg !== 'xsalsa20poly1305') {
+    return { secret: null, reason: 'not_v2' };
+  }
 
   const opened = nacl.secretbox.open(
     hexToBytes(envelope.ct),
@@ -2684,7 +3106,7 @@ function decryptBackupV2(body: string, passphrase: string): Uint8Array | null {
     // Authentication failure. Under v1 this same blob would have "decrypted"
     // to garbage and been length-checked; now it is rejected.
     console.warn('[MasterSecret] Drive backup failed authentication; rejecting.');
-    return null;
+    return { secret: null, reason: 'auth_failed' };
   }
 
   try {
@@ -2694,39 +3116,69 @@ function decryptBackupV2(body: string, passphrase: string): Uint8Array | null {
     // whose payload and claimed identity disagree is not usable.
     if (inner.algo !== derivePersonalV2Address(secret) || inner.evm !== derivePersonalEvmAddress(secret)) {
       console.warn('[MasterSecret] Drive backup identity commitment does not match its secret; rejecting.');
-      return null;
+      return { secret: null, reason: 'bad_commitment' };
     }
-    return secret;
+    return { secret, reason: 'decrypted' };
   } catch (e) {
-    console.warn('[MasterSecret] Drive backup payload malformed; rejecting.', e);
-    return null;
+    // The exception, not the error: a parser that chokes on backup bytes
+    // quotes them back ("invalid hex: PI"), which puts fragments of key
+    // material in the log. The reason is what anyone debugging needs.
+    console.warn('[MasterSecret] Drive backup payload malformed; rejecting.', errorKind(e));
+    return { secret: null, reason: 'bad_secret' };
   }
 }
 
+// An error's class, never its message. Decoders quote the input they
+// rejected, and here the input is ciphertext or a master secret.
+function errorKind(error: unknown): string {
+  return (error as any)?.constructor?.name || typeof error;
+}
+
 function decryptBackup(content: string, AES: any, key: string, Utf8: any): Uint8Array | null {
+  return decryptBackupDetailed(content, AES, key, Utf8).secret;
+}
+
+export function decryptBackupDetailed(
+  content: string,
+  AES: any,
+  key: string,
+  Utf8: any,
+): { secret: Uint8Array | null; reason: BackupReadReason } {
+  // Declared out here so the catch below can still say WHY: a v2 envelope
+  // that failed to open is not a damaged v1 blob, and support needs that
+  // difference to tell a wrong key from a corrupt file.
+  let v2Failed = false;
+  let v2Reason: BackupReadReason = 'unknown';
   try {
     let clean = content.trim();
     if (clean.includes('ADVERTENCIA') || clean.includes('\n')) {
       clean = clean.split('\n').pop()!.trim();
     }
+    // Header with nothing after it: there is no ciphertext to judge, so do
+    // not report this as a key or corruption problem.
+    if (!clean || clean.startsWith('ADVERTENCIA')) return { secret: null, reason: 'empty' };
     // v2 first; a v1 blob is not JSON, so this returns null and we fall through.
-    const v2 = decryptBackupV2(clean, key);
-    if (v2) return v2;
+    const v2 = decryptBackupV2Detailed(clean, key);
+    if (v2.secret) return v2;
+    v2Reason = v2.reason;
+    v2Failed = v2.reason !== 'not_v2';
 
     const bytes = AES.decrypt(clean, key);
     const b64 = bytes.toString(Utf8);
-    if (!b64) return null;
+    if (!b64) return { secret: null, reason: v2Failed ? v2Reason : 'bad_secret' };
     // STRICT decode on the legacy path too: base64-js maps junk to zero bytes,
     // so `'!'.repeat(43) + '='` used to sail through as 32 zero bytes here.
     // v1 blobs are unauthenticated, so this is the only integrity signal they
     // have. Existing backups must keep working — never stop reading v1.
-    return driveCandidateSecret(
+    const legacy = driveCandidateSecret(
       strictBase64ToBytes(b64, MASTER_SECRET_BYTES),
       'Drive backup (legacy v1)'
     );
+    if (legacy) return { secret: legacy, reason: 'decrypted' };
+    return { secret: null, reason: v2Failed ? v2Reason : 'bad_secret' };
   } catch (e) {
-    console.warn('Decryption failed:', e);
-    return null;
+    console.warn('[MasterSecret] Decryption failed:', errorKind(e));
+    return { secret: null, reason: v2Failed ? v2Reason : 'bad_secret' };
   }
 }
 
@@ -3673,6 +4125,140 @@ export const secureDeterministicWallet = SecureDeterministicWalletService.getIns
 /**
  * Reports backup status to the server.
  */
+/**
+ * Tell the server what this device saw when wallet recovery failed. Shapes,
+ * counts and byte lengths only: never ciphertext, addresses or file names.
+ *
+ * Recovery happens entirely on the device, so before this a lockout was
+ * invisible to support: the only server-side trace was the user signing in
+ * again and again (user 2785, 2026-10-14). Best effort by construction — a
+ * failed report must never replace the error the user is actually waiting on.
+ */
+// Duplicate guard, not a latency device: reporting no longer blocks the
+// caller, so this exists only to stop a multi-account reconciliation from
+// sending the same failure once per account in the same breath. Short,
+// because suppressing a LATER report costs evidence and now buys nothing.
+// Keyed rather than global, because one sign-in legitimately produces
+// DIFFERENT failures in sequence: canonical discovery says 'missing', then
+// the legacy path says 'unreadable', and that second one is the diagnosis
+// support needs.
+const REPORT_INTERVAL_MS = 15_000;
+
+/**
+ * Wait for a best-effort report, but never forever.
+ *
+ * These awaits happen while the master-secret mutex is held, and the
+ * mutation has no deadline of its own - Apollo's timeout link skips
+ * mutations. A status report that never settles would hold the lock for
+ * the life of the process, blocking every later master-secret call,
+ * including another identity's.
+ */
+const BACKUP_REPORT_DEADLINE_MS = 10_000;
+async function awaitBoundedReport(report: Promise<unknown>, label: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      report,
+      new Promise<void>(resolve => {
+        timer = setTimeout(() => {
+          console.warn(`[BackupHealth] ${label} did not settle in time; continuing.`);
+          resolve();
+        }, BACKUP_REPORT_DEADLINE_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+const MAX_TRACKED_REPORTS = 32;
+
+// Why the report failed, without the error itself. A rejected request can
+// come back with the payload quoted in the response body, which Apollo keeps
+// on the error; logging the error would reprint what this feature exists to
+// keep out of logs.
+const failureLabel = (error: unknown): string => {
+  const status = (error as any)?.networkError?.statusCode ?? (error as any)?.statusCode;
+  const name = (error as any)?.name;
+  if ((error as any)?.name === 'AbortError') return 'aborted';
+  return [name || 'error', status ? `http_${status}` : null].filter(Boolean).join(' ');
+};
+const lastReportAt = new Map<string, number>();
+
+export const reportWalletRecoveryDiagnostic = async (
+  code: 'missing' | 'unreadable' | 'mismatch' | 'local_corrupt' | 'drive_access' | 'unexpected',
+  // inventory is categorical by construction and whitelisted again by the
+  // server, so this accepts whatever the failing path collected.
+  details: { foundAny?: boolean; foundDecryptable?: boolean; inventory?: readonly unknown[] },
+  pinnedAuthToken?: string,
+): Promise<void> => {
+  // Deliberately NOT awaited past this point. Recovery failures arrive in
+  // sequence - local corruption, then missing, then unreadable - and an
+  // awaited four second deadline on each one stacked up in front of the
+  // error the user is waiting for. The report is best effort; sign-in is
+  // not. Everything below is started here and finishes on its own.
+  // No verified identity, no report. Falling back to the stored JWT would
+  // file this device's failure against whoever was signed in before - and
+  // would share one throttle slot between them. An unattributable report is
+  // worse than no report: support reads it as the wrong user's evidence.
+  if (!pinnedAuthToken) return;
+  const now = Date.now();
+  const throttleKey = `${code}|${pinnedAuthToken}`;
+  const previous = lastReportAt.get(throttleKey);
+  // A clock that moved backwards must not mute reporting until it catches up.
+  if (previous !== undefined && now >= previous && now - previous < REPORT_INTERVAL_MS) return;
+  for (const [key, at] of lastReportAt) {
+    if (now < at || now - at >= REPORT_INTERVAL_MS) lastReportAt.delete(key);
+  }
+  // Rotating tokens would otherwise grow this map for the life of the
+  // process. Oldest first, because Map preserves insertion order.
+  while (lastReportAt.size >= MAX_TRACKED_REPORTS) {
+    const oldest = lastReportAt.keys().next();
+    if (oldest.done) break;
+    lastReportAt.delete(oldest.value);
+  }
+  lastReportAt.set(throttleKey, now);
+  // No device name and no app version: both are strings a modified client
+  // controls, and any rule loose enough to accept the real values also
+  // accepts a name or a phone number.
+  const controller = new AbortController();
+  let settle: () => void = () => {};
+  // Telemetry must never outlive the answer the user is waiting for. Abort
+  // cancels the HTTP request so no late response reaches Apollo's global
+  // handlers; the deadline also stops us waiting on everything the abort
+  // cannot cancel, such as the auth link's own Keychain read. Apollo's
+  // timeout link deliberately skips mutations, so this is bounded here.
+  const deadline = setTimeout(() => { controller.abort(); settle(); }, 4000);
+  void (async () => {
+   try {
+    const report = apolloClient.mutate({
+      mutation: REPORT_WALLET_RECOVERY_DIAGNOSTIC,
+      variables: {
+        code,
+        foundAny: !!details.foundAny,
+        foundDecryptable: !!details.foundDecryptable,
+        inventory: JSON.stringify(details.inventory || []),
+      },
+      context: {
+        skipAuth: false,
+        fetchOptions: { signal: controller.signal },
+        // Never let telemetry trigger a token refresh: it would change
+        // authentication state underneath the sign-in that is failing.
+        skipProactiveRefresh: true,
+        ...(pinnedAuthToken ? { pinnedAuthToken } : {}),
+      },
+    }).catch(e => console.warn('[WalletRecovery] Could not report diagnostic:', failureLabel(e)));
+    await Promise.race([
+      report,
+      new Promise<void>(resolve => { settle = resolve; }),
+    ]);
+   } catch (e) {
+    console.warn('[WalletRecovery] Could not report diagnostic:', failureLabel(e));
+   } finally {
+    clearTimeout(deadline);
+   }
+  })();
+};
+
 export const reportBackupStatus = async (
   provider: 'google_drive' | 'icloud',
   pinnedAuthToken?: string,

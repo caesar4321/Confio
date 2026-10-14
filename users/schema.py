@@ -38,6 +38,7 @@ from graphql_jwt.decorators import login_required
 from datetime import datetime, timedelta
 from django.utils import timezone
 import logging
+import re
 import json
 from django.utils.translation import gettext as _
 from .legal.documents import TERMS, PRIVACY, DELETION
@@ -5894,6 +5895,140 @@ class RequestPremiumUpgrade(graphene.Mutation):
 			return RequestPremiumUpgrade(success=False, error=str(e), verification_level=0)
 
 
+class ReportWalletRecoveryDiagnostic(graphene.Mutation):
+    """Record what the device saw when wallet recovery failed at sign-in.
+
+    Diagnostics only. Never authorizes anything, and never accepts file
+    contents: the client sends shapes and byte counts, and everything here
+    is whitelisted again before it is stored.
+    """
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    class Arguments:
+        code = graphene.String(required=True)
+        found_any = graphene.Boolean(required=False)
+        found_decryptable = graphene.Boolean(required=False)
+        # Plain String, not JSONString: this resolver measures the payload
+        # before it decodes it, so an oversized report is refused rather than
+        # parsed. No device name is accepted at all.
+        inventory = graphene.String(required=False)
+
+    CODES = {'missing', 'unreadable', 'mismatch', 'local_corrupt', 'drive_access', 'unexpected'}
+    SHAPES = {'payload', 'legacy', 'manifest', 'revision', 'other'}
+    FORMATS = {'v2_envelope', 'legacy_aes', 'header_only', 'empty', 'json', 'unknown'}
+    OUTCOMES = {'decrypted', 'auth_failed', 'bad_commitment', 'bad_secret', 'not_v2', 'empty', 'parsed', 'malformed', 'download_failed', 'anchor_mismatch', 'unknown'}
+    MAX_ENTRIES = 25
+    KEEP_PER_USER = 20
+    MAX_INVENTORY_CHARS = 8192
+    RATE_LIMIT_PER_HOUR = 12
+
+    @staticmethod
+    def _pick(value, allowed, fallback):
+        """A known string, or the fallback. Lists and dicts are not members
+        of anything: comparing them raises, which used to discard the whole
+        report including its valid entries."""
+        return value if isinstance(value, str) and value in allowed else fallback
+
+    @classmethod
+    def _clean(cls, raw):
+        """Keep only known keys with known values. Anything else is dropped."""
+        entries = []
+        if not isinstance(raw, list):
+            return entries
+        for item in raw[:cls.MAX_ENTRIES]:
+            if not isinstance(item, dict):
+                continue
+            size = item.get('bytes')
+            entries.append({
+                'shape': cls._pick(item.get('shape'), cls.SHAPES, 'other'),
+                'format': cls._pick(item.get('format'), cls.FORMATS, 'unknown'),
+                'outcome': cls._pick(item.get('outcome'), cls.OUTCOMES, 'unknown'),
+                'bytes': int(size) if isinstance(size, int) and not isinstance(size, bool)
+                         and 0 <= size <= 10_000_000 else None,
+                'trashed': bool(item.get('trashed')),
+            })
+        return entries
+
+    @classmethod
+    def mutate(cls, root, info, code, found_any=None, found_decryptable=None,
+               inventory=None):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return cls(success=False, error='Authentication required')
+        if code not in cls.CODES:
+            return cls(success=False, error='Invalid code')
+        if isinstance(inventory, str) and len(inventory) > cls.MAX_INVENTORY_CHARS:
+            return cls(success=False, error='Inventory too large')
+        try:
+            import json as _json
+            from datetime import timedelta
+
+            from django.db import transaction
+            from django.utils import timezone
+
+            from users.models import User, WalletRecoveryDiagnostic
+
+            # A locked-out device retries on its own; bound the work it can
+            # make the server do, not just the rows it leaves behind.
+            parsed = inventory
+            if isinstance(parsed, str):
+                try:
+                    parsed = _json.loads(parsed) if parsed else []
+                except ValueError:
+                    parsed = []
+            entries = cls._clean(parsed)
+            # Admission is decided in the database, under a lock on the user
+            # row. A cache counter cannot do this job: the default cache is
+            # per-process, so each worker would grant its own allowance, and
+            # counting before inserting lets concurrent requests all pass.
+            # Cheap refusal first, WITHOUT the lock. A device stuck in a
+            # retry loop keeps sending after its allowance is gone, and
+            # every one of those would otherwise take an exclusive lock on
+            # the user row and queue behind legitimate writes to it. This
+            # read decides nothing on its own: admission is still settled
+            # under the lock below.
+            window_start = timezone.now() - timedelta(hours=1)
+            if WalletRecoveryDiagnostic.objects.filter(
+                user=user, created_at__gte=window_start,
+            ).count() >= cls.RATE_LIMIT_PER_HOUR:
+                return cls(success=False, error='Too many reports')
+            with transaction.atomic():
+                User.objects.select_for_update().filter(pk=user.pk).first()
+                recent = WalletRecoveryDiagnostic.objects.filter(
+                    user=user, created_at__gte=timezone.now() - timedelta(hours=1),
+                ).count()
+                if recent >= cls.RATE_LIMIT_PER_HOUR:
+                    return cls(success=False, error='Too many reports')
+                WalletRecoveryDiagnostic.objects.create(
+                    user=user,
+                    code=code,
+                    found_any=bool(found_any),
+                    found_decryptable=bool(found_decryptable),
+                    candidate_count=len(entries),
+                    inventory=entries,
+                )
+                # A locked-out user retries in a loop (2785 signed in 24 times
+                # in three days), so cap the history instead of letting it grow.
+                stale = list(
+                    WalletRecoveryDiagnostic.objects
+                    .filter(user=user)
+                    .order_by('-created_at')
+                    .values_list('id', flat=True)[cls.KEEP_PER_USER:]
+                )
+                if stale:
+                    WalletRecoveryDiagnostic.objects.filter(id__in=stale).delete()
+            logger.warning(
+                'Wallet recovery failed for user %s: code=%s found_any=%s decryptable=%s candidates=%s',
+                user.id, code, bool(found_any), bool(found_decryptable), len(entries),
+            )
+            return cls(success=True, error=None)
+        except Exception as e:
+            logger.error('ReportWalletRecoveryDiagnostic failed for user %s: %s', user.id, e)
+            return cls(success=False, error='Could not store diagnostic')
+
+
 class ReportBackupStatus(graphene.Mutation):
     """
     Report the status of a wallet backup to the server for safety tracking.
@@ -6153,6 +6288,7 @@ from users.product_waitlist_schema import PaidOfferMutations
 
 class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, PaidOfferMutations, graphene.ObjectType):
     report_backup_status = ReportBackupStatus.Field()
+    report_wallet_recovery_diagnostic = ReportWalletRecoveryDiagnostic.Field()
 
     update_phone_number = UpdatePhoneNumber.Field()
     confirm_phone_relink = ConfirmPhoneRelink.Field()

@@ -17,6 +17,7 @@ import { getAuth, GoogleAuthProvider, AppleAuthProvider, signInWithCredential, g
 import { Platform } from 'react-native';
 // Using Web3Auth mutations from mutations.ts
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
+import { RecoveryEvidenceSink, WalletRecoveryError } from './walletRecoveryErrors';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
@@ -434,6 +435,43 @@ type LegacyMigrationInspection = {
 };
 
 
+/**
+ * Report a lockout that happened after authentication succeeded.
+ *
+ * `sessionToken` is the token THIS sign-in was issued, never one read back
+ * out of storage, so there is no question whose failure it describes. A
+ * failure before authentication has no session and no diagnostic: it is
+ * not a wallet lockout.
+ */
+async function reportSignInWalletLockout(
+  error: unknown,
+  sessionToken: string | undefined,
+  evidence: RecoveryEvidenceSink,
+): Promise<void> {
+  if (!sessionToken) return;
+  try {
+    const { reportTerminalRecoveryFailure } = await import('./secureDeterministicWallet');
+    await reportTerminalRecoveryFailure(error, sessionToken, evidence);
+  } catch (reportError) {
+    console.warn('[AuthService] Could not report the sign-in wallet failure:', reportError);
+  }
+}
+
+/**
+ * NOTE ON IDENTITY: recovery diagnostics are only sent from SIGN-IN, where
+ * the session token comes from the sign-in response itself and is
+ * unambiguously the identity the recovery belongs to.
+ *
+ * There used to be a helper here that read the stored token for callers
+ * that are already signed in (backup setup, migration). It could not work:
+ * sign-in writes the OAuth subject before the JWT, so mid-sign-in the two
+ * stores describe different people, and a token refresh or account switch
+ * landing afterwards reopens the same gap. Re-reading, timestamps and
+ * transition windows all narrow it without closing it, and the failure
+ * mode is filing one user's lockout against another. Those callers now
+ * send nothing rather than something wrong.
+ */
+
 export class AccountDeactivatedError extends Error {
   constructor(message: string) {
     super(message);
@@ -794,6 +832,8 @@ export class AuthService {
   private async syncCurrentWalletToDrive(
     oauthData: { subject: string; provider: 'google' | 'apple' },
     accessToken: string,
+    // Captured by the caller before it awaited anything, so a sign-in that
+    // lands mid-flight cannot retag this user's failure as someone else's.
   ): Promise<void> {
       // Fetch the server's authoritative Algorand address so the restore
       // path can filter Drive candidates by expectedAddress. Without this,
@@ -851,8 +891,8 @@ export class AuthService {
 
       if (expectedAddress || expectedEvmAddress) {
         console.log('[AuthService] enableDriveBackup anchors fetched from server:', {
-          expectedAddress,
-          expectedEvmAddress,
+          expectedAddress: redactAddress(expectedAddress),
+          expectedEvmAddress: redactAddress(expectedEvmAddress),
         });
       } else {
         console.log('[AuthService] enableDriveBackup: no server-side anchor available; proceeding without filter');
@@ -932,6 +972,10 @@ export class AuthService {
         return { success: false, error: 'No se pudo obtener acceso a Google Drive' };
       }
 
+      // No recovery diagnostic from here. This is backup SETUP, run by an
+      // already-signed-in user from Profile: cancelling the consent sheet
+      // is not a lockout, the wallet on this device still works, and a row
+      // filed here would spend the hourly allowance a real lockout needs.
       await runWithDriveAuthorizationRetry(
         accessToken,
         token => this.syncCurrentWalletToDrive(oauthData, token),
@@ -1055,6 +1099,10 @@ export class AuthService {
     const perfLog = (step: string) => {
       console.log(`[PERF] ${step}: ${Date.now() - startTime}ms`);
     };
+    // Set the moment this sign-in is authenticated, and used only by the
+    // catch at the end of this method. Recovery fills the sink as it goes.
+    let signInSession: string | undefined;
+    const walletEvidence: RecoveryEvidenceSink = {};
 
     try {
       console.log(`Starting Google Sign-In process (Drive Scope: ${enableDrive})...`);
@@ -1214,6 +1262,7 @@ export class AuthService {
       });
       // Apollo results may be frozen; reconciliation updates only this sign-in's copy.
       const authData = loginResponse ? { ...loginResponse, user: { ...loginResponse.user } } : null;
+      signInSession = authData?.accessToken;
       console.log('Backend authentication response:', authData ? 'Data received' : 'No data');
       perfLog('Backend authenticated');
 
@@ -1429,6 +1478,7 @@ export class AuthService {
       // ----------------------------------------------------------------------
       try {
         const reconciled = await reconcileSignInWallet({
+          evidenceSink: walletEvidence,
           provider: 'google', subject: googleSubject, firebaseToken, authData,
           client: apolloClient,
           beforeWalletChange: () => invalidateBackendSession('before sign-in wallet reconciliation'),
@@ -1489,6 +1539,7 @@ export class AuthService {
           : undefined;
         try {
           const verifiedSecret = await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined, {
+            evidenceSink: walletEvidence,
             allowGenerate: allowV2SecretGeneration,
             provider: 'google',
             expectedAddress: serverAlgorandAddress,
@@ -1507,13 +1558,26 @@ export class AuthService {
           console.error('[AuthService] ⚠️ Failed to verify/restore V2 Master Secret:', v2Err);
           if (!allowV2SecretGeneration) {
             onProgress?.('Recuperando tu billetera con Google Drive...');
-            const recoveryDriveToken = tokenForDrive || await this.getDriveAccessTokenOnly();
+            // Pinned to this session's Google account. Without it the
+            // consent sheet accepts any account: recovery would then scan a
+            // STRANGER's Drive, reject every candidate against this user's
+            // anchors, and describe that stranger's files in this user's
+            // diagnostic. The guidance below already says "the same Google
+            // account"; this is what enforces it.
+            const recoveryDriveToken = tokenForDrive
+              || await this.getDriveAccessTokenOnly({ expectedGoogleSubject: googleSubject });
             if (!recoveryDriveToken) {
+              // Reported here rather than at the boundary below, which
+              // could only call this 'unexpected': the user-facing message
+              // is specific guidance and must not change.
+              await reportSignInWalletLockout(
+                new WalletRecoveryError('drive_access'), signInSession, walletEvidence);
               throw new Error('Para entrar a esta cuenta necesitamos recuperar tu billetera. Toca Continuar con Google y elige la misma cuenta de Google donde guardaste tu respaldo.');
             }
 
             try {
               const recoveredSecret = await getOrCreateMasterSecret(googleSubject, recoveryDriveToken, {
+                evidenceSink: walletEvidence,
                 allowGenerate: false,
                 provider: 'google',
                 expectedAddress: serverAlgorandAddress,
@@ -1549,6 +1613,10 @@ export class AuthService {
               // A Drive API/permission/network failure is NOT "backup missing":
               // telling the user to try another Google account sends them away
               // from the account that actually holds their backup.
+              // Report BEFORE wrapping: walletRecoveryMessage turns a
+              // classified failure into guidance prose, and the boundary
+              // below could then only call it 'unexpected'.
+              await reportSignInWalletLockout(driveRecoveryErr, signInSession, walletEvidence);
               throw new Error(walletRecoveryMessage(driveRecoveryErr));
               }
             }
@@ -1820,6 +1888,13 @@ export class AuthService {
       } else {
         console.error('Error signing in with Google:', error);
       }
+      // Sign-in does not end at reconciliation. Verifying or restoring the
+      // secret, writing it to this device, resolving a legacy collision
+      // and registering the address all still gate the user, and a failure
+      // in any of them stops them at the same door. This is the one place
+      // that sees all of it, and the only identity it uses is the token
+      // this sign-in was issued - never one read back out of storage.
+      await reportSignInWalletLockout(error, signInSession, walletEvidence);
       throw new Error(this.getGoogleSignInErrorMessage(error));
     }
   }
@@ -1830,6 +1905,11 @@ export class AuthService {
     if (Platform.OS !== 'ios') {
       throw new Error('Apple Sign In is only supported on iOS');
     }
+
+    // Same contract as the Google path: the token this sign-in was issued,
+    // and a sink recovery fills as it goes.
+    let signInSession: string | undefined;
+    const walletEvidence: RecoveryEvidenceSink = {};
 
     try {
       // Don't show progress during Apple modal
@@ -1906,6 +1986,7 @@ export class AuthService {
       });
 
       const authData = loginResponse ? { ...loginResponse, user: { ...loginResponse.user } } : null;
+      signInSession = authData?.accessToken;
       if (!authData || !authData.success) {
         const backendError = authData?.error || 'Backend authentication failed';
         const normalizedError = backendError.toLowerCase();
@@ -1920,6 +2001,7 @@ export class AuthService {
 
       try {
         await reconcileSignInWallet({
+          evidenceSink: walletEvidence,
           provider: 'apple', subject: appleSub, firebaseToken, authData,
           client: apolloClient,
           beforeWalletChange: async () => {
@@ -1963,12 +2045,17 @@ export class AuthService {
             allowGenerate: allowAppleSecretGeneration,
             provider: 'apple',
             expectedEvmAddress: serverBscAddressApple,
+            evidenceSink: walletEvidence,
           });
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple master secret (BSC-only):', v2Err);
           if (allowAppleSecretGeneration) {
             throw v2Err;
           }
+          // Same reason as the Algorand branch below: report before the
+          // guidance replaces the error, or a corrupt key and a missing one
+          // both arrive as 'unexpected'.
+          await reportSignInWalletLockout(v2Err, signInSession, walletEvidence);
           throw new Error('No pudimos recuperar tu billetera desde el llavero de Apple. Verifica iCloud y vuelve a intentarlo. No desinstales Confío. Código: RECOVERY-APPLE-KEYCHAIN.');
         }
         console.log('Master secret checked/created for Apple user (BSC-only)');
@@ -2010,10 +2097,16 @@ export class AuthService {
             allowGenerate: allowV2SecretGeneration,
             provider: 'apple',
             expectedAddress: serverAlgorandAddress,
+            evidenceSink: walletEvidence,
           });
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple V2 Master Secret:', v2Err);
           if (!allowV2SecretGeneration) {
+            // Report the real failure before the guidance replaces it: the
+            // boundary at the end of this method would otherwise only ever
+            // see 'unexpected', and a corrupt key reads nothing like a
+            // missing one.
+            await reportSignInWalletLockout(v2Err, signInSession, walletEvidence);
             throw new Error('No pudimos recuperar tu billetera desde el llavero de Apple. Verifica iCloud y vuelve a intentarlo. No desinstales Confío. Código: RECOVERY-APPLE-KEYCHAIN.');
           }
           if (allowV2SecretGeneration) {
@@ -2029,9 +2122,12 @@ export class AuthService {
       const serverAlgorandAddressForApple = authData.user?.algorandAddress || null;
       if (!legacyAddress && serverAlgorandAddressForApple && algorandAddress !== serverAlgorandAddressForApple) {
         console.warn('[AuthService] Refusing mismatched Apple V2 wallet for existing account', {
-          serverAlgorandAddress: serverAlgorandAddressForApple,
-          localAlgorandAddress: algorandAddress,
+          serverAlgorandAddress: redactAddress(serverAlgorandAddressForApple),
+          localAlgorandAddress: redactAddress(algorandAddress),
         });
+        const { WalletRecoveryError: MismatchError } = await import('./walletRecoveryErrors');
+        await reportSignInWalletLockout(
+          new MismatchError('mismatch'), signInSession, walletEvidence);
         throw new Error('Esta cuenta ya tiene una billetera registrada. Recupera la billetera correcta antes de continuar.');
       }
 
@@ -2096,6 +2192,9 @@ export class AuthService {
       return await this.finishAppleSignIn(userCredential, authData, algorandAddress);
     } catch (error) {
       console.error('Apple Sign In Error:', error);
+      // Apple sign-in keeps verifying and restoring the secret after
+      // reconciliation too, and those failures gate the user identically.
+      await reportSignInWalletLockout(error, signInSession, walletEvidence);
       throw error;
     }
   }

@@ -8,7 +8,7 @@ import { getApiUrl } from '../config/env';
 import { appCheckDiagnosticCode } from '../utils/appCheckDiagnostics';
 import { Observable as ApolloObservable } from '@apollo/client/utilities';
 import appCheckService from '../services/appCheckService';
-import { shouldSkipStoredJwt } from './authPolicy';
+import { shouldSkipStoredJwt, shouldNeverMutateSession } from './authPolicy';
 // RN-free module — safe to import statically (heavier emergencyExit modules
 // like the keychain store stay behind dynamic imports).
 import { successProvesUnbanned } from '../services/emergencyExit/banSignal';
@@ -206,7 +206,14 @@ function sanitizeHeaders(headers: Record<string, unknown> = {}): Record<string, 
 // BlockedAccount.
 const banClearLink = new ApolloLink((operation, forward) =>
   forward(operation).map((result) => {
-    if (successProvesUnbanned(operation.getContext().headers)) {
+    // Read-only operations prove nothing about the CURRENT identity: wallet
+    // recovery telemetry can land after a sign-out carrying the previous
+    // session's token, and clearing the flag re-arms the ban navigation for
+    // whoever is signed in now. A real request will clear it honestly.
+    if (
+      !shouldNeverMutateSession(operation.operationName) &&
+      successProvesUnbanned(operation.getContext().headers)
+    ) {
       import('../services/emergencyExit/banSignal').then(async ({ clearBanSignal }) => {
         const { emergencyStore } = await import('../services/emergencyExit/store');
         await clearBanSignal(emergencyStore);
@@ -239,27 +246,48 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
     'AskAssistant', 'SendSupportMessage', 'CreateAssistantPet',
     'StartAssistantVoice', 'ConnectAssistantVoice', 'RunAssistantVoiceTool', 'LogAssistantVoice',
     'UpdateAssistantProfile', 'UseAssistantPet', 'DeleteAssistantPet',
+    // Wallet recovery diagnostics describe a user's backup files. Shapes
+    // only by construction, but never echo them into error logs.
+    'ReportWalletRecoveryDiagnostic',
   ].includes(operation.operationName);
+  // An error body can echo the request back: a proxy or gateway that quotes
+  // the payload it rejected turns this log into a copy of what the line
+  // above just redacted. Extensions carry server-side detail for the same
+  // reason, so they go with it.
+  const redactErrorText = isMembershipClaim || shouldNeverMutateSession(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {
       console.error('[GraphQL error]:', {
-        message: isMembershipClaim ? 'Membership claim failed' : err.message,
-        locations: err.locations,
-        path: err.path,
-        extensions: isMembershipClaim ? undefined : err.extensions,
+        message: isMembershipClaim ? 'Membership claim failed'
+          : redactErrorText ? '[redacted]' : err.message,
+        // path echoes the ALIASES the request used, and a modified client
+        // can name an alias after anything it likes. Locations are offsets
+        // into that same text. Neither survives redaction on its own.
+        locations: redactVariables ? undefined : err.locations,
+        path: redactVariables ? undefined : err.path,
+        extensions: redactVariables ? undefined : err.extensions,
         operation: operation.operationName,
         variables: redactVariables ? '[REDACTED]' : operation.variables
       });
 
-      // Handle specific error codes
-      if (err.extensions?.code) {
+      // Handle specific error codes. A code is supposed to be a short
+      // token, but it arrives from the server, so for a redacted operation
+      // it is just more unvetted text going to the same log the line above
+      // took care to empty.
+      if (err.extensions?.code && !redactVariables) {
         console.error(`[GraphQL error code]: ${err.extensions.code}`);
       }
 
       const context = operation.getContext();
       // Pinned requests must never change identity. Public auth operations
       // establish their own identity and must not refresh/replay another one.
-      if (context.pinnedAuthToken || shouldSkipStoredJwt(operation.operationName, !!context.skipAuth)) {
+      // Read-only operations must not refresh or clear the session either:
+      // an unpinned caller would otherwise rewrite Keychain from telemetry.
+      if (
+        context.pinnedAuthToken ||
+        shouldNeverMutateSession(operation.operationName) ||
+        shouldSkipStoredJwt(operation.operationName, !!context.skipAuth)
+      ) {
         continue;
       }
       const tokens = context.sessionTokens as SessionTokens | undefined;
@@ -306,9 +334,10 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   if (networkError) {
     const ne = networkError as any;
     console.error('[Network error]:', {
-      message: isMembershipClaim ? 'Membership claim request failed' : networkError.message,
+      message: isMembershipClaim ? 'Membership claim request failed'
+        : redactErrorText ? '[redacted]' : networkError.message,
       name: networkError.name,
-      stack: isMembershipClaim ? undefined : networkError.stack,
+      stack: redactVariables ? undefined : networkError.stack,
       statusCode: ne.statusCode,
       operation: operation.operationName,
       variables: redactVariables ? '[REDACTED]' : operation.variables
@@ -326,7 +355,15 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       typeof ne.result === 'string' ? ne.result : (ne.result ? JSON.stringify(ne.result) : ''),
       networkError.message || '',
     ].join(' ').toLowerCase();
-    if (banBody.includes('suspended') || ne.statusCode === 403) {
+    // A read-only operation must not change what the user sees either.
+    // Wallet-recovery telemetry rides along a failing sign-in; a 403 from a
+    // proxy in front of it would route the user to BlockedAccount and
+    // persist the ban flag on the strength of a request they never made.
+    // A genuinely banned user still learns it from their next real call.
+    if (
+      !shouldNeverMutateSession(operation.operationName) &&
+      (banBody.includes('suspended') || ne.statusCode === 403)
+    ) {
       // Loud, greppable marker so a device log proves this path ran.
       console.warn('[BanSignal] 403 lockout detected on', operation.operationName, '→ routing to BlockedAccount');
       // Route IMMEDIATELY and INDEPENDENTLY of keychain persistence. The
@@ -418,6 +455,11 @@ const authLink = setContext(async (operation, previousContext) => {
     return { headers: nextHeaders };
   }
 
+  // Read-only operations attach whatever token is already stored and
+  // otherwise leave the session exactly as they found it: no refresh, no
+  // reset, no clear. An unusable token simply costs them the request.
+  const readOnlySession = shouldNeverMutateSession(operation.operationName);
+
   try {
     let credentials;
     try {
@@ -454,9 +496,11 @@ const authLink = setContext(async (operation, previousContext) => {
       refreshToken = tokens.refreshToken;
     } catch (error) {
       console.error('Error parsing tokens:', error);
-      await Keychain.resetGenericPassword({
-        service: AUTH_KEYCHAIN_SERVICE
-      });
+      if (!readOnlySession) {
+        await Keychain.resetGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE
+        });
+      }
       return { headers: nextHeaders };
     }
 
@@ -465,15 +509,17 @@ const authLink = setContext(async (operation, previousContext) => {
     try {
       decoded = jwtDecode<CustomJwtPayload>(token);
     } catch (error) {
-      await clearRejectedSession(tokens);
+      if (!readOnlySession) await clearRejectedSession(tokens);
       return { headers: nextHeaders };
     }
     if (!decoded.user_id || decoded.type !== 'access') {
-      await clearRejectedSession(tokens);
+      if (!readOnlySession) await clearRejectedSession(tokens);
       return { headers: nextHeaders };
     }
 
-    const skipProactive = operation.operationName === 'GetUserAccounts' || !!previousContext?.skipProactiveRefresh;
+    const skipProactive = readOnlySession
+      || operation.operationName === 'GetUserAccounts'
+      || !!previousContext?.skipProactiveRefresh;
     const expiresSoon = !decoded.exp || decoded.exp <= Date.now() / 1000 + 5 * 60;
     if (!skipProactive && expiresSoon) {
       try {

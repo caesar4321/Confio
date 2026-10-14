@@ -1,5 +1,5 @@
 import { gql } from '@apollo/client';
-import { WalletRecoveryError } from './walletRecoveryErrors';
+import { RecoveryEvidenceSink, WalletRecoveryError } from './walletRecoveryErrors';
 import { runWithDriveAuthorizationRetry } from './googleDriveAuthPolicy';
 
 const PREPARE = gql`
@@ -72,7 +72,7 @@ export function candidateMatchesRegistration(
  * balance inspection. Confirmed missing Google backups are provisioned and
  * read back before using the same signed registration replacement flow.
  */
-export async function reconcileSignInWallet(options: {
+type ReconcileOptions = {
   provider: 'google' | 'apple'; subject: string; firebaseToken: string;
   authData: any; client: any; getGoogleDriveToken: () => Promise<string | null>;
   beforeWalletChange: () => Promise<void>;
@@ -80,10 +80,56 @@ export async function reconcileSignInWallet(options: {
   getLegacyV1Address?: (account: Registration) => Promise<string | null>;
   /** Clear the rejected token and authorize the SAME Google subject. */
   reauthorizeGoogleDrive?: (rejectedToken: string) => Promise<string | null>;
-}): Promise<boolean> {
+  /**
+   * The caller's sink, when the caller has its own boundary further out.
+   * Sign-in does: sharing one sink is what stops reconciliation and the
+   * sign-in catch from filing the same lockout twice, once precisely and
+   * once as 'unexpected'.
+   */
+  evidenceSink?: RecoveryEvidenceSink;
+};
+
+/**
+ * Sign-in wallet reconciliation, with ONE diagnostic per lockout.
+ *
+ * Everything from here to the end of sign-in gates the user: a failed
+ * backup acknowledgement, a rejected commit or an address that cannot be
+ * published leaves them exactly as locked out as an unreadable backup, and
+ * those paths used to report nothing because they are nowhere near the
+ * recovery code. So the boundary is the whole operation. Inner boundaries
+ * remain only where they can name the failure more precisely than
+ * 'unexpected', and the sink's reported flag keeps the pair from filing it
+ * twice.
+ */
+export async function reconcileSignInWallet(options: ReconcileOptions): Promise<boolean> {
+  // The caller's sink when it has one, so a single lockout is reported
+  // once; otherwise our own. Per call either way, never module scope: two
+  // sign-ins in one process must not read each other's findings.
+  const sink: RecoveryEvidenceSink = options.evidenceSink ?? {};
+  try {
+    return await reconcileSignInWalletInner(options, sink);
+  } catch (error) {
+    // An inner boundary that already named this failure precisely has
+    // filed it; calling again would only add 'unexpected' beside it.
+    if (!sink.reported) {
+      const { reportTerminalRecoveryFailure } = await import('./secureDeterministicWallet');
+      await reportTerminalRecoveryFailure(error, options.authData?.accessToken, sink);
+    }
+    throw error;
+  }
+}
+
+async function reconcileSignInWalletInner(
+  options: ReconcileOptions,
+  evidenceSink: RecoveryEvidenceSink,
+): Promise<boolean> {
+
   const { authData, provider, subject, client } = options;
   if (authData.isNewUser) return false;
-  const { getSignInWalletCandidate, createMissingSignInWalletCandidate, reportBackupStatus, clearReconciledLegacyWallets } = await import('./secureDeterministicWallet');
+  const {
+    getSignInWalletCandidate, createMissingSignInWalletCandidate, reportBackupStatus,
+    clearReconciledLegacyWallets, reportTerminalRecoveryFailure,
+  } = await import('./secureDeterministicWallet');
   let candidate: Awaited<ReturnType<typeof getSignInWalletCandidate>> | undefined;
   let restoredLegacyBackup = false;
   const acknowledgeBackup = async () => {
@@ -95,11 +141,17 @@ export async function reconcileSignInWallet(options: {
     authData.requiresBackupCompletion = false;
   };
   try {
-    candidate = await getSignInWalletCandidate(subject);
+    candidate = await getSignInWalletCandidate(subject, undefined, {
+      reportAuthToken: authData.accessToken, evidenceSink,
+    });
   } catch (error: any) {
     // A corrupt Keychain copy may be repaired by the canonical Google backup.
     // Permission/locked-storage errors must not be treated as missing keys.
-    if (provider !== 'google' || error?.name !== 'CorruptMasterSecretError') throw error;
+    if (provider !== 'google' || error?.name !== 'CorruptMasterSecretError') {
+      // Nothing answers this one: local discovery is where sign-in stops.
+      await reportTerminalRecoveryFailure(error, authData.accessToken, evidenceSink);
+      throw error;
+    }
   }
   const context = { pinnedAuthToken: authData.accessToken, skipProactiveRefresh: true };
   const prepare = async (bscAddress?: string) => {
@@ -172,8 +224,21 @@ export async function reconcileSignInWallet(options: {
     return false;
   }
   if (provider === 'google') {
-    const token = await options.getGoogleDriveToken();
-    if (!token) throw new Error('Autoriza Google Drive con la misma cuenta para recuperar tu billetera.');
+    // Initial authorization is part of the lockout too: a user who cancels
+    // it, or whose token request fails, cannot sign in and leaves exactly
+    // the silence this diagnostic exists to end.
+    let token: string | null;
+    try {
+      token = await options.getGoogleDriveToken();
+    } catch (error) {
+      await reportTerminalRecoveryFailure(error, authData.accessToken, evidenceSink);
+      throw error;
+    }
+    if (!token) {
+      const denied = new WalletRecoveryError('drive_access');
+      await reportTerminalRecoveryFailure(denied, authData.accessToken, evidenceSink);
+      throw new Error('Autoriza Google Drive con la misma cuenta para recuperar tu billetera.');
+    }
     const localCandidate = candidate;
     const recoverFromDrive = async (token: string): Promise<boolean> => {
       // A retry starts cloud discovery from scratch, not from a partially read
@@ -181,14 +246,18 @@ export async function reconcileSignInWallet(options: {
       candidate = localCandidate;
       restoredLegacyBackup = false;
       try {
-        candidate = await getSignInWalletCandidate(subject, token);
+        candidate = await getSignInWalletCandidate(subject, token, {
+          reportAuthToken: authData.accessToken, evidenceSink,
+        });
       } catch (error) {
         if (error instanceof WalletRecoveryError && error.code === 'missing') {
           try {
             // Old subject-named backup formats can restore only an already
             // registered wallet. The candidate reader validates every anchor;
             // this is never permission to choose a replacement from history.
-            candidate = await getSignInWalletCandidate(subject, token, { legacyRegistrations: accounts });
+            candidate = await getSignInWalletCandidate(subject, token, {
+              legacyRegistrations: accounts, reportAuthToken: authData.accessToken, evidenceSink,
+            });
             restoredLegacyBackup = true;
           } catch (legacyError) {
             if (candidate === null && accounts.every(row => !row.isKeylessMigrated && !row.bscAddress)
@@ -202,7 +271,7 @@ export async function reconcileSignInWallet(options: {
                 throw new Error('No pudimos coordinar la recuperación. Intenta nuevamente. Código: RECOVERY-RESERVATION.');
               }
               return result.recoveryFileIds;
-            });
+            }, authData.accessToken, evidenceSink);
           }
         } else {
           // Never fall back from an unreadable or unreachable canonical backup.
@@ -213,16 +282,31 @@ export async function reconcileSignInWallet(options: {
     };
     // Retry only the cloud phase. Keychain persistence and the signed server
     // commit below must never be replayed by a Drive authorization retry.
-    const recovered = options.reauthorizeGoogleDrive
-      ? await runWithDriveAuthorizationRetry(token, recoverFromDrive,
-          () => options.reauthorizeGoogleDrive!(token))
-      : await recoverFromDrive(token);
+    // The terminal boundary for the whole cloud phase. Everything inside
+    // may suppress a failure it is about to answer; what comes out of here
+    // has answered nothing. Provisioning failures, a Drive error the retry
+    // cannot fix, and a cancelled reauthorization all surface here.
+    let recovered: boolean;
+    try {
+      recovered = options.reauthorizeGoogleDrive
+        ? await runWithDriveAuthorizationRetry(token, recoverFromDrive,
+            () => options.reauthorizeGoogleDrive!(token))
+        : await recoverFromDrive(token);
+    } catch (error) {
+      await reportTerminalRecoveryFailure(error, authData.accessToken, evidenceSink);
+      throw error;
+    }
     if (!recovered) return false;
   }
   // An unmigrated Apple account may still use the reproducible V1 path.
   // No automatic Google authorization and no random replacement on missing keys.
   if (!candidate) {
     if (accounts.some(row => row.isKeylessMigrated || row.bscAddress)) {
+      // An Apple account with a registered wallet and no local key is a
+      // lockout like any other: discovery RETURNED here, it did not throw,
+      // so no boundary above has seen it.
+      await reportTerminalRecoveryFailure(
+        new WalletRecoveryError('missing'), authData.accessToken, evidenceSink);
       throw new Error('No pudimos recuperar tu billetera desde el llavero de Apple. Verifica iCloud y vuelve a intentarlo. Código: RECOVERY-APPLE-KEYCHAIN.');
     }
     return false;

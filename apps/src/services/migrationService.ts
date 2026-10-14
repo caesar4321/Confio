@@ -425,6 +425,10 @@ class WalletMigrationService {
                 throw new DriveAuthorizationRequiredError();
             }
 
+            // Whose failure this would be. Statically imported and started
+            // on this same tick on purpose: a dynamic import yields first,
+            // and a sign-in completing in that yield would hand this
+            // migration's failures to the user who just arrived.
             // requireCloudSync is NOT optional here. Without it,
             // getOrCreateMasterSecret reports sync failure through
             // onCloudSyncResult and returns the secret anyway — so this line
@@ -432,6 +436,10 @@ class WalletMigrationService {
             // into a V2 secret that existed only on this device. That is the
             // 10090 lockout shape, in the one path that moves money.
             let cloudSynced = false;
+            // No recovery diagnostic here: migration runs long after
+            // sign-in, so the only identity available is whatever is in
+            // Keychain now, and that is not reliably the identity this
+            // migration belongs to. Sign-in reports; this does not.
             const v2Secret = await getOrCreateMasterSecret(sub, driveAccessToken, {
                 provider,
                 requireCloudSync: true,
@@ -450,8 +458,12 @@ class WalletMigrationService {
             const v2Address = v2Wallet.address;
 
             // 2. Restore V1 Wallet for signing
+            // The OAuth subject is the user's stable identifier at Google
+            // or Apple, and V1 keys derive from it: it does not belong in a
+            // device log. The shape of the derivation input does.
             console.log('[MigrationService] Restoring Legacy V1 Wallet with inputs:', JSON.stringify({
-                iss, sub, aud, provider, type: 'personal', index: accountIndex, businessId: businessId || 'undefined'
+                iss, aud, provider, type: 'personal', index: accountIndex,
+                hasSubject: !!sub, hasBusinessId: !!businessId,
             }));
             const v1Wallet = await secureDeterministicWallet.restoreLegacyV1Wallet(
                 iss, sub, aud, provider, 'personal', accountIndex, businessId

@@ -2,6 +2,12 @@ jest.mock('../secureDeterministicWallet', () => ({
   getSignInWalletCandidate: jest.fn(),
   createMissingSignInWalletCandidate: jest.fn(),
   clearReconciledLegacyWallets: jest.fn(),
+  // Mirrors the real report-once rule, which is what keeps an inner
+  // boundary and the outer one from filing the same lockout twice.
+  reportTerminalRecoveryFailure: jest.fn(async (_e: any, _t: any, sink: any) => {
+    if (sink?.reported) return;
+    if (sink) sink.reported = true;
+  }),
   reportBackupStatus: jest.fn(),
 }));
 import { createMissingSignInWalletCandidate, getSignInWalletCandidate, clearReconciledLegacyWallets, reportBackupStatus } from '../secureDeterministicWallet';
@@ -272,7 +278,10 @@ it('restores matching legacy-format backup only after canonical absence without 
   (getSignInWalletCandidate as jest.Mock).mockResolvedValueOnce(null)
     .mockRejectedValueOnce(new WalletRecoveryError('missing')).mockResolvedValueOnce(wallet);
   expect(await reconcileSignInWallet(args)).toBe(false);
-  expect(getSignInWalletCandidate).toHaveBeenLastCalledWith('subject', 'drive', { legacyRegistrations: state.accounts });
+  expect(getSignInWalletCandidate).toHaveBeenLastCalledWith('subject', 'drive', {
+    legacyRegistrations: state.accounts, reportAuthToken: 'session',
+    evidenceSink: expect.any(Object),
+  });
   expect(wallet.persist).toHaveBeenCalledTimes(1);
   expect(args.beforeWalletChange).not.toHaveBeenCalled();
   expect(args.client.mutate).toHaveBeenCalledTimes(1);

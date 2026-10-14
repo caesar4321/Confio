@@ -1363,3 +1363,44 @@ from .models_cashflow import (  # noqa: F401,E402
     CusdPlusPriceSnapshot,
     CusdPlusHoldingSnapshot,
 )
+
+
+class WalletRecoveryDiagnostic(models.Model):
+    """What the device saw when wallet recovery failed during sign-in.
+
+    Recovery runs entirely on the device, so a lockout leaves no trace here:
+    user 2785 retried eight times in 35 minutes on 2026-10-14 and the only
+    server-side evidence was a repeated Web3Auth login. This records the
+    SHAPE of what the device found in Drive, never ciphertext, key material
+    or file contents, so support can tell "no backup" from "a backup we
+    cannot read", and one damaged file from an ambiguous Drive.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='wallet_recovery_diagnostics',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    # WalletRecoveryFailure in the app: missing | unreadable | mismatch |
+    # local_corrupt | drive_access | unexpected
+    code = models.CharField(max_length=32)
+    found_any = models.BooleanField(default=False)
+    found_decryptable = models.BooleanField(default=False)
+    candidate_count = models.PositiveIntegerField(default=0)
+    # One small record per Drive candidate: name shape, byte length, format
+    # class and why it was rejected. The mutation validates and truncates it.
+    inventory = models.JSONField(default=list, blank=True)
+    # No client-supplied free text is stored here at all. Both a device name
+    # and an "app version" are strings a modified client controls, and any
+    # pattern loose enough to accept real versions also accepts a phone
+    # number or a name. The inventory below carries the diagnosis; the
+    # platform and timing we already know from the user record.
+
+    class Meta:
+        indexes = [
+            models.Index(fields=('user', '-created_at'), name='wallet_recov_user_time_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.user_id} {self.code} {self.created_at:%Y-%m-%d %H:%M}'
