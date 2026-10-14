@@ -1172,6 +1172,57 @@ class SuggestionRankingTests(TestCase):
         with patch('assistant.suggestions._state', return_value=state):
             return suggestions.build(self._viewer(None), screen)
 
+    def test_questions_already_asked_make_room_for_the_next(self):
+        from . import suggestions
+        asked = {'¿cómo pongo mis primeros dólares en confío?', '¿cuánto cuesta usar confío?'}
+        with patch('assistant.suggestions._state', return_value=self._state(probe_answered=True)), \
+                patch('assistant.suggestions._recently_asked', return_value=asked):
+            result = suggestions.build(self._viewer(None), 'Home')
+        ids = [s.id for s in result.starters]
+        self.assertNotIn('first.how', ids)
+        self.assertNotIn('app.cost', ids)
+        self.assertEqual(len(ids), 4)  # backfilled, not shorter
+        self.assertNotIn('first.how', [s.id for s in result.hints])
+
+    def test_asking_every_chip_never_leaves_the_list_empty(self):
+        from . import suggestions
+        asked = {'¿cómo cobro a un cliente?', '¿cómo genero un qr para cobrar?', '¿qué es confío y para qué sirve?'}
+        with patch('assistant.suggestions._state', return_value=self._state(employee=True, personal=False)), \
+                patch('assistant.suggestions._recently_asked', return_value=asked):
+            result = suggestions.build(self._viewer(None, 'business'), 'Home')
+        self.assertEqual([s.id for s in result.starters], ['emp.charge', 'emp.charge_qr', 'app.what'])
+
+    def test_recently_asked_reads_only_this_users_recent_messages(self):
+        from datetime import timedelta
+
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+
+        from inbox.models import SupportConversation, SupportMessage
+
+        from .suggestions import _recently_asked
+        User = get_user_model()
+        ana = User.objects.create_user(username='ana-sug', firebase_uid='uid-ana-sug')
+        other = User.objects.create_user(username='luis-sug', firebase_uid='uid-luis-sug')
+        mine = SupportConversation.objects.create(
+            user=ana, account=Account.objects.create(user=ana, account_type='personal', account_index=0))
+        theirs = SupportConversation.objects.create(
+            user=other, account=Account.objects.create(user=other, account_type='personal', account_index=0))
+        SupportMessage.objects.create(conversation=mine, sender_type='USER', body='¿Cuánto cuesta usar  Confío?')
+        old = SupportMessage.objects.create(conversation=mine, sender_type='USER', body='Viejo')
+        SupportMessage.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=2))
+        SupportMessage.objects.create(conversation=theirs, sender_type='USER', body='Ajeno')
+        SupportMessage.objects.create(conversation=mine, sender_type='AGENT', body='Respuesta')
+        viewer = Viewer(user=ana, account=mine.account, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.assertEqual(_recently_asked(viewer), {'¿cuánto cuesta usar confío?'})
+        # Another account of the same person doesn't see it.
+        other_account = Account.objects.create(user=ana, account_type='personal', account_index=1)
+        elsewhere = Viewer(user=ana, account=other_account, account_type='personal', business_id=None,
+                           is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.assertEqual(_recently_asked(elsewhere), set())
+        self.assertEqual(_recently_asked(self._viewer(None)), set())
+
     def test_never_funded_rail_country_gets_the_probe_first(self):
         result = self._build(self._state())
         self.assertEqual(result.hints[0].kind, 'probe')

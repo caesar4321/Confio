@@ -40,6 +40,10 @@ PROBE_KEYS = {key for key, _ in PROBE_ANSWERS}
 # An unfinished identity verification is worth a nudge for this long.
 VERIFICATION_NUDGE_DAYS = 14
 MAX_STARTERS = 4
+# A question the person already asked stays out of the chips this long, so a
+# chip they tapped makes room for the next one (people re-tapped "¿Cómo pongo
+# mis primeros dólares?" up to 4 times in 5 minutes, 2026-10-14).
+ASKED_WINDOW_HOURS = 24
 
 
 @dataclass(frozen=True)
@@ -178,8 +182,37 @@ def wants_probe(state: _State) -> bool:
     return state.personal and not state.funded and state.country in RAIL_COUNTRIES and not state.probe_answered
 
 
+def _norm(text):
+    return ' '.join((text or '').lower().split())
+
+
+def _recently_asked(viewer) -> set:
+    """What this person sent the assistant in the last ASKED_WINDOW_HOURS."""
+    user = getattr(viewer, 'user', None)
+    if user is None or not getattr(user, 'pk', None):
+        return set()
+    try:
+        from inbox.models import SupportMessage
+
+        since = timezone.now() - timedelta(hours=ASKED_WINDOW_HOURS)
+        # This account's thread only: a question asked from the business account
+        # doesn't hide the chip in the personal one.
+        scope = {'conversation__user': user}
+        if getattr(viewer, 'account_type', '') == 'business' and getattr(viewer, 'business_id', None):
+            scope['conversation__business_id'] = viewer.business_id
+        elif getattr(viewer, 'account', None) is not None:
+            scope['conversation__account'] = viewer.account
+        bodies = (SupportMessage.objects.filter(sender_type='USER', created_at__gte=since, **scope)
+                  .order_by('-created_at').values_list('body', flat=True)[:50])
+        return {_norm(b) for b in bodies}
+    except Exception:  # noqa: BLE001 - chips are a nicety: never fail the screen over them
+        logger.warning('suggestions: recent questions unavailable', exc_info=True)
+        return set()
+
+
 def build(viewer, screen: str = '', request_meta=None) -> Suggestions:
     state = _state(viewer, request_meta)
+    asked = _recently_asked(viewer)
     attention, situation = [], []
 
     if state.topup_in_progress and not state.employee:
@@ -208,24 +241,37 @@ def build(viewer, screen: str = '', request_meta=None) -> Suggestions:
                        '¿Cómo pongo mis primeros dólares en Confío?'),
                     _s('app.what', '¿Qué es Confío y para qué me sirve?'),
                     _s('app.cost', '¿Cuánto cuesta usar Confío?'),
-                    _s('app.safe', '¿Es seguro? ¿Quién controla mi dinero?')]
+                    _s('app.safe', '¿Es seguro? ¿Quién controla mi dinero?'),
+                    # Next in line once the ones above were asked.
+                    (_s('save.plus', '¿Cuánto rinde Confío Dollar+?') if state.ondo_eligible
+                     else _s('save.dollars', '¿Cómo ahorro en dólares?')),
+                    _s('norail.receive', '¿Cómo recibo dólares de otra persona?'),
+                    _s('norail.cash', '¿Dónde cambio dólares por efectivo?')]
     elif not state.funded:
         situation.append(_s('norail.receive', '¿Cómo recibes dólares de otra persona? Te explico.',
                             '¿Cómo recibo dólares de otra persona?'))
         starters = [_s('norail.receive', '¿Cómo recibo dólares de otra persona?'),
                     _s('norail.cash', '¿Dónde cambio dólares por efectivo?'),
                     _s('app.what', '¿Qué es Confío y para qué me sirve?'),
-                    _s('app.cost', '¿Cuánto cuesta usar Confío?')]
+                    _s('app.cost', '¿Cuánto cuesta usar Confío?'),
+                    _s('app.safe', '¿Es seguro? ¿Quién controla mi dinero?')]
     else:
         situation.append(_s('month.where', '¿Te cuento en qué se fue tu dinero este mes?', '¿En qué gasté más este mes?'))
         save = (_s('save.plus', '¿Cuánto rinde Confío Dollar+?') if state.ondo_eligible
                 else _s('save.dollars', '¿Cómo ahorro en dólares?'))
         grow = (_s('invest.how', '¿Cómo invierto en acciones?') if state.ondo_eligible
                 else _s('send.abroad', '¿Cómo envío dinero a otro país?'))
-        starters = [_s('month.where', '¿En qué gasté más este mes?'), _s('pay.qr', 'Abre QR para pagar'), save, grow]
+        starters = [_s('month.where', '¿En qué gasté más este mes?'), _s('pay.qr', 'Abre QR para pagar'), save, grow,
+                    _s('app.cost', '¿Cuánto cuesta usar Confío?'), _s('app.safe', '¿Es seguro? ¿Quién controla mi dinero?')]
 
-    hints = attention + (situation if screen in ('', 'Home') else []) + SCREEN_HINTS.get(screen, [])
-    starters = list({s.id: s for s in attention + starters}.values())[:MAX_STARTERS]
+    def fresh(items):
+        # Attention items stay (something is pending); asked prompts make room.
+        return [s for s in items if s in attention or s.kind != 'prompt' or _norm(s.prompt) not in asked]
+
+    hints = fresh(attention + (situation if screen in ('', 'Home') else []) + SCREEN_HINTS.get(screen, []))
+    # Starters never filter down to nothing: an empty list makes the app fall back
+    # to its own built-in chips, which don't fit employees or no-rail countries.
+    starters = list({s.id: s for s in (fresh(attention + starters) or attention + starters)}.values())[:MAX_STARTERS]
     return Suggestions(hints=hints, starters=starters, probe=probe_payload() if wants_probe(state) else None)
 
 
