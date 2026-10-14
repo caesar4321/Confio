@@ -1911,3 +1911,28 @@ class ExchangeRateToolTests(TestCase):
         ecuador = Viewer(user=SimpleNamespace(id=2, phone_country='EC'), account=None, account_type='personal',
                          business_id=None, is_business_owner=False, tz=ZoneInfo('America/Guayaquil'))
         self.assertIn('dólar estadounidense', exchange_rate_data(ecuador, None)['motivo'])
+        self.assertIn('dólar estadounidense', exchange_rate_data(ecuador, 'USD')['motivo'])  # model passed USD itself
+        # An unknown or missing phone country is not "dollarized": ask which currency.
+        nobody = Viewer(user=SimpleNamespace(id=3, phone_country=None), account=None, account_type='personal',
+                        business_id=None, is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.assertIn('Dime de qué moneda', exchange_rate_data(nobody, None)['motivo'])
+
+    def test_every_issuer_blocked_country_has_a_spanish_name(self):
+        from cusd_plus.eligibility import ONDO_BLOCKED
+
+        from .engine import COUNTRY_NAMES_ES
+        self.assertEqual(set(ONDO_BLOCKED) - set(COUNTRY_NAMES_ES), set())
+
+    def test_voice_only_advertises_tools_it_can_run(self):
+        from .voice import SERVER_TOOLS, _realtime_tools
+        viewers = [
+            Viewer(user=SimpleNamespace(id=1, phone_country='BO'), account=None, account_type='personal',
+                   business_id=None, is_business_owner=False, tz=ZoneInfo('UTC')),
+            Viewer(user=SimpleNamespace(id=1, phone_country='BO'), account=None, account_type='business',
+                   business_id=7, is_business_owner=True, tz=ZoneInfo('UTC')),
+            Viewer(user=SimpleNamespace(id=1, phone_country='BO'), account=None, account_type='business',
+                   business_id=7, is_business_owner=False, tz=ZoneInfo('UTC')),
+        ]
+        for viewer in viewers:
+            belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=1)
+            self.assertLessEqual({t['name'] for t in _realtime_tools(belt)}, SERVER_TOOLS, viewer.account_type)

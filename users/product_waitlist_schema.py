@@ -86,7 +86,8 @@ class PaidOfferQueries(graphene.ObjectType):
             available = paid_offers.available(product, is_employee=is_employee, meta=meta, user_id=user.pk)
             # Everyone who can open the pitch sees the row (Julian 2026-10-14): the
             # waitlist records `funded`, so funded answers are read apart.
-            row = available and product == paid_offers.PRODUCT_SMART_ACCOUNT
+            row = product == paid_offers.PRODUCT_SMART_ACCOUNT and paid_offers.billeteras_row_visible(
+                is_employee=is_employee, meta=meta, user_id=user.pk)
             entry = entries.get(product)
             out.append(PaidOfferType(
                 product=product, available=available, row_visible=row,

@@ -358,10 +358,17 @@ def _plus_net_apy():
 
 RATE_TYPES_ES = {'parallel': 'paralelo', 'average': 'promedio', 'official': 'oficial'}
 # Where a connection-based block comes from, said as a person would.
+# Covers every country in cusd_plus.eligibility.ONDO_BLOCKED (a test keeps it so).
 COUNTRY_NAMES_ES = {
-    'BR': 'Brasil', 'US': 'Estados Unidos', 'CA': 'Canadá', 'GB': 'el Reino Unido', 'ES': 'España', 'FR': 'Francia',
-    'DE': 'Alemania', 'IT': 'Italia', 'PT': 'Portugal', 'NL': 'los Países Bajos', 'CH': 'Suiza', 'CU': 'Cuba',
-    'SG': 'Singapur', 'HK': 'Hong Kong', 'MY': 'Malasia', 'RU': 'Rusia',
+    'US': 'Estados Unidos', 'CA': 'Canadá', 'AF': 'Afganistán', 'BY': 'Bielorrusia', 'KP': 'Corea del Norte',
+    'CU': 'Cuba', 'IR': 'Irán', 'LY': 'Libia', 'MM': 'Myanmar', 'RU': 'Rusia', 'SY': 'Siria', 'SO': 'Somalia',
+    'SD': 'Sudán', 'SS': 'Sudán del Sur', 'AT': 'Austria', 'BE': 'Bélgica', 'BG': 'Bulgaria', 'HR': 'Croacia',
+    'CY': 'Chipre', 'CZ': 'Chequia', 'DK': 'Dinamarca', 'EE': 'Estonia', 'FI': 'Finlandia', 'FR': 'Francia',
+    'DE': 'Alemania', 'GR': 'Grecia', 'HU': 'Hungría', 'IE': 'Irlanda', 'IT': 'Italia', 'LV': 'Letonia',
+    'LT': 'Lituania', 'LU': 'Luxemburgo', 'MT': 'Malta', 'NL': 'los Países Bajos', 'PL': 'Polonia', 'PT': 'Portugal',
+    'RO': 'Rumania', 'SK': 'Eslovaquia', 'SI': 'Eslovenia', 'ES': 'España', 'SE': 'Suecia', 'IS': 'Islandia',
+    'LI': 'Liechtenstein', 'NO': 'Noruega', 'BR': 'Brasil', 'GB': 'el Reino Unido', 'CH': 'Suiza',
+    'HK': 'Hong Kong', 'SG': 'Singapur', 'MY': 'Malasia',
 }
 # Said in full so a mix-up shows ("bolívares" from Bolivia gets "bolívares
 # venezolanos" back, and the person can correct it).
@@ -379,12 +386,13 @@ def exchange_rate_data(viewer: Viewer, currency=None):
     exchange_rates.services.get_rate_with_fallback), with which kind it is and
     when it was read. Not a quote: a top-up or withdrawal uses the provider's
     rate, shown before confirming."""
-    from exchange_rates.currency_mapping import get_currency_for_country
+    from exchange_rates.currency_mapping import COUNTRY_TO_CURRENCY, get_currency_for_country
 
-    code = (currency or '').strip().upper() or get_currency_for_country(
-        getattr(viewer.user, 'phone_country', '') or '')
-    if code == 'USD' and not currency:
-        # Dollarized countries (Ecuador, Panamá, El Salvador): nothing to convert.
+    phone_country = (getattr(viewer.user, 'phone_country', '') or '').upper()
+    code = (currency or '').strip().upper() or get_currency_for_country(phone_country)
+    # Dollarized countries (Ecuador, Panamá, El Salvador): nothing to convert. Only
+    # a phone country actually mapped to USD (an unknown one also falls back to USD).
+    if code == 'USD' and COUNTRY_TO_CURRENCY.get(phone_country) == 'USD':
         return {'disponible': False, 'motivo': 'En su país la moneda es el dólar estadounidense: no hay que convertir.'}
     if not re.fullmatch(r'[A-Z]{3}', code) or code == 'USD':
         return {'disponible': False, 'motivo': 'Dime de qué moneda quieres el tipo de cambio.'}
