@@ -1,3 +1,4 @@
+import type { TransactionDetailParams, TransactionReceiptParams, TransactionDetailData } from './transactionReceipt';
 import { NavigatorScreenParams } from '@react-navigation/native';
 
 // Auth Stack - Handles authentication flow
@@ -327,10 +328,7 @@ export type MainStackParamList = {
     title: string;
     masked?: boolean;
   };
-  TransactionDetail: {
-    transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion' | 'ramp';
-    transactionData?: any; // You can make this more specific based on your data structure
-  };
+  TransactionDetail: TransactionDetailParams;
   TransactionProcessing: {
     transactionData: {
       type: 'sent' | 'payment';
@@ -404,7 +402,7 @@ export type MainStackParamList = {
     };
   };
   PaymentSuccess: {
-    transactionData: {
+    transactionData: TransactionDetailData & {
       type: 'payment';
       amount: string;
       currency: string;
@@ -414,6 +412,9 @@ export type MainStackParamList = {
       merchantAddress?: string;
       message?: string;
       transactionHash?: string;
+      location?: string;
+      terminal?: string;
+      address?: string;
     };
   };
   BusinessPaymentSuccess: {
@@ -518,8 +519,8 @@ export type MainStackParamList = {
   PayrollTopUp: undefined;
   PayrollHome: undefined;
   PayrollRunDetail: { run: any };
-  PayrollReceipt: { transaction: any; type?: 'payroll' };
-  TransactionReceipt: { transaction: any; type?: 'payroll' | 'payment' | 'transfer' };
+  PayrollReceipt: Omit<TransactionReceiptParams, 'type'> & {type?: 'payroll'};
+  TransactionReceipt: TransactionReceiptParams;
   PayrollSetupWizard: undefined;
   PayrollRecipientsManage: undefined;
   PayrollDelegatesManage: undefined;

@@ -1,3 +1,4 @@
+import { transactionDetailRoute } from '../utils/transactionRoutes';
 import { AuthorizationStatus, getAPNSToken, getInitialNotification, getMessaging, getToken, hasPermission, isDeviceRegisteredForRemoteMessages, onMessage, onNotificationOpenedApp, onTokenRefresh, registerDeviceForRemoteMessages, requestPermission } from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, AndroidStyle, EventType } from '@notifee/react-native';
 import { Platform } from 'react-native';
@@ -988,10 +989,10 @@ class MessagingService {
             // Use nested navigation for TransactionDetail
             navigationRef.current?.navigate('Main' as never, {
               screen: 'TransactionDetail',
-              params: {
+              params: transactionDetailRoute({
                 transactionType,
                 transactionData: navData
-              }
+              })
             } as never);
           }
           break;
@@ -1112,10 +1113,10 @@ class MessagingService {
 
         navigationRef.current?.navigate('Main' as never, {
           screen: 'TransactionDetail',
-          params: {
+          params: transactionDetailRoute({
             transactionType,
             transactionData: navData
-          }
+          })
         } as never);
         break;
       case 'P2PTrade':

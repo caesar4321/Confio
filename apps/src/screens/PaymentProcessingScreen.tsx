@@ -410,6 +410,7 @@ export const PaymentProcessingScreen = () => {
               payInvoice: {
                 paymentTransaction: {
                   internalId: candidate.internalId,
+                  createdAt: candidate.createdAt,
                   blockchainData: candidate.blockchainData,
                 },
                 success: true
@@ -720,6 +721,7 @@ export const PaymentProcessingScreen = () => {
             transactionHash: txHash,
             // Use undefined instead of empty string so QR code section properly hides when no internalId
             internalId: paymentResponse?.paymentTransaction?.internalId || undefined,
+            createdAt: paymentResponse?.paymentTransaction?.createdAt || undefined,
             status,
           };
 

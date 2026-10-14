@@ -162,13 +162,15 @@ export const notificationVisual = (type: string, data?: { stage?: string | null;
 // The ledger's own row kinds. `incoming` comes from the amount's sign, which
 // is what the row already uses to color its amount.
 export type TransactionKind =
-  | 'received' | 'sent' | 'send' | 'payment' | 'payroll' | 'humanitarian' | 'exchange'
+  | 'unknown' | 'received' | 'sent' | 'send' | 'payment' | 'payroll' | 'humanitarian' | 'exchange'
   | 'conversion' | 'ramp' | 'reward' | 'presale' | 'stocks' | 'local_transfer'
   | 'deposit' | 'withdrawal';
 
 export const transactionVisual = (kind: TransactionKind | string, incoming: boolean): IconVisual => {
   const direction = incoming ? 'moneyIn' : 'moneyOut';
   switch (kind) {
+    case 'unknown':
+      return visual('help-circle', 'neutral');
     case 'received':
       return visual('arrow-down', 'moneyIn');
     case 'sent':

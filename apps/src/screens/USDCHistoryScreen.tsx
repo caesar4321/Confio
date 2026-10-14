@@ -1,3 +1,6 @@
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { MainStackParamList } from '../types/navigation';
+import { transactionDetailRoute } from '../utils/transactionRoutes';
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -66,6 +69,7 @@ const ITEMS_PER_PAGE = 20;
 
 export const USDCHistoryScreen = () => {
   const navigation = useNavigation();
+  const detailNavigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -186,7 +190,7 @@ export const USDCHistoryScreen = () => {
 
   const handleTransactionPress = (transaction: USDCTransactionRecord) => {
     // Navigate to detail screen with transaction data
-    navigation.navigate('TransactionDetail', {
+    detailNavigation.navigate('TransactionDetail', transactionDetailRoute({
       transactionType: transaction.transactionType.toLowerCase(),
       transactionData: {
         type: transaction.transactionType.toLowerCase(),
@@ -221,7 +225,7 @@ export const USDCHistoryScreen = () => {
         hash: transaction.transactionHash || transaction.transactionId,
         network: transaction.network || 'ALGORAND',
       }
-    });
+    }));
   };
 
   const renderItem = ({ item }: { item: USDCTransactionRecord }) => {

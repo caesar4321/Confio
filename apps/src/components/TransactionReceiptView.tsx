@@ -108,7 +108,7 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
             <View style={styles.amountCard}>
                 <Text style={styles.amountLabel}>Monto</Text>
                 <Text style={styles.amountValue}>{amount} {formatTokenLabel(currency)}</Text>
-                <Text style={styles.amountDate}>{formatDate(date)}</Text>
+                <Text style={styles.amountDate}>{date ? formatDate(date) : 'Fecha no disponible'}</Text>
             </View>
 
             {/* Participants Card */}

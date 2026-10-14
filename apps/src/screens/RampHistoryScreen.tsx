@@ -1,3 +1,4 @@
+import { unifiedDetailRoute } from '../utils/transactionRoutes';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -316,11 +317,13 @@ export const RampHistoryScreen = () => {
       <TouchableOpacity
         style={styles.itemCard}
         onPress={() => {
-          navigation.navigate('TransactionDetail', {
+          navigation.navigate('TransactionDetail', unifiedDetailRoute({
             transactionType: 'ramp',
             transactionData: {
               ...item,
               type: 'ramp',
+              walletAmount: item.netAmount || item.amount,
+              walletCurrency: item.tokenType,
               amount: primaryAmount.amount,
               currency: primaryAmount.currency,
               formattedTitle: `${titleText} con ${providerLabel}`,
@@ -331,7 +334,7 @@ export const RampHistoryScreen = () => {
               date: item.createdAt,
               time: moment.utc(item.createdAt).local().format('HH:mm'),
             },
-          });
+          }));
         }}
         activeOpacity={0.75}
       >

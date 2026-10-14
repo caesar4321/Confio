@@ -1,3 +1,4 @@
+import { transactionReceiptRoute, transactionDetailRoute, transactionTimestamp } from '../utils/transactionRoutes';
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, StatusBar, Image, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { Text } from '../components/common/AppText';
@@ -270,7 +271,7 @@ export const NotificationScreen = () => {
     }
 
 
-    navigation.navigate('TransactionReceipt', {
+    navigation.navigate('TransactionReceipt', transactionReceiptRoute({
       transaction: {
         id,
         // type: 'payroll', // Redundant if passing explicit type below, but good for self-contained object
@@ -282,14 +283,14 @@ export const NotificationScreen = () => {
           ? (data.business_name || data.businessName || data.sender_name || data.senderName || data.sender_display_name || data.senderDisplayName || data.from || 'Empresa')
           : (data.business_name || data.businessName || currentUserName || profileData?.businessProfile?.name || 'Tu Empresa'),
         amount: data.amount || '0.00',
-        currency: data.currency || 'cUSD',
+        currency: data.currency || data.tokenType || data.token_type,
         date: data.date || data.executed_at || data.executedAt || data.created_at || data.createdAt || notificationCreatedAt,
         status: data.status || 'completed',
         transactionHash: data.transaction_hash || data.transactionHash || '',
         payrollRunId: data.payroll_run_id || data.payrollRunId || '',
       },
       type: 'payroll'
-    });
+    }));
   };
 
   /**
@@ -306,34 +307,6 @@ export const NotificationScreen = () => {
     const { id, notifType, txnType, baseData, enrichedData = {} } = params;
 
 
-    // Prefer internalId/internal_id, but also accept transaction_id variants since some notifications omit the explicit field
-    const pickInternalId = (candidate: any): string | undefined => {
-      if (candidate === undefined || candidate === null) return undefined;
-      const value = typeof candidate === 'string' ? candidate.trim() : String(candidate || '').trim();
-      if (!value || value.toUpperCase() === '#PENDING') return undefined;
-      // Must look UUID-like to avoid numeric fallbacks (length + letters/hyphen)
-      if (value.length < 32) return undefined;
-      if (!/[A-Fa-f-]/.test(value)) return undefined;
-      return value;
-    };
-
-    const internalId =
-      pickInternalId(enrichedData.internalId) ||
-      pickInternalId(enrichedData.internal_id) ||
-      pickInternalId(enrichedData.transactionId) ||
-      pickInternalId(enrichedData.transaction_id) ||
-      pickInternalId(enrichedData.paymentTransactionId) ||
-      pickInternalId(enrichedData.payment_transaction_id) ||
-      pickInternalId(baseData.internalId) ||
-      pickInternalId(baseData.internal_id) ||
-      pickInternalId(baseData.transactionId) ||
-      pickInternalId(baseData.transaction_id) ||
-      pickInternalId(baseData.paymentTransactionId) ||
-      pickInternalId(baseData.payment_transaction_id) ||
-      pickInternalId(enrichedData.id) ||
-      pickInternalId(baseData.id) ||
-      pickInternalId(id);
-
     const transactionPayload = {
       ...baseData,
       ...enrichedData,
@@ -343,13 +316,12 @@ export const NotificationScreen = () => {
         enrichedData?.status ||
         baseData?.status ||
         deriveStatusFromNotificationType(notifType),
-      ...(internalId ? { internalId, internal_id: internalId } : {}),
     };
 
-    navigation.navigate('TransactionDetail', {
-      transactionType: txnType as any,
+    navigation.navigate('TransactionDetail', transactionDetailRoute({
+      transactionType: txnType,
       transactionData: transactionPayload
-    });
+    }));
   };
 
   const handleNotificationPress = useCallback(async (notification: Notification) => {
@@ -552,7 +524,7 @@ export const NotificationScreen = () => {
           })(),
           token_type: fullData.token_type ?? fullData.tokenType ?? fullData.currency,
           amount: fullData.amount,
-          createdAt: notification.createdAt,
+          createdAt: transactionTimestamp(fullData.createdAt, fullData.created_at, fullData.timestamp),
         };
 
         navigateToTransactionDetail({
@@ -649,7 +621,7 @@ export const NotificationScreen = () => {
         const uiCurrency = (typeof currency === 'string' && currency.toUpperCase() === 'CUSD') ? 'cUSD' : currency;
 
         // Include notification timestamp as createdAt fallback if transaction lacks it
-        const createdAt = notification.createdAt;
+        const createdAt = transactionTimestamp(fullData.createdAt, fullData.created_at, fullData.timestamp);
 
         // For payments: ensure signed amount to reflect buyer/seller perspective
         let signedAmount = fullData.amount;
@@ -798,7 +770,7 @@ export const NotificationScreen = () => {
           recipient_address: toAddress,
           toAddress,
           status: 'completed',
-          createdAt: notification.createdAt,
+          createdAt: transactionTimestamp(fullData.createdAt, fullData.created_at, fullData.timestamp),
         };
 
         navigateToTransactionDetail({

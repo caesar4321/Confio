@@ -1,3 +1,4 @@
+import { transactionReceiptRoute, receiptAmount, transactionTimestamp } from '../utils/transactionRoutes';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
@@ -788,7 +789,7 @@ export const TransactionDetailScreen = () => {
   const { transactionType, transactionData: rawTransactionData } = route.params;
 
   // Parse transactionData if it's a string (GraphQL JSONField returns as string)
-  let transactionData = rawTransactionData;
+  let transactionData: any = rawTransactionData;
   if (typeof rawTransactionData === 'string') {
     try {
       transactionData = JSON.parse(rawTransactionData);
@@ -950,7 +951,9 @@ export const TransactionDetailScreen = () => {
       fromAddress: tx.senderAddress,
       to: tx.recipientDisplayName || tx.recipientUser?.firstName || (transactionData as any)?.recipientName || 'Usuario',
       toAddress: tx.recipientAddress,
-      amount: resolvedType === 'sent' ? `-${tx.amount}` : `+${tx.amount}`,
+      amount: receiptAmount(tx.amount, resolvedType, transactionData || {}),
+      createdAt: transactionTimestamp(tx.createdAt),
+      timestamp: transactionTimestamp(tx.createdAt),
       feeAmount: tx.feeAmount ?? (transactionData as any)?.feeAmount ?? (transactionData as any)?.fee_amount,
       feeBps: tx.feeBps ?? (transactionData as any)?.feeBps ?? (transactionData as any)?.fee_bps,
       netAmount: tx.netAmount ?? (transactionData as any)?.netAmount ?? (transactionData as any)?.net_amount,
@@ -1180,13 +1183,8 @@ export const TransactionDetailScreen = () => {
       }
     }
 
-    // Fallback timestamp if missing
-    if (!normalizedTransactionData.createdAt && !normalizedTransactionData.timestamp) {
-      const now = Date.now();
-      (normalizedTransactionData as any).timestamp = now;
-      (normalizedTransactionData as any).date = moment(now).format('YYYY-MM-DD');
-      (normalizedTransactionData as any).time = moment(now).format('HH:mm');
-    }
+    // Preserve historical date/time when no timestamp was supplied. Never
+    // replace a missing transaction date with the time this screen was opened.
 
     // Provide from/to fallback names from sender/recipient_name
     // Prefer senderName/recipientName over generic "Usuario" or undefined
@@ -1670,12 +1668,14 @@ export const TransactionDetailScreen = () => {
       const date = typeof currentTx.createdAt === 'string'
         ? (currentTx.createdAt.includes('T') ? new Date(currentTx.createdAt) : moment(currentTx.createdAt).toDate())
         : new Date(currentTx.createdAt as any);
-      return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
+      if (Number.isFinite(date.getTime())) {
+        return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
+      }
     }
-    if (currentTx.date && currentTx.time) {
+    if (currentTx.date && currentTx.time && Number.isFinite(Date.parse(currentTx.date))) {
       return `${moment(currentTx.date, 'YYYY-MM-DD').format('DD/MM/YYYY')} • ${currentTx.time}`;
     }
-    if (currentTx.date) {
+    if (currentTx.date && Number.isFinite(Date.parse(currentTx.date))) {
       return moment(currentTx.date, 'YYYY-MM-DD').format('DD/MM/YYYY');
     }
     return 'No disponible';
@@ -1763,7 +1763,7 @@ export const TransactionDetailScreen = () => {
         });
       }
     } else {
-      const amountLabel = currentTx.type === 'payment'
+      const amountLabel = currentTx.type === 'unknown' ? 'Monto' : currentTx.type === 'payment'
         ? (isPaymentDebit ? 'Monto pagado' : 'Monto cobrado')
         : currentTx.type === 'received'
           ? 'Monto recibido'
@@ -1904,7 +1904,7 @@ export const TransactionDetailScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Ver comprobante"
               onPress={() => {
-                navigation.navigate('TransactionReceipt', {
+                navigation.navigate('TransactionReceipt', transactionReceiptRoute({
                   transaction: {
                     ...currentTx,
                     // Explicitly pass name fields for ALL types to prevent 'Usuario'/'Comercio' fallback
@@ -1925,7 +1925,7 @@ export const TransactionDetailScreen = () => {
                     transactionHash: currentTx.transactionId || currentTx.transactionHash,
                   },
                   type: currentTx.type === 'payroll' ? 'payroll' : (currentTx.type === 'payment' ? 'payment' : 'transfer')
-                });
+                }));
               }}
             >
               <Icon name="share" size={24} color={colors.white} />
@@ -2669,10 +2669,10 @@ export const TransactionDetailScreen = () => {
             <>
               <TouchableOpacity
                 onPress={() => {
-                  navigation.navigate('TransactionReceipt', {
+                  navigation.navigate('TransactionReceipt', transactionReceiptRoute({
                     transaction: {
-                      ...currentTx,
                       ...transactionData,
+                      ...currentTx,
                       // Explicitly pass name fields for ALL types
                       senderName: currentTx.payerDisplayName || currentTx.senderDisplayName || currentTx.senderName || currentTx.from || currentTx.sender_name,
                       recipientName: currentTx.merchantDisplayName || currentTx.recipientDisplayName || currentTx.recipientName || currentTx.to || currentTx.recipient_name,
@@ -2690,7 +2690,7 @@ export const TransactionDetailScreen = () => {
                       transactionHash: currentTx.transactionId || transactionData?.transactionId || currentTx.transactionHash,
                     },
                     type: currentTx.type === 'payment' ? 'payment' : 'transfer'
-                  });
+                  }));
                 }}
                 style={styles.actionRow}
                 accessibilityRole="button"

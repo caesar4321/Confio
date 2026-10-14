@@ -1,3 +1,4 @@
+import { transactionReceiptRoute } from '../utils/transactionRoutes';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Linking, Share, Modal, Vibration } from 'react-native';
 import { Text } from '../components/common/AppText';
@@ -147,15 +148,15 @@ export const TransactionSuccessScreen = () => {
 
 
   const handleShareReceipt = () => {
-    (navigation as any).navigate('TransactionReceipt', {
+    (navigation as any).navigate('TransactionReceipt', transactionReceiptRoute({
       transaction: {
         ...transactionData,
         // Use internalId for the receipt verification ID if available, else fallback to hash
         id: (transactionData as any).internalId || transactionData.transactionId,
         transactionHash: (transactionData as any).transactionHash || transactionData.transactionId,
-        date: new Date().toISOString(),
+        date: (transactionData as any).createdAt || (transactionData as any).timestamp,
         // Pass actual status - only 'CONFIRMED' shows green, else shows yellow pending
-        status: (transactionData as any).status || 'SUBMITTED',
+        status: settledStatus || 'SUBMITTED',
         // Map fields for generic view
         employeeName: (transactionData as any).recipient || (transactionData as any).recipientName || 'Empleado',
         employeePhone: (transactionData as any).recipientPhone,
@@ -173,7 +174,7 @@ export const TransactionSuccessScreen = () => {
         verificationId: (transactionData as any).internalId // Explicitly pass verificationId
       },
       type: transactionData.type === 'payment' ? 'payment' : 'transfer'
-    });
+    }));
   };
 
   const { userProfile } = useAuth();

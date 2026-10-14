@@ -1,3 +1,4 @@
+import { transactionReceiptRoute } from '../utils/transactionRoutes';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -179,7 +180,7 @@ export const BusinessPaymentSuccessScreen = () => {
   };
 
   const handleShareReceipt = () => {
-    (navigation as any).navigate('TransactionReceipt', {
+    (navigation as any).navigate('TransactionReceipt', transactionReceiptRoute({
       transaction: {
         ...paymentData,
         // Map to fields expected by TransactionReceiptScreen
@@ -206,7 +207,7 @@ export const BusinessPaymentSuccessScreen = () => {
         verificationId: paymentData.internalId
       },
       type: 'payment'
-    });
+    }));
   };
 
   const handleViewCustomerProfile = () => {

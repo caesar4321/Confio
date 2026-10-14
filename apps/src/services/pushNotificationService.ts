@@ -1,3 +1,4 @@
+import { transactionReceiptRoute, transactionDetailRoute } from '../utils/transactionRoutes';
 import { AuthorizationStatus, FirebaseMessagingTypes, getInitialNotification, getMessaging, getToken, hasPermission, onMessage, onNotificationOpenedApp, onTokenRefresh, requestPermission, setBackgroundMessageHandler, subscribeToTopic, unsubscribeFromTopic } from '@react-native-firebase/messaging';
 import notifee from '@notifee/react-native';
 import {localTransferRoute} from './localTransferNavigation';
@@ -365,7 +366,7 @@ export class PushNotificationService {
               status: 'confirmed',
               type: receiptDirection,
               direction: receiptDirection,
-              date: remoteMessage.data?.created_at || new Date().toISOString(),
+              date: transactionData.created_at || transactionData.createdAt || remoteMessage.data?.created_at,
               memo: transactionData.memo || '',
               // Sender/recipient names from notification payload
               senderName: transactionData.sender_name || '',
@@ -399,17 +400,17 @@ export class PushNotificationService {
               if (target) {
                 target.navigate('Main' as never, {
                   screen: 'TransactionReceipt',
-                  params: {
+                  params: transactionReceiptRoute({
                     transaction: receiptTransaction,
                     type: receiptType,
-                  },
+                  }),
                 } as never);
               } else {
                 setTimeout(() => {
-                  RootNavigation.navigate('TransactionReceipt' as never, {
+                  RootNavigation.navigate('TransactionReceipt' as never, transactionReceiptRoute({
                     transaction: receiptTransaction,
                     type: receiptType,
-                  } as never);
+                  }) as never);
                 }, 1000);
               }
             };
@@ -427,26 +428,26 @@ export class PushNotificationService {
             if (RootNavigation.navigationRef.isReady()) {
               RootNavigation.navigationRef.navigate('Main' as never, {
                 screen: 'TransactionDetail',
-                params: {
+                params: transactionDetailRoute({
                   transactionType,
                   transactionData: {
                     ...transactionData,
                     id: transactionId,
                     transaction_type: transactionType
                   }
-                }
+                })
               } as never);
             } else {
               console.log('[PushNotificationService] Navigation not ready for transaction, will retry...');
               setTimeout(() => {
-                RootNavigation.navigate('TransactionDetail' as never, {
+                RootNavigation.navigate('TransactionDetail' as never, transactionDetailRoute({
                   transactionType,
                   transactionData: {
                     ...transactionData,
                     id: transactionId,
                     transaction_type: transactionType
                   }
-                } as never);
+                }) as never);
               }, 1000);
             }
           }

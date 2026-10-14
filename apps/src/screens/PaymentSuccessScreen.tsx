@@ -1,3 +1,5 @@
+import type { MainStackParamList } from '../types/navigation';
+import { transactionReceiptRoute, paymentSuccessDetailRoute } from '../utils/transactionRoutes';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -27,26 +29,7 @@ import { CategoryPrompt } from '../components/CategoryChips';
 import { useSettlementStatus } from '../hooks/useSettlementStatus';
 import { formatAmountString } from '../utils/numberLocale';
 
-type PaymentSuccessRouteProp = RouteProp<{
-  PaymentSuccess: {
-    transactionData: {
-      type: 'payment';
-      amount: string;
-      currency: string;
-      recipient: string;
-      merchant: string;
-      recipientAddress?: string;
-      merchantAddress?: string;
-      message?: string;
-      transactionHash?: string;
-      location?: string;
-      terminal?: string;
-      address?: string;
-      internalId?: string;
-      status?: string;
-    };
-  };
-}, 'PaymentSuccess'>;
+type PaymentSuccessRouteProp = RouteProp<MainStackParamList, 'PaymentSuccess'>;
 
 const { width } = Dimensions.get('window');
 
@@ -84,9 +67,7 @@ export const PaymentSuccessScreen = () => {
 
   const handleViewTransaction = () => {
     // Navigate to transaction detail screen
-    (navigation as any).navigate('TransactionDetail', {
-      transactionId: transactionData.transactionHash || 'pending'
-    });
+    (navigation as any).navigate('TransactionDetail', paymentSuccessDetailRoute({...transactionData, status: settledStatus}));
   };
 
   const handleCopy = () => {
@@ -99,14 +80,14 @@ export const PaymentSuccessScreen = () => {
   };
 
   const handleShareReceipt = () => {
-    (navigation as any).navigate('TransactionReceipt', {
+    (navigation as any).navigate('TransactionReceipt', transactionReceiptRoute({
       transaction: {
         ...transactionData,
         id: transactionData.internalId || transactionData.transactionHash || 'pending',
         transactionHash: transactionData.transactionHash || 'pending',
-        date: new Date().toISOString(),
+        date: transactionData.createdAt,
         // Pass actual status - 'CONFIRMED' for green, anything else for yellow pending
-        status: transactionData.status || 'pending',
+        status: settledStatus || 'pending',
         // Map fields for generic view
         merchantName: transactionData.merchant,
         merchantAddress: transactionData.merchantAddress,
@@ -133,7 +114,7 @@ export const PaymentSuccessScreen = () => {
         payerBusiness: profileData?.currentAccountType === 'business' ? profileData?.businessProfile : undefined,
       },
       type: 'payment'
-    });
+    }));
   };
 
   const handleViewTechnicalDetails = () => {

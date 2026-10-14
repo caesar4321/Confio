@@ -35,6 +35,7 @@ import { colors } from '../config/theme';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { formatTokenLabel } from '../utils/tokenDisplay';
 import { parseAmountInput } from '../utils/numberLocale';
+import { unifiedTransactionReceipt, historyReceiptRoute, transferDirection } from '../utils/transactionReceipt';
 
 // Color palette
 type FriendDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -42,7 +43,8 @@ type FriendDetailScreenRouteProp = RouteProp<MainStackParamList, 'FriendDetail'>
 
 interface Transaction {
   id: string;
-  type: 'sent' | 'received' | 'payment' | 'exchange' | 'reward';
+  receipt: ReturnType<typeof unifiedTransactionReceipt>;
+  type: 'sent' | 'received' | 'payment' | 'exchange' | 'reward' | 'unknown';
   from?: string;
   to?: string;
   amount: string;
@@ -232,26 +234,28 @@ export function FriendDetailScreen() {
       
       // Determine transaction direction from current user perspective
       const isCurrentUserSender = tx.direction === 'sent';
+      const createdAt = tx.createdAt && Number.isFinite(Date.parse(tx.createdAt)) ? moment(tx.createdAt) : null;
       
       const uiCurrency = formatTokenLabel(tx.tokenType) || 'CONFIO';
       allTransactions.push({
         id: tx.id,
+        receipt: unifiedTransactionReceipt(tx),
         type: transactionType === 'exchange' ? 'exchange' : 
               transactionType === 'payment' ? 'payment' :
               transactionType === 'reward' ? 'reward' :
-              isCurrentUserSender ? 'sent' : 'received',
+              transferDirection(tx.direction),
         from: transactionType === 'reward'
           ? (tx.senderDisplayName || 'Confío Rewards')
-          : isCurrentUserSender ? undefined : friend.name,
+          : tx.direction === 'received' ? friend.name : undefined,
         to: transactionType === 'reward'
           ? (friend.name || 'Tú')
           : isCurrentUserSender ? friend.name : undefined,
         amount: tx.displayAmount || tx.amount,
         currency: uiCurrency,
-        date: new Date(tx.createdAt).toISOString().split('T')[0],
-        time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+        date: createdAt ? createdAt.format('YYYY-MM-DD') : '',
+        time: createdAt ? createdAt.format('HH:mm') : '',
         status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
-        hash: tx.transactionHash || tx.id || 'pending',
+        hash: tx.transactionHash || '',
         isInvitation: tx.isInvitation || false,
         invitationId: tx.idempotencyKey,
         idempotencyKey: tx.idempotencyKey,
@@ -266,7 +270,7 @@ export function FriendDetailScreen() {
     });
 
     // Sort by date (newest first)
-    return allTransactions.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
+    return allTransactions.sort((a, b) => (Date.parse(b.receipt.createdAt || '') || 0) - (Date.parse(a.receipt.createdAt || '') || 0));
   }, [friendTransactions, friend.name]);
   
   const transactions = formatTransactions();
@@ -311,7 +315,7 @@ export function FriendDetailScreen() {
     // Apply type filters
     if (transactionFilters.types) {
       filtered = filtered.filter(tx => {
-        return transactionFilters.types[tx.type] ?? true;
+        return tx.type === 'unknown' || (transactionFilters.types[tx.type] ?? true);
       });
     }
     
@@ -707,9 +711,7 @@ export function FriendDetailScreen() {
                       });
                     } else {
                       // Handle regular transaction navigation
-                      const params = {
-                        transactionType: transaction.type,
-                        transactionData: {
+                      const params = historyReceiptRoute(transaction.type, transaction.receipt, {
                           type: transaction.type,
                           from: transaction.from,
                           to: transaction.to,
@@ -722,13 +724,9 @@ export function FriendDetailScreen() {
                           // Add additional fields that TransactionDetailScreen expects
                           fromAddress: transaction.type === 'received' ? transaction.senderAddress : undefined,
                           toAddress: transaction.type === 'sent' ? transaction.recipientAddress : undefined,
-                          blockNumber: '2,847,392',
-                          gasUsed: '21,000',
-                          gasFee: '0.001',
-                          confirmations: 127,
                           note: transaction.type === 'received' ? `Pago de ${friend.name}` : 
                                 transaction.type === 'sent' ? `Envío a ${friend.name}` : 
-                                `Pago a ${friend.name}`,
+                                transaction.type === 'unknown' ? undefined : `Pago a ${friend.name}`,
                           avatar: friend.avatar,
                           isInvitedFriend: transaction.isInvitation || false, // Use transaction's invitation status
                           invitationId: transaction.invitationId,
@@ -740,9 +738,7 @@ export function FriendDetailScreen() {
                           recipientIsReferralVerified: friendIsReferralVerified,
                           senderStatusTier: friendStatusTier,
                           senderIsReferralVerified: friendIsReferralVerified,
-                        }
-                      };
-                      // @ts-ignore - Navigation type mismatch, but works at runtime
+                      });
                       navigation.navigate('TransactionDetail', params);
                     }
                   }} 

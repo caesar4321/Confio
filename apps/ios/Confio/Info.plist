@@ -79,14 +79,28 @@
 	<string>Confío usa tu ubicación precisa para verificar que puedes activar y usar Bre-B desde tu ubicación actual. No rastreamos tu ubicación en segundo plano.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Confío usa el micrófono para los audios que le mandas a Confio Assistant y para la verificación de identidad en video.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Confío usa tus fotos solo cuando eliges una: para publicar en Comunidad, para tu foto de perfil, para leer un código QR o para personalizar tu asistente.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Confío guarda en tus fotos los comprobantes que decides descargar.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Confío usa tus fotos solo cuando eliges una: para publicar en Comunidad, para tu foto de perfil, para leer un código QR o para personalizar tu asistente.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Confío no utiliza reconocimiento de voz ni transcribe tu audio. Esta declaración se incluye porque el SDK utilizado para la verificación facial contiene funciones de reconocimiento de voz que Confío no activa.</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>Confío will send you important notifications about your transactions, received payments, and security alerts.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Feather.ttf</string>
+		<string>MaterialCommunityIcons.ttf</string>
+		<string>FontAwesome.ttf</string>
+		<string>InstrumentSans-Regular.ttf</string>
+		<string>InstrumentSans-Medium.ttf</string>
+		<string>InstrumentSans-SemiBold.ttf</string>
+		<string>InstrumentSans-Bold.ttf</string>
+		<string>InstrumentSans-Italic.ttf</string>
+		<string>InstrumentSans-MediumItalic.ttf</string>
+		<string>InstrumentSans-SemiBoldItalic.ttf</string>
+		<string>InstrumentSans-BoldItalic.ttf</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -104,20 +118,6 @@
 			</array>
 		</dict>
 	</dict>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Feather.ttf</string>
-		<string>MaterialCommunityIcons.ttf</string>
-		<string>FontAwesome.ttf</string>
-		<string>InstrumentSans-Regular.ttf</string>
-		<string>InstrumentSans-Medium.ttf</string>
-		<string>InstrumentSans-SemiBold.ttf</string>
-		<string>InstrumentSans-Bold.ttf</string>
-		<string>InstrumentSans-Italic.ttf</string>
-		<string>InstrumentSans-MediumItalic.ttf</string>
-		<string>InstrumentSans-SemiBoldItalic.ttf</string>
-		<string>InstrumentSans-BoldItalic.ttf</string>
-	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

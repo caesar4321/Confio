@@ -169,3 +169,9 @@ describe('IconChip', () => {
     expect(tree.children.map(styleOf).some((style: any) => style.borderColor)).toBe(false);
   });
 });
+
+it('does not imply a direction for an unknown transfer', () => {
+  for (const incoming of [true, false]) {
+    expect(transactionVisual('unknown', incoming)).toMatchObject({ glyph: 'help-circle', color: TONES.neutral.color });
+  }
+});

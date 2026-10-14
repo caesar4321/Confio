@@ -1,3 +1,5 @@
+import { transactionReceiptRoute } from '../utils/transactionRoutes';
+import { unifiedTransactionReceipt, historyReceiptRoute, transferDirection } from '../utils/transactionReceipt';
 import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import {
   View,
@@ -72,8 +74,9 @@ type AccountDetailScreenNavigationProp = NativeStackNavigationProp<MainStackPara
 type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail'>;
 
 interface Transaction {
+  receipt: ReturnType<typeof unifiedTransactionReceipt>;
   id?: string;
-  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale' | 'payroll' | 'ramp' | 'humanitarian';
+  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale' | 'payroll' | 'ramp' | 'humanitarian' | 'unknown';
   from?: string;
   to?: string;
   fromPhone?: string;
@@ -704,7 +707,7 @@ export const AccountDetailScreen = () => {
     if (sourceTransactions.length > 0) {
       sourceTransactions.forEach((tx: any) => {
         // Determine transaction type based on both transactionType and direction
-        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' | 'payroll' | 'ramp' | 'humanitarian' = 'sent';
+        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' | 'payroll' | 'ramp' | 'humanitarian' | 'unknown' = 'unknown';
         const normalizedTxType = (tx.transactionType || '').toLowerCase();
         if (normalizedTxType === 'payment') {
           type = 'payment';
@@ -723,7 +726,7 @@ export const AccountDetailScreen = () => {
         } else if (normalizedTxType === 'humanitarian') {
           type = 'humanitarian';
         } else {
-          type = tx.direction === 'sent' ? 'sent' : 'received';
+          type = transferDirection(tx.direction);
         }
         const isReward = type === 'reward';
         const isPresale = type === 'presale';
@@ -863,10 +866,10 @@ export const AccountDetailScreen = () => {
         let signedDisplayAmount = tx.displayAmount;
         if (!signedDisplayAmount) {
           const base = tx.amount ?? '0';
-          const sign = tx.direction === 'sent' ? '-' : '+';
+          const sign = tx.direction === 'sent' ? '-' : tx.direction === 'received' ? '+' : '';
           signedDisplayAmount = `${sign}${base}`;
         } else if (!(signedDisplayAmount.startsWith('+') || signedDisplayAmount.startsWith('-'))) {
-          const sign = tx.direction === 'sent' ? '-' : '+';
+          const sign = tx.direction === 'sent' ? '-' : tx.direction === 'received' ? '+' : '';
           signedDisplayAmount = `${sign}${signedDisplayAmount}`;
         }
         // displayAmount remains gross for compatibility with released detail
@@ -925,6 +928,7 @@ export const AccountDetailScreen = () => {
         })();
 
         const finalTransaction = {
+          receipt: unifiedTransactionReceipt(tx),
           id: tx.id,
           type,
           direction: tx.direction,
@@ -976,8 +980,8 @@ export const AccountDetailScreen = () => {
           toToken: isConversion ? (conversionToToken || tx.toToken || tx.to_token) : undefined,
           from_token: isConversion ? (conversionFromToken || tx.from_token || tx.fromToken) : undefined,
           to_token: isConversion ? (conversionToToken || tx.to_token || tx.toToken) : undefined,
-          date: tx.createdAt, // Keep full timestamp for proper sorting
-          time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+          date: tx.createdAt && Number.isFinite(Date.parse(tx.createdAt)) ? tx.createdAt : '', // Preserve full timestamp when available
+          time: tx.createdAt && Number.isFinite(Date.parse(tx.createdAt)) ? moment(tx.createdAt).format('HH:mm') : '',
           status: mappedStatus,
           hash: tx.transactionHash || 'pending',
           isInvitation: isActualInvitation,
@@ -1243,11 +1247,14 @@ export const AccountDetailScreen = () => {
     const groups: { [key: string]: Transaction[] } = {};
 
     filteredTransactions.forEach(tx => {
-      const date = moment(tx.date);
+      const date = tx.date && Number.isFinite(Date.parse(tx.date)) ? moment(tx.date) : null;
       let groupKey: string;
       let groupTitle: string;
 
-      if (date.isSame(moment(), 'day')) {
+      if (!date) {
+        groupKey = 'unavailable';
+        groupTitle = 'Fecha no disponible';
+      } else if (date.isSame(moment(), 'day')) {
         groupKey = 'today';
         groupTitle = 'Hoy';
       } else if (date.isSame(moment().subtract(1, 'day'), 'day')) {
@@ -1273,6 +1280,8 @@ export const AccountDetailScreen = () => {
     // Convert to sections array and sort by date
     return Object.entries(groups)
       .sort(([keyA], [keyB]) => {
+        if (keyA === 'unavailable') return 1;
+        if (keyB === 'unavailable') return -1;
         if (keyA === 'today') return -1;
         if (keyB === 'today') return 1;
         if (keyA === 'yesterday') return -1;
@@ -1282,7 +1291,7 @@ export const AccountDetailScreen = () => {
         return keyB.localeCompare(keyA);
       })
       .map(([key, txs]) => ({
-        title: key === 'today' ? 'Hoy' :
+        title: key === 'unavailable' ? 'Fecha no disponible' : key === 'today' ? 'Hoy' :
           key === 'yesterday' ? 'Ayer' :
             key === 'this_week' ? 'Esta semana' :
               moment(txs[0].date).format(key.includes('-') ? 'D [de] MMMM' : 'MMMM YYYY'),
@@ -1306,7 +1315,7 @@ export const AccountDetailScreen = () => {
   const TransactionItem = memo(({ transaction, activeAccount, userProfile }: { transaction: Transaction, activeAccount: any, userProfile: any }) => {
     // Short date — rows sit under Hoy/Ayer/month section headers, so the
     // full DD/MM/YYYY repeats what the header already says.
-    const formattedDate = moment(transaction.date).format('D MMM');
+    const formattedDate = transaction.date && Number.isFinite(Date.parse(transaction.date)) ? moment(transaction.date).format('D MMM') : 'Fecha no disponible';
     const formattedTime = transaction.time;
     const isRewardTransaction = transaction.type === 'reward' || transaction.isRewardPayout;
     const isPresaleTransaction = transaction.type === 'presale';
@@ -1435,7 +1444,7 @@ export const AccountDetailScreen = () => {
         return;
       }
       const detailAmount = (() => {
-        if (transaction.type === 'conversion') return transaction.amount;
+        if (transaction.type === 'conversion' || transaction.type === 'unknown') return transaction.amount;
         if (transaction.type === 'ramp' && transaction.rampDirection === 'on_ramp'
             && transaction.rampFiatAmount) {
           const fiat = String(transaction.rampFiatAmount).replace(/^[+-]/, '');
@@ -1450,11 +1459,8 @@ export const AccountDetailScreen = () => {
         && transaction.rampDirection === 'on_ramp'
         && transaction.rampFiatCurrency
       ) ? transaction.rampFiatCurrency : (transaction.grossCurrency || transaction.currency);
-      const params = {
-        transactionType: transaction.type,
-        transactionData: {
+      const params = historyReceiptRoute(transaction.type, transaction.receipt, {
           type: transaction.type,
-          internalId: (transaction as any).internalId,
           from: (transaction.type === 'received' || transaction.type === 'reward')
             ? (transaction.from || contactInfo.displayName)
             : (transaction.type === 'payment' && transaction.amount.startsWith('+'))
@@ -1468,9 +1474,6 @@ export const AccountDetailScreen = () => {
           amount: detailAmount,
           currency: detailCurrency,
           secondaryCurrency: transaction.secondaryCurrency,
-          feeAmount: transaction.feeAmount,
-          feeBps: transaction.feeBps,
-          netAmount: transaction.netAmount,
           fromAmount: transaction.fromAmount,
           toAmount: transaction.toAmount,
           creditedCurrency: transaction.creditedCurrency,
@@ -1480,15 +1483,12 @@ export const AccountDetailScreen = () => {
           rampProvider: transaction.rampProvider,
           rampFiatAmount: transaction.rampFiatAmount,
           rampFiatCurrency: transaction.rampFiatCurrency,
-          date: moment(transaction.date).format('YYYY-MM-DD'),
+          date: transaction.date ? moment(transaction.date).format('YYYY-MM-DD') : undefined,
           time: transaction.time,
-          timestamp: transaction.date,
           status: transaction.status,
           hash: transaction.hash,
           fromAddress: (transaction.type === 'received' || transaction.type === 'reward') ? transaction.senderAddress : undefined,
           toAddress: transaction.type === 'sent' ? transaction.recipientAddress : undefined,
-          fromPhone: transaction.fromPhone,
-          toPhone: transaction.toPhone,
           note: undefined,
           description: transaction.description,
           isStockMovement,
@@ -1528,12 +1528,8 @@ export const AccountDetailScreen = () => {
           // Pass rich name data for Detail Screen resolution
           senderName: transaction.senderDisplayName || (transaction.senderUser?.firstName ? `${transaction.senderUser.firstName} ${transaction.senderUser.lastName || ''}`.trim() : undefined) || transaction.from,
           recipientName: transaction.counterpartyDisplayName || (transaction.recipientUser?.firstName ? `${transaction.recipientUser.firstName} ${transaction.recipientUser.lastName || ''}`.trim() : undefined) || transaction.to,
-          senderUser: transaction.senderUser,
-          recipientUser: transaction.recipientUser,
           senderDisplayName: transaction.senderDisplayName,
           recipientDisplayName: transaction.counterpartyDisplayName,
-          senderBusiness: (transaction as any).senderBusiness,
-          recipientBusiness: (transaction as any).recipientBusiness,
           senderStatusTier,
           senderIsReferralVerified,
           recipientStatusTier,
@@ -1544,8 +1540,7 @@ export const AccountDetailScreen = () => {
           payerIsReferralVerified: (transaction as any).payerIsReferralVerified ?? senderIsReferralVerified,
           merchantStatusTier: (transaction as any).merchantStatusTier ?? recipientStatusTier,
           merchantIsReferralVerified: (transaction as any).merchantIsReferralVerified ?? recipientIsReferralVerified,
-        }
-      };
+      });
       // Navigate to different screens based on transaction type
       if (transaction.type === 'exchange' && transaction.p2pTradeId) {
         // Navigate to ActiveTrade screen for P2P trades
@@ -1585,7 +1580,7 @@ export const AccountDetailScreen = () => {
           : (activeAccount?.business?.name || userProfile?.businessName || 'Tu Empresa');
 
         // @ts-ignore - Navigation type mismatch, but works at runtime
-        navigation.navigate('TransactionReceipt', {
+        navigation.navigate('TransactionReceipt', transactionReceiptRoute({
           transaction: {
             ...transaction,
             verificationId: txAny.internalId || txAny.id, // Use full UUID for QR code if available
@@ -1601,10 +1596,9 @@ export const AccountDetailScreen = () => {
             payrollRunId: transaction.payrollRunId
           },
           type: 'payroll'
-        });
+        }));
       } else {
-        // @ts-ignore - Navigation type mismatch, but works at runtime
-        navigation.navigate('TransactionDetail', params);
+        transferNavigation.navigate('TransactionDetail', params);
       }
     };
 

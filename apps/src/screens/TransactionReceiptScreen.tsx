@@ -1,3 +1,5 @@
+import { useSettlementDetails } from '../hooks/useSettlementStatus';
+import { transactionReceiptRoute } from '../utils/transactionRoutes';
 import React, { useRef } from 'react';
 import {
   View,
@@ -29,8 +31,17 @@ export const TransactionReceiptScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
   const { userProfile } = useAuth();
-  const transaction = route.params?.transaction as any;
+  const transaction = route.params?.transaction ? transactionReceiptRoute(route.params).transaction as any : undefined;
   const viewShotRef = useRef<ViewShot>(null);
+  const isPaymentReceipt = route.params?.type === 'payment' || transaction?.type === 'payment';
+  const isSendReceipt = route.params?.type !== 'payroll' &&
+    (!transaction?.type || ['sent', 'send', 'received'].includes(transaction.type));
+  const settlement = useSettlementDetails(
+    isPaymentReceipt ? 'payment' : 'send',
+    isPaymentReceipt || isSendReceipt ? transaction?.internalId : undefined,
+    transaction?.status,
+    transaction?.date,
+  );
 
   if (!transaction) {
     return (
@@ -184,15 +195,12 @@ export const TransactionReceiptScreen = () => {
   // leaking into any of them is the same bug in three places.
   const currency = formatTokenLabel(
     transaction.currency || transaction.tokenType || 'cUSD');
-  const date = transaction.date || transaction.executedAt || transaction.createdAt || new Date().toISOString();
+  const date = settlement.createdAt || transaction.date || '';
   const transactionHash = transaction.hash || transaction.transactionHash || '';
   // FIX: Strictly use verificationId or internal id. NEVER use transaction hash for verification.
   // If no valid internal ID exists, verificationId should be falsy, checking for length to avoid 'undefined' string
-  const rawId = transaction.verificationId || transaction.id || transaction.internalId || transaction.internal_id;
-  // Ensure it's a UUID/Internal ID (not a hash)
-  const isHash = typeof rawId === 'string' && rawId.startsWith('0x');
-  const verificationId = (!isHash && rawId) ? rawId : undefined;
-  const status = (transaction.status || 'completed').toLowerCase();
+  const verificationId = transaction.verificationId;
+  const status = (settlement.status || transaction.status || 'pending').toLowerCase();
 
   const handleExportPDF = async () => {
     try {
