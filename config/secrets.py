@@ -8,8 +8,8 @@ App secrets live in SSM Parameter Store as SecureStrings under
 `/confio/secrets/<name>` (standard tier: free storage and reads, vs $0.40 per
 secret per month in Secrets Manager). `get_secret('prod/x')` reads
 `/confio/secrets/prod/x` and falls back to the Secrets Manager secret `prod/x`
-when no such parameter exists — which is still the case for `RDS_SECRET`
-(RDS Proxy only authenticates through Secrets Manager).
+when no such parameter exists. Only the RDS-managed `rds!…` master secret and
+the ConfioAI stack's `confioai/runtime` still live in Secrets Manager.
 
 Size limit: standard-tier parameters hold at most 4,096 bytes. The largest
 today is prod/didit-workflow-ids-by-phone-country at 3,651 bytes (2026-10-13);
@@ -39,8 +39,6 @@ except ImportError:
 # Kept apart from /confio/global and /confio/algorand key material, so loading
 # app secrets never pulls private keys into every process.
 PARAMETER_PREFIX = '/confio/secrets/'
-# Expected to be read from Secrets Manager; anything else falling back is a gap.
-SECRETS_MANAGER_ONLY = frozenset({'RDS_SECRET'})
 
 _parameter_secrets_cache: Dict[str, Dict[str, str]] = {}
 
@@ -110,7 +108,7 @@ def get_secret(secret_name: str, region_name: str = "eu-central-2") -> Union[str
     except (ClientError, BotoCoreError) as e:
         logger.warning(f"Parameter Store load failed, reading {secret_name} from Secrets Manager: {e}")
         parameters = {}
-    if secret_name not in parameters and parameters and secret_name not in SECRETS_MANAGER_ONLY:
+    if secret_name not in parameters and parameters:
         # Created after this process loaded its snapshot (e.g. a new alert
         # bot secret): one direct read keeps "create it, no restart needed".
         try:
@@ -129,8 +127,7 @@ def get_secret(secret_name: str, region_name: str = "eu-central-2") -> Union[str
             return json.loads(value)
         except json.JSONDecodeError:
             return value
-    if secret_name not in SECRETS_MANAGER_ONLY:
-        logger.warning(f"{PARAMETER_PREFIX}{secret_name} not in Parameter Store, reading Secrets Manager")
+    logger.warning(f"{PARAMETER_PREFIX}{secret_name} not in Parameter Store, reading Secrets Manager")
 
     session = boto3.session.Session()
     client = session.client(

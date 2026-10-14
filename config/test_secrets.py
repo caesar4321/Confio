@@ -46,9 +46,15 @@ class GetSecretTests(unittest.TestCase):
             {'Error': {'Code': 'ParameterNotFound', 'Message': ''}}, 'GetParameter',
         )
         self.sm.get_secret_value.return_value = {'SecretString': '{"password": "pw"}'}
+        self.assertEqual(secrets.get_secret('prod/legacy-json'), {'password': 'pw'})
+        self.sm.get_secret_value.assert_called_once_with(SecretId='prod/legacy-json')
+
+    def test_rds_secret_comes_from_parameter_store(self):
+        self.pages[0]['Parameters'].append(
+            {'Name': '/confio/secrets/RDS_SECRET', 'Value': '{"password": "pw"}'},
+        )
         self.assertEqual(secrets.get_secret('RDS_SECRET'), {'password': 'pw'})
-        self.sm.get_secret_value.assert_called_once_with(SecretId='RDS_SECRET')
-        self.ssm.get_parameter.assert_not_called()  # Secrets Manager-only by design
+        self.sm.get_secret_value.assert_not_called()
 
     def test_direct_read_network_error_still_falls_back(self):
         from botocore.exceptions import EndpointConnectionError

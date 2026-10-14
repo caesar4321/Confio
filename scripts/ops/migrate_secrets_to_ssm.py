@@ -14,9 +14,10 @@ import boto3
 REGION = 'eu-central-2'
 STANDARD_TIER_MAX_BYTES = 4096
 
-# Stay in Secrets Manager: RDS Proxy auth, RDS-managed master secret, and the
-# ConfioAI CloudFormation stack's own secret.
-KEEP = {'RDS_SECRET', 'confioai/runtime'}
+# Stay in Secrets Manager: the RDS-managed master secret and the ConfioAI
+# CloudFormation stack's own secret. (RDS_SECRET stayed until RDS Proxy was
+# deleted on 2026-10-14, then moved to /confio/secrets/RDS_SECRET as well.)
+KEEP = {'confioai/runtime'}
 KEEP_PREFIXES = ('rds!',)
 # Retired: superseded by prod/ondo-gm-{read,write}-key on 2026-07-31, or unused.
 RETIRED = {
