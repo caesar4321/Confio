@@ -265,6 +265,9 @@ describe('sign-in recovery reporting', () => {
       name && name.endsWith('.json') && !name.startsWith('confio_wallet_manifest')
         ? [{ id: 'legacy-1', name }, { id: 'legacy-2', name }]
         : []);
+    // Twins are now read rather than refused on sight; these two do not
+    // decrypt, so the outcome is still 'unreadable'.
+    googleDriveStorage.downloadFile.mockResolvedValue('not an encrypted backup');
     await expect(recover('sub', 'drive-token', {
       reportAuthToken: 'jwt',
       legacyRegistrations: [{ accountType: 'personal', accountIndex: 0, algorandAddress: 'ADDR' }],

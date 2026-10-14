@@ -43,7 +43,7 @@ it('retries Drive recovery with fresh authorization before committing once', asy
   expect(await reconcileSignInWallet(args)).toBe(true);
   expect(args.reauthorizeGoogleDrive).toHaveBeenCalledWith('drive-token');
   expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-drive-token', {
-    reportAuthToken: 'session', evidenceSink: expect.any(Object),
+    reportAuthToken: 'session', evidenceSink: expect.any(Object), anchors: expect.any(Array),
   });
   expect(wallet.persist).toHaveBeenCalledTimes(1);
   expect(args.client.mutate.mock.calls.filter(([call]) => 'wallets' in call.variables)).toHaveLength(1);
@@ -210,7 +210,7 @@ it('restarts canonical discovery if legacy backup lookup rejects the token', asy
   const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue('fresh-token') };
   expect(await reconcileSignInWallet(args)).toBe(true);
   expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-token', {
-    reportAuthToken: 'session', evidenceSink: expect.any(Object),
+    reportAuthToken: 'session', evidenceSink: expect.any(Object), anchors: expect.any(Array),
   });
   expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
 });
@@ -225,7 +225,7 @@ it('resumes an interrupted missing-backup upload through canonical discovery', a
   expect(await reconcileSignInWallet(args)).toBe(true);
   expect(createMissingSignInWalletCandidate).toHaveBeenCalledTimes(1);
   expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-token', {
-    reportAuthToken: 'session', evidenceSink: expect.any(Object),
+    reportAuthToken: 'session', evidenceSink: expect.any(Object), anchors: expect.any(Array),
   });
 });
 
@@ -250,7 +250,7 @@ it('Google activates the canonical Drive wallet without checking old funds', asy
   expect(await reconcileSignInWallet(args)).toBe(true);
   expect(recover.mock.calls).toEqual([
     ['subject', undefined, { reportAuthToken: 'session', evidenceSink: expect.any(Object) }],
-    ['subject', 'drive-token', { reportAuthToken: 'session', evidenceSink: expect.any(Object) }],
+    ['subject', 'drive-token', { reportAuthToken: 'session', evidenceSink: expect.any(Object), anchors: expect.any(Array) }],
   ]);
   expect(local.persist).not.toHaveBeenCalled();
   expect(canonical.persist).toHaveBeenCalledTimes(1);

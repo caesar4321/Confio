@@ -922,14 +922,26 @@ async function fetchManifest(googleDriveStorage: any, accessToken: string): Prom
 }
 
 /**
- * Helper to save the manifest (Overwrite)
+ * Write the manifest without adding a second one.
+ *
+ * Drive does not keep file names unique, so a create-by-name next to an
+ * existing manifest leaves twins - which sign-in then has to resolve. An
+ * existing manifest is therefore always updated in place - the newest, so
+ * the freshest pointer carries this write. (Sign-in, facing twins, picks the
+ * newest manifest among those that hold the secret it adopted; when the
+ * twins are of one wallet, that is this same file.) Only an account with
+ * no manifest at all creates one.
+ *
+ * That create can still race another device doing the same thing at the
+ * same moment. That is now rare (the master-secret queue serializes writers
+ * on one device), and the sign-in reader recovers from the result safely.
  */
 async function saveManifest(googleDriveStorage: any, accessToken: string, manifest: WalletManifest): Promise<void> {
   const content = JSON.stringify(manifest, null, 2);
-  // Search for existing file to update (overwrite)
   const files = await googleDriveStorage.listFiles(accessToken, MANIFEST_FILENAME);
   if (files.length > 0) {
-    await googleDriveStorage.updateFile(accessToken, files[0].id, content);
+    const newest = [...files].sort((a: any, b: any) => getBackupTime(b) - getBackupTime(a))[0];
+    await googleDriveStorage.updateFile(accessToken, newest.id, content);
   } else {
     await googleDriveStorage.createFile(accessToken, MANIFEST_FILENAME, content);
   }
@@ -1866,7 +1878,9 @@ async function provisionMissingSignInWalletCandidate(
   // malformed backups and legacy mismatches are never generation permission.
   const existing = async () => {
     try {
-      return await getSignInWalletCandidate(userSub, driveToken, { reportAuthToken, evidenceSink });
+      return await getSignInWalletCandidate(userSub, driveToken, {
+        reportAuthToken, evidenceSink, anchors: registrations,
+      });
     } catch (error) {
       if (!(error instanceof WalletRecoveryError) || error.code !== 'missing') throw error;
     }
@@ -1991,7 +2005,9 @@ async function provisionMissingSignInWalletCandidate(
     }
   }
   // Only a decryptable canonical read-back may proceed to server replacement.
-  const verified = await getSignInWalletCandidate(userSub, driveToken, { reportAuthToken, evidenceSink });
+  const verified = await getSignInWalletCandidate(userSub, driveToken, {
+    reportAuthToken, evidenceSink, anchors: registrations,
+  });
   const expected = deriveEvmKeyFromMasterSecret(secret, { accountType: 'personal', accountIndex: 0 });
   if (!verified || verified.bscAddress.toLowerCase() !== expected.address.toLowerCase()) {
     throw new WalletRecoveryError('mismatch');
@@ -2054,6 +2070,8 @@ export async function getSignInWalletCandidate(userSub: string, driveToken?: str
   reportAuthToken?: string;
   /** Where this attempt leaves what it saw, for the caller's boundary. */
   evidenceSink?: RecoveryEvidenceSink;
+  /** The registered wallet, used only to choose among duplicate backups. */
+  anchors?: AnchorRegistration[];
 }) {
   const probe: DriveCandidateReport[] = [];
   const sink = options?.evidenceSink;
@@ -2107,6 +2125,67 @@ export async function getSignInWalletCandidate(userSub: string, driveToken?: str
   };
 }
 
+// Drive does not keep file names unique, and the backup writer used to look
+// files up by name, so an account can hold twins of its manifest or payload.
+// Bounded so a Drive full of them cannot turn sign-in into a download storm.
+const MAX_DUPLICATE_CANDIDATES = 6;
+
+type AnchorRegistration = {
+  accountType: 'personal' | 'business'; accountIndex: number; businessId?: string | null;
+  algorandAddress?: string | null; bscAddress?: string | null;
+};
+
+/**
+ * Which recovered secret sign-in may adopt, or null if it must refuse.
+ *
+ * Adopting a canonical secret is not a read: when it does not match the
+ * registered wallet, reconciliation REPLACES the registration with it. So a
+ * wrong pick among twins can re-point the account at a different wallet and
+ * strand the funds on the other one. The rule is therefore:
+ *
+ *  - exactly one manifest and one payload, read cleanly: adopt it, exactly
+ *    as sign-in always has, replacement included.
+ *  - anything else - twins of any kind, a twin we could not read, a twin
+ *    whose payload is gone: adopt only the one secret that every registered
+ *    address derives from. That is the wallet the account already has, so
+ *    adopting it replaces nothing. Duplicates never authorize a replacement,
+ *    even when they all agree: a missing or unreadable twin could be the
+ *    real wallet, and "they agree" is only as good as what we could read.
+ *  - no such secret, or no registered primary address to check: refuse.
+ */
+function chooseRecoveredSecret(
+  secrets: Uint8Array[],
+  singleCleanBackup: boolean,
+  anchors: AnchorRegistration[] | undefined,
+): Uint8Array | null {
+  const distinct: Uint8Array[] = [];
+  for (const secret of secrets) {
+    if (!distinct.some(seen => secretsEqual(seen, secret))) distinct.push(secret);
+  }
+  if (!distinct.length) return null;
+  if (singleCleanBackup && distinct.length === 1) return distinct[0];
+  const anchored = (anchors || []).filter(row => row.algorandAddress || row.bscAddress);
+  // Mirrors reconciliation's matchesAll: an unanchored primary must not be
+  // waved through just because a sibling happens to match.
+  const primaryAnchored = anchored.some(row => row.accountType === 'personal' && row.accountIndex === 0);
+  if (!primaryAnchored) return null;
+  const matching = distinct.filter(secret => anchored.every(row => {
+    try {
+      const opts = {
+        accountType: row.accountType,
+        accountIndex: row.accountIndex,
+        businessId: row.businessId || undefined,
+      };
+      return (!row.algorandAddress || deriveV2AddressPure(secret, opts) === row.algorandAddress)
+        && (!row.bscAddress
+          || deriveEvmKeyFromMasterSecret(secret, opts).address.toLowerCase() === row.bscAddress.toLowerCase());
+    } catch {
+      return false;
+    }
+  }));
+  return matching.length === 1 ? matching[0] : null;
+}
+
 async function getSignInWalletCandidateInner(userSub: string, driveToken?: string, options?: {
   // Compatibility-only recovery of the old subject-named file. Every known
   // registration must match; this path must never authorize replacement.
@@ -2115,6 +2194,11 @@ async function getSignInWalletCandidateInner(userSub: string, driveToken?: strin
     algorandAddress?: string | null; bscAddress?: string | null;
   }>;
   reportAuthToken?: string;
+  /**
+   * The registered wallet. Only consulted to choose among duplicate
+   * backups; a single clean backup is adopted exactly as before.
+   */
+  anchors?: AnchorRegistration[];
 }, probe: DriveCandidateReport[] = []) {
   const note = (
     shape: DriveCandidateReport['shape'],
@@ -2151,73 +2235,144 @@ async function getSignInWalletCandidateInner(userSub: string, driveToken?: strin
       const legacyFirst = probe.length;
       files.forEach(() => note('legacy'));
       if (!files.length) throw new WalletRecoveryError('missing');
-      if (files.length !== 1) throw new WalletRecoveryError('unreadable');
-      let legacyBody: string;
-      try {
-        legacyBody = await googleDriveStorage.downloadFile(driveToken, files[0].id);
-      } catch (error) {
-        describe(legacyFirst, { outcome: 'download_failed' });
-        throw error;
+      if (files.length > MAX_DUPLICATE_CANDIDATES) throw new WalletRecoveryError('unreadable');
+      // Twins of the subject-named file are read like any duplicate. Every
+      // registration is checked again after this anyway; this path never
+      // authorizes a replacement.
+      const legacySecrets: Uint8Array[] = [];
+      for (let index = 0; index < files.length; index += 1) {
+        let legacyBody: string;
+        try {
+          legacyBody = await googleDriveStorage.downloadFile(driveToken, files[index].id);
+        } catch (error) {
+          // An incomplete read is never a decision: rethrow, do not pick.
+          describe(legacyFirst + index, { outcome: 'download_failed' });
+          throw error;
+        }
+        const legacyRead = decryptBackupDetailed(
+          legacyBody, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+        describe(legacyFirst + index, {
+          format: classifyBackupBody(legacyBody),
+          outcome: legacyRead.reason,
+          bytes: legacyBody.length,
+        });
+        if (legacyRead.secret) legacySecrets.push(legacyRead.secret);
       }
-      const legacyRead = decryptBackupDetailed(
-        legacyBody, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
-      describe(legacyFirst, {
-        format: classifyBackupBody(legacyBody),
-        outcome: legacyRead.reason,
-        bytes: legacyBody.length,
-      });
-      secret = legacyRead.secret;
+      secret = chooseRecoveredSecret(
+        legacySecrets, files.length === 1 && legacySecrets.length === 1, options.legacyRegistrations);
       if (!secret) throw new WalletRecoveryError('unreadable');
     } else {
       if (!manifests.length) throw new WalletRecoveryError('missing');
-      // Ambiguity is not permission to pick another wallet or generate a key.
-      if (manifests.length !== 1) throw new WalletRecoveryError('unreadable');
-      let manifestBody: string;
-      try {
-        manifestBody = await googleDriveStorage.downloadFile(driveToken, manifests[0].id);
-      } catch (error) {
-        describe(0, { outcome: 'download_failed' });
-        throw error;
+      // Twins are expected, not exotic: Drive does not keep names unique and
+      // the writer used to create by name. Read every candidate and let
+      // chooseRecoveredSecret decide; ambiguity is still never permission to
+      // pick another wallet or generate a key.
+      if (manifests.length > MAX_DUPLICATE_CANDIDATES) throw new WalletRecoveryError('unreadable');
+      const recovered: Array<{ secret: Uint8Array; walletId: string; manifestTime: number }> = [];
+      // Twin manifests often name the SAME wallet. List each wallet id once
+      // and read each payload file once, so the bound counts files rather
+      // than visits and the diagnostic describes every file exactly once.
+      const payloadsByWallet = new Map<string, Array<{ id: string }>>();
+      const readByFile = new Map<string, Uint8Array | null>();
+      // Every listed payload gets its diagnostic slot when it is LISTED, not
+      // when it is read: if recovery stops early - the bound trips, or a
+      // download fails - the files it never reached still show up, as
+      // 'unknown', instead of vanishing from the report.
+      const slotByFile = new Map<string, number>();
+      let manifestMalformed = false;
+      let manifestWithoutPayload = false;
+      // Phase 1: read every manifest and list every payload it names, and
+      // only then decide whether this Drive is within bounds. Checking as
+      // we went let one manifest's payloads download before a later
+      // manifest's listing tripped the bound.
+      const named: Array<{ walletId: string; manifestTime: number }> = [];
+      for (let index = 0; index < manifests.length; index += 1) {
+        let manifestBody: string;
+        try {
+          manifestBody = await googleDriveStorage.downloadFile(driveToken, manifests[index].id);
+        } catch (error) {
+          // An incomplete read is never a decision: rethrow, do not pick.
+          describe(index, { outcome: 'download_failed' });
+          throw error;
+        }
+        describe(index, { format: classifyBackupBody(manifestBody), bytes: manifestBody.length, outcome: 'parsed' });
+        let manifest: any;
+        try {
+          manifest = JSON.parse(manifestBody);
+        } catch (error) {
+          describe(index, { outcome: 'malformed' });
+          if (!(error instanceof SyntaxError)) throw error;
+          manifestMalformed = true;
+          continue;
+        }
+        const candidateId = Array.isArray(manifest?.wallets) && manifest.wallets.length === 1
+          ? manifest.wallets[0]?.id
+          : undefined;
+        if (typeof candidateId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(candidateId)) {
+          describe(index, { outcome: 'malformed' });
+          manifestMalformed = true;
+          continue;
+        }
+        named.push({ walletId: candidateId, manifestTime: getBackupTime(manifests[index]) });
+        if (!payloadsByWallet.has(candidateId)) {
+          const files = await googleDriveStorage.listFiles(driveToken, `confio_wallet_v2_${candidateId}.enc`);
+          payloadsByWallet.set(candidateId, files);
+          for (const file of files) {
+            if (!slotByFile.has(file.id)) {
+              slotByFile.set(file.id, probe.length);
+              note('payload');
+            }
+          }
+        }
+        // A manifest whose payload is gone may name the REAL wallet. Its
+        // absence is not evidence that a readable twin is the right one.
+        if (!payloadsByWallet.get(candidateId)!.length) manifestWithoutPayload = true;
       }
-      describe(0, { format: classifyBackupBody(manifestBody), bytes: manifestBody.length, outcome: 'parsed' });
-      let manifest: any;
-      try {
-        manifest = JSON.parse(manifestBody);
-      } catch (error) {
-        describe(0, { outcome: 'malformed' });
-        if (error instanceof SyntaxError) throw new WalletRecoveryError('unreadable');
-        throw error;
+      if (slotByFile.size > MAX_DUPLICATE_CANDIDATES) throw new WalletRecoveryError('unreadable');
+      // Phase 2: read each distinct payload exactly once.
+      for (const [fileId, slot] of slotByFile) {
+        let body: string;
+        try {
+          body = await googleDriveStorage.downloadFile(driveToken, fileId);
+        } catch (error) {
+          describe(slot, { outcome: 'download_failed' });
+          throw error;
+        }
+        const read = decryptBackupDetailed(
+          body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+        describe(slot, { format: classifyBackupBody(body), outcome: read.reason, bytes: body.length });
+        readByFile.set(fileId, read.secret);
       }
-      if (!Array.isArray(manifest?.wallets) || manifest.wallets.length !== 1) {
-        describe(0, { outcome: 'malformed' });
+      for (const { walletId: candidateId, manifestTime } of named) {
+        for (const file of payloadsByWallet.get(candidateId)!) {
+          const secretRead = readByFile.get(file.id);
+          if (secretRead) recovered.push({ secret: secretRead, walletId: candidateId, manifestTime });
+        }
+      }
+      if (!recovered.length) {
+        // Exactly one clean manifest that points at no payload is what
+        // 'missing' has always meant, and it is what lets provisioning run.
+        // Anything else is evidence of a backup we could not read, and must
+        // never become permission to generate a replacement.
+        if (manifests.length === 1 && !manifestMalformed && readByFile.size === 0) {
+          throw new WalletRecoveryError('missing');
+        }
         throw new WalletRecoveryError('unreadable');
       }
-      walletId = manifest.wallets[0]?.id;
-      if (typeof walletId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(walletId)) {
-        describe(0, { outcome: 'malformed' });
-        throw new WalletRecoveryError('unreadable');
-      }
-      const files = await googleDriveStorage.listFiles(driveToken, `confio_wallet_v2_${walletId}.enc`);
-      const payloadFirst = probe.length;
-      files.forEach(() => note('payload'));
-      if (!files.length) throw new WalletRecoveryError('missing');
-      if (files.length !== 1) throw new WalletRecoveryError('unreadable');
-      let body: string;
-      try {
-        body = await googleDriveStorage.downloadFile(driveToken, files[0].id);
-      } catch (error) {
-        describe(payloadFirst, { outcome: 'download_failed' });
-        throw error;
-      }
-      const read = decryptBackupDetailed(
-        body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
-      describe(payloadFirst, {
-        format: classifyBackupBody(body),
-        outcome: read.reason,
-        bytes: body.length,
-      });
-      secret = read.secret;
-      if (!secret) throw new WalletRecoveryError('unreadable');
+      const unreadableFiles = [...readByFile.values()].some(value => !value);
+      const singleCleanBackup = manifests.length === 1 && readByFile.size === 1
+        && !manifestMalformed && !manifestWithoutPayload && !unreadableFiles;
+      const chosen = chooseRecoveredSecret(
+        recovered.map(entry => entry.secret), singleCleanBackup, options?.anchors);
+      if (!chosen) throw new WalletRecoveryError('unreadable');
+      // Twins of one secret can still name different wallet ids. Adopt the
+      // newest manifest's, as the reenrollment attestation already does, so
+      // every device converges on the same file.
+      const owner = recovered
+        .filter(entry => secretsEqual(entry.secret, chosen))
+        .sort((a, b) => (b.manifestTime - a.manifestTime) || a.walletId.localeCompare(b.walletId))[0];
+      walletId = owner.walletId;
+      secret = chosen;
     }
   } else {
     secret = await getExistingLocalV2MasterSecret(userSub);

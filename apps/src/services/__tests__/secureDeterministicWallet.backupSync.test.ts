@@ -126,6 +126,282 @@ describe('sign-in canonical wallet recovery', () => {
     (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([]);
   });
 
+  describe('duplicate backups', () => {
+    // Drive does not keep file names unique, and the backup writer used to
+    // create by name, so an account can hold twins of its manifest or its
+    // payload. User 2785 is locked out on every device by exactly this
+    // shape: sign-in used to refuse any second file outright.
+    const OTHER_SECRET = new Uint8Array(32).fill(19);
+    const personal = { accountType: 'personal' as const, accountIndex: 0 };
+    const otherAddress = deriveV2AddressPure(OTHER_SECRET, personal);
+    const AES = require('crypto-js/aes');
+    const encrypt = (secret: Uint8Array) =>
+      AES.encrypt(bytesToBase64(secret), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    const anchoredTo = (algorandAddress: string) => [{ ...personal, algorandAddress }];
+
+    // Each manifest names a wallet id; each id has the payload bodies given.
+    const drive = (layout: Array<{ manifestId: string; walletId: string; modifiedTime: string }>,
+                   payloads: Record<string, string[]>) => {
+      (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_t: string, name?: string) => {
+        if (name === 'confio_wallet_manifest_v2.json') {
+          return layout.map(entry => ({ id: entry.manifestId, name, modifiedTime: entry.modifiedTime }));
+        }
+        const match = /^confio_wallet_v2_(.+)\.enc$/.exec(name || '');
+        if (match) return (payloads[match[1]] || []).map((_body, index) => ({ id: `${match[1]}#${index}`, name }));
+        return [];
+      });
+      (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t: string, id: string) => {
+        const manifest = layout.find(entry => entry.manifestId === id);
+        if (manifest) return JSON.stringify({ wallets: [{ id: manifest.walletId }] });
+        const [walletId, index] = id.split('#');
+        return payloads[walletId][Number(index)];
+      });
+    };
+
+    it('recovers twin manifests of the registered wallet, which used to lock the user out on every device', async () => {
+      // Sign-in always has the registered addresses by this point.
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-13T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w1', modifiedTime: '2026-10-14T01:45:00Z' },
+      ], { w1: [encrypt(MASTER_SECRET)] });
+
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      });
+
+      expect(wallet?.algorandAddress).toBe(expectedAddress);
+    });
+
+    it('recovers twin payloads only when they are the registered wallet', async () => {
+      drive([{ manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' }],
+        { w1: [encrypt(MASTER_SECRET), encrypt(MASTER_SECRET)] });
+
+      // With nothing to check them against, twins prove nothing: refuse.
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token'))
+        .rejects.toMatchObject({ code: 'unreadable' });
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      });
+      expect(wallet?.algorandAddress).toBe(expectedAddress);
+    });
+
+    it('never lets agreeing twins replace a different registered wallet', async () => {
+      // Every twin reads cleanly and they agree - but on a wallet the account
+      // does not have. Adopting would make reconciliation replace the
+      // registration. A single clean backup may do that; duplicates may not.
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w1', modifiedTime: '2026-10-13T00:00:00Z' },
+      ], { w1: [encrypt(OTHER_SECRET)] });
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      })).rejects.toMatchObject({ code: 'unreadable' });
+    });
+
+    it('does not adopt a readable twin when the registered wallet\'s payload is missing', async () => {
+      // Manifest m-registered names the real wallet, whose payload is gone.
+      // The readable twin is a different wallet. Counting a missing payload
+      // as "read cleanly" adopted it - and reconciliation would then have
+      // replaced the registration and stranded the funds.
+      drive([
+        { manifestId: 'm-registered', walletId: 'w-registered', modifiedTime: '2026-10-13T00:00:00Z' },
+        { manifestId: 'm-stranger', walletId: 'w-stranger', modifiedTime: '2026-10-14T00:00:00Z' },
+      ], { 'w-stranger': [encrypt(OTHER_SECRET)] });
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      })).rejects.toMatchObject({ code: 'unreadable' });
+    });
+
+    it('reads each file once when twin manifests name the same wallet', async () => {
+      // Three manifests, one wallet id, three identical payloads: six files.
+      // Counting visits (3 x 3) tripped the bound and described each
+      // payload three times.
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-12T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w1', modifiedTime: '2026-10-13T00:00:00Z' },
+        { manifestId: 'm3', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' },
+      ], { w1: [encrypt(MASTER_SECRET), encrypt(MASTER_SECRET), encrypt(MASTER_SECRET)] });
+      const evidenceSink: RecoveryEvidenceSink = {};
+
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress), evidenceSink,
+      });
+
+      expect(wallet?.algorandAddress).toBe(expectedAddress);
+      expect(evidenceSink.current!.inventory).toHaveLength(6);
+      const payloadReads = (googleDriveStorage.downloadFile as jest.Mock).mock.calls
+        .filter(([, id]: [string, string]) => id.startsWith('w1#'));
+      expect(payloadReads).toHaveLength(3);
+    });
+
+    it('still shows the file that tripped the bound when it refuses', async () => {
+      // Seven distinct payloads: one more than the bound. Recording files
+      // only as they were read hid exactly the one that caused the refusal.
+      const seven = Array.from({ length: 7 }, (_unused, n) => encrypt(new Uint8Array(32).fill(40 + n)));
+      drive([{ manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' }], { w1: seven });
+      const evidenceSink: RecoveryEvidenceSink = {};
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress), evidenceSink,
+      })).rejects.toMatchObject({ code: 'unreadable' });
+
+      const payloads = (evidenceSink.current!.inventory as any[]).filter(entry => entry.shape === 'payload');
+      expect(payloads).toHaveLength(7);
+    });
+
+    it('refuses an oversized Drive before downloading any payload, across manifests', async () => {
+      // Three payloads under one wallet, four under another: seven files.
+      // Checking the bound per manifest downloaded the first three before
+      // the second listing tripped it.
+      const many = (seed: number, count: number) =>
+        Array.from({ length: count }, (_unused, n) => encrypt(new Uint8Array(32).fill(seed + n)));
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w2', modifiedTime: '2026-10-13T00:00:00Z' },
+      ], { w1: many(50, 3), w2: many(60, 4) });
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      })).rejects.toMatchObject({ code: 'unreadable' });
+
+      const payloadReads = (googleDriveStorage.downloadFile as jest.Mock).mock.calls
+        .filter(([, id]: [string, string]) => id.includes('#'));
+      expect(payloadReads).toHaveLength(0);
+    });
+
+    it('still shows the files it never reached when a download fails', async () => {
+      drive([{ manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' }],
+        { w1: [encrypt(MASTER_SECRET), encrypt(MASTER_SECRET), encrypt(MASTER_SECRET)] });
+      const failure = Object.assign(new Error('drive down'), { name: 'GoogleDriveStorageError' });
+      const download = googleDriveStorage.downloadFile as jest.Mock;
+      const original = download.getMockImplementation()!;
+      download.mockImplementation(async (token: string, id: string) => {
+        if (id === 'w1#1') throw failure;
+        return original(token, id);
+      });
+      const evidenceSink: RecoveryEvidenceSink = {};
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress), evidenceSink,
+      })).rejects.toBe(failure);
+
+      const outcomes = (evidenceSink.current!.inventory as any[])
+        .filter(entry => entry.shape === 'payload')
+        .map(entry => entry.outcome);
+      expect(outcomes).toEqual(['decrypted', 'download_failed', 'unknown']);
+    });
+
+    it('adopts the newest manifest\'s wallet id, so every device converges on one file', async () => {
+      drive([
+        { manifestId: 'm-old', walletId: 'w-old', modifiedTime: '2026-10-01T00:00:00Z' },
+        { manifestId: 'm-new', walletId: 'w-new', modifiedTime: '2026-10-14T00:00:00Z' },
+      ], { 'w-old': [encrypt(MASTER_SECRET)], 'w-new': [encrypt(MASTER_SECRET)] });
+
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      });
+      await wallet!.persist();
+
+      const { credentialStorage } = require('../credentialStorage');
+      const storedIds = (credentialStorage.storeSecret as jest.Mock).mock.calls
+        .filter(([key]: [string]) => key.startsWith('confio_wallet_id_v2_'))
+        .map(([, value]: [string, Uint8Array]) => new TextDecoder().decode(value));
+      expect(storedIds).toEqual(['w-new']);
+    });
+
+    it('chooses the registered wallet when twins hold different secrets', async () => {
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w2', modifiedTime: '2026-10-13T00:00:00Z' },
+      ], { w1: [encrypt(OTHER_SECRET)], w2: [encrypt(MASTER_SECRET)] });
+
+      // The newest manifest holds the OTHER wallet. Adopting it would make
+      // reconciliation replace the registration and strand the funds.
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      });
+
+      expect(wallet?.algorandAddress).toBe(expectedAddress);
+    });
+
+    it('refuses different secrets when none is the registered wallet', async () => {
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w2', modifiedTime: '2026-10-13T00:00:00Z' },
+      ], { w1: [encrypt(OTHER_SECRET)], w2: [encrypt(new Uint8Array(32).fill(23))] });
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      })).rejects.toMatchObject({ code: 'unreadable' });
+    });
+
+    it('refuses different secrets when there is no registered wallet to choose by', async () => {
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w2', modifiedTime: '2026-10-13T00:00:00Z' },
+      ], { w1: [encrypt(OTHER_SECRET)], w2: [encrypt(MASTER_SECRET)] });
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token'))
+        .rejects.toMatchObject({ code: 'unreadable' });
+    });
+
+    it('does not trust a readable twin beside an unreadable one unless it is the registered wallet', async () => {
+      // The unreadable twin could hold anything, including the real wallet.
+      drive([{ manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' }],
+        { w1: [encrypt(OTHER_SECRET), 'corrupt payload'] });
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token'))
+        .rejects.toMatchObject({ code: 'unreadable' });
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      })).rejects.toMatchObject({ code: 'unreadable' });
+
+      // ...but the registered wallet beside a corrupt twin is recoverable.
+      drive([{ manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' }],
+        { w1: ['corrupt payload', encrypt(MASTER_SECRET)] });
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', {
+        anchors: anchoredTo(expectedAddress),
+      });
+      expect(wallet?.algorandAddress).toBe(expectedAddress);
+    });
+
+    it('never turns unreadable twins into a missing backup, which would let provisioning run', async () => {
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w2', modifiedTime: '2026-10-13T00:00:00Z' },
+      ], {});
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token'))
+        .rejects.toMatchObject({ code: 'unreadable' });
+    });
+
+    it('still reports one clean manifest that points at nothing as missing', async () => {
+      drive([{ manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' }], {});
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token'))
+        .rejects.toMatchObject({ code: 'missing' });
+    });
+
+    it('requires the primary account to be anchored before choosing', async () => {
+      // Mirrors reconciliation: a sibling match must not stand in for the
+      // primary account.
+      drive([
+        { manifestId: 'm1', walletId: 'w1', modifiedTime: '2026-10-14T00:00:00Z' },
+        { manifestId: 'm2', walletId: 'w2', modifiedTime: '2026-10-13T00:00:00Z' },
+      ], { w1: [encrypt(OTHER_SECRET)], w2: [encrypt(MASTER_SECRET)] });
+      const siblingOnly = [{
+        accountType: 'personal' as const, accountIndex: 1,
+        algorandAddress: deriveV2AddressPure(MASTER_SECRET, { accountType: 'personal', accountIndex: 1 }),
+      }];
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: siblingOnly }))
+        .rejects.toMatchObject({ code: 'unreadable' });
+      expect(otherAddress).not.toBe(expectedAddress);
+    });
+  });
+
   describe('confirmed missing backup replacement', () => {
     const files = new Map<string, string>();
     const ids = new Map<string, string>();
@@ -1463,5 +1739,73 @@ describe('Drive backup format v2', () => {
       ([username]) => username === 'evm_address'
     );
     expect(evmWrites).toHaveLength(0);
+  });
+});
+
+describe('backup writer never adds a second manifest', () => {
+  // Drive keeps ids unique and names not, so a create-by-name next to an
+  // existing manifest leaves twins. The writer updates in place instead.
+  const MANIFEST = 'confio_wallet_manifest_v2.json';
+  let files: Map<string, { name: string; content: string; modifiedTime: string }>;
+  let clock: number;
+  const manifests = () => [...files.entries()].filter(([, file]) => file.name === MANIFEST);
+
+  beforeEach(() => {
+    mockMemoryStore.clear();
+    jest.clearAllMocks();
+    files = new Map();
+    clock = Date.parse('2026-10-14T00:00:00Z');
+    seedLocalVerifiedSecret();
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_t: string, name?: string) =>
+      [...files.entries()]
+        .filter(([, file]) => !name || file.name === name)
+        .map(([id, file]) => ({ id, name: file.name, modifiedTime: file.modifiedTime })));
+    (googleDriveStorage.createFile as jest.Mock).mockImplementation(
+      async (_t: string, name: string, content: string) => {
+        const id = `file-${files.size}`;
+        files.set(id, { name, content, modifiedTime: new Date(clock += 1000).toISOString() });
+        return id;
+      });
+    (googleDriveStorage.updateFile as jest.Mock).mockImplementation(async (_t: string, id: string, content: string) => {
+      const file = files.get(id)!;
+      files.set(id, { ...file, content, modifiedTime: new Date(clock += 1000).toISOString() });
+    });
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t: string, id: string) =>
+      files.get(id)!.content);
+    (apolloClient.mutate as jest.Mock).mockResolvedValue({
+      data: { reportBackupStatus: { success: true, error: null } },
+    });
+  });
+
+  const backUp = () => getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+    provider: 'google', requireCloudSync: true, expectedAddress,
+  });
+
+  it('creates a manifest only when the account has none', async () => {
+    await backUp();
+    await backUp();
+
+    expect(manifests()).toHaveLength(1);
+  });
+
+  it('updates an existing manifest in place', async () => {
+    files.set('existing-manifest', { name: MANIFEST, content: '{"wallets":[]}', modifiedTime: '2026-09-01T00:00:00Z' });
+
+    await backUp();
+
+    expect(manifests().map(([id]) => id)).toEqual(['existing-manifest']);
+    expect(JSON.parse(files.get('existing-manifest')!.content).wallets).toHaveLength(1);
+  });
+
+  it('updates the newest of existing twins, the one sign-in adopts', async () => {
+    // Older one listed first, so "the first in the listing" picks wrong.
+    files.set('twin-old', { name: MANIFEST, content: '{"wallets":[]}', modifiedTime: '2026-09-01T00:00:00Z' });
+    files.set('twin-new', { name: MANIFEST, content: '{"wallets":[]}', modifiedTime: '2026-10-01T00:00:00Z' });
+
+    await backUp();
+
+    expect(manifests()).toHaveLength(2);
+    expect(JSON.parse(files.get('twin-new')!.content).wallets).toHaveLength(1);
+    expect(JSON.parse(files.get('twin-old')!.content).wallets).toHaveLength(0);
   });
 });

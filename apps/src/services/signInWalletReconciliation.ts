@@ -247,7 +247,9 @@ async function reconcileSignInWalletInner(
       restoredLegacyBackup = false;
       try {
         candidate = await getSignInWalletCandidate(subject, token, {
-          reportAuthToken: authData.accessToken, evidenceSink,
+          // The registered wallet, so duplicate backups can be resolved to
+          // the one this account already has instead of refused outright.
+          reportAuthToken: authData.accessToken, evidenceSink, anchors: accounts,
         });
       } catch (error) {
         if (error instanceof WalletRecoveryError && error.code === 'missing') {
