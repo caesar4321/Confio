@@ -4,8 +4,9 @@ Pure intent probes: nothing is sold, charged or unlocked. Who sees each door:
 
 - Confío IA+: the assistant header pill and investing chips, for anyone who
   is not an employee, on a build that has the pitch screen.
-- Cuenta inteligente: the Billeteras row for people who have ever funded,
-  plus pain-point / asked chips; never employees.
+- Cuenta inteligente: the Billeteras row for everyone (funded or not; the
+  waitlist records which, so the target persona is read apart), plus
+  pain-point / asked chips; never employees.
 
 Each probe has its own server flag, so App Review objections can turn one off
 alone. Prices come from settings, never from app copy.
@@ -77,7 +78,8 @@ def available(product, *, is_employee, meta, user_id=None):
     return not (product == PRODUCT_IA_PLUS and user_id is not None and _has_plus(user_id))
 
 
-def billeteras_row_visible(*, is_employee, meta, funded, user_id=None):
-    """The Cuenta inteligente row: ever-funded only, so it never sits in the
-    "Tu primer dólar" path."""
-    return available(PRODUCT_SMART_ACCOUNT, is_employee=is_employee, meta=meta, user_id=user_id) and funded
+def billeteras_row_visible(*, is_employee, meta, user_id=None):
+    """The Cuenta inteligente row: whoever can open the pitch. It was
+    ever-funded only (design 21A) until 2026-10-14: 7 views in 3 days was too
+    little to learn from, and the waitlist's `funded` keeps the persona split."""
+    return available(PRODUCT_SMART_ACCOUNT, is_employee=is_employee, meta=meta, user_id=user_id)

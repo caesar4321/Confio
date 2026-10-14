@@ -61,7 +61,7 @@ def _last_chip_trigger(user, product):
 class PaidOfferType(graphene.ObjectType):
     product = graphene.String(required=True, description="'ia_plus' or 'smart_account'")
     available = graphene.Boolean(required=True, description='The pitch can be opened (flag on, not an employee, new build)')
-    row_visible = graphene.Boolean(required=True, description='Show the Billeteras row (Cuenta inteligente, ever funded)')
+    row_visible = graphene.Boolean(required=True, description='Show the Billeteras row (Cuenta inteligente)')
     monthly_price_usd = graphene.String(description='e.g. "9.99"; null hides the price line')
     on_waitlist = graphene.Boolean(required=True)
     waitlisted_at = graphene.DateTime()
@@ -74,8 +74,6 @@ class PaidOfferQueries(graphene.ObjectType):
 
     @login_required
     def resolve_paid_offers(self, info):
-        from users.funding import has_funded
-
         try:
             user, is_employee, _ = _who(info)
         except Exception:  # noqa: BLE001 - no context, no doors
@@ -83,14 +81,12 @@ class PaidOfferQueries(graphene.ObjectType):
             return []
         meta = _meta(info)
         entries = {e.product: e for e in ProductWaitlistEntry.objects.filter(user=user)}
-        funded = None
         out = []
         for product in (paid_offers.PRODUCT_IA_PLUS, paid_offers.PRODUCT_SMART_ACCOUNT):
             available = paid_offers.available(product, is_employee=is_employee, meta=meta, user_id=user.pk)
-            row = False
-            if available and product == paid_offers.PRODUCT_SMART_ACCOUNT:
-                funded = has_funded(user) if funded is None else funded
-                row = funded
+            # Everyone who can open the pitch sees the row (Julian 2026-10-14): the
+            # waitlist records `funded`, so funded answers are read apart.
+            row = available and product == paid_offers.PRODUCT_SMART_ACCOUNT
             entry = entries.get(product)
             out.append(PaidOfferType(
                 product=product, available=available, row_visible=row,

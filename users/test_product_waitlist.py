@@ -41,9 +41,10 @@ class PaidOfferRulesTests(TestCase):
             self.assertTrue(paid_offers.available('smart_account', is_employee=False, meta=NEW_BUILD))
         self.assertFalse(paid_offers.available('loans', is_employee=False, meta=NEW_BUILD))
 
-    def test_row_needs_ever_funded(self):
-        self.assertTrue(paid_offers.billeteras_row_visible(is_employee=False, meta=NEW_BUILD, funded=True))
-        self.assertFalse(paid_offers.billeteras_row_visible(is_employee=False, meta=NEW_BUILD, funded=False))
+    def test_row_shows_to_everyone_who_can_open_the_pitch(self):
+        self.assertTrue(paid_offers.billeteras_row_visible(is_employee=False, meta=NEW_BUILD))
+        self.assertFalse(paid_offers.billeteras_row_visible(is_employee=True, meta=NEW_BUILD))
+        self.assertFalse(paid_offers.billeteras_row_visible(is_employee=False, meta=OLD_BUILD))
 
     def test_price_is_a_server_value_or_hidden(self):
         self.assertEqual(paid_offers.price('ia_plus'), '9.99')
@@ -120,6 +121,9 @@ class PaidOfferWaitlistTests(TestCase):
         self.assertTrue(offers['ia_plus'].on_waitlist)
         self.assertFalse(offers['ia_plus'].row_visible)  # the row is Cuenta inteligente's only
         self.assertTrue(offers['smart_account'].row_visible)
+        with patch('users.funding.has_funded', return_value=False):
+            unfunded = {o.product: o for o in _resolve(_info(self.ana))}
+        self.assertTrue(unfunded['smart_account'].row_visible)  # not funded-only any more
         self.assertFalse(offers['smart_account'].on_waitlist)
         self.assertEqual(offers['smart_account'].monthly_price_usd, '9.99')
         with patch('users.funding.has_funded', return_value=True):

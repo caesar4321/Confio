@@ -355,8 +355,9 @@ Decisions made during the reviews that apply when the real account is built:
 
 ## Open Questions
 
-- Whether the Billeteras row should also reach unfunded users once "Tu primer dólar"
-  ships (default: no).
+- ~~Whether the Billeteras row should also reach unfunded users~~ Decided 2026-10-14: yes,
+  everyone who can open the pitch (7 views in the first 3 days funded-only). The waitlist's
+  `funded` flag keeps the funded-persona answers separate.
 
 ## Success Criteria
 

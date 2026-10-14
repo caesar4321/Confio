@@ -227,7 +227,7 @@ export const HomeScreen = () => {
   // until the cUSD+/stocks backend lands; single wiring point in the hook).
   const savingsPortfolio = useSavingsPortfolio();
   // Cuenta inteligente probe row (waitlist only): the server decides who sees
-  // it (flag on, ever funded, never employees, this build or newer).
+  // it (flag on, never employees, this build or newer).
   const smartAccountRow = usePaidOffers().smart_account?.rowVisible === true;
   useEffect(() => {
     if (smartAccountRow) {
