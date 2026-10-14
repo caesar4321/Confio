@@ -1916,6 +1916,8 @@ class ExchangeRateToolTests(TestCase):
         nobody = Viewer(user=SimpleNamespace(id=3, phone_country=None), account=None, account_type='personal',
                         business_id=None, is_business_owner=False, tz=ZoneInfo('UTC'))
         self.assertIn('Dime de qué moneda', exchange_rate_data(nobody, None)['motivo'])
+        # A Bolivian who types "USD" is not told their country uses dollars.
+        self.assertIn('Dime de qué moneda', exchange_rate_data(self.viewer, 'USD')['motivo'])
 
     def test_every_issuer_blocked_country_has_a_spanish_name(self):
         from cusd_plus.eligibility import ONDO_BLOCKED

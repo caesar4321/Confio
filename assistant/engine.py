@@ -390,7 +390,7 @@ def exchange_rate_data(viewer: Viewer, currency=None):
 
     phone_country = (getattr(viewer.user, 'phone_country', '') or '').upper()
     code = (currency or '').strip().upper() or get_currency_for_country(phone_country)
-    # Dollarized countries (Ecuador, Panamá, El Salvador): nothing to convert. Only
+    # Dollar countries (Ecuador, Panamá, El Salvador, EE.UU.): nothing to convert. Only
     # a phone country actually mapped to USD (an unknown one also falls back to USD).
     if code == 'USD' and COUNTRY_TO_CURRENCY.get(phone_country) == 'USD':
         return {'disponible': False, 'motivo': 'En su país la moneda es el dólar estadounidense: no hay que convertir.'}
