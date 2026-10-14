@@ -357,6 +357,12 @@ def _plus_net_apy():
 
 
 RATE_TYPES_ES = {'parallel': 'paralelo', 'average': 'promedio', 'official': 'oficial'}
+# Where a connection-based block comes from, said as a person would.
+COUNTRY_NAMES_ES = {
+    'BR': 'Brasil', 'US': 'Estados Unidos', 'CA': 'Canadá', 'GB': 'el Reino Unido', 'ES': 'España', 'FR': 'Francia',
+    'DE': 'Alemania', 'IT': 'Italia', 'PT': 'Portugal', 'NL': 'los Países Bajos', 'CH': 'Suiza', 'CU': 'Cuba',
+    'SG': 'Singapur', 'HK': 'Hong Kong', 'MY': 'Malasia', 'RU': 'Rusia',
+}
 # Said in full so a mix-up shows ("bolívares" from Bolivia gets "bolívares
 # venezolanos" back, and the person can correct it).
 CURRENCY_NAMES_ES = {
@@ -377,6 +383,9 @@ def exchange_rate_data(viewer: Viewer, currency=None):
 
     code = (currency or '').strip().upper() or get_currency_for_country(
         getattr(viewer.user, 'phone_country', '') or '')
+    if code == 'USD' and not currency:
+        # Dollarized countries (Ecuador, Panamá, El Salvador): nothing to convert.
+        return {'disponible': False, 'motivo': 'En su país la moneda es el dólar estadounidense: no hay que convertir.'}
     if not re.fullmatch(r'[A-Z]{3}', code) or code == 'USD':
         return {'disponible': False, 'motivo': 'Dime de qué moneda quieres el tipo de cambio.'}
     from exchange_rates.services import exchange_rate_service
@@ -424,8 +433,9 @@ def _ondo_decision(viewer):
             where = country_for_request(viewer.request_meta)
         except Exception:  # noqa: BLE001
             where = None
-        return False, (f'Se está conectando desde {where or "otro país"}, donde el emisor (Ondo) no permite estas '
-                       'inversiones; no es por el país de su teléfono.')
+        return False, (f'Se está conectando desde {COUNTRY_NAMES_ES.get(where, "otro país")}, donde el emisor (Ondo) '
+                       'no permite estas inversiones; no es por el país de su teléfono. No le sugieras conectarse desde '
+                       'otro lugar ni usar una VPN.')
     from security.geo import phone_country_of
     if not phone_country_of(viewer.user):
         return False, 'Su cuenta no tiene un país de teléfono verificado.'

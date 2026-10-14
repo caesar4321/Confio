@@ -1363,7 +1363,8 @@ class PortfolioAndNeedsTests(TestCase):
             policy.evaluate.return_value = SimpleNamespace(allowed=True, blocked_by=None)
             allowed = portfolio_data(viewer)
         self.assertIs(by_ip['acciones_y_confio_dollar_plus_disponibles'], False)
-        self.assertIn('desde BR', by_ip['motivo_no_disponible'])
+        self.assertIn('desde Brasil', by_ip['motivo_no_disponible'])
+        self.assertIn('VPN', by_ip['motivo_no_disponible'])
         self.assertIn('no es por el país de su teléfono', by_ip['motivo_no_disponible'])
         self.assertIn('país de su teléfono', by_phone['motivo_no_disponible'])
         self.assertNotIn('Se está conectando', by_phone['motivo_no_disponible'])
@@ -1906,3 +1907,7 @@ class ExchangeRateToolTests(TestCase):
             self.assertFalse(exchange_rate_data(self.viewer, 'usd')['disponible'])
             self.assertFalse(exchange_rate_data(self.viewer, 'XYZ')['disponible'])
             self.assertFalse(exchange_rate_data(self.viewer, 'bolivianos')['disponible'])
+        # Dollarized country, no currency named: says there's nothing to convert.
+        ecuador = Viewer(user=SimpleNamespace(id=2, phone_country='EC'), account=None, account_type='personal',
+                         business_id=None, is_business_owner=False, tz=ZoneInfo('America/Guayaquil'))
+        self.assertIn('dólar estadounidense', exchange_rate_data(ecuador, None)['motivo'])

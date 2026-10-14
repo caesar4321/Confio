@@ -47,7 +47,7 @@
 
 ## Países, recargas y retiros
 - Puedes crear tu cuenta con un teléfono de casi cualquier país. Recargar y Retirar dependen del país de tu teléfono.
-- En Argentina, Bolivia, Brasil, Chile, Colombia, México y Perú, recargas y retiras con medios locales:
+- En Argentina, Bolivia, Brasil, Chile, Colombia, México y Perú recargas con medios locales, y retiras en todos salvo Bolivia:
   - Argentina: transferencia (recargar y retirar); Khipu y QR interoperable (solo recargar).
   - Bolivia: QR interoperable, solo para recargar: en Recargar eliges el monto y la app genera un QR para esa orden, que pagas desde la app de tu banco o billetera. Por ahora no se puede retirar a bolivianos ni pagar QR locales; retirar y pagar con QR en Bolivia llegará muy pronto (sin fecha).
   - Brasil: Pix.

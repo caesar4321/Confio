@@ -121,9 +121,10 @@ class PaidOfferWaitlistTests(TestCase):
         self.assertTrue(offers['ia_plus'].on_waitlist)
         self.assertFalse(offers['ia_plus'].row_visible)  # the row is Cuenta inteligente's only
         self.assertTrue(offers['smart_account'].row_visible)
-        with patch('users.funding.has_funded', return_value=False):
+        # The row no longer reads funding at all (it was funded-only until 2026-10-14).
+        with patch('users.funding.has_funded', side_effect=AssertionError('row must not depend on funding')):
             unfunded = {o.product: o for o in _resolve(_info(self.ana))}
-        self.assertTrue(unfunded['smart_account'].row_visible)  # not funded-only any more
+        self.assertTrue(unfunded['smart_account'].row_visible)
         self.assertFalse(offers['smart_account'].on_waitlist)
         self.assertEqual(offers['smart_account'].monthly_price_usd, '9.99')
         with patch('users.funding.has_funded', return_value=True):

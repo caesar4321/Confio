@@ -16,11 +16,11 @@ from django.conf import settings
 from users.models import FunnelEvent
 from users.models_product_waitlist import ProductWaitlistEntry
 
-PREVIEW = {int(p) for p in str(getattr(settings, 'PAID_OFFER_PREVIEW_USER_IDS', '') or '').split(',') if p.strip()}
+PREVIEW = {int(p) for p in str(getattr(settings, 'PAID_OFFER_PREVIEW_USER_IDS', '') or '').split(',') if p.strip().isdigit()}
 STAGES = ('door_shown', 'detail_opened', 'avisame_tapped', 'solo_miraba', 'would_pay_answered', 'volume_answered')
 PRODUCTS = {'ia_plus': 'Confío IA+', 'smart_account': 'Cuenta inteligente'}
 
-events = FunnelEvent.objects.filter(event_name='paid_offer_interest').exclude(user_id__in=PREVIEW)
+events = FunnelEvent.objects.filter(event_name='paid_offer_interest', user__isnull=False).exclude(user_id__in=PREVIEW)
 first = events.order_by('created_at').values_list('created_at', flat=True).first()
 print(f"Probe events since {first:%Y-%m-%d %H:%M} UTC" if first else 'No probe events yet')
 
