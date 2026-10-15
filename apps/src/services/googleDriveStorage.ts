@@ -122,8 +122,13 @@ export const googleDriveStorage = {
      * @param accessToken - Valid Google OAuth Access Token
      * @param filename - Optional filename to filter by
      * @param trashed - Optional boolean to search trashed files (default false)
+     * @param beforePage - Asked before every page request; false stops the
+     *   listing as incomplete. Lets a caller's search budget count pages,
+     *   not calls.
      */
-    async listFiles(accessToken: string, filename?: string, trashed: boolean = false): Promise<DriveFile[]> {
+    async listFiles(
+        accessToken: string, filename?: string, trashed: boolean = false, beforePage?: () => boolean,
+    ): Promise<DriveFile[]> {
         try {
             // Build query - don't include 'spaces' here, it's a separate URL param
             let query = `trashed=${trashed}`;
@@ -135,6 +140,7 @@ export const googleDriveStorage = {
             const seenTokens = new Set<string>();
             let pageToken: string | undefined;
             do {
+                if (beforePage && !beforePage()) throw new GoogleDriveStorageError('list', 0, 'search_budget');
                 const response = await driveFetch(
                     'list',
                     `${DRIVE_API_URL}?spaces=appDataFolder&q=${encodeURIComponent(query)}&fields=files(id,name,modifiedTime),nextPageToken,incompleteSearch${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`,
@@ -211,11 +217,18 @@ export const googleDriveStorage = {
     /**
      * List revisions of a file
      */
-    async listRevisions(accessToken: string, fileId: string): Promise<any[]> {
-        try {
+    async listRevisions(accessToken: string, fileId: string, beforePage?: () => boolean): Promise<any[]> {
+        // Every page, like listFiles: a revision on page two is as much a
+        // backup as one on page one, and a search that stopped at the first
+        // page would report the key absent when it was only unread.
+        const revisions: any[] = [];
+        const seenTokens = new Set<string>();
+        let pageToken: string | undefined;
+        do {
+            if (beforePage && !beforePage()) throw new GoogleDriveStorageError('revisions', 0, 'search_budget');
             const response = await driveFetch(
                 'revisions',
-                `${DRIVE_API_URL}/${fileId}/revisions?fields=revisions(id,modifiedTime,keepForever,size)`,
+                `${DRIVE_API_URL}/${fileId}/revisions?pageSize=1000&fields=nextPageToken,revisions(id,modifiedTime,keepForever,size)${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`,
                 {
                     method: 'GET',
                     headers: {
@@ -227,10 +240,22 @@ export const googleDriveStorage = {
             if (!response.ok) throw await createDriveError('revisions', response);
 
             const data = await response.json();
-            return data.revisions || [];
-        } catch (e) {
-            throw e;
-        }
+            if (!data || typeof data !== 'object' || Array.isArray(data)
+                || (data.revisions !== undefined && !Array.isArray(data.revisions))
+                || (data.revisions || []).some((revision: any) => !revision || typeof revision.id !== 'string' || !revision.id)
+                || (data.nextPageToken !== undefined && (typeof data.nextPageToken !== 'string' || !data.nextPageToken))) {
+                throw new GoogleDriveStorageError('revisions', 0, 'incomplete_listing');
+            }
+            revisions.push(...(data.revisions || []));
+            pageToken = data.nextPageToken;
+            if (pageToken) {
+                if (seenTokens.has(pageToken) || seenTokens.size >= 100) {
+                    throw new GoogleDriveStorageError('revisions', 0, 'incomplete_listing');
+                }
+                seenTokens.add(pageToken);
+            }
+        } while (pageToken);
+        return revisions;
     },
 
     /**

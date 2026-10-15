@@ -50,6 +50,42 @@ describe('googleDriveStorage', () => {
         });
     });
 
+    it('reads every page of revisions, so a later revision is never reported absent', async () => {
+        globalThis.fetch = jest.fn()
+            .mockResolvedValueOnce({ ok: true, json: async () => ({ revisions: [{ id: 'r1' }], nextPageToken: 'next-page' }) })
+            .mockResolvedValueOnce({ ok: true, json: async () => ({ revisions: [{ id: 'r2' }] }) });
+        await expect(googleDriveStorage.listRevisions('token', 'file')).resolves.toEqual([{ id: 'r1' }, { id: 'r2' }]);
+        expect((globalThis.fetch as jest.Mock).mock.calls[0][0]).toContain('nextPageToken');
+        expect((globalThis.fetch as jest.Mock).mock.calls[1][0]).toContain('pageToken=next-page');
+    });
+
+    it.each([{ revisions: false }, { revisions: [{}] }, { revisions: [], nextPageToken: '' }])(
+        'does not treat a malformed revision page as an empty history: %j', async body => {
+            globalThis.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => body });
+            await expect(googleDriveStorage.listRevisions('token', 'file')).rejects.toMatchObject({
+                name: 'GoogleDriveStorageError', operation: 'revisions',
+            });
+        },
+    );
+
+    it.each(['listFiles', 'listRevisions'] as const)('%s stops before a page its caller has no budget for', async method => {
+        let page = 0;
+        globalThis.fetch = jest.fn().mockImplementation(async () =>
+            ({ ok: true, json: async () => ({ files: [], revisions: [], nextPageToken: `page-${++page}` }) }));
+        let allowed = 2;
+        const beforePage = () => allowed-- > 0;
+        const call = method === 'listFiles'
+            ? googleDriveStorage.listFiles('token', undefined, false, beforePage)
+            : googleDriveStorage.listRevisions('token', 'file', beforePage);
+        await expect(call).rejects.toMatchObject({ name: 'GoogleDriveStorageError', reason: 'search_budget' });
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects a repeated revision page token instead of looping indefinitely', async () => {
+        globalThis.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ revisions: [], nextPageToken: 'same' }) });
+        await expect(googleDriveStorage.listRevisions('token', 'file')).rejects.toMatchObject({ name: 'GoogleDriveStorageError' });
+    });
+
     it('types network failures without exposing transport diagnostics', async () => {
         globalThis.fetch = jest.fn().mockRejectedValue(new TypeError('private transport details'));
         await expect(googleDriveStorage.listFiles('token')).rejects.toMatchObject({

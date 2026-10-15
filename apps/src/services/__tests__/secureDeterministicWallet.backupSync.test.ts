@@ -402,6 +402,313 @@ describe('sign-in canonical wallet recovery', () => {
     });
   });
 
+  describe('registered wallet recovered from Drive history', () => {
+    // User 2785's shape: four twin manifests and payloads that all decrypt,
+    // none to the registered wallet - whose key was in Drive (migration
+    // confirmed it before sweeping) and was overwritten in place by a later
+    // write. Drive keeps earlier revisions; the current-files reader does not
+    // look at them.
+    const OTHER_SECRET = new Uint8Array(32).fill(19);
+    const personal = { accountType: 'personal' as const, accountIndex: 0 };
+    const AES = require('crypto-js/aes');
+    const encrypt = (secret: Uint8Array) =>
+      AES.encrypt(bytesToBase64(secret), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    const registered = [{ ...personal, algorandAddress: expectedAddress }];
+    type Rev = { id: string; content: string; modifiedTime: string };
+    type File = { id: string; name: string; content: string; modifiedTime: string; trashed?: boolean; revisions?: Rev[] };
+    let files: File[];
+
+    const install = () => {
+      (googleDriveStorage.listFiles as jest.Mock).mockImplementation(
+        async (_t: string, name?: string, trashed = false) =>
+          files.filter(f => !!f.trashed === trashed && (!name || f.name === name))
+            .map(f => ({ id: f.id, name: f.name, modifiedTime: f.modifiedTime })));
+      (googleDriveStorage.listRevisions as jest.Mock).mockImplementation(async (_t: string, fileId: string) =>
+        (files.find(f => f.id === fileId)?.revisions || []).map(r => ({ id: r.id, modifiedTime: r.modifiedTime })));
+      (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(
+        async (_t: string, fileId: string, revisionId?: string) => {
+          const file = files.find(f => f.id === fileId)!;
+          return revisionId ? file.revisions!.find(r => r.id === revisionId)!.content : file.content;
+        });
+      (googleDriveStorage.createFile as jest.Mock).mockImplementation(async (_t: string, name: string, content: string) => {
+        const id = `created-${files.length}`;
+        files.push({ id, name, content, modifiedTime: '2026-10-14T09:00:00Z' });
+        return id;
+      });
+    };
+    const overwritten = (): File[] => [
+      manifest('m1', 'w1', '2026-10-14T02:00:00Z'),
+      manifest('m2', 'w1', '2026-10-14T03:00:00Z'),
+      {
+        id: 'p1', name: 'confio_wallet_v2_w1.enc', content: encrypt(OTHER_SECRET), modifiedTime: '2026-10-14T03:00:00Z',
+        revisions: [{ id: 'r1', content: encrypt(MASTER_SECRET), modifiedTime: '2026-10-14T01:45:00Z' }],
+      },
+    ];
+    const manifest = (id: string, walletId: string, modifiedTime: string): File =>
+      ({ id, name: 'confio_wallet_manifest_v2.json', content: JSON.stringify({ wallets: [{ id: walletId }] }), modifiedTime });
+
+    it('recovers the registered wallet from an earlier revision of an overwritten payload', async () => {
+      files = [
+        manifest('m1', 'w1', '2026-10-14T02:00:00Z'),
+        manifest('m2', 'w1', '2026-10-14T03:00:00Z'),
+        {
+          id: 'p1', name: 'confio_wallet_v2_w1.enc', content: encrypt(OTHER_SECRET), modifiedTime: '2026-10-14T03:00:00Z',
+          // The registered key, as written at migration and later overwritten.
+          revisions: [{ id: 'r1', content: encrypt(MASTER_SECRET), modifiedTime: '2026-10-14T01:45:00Z' }],
+        },
+      ];
+      install();
+
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered });
+
+      expect(wallet?.algorandAddress).toBe(expectedAddress);
+    });
+
+    it('gives a recovered key a fresh wallet id, so the next backup cannot overwrite the other secret', async () => {
+      files = [
+        manifest('m1', 'w1', '2026-10-14T02:00:00Z'),
+        manifest('m2', 'w1', '2026-10-14T03:00:00Z'),
+        {
+          id: 'p1', name: 'confio_wallet_v2_w1.enc', content: encrypt(OTHER_SECRET), modifiedTime: '2026-10-14T03:00:00Z',
+          revisions: [{ id: 'r1', content: encrypt(MASTER_SECRET), modifiedTime: '2026-10-14T01:45:00Z' }],
+        },
+      ];
+      install();
+
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered });
+      await wallet!.persist();
+
+      const { credentialStorage } = require('../credentialStorage');
+      const storedIds = (credentialStorage.storeSecret as jest.Mock).mock.calls
+        .filter(([key]: [string]) => key.startsWith('confio_wallet_id_v2_'))
+        .map(([, value]: [string, Uint8Array]) => new TextDecoder().decode(value));
+      expect(storedIds).toHaveLength(1);
+      expect(storedIds[0]).not.toBe('w1');
+    });
+
+    it('recovers from a single corrupt current payload when a revision holds the registered wallet', async () => {
+      files = [
+        manifest('m1', 'w1', '2026-10-14T02:00:00Z'),
+        {
+          id: 'p1', name: 'confio_wallet_v2_w1.enc', content: 'corrupt payload', modifiedTime: '2026-10-14T02:00:00Z',
+          revisions: [{ id: 'r1', content: encrypt(MASTER_SECRET), modifiedTime: '2026-10-13T00:00:00Z' }],
+        },
+      ];
+      install();
+
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered });
+
+      expect(wallet?.algorandAddress).toBe(expectedAddress);
+    });
+
+    it('still refuses when no revision holds the registered wallet, and reports what history held', async () => {
+      files = [
+        manifest('m1', 'w1', '2026-10-14T02:00:00Z'),
+        manifest('m2', 'w1', '2026-10-14T03:00:00Z'),
+        {
+          id: 'p1', name: 'confio_wallet_v2_w1.enc', content: encrypt(OTHER_SECRET), modifiedTime: '2026-10-14T03:00:00Z',
+          revisions: [{ id: 'r1', content: encrypt(OTHER_SECRET), modifiedTime: '2026-10-14T01:45:00Z' }],
+        },
+      ];
+      install();
+      const evidenceSink: RecoveryEvidenceSink = {};
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered, evidenceSink }))
+        .rejects.toMatchObject({ code: 'unreadable' });
+
+      const shapes = (evidenceSink.current!.inventory as any[]).map(entry => entry.shape);
+      expect(shapes).toContain('revision');
+    });
+
+    it('never searches history without a registered address to match', async () => {
+      // Unanchored, the history search adopts the oldest backup, whoever's.
+      files = [
+        manifest('m1', 'w1', '2026-10-14T02:00:00Z'),
+        manifest('m2', 'w1', '2026-10-14T03:00:00Z'),
+        {
+          id: 'p1', name: 'confio_wallet_v2_w1.enc', content: encrypt(OTHER_SECRET), modifiedTime: '2026-10-14T03:00:00Z',
+          revisions: [{ id: 'r1', content: encrypt(MASTER_SECRET), modifiedTime: '2026-10-14T01:45:00Z' }],
+        },
+      ];
+      install();
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token'))
+        .rejects.toMatchObject({ code: 'unreadable' });
+      expect(googleDriveStorage.listRevisions).not.toHaveBeenCalled();
+    });
+
+    it('makes the recovered key a current backup before recording it as backed up', async () => {
+      // Revisions expire. Acknowledging a key whose only copy is a revision
+      // would lock this user out again the day that revision is purged.
+      files = overwritten();
+      install();
+
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered });
+      await wallet!.persist();
+
+      // Created, never updated: every existing file may hold another wallet.
+      expect(googleDriveStorage.updateFile).not.toHaveBeenCalled();
+      const created = (googleDriveStorage.createFile as jest.Mock).mock.calls.map(([, name]) => name);
+      expect(created).toHaveLength(2);
+      expect(created[1]).toBe('confio_wallet_manifest_v2.json');
+      const { credentialStorage } = require('../credentialStorage');
+      const receiptOrder = (credentialStorage.storeSecret as jest.Mock).mock.invocationCallOrder[0];
+      const createOrder = (googleDriveStorage.createFile as jest.Mock).mock.invocationCallOrder;
+      expect(Math.max(...createOrder)).toBeLessThan(receiptOrder);
+
+      // The next sign-in finds it among the CURRENT files, with no history.
+      (googleDriveStorage.listRevisions as jest.Mock).mockRejectedValue(new Error('history not needed'));
+      const again = await getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered });
+      expect(again?.algorandAddress).toBe(expectedAddress);
+      // Under the id the device now stores, so later backups go to that file.
+      const storedId = (credentialStorage.storeSecret as jest.Mock).mock.calls
+        .filter(([key]: [string]) => key.startsWith('confio_wallet_id_v2_'))
+        .map(([, value]: [string, Uint8Array]) => new TextDecoder().decode(value))[0];
+      expect(created[0]).toBe(`confio_wallet_v2_${storedId}.enc`);
+    });
+
+    it('records nothing when the restored backup does not read back as the recovered key', async () => {
+      files = overwritten();
+      install();
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered });
+      (googleDriveStorage.createFile as jest.Mock).mockImplementation(async (_t: string, name: string) => {
+        files.push({ id: 'garbled', name, content: encrypt(OTHER_SECRET), modifiedTime: '2026-10-14T09:00:00Z' });
+        return 'garbled';
+      });
+
+      await expect(wallet!.persist()).rejects.toMatchObject({ code: 'unexpected' });
+
+      const { credentialStorage } = require('../credentialStorage');
+      expect(credentialStorage.storeSecret).not.toHaveBeenCalled();
+      // No manifest names a payload that failed verification.
+      expect((googleDriveStorage.createFile as jest.Mock).mock.calls).toHaveLength(1);
+    });
+
+    it('recovers user 2785\'s shape: four manifests, four other wallets, the key in a revision', async () => {
+      files = [
+        ...[1, 2, 3, 4].map(n => manifest(`m${n}`, `w${n}`, `2026-10-14T0${n}:00:00Z`)),
+        ...[1, 2, 3, 4].map(n => ({
+          id: `p${n}`, name: `confio_wallet_v2_w${n}.enc`,
+          content: encrypt(new Uint8Array(32).fill(20 + n)), modifiedTime: `2026-10-14T0${n}:00:00Z`,
+          revisions: n === 3 ? [{ id: 'r3', content: encrypt(MASTER_SECRET), modifiedTime: '2026-10-14T01:45:00Z' }] : [],
+        })),
+      ];
+      install();
+
+      const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered });
+      await wallet!.persist();
+
+      expect(wallet?.algorandAddress).toBe(expectedAddress);
+      // A second device restoring at the same moment still leaves the next
+      // sign-in within the bound.
+      const restored = files.filter(f => f.id.startsWith('created-'));
+      files.push(...restored.map(f => ({ ...f, id: `${f.id}-twin` })));
+      (googleDriveStorage.listRevisions as jest.Mock).mockRejectedValue(new Error('history not needed'));
+      const again = await getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered });
+      expect(again?.algorandAddress).toBe(expectedAddress);
+    });
+
+    it('does not search history when there is no room to restore a current backup', async () => {
+      // Restoring adds a manifest, and so may a second device at the same
+      // moment. Past the bound, the next sign-in would refuse as over-bound
+      // and never reach history again.
+      files = [
+        ...Array.from({ length: 5 }, (_, index) => manifest(`m${index}`, 'w1', `2026-10-14T0${index}:00:00Z`)),
+        ...overwritten().slice(2),
+      ];
+      install();
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered }))
+        .rejects.toMatchObject({ code: 'unreadable' });
+      expect(googleDriveStorage.listRevisions).not.toHaveBeenCalled();
+    });
+
+    it('stops a history search that outgrows its budget and reports it unfinished', async () => {
+      files = overwritten();
+      files[2].revisions = Array.from({ length: 400 }, (_, index) => ({
+        id: `r${index}`, content: encrypt(OTHER_SECRET), modifiedTime: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(),
+      }));
+      install();
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered }))
+        .rejects.toMatchObject({ code: 'drive_access' });
+      const downloads = (googleDriveStorage.downloadFile as jest.Mock).mock.calls.length;
+      expect(downloads).toBeLessThan(320);
+    });
+
+    it('charges every listing page to the budget, so a slow paginated history still stops', async () => {
+      files = overwritten();
+      install();
+      let now = Date.parse('2026-10-14T10:00:00Z');
+      const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+      let pages = 0;
+      (googleDriveStorage.listRevisions as jest.Mock).mockImplementation(
+        async (_t: string, _id: string, beforePage?: () => boolean) => {
+          // A thousand-page revision listing, ten seconds a page.
+          for (let page = 0; page < 1000; page += 1) {
+            if (beforePage && !beforePage()) throw new GoogleDriveStorageError('revisions', 0, 'search_budget');
+            pages += 1;
+            now += 10_000;
+          }
+          return [];
+        });
+      try {
+        await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered }))
+          .rejects.toMatchObject({ code: 'drive_access' });
+      } finally {
+        clock.mockRestore();
+      }
+      expect(pages).toBeLessThanOrEqual(12);
+    });
+
+    it('charges the manifest listing to the budget too', async () => {
+      files = overwritten();
+      install();
+      let now = Date.parse('2026-10-14T10:00:00Z');
+      const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+      const listFiles = (googleDriveStorage.listFiles as jest.Mock).getMockImplementation()!;
+      let manifestPages = 0;
+      let searching = false;
+      (googleDriveStorage.listRevisions as jest.Mock).mockImplementation(async () => {
+        searching = true;
+        throw new Error('the search must stop before revisions');
+      });
+      (googleDriveStorage.listFiles as jest.Mock).mockImplementation(
+        async (t: string, name?: string, trashed?: boolean, beforePage?: () => boolean) => {
+          if (beforePage && name === 'confio_wallet_manifest_v2.json') {
+            // The history search's own manifest read: a thousand slow pages.
+            for (let page = 0; page < 1000; page += 1) {
+              if (!beforePage()) throw new GoogleDriveStorageError('list', 0, 'search_budget');
+              manifestPages += 1;
+              now += 10_000;
+            }
+          }
+          return listFiles(t, name, trashed);
+        });
+      try {
+        await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered }))
+          .rejects.toMatchObject({ code: 'drive_access' });
+      } finally {
+        clock.mockRestore();
+      }
+      expect(manifestPages).toBeLessThanOrEqual(12);
+      expect(searching).toBe(false);
+    });
+
+    it('reports a history search that could not finish as a Drive failure', async () => {
+      files = [
+        manifest('m1', 'w1', '2026-10-14T02:00:00Z'),
+        manifest('m2', 'w1', '2026-10-14T03:00:00Z'),
+        { id: 'p1', name: 'confio_wallet_v2_w1.enc', content: encrypt(OTHER_SECRET), modifiedTime: '2026-10-14T03:00:00Z' },
+      ];
+      install();
+      (googleDriveStorage.listRevisions as jest.Mock).mockRejectedValue(new Error('revisions unavailable'));
+
+      await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { anchors: registered }))
+        .rejects.toMatchObject({ code: 'drive_access' });
+    });
+  });
+
   describe('confirmed missing backup replacement', () => {
     const files = new Map<string, string>();
     const ids = new Map<string, string>();
@@ -1807,5 +2114,47 @@ describe('backup writer never adds a second manifest', () => {
     expect(manifests()).toHaveLength(2);
     expect(JSON.parse(files.get('twin-new')!.content).wallets).toHaveLength(1);
     expect(JSON.parse(files.get('twin-old')!.content).wallets).toHaveLength(0);
+  });
+
+  it('never adopts the id of a file whose history, not its content, held the key', async () => {
+    // The oldest anchored match is an old revision of a payload that now
+    // holds another secret. Adopting that file's id would update it in
+    // place and bury the other secret the way this key was once buried.
+    const AES = require('crypto-js/aes');
+    const encrypt = (secret: Uint8Array) =>
+      AES.encrypt(bytesToBase64(secret), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    const otherBody = encrypt(new Uint8Array(32).fill(19));
+    files.set('manifest-w1', { name: MANIFEST, content: JSON.stringify({ wallets: [{ id: 'w1' }] }), modifiedTime: '2026-10-13T00:00:00Z' });
+    files.set('payload-w1', { name: 'confio_wallet_v2_w1.enc', content: otherBody, modifiedTime: '2026-10-13T00:00:00Z' });
+    (googleDriveStorage.listRevisions as jest.Mock).mockImplementation(async (_t: string, id: string) =>
+      id === 'payload-w1' ? [{ id: 'r1', modifiedTime: '2026-10-01T00:00:00Z' }] : []);
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t: string, id: string, revisionId?: string) =>
+      revisionId ? encrypt(MASTER_SECRET) : files.get(id)!.content);
+
+    await backUp();
+
+    expect(files.get('payload-w1')!.content).toBe(otherBody);
+    expect([...files.values()].filter(file => /^confio_wallet_v2_.+\.enc$/.test(file.name))).toHaveLength(2);
+  });
+
+  it('never reuses this device\'s id for a history-found key when that id\'s file now holds another', async () => {
+    // Local A under id w-local; another device since overwrote w-local's
+    // payload with B; A survives in its history. Keeping w-local would
+    // update that payload over B.
+    const AES = require('crypto-js/aes');
+    const encrypt = (secret: Uint8Array) =>
+      AES.encrypt(bytesToBase64(secret), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    const otherBody = encrypt(new Uint8Array(32).fill(19));
+    const localId = '11111111-2222-4333-8444-555555555555';
+    files.set('manifest', { name: MANIFEST, content: JSON.stringify({ wallets: [{ id: localId }] }), modifiedTime: '2026-10-13T00:00:00Z' });
+    files.set('payload-local', { name: `confio_wallet_v2_${localId}.enc`, content: otherBody, modifiedTime: '2026-10-13T00:00:00Z' });
+    (googleDriveStorage.listRevisions as jest.Mock).mockImplementation(async (_t: string, id: string) =>
+      id === 'payload-local' ? [{ id: 'r1', modifiedTime: '2026-10-01T00:00:00Z' }] : []);
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t: string, id: string, revisionId?: string) =>
+      revisionId ? encrypt(MASTER_SECRET) : files.get(id)!.content);
+
+    await backUp();
+
+    expect(files.get('payload-local')!.content).toBe(otherBody);
   });
 });

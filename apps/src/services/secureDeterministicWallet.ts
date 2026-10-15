@@ -516,6 +516,10 @@ interface OldestDriveBackupResult {
   foundAny: boolean;
   secret: Uint8Array | null;
   walletId: string | null;
+  // The secret came from a revision or a trashed file. Its walletId then
+  // names a file whose CURRENT content may be another secret, so a writer
+  // must not adopt that id and update the file in place.
+  fromHistory?: boolean;
   deviceHint?: string | null;
   foundDecryptable?: boolean;
   // Whether the manifest contains entries from other OAuth identities,
@@ -870,10 +874,17 @@ function generateUUID(): string {
 /**
  * Helper to fetch and parse the manifest
  */
-async function fetchManifest(googleDriveStorage: any, accessToken: string): Promise<WalletManifest> {
+async function fetchManifest(
+  googleDriveStorage: any,
+  accessToken: string,
+  // A caller's search budget, asked before every request. Running out reads
+  // as no manifest here; the caller sees its own budget spent and stops.
+  beforeRequest?: () => boolean,
+): Promise<WalletManifest> {
   try {
-    const files = await googleDriveStorage.listFiles(accessToken, MANIFEST_FILENAME);
+    const files = await googleDriveStorage.listFiles(accessToken, MANIFEST_FILENAME, false, beforeRequest);
     if (files.length > 0) {
+      if (beforeRequest && !beforeRequest()) return { wallets: [] };
       const content = await googleDriveStorage.downloadFile(accessToken, files[0].id);
       const parsed = JSON.parse(content);
       // Valid JSON is not a valid manifest. Callers immediately do
@@ -1049,6 +1060,13 @@ async function findOldestRestorableDriveBackup(
   expectedEvmAddress?: string | null,
   // Where this attempt leaves what it saw, win or lose.
   evidenceSink?: RecoveryEvidenceSink,
+  // A ceiling on the whole search. Without one, a Drive with hundreds of
+  // files and revisions holds sign-in for as long as it takes to download
+  // every one of them. Running out is an incomplete search ('drive_access'),
+  // never a verdict that the key is absent. Every Drive request is charged,
+  // listing pages included, so the overrun is at most the one request in
+  // flight when the deadline passes.
+  budget?: { deadline: number; maxRequests: number },
 ): Promise<OldestDriveBackupResult> {
   // A candidate must derive to EVERY anchor the caller supplied, not any one
   // of them. Google login supplies both the Algorand and the BSC address, and
@@ -1075,6 +1093,20 @@ async function findOldestRestorableDriveBackup(
   // rather than add a second one: duplicates spend the 25 slots a
   // multi-backup Drive needs, and the scan usually knows MORE.
   const describedSlots = new Map<string, number>();
+  let incompleteSearch = false;
+  let budgetSpent = false;
+  let requestsSpent = 0;
+  // Claims one Drive request from the budget, or reports that it is spent.
+  const withinBudget = (): boolean => {
+    if (!budget) return true;
+    if (requestsSpent >= budget.maxRequests || Date.now() >= budget.deadline) {
+      incompleteSearch = true;
+      budgetSpent = true;
+      return false;
+    }
+    requestsSpent += 1;
+    return true;
+  };
   // Record what the scan learned WITHOUT touching what is thrown: callers
   // tell a GoogleDriveStorageError apart by class and status to decide
   // whether to reauthorize Drive, so converting one here would break the
@@ -1087,7 +1119,8 @@ async function findOldestRestorableDriveBackup(
   };
   const abandon = (code: 'drive_access' | 'unexpected' | 'missing') =>
     publishEvidence(new WalletRecoveryError(code));
-  const manifest = await fetchManifest(googleDriveStorage, accessToken);
+  const manifest = await fetchManifest(googleDriveStorage, accessToken, budget ? withinBudget : undefined);
+  if (budgetSpent) throw abandon('drive_access');
   const manifestById = new Map(
     manifest.wallets
       .filter(entry => !!entry.id)
@@ -1116,9 +1149,10 @@ async function findOldestRestorableDriveBackup(
   if ((expectedAddress || expectedEvmAddress) && manifest.wallets.length > 0) {
     for (const entry of manifest.wallets) {
       if (!entry.id) continue;
+      if (budgetSpent) break;
       const filename = `confio_wallet_v2_${entry.id}.enc`;
       try {
-        const matches = await googleDriveStorage.listFiles(accessToken, filename);
+        const matches = await googleDriveStorage.listFiles(accessToken, filename, false, withinBudget);
         if (matches.length === 0) continue;
         // The fast path reads real files, so what it learns is evidence
         // too: an error after this point must not report an empty Drive.
@@ -1132,6 +1166,7 @@ async function findOldestRestorableDriveBackup(
           });
         }
         let content: string;
+        if (!withinBudget()) break;
         try {
           content = await googleDriveStorage.downloadFile(accessToken, matches[0].id);
         } catch (error) {
@@ -1187,15 +1222,14 @@ async function findOldestRestorableDriveBackup(
 
   let activeFiles: any[];
   try {
-    activeFiles = await googleDriveStorage.listFiles(accessToken);
+    activeFiles = await googleDriveStorage.listFiles(accessToken, undefined, false, withinBudget);
   } catch (error) {
     // Whatever the fast path already learned travels with this failure.
     throw publishEvidence(error);
   }
   let trashedFiles: any[] = [];
-  let incompleteSearch = false;
   try {
-    trashedFiles = await googleDriveStorage.listFiles(accessToken, undefined, true);
+    trashedFiles = await googleDriveStorage.listFiles(accessToken, undefined, true, withinBudget);
   } catch (e) {
     console.warn('[MasterSecret] Failed to list trashed Drive backups:', e);
     incompleteSearch = true;
@@ -1248,8 +1282,9 @@ async function findOldestRestorableDriveBackup(
       deviceHint: manifestEntry?.deviceHint,
     });
 
+    if (budgetSpent) break;
     try {
-      const revisions = await googleDriveStorage.listRevisions(accessToken, file.id);
+      const revisions = await googleDriveStorage.listRevisions(accessToken, file.id, withinBudget);
       for (const revision of revisions || []) {
         candidates.push({
           fileId: file.id,
@@ -1275,6 +1310,7 @@ async function findOldestRestorableDriveBackup(
 
   let candidateValidationFailed = false;
   for (const candidate of candidates) {
+    if (!withinBudget()) break;
     let downloaded = false;
     const shape: DriveCandidateReport['shape'] = candidate.revisionId
       ? 'revision'
@@ -1341,6 +1377,7 @@ async function findOldestRestorableDriveBackup(
           foundAny: true,
           secret: decrypted,
           walletId: candidate.walletId || null,
+          fromHistory: !!candidate.revisionId || trashedIds.has(candidate.fileId),
           deviceHint: candidate.deviceHint || null,
           foundDecryptable,
           manifestHasAndroidEntry,
@@ -2129,6 +2166,14 @@ export async function getSignInWalletCandidate(userSub: string, driveToken?: str
 // files up by name, so an account can hold twins of its manifest or payload.
 // Bounded so a Drive full of them cannot turn sign-in into a download storm.
 const MAX_DUPLICATE_CANDIDATES = 6;
+// The history search reads every file and revision. Bounded so a Drive full
+// of them answers "try again" within minutes instead of never.
+const HISTORY_SEARCH_MS = 120_000;
+const HISTORY_SEARCH_MAX_REQUESTS = 300;
+// Restoring a key from history adds one manifest and one payload. Two devices
+// restoring at the same moment add two of each, and the next sign-in must
+// still be within the bound, so history is searched only with that headroom.
+const HISTORY_RESTORE_ROOM = MAX_DUPLICATE_CANDIDATES - 2;
 
 type AnchorRegistration = {
   accountType: 'personal' | 'business'; accountIndex: number; businessId?: string | null;
@@ -2186,6 +2231,93 @@ function chooseRecoveredSecret(
   return matching.length === 1 ? matching[0] : null;
 }
 
+/**
+ * The registered wallet's key from anywhere in Drive's history, or null.
+ *
+ * Sign-in reads only the current manifest and payload files. When those
+ * cannot be adopted - duplicates holding some other wallet, or a corrupt
+ * current payload - the key may still exist in an earlier REVISION of a
+ * payload, or in trash: the backup writer updates payloads in place, so a
+ * later write from a device holding a different secret replaces the current
+ * content but not the history. findOldestRestorableDriveBackup scans active
+ * files, trash and every revision.
+ *
+ * It must never run unanchored - with no anchors it adopts the oldest
+ * backup, whoever's it is - so the registered primary account's address is
+ * required, and the result is checked again against EVERY registration.
+ * Adopting the wallet the account already has replaces nothing.
+ */
+async function recoverRegisteredWalletFromHistory(
+  driveToken: string,
+  userSub: string,
+  googleDriveStorage: any,
+  anchors: AnchorRegistration[] | undefined,
+  probe: DriveCandidateReport[],
+): Promise<Uint8Array | null> {
+  const primary = (anchors || []).find(row =>
+    row.accountType === 'personal' && row.accountIndex === 0 && !row.businessId);
+  const expectedAddress = primary?.algorandAddress || null;
+  const expectedEvmAddress = primary?.bscAddress || null;
+  if (!expectedAddress && !expectedEvmAddress) return null;
+  const historySink: RecoveryEvidenceSink = {};
+  try {
+    const restore = await findOldestRestorableDriveBackup(
+      driveToken, userSub, googleDriveStorage,
+      require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'),
+      expectedAddress, expectedEvmAddress, historySink,
+      { deadline: Date.now() + HISTORY_SEARCH_MS, maxRequests: HISTORY_SEARCH_MAX_REQUESTS },
+    );
+    if (!restore.secret) return null;
+    // Same rule as duplicates: the one secret every registration derives from.
+    return chooseRecoveredSecret([restore.secret], false, anchors);
+  } catch (error) {
+    // A search that could not finish is reported as such; anything else
+    // leaves the original refusal standing.
+    const driveFailure = (error as any)?.name === 'GoogleDriveStorageError'
+      || (error instanceof WalletRecoveryError && error.code === 'drive_access');
+    if (driveFailure) throw error;
+    console.warn('[MasterSecret] History search for the registered wallet failed:', errorKind(error));
+    return null;
+  } finally {
+    // What the history search saw travels with the report, so the next
+    // diagnostic says whether the registered wallet was in Drive at all.
+    for (const entry of (historySink.current?.inventory || []) as DriveCandidateReport[]) {
+      if (probe.length >= 25) break;
+      probe.push(entry);
+    }
+  }
+}
+
+/**
+ * Make a key recovered from Drive history a current backup again.
+ *
+ * A NEW payload and a NEW manifest naming it, both created, never updated:
+ * every existing file may belong to some other wallet, and overwriting one
+ * in place is how this key was most likely lost. The next sign-in then finds
+ * the registered wallet among the current duplicates, where
+ * chooseRecoveredSecret picks it by its anchors, without searching history.
+ * The payload is read back and compared before the manifest names it.
+ */
+async function restoreHistoricalBackup(
+  driveToken: string,
+  secret: Uint8Array,
+  walletId: string,
+): Promise<void> {
+  const { googleDriveStorage } = await import('./googleDriveStorage');
+  const payloadId = await googleDriveStorage.createFile(
+    driveToken, `confio_wallet_v2_${walletId}.enc`,
+    `${DRIVE_SECURITY_HEADER}\n${encryptBackupV2(secret, APP_BACKUP_KEY)}`);
+  const body = await googleDriveStorage.downloadFile(driveToken, payloadId);
+  const reread = decryptBackupDetailed(
+    body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8')).secret;
+  if (!reread || !secretsEqual(reread, secret)) throw new WalletRecoveryError('unexpected');
+  const now = new Date().toISOString();
+  await googleDriveStorage.createFile(driveToken, MANIFEST_FILENAME, JSON.stringify({ wallets: [{
+    id: walletId, createdAt: now, lastBackupAt: now,
+    deviceHint: `${await DeviceInfo.getDeviceName()} (${Platform.OS})`, providerHint: 'Google',
+  }] }));
+}
+
 async function getSignInWalletCandidateInner(userSub: string, driveToken?: string, options?: {
   // Compatibility-only recovery of the old subject-named file. Every known
   // registration must match; this path must never authorize replacement.
@@ -2221,6 +2353,8 @@ async function getSignInWalletCandidateInner(userSub: string, driveToken?: strin
   const pendingReportAlias = `confio_backup_report_pending_v1_${safeSub}`;
   let secret: Uint8Array | null;
   let walletId: string | null = null;
+  // Set when the key came from Drive history rather than a current file.
+  let restoreCurrentBackup = false;
   if (driveToken) {
     const { googleDriveStorage } = await import('./googleDriveStorage');
     const manifests = await googleDriveStorage.listFiles(driveToken, MANIFEST_FILENAME);
@@ -2262,117 +2396,155 @@ async function getSignInWalletCandidateInner(userSub: string, driveToken?: strin
         legacySecrets, files.length === 1 && legacySecrets.length === 1, options.legacyRegistrations);
       if (!secret) throw new WalletRecoveryError('unreadable');
     } else {
-      if (!manifests.length) throw new WalletRecoveryError('missing');
-      // Twins are expected, not exotic: Drive does not keep names unique and
-      // the writer used to create by name. Read every candidate and let
-      // chooseRecoveredSecret decide; ambiguity is still never permission to
-      // pick another wallet or generate a key.
-      if (manifests.length > MAX_DUPLICATE_CANDIDATES) throw new WalletRecoveryError('unreadable');
-      const recovered: Array<{ secret: Uint8Array; walletId: string; manifestTime: number }> = [];
-      // Twin manifests often name the SAME wallet. List each wallet id once
-      // and read each payload file once, so the bound counts files rather
-      // than visits and the diagnostic describes every file exactly once.
-      const payloadsByWallet = new Map<string, Array<{ id: string }>>();
-      const readByFile = new Map<string, Uint8Array | null>();
-      // Every listed payload gets its diagnostic slot when it is LISTED, not
-      // when it is read: if recovery stops early - the bound trips, or a
-      // download fails - the files it never reached still show up, as
-      // 'unknown', instead of vanishing from the report.
-      const slotByFile = new Map<string, number>();
-      let manifestMalformed = false;
-      let manifestWithoutPayload = false;
-      // Phase 1: read every manifest and list every payload it names, and
-      // only then decide whether this Drive is within bounds. Checking as
-      // we went let one manifest's payloads download before a later
-      // manifest's listing tripped the bound.
-      const named: Array<{ walletId: string; manifestTime: number }> = [];
-      for (let index = 0; index < manifests.length; index += 1) {
-        let manifestBody: string;
-        try {
-          manifestBody = await googleDriveStorage.downloadFile(driveToken, manifests[index].id);
-        } catch (error) {
-          // An incomplete read is never a decision: rethrow, do not pick.
-          describe(index, { outcome: 'download_failed' });
-          throw error;
+      // Set only when the six-file bound refuses. That refusal is final: the
+      // bound exists to stop a download storm on an oversized Drive, and the
+      // history search below downloads every file and every revision.
+      let overBound = false;
+      // Payload files the manifests name, once listed.
+      let payloadFilesSeen = 0;
+      try {
+        if (!manifests.length) throw new WalletRecoveryError('missing');
+        // Twins are expected, not exotic: Drive does not keep names unique and
+        // the writer used to create by name. Read every candidate and let
+        // chooseRecoveredSecret decide; ambiguity is still never permission to
+        // pick another wallet or generate a key.
+        if (manifests.length > MAX_DUPLICATE_CANDIDATES) {
+          overBound = true;
+          throw new WalletRecoveryError('unreadable');
         }
-        describe(index, { format: classifyBackupBody(manifestBody), bytes: manifestBody.length, outcome: 'parsed' });
-        let manifest: any;
-        try {
-          manifest = JSON.parse(manifestBody);
-        } catch (error) {
-          describe(index, { outcome: 'malformed' });
-          if (!(error instanceof SyntaxError)) throw error;
-          manifestMalformed = true;
-          continue;
-        }
-        const candidateId = Array.isArray(manifest?.wallets) && manifest.wallets.length === 1
-          ? manifest.wallets[0]?.id
-          : undefined;
-        if (typeof candidateId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(candidateId)) {
-          describe(index, { outcome: 'malformed' });
-          manifestMalformed = true;
-          continue;
-        }
-        named.push({ walletId: candidateId, manifestTime: getBackupTime(manifests[index]) });
-        if (!payloadsByWallet.has(candidateId)) {
-          const files = await googleDriveStorage.listFiles(driveToken, `confio_wallet_v2_${candidateId}.enc`);
-          payloadsByWallet.set(candidateId, files);
-          for (const file of files) {
-            if (!slotByFile.has(file.id)) {
-              slotByFile.set(file.id, probe.length);
-              note('payload');
+        const recovered: Array<{ secret: Uint8Array; walletId: string; manifestTime: number }> = [];
+        // Twin manifests often name the SAME wallet. List each wallet id once
+        // and read each payload file once, so the bound counts files rather
+        // than visits and the diagnostic describes every file exactly once.
+        const payloadsByWallet = new Map<string, Array<{ id: string }>>();
+        const readByFile = new Map<string, Uint8Array | null>();
+        // Every listed payload gets its diagnostic slot when it is LISTED, not
+        // when it is read: if recovery stops early - the bound trips, or a
+        // download fails - the files it never reached still show up, as
+        // 'unknown', instead of vanishing from the report.
+        const slotByFile = new Map<string, number>();
+        let manifestMalformed = false;
+        let manifestWithoutPayload = false;
+        // Phase 1: read every manifest and list every payload it names, and
+        // only then decide whether this Drive is within bounds. Checking as
+        // we went let one manifest's payloads download before a later
+        // manifest's listing tripped the bound.
+        const named: Array<{ walletId: string; manifestTime: number }> = [];
+        for (let index = 0; index < manifests.length; index += 1) {
+          let manifestBody: string;
+          try {
+            manifestBody = await googleDriveStorage.downloadFile(driveToken, manifests[index].id);
+          } catch (error) {
+            // An incomplete read is never a decision: rethrow, do not pick.
+            describe(index, { outcome: 'download_failed' });
+            throw error;
+          }
+          describe(index, { format: classifyBackupBody(manifestBody), bytes: manifestBody.length, outcome: 'parsed' });
+          let manifest: any;
+          try {
+            manifest = JSON.parse(manifestBody);
+          } catch (error) {
+            describe(index, { outcome: 'malformed' });
+            if (!(error instanceof SyntaxError)) throw error;
+            manifestMalformed = true;
+            continue;
+          }
+          const candidateId = Array.isArray(manifest?.wallets) && manifest.wallets.length === 1
+            ? manifest.wallets[0]?.id
+            : undefined;
+          if (typeof candidateId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(candidateId)) {
+            describe(index, { outcome: 'malformed' });
+            manifestMalformed = true;
+            continue;
+          }
+          named.push({ walletId: candidateId, manifestTime: getBackupTime(manifests[index]) });
+          if (!payloadsByWallet.has(candidateId)) {
+            const files = await googleDriveStorage.listFiles(driveToken, `confio_wallet_v2_${candidateId}.enc`);
+            payloadsByWallet.set(candidateId, files);
+            for (const file of files) {
+              if (!slotByFile.has(file.id)) {
+                slotByFile.set(file.id, probe.length);
+                note('payload');
+              }
             }
           }
+          // A manifest whose payload is gone may name the REAL wallet. Its
+          // absence is not evidence that a readable twin is the right one.
+          if (!payloadsByWallet.get(candidateId)!.length) manifestWithoutPayload = true;
         }
-        // A manifest whose payload is gone may name the REAL wallet. Its
-        // absence is not evidence that a readable twin is the right one.
-        if (!payloadsByWallet.get(candidateId)!.length) manifestWithoutPayload = true;
-      }
-      if (slotByFile.size > MAX_DUPLICATE_CANDIDATES) throw new WalletRecoveryError('unreadable');
-      // Phase 2: read each distinct payload exactly once.
-      for (const [fileId, slot] of slotByFile) {
-        let body: string;
-        try {
-          body = await googleDriveStorage.downloadFile(driveToken, fileId);
-        } catch (error) {
-          describe(slot, { outcome: 'download_failed' });
-          throw error;
+        payloadFilesSeen = slotByFile.size;
+        if (slotByFile.size > MAX_DUPLICATE_CANDIDATES) {
+          overBound = true;
+          throw new WalletRecoveryError('unreadable');
         }
-        const read = decryptBackupDetailed(
-          body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
-        describe(slot, { format: classifyBackupBody(body), outcome: read.reason, bytes: body.length });
-        readByFile.set(fileId, read.secret);
-      }
-      for (const { walletId: candidateId, manifestTime } of named) {
-        for (const file of payloadsByWallet.get(candidateId)!) {
-          const secretRead = readByFile.get(file.id);
-          if (secretRead) recovered.push({ secret: secretRead, walletId: candidateId, manifestTime });
+        // Phase 2: read each distinct payload exactly once.
+        for (const [fileId, slot] of slotByFile) {
+          let body: string;
+          try {
+            body = await googleDriveStorage.downloadFile(driveToken, fileId);
+          } catch (error) {
+            describe(slot, { outcome: 'download_failed' });
+            throw error;
+          }
+          const read = decryptBackupDetailed(
+            body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+          describe(slot, { format: classifyBackupBody(body), outcome: read.reason, bytes: body.length });
+          readByFile.set(fileId, read.secret);
         }
-      }
-      if (!recovered.length) {
-        // Exactly one clean manifest that points at no payload is what
-        // 'missing' has always meant, and it is what lets provisioning run.
-        // Anything else is evidence of a backup we could not read, and must
-        // never become permission to generate a replacement.
-        if (manifests.length === 1 && !manifestMalformed && readByFile.size === 0) {
-          throw new WalletRecoveryError('missing');
+        for (const { walletId: candidateId, manifestTime } of named) {
+          for (const file of payloadsByWallet.get(candidateId)!) {
+            const secretRead = readByFile.get(file.id);
+            if (secretRead) recovered.push({ secret: secretRead, walletId: candidateId, manifestTime });
+          }
         }
-        throw new WalletRecoveryError('unreadable');
+        if (!recovered.length) {
+          // Exactly one clean manifest that points at no payload is what
+          // 'missing' has always meant, and it is what lets provisioning run.
+          // Anything else is evidence of a backup we could not read, and must
+          // never become permission to generate a replacement.
+          if (manifests.length === 1 && !manifestMalformed && readByFile.size === 0) {
+            throw new WalletRecoveryError('missing');
+          }
+          throw new WalletRecoveryError('unreadable');
+        }
+        const unreadableFiles = [...readByFile.values()].some(value => !value);
+        const singleCleanBackup = manifests.length === 1 && readByFile.size === 1
+          && !manifestMalformed && !manifestWithoutPayload && !unreadableFiles;
+        const chosen = chooseRecoveredSecret(
+          recovered.map(entry => entry.secret), singleCleanBackup, options?.anchors);
+        if (!chosen) throw new WalletRecoveryError('unreadable');
+        // Twins of one secret can still name different wallet ids. Adopt the
+        // newest manifest's, as the reenrollment attestation already does, so
+        // every device converges on the same file.
+        const owner = recovered
+          .filter(entry => secretsEqual(entry.secret, chosen))
+          .sort((a, b) => (b.manifestTime - a.manifestTime) || a.walletId.localeCompare(b.walletId))[0];
+        walletId = owner.walletId;
+        secret = chosen;
+      } catch (error) {
+        // The current files could not be adopted. Before refusing, look
+        // for the REGISTERED wallet in Drive's history: a payload updated in
+        // place keeps its earlier revisions, so a key overwritten by a later
+        // write from another device can still be there. Only 'unreadable'
+        // gets this second look - 'missing' has its own path, and a Drive
+        // failure is never a decision.
+        if (!(error instanceof WalletRecoveryError) || error.code !== 'unreadable' || overBound) throw error;
+        // A key found in history is adopted only together with a new current
+        // backup. Without room for it - and for one concurrent restore from
+        // another device - the next sign-in would refuse as over-bound and
+        // never search history again.
+        if (manifests.length > HISTORY_RESTORE_ROOM || payloadFilesSeen > HISTORY_RESTORE_ROOM) throw error;
+        const history = await recoverRegisteredWalletFromHistory(
+          driveToken, userSub, googleDriveStorage, options?.anchors, probe);
+        if (!history) throw error;
+        secret = history;
+        // A FRESH wallet id, never the id of the file whose history held the
+        // key: that file's current content is a different secret, and the
+        // next backup would overwrite it in place - the same overwrite that
+        // most likely lost this key in the first place.
+        walletId = generateUUID();
+        restoreCurrentBackup = true;
       }
-      const unreadableFiles = [...readByFile.values()].some(value => !value);
-      const singleCleanBackup = manifests.length === 1 && readByFile.size === 1
-        && !manifestMalformed && !manifestWithoutPayload && !unreadableFiles;
-      const chosen = chooseRecoveredSecret(
-        recovered.map(entry => entry.secret), singleCleanBackup, options?.anchors);
-      if (!chosen) throw new WalletRecoveryError('unreadable');
-      // Twins of one secret can still name different wallet ids. Adopt the
-      // newest manifest's, as the reenrollment attestation already does, so
-      // every device converges on the same file.
-      const owner = recovered
-        .filter(entry => secretsEqual(entry.secret, chosen))
-        .sort((a, b) => (b.manifestTime - a.manifestTime) || a.walletId.localeCompare(b.walletId))[0];
-      walletId = owner.walletId;
-      secret = chosen;
     }
   } else {
     secret = await getExistingLocalV2MasterSecret(userSub);
@@ -2437,6 +2609,11 @@ async function getSignInWalletCandidateInner(userSub: string, driveToken?: strin
       }
     },
     persist: async () => {
+      if (restoreCurrentBackup) {
+        // History is not a backup: revisions expire. Before anything below
+        // records this key as backed up, make it a current file again.
+        await restoreHistoricalBackup(driveToken!, recovered, walletId!);
+      }
       if (driveToken) {
         // This exact secret was decrypted from the canonical Drive file.
         // Record only its public address before rebinding Keychain: a killed
@@ -2865,7 +3042,14 @@ export async function getOrCreateMasterSecret(
         }
         if (!keepUnanchoredLocal) {
           localSecret = restore.secret;
-          localWalletId = restore.walletId || generateUUID();
+          // A key found only in history gets a fresh id. The historical
+          // file's id - and the id this device holds, which may name that
+          // same file - can point at a payload that now holds another secret,
+          // and the upload below updates that payload in place: the overwrite
+          // that loses keys in the first place.
+          localWalletId = restore.fromHistory
+            ? generateUUID()
+            : (restore.walletId || generateUUID());
 
           await tryStoreRecoveredSecret(
             credentialStorage,
