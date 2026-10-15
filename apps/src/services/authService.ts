@@ -6,7 +6,9 @@ import {
   statusCodes,
 } from '@react-native-google-signin/google-signin';
 import { jwtDecode } from 'jwt-decode';
-import { walletRecoveryMessage } from './walletRecoveryErrors';
+import {
+  RecoveryEvidenceSink, WalletRecoveryError, walletRecoveryMessage, withSupportCode,
+} from './walletRecoveryErrors';
 import { reconcileSignInWallet } from './signInWalletReconciliation';
 import { persistSignInSession } from './signInSessionStorage';
 import { canReplaceAfterRecoveryFailure, collisionRefusalMessage } from './walletReenrollmentDecision';
@@ -17,7 +19,6 @@ import { getAuth, GoogleAuthProvider, AppleAuthProvider, signInWithCredential, g
 import { Platform } from 'react-native';
 // Using Web3Auth mutations from mutations.ts
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
-import { RecoveryEvidenceSink, WalletRecoveryError } from './walletRecoveryErrors';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
@@ -512,8 +513,10 @@ export class AuthService {
       }
     }
 
+    // Re-wrapping keeps only the message, so carry the support code across
+    // now - the dialog is the one place a user can show it to us.
     return error instanceof Error && error.message
-      ? error.message
+      ? withSupportCode(error.message, error)
       : 'No se pudo completar el inicio de sesión con Google.';
   }
 
@@ -1617,7 +1620,7 @@ export class AuthService {
               // classified failure into guidance prose, and the boundary
               // below could then only call it 'unexpected'.
               await reportSignInWalletLockout(driveRecoveryErr, signInSession, walletEvidence);
-              throw new Error(walletRecoveryMessage(driveRecoveryErr));
+              throw new Error(withSupportCode(walletRecoveryMessage(driveRecoveryErr), driveRecoveryErr));
               }
             }
           } else {

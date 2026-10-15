@@ -65,3 +65,20 @@ it('clears the supplied rejected token even if memory currently holds another to
   expect(google.clearCachedAccessToken).toHaveBeenCalledWith('rejected');
   expect(service.driveAccessToken).toBe('other');
 });
+
+it('keeps a Drive failure\'s support code in the sign-in error the user sees', () => {
+  // AuthScreen shows only the message, and signInWithGoogle re-wraps the
+  // error as new Error(message), so the code has to survive this step.
+  const { GoogleDriveStorageError } = require('../googleDriveStorage');
+  const timeout = new GoogleDriveStorageError('list', 0, 'request_timeout');
+
+  expect(service.getGoogleSignInErrorMessage(timeout)).toBe(
+    'No pudimos completar la operación de Google Drive (list). Intenta nuevamente.'
+    + '\n\nCódigo de soporte: DRIVE-0-REQUEST_TIMEOUT',
+  );
+});
+
+it('leaves ordinary sign-in errors as they were', () => {
+  expect(service.getGoogleSignInErrorMessage(new Error('Cancelaste el inicio de sesión con Google.')))
+    .toBe('Cancelaste el inicio de sesión con Google.');
+});

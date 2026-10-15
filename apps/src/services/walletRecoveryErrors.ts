@@ -50,6 +50,23 @@ export class WalletRecoveryError extends Error {
 
 // Classify typed failures only. Never infer a missing backup from arbitrary
 // exception text, which may describe a device, storage, or programming error.
+/**
+ * The message a person reads, plus the code support needs.
+ *
+ * "No pudimos completar la operación de Google Drive (list). Intenta
+ * nuevamente." is what a Drive timeout, a refused token, a rate limit and a
+ * partial listing all look like on screen. The code tells them apart, so a
+ * screenshot settles the case. It carries no personal data: only the HTTP
+ * status and Drive's own reason, already reduced to [A-Z0-9_-].
+ */
+export function withSupportCode(message: string, error: unknown): string {
+  const code = (error as { supportCode?: unknown } | null)?.supportCode;
+  if (typeof code !== 'string' || !/^[A-Z0-9_-]{1,120}$/.test(code) || message.includes(code)) {
+    return message;
+  }
+  return `${message}\n\nCódigo de soporte: ${code}`;
+}
+
 export function walletRecoveryMessage(error: unknown): string {
   if (error instanceof WalletRecoveryError) return messages[error.code];
   if (error instanceof Error && error.name === 'GoogleDriveStorageError') {
