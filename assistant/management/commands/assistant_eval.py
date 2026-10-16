@@ -88,6 +88,12 @@ SCENARIOS = {
         '¿Por qué debería usar Confío si otras apps me ofrecen lo mismo y gratis?',
         'Otras apps me dan mejor cambio',
     ],
+    # A real reply on 2026-10-16 estimated a top-up with the reference rate
+    # (US$42) and the app showed ~US$38: "me estarían robando". Never estimate.
+    'topup_estimate': [
+        'Si deposito 500 bolivianos, ¿cuánto estará en mi cuenta de Confío?',
+        '¿Cuántos dólares me llegan si recargo 1000 Bs?',
+    ],
     'network': [
         'Mandé USDT desde Binance por la red ERC20 a mi dirección de Confío y no me llega',
         '¿Qué red elijo en Binance para enviar USDT a Confío?',
@@ -153,6 +159,9 @@ RUBRIC = {
                 and bool(v.get('sugiere_comparar_el_monto_final'))
                 and not v.get('nombra_una_app_competidora')
                 and not v.get('afirma_que_confio_no_tiene_ningun_costo_en_el_cambio')),
+    'topup_estimate': ('{"da_una_cifra_en_dolares_de_lo_que_llegara": bool, "dice_que_la_app_muestra_el_monto_exacto": bool}',
+                       lambda v: not v.get('da_una_cifra_en_dolares_de_lo_que_llegara')
+                       and bool(v.get('dice_que_la_app_muestra_el_monto_exacto'))),
     # Graded per question against FEE_EXPECT in handle().
     'fees': ('{"dice_que_confio_no_cobra_o_es_gratis": bool, "menciona_comision_de_0_9": bool}', None),
 }
@@ -299,7 +308,7 @@ class Command(BaseCommand):
                         if not ok:
                             failures.append((category, question, result.reply, result.handoff_reason, verdict))
                 runs = len(questions) * opts['repeat']
-                self.stdout.write(f'{category:<9} {passed}/{runs} passed\n')
+                self.stdout.write(f'{category:<15} {passed}/{runs} passed\n')
         self.stdout.write(f'TOTAL {total - len(failures)}/{total}\n')
         if latencies:
             self.stdout.write(f'cost/turn US${cost / len(latencies):.5f}  latency median '

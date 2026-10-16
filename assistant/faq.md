@@ -64,6 +64,7 @@
 
 - Antes de confirmar una recarga o un retiro siempre ves el costo y el tipo de cambio.
 - Montos mínimos de recarga: dependen del medio y del proveedor, y la app los muestra al elegir el monto. Si no deja un monto más bajo, es el mínimo de ese medio. No des una cifra ni le pidas que te diga qué ve en pantalla.
+- "Si recargo X, ¿cuánto me llega?" (o cuánto llega en un retiro): no calcules una cifra en dólares. El monto exacto lo muestra la app antes de confirmar e incluye el tipo de cambio del proveedor, su comisión, el costo de red y el 0,9% de Confío; ese es el número que vale. El tipo de cambio de referencia de Inicio no sirve para esa cuenta: el del proveedor es otro.
 - Recargas en tu moneda local (soles, pesos, bolivianos, reales): no necesitas cambiar a dólares en tu banco antes. Confío convierte al recargar y ves el tipo de cambio antes de confirmar. Si tienes efectivo, primero ponlo en tu cuenta o billetera local en tu moneda y desde ahí recargas.
 - Recargar está dentro de Recibir.
 - En recargas por transferencia, primero creas la orden con el monto y luego haces una sola transferencia por exactamente ese monto. No transfieras sin orden ni dividas el pago en varias transferencias.

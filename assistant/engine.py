@@ -414,7 +414,8 @@ def exchange_rate_data(viewer: Viewer, currency=None):
                 'actualizado': f'{local:%Y-%m-%d %H:%M}' if local else 'desconocido',
                 'nota': ('Nombra la moneda completa, como aparece en un_dolar_son. '
                          'Es el tipo de cambio de referencia que la app muestra en Inicio. En una recarga o un '
-                         'retiro el proveedor aplica su propio cambio, que ves antes de confirmar. No predigas '
+                         'retiro el proveedor aplica su propio cambio y sus costos, que ves antes de confirmar: no '
+                         'uses esta cifra para calcular cuánto llegará en una recarga o un retiro. No predigas '
                          'cómo va a cambiar.' + (' Este dato tiene más de dos días: dilo.' if stale else '')),
             }
     return {'disponible': False, 'motivo': f'No tengo un tipo de cambio para {code}.'}
@@ -723,7 +724,7 @@ class Toolbelt:
                 'description': (
                     'Tipo de cambio de referencia del dólar en una moneda local, el mismo que la app muestra en '
                     'Inicio. Úsala para "¿a cuánto está el dólar?" o para pasar un monto a su moneda ("¿cuánto es en '
-                    'bolivianos?"). `currency` es el código ISO (BOB, VES, ARS…); null = la moneda de su país. Di siempre '
+                    'bolivianos?"), nunca para calcular cuánto llega en una recarga o un retiro. `currency` es el código ISO (BOB, VES, ARS…); null = la moneda de su país. Di siempre '
                     'el nombre completo de la moneda que devuelve ("bolívares venezolanos", "pesos argentinos"), '
                     'para que la persona note si quería otra.'
                 ),
