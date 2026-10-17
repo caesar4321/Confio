@@ -218,7 +218,9 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       // count query still starts in parallel, so it is ready when shown.
       // Volume traded is the activity number (founder, 2026-10-17): money
       // members actually moved through stocks, not a holdings snapshot. The
-      // older numbers stay as fallbacks for a server without it.
+      // older numbers stay as fallbacks for a server without it. Like every
+      // proof tile it opens the explanation (what Ondo Stocks is, what the
+      // community does), not the buy list: that is one tap further.
       const stocks: Tile | null = !stocksEnabled
         ? null
         : stockTradedUsd != null && stockTradedUsd > 0
@@ -229,7 +231,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
           unit: 'USD',
           label: 'Acciones',
           descriptor: 'Operado en EE.UU.',
-          onPress: () => navigation.navigate('StocksList'),
+          onPress: () => navigation.navigate('OndoStocksInfo'),
         }
         : stockInvestedUsd != null
         ? {
@@ -239,7 +241,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
           unit: 'USD',
           label: 'Acciones',
           descriptor: 'Invertido en EE.UU.',
-          onPress: () => navigation.navigate('StocksList'),
+          onPress: () => navigation.navigate('OndoStocksInfo'),
         }
         : stockAssetCount != null
           ? {
@@ -249,7 +251,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
             label: 'Acciones',
             // No trailing "…": in a one-line cell it read as truncated.
             descriptor: 'S&P 500, Apple, oro y más',
-            onPress: () => navigation.navigate('StocksList'),
+            onPress: () => navigation.navigate('OndoStocksInfo'),
           }
           : null;
       const presale: Tile = {

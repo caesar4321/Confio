@@ -37,8 +37,10 @@ jest.mock('../../navigation/Header', () => ({Header: 'Header'}));
 jest.mock('../../hooks/useSavingsPortfolio', () => ({
   useSavingsPortfolio: () => ({stocks: {enabled: true, buyEnabled: true}}),
 }));
+let mockTradedUsd: number | null = 3424.6;
 jest.mock('../../hooks/useGmMarket', () => ({
   useGmMarket: () => ({stocks: mockMarketAssets}),
+  useGmHomeTile: () => ({assetCount: 438, investedUsd: null, tradedUsd: mockTradedUsd, refetch: jest.fn()}),
 }));
 jest.mock('../../hooks/useCurrency', () => ({
   useCurrency: () => ({
@@ -131,6 +133,13 @@ describe('OndoStocksInfoScreen headline figures', () => {
     const text = render();
     // Unknown must not be presented as a real zero-value community total.
     expect(text).not.toContain('US$0 en acciones');
+  });
+
+  it('shows the all-time volume traded, and nothing when it is unknown', () => {
+    expect(render()).toMatch(/US\$\s*3\.425\s*operados/);
+    mockTradedUsd = null;
+    expect(render()).not.toContain('operados');
+    mockTradedUsd = 3424.6;
   });
 
   it('renders the live asset count, not a hardcoded 400+', () => {

@@ -113,7 +113,7 @@ describe('HomeStatsSection layout', () => {
     mockNavigate.mockClear();
     tileNodes.forEach(n => n.props.onPress());
     expect(mockNavigate.mock.calls.map(c => c[0])).toEqual(
-      ['LatamCommunity', 'ProtectedSavings', 'FundFlow', 'StocksList', 'ConfioPresale']);
+      ['LatamCommunity', 'ProtectedSavings', 'FundFlow', 'OndoStocksInfo', 'ConfioPresale']);
 
     // No horizontally scrolling container anywhere in the row.
     expect(tree.root.findAll(n => n.props?.horizontal === true)).toHaveLength(0);

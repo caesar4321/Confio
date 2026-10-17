@@ -17,7 +17,7 @@ import {Header} from '../navigation/Header';
 import {colors} from '../config/theme';
 import {MainStackParamList} from '../types/navigation';
 import {useSavingsPortfolio} from '../hooks/useSavingsPortfolio';
-import {useGmMarket} from '../hooks/useGmMarket';
+import {useGmHomeTile, useGmMarket} from '../hooks/useGmMarket';
 import {useCurrency} from '../hooks/useCurrency';
 import {useAuthReady} from '../contexts/AuthContext';
 import {TickerLogo} from '../components/TickerLogo';
@@ -138,6 +138,11 @@ export const OndoStocksInfoScreen = () => {
   // pill only when there is a real figure — a "US$0 en acciones" pill would
   // read as "nobody is invested" rather than "we don't know right now".
   const stocksTvl: number | null | undefined = feeData?.gmCommunity?.valueUsd;
+  // The same all-time volume Home's Acciones tile shows (its own query).
+  const { tradedUsd } = useGmHomeTile();
+  const tradedLabel = tradedUsd != null && tradedUsd > 0
+    ? formatWhole(tradedUsd, currency.thousandsSeparator)
+    : null;
   const stocksTvlLabel =
     stocksTvl != null
       ? formatWhole(stocksTvl, currency.thousandsSeparator)
@@ -281,6 +286,12 @@ export const OndoStocksInfoScreen = () => {
                 24/5 y algunos fines de semana
               </Text>
             </View>
+            {tradedLabel && (
+              <View style={styles.heroPill}>
+                <Icon name="repeat" size={14} color={colors.primary} />
+                <Text style={styles.heroPillText}>US${tradedLabel} operados</Text>
+              </View>
+            )}
             {stocksTvlLabel && (
               <View style={styles.heroPill}>
                 <Icon name="trending-up" size={14} color={colors.primary} />
