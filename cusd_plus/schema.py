@@ -325,6 +325,9 @@ class GmHomeTileType(graphene.ObjectType):
     invested_usd = graphene.Float(
         description="Marked-to-market total held by Confío users; null below GM_HOME_INVESTED_MIN_USD",
     )
+    traded_usd = graphene.Float(
+        description="All-time settled U.S. stock volume (buys + sales) traded in Confío; null when unreadable",
+    )
 
 
 class GmMarketType(graphene.ObjectType):
@@ -718,7 +721,7 @@ class Query(graphene.ObjectType):
         if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
             return None
         from django.conf import settings
-        from . import gm_api, gm_tvl
+        from . import gm_api, gm_tvl, gm_volume
 
         try:
             market = gm_api.all_market()
@@ -738,6 +741,7 @@ class Query(graphene.ObjectType):
         return GmHomeTileType(
             asset_count=asset_count,
             invested_usd=invested if invested is not None and invested >= threshold else None,
+            traded_usd=gm_volume.traded_usd(),
         )
 
     def resolve_gm_highlights(self, info):

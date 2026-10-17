@@ -23,7 +23,7 @@
 //   No dividend-payout UI anywhere, by design.
 // - Buying power = the user's cUSD+ balance (sweep-account model).
 
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { gql, useQuery } from '@apollo/client';
 import { STOCK_PRESENTATION } from '../config/stockPresentation';
 
@@ -221,16 +221,34 @@ const GM_HOME_TILE = gql`
   }
 `;
 
+// All-time traded volume, on its own query: a server without the field
+// fails only this one and the tile keeps its previous number.
+const GM_HOME_TILE_TRADED = gql`
+  query GmHomeTileTraded {
+    gmHomeTile {
+      tradedUsd
+    }
+  }
+`;
+
 export const useGmHomeTile = () => {
   const { data, refetch } = useQuery(GM_HOME_TILE, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
     pollInterval: 300_000, // the invested total follows the 5-min holdings snapshot
   });
+  const { data: tradedData, refetch: refetchTraded } = useQuery(GM_HOME_TILE_TRADED, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    pollInterval: 300_000,
+  });
+  const refetchAll = useCallback(() => Promise.all([refetch(), refetchTraded()]), [refetch, refetchTraded]);
   return {
     assetCount: (data?.gmHomeTile?.assetCount ?? null) as number | null,
     investedUsd: (data?.gmHomeTile?.investedUsd ?? null) as number | null,
-    refetch,
+    tradedUsd: (tradedData?.gmHomeTile?.tradedUsd ?? null) as number | null,
+    // Stable: callers keep it in effect dependencies.
+    refetch: refetchAll,
   };
 };
 

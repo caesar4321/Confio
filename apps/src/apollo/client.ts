@@ -568,6 +568,11 @@ export const apolloClient = new ApolloClient({
           cusdPlusSummary: {
             merge: true,
           },
+          // Home's stock tile reads it in two queries (count/holdings, and
+          // the traded volume on its own): neither may erase the other.
+          gmHomeTile: {
+            merge: true,
+          },
         },
       },
       MessageInboxType: {

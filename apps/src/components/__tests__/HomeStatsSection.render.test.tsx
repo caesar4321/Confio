@@ -17,7 +17,7 @@ const mockRemoveAppStateListener = jest.fn();
 const mockFlow = {totalUsd: 176000, operationCount: 337};
 const mockFlowRefetch = jest.fn(() => Promise.resolve());
 let mockStocksEnabled = true;
-let mockStockTile: {assetCount: number | null; investedUsd: number | null} | null = {assetCount: 458, investedUsd: null};
+let mockStockTile: {assetCount: number | null; investedUsd: number | null; tradedUsd?: number | null} | null = {assetCount: 458, investedUsd: null};
 const mockUseQuery = jest.fn(
   (query: any, _options: any): any => {
     if (String(query).includes('FundFlowStats')) return {data: {fundFlowStats: mockFlow}, refetch: mockFlowRefetch};
@@ -138,6 +138,14 @@ describe('HomeStatsSection layout', () => {
     const acciones = tileLabels(render().root)[3];
     expect(acciones).toContain('25.000 USD');
     expect(acciones).toContain('Invertido en EE.UU.');
+    mockStockTile = {assetCount: 458, investedUsd: null};
+  });
+
+  it('shows the volume traded in stocks over any holdings figure', () => {
+    mockStockTile = {assetCount: 458, investedUsd: 25000, tradedUsd: 3424.6};
+    const acciones = tileLabels(render().root)[3];
+    expect(acciones).toContain('Operado en EE.UU.');
+    expect(acciones).not.toContain('25.000');
     mockStockTile = {assetCount: 458, investedUsd: null};
   });
 

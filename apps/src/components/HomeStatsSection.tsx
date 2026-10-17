@@ -116,7 +116,9 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   });
   // Shared with Home's Acciones row through Apollo's cache. Null for users
   // outside Ondo's eligibility — then the tile is simply absent.
-  const { assetCount: stockAssetCount, investedUsd: stockInvestedUsd, refetch: refetchStockTile } = useGmHomeTile();
+  const {
+    assetCount: stockAssetCount, investedUsd: stockInvestedUsd, tradedUsd: stockTradedUsd, refetch: refetchStockTile,
+  } = useGmHomeTile();
   const flowTotalUsd: number | null = flowData?.fundFlowStats?.totalUsd ?? null;
   const flowOperations: number | null = flowData?.fundFlowStats?.operationCount ?? null;
   const previousRefreshNonce = useRef(refreshNonce);
@@ -214,8 +216,21 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       // GM_HOME_INVESTED_MIN_USD), then what users actually hold.
       // Visibility follows stocksEnabled (the explorer's own gate); the
       // count query still starts in parallel, so it is ready when shown.
+      // Volume traded is the activity number (founder, 2026-10-17): money
+      // members actually moved through stocks, not a holdings snapshot. The
+      // older numbers stay as fallbacks for a server without it.
       const stocks: Tile | null = !stocksEnabled
         ? null
+        : stockTradedUsd != null && stockTradedUsd > 0
+        ? {
+          key: 'stocks',
+          icon: 'trending-up',
+          value: fmt(stockTradedUsd),
+          unit: 'USD',
+          label: 'Acciones',
+          descriptor: 'Operado en EE.UU.',
+          onPress: () => navigation.navigate('StocksList'),
+        }
         : stockInvestedUsd != null
         ? {
           key: 'stocks',
@@ -265,7 +280,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         : [users, savings, flow, presale];
     },
     [s?.totalUsers, verified, tvl, backingDescriptor, flowTotalUsd, flowOperations,
-     stockAssetCount, stockInvestedUsd, stocksEnabled,
+     stockAssetCount, stockInvestedUsd, stockTradedUsd, stocksEnabled,
      s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
   );
 
