@@ -50,12 +50,13 @@ export const fetchAppUpdatePolicy = async (): Promise<AppUpdatePolicy | null> =>
 };
 
 // Native store app first; the https page when it is missing (AOSP builds,
-// simulators). On Android the intent names Google Play so other stores that
-// also claim market:// (Xiaomi, Huawei) don't open instead.
+// simulators). Android uses market://: React Native's Linking hands the URL
+// to Uri.parse, never Intent.parseUri, so an intent:// URL naming Google
+// Play would not open Play at all.
 export const openAppStore = async (): Promise<void> => {
   const native = Platform.OS === 'ios'
     ? `itms-apps://apps.apple.com/app/id${IOS_APP_STORE_ID}`
-    : `intent://details?id=${ANDROID_PACKAGE}#Intent;scheme=market;package=com.android.vending;end`;
+    : `market://details?id=${ANDROID_PACKAGE}`;
   const web = Platform.OS === 'ios'
     ? `https://apps.apple.com/app/id${IOS_APP_STORE_ID}`
     : `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;

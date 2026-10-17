@@ -3,6 +3,7 @@ import { AppState, Modal, StyleSheet, TouchableOpacity, View } from 'react-nativ
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
+import { useEmergencyExitOpen } from '../hooks/useEmergencyExitOpen';
 import { AppUpdatePolicy, fetchAppUpdatePolicy, openAppStore } from '../services/appUpdate';
 
 // Re-ask on foreground at most this often, so a minimum raised while the
@@ -13,7 +14,9 @@ const RECHECK_AFTER_MS = 30 * 60 * 1000;
  * Below the server's minimum version the app is covered by a screen with
  * only "Actualizar"; below its latest version the update is offered once
  * per launch and can be put off. The policy is set per platform in the
- * admin (AppVersionPolicy).
+ * admin (AppVersionPolicy). Once the on-chain heartbeat opens Salida de
+ * emergencia the gate stands down, so a stale minimum served by a failing
+ * Confío can never hide the exit.
  */
 export const AppUpdateGate: React.FC = () => {
   const [policy, setPolicy] = useState<AppUpdatePolicy | null>(null);
@@ -36,9 +39,10 @@ export const AppUpdateGate: React.FC = () => {
     return () => subscription.remove();
   }, [check]);
 
-  const required = policy?.status === 'update_required';
+  const exitOpen = useEmergencyExitOpen(policy?.status === 'update_required');
+  const required = policy?.status === 'update_required' && !exitOpen;
   const available = policy?.status === 'update_available' && dismissedVersion !== policy.latestVersion;
-  if (!policy || (!required && !available)) return null;
+  if (!policy || exitOpen || (!required && !available)) return null;
 
   return (
     <Modal animationType="fade" transparent visible statusBarTranslucent onRequestClose={() => {
