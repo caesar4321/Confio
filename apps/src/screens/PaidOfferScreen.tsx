@@ -1,6 +1,6 @@
 // The pitch behind the paid-offer probe: Cuenta inteligente, with Confío IA+
-// as one of its benefits since 2026-10-17 (selling IA+ on its own through store
-// billing later is an option); the old standalone IA+ route opens this same pitch. A
+// as one of its benefits since 2026-10-17 (never store billing: no in-app
+// purchases, most users have no card for them); the old standalone IA+ route opens this same pitch. A
 // waitlist only: nothing is sold, charged or unlocked here. "¡Anotado!"
 // appears only after the server confirms the join (never optimistically), and
 // the price is the server's value. Design: docs/designs/cuenta-inteligente-fake-door.md.
