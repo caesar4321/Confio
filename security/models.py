@@ -717,7 +717,7 @@ class AppVersionPolicy(models.Model):
     latest_version = models.CharField(max_length=16, blank=True,
                                       help_text='Newest version live in the store, e.g. 5.2.3')
     message = models.CharField(max_length=280, blank=True,
-                               help_text='Optional text shown in the update prompt (Spanish)')
+                               help_text='Optional "Novedades" for the update pop-up, one per line, up to 4 (Spanish)')
     updated_at = models.DateTimeField(auto_now=True)
 
     def clean(self):
