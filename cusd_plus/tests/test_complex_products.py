@@ -32,6 +32,13 @@ class ComplexProductListTests(TestCase):
         self.assertIsNone(complex_products.factor_for_symbol('TSLAon'))
         self.assertIsNone(complex_products.factor_for_symbol(''))
 
+    def test_header_shelf_lists_exactly_these_funds_last(self):
+        # The shelf is the visible category: the last header shelf, above search.
+        from cusd_plus.schema import _gm_highlights
+        shelf = _gm_highlights()['shelves'][-1]
+        self.assertEqual(shelf['key'], 'leveraged')
+        self.assertEqual({item['ticker'] for item in shelf['items']}, set(complex_products.factors()))
+
     def test_every_listed_fund_carries_a_warning(self):
         from cusd_plus.schema import _gm_highlights
         warnings = _gm_highlights()['warnings']

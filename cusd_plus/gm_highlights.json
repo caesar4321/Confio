@@ -33,6 +33,18 @@
         {"ticker": "ETHA", "tagline": "Sube y baja con ether"},
         {"ticker": "FSOL", "tagline": "Sube y baja con Solana"}
       ]
+    },
+    {
+      "key": "leveraged",
+      "title": "Apalancados e inversos",
+      "subtitle": "Multiplican o invierten el movimiento de un solo día. Pensados para plazos cortos, no para ahorrar.",
+      "items": [
+        {"ticker": "TQQQ", "tagline": "3x el Nasdaq-100, por un día"},
+        {"ticker": "SQQQ", "tagline": "Gana 3x si el Nasdaq-100 baja"},
+        {"ticker": "SOXL", "tagline": "3x las empresas de chips, por un día"},
+        {"ticker": "SOXS", "tagline": "Gana 3x si los chips bajan"},
+        {"ticker": "PSQ", "tagline": "Gana si el Nasdaq-100 baja"}
+      ]
     }
   ],
   "names": {
