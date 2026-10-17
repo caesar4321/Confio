@@ -13,7 +13,7 @@ cuenta-inteligente-fake-door.md):
 
 Since 2026-10-17 Confío IA+ is a benefit of Cuenta inteligente (like Nu+ or
 Robinhood Gold), not its own offer: with `ia_plus` off, on builds whose pitch
-shows the IA+ perk (paid_offers.ia_plus_bundled), the Confío IA+ doors open
+lists IA+ as a benefit (paid_offers.ia_plus_bundled), the Confío IA+ doors open
 Cuenta inteligente instead (`asked_ia_plus`, `investing`). Older builds get no
 IA+ door at all, so their Cuenta inteligente numbers stay what they were.
 

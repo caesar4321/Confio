@@ -1,6 +1,7 @@
 // The pitch behind the paid-offer probe: Cuenta inteligente, with Confío IA+
-// as an included benefit (like Nu+ or Robinhood Gold) since 2026-10-17; the
-// old standalone IA+ route opens this same pitch. A waitlist only: nothing is sold, charged or unlocked here. "¡Anotado!"
+// as one of its benefits since 2026-10-17 (selling IA+ on its own through store
+// billing later is an option); the old standalone IA+ route opens this same pitch. A
+// waitlist only: nothing is sold, charged or unlocked here. "¡Anotado!"
 // appears only after the server confirms the join (never optimistically), and
 // the price is the server's value. Design: docs/designs/cuenta-inteligente-fake-door.md.
 //
@@ -39,7 +40,7 @@ const BACK_SIZE = 40;
 
 type Benefit = { icon: string; name: string; line: string };
 
-// The account is the offer; Confío IA+ comes with it, shown as one perk block.
+// The account is the offer; Confío IA+ is one of its benefits, not a bundle.
 const OFFER: { title: string; headline: string; benefits: Benefit[] } = {
   title: 'Cuenta inteligente',
   headline: 'Tu dinero se mueve según tus reglas.',
@@ -49,15 +50,9 @@ const OFFER: { title: string; headline: string; benefits: Benefit[] } = {
     { icon: 'calendar', name: 'Transferencias programadas', line: 'A tu familia y a tus propias cuentas.' },
     { icon: 'shield', name: 'Control de débitos', line: 'Tú apruebas cada permiso y lo puedes quitar.' },
     { icon: 'bell', name: 'Aviso antes de cada cobro', line: 'Y si un cobro viene más alto de lo normal.' },
+    { icon: 'message-circle', name: 'Confío IA+', line: 'Tu asistente financiero personal, más avanzado y con voz en tiempo real.' },
   ],
 };
-
-const IA_PLUS_PERKS = [
-  'Respuestas más avanzadas de Confío IA',
-  'Voz en tiempo real, como una llamada',
-  'Más preguntas y análisis cada día',
-  'Seguimiento de tus metas y de tu dinero',
-];
 
 const VOLUMES: { key: string; label: string }[] = [
   { key: 'lt_100', label: 'Menos de US$100' },
@@ -230,28 +225,7 @@ export function PaidOfferScreen() {
           ))}
         </Rise>
 
-        {/* Confío IA+: a perk of the account, never its own offer. Its badge is
-            the deep emerald disc with the name as the glyph (never a sparkle
-            or violet, which read as an AI unlock). */}
-        <Rise index={2} style={styles.perks}>
-          <View style={styles.perksHead} accessible accessibilityLabel="Incluye Confío IA+, tu asistente financiero personal">
-            <View style={styles.iaMark}>
-              <Text style={styles.iaMarkText}>IA+</Text>
-            </View>
-            <View style={styles.perksHeadText}>
-              <Text style={styles.perksTitle}>Incluye Confío IA+</Text>
-              <Text style={styles.perksSub}>Tu asistente financiero personal.</Text>
-            </View>
-          </View>
-          {IA_PLUS_PERKS.map((perk) => (
-            <View key={perk} style={styles.perk}>
-              <Icon name="check" size={16} color={EMERALD} />
-              <Text style={styles.perkText}>{perk}</Text>
-            </View>
-          ))}
-        </Rise>
-
-        <Rise index={3} style={styles.priceCard}>
+        <Rise index={2} style={styles.priceCard}>
           {price ? (
             <View style={styles.priceRow} accessible accessibilityLabel={`${price} dólares al mes al lanzar`}>
               <Text style={styles.priceAmount}>{`US$${price}`}</Text>
@@ -388,29 +362,6 @@ const styles = StyleSheet.create({
   },
   statusBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: HERO, zIndex: 2, elevation: 4 },
   heroBody: { marginTop: 8 },
-  iaMark: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: DEEP,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iaMarkText: { fontSize: 15, fontWeight: '700', color: '#FCD34D' },
-  perks: {
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 20,
-    padding: 18,
-    ...shadow,
-  },
-  perksHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  perksHeadText: { flex: 1, marginLeft: 12 },
-  perksTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
-  perksSub: { fontSize: 14, color: MUTED, marginTop: 2 },
-  perk: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
-  perkText: { fontSize: 15, color: TEXT, marginLeft: 10, flexShrink: 1 },
   soonTag: {
     alignSelf: 'flex-start',
     marginTop: 16,

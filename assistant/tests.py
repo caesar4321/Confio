@@ -1920,7 +1920,7 @@ class PaidChipAuditFixTests(TestCase):
                          ('cuenta_inteligente', 'investing'))
         # Neither offer on: no chip at all.
         self.assertIsNone(paid_chips.choose(self.viewer, '¿Qué es Confío IA+?', result(), {'home'}))
-        # A build whose pitch has no IA+ perk never gets an IA+ door.
+        # A build whose pitch doesn't list IA+ never gets an IA+ door.
         self.viewer.request_meta = {'HTTP_X_CONFIO_VERSION': '5.2.3'}
         self.assertIsNone(paid_chips.choose(self.viewer, '¿Qué es Confío IA+?', result(), allowed))
         self.assertIsNone(paid_chips.choose(self.viewer, 'mi portafolio',
@@ -1934,7 +1934,7 @@ class PaidChipAuditFixTests(TestCase):
             plain = build_system_prompt(destinations=['home', 'cuenta_inteligente'], **common)
             both = build_system_prompt(destinations=['home', 'ia_plus', 'cuenta_inteligente'], ia_plus_bundled=True,
                                        **common)
-        self.assertIn('incluye Confío IA+', bundled)
+        self.assertIn('Uno de sus beneficios es Confío IA+', bundled)
         self.assertNotIn('Confío IA+', plain)
         self.assertNotIn('no se ofrece por separado', both)  # standalone IA+ back on: no contradiction
 

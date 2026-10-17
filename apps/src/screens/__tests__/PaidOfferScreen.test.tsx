@@ -91,11 +91,11 @@ it('remembers someone already on the list and asks only what is unanswered', asy
 });
 
 it('logs Solo miraba and goes back without joining', async () => {
-  // An old Confío IA+ link opens Cuenta inteligente, with IA+ as its perk.
+  // An old Confío IA+ link opens Cuenta inteligente, with IA+ as one benefit.
   mockParams = {offer: 'ia_plus', door: 'chip', trigger: 'investing'};
   await mount();
   expect(texts(tree)).toContain('Cuenta inteligente');
-  expect(texts(tree)).toContain('Incluye Confío IA+');
+  expect(texts(tree)).toContain('Confío IA+');
   await act(async () => { press(tree, 'Solo miraba').props.onPress(); });
   expect(mockJoin).not.toHaveBeenCalled();
   expect(mockGoBack).toHaveBeenCalled();

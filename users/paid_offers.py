@@ -98,7 +98,7 @@ def available(product, *, is_employee, meta, user_id=None):
 
 def ia_plus_bundled(*, meta, user_id=None):
     """Does this person's Cuenta inteligente pitch include Confío IA+? Only on
-    builds that show the perk block (older pitches never mention it), and
+    builds that list it as a benefit (older pitches never mention it), and
     never for someone who already has Assistant+."""
     if not (_at_least(meta, 'SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION') or previewing(user_id)):
         return False

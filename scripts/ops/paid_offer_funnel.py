@@ -9,10 +9,10 @@ country. Preview users (PAID_OFFER_PREVIEW_USER_IDS, the founder's test account)
 are excluded. "Saw it" only counts builds at PAID_OFFER_MIN_APP_VERSION or later,
 so compare runs over time, not against total users.
 
-Since 2026-10-17 Confío IA+ is a perk of Cuenta inteligente: IA+ rows stop
+Since 2026-10-17 Confío IA+ is a benefit of Cuenta inteligente: IA+ rows stop
 growing, and Cuenta inteligente is also split by pitch. Events carry the
 server-stamped app_version since then; builds at SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION
-or later saw "Incluye Confío IA+", older ones (and events without a version) the old pitch.
+or later saw Confío IA+ among the benefits, older ones (and events without a version) the old pitch.
 """
 from collections import Counter, defaultdict
 
@@ -75,7 +75,7 @@ for product, name in PRODUCTS.items():
         print(f"    door:        {dict(Counter(waitlist.values_list('door', flat=True)))}"
               f"  trigger: {dict(Counter(t or '-' for t in waitlist.values_list('trigger', flat=True)))}")
 
-print(f"\n=== Cuenta inteligente by pitch (IA+ perk from build {BUNDLE_FLOOR or 'none'}) ===")
+print(f"\n=== Cuenta inteligente by pitch (IA+ benefit from build {BUNDLE_FLOOR or 'none'}) ===")
 by_pitch = defaultdict(lambda: defaultdict(set))
 answers = defaultdict(dict)  # pitch -> user -> latest would-pay answer
 for uid, props in (events.filter(source_type='smart_account').order_by('created_at')
