@@ -1860,7 +1860,7 @@ export const ExchangeScreen = () => {
                 <>
                   {offer.paymentMethods.map((method) => (
                     <View key={method.id} style={styles.myOfferPaymentTag}>
-                      <Text style={styles.myOfferPaymentTagText}>{method.displayName}</Text>
+                      <Text style={styles.myOfferPaymentTagText} numberOfLines={1}>{method.displayName}</Text>
                       <CountryFlag emoji={method.bank?.country?.flagEmoji} size={12} style={styles.myOfferPaymentTagFlag} />
                     </View>
                   ))}
@@ -1869,7 +1869,7 @@ export const ExchangeScreen = () => {
                 <>
                   {offer.paymentMethods.slice(0, 2).map((method) => (
                     <View key={method.id} style={styles.myOfferPaymentTag}>
-                      <Text style={styles.myOfferPaymentTagText}>{method.displayName}</Text>
+                      <Text style={styles.myOfferPaymentTagText} numberOfLines={1}>{method.displayName}</Text>
                       <CountryFlag emoji={method.bank?.country?.flagEmoji} size={12} style={styles.myOfferPaymentTagFlag} />
                     </View>
                   ))}
@@ -4917,6 +4917,7 @@ const styles = StyleSheet.create({
   myOfferPaymentTag: {
     flexDirection: 'row',
     alignItems: 'center',
+    maxWidth: '100%',
     backgroundColor: '#F3F4F6',
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -4927,6 +4928,7 @@ const styles = StyleSheet.create({
   myOfferPaymentTagText: {
     fontSize: 11,
     color: '#374151',
+    flexShrink: 1,
   },
   myOfferPaymentTagFlag: {
     marginLeft: 4,

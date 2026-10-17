@@ -365,7 +365,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
                   <View style={styles.countryFlag}>
                     <CountryFlag iso={item[2]} size={24} />
                   </View>
-                  <Text style={styles.countryName}>{item[0]}</Text>
+                  <Text style={styles.countryName} numberOfLines={1}>{item[0]}</Text>
                   <Text style={styles.countryCode}>{item[1]}</Text>
                   {selectedCountry[2] === item[2] && (
                     <Icon name="check" size={20} color={colors.primaryDark} />
@@ -603,20 +603,20 @@ const styles = StyleSheet.create({
   pickerCloseButton: {
     padding: 4,
   },
+  // Exactly the 65 getItemLayout declares, however long the name or large
+  // the system text: the name truncates rather than growing the row.
   countryItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    height: 65,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
   countryItemSelected: {
     backgroundColor: '#F0FDF4',
   },
-  // Fixed height so each row is 16+32+16+1 = 65, the getItemLayout length.
   countryFlag: {
-    height: 32,
-    justifyContent: 'center',
     marginRight: 12,
   },
   countryName: {
