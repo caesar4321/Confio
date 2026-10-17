@@ -285,6 +285,8 @@ def _country2(value) -> str | None:
 
 
 RAIL_NAMES = {'breb_key': 'Bre-B', 'bank_account': 'transferencia', 'qr': 'QR'}
+# Incoming rails as people know them (FinancialAccount.payin_rail codes).
+PAYIN_RAIL_NAMES = {'BREB': 'Bre-B', 'BRE-B': 'Bre-B', 'PIX': 'Pix', 'SPEI': 'SPEI', 'PSE': 'PSE'}
 
 
 def _payout_is_own(journey, destination) -> bool:
@@ -328,7 +330,7 @@ def classify_journey(journey) -> tuple[str, str | None]:
         rail = RAIL_NAMES.get(destination.kind if destination else '', 'transferencia')
         return (WITHDRAW if _payout_is_own(journey, destination) else SEND), rail
     payin = (journey.local_account.payin_rail or '').strip()
-    rail = 'QR' if 'QR' in payin.upper() else (payin or 'transferencia')
+    rail = 'QR' if 'QR' in payin.upper() else PAYIN_RAIL_NAMES.get(payin.upper(), payin or 'transferencia')
     credit = journey.funding_credit
     reason = getattr(getattr(credit, 'payin_admission', None), 'reason', None) if credit else None
     return (TOP_UP if reason == 'same_owner' else RECEIVE), rail

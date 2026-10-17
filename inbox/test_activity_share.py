@@ -600,6 +600,11 @@ class LocalTransferClassificationTests(CommunityTestBase):
         self.assertEqual(self.classify(self.journey('to_wallet', funding_credit=other))[0], 'receive')
         self.assertEqual(self.classify(self.journey('to_wallet'))[0], 'receive')
 
+    def test_incoming_rails_read_as_people_know_them(self):
+        for code, name in (('BREB', 'Bre-B'), ('PIX', 'Pix'), ('SPEI', 'SPEI')):
+            journey = self.journey('to_wallet', local_account=SimpleNamespace(payin_rail=code, country='COL'))
+            self.assertEqual(self.classify(journey)[1], name)
+
     def test_local_headlines_never_name_the_other_side(self):
         headline = activity_share.activity_headline
         self.assertEqual(headline({'kind': 'send', 'local': True, 'rail': 'Bre-B', 'amount_usd': '20.00',
