@@ -19,6 +19,7 @@ import { View, StyleSheet, TouchableOpacity, Modal, Image, ScrollView, useWindow
 import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
+import { CountryFlag } from './CountryFlag';
 import { useAppSafeArea } from '../hooks/useAppSafeArea';
 
 export interface RouteOption {
@@ -39,6 +40,12 @@ export interface RouteOption {
    * fixed-width cell makes every title share one left edge on both platforms.
    */
   flag?: string;
+  /**
+   * ISO-2 or ISO-3 country. When set, the cell draws the bundled round flag
+   * (CountryFlag) instead of the `flag` emoji, which only stays as the
+   * fallback for countries without an image.
+   */
+  country?: string;
   /** Feather icon name; ignored when `image` is provided. */
   icon: string;
   /** Token/brand logo — takes the icon slot when provided. */
@@ -89,7 +96,9 @@ export const RouteOptionRow = ({
     )}
     <View style={{ flex: 1 }}>
       <View style={styles.optionTitleRow}>
-        {o.flag ? <Text style={styles.optionFlag}>{o.flag}</Text> : null}
+        {o.country ? (
+          <View style={styles.optionFlagCell}><CountryFlag iso={o.country} size={18} /></View>
+        ) : o.flag ? <Text style={styles.optionFlag}>{o.flag}</Text> : null}
         <Text style={styles.optionTitle}>{o.title}</Text>
       </View>
       <Text style={styles.optionSubtitle}>{o.subtitle}</Text>
@@ -227,6 +236,7 @@ const styles = StyleSheet.create({
   // Fixed width, centred glyph: the title's left edge is then independent of
   // how wide a given flag happens to render.
   optionFlag: { fontSize: 15, width: 22, marginRight: 8, textAlign: 'center' },
+  optionFlagCell: { width: 22, marginRight: 8, alignItems: 'center' },
   optionTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary, flexShrink: 1 },
   optionSubtitle: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   optionNote: { fontSize: 12, color: colors.text.light, marginTop: 3 },

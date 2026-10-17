@@ -137,6 +137,7 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
     id: method.id,
     icon: isIdentityBlocked(method) ? 'clock' : method.direction === 'send' ? 'send' : 'download',
     flag: countryFlag(method.country),
+    country: method.country,
     title: method.title,
     subtitle: method.subtitle,
     note: isIdentityBlocked(method)
@@ -219,6 +220,7 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
       id: rail.id,
       icon: rail.status === 'live' ? (direction === 'send' ? 'send' : 'download') : 'clock',
       flag: countryFlag(rail.country),
+      country: rail.country,
       title: rail.title,
       subtitle: rail.subtitle,
       note: rail.status === 'live' ? undefined : COMING_SOON_NOTE,
@@ -256,6 +258,7 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
             id: instruction.internalId,
             icon: 'download',
             flag: countryFlag(account.country),
+            country: account.country,
             title: instruction.kind === 'breb_key' ? 'Tu llave Bre-B' : instruction.displayValue,
             subtitle: instruction.kind === 'breb_key'
               ? 'Toca para verla'
