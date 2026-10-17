@@ -50,7 +50,9 @@ const OFFER: { title: string; headline: string; benefits: Benefit[] } = {
     { icon: 'calendar', name: 'Transferencias programadas', line: 'A tu familia y a tus propias cuentas.' },
     { icon: 'shield', name: 'Control de débitos', line: 'Tú apruebas cada permiso y lo puedes quitar.' },
     { icon: 'bell', name: 'Aviso antes de cada cobro', line: 'Y si un cobro viene más alto de lo normal.' },
-    { icon: 'message-circle', name: 'Confío IA+', line: 'Tu asistente financiero personal, más avanzado y con voz en tiempo real.' },
+    // Part of the account service (like Robinhood Gold's Cortex): what it does
+    // with your money, never "more AI usage" or a better model.
+    { icon: 'message-circle', name: 'Confío IA+', line: 'Tu asistente financiero analiza tu cuenta, te alerta de lo importante y sigue tus metas.' },
   ],
 };
 

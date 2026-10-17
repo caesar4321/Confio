@@ -124,9 +124,10 @@ PAID_OFFER_SECTIONS = {
 
 # Only where the person's pitch lists IA+ as a benefit and the standalone offer is off.
 IA_PLUS_IN_SMART_ACCOUNT = (
-    ' Uno de sus beneficios es Confío IA+: respuestas más avanzadas de Confío IA y conversación por voz en tiempo '
-    'real (como una llamada; los audios ya están en Confío IA). Hoy Confío IA+ no se ofrece por separado: si '
-    'preguntan por Confío IA+, dilo así y abre `cuenta_inteligente`.')
+    ' Uno de sus beneficios es Confío IA+: el asistente financiero de la cuenta, que analiza tus movimientos, te '
+    'alerta de lo importante y sigue tus metas. Descríbelo siempre así, como parte del servicio de la cuenta: nunca '
+    'como más uso de Confío IA, un modelo mejor o funciones nuevas del chat. Confío IA+ no se ofrece por separado: '
+    'si preguntan por Confío IA+, dilo así y abre `cuenta_inteligente`.')
 
 
 def _paid_offer_sections(destinations, ia_plus_bundled=False):
