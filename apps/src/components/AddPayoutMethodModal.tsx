@@ -1094,7 +1094,7 @@ export const AddPayoutMethodModal = ({
 
     const renderCountryItem = ({ item: country }: { item: Country }) => (
       <TouchableOpacity
-        style={styles.pickerItem}
+        style={[styles.pickerItem, styles.countryPickerItem]}
         onPress={() => {
           setSelectedCountry(country);
           setSelectedBank(null);
@@ -1926,6 +1926,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: colors.neutralDark,
+  },
+  // Exactly the 56 the country list's getItemLayout declares, whatever the
+  // flag and text measure.
+  countryPickerItem: {
+    height: 56,
+    paddingVertical: 0,
   },
   pickerItemText: {
     flex: 1,

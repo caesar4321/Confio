@@ -1602,7 +1602,7 @@ export const ExchangeScreen = () => {
                           const isLast = index === visibleMethods.length - 1 && remainingCount <= 0;
                           return (
                             <View key={pm.id || index} style={styles.paymentMethodsSummaryItem}>
-                              <Text style={styles.paymentMethodsSummaryText}>{pm.displayName}</Text>
+                              <Text style={[styles.paymentMethodsSummaryText, styles.paymentMethodsSummaryName]} numberOfLines={1}>{pm.displayName}</Text>
                               <CountryFlag emoji={pm.bank?.country?.flagEmoji} size={13} style={styles.paymentMethodsSummaryFlag} />
                               {!isLast && <Text style={styles.paymentMethodsSummaryText}>, </Text>}
                             </View>
@@ -1628,7 +1628,7 @@ export const ExchangeScreen = () => {
                           size={14}
                           color="#6B7280"
                         />
-                        <Text style={styles.paymentMethodName}>{pm.displayName || pm.name}</Text>
+                        <Text style={[styles.paymentMethodName, styles.paymentMethodsSummaryName]}>{pm.displayName || pm.name}</Text>
                         <CountryFlag emoji={pm.bank?.country?.flagEmoji} size={14} />
                       </View>
                     ))}
@@ -3927,9 +3927,15 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
+  // A long method name truncates inside the card instead of pushing its
+  // flag (and the chevron) off the edge.
   paymentMethodsSummaryItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    maxWidth: '100%',
+  },
+  paymentMethodsSummaryName: {
+    flexShrink: 1,
   },
   paymentMethodsSummaryText: {
     fontSize: 12,
@@ -3950,6 +3956,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingVertical: 4,
+    maxWidth: '100%',
   },
   paymentMethodIcon: {
     width: 20,
