@@ -93,6 +93,13 @@ app.conf.beat_schedule.setdefault('payments-reconcile-stranded-bsc', {
     'schedule': crontab(minute='*/15'),
 })
 
+# The update pop-up follows the stores: latest_version only moves up once
+# the App Store or a 100% Play production rollout actually serves the build.
+app.conf.beat_schedule.setdefault('security-sync-store-versions', {
+    'task': 'security.sync_store_versions',
+    'schedule': crontab(minute=33),
+})
+
 # Ensure DB connections are properly managed around every Celery task
 try:
     from celery import signals

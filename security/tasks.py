@@ -39,3 +39,10 @@ def purge_face_check_evidence():
     """Daily: drop frames of passed Confío Face checks past their retention."""
     from .face_step_up import purge_expired_evidence
     return purge_expired_evidence()
+
+
+@shared_task(name='security.sync_store_versions')
+def sync_store_versions():
+    """Hourly: raise AppVersionPolicy.latest_version to what each store serves."""
+    from .store_versions import sync_store_versions as sync
+    return sync()

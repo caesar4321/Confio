@@ -1597,7 +1597,9 @@ class FaceReferenceAdmin(admin.ModelAdmin):
 
 
 class AppVersionPolicyAdmin(admin.ModelAdmin):
-    """One row per platform; the app reads it on launch and on foreground."""
+    """One row per platform; the app reads it on launch and on foreground.
+    latest_version follows the stores on its own (security.sync_store_versions,
+    hourly, raise-only); a manual value here is an override."""
     list_display = ('platform', 'latest_version', 'updated_at')
     fields = ('platform', 'latest_version', 'message', 'updated_at')
     readonly_fields = ('updated_at',)

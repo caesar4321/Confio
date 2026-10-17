@@ -706,16 +706,19 @@ class AppVersionPolicy(models.Model):
 
     Read by GET /api/app-version/ (security/app_version.py). Older apps get
     a pop-up suggesting the update, which the user can put off; nothing is
-    ever blocked. Raise latest_version only after the store has published
-    that build, or users are sent to a store page that still shows the old
-    one. Blank = no prompt.
+    ever blocked. latest_version is auto-synced hourly from the App Store
+    and the fully rolled-out Play production release
+    (security/store_versions.py), which only ever raises it. Setting it by
+    hand is an override that sticks until the store passes it; set it no
+    higher than what the store serves, or users are sent to a store page
+    that still shows the old build. Blank = no prompt until the next sync.
     """
 
     PLATFORM_CHOICES = [('ios', 'iOS'), ('android', 'Android')]
 
     platform = models.CharField(max_length=16, choices=PLATFORM_CHOICES, unique=True)
     latest_version = models.CharField(max_length=16, blank=True,
-                                      help_text='Newest version live in the store, e.g. 5.2.3')
+                                      help_text='Auto-synced hourly from the store (only ever raised). Edit only to override, e.g. 5.2.3')
     message = models.CharField(max_length=280, blank=True,
                                help_text='Optional "Novedades" for the update pop-up, one per line, up to 4 (Spanish)')
     updated_at = models.DateTimeField(auto_now=True)
