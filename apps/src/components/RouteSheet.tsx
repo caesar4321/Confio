@@ -46,8 +46,10 @@ export interface RouteOption {
    * fallback for countries without an image.
    */
   country?: string;
-  /** Feather icon name; ignored when `image` is provided. */
+  /** Feather icon name; ignored when `image` or `iconNode` is provided. */
   icon: string;
+  /** A custom glyph (e.g. QrShowIcon) for the icon cell, where Feather has none. */
+  iconNode?: React.ReactNode;
   /** Token/brand logo — takes the icon slot when provided. */
   image?: ImageSourcePropType;
   title: string;
@@ -91,7 +93,7 @@ export const RouteOptionRow = ({
       <Image source={o.image} style={styles.optionImage} />
     ) : (
       <View style={styles.optionIcon}>
-        <Icon name={o.icon} size={20} color={colors.primaryDark} />
+        {o.iconNode ?? <Icon name={o.icon} size={20} color={colors.primaryDark} />}
       </View>
     )}
     <View style={{ flex: 1 }}>

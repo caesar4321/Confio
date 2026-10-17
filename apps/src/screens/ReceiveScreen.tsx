@@ -18,6 +18,7 @@ import { useRampFlows } from '../hooks/useRampFlows';
 import { MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
 import { buildInviteLink } from '../utils/inviteLinks';
+import { QrShowIcon } from '../components/QrPayIcon';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -166,6 +167,7 @@ export default function ReceiveScreen() {
                 option={{
                   id: 'charge',
                   icon: 'dollar-sign',
+                  iconNode: <QrShowIcon size={20} color={colors.primaryDark} />,
                   title: 'Cobrar con QR',
                   subtitle: 'Crea un cobro y muéstrale el QR a quien te paga',
                   onPress: () => navigation.navigate('Charge'),

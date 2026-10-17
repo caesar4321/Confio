@@ -8,6 +8,7 @@ import { RootStackParamList } from '../types/navigation';
 
 import { APP_LAYOUT } from '../config/layout';
 import { colors } from '../config/theme';
+import { QrShowIcon } from '../components/QrPayIcon';
 
 export const HEADER_HEIGHT = APP_LAYOUT.headerHeight;
 
@@ -123,7 +124,7 @@ export const Header: React.FC<HeaderProps> = ({
               accessibilityRole="button"
               accessibilityLabel="Cobrar"
             >
-              <Icon name="dollar-sign" size={20} color="#fff" />
+              <QrShowIcon size={20} color="#fff" />
             </TouchableOpacity>
           )}
           <TouchableOpacity 

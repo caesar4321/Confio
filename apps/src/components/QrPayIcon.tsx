@@ -28,3 +28,21 @@ export const QrPayIcon = ({ size = 30, color = '#fff' }: { size?: number; color?
     <Rect x={18} y={21.4} width={2.6} height={2.6} fill={color} />
   </Svg>
 );
+
+/**
+ * The Cobrar glyph: the same QR without the scanner frame — a code you SHOW,
+ * where Pagar's framed one is a code you scan. Drawn larger, since nothing
+ * else fills the box.
+ */
+export const QrShowIcon = ({ size = 30, color = '#fff' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+    {/* finder patterns */}
+    <Rect x={4} y={4} width={9} height={9} rx={1.5} stroke={color} strokeWidth={2.4} />
+    <Rect x={19} y={4} width={9} height={9} rx={1.5} stroke={color} strokeWidth={2.4} />
+    <Rect x={4} y={19} width={9} height={9} rx={1.5} stroke={color} strokeWidth={2.4} />
+    {/* data modules */}
+    <Rect x={18.2} y={18.2} width={3.8} height={3.8} fill={color} />
+    <Rect x={24.2} y={24.2} width={3.8} height={3.8} fill={color} />
+    <Rect x={18.2} y={24.2} width={3.8} height={3.8} fill={color} />
+  </Svg>
+);
