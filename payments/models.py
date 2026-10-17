@@ -83,12 +83,15 @@ class PaymentTransaction(SoftDeleteModel):
         help_text='Business that made the payment (if payer is business account)'
     )
     
-    # The actual merchant entity (REQUIRED - only businesses can accept payments)
+    # The merchant business. Null when a personal account accepted the
+    # payment (merchant_type 'user'): merchant_account is then the person's.
     merchant_business = models.ForeignKey(
         'users.Business',
         on_delete=models.CASCADE,
         related_name='payment_transactions_received',
-        help_text='Business entity that received the payment'
+        null=True,
+        blank=True,
+        help_text='Business that received the payment; empty for a personal merchant'
     )
 
     # Computed fields for GraphQL
@@ -107,7 +110,7 @@ class PaymentTransaction(SoftDeleteModel):
         max_length=10,
         choices=ACCOUNT_TYPE_CHOICES,
         default='business',
-        help_text='Type of merchant (always business for payments)'
+        help_text='Type of merchant (business, or user for a personal account)'
     )
     payer_display_name = models.CharField(
         max_length=255,
@@ -206,7 +209,7 @@ class PaymentTransaction(SoftDeleteModel):
         ]
 
     def __str__(self):
-        merchant_name = self.merchant_business.name
+        merchant_name = self.merchant_business.name if self.merchant_business_id else self.merchant_display_name
         return f"PAY-{self.internal_id}: {self.token_type} {self.amount} from {self.payer_user} to {merchant_name}"
 
 
@@ -266,12 +269,15 @@ class Invoice(SoftDeleteModel):
         help_text='User who created this invoice (business owner or cashier)'
     )
 
-    # The actual merchant entity (REQUIRED - only businesses can create invoices)
+    # The merchant business. Null when a personal account charges (merchant
+    # type 'user'); merchant_account is then the person's own account.
     merchant_business = models.ForeignKey(
         'users.Business',
         on_delete=models.CASCADE,
         related_name='invoices_received',
-        help_text='Business entity that is the actual merchant'
+        null=True,
+        blank=True,
+        help_text='Business that is the merchant; empty for a personal merchant'
     )
 
     # Computed fields for GraphQL
@@ -279,7 +285,7 @@ class Invoice(SoftDeleteModel):
         max_length=10,
         choices=[('user', 'Personal'), ('business', 'Business')],
         default='business',
-        help_text='Type of merchant (always business for invoices)'
+        help_text='Type of merchant (business, or user for a personal account)'
     )
     merchant_display_name = models.CharField(
         max_length=255,
@@ -369,7 +375,7 @@ class Invoice(SoftDeleteModel):
         ]
 
     def __str__(self):
-        merchant_name = self.merchant_business.name
+        merchant_name = self.merchant_business.name if self.merchant_business_id else self.merchant_display_name
         return f"INV-{self.internal_id[:8]}: {self.token_type} {self.amount} by {merchant_name}"
 
     def save(self, *args, **kwargs):

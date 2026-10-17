@@ -204,7 +204,10 @@ def _recover_pay_signer(digest: bytes, sig_hex: str) -> str:
 def _notify_merchant_needs_app(invoice, payer_user) -> None:
     """Business registration is OWNER-only (users/schema.py guard), so the
     nudge goes to the invoice creator — in practice the owner or cashier
-    who can relay it. Opening the app as the owner IS the registration."""
+    who can relay it. Opening the app as the owner IS the registration.
+    A personal merchant is the creator and registers by opening the app."""
+    who = ('El dueño del negocio debe abrir' if invoice.merchant_business_id
+           else 'Abre')
     try:
         from notifications import utils as notif_utils
         from notifications.models import NotificationType as NotifType
@@ -215,8 +218,8 @@ def _notify_merchant_needs_app(invoice, payer_user) -> None:
             notification_type=NotifType.PAYMENT_RECEIVED,
             title='Un cliente quiere pagarte',
             message=(
-                'Alguien intentó pagarte con dólares digitales. El dueño del '
-                'negocio debe abrir Confío para activar los cobros.'
+                f'Alguien intentó pagarte con dólares digitales. {who} '
+                'Confío para activar los cobros.'
             ),
             data={'transaction_type': 'payment_blocked', 'reason': 'no_bsc_address'},
         )
@@ -244,6 +247,13 @@ def _merchant_kyb_verified(merchant_business) -> bool:
         risk_factors__business_id=str(merchant_business.id)).exists()
 
 
+def _personal_merchant(invoice):
+    """The person charging, or None when a business is the merchant."""
+    if invoice is None or invoice.merchant_business_id:
+        return None
+    return getattr(invoice.merchant_account, 'user', None)
+
+
 def _payment_face_terms(invoice) -> dict:
     """Always the full Confío Face: a payment only asks for a face when it
     goes into a business the payer owns or works for, or one without KYB.
@@ -258,19 +268,24 @@ def _payment_step_up(user, payer_business, merchant_business, invoice=None, **cl
 
     Pay stays face-free at verified merchants. Confío Face (for payers who
     went through KYC) only where a ring would route money: into a business
-    the payer owns or works for, or into one that never passed KYB. Business
+    the payer owns or works for, or into one that never passed KYB. A person
+    who charges is verified by their own ID (KYC stands in for KYB). Business
     payers are governed by KYB and limits, as for sends.
     """
     from security.identity_reuse import outgoing_identity_restriction
     restriction = outgoing_identity_restriction(user)
     if restriction:
         return restriction
-    if payer_business is not None or merchant_business is None:
+    merchant_user = _personal_merchant(invoice) if merchant_business is None else None
+    if payer_business is not None or (merchant_business is None and merchant_user is None):
         return ''
     from security.face_step_up import require_face_step_up, step_up_applies
     if not step_up_applies(user):
         return ''
-    if not _pays_own_business(user, merchant_business) and _merchant_kyb_verified(merchant_business):
+    if merchant_user is not None:
+        if merchant_user.id != user.id and merchant_user.has_verified_identity_document:
+            return ''
+    elif not _pays_own_business(user, merchant_business) and _merchant_kyb_verified(merchant_business):
         return ''
     if invoice is not None:
         claim.update(_payment_face_terms(invoice))
@@ -365,6 +380,12 @@ def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '
     if invoice_token not in DOLLAR_INVOICE_TOKENS and invoice_token != 'CONFIO':
         return {'success': False, 'error': 'unsupported_token'}
 
+    # Nobody pays their own charge, from any of their accounts: for a person
+    # it would only shuttle money between their own wallets at 0.9%.
+    personal_merchant = _personal_merchant(invoice)
+    if personal_merchant is not None and personal_merchant.id == user.id:
+        return {'success': False, 'error': 'self_pay_not_allowed'}
+
     # Payer account from the JWT context only.
     if jwt_ctx['account_type'] == 'business' and jwt_ctx.get('business_id'):
         if jwt_ctx['business_id'] == invoice.merchant_business_id:
@@ -384,11 +405,18 @@ def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '
     if not payer_addr:
         return {'success': False, 'error': 'no_bsc_address'}
 
-    # Merchant destination: the business account's registered address.
-    merchant_account = Account.objects.filter(
-        business=invoice.merchant_business, account_type='business',
-        deleted_at__isnull=True,
-    ).order_by('account_index').first()
+    # Merchant destination: the business account's registered address, or
+    # for a person the very account they charged from.
+    if invoice.merchant_business_id:
+        merchant_account = Account.objects.filter(
+            business=invoice.merchant_business, account_type='business',
+            deleted_at__isnull=True,
+        ).order_by('account_index').first()
+    else:
+        merchant_account = Account.objects.filter(
+            id=invoice.merchant_account_id, account_type='personal',
+            deleted_at__isnull=True,
+        ).first()
     merchant_addr = (getattr(merchant_account, 'bsc_address', None) or '').lower()
     if not merchant_addr:
         _notify_merchant_needs_app(invoice, user)
@@ -659,7 +687,9 @@ def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '
             'payer_phone': user.phone_number or '',
             'merchant_account_user': invoice.created_by_user,
             'merchant_business': invoice.merchant_business,
-            'merchant_display_name': invoice.merchant_display_name or invoice.merchant_business.name,
+            'merchant_type': invoice.merchant_type,
+            'merchant_display_name': invoice.merchant_display_name or (
+                invoice.merchant_business.name if invoice.merchant_business_id else ''),
             'payer_account': payer_account,
             'merchant_account': invoice.merchant_account,
             'payer_address': payer_addr,

@@ -157,7 +157,7 @@ export const PaymentSuccessScreen = () => {
         {/* Compact receipt card: everything else is one quiet card. */}
         <View style={styles.card}>
           <View style={styles.row}>
-            <Text style={styles.rowLabel}>Comercio</Text>
+            <Text style={styles.rowLabel}>Pagado a</Text>
             <Text style={styles.rowValue} numberOfLines={1}>
               {transactionData.location && transactionData.terminal
                 ? `${transactionData.merchant} · ${transactionData.location}`

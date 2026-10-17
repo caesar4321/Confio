@@ -56,6 +56,11 @@ const ChargeScreen = () => {
   const navigation = useNavigation<ChargeScreenNavigationProp>();
   const { activeAccount } = useAccount();
   const viewShotRef = useRef<ViewShot>(null);
+  // A personal account charges too (same 0.9%), reaching this screen from
+  // Recibir or the Home header as a stack screen. It already has the Pagar
+  // tab, so it gets no Cobrar/Pagar toggle, and a back arrow instead.
+  const isBusiness = activeAccount?.type?.toLowerCase() === 'business';
+  const isStackScreen = (navigation as any).getState?.()?.type === 'stack';
 
   const [mode, setMode] = useState('cobrar');
   const [selectedCurrency, setSelectedCurrency] = useState(CUSD_PLUS);
@@ -127,7 +132,7 @@ const ChargeScreen = () => {
               payerAddress: currentInvoice.paymentTransactions?.[0]?.payerAddress || '0x...',
               merchantUser: {
                 id: activeAccount?.id || '',
-                username: activeAccount?.name || 'Tu Negocio',
+                username: activeAccount?.name || (isBusiness ? 'Tu Negocio' : 'Tú'),
                 firstName: undefined,
                 lastName: undefined
               },
@@ -191,22 +196,21 @@ const ChargeScreen = () => {
     setIsLoading(true);
 
     try {
-      // Both charge tokens settle on BSC (2026-08-01), so the business's
+      // Both charge tokens settle on BSC (2026-08-01), so the account's
       // registered BSC address — not an Algorand asset opt-in — is what makes
-      // a QR payable. Registration is OWNER-only server-side (an employee's
-      // client would derive an address the owner doesn't control), so this is
-      // best-effort here and the server has the final say at createInvoice.
-      if (activeAccount.type === 'business') {
-        setIsOptingIn(true);
-        setOptInMessage('Preparando cuenta para recibir pagos...');
-        try {
-          const { ensureBscAddressRegistered } = await import('../services/authService');
-          await ensureBscAddressRegistered();
-        } catch (_) {
-          // Non-fatal: createInvoice reports merchant_not_ready if it mattered.
-        }
-        setIsOptingIn(false);
+      // a QR payable. For a business, registration is OWNER-only server-side
+      // (an employee's client would derive an address the owner doesn't
+      // control), so this is best-effort here and the server has the final
+      // say at createInvoice.
+      setIsOptingIn(true);
+      setOptInMessage('Preparando cuenta para recibir pagos...');
+      try {
+        const { ensureBscAddressRegistered } = await import('../services/authService');
+        await ensureBscAddressRegistered();
+      } catch (_) {
+        // Non-fatal: createInvoice reports merchant_not_ready if it mattered.
       }
+      setIsOptingIn(false);
 
       const { data } = await createInvoice({
         variables: {
@@ -248,7 +252,7 @@ const ChargeScreen = () => {
             isNonOwnerEmployee ? 'Acción requerida del dueño' : 'Cuenta no preparada',
             isNonOwnerEmployee
               ? 'La cuenta del negocio aún no puede recibir pagos. Pide al dueño que abra Confío una vez para activarlos.'
-              : 'Tu cuenta empresarial aún no puede recibir pagos. Cierra y vuelve a abrir Confío e inténtalo de nuevo.',
+              : `Tu cuenta${isBusiness ? ' empresarial' : ''} aún no puede recibir pagos. Cierra y vuelve a abrir Confío e inténtalo de nuevo.`,
             [{ text: 'Entendido' }]
           );
         } else {
@@ -409,6 +413,11 @@ const ChargeScreen = () => {
             <Circle cx="105%" cy="30%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
           </Svg>
           <View style={styles.headerInner}>
+          {isStackScreen ? (
+            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Volver">
+              <Icon name="arrow-left" size={22} color={colors.white} />
+            </TouchableOpacity>
+          ) : null}
           <View style={styles.headerContent}>
             <View style={styles.qrIconContainer}>
               <Icon name="maximize" size={32} color={mode === 'cobrar' ? currentCurrency.color : colors.primary} />
@@ -426,7 +435,8 @@ const ChargeScreen = () => {
           </View>
         </View>
 
-        {/* Mode Toggle */}
+        {/* Mode Toggle (business only: a person pays from the Pagar tab) */}
+        {isBusiness ? (
         <View style={styles.modeToggleContainer}>
           <View style={styles.modeToggle}>
             <TouchableOpacity
@@ -459,6 +469,7 @@ const ChargeScreen = () => {
             </TouchableOpacity>
           </View>
         </View>
+        ) : null}
 
         {/* Content */}
         <View style={styles.content}>
@@ -537,6 +548,9 @@ const ChargeScreen = () => {
                           {currentCurrency.symbol}
                         </Text>
                       </View>
+                      <Text style={styles.characterCount}>
+                        Confío descuenta 0,9% de cada pago que recibes.
+                      </Text>
                     </View>
 
                     <View style={styles.inputContainer}>
@@ -748,6 +762,18 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 24,
     paddingHorizontal: 16,
+  },
+  backButton: {
+    position: 'absolute',
+    top: 52,
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
   },
   headerContent: {
     alignItems: 'center',

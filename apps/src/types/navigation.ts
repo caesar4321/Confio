@@ -471,6 +471,9 @@ export type MainStackParamList = {
   Scan: {
     mode?: 'pagar' | 'cobrar';
   };
+  // Cobrar for a personal account, pushed from Recibir or the Home header
+  // (a business has it as a tab).
+  Charge: undefined;
   TraderRating: {
     tradeId: string;
     trader: {

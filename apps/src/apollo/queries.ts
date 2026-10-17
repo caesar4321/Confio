@@ -879,6 +879,8 @@ export const GET_INVOICE = gql`
         qrCodeData
         qrCodeData
         isExpired
+        merchantType
+        merchantDisplayName
         paymentTransactions {
           id
           internalId
@@ -4264,6 +4266,18 @@ export const GET_INVOICE_SETTLEMENT_CHAIN = gql`
     invoice(invoiceId: $invoiceId) {
       id
       settlementChain
+    }
+  }
+`;
+
+// Whether the payer's "Verificado" badge may show: KYB for a business, the
+// person's own ID for a personal merchant. Its own query: one unknown field
+// fails the whole query against an older server.
+export const GET_INVOICE_MERCHANT_VERIFIED = gql`
+  query GetInvoiceMerchantVerified($invoiceId: String!) {
+    invoice(invoiceId: $invoiceId) {
+      id
+      merchantVerified
     }
   }
 `;

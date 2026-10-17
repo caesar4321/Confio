@@ -5,6 +5,19 @@ from django.utils.html import format_html
 from .models import Invoice, PaymentTransaction
 
 
+def _merchant_badge(obj):
+    if obj.merchant_business_id:
+        label, color, name = 'BUSINESS', '#8B5CF6', obj.merchant_business.name
+    else:
+        label, color, name = 'PERSONAL', '#10B981', obj.merchant_display_name or '-'
+    return format_html(
+        '<span style="background-color: {}; color: white; padding: 2px 6px; '
+        'border-radius: 4px; font-size: 11px; margin-right: 4px;">{}</span>'
+        '<strong>{}</strong>',
+        color, label, name
+    )
+
+
 @admin.register(PaymentTransaction)
 class PaymentTransactionAdmin(admin.ModelAdmin):
     """Admin configuration for PaymentTransaction model"""
@@ -65,7 +78,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         }),
         ('Merchant Details', {
             'fields': ('merchant_type', 'merchant_business', 'merchant_account_user', 'merchant_display_name'),
-            'description': 'Merchant is always a business'
+            'description': 'Merchant is a business, or a person (merchant_type user, no business)'
         }),
         ('Account Details', {
             'fields': ('payer_account', 'merchant_account'),
@@ -106,12 +119,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
     
     def merchant_display(self, obj):
         """Display merchant with business and account user info"""
-        business_part = format_html(
-            '<span style="background-color: #8B5CF6; color: white; padding: 2px 6px; '
-            'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
-            '<strong>{}</strong>',
-            obj.merchant_business.name
-        )
+        business_part = _merchant_badge(obj)
         
         # Show account user (who handled the transaction)
         user_part = ""
@@ -209,7 +217,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         }),
         ('Merchant Details', {
             'fields': ('merchant_type', 'merchant_business', 'created_by_user', 'merchant_display_name', 'merchant_account'),
-            'description': 'Merchant is always a business'
+            'description': 'Merchant is a business, or a person (merchant_type user, no business)'
         }),
         ('Status & Timing', {
             'fields': ('status', 'created_at', 'expires_at', 'is_expired')
@@ -230,12 +238,7 @@ class InvoiceAdmin(admin.ModelAdmin):
     
     def merchant_display(self, obj):
         """Display merchant with business and creator info"""
-        business_part = format_html(
-            '<span style="background-color: #8B5CF6; color: white; padding: 2px 6px; '
-            'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
-            '<strong>{}</strong>',
-            obj.merchant_business.name
-        )
+        business_part = _merchant_badge(obj)
         
         # Show creator user (who created the invoice)
         creator_part = format_html(

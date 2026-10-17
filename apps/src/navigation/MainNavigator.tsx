@@ -84,6 +84,7 @@ import { TradeChatScreen } from '../screens/TradeChatScreen';
 import { ActiveTradeScreen } from '../screens/ActiveTradeScreen';
 import { TraderRatingScreen } from '../screens/TraderRatingScreen';
 import { ScanScreen } from '../screens/ScanScreen';
+import { ChargeScreen } from '../screens/ChargeScreen';
 import { CreateOfferScreen } from '../screens/CreateOfferScreen';
 import { PayoutMethodsScreen } from '../screens/PayoutMethodsScreen';
 import { RampAddressScreen } from '../screens/RampAddressScreen';
@@ -616,6 +617,11 @@ export const MainNavigator = () => {
           name="Scan"
           component={ScanScreen}
           options={{ headerShown: false, freezeOnBlur: true }}
+        />
+        <Stack.Screen
+          name="Charge"
+          component={ChargeScreen}
+          options={{ headerShown: false }}
         />
         <Stack.Screen
           name="CreateOffer"

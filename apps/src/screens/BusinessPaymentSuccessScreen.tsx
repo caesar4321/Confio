@@ -199,7 +199,7 @@ export const BusinessPaymentSuccessScreen = () => {
         payerPhone: '', // Not always available in paymentData unless added to schema override
 
         // Merchant info
-        merchantName: paymentData.merchantAccount?.business?.name || 'Comercio',
+        merchantName: paymentData.merchantAccount?.business?.name || paymentData.merchantUser?.username || 'Comercio',
         recipientBusiness: paymentData.merchantAccount?.business,
         recipientUser: paymentData.merchantUser,
 

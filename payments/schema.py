@@ -142,6 +142,16 @@ class InvoiceType(DjangoObjectType):
     qr_code_data = graphene.String()
     payment_transactions = graphene.List(PaymentTransactionType)
     currency = graphene.String() # Alias for token_type for web app
+    # What the payer's "Verificado" badge may claim: KYB for a business, the
+    # person's own ID for a personal merchant.
+    merchant_verified = graphene.Boolean()
+
+    def resolve_merchant_verified(self, info):
+        if self.merchant_business_id:
+            from .bsc_flow import _merchant_kyb_verified
+            return _merchant_kyb_verified(self.merchant_business)
+        merchant_user = getattr(self.merchant_account, 'user', None)
+        return bool(merchant_user and merchant_user.has_verified_identity_document)
     
     def resolve_is_expired(self, info):
         """Resolve is_expired property"""
@@ -269,25 +279,32 @@ class CreateInvoice(graphene.Mutation):
                 )
             expires_at = timezone.now() + timedelta(hours=expires_in_hours)
 
-            # Only businesses can create invoices
-            if account_type != 'business' or not business_id:
+            # Personal accounts charge too: much of Latin America's commerce
+            # runs under a person's own name. The person is the merchant
+            # (merchant_business stays empty) and pays the same 0.9%.
+            if account_type == 'business' and business_id:
+                from users.models import Business
+                merchant_business = Business.objects.filter(id=business_id).first()
+                if not merchant_business:
+                    return CreateInvoice(
+                        invoice=None,
+                        success=False,
+                        errors=["Negocio no encontrado"]
+                    )
+                merchant_type = 'business'
+                merchant_display_name = merchant_business.name
+            elif account_type == 'personal':
+                merchant_business = None
+                merchant_type = 'user'
+                # The user's name is the verified one once they pass KYC
+                # (security.models keeps it in sync).
+                merchant_display_name = user.get_full_name() or user.username or ''
+            else:
                 return CreateInvoice(
                     invoice=None,
                     success=False,
-                    errors=["Solo las cuentas de negocio pueden crear facturas"]
+                    errors=["Cuenta activa no encontrada"]
                 )
-            
-            # Get the business directly using the business_id from JWT
-            from users.models import Business
-            merchant_business = Business.objects.filter(id=business_id).first()
-            if not merchant_business:
-                return CreateInvoice(
-                    invoice=None,
-                    success=False,
-                    errors=["Negocio no encontrado"]
-                )
-            merchant_type = 'business'
-            merchant_display_name = merchant_business.name
 
             # Normalize token type to canonical uppercase for DB/network.
             # The charge menu is exactly two denominations after the BSC
@@ -325,6 +342,12 @@ class CreateInvoice(graphene.Mutation):
                 return CreateInvoice(
                     invoice=None, success=False,
                     errors=[f"{normalized_token} solo se liquida en Algorand"])
+            # Personal charges are new and BSC-only: the Algorand rail routes
+            # every payment to a business and takes no new work.
+            if merchant_type == 'user' and settlement_chain != 'BSC':
+                return CreateInvoice(
+                    invoice=None, success=False,
+                    errors=["Los cobros personales solo se liquidan en BSC"])
 
             # A BSC QR is only payable once the business has a registered BSC
             # address — which only the OWNER's client can derive (the
@@ -366,7 +389,7 @@ class CreateInvoice(graphene.Mutation):
             
             # Log activity if user is an employee
             from users.models_employee import BusinessEmployee, EmployeeActivityLog
-            employee_record = BusinessEmployee.objects.filter(
+            employee_record = merchant_business and BusinessEmployee.objects.filter(
                 business=merchant_business,
                 user=user,
                 is_active=True

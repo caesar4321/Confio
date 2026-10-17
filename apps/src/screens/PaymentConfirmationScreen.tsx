@@ -25,7 +25,7 @@ import { ReceiptCard } from '../components/common/ReceiptCard';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { formatNumber } from '../utils/numberFormatting';
 import { useMutation, useQuery } from '@apollo/client';
-import { GET_INVOICE, GET_BSC_CONFIO_TOKEN_BALANCE, GET_INVOICE_SETTLEMENT_CHAIN } from '../apollo/queries';
+import { GET_INVOICE, GET_BSC_CONFIO_TOKEN_BALANCE, GET_INVOICE_SETTLEMENT_CHAIN, GET_INVOICE_MERCHANT_VERIFIED } from '../apollo/queries';
 import { useAuth, useAuthReady } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
@@ -61,6 +61,9 @@ type PaymentConfirmationRouteProp = RouteProp<{
         };
       };
       isExpired: boolean;
+      // 'user' when a personal account charges (no business).
+      merchantType?: string;
+      merchantDisplayName?: string;
     };
   };
 }, 'PaymentConfirmation'>;
@@ -163,6 +166,13 @@ export const PaymentConfirmationScreen = () => {
   );
   // Undefined = not answered yet, or a server that predates the field.
   const serverChain: string | undefined = chainData?.invoice?.settlementChain;
+  // The badge claims only what the server confirms; unknown = no badge.
+  const { data: verifiedData } = useQuery(
+    GET_INVOICE_MERCHANT_VERIFIED,
+    { variables: { invoiceId: safeInvoiceId }, skip: !safeInvoiceId,
+      fetchPolicy: 'network-only' },
+  );
+  const merchantVerified = verifiedData?.invoice?.merchantVerified === true;
   // ONLY a schema error means "this server is too old to know the rail". A
   // timeout or a 500 says nothing about the invoice, and treating it as an
   // old server would silently route a BSC invoice at Algorand (Codex audit
@@ -384,22 +394,29 @@ export const PaymentConfirmationScreen = () => {
     );
   }
 
+  // A personal account charging: the person's name (the verified one once
+  // they pass KYC), no category and no shop address.
+  const isPersonalMerchant = invoiceData.merchantType === 'user' || !invoiceData.merchantAccount.business;
+  const recipientName = invoiceData.merchantAccount.business?.name ||
+    invoiceData.merchantDisplayName ||
+    [invoiceData.merchantUser.firstName, invoiceData.merchantUser.lastName].filter(Boolean).join(' ') ||
+    invoiceData.merchantUser.username;
   const currentPayment = {
     type: 'merchant',
-    recipient: invoiceData.merchantAccount.business?.name ||
-      invoiceData.merchantUser.firstName ||
-      invoiceData.merchantUser.username,
-    recipientType: translateCategory(invoiceData.merchantAccount.business?.category || 'Usuario'),
+    recipient: recipientName,
+    recipientType: isPersonalMerchant
+      ? 'Persona'
+      : translateCategory(invoiceData.merchantAccount.business?.category || 'Usuario'),
     amount: invoiceData.amount,
     currency: normalizeTokenType(invoiceData.tokenType),
     description: invoiceData.description,
-    location: invoiceData.merchantAccount.business?.address || 'Dirección no disponible',
+    location: isPersonalMerchant
+      ? 'Cobro personal'
+      : (invoiceData.merchantAccount.business?.address || 'Dirección no disponible'),
     merchantId: invoiceData.merchantAccount.id,
     paymentId: invoiceData.internalId,
-    avatar: (invoiceData.merchantAccount.business?.name ||
-      invoiceData.merchantUser.firstName ||
-      invoiceData.merchantUser.username).charAt(0).toUpperCase(),
-    verification: 'Verificado'
+    avatar: (recipientName || '?').charAt(0).toUpperCase(),
+    verification: merchantVerified ? 'Verificado' : '',
   };
 
   // Use snapshot balance; no immediate network dependency
@@ -645,10 +662,12 @@ export const PaymentConfirmationScreen = () => {
                 <Text style={styles.recipientName}>{currentPayment.recipient}</Text>
                 <View style={styles.recipientMeta}>
                   <Text style={styles.recipientCategory}>{currentPayment.recipientType}</Text>
-                  <View style={styles.verificationBadge}>
-                    <Icon name="check-circle" size={12} color={colors.primaryDark} />
-                    <Text style={styles.verificationText}>{currentPayment.verification}</Text>
-                  </View>
+                  {currentPayment.verification ? (
+                    <View style={styles.verificationBadge}>
+                      <Icon name="check-circle" size={12} color={colors.primaryDark} />
+                      <Text style={styles.verificationText}>{currentPayment.verification}</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             </View>

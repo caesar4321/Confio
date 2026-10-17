@@ -22,6 +22,8 @@ interface HeaderProps {
   onProfilePress?: () => void;
   onNotificationPress?: () => void;
   onMessagePress?: () => void;
+  /** Home only: Cobrar for a personal account (a business has the tab). */
+  onChargePress?: () => void;
   onBackPress?: () => void;
   backgroundColor?: string;
   isLight?: boolean;
@@ -41,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   onProfilePress,
   onNotificationPress,
   onMessagePress,
+  onChargePress,
   onBackPress,
   backgroundColor,
   isLight = false,
@@ -105,6 +108,24 @@ export const Header: React.FC<HeaderProps> = ({
       </View>
       {isHomeScreen && (
         <View style={{ flexDirection: 'row', gap: 12, flexShrink: 0 }}>
+          {onChargePress && (
+            <TouchableOpacity
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+              onPress={onChargePress}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel="Cobrar"
+            >
+              <Icon name="dollar-sign" size={20} color="#fff" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity 
             style={{ 
               width: 40,

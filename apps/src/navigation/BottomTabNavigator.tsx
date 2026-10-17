@@ -35,10 +35,15 @@ export const BottomTabNavigator = () => {
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
   const isEmployee = activeAccount?.isEmployee || false;
   const canSendFunds = !isEmployee || activeAccount?.employeePermissions?.sendFunds === true;
+  // Check if account is business (using normalized type)
+  const isBusinessAccount = accountType === 'business';
 
   //
   const handleNotificationPress = useCallback(() => {
     navigation.navigate('Notification' as any);
+  }, [navigation]);
+  const handleChargePress = useCallback(() => {
+    navigation.navigate('Charge' as any);
   }, [navigation]);
 
 
@@ -50,13 +55,15 @@ export const BottomTabNavigator = () => {
       title="Confío"
       onProfilePress={profileMenu.openProfileMenu}
       onNotificationPress={handleNotificationPress}
+      // A business has Cobrar as a tab; a person gets it here and in Recibir.
+      onChargePress={isBusinessAccount ? undefined : handleChargePress}
       backgroundColor={colors.heroField}
       showBackButton={false}
       isLight={false}
       unreadNotifications={unreadNotifications}
       currentAccountAvatar={currentAccountAvatar}
     />
-  ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, unreadNotifications, currentAccountAvatar]);
+  ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, handleChargePress, isBusinessAccount, unreadNotifications, currentAccountAvatar]);
 
 
   // Charge header removed since ChargeScreen has its own header
@@ -77,9 +84,6 @@ export const BottomTabNavigator = () => {
       currentAccountAvatar="U"
     />
   ), [navigation]);
-
-  // Check if account is business (using normalized type)
-  const isBusinessAccount = accountType === 'business';
 
   // Personal accounts pay from the center tab; businesses use Cobrar → Pagar.
   const scanTabOptions = useMemo(() => ({

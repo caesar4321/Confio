@@ -86,8 +86,8 @@ class PrepareBatchTests(SimpleTestCase):
             internal_id='inv123', status='PENDING', is_expired=False,
             token_type=token, settlement_chain=chain, amount=Decimal(amount),
             merchant_business=merchant_business, merchant_business_id=77,
-            merchant_display_name='Bodega La 22',
-            merchant_account=SimpleNamespace(id=5),
+            merchant_type='business', merchant_display_name='Bodega La 22',
+            merchant_account=SimpleNamespace(id=5), merchant_account_id=5,
             created_by_user=SimpleNamespace(id=9),
             description='',
         )
@@ -131,6 +131,8 @@ class PrepareBatchTests(SimpleTestCase):
              mock.patch('payments.models.PaymentTransaction.objects') as pt_objs:
             acct_objs.filter.return_value.order_by.return_value.first.return_value = \
                 merchant_account
+            acct_objs.filter.return_value.first.return_value = merchant_account
+            captured['acct_objs'] = acct_objs
             pt_objs.get_or_create.side_effect = _goc
             result = bsc_flow.prepare_bsc_payment(
                 self._user(), {'account_type': 'personal', 'account_index': 0}, invoice)
@@ -294,6 +296,40 @@ class PrepareBatchTests(SimpleTestCase):
             self._invoice('10'))
         self.assertEqual(result['error'], 'self_pay_not_allowed')
 
+    def _personal_invoice(self, seller_id=42):
+        invoice = self._invoice('10')
+        invoice.merchant_business = None
+        invoice.merchant_business_id = None
+        invoice.merchant_type = 'user'
+        invoice.merchant_display_name = 'Rosa Mendoza'
+        invoice.merchant_account = SimpleNamespace(id=5, user=SimpleNamespace(id=seller_id))
+        return invoice
+
+    def test_personal_merchant_is_paid_at_their_own_account(self):
+        result, row, _ = self._prepare(self._personal_invoice(), cusd=100 * WAD)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(row.merchant_type, 'user')
+        self.assertIsNone(row.merchant_business)
+        self.assertEqual(row.merchant_display_name, 'Rosa Mendoza')
+        inv_b, d_token, d_gross, d_merchant, *_ = self._decode_pay(result['calls'][1])
+        self.assertEqual(d_merchant.lower(), MERCHANT)
+
+    def test_personal_merchant_destination_is_the_charging_account(self):
+        with mock.patch('users.models.Account.objects') as acct_objs:
+            acct_objs.filter.return_value.first.return_value = None
+            with mock.patch.object(bsc_flow, '_notify_merchant_needs_app'):
+                bsc_flow.prepare_bsc_payment(
+                    self._user(), {'account_type': 'personal', 'account_index': 0},
+                    self._personal_invoice())
+        acct_objs.filter.assert_called_with(
+            id=5, account_type='personal', deleted_at__isnull=True)
+
+    def test_paying_your_own_personal_charge_is_blocked(self):
+        result = bsc_flow.prepare_bsc_payment(
+            self._user(uid=42), {'account_type': 'personal', 'account_index': 0},
+            self._personal_invoice(seller_id=42))
+        self.assertEqual(result['error'], 'self_pay_not_allowed')
+
     @override_settings(BSC_PAY_ENABLED=False)
     def test_dark_flag_blocks(self):
         result, _, _ = self._prepare(self._invoice('10'))
@@ -444,7 +480,8 @@ class PaymentBatchInvariantTests(SimpleTestCase):
         user = SimpleNamespace(id=7)
         invoice = SimpleNamespace(
             status='PENDING', is_expired=False, settlement_chain='BSC',
-            internal_id='invoice-race', merchant_business=None)
+            internal_id='invoice-race', merchant_business=None, merchant_business_id=None,
+            merchant_account=SimpleNamespace(id=5, user=SimpleNamespace(id=8)))
         payment = SimpleNamespace(
             id=88, internal_id='payment-race', payer_user_id=7,
             payer_business=None,

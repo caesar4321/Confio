@@ -156,6 +156,24 @@ export default function ReceiveScreen() {
             </RouteCard>
           ) : null}
 
+          {/* A person charges like a shop: much of LATAM's commerce runs
+              under someone's own name. Same invoice QR and 0.9% as a
+              business; the stack Charge screen, since the tab is business-only. */}
+          {!isBusiness ? (
+            <RouteCard label="DE TUS CLIENTES">
+              <RouteOptionRow
+                first
+                option={{
+                  id: 'charge',
+                  icon: 'dollar-sign',
+                  title: 'Cobrar con QR',
+                  subtitle: 'Crea un cobro y muéstrale el QR a quien te paga',
+                  onPress: () => navigation.navigate('Charge'),
+                }}
+              />
+            </RouteCard>
+          ) : null}
+
           {/* Same card as Enviar's, mirrored: the own-money row (the old
               Recargar) always leads, as "A mi propia cuenta" does there.
               Other countries sit behind "Más países". */}
