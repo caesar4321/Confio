@@ -221,7 +221,14 @@ export const PaymentProcessingScreen = () => {
           transactionData.internalId,
           transactionData.idempotencyKey,
         );
-        setPaymentResponse({ success: true, transactionHash: result.txHash });
+        // The success screen reads paymentTransaction.{internalId,transactionHash}:
+        // without them a BSC payment reached it with no id and no hash (no
+        // receipt QR, no settlement status, no Comunidad share sheet).
+        setPaymentResponse({
+          success: true,
+          transactionHash: result.txHash,
+          paymentTransaction: { internalId: result.paymentId, transactionHash: result.txHash },
+        });
         setIsComplete(true);
       } catch (e: any) {
         const code = e?.message || '';

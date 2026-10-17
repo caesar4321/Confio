@@ -24,7 +24,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
-import { formatTokenLabel } from '../utils/tokenDisplay';
+import { explorerFor, formatTokenLabel } from '../utils/tokenDisplay';
 import { CategoryPrompt } from '../components/CategoryChips';
 import { useSettlementStatus } from '../hooks/useSettlementStatus';
 import { formatAmountString } from '../utils/numberLocale';
@@ -297,17 +297,21 @@ export const PaymentSuccessScreen = () => {
                     Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
                     return;
                   }
-                  const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                  const url = `${base}/tx/${encodeURIComponent(txid)}`;
+                  // The token (or the hash's shape) picks the explorer: BSC
+                  // payments open BscScan, Algorand ones Pera.
+                  const explorer = explorerFor(transactionData.currency, txid);
+                  const url = `${explorer.base}/tx/${encodeURIComponent(txid)}`;
                   try {
                     await Linking.openURL(url);
                   } catch {
-                    Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                    Alert.alert('Error', `No se pudo abrir ${explorer.name}.`);
                   }
                 }}
               >
                 <Icon name="external-link" size={16} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+                <Text style={styles.explorerButtonText}>
+                  Abrir en {explorerFor(transactionData.currency, transactionData.transactionHash).name}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
