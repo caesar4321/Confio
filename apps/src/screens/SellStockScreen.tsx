@@ -156,8 +156,10 @@ export const SellStockScreen = () => {
   const tradability = tradabilityFor(stock);
   const overBalance = amount > available;
   const belowMin = amount > 0 && amount < MIN_AMOUNT_USD;
-  // Checked on the quote before sending: Ondo would reject it anyway.
-  const belowNetMin = quoteReady && softNetWei > 0n && softNetWei < SELL_NET_MIN_WEI;
+  // Checked on the quote before sending: Ondo would reject it anyway. Not
+  // for MAX: its preview is the 2-decimal display amount, below the exact
+  // balance the binding quote sells; sellStockToSavings checks that one.
+  const belowNetMin = !sellAll && quoteReady && softNetWei > 0n && softNetWei < SELL_NET_MIN_WEI;
   const canConfirm =
     amount >= MIN_AMOUNT_USD && !overBalance && !belowNetMin && !quote.paused && tradability !== 'closed';
 
