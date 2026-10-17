@@ -40,7 +40,7 @@ VOICE_NOTE = """
 # navigate is checked here too (the per-user screen list: employees and
 # business accounts), then the app opens what the server approved.
 SERVER_TOOLS = {'navigate', 'escalate_to_human', 'get_month_summary', 'get_transactions', 'analyze_finances',
-                'get_portfolio', 'get_exchange_rate'}
+                'get_portfolio', 'get_exchange_rate', 'get_topup_status'}
 
 
 class VoiceUnavailable(Exception):

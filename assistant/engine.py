@@ -357,6 +357,99 @@ def _plus_net_apy():
 
 
 RATE_TYPES_ES = {'parallel': 'paralelo', 'average': 'promedio', 'official': 'oficial'}
+
+# Suggestion prompts that only ask how something works: never a handoff.
+INFORMATIONAL_PROMPTS = {
+    '¿cuánto cuesta usar confío?', '¿qué es confío y para qué me sirve?', '¿qué es confío y para qué sirve?',
+    '¿es seguro? ¿quién controla mi dinero?', '¿cómo pongo mis primeros dólares en confío?',
+}
+# "¿Para cuándo habrá recargas en Ecuador?" — the WHOLE message must be this one
+# question shape: when + will-there-be + feature + "en <país>". Nothing else
+# (a status question, a follow-up sentence) ever matches, so it may escalate.
+# Plural only: "(la) recarga"/"(el) retiro" usually means their own order.
+_FEATURE = (r'(?:(?:las |los )?(?:recargas|retiros|cuentas locales)|recargar|retirar|pix|bre-?b|'
+            r'pago m[oó]vil|qr)(?: (?:por|con) (?:qr|pago m[oó]vil))?')
+_ROADMAP_QUESTION = re.compile(
+    r'(?:(?:hola|disculpa|me (?:puedes|podr[ií]as|pueden) decir|sabes|saben),? )?¿? ?'
+    r'(?:para cu[aá]ndo|cu[aá]ndo|(?:para )?qu[eé] fecha(?: m[aá]s o menos)?) '
+    r'(?:habr[aá]|estar[aá]n? disponibles?|se podr[aá]|se podr[ií]a|van a (?:tener|habilitar)) '
+    r'(?:hacer |tener |usar )?' + _FEATURE + r'(?: y ' + _FEATURE + r')? '
+    r'en (?:ecuador|venezuela|paraguay|uruguay|panam[aá]|guatemala|honduras|nicaragua|el salvador|costa rica|'
+    r'cuba|rep[uú]blica dominicana|argentina|bolivia|brasil|chile|colombia|m[eé]xico|per[uú]|espa[ñn]a|'
+    r'estados unidos|mi pa[ií]s) ?[?.]?')
+# Earlier messages that mention their own case, a number or a problem keep the
+# escalation open (false negatives are fine; a blocked escalation is not).
+_CONTEXT_PERSONAL = re.compile(r'\b(me|mi|m[ií]|mis|tengo|yo|nuestr[oa]s?|nos)\b|\b\w{3,}[éí]\b|\d|'
+                               r'\w+(me|nos)\b|persona|humano|agente|asesor|operador|ejecutivo|supervisor|'
+                               r'represent|equipo|soporte|ayuda|alguien|lleg|perd|estaf|rob|hacke|fraude|bloque|'
+                               r'congel|suspend|restring|banead|cobr|cargo|d[eé]bito|descont|devuelv|reembols|'
+                               r'devoluci|pendiente|rechaz|no puedo|no me deja|no funciona|no aparece|refleja|'
+                               r'desaparec|verific|kyc|c[eé]dula|reclam|queja|denunci|urgente|error|falla|'
+                               r'problema|plata|dinero|saldo|fondos|d[oó]lares')
+
+
+def _is_roadmap_question(text):
+    return bool(_ROADMAP_QUESTION.fullmatch(text))
+
+
+def handoff_not_needed(message, earlier=''):
+    """True for questions the assistant answers itself: an informational
+    suggestion tap, or "¿para cuándo habrá X en <país>?" about the product
+    (roadmap answers are in the FAQ). Never when the person's recent messages
+    mention their own case, a number, a problem or a person."""
+    text = ' '.join((message or '').lower().split())
+    context = ' '.join((earlier or '').lower().split())
+    if not text or _CONTEXT_PERSONAL.search(context):
+        return False
+    if text in INFORMATIONAL_PROMPTS:  # an exact suggestion tap ("…controla mi dinero?" included)
+        return True
+    return _is_roadmap_question(text)
+
+
+RAMP_STATUS_ES = {'PENDING': 'pendiente', 'PROCESSING': 'en proceso', 'COMPLETED': 'completada',
+                  'FAILED': 'fallida', 'AML_REVIEW': 'en revisión'}
+
+
+def topup_status_data(viewer: Viewer, days=30):
+    """This account's own top-ups and withdrawals (never another account's)."""
+    if viewer.is_employee:
+        return {'disponible': False, 'motivo': 'Solo el dueño del negocio ve las recargas y retiros.'}
+    from ramps.models import RampTransaction
+
+    if viewer.account_type == 'business':
+        if not viewer.business_id:
+            return {'disponible': False, 'motivo': 'No pude identificar el negocio.'}
+        rows = RampTransaction.objects.filter(actor_business_id=viewer.business_id)
+    elif getattr(viewer.user, 'pk', None):
+        rows = RampTransaction.objects.filter(actor_user=viewer.user, actor_business__isnull=True)
+    else:
+        return {'disponible': False, 'motivo': 'No pude identificar tu cuenta.'}
+    since = timezone.now() - timedelta(days=days)
+    out = []
+    for row in rows.filter(created_at__gte=since).order_by('-created_at')[:5]:
+        created = timezone.localtime(row.created_at, viewer.tz)
+        item = {
+            'tipo': 'recarga' if row.direction == 'on_ramp' else 'retiro',
+            'estado': RAMP_STATUS_ES.get(row.status, row.status.lower()),
+            'pedida': f'{created:%Y-%m-%d %H:%M}',
+            'hace_minutos': int((timezone.now() - row.created_at).total_seconds() // 60),
+            'monto': f'{row.fiat_amount.normalize():f} {row.fiat_currency}' if row.fiat_amount else 'desconocido',
+        }
+        if row.status == 'COMPLETED' and row.final_amount is not None and row.direction == 'on_ramp':
+            # On withdrawals final_amount is what left Confío, not what reached the bank.
+            item['llego_usd'] = f'{row.final_amount.quantize(Decimal("0.01"))}'
+        if row.status == 'COMPLETED':
+            if row.completed_at:
+                item['completada'] = f'{timezone.localtime(row.completed_at, viewer.tz):%Y-%m-%d %H:%M}'
+        out.append(item)
+    return {
+        'disponible': True, 'movimientos': out,
+        'nota': ('Aquí solo están las recargas y retiros con proveedor de los últimos 30 días: un depósito de USDT '
+                 'o un envío no aparece, así que una lista vacía no significa que no llegó nada. Si está completada, '
+                 'di cuánto llegó. Si está pendiente o en proceso desde hace poco, di que sigue en curso. Esto no '
+                 'cambia las reglas de escalar: si pide una persona, si dice que pagó y no le llegó, si lleva mucho '
+                 'tiempo pendiente, si está fallida y pagó o si está en revisión, pásalo al equipo.'),
+    }
 # Where a connection-based block comes from, said as a person would.
 # Covers every country in cusd_plus.eligibility.ONDO_BLOCKED (a test keeps it so).
 COUNTRY_NAMES_ES = {
@@ -584,6 +677,10 @@ class Toolbelt:
         self.reserve_news = reserve_news
         self.saw_web = False
         self.docs_read = set()
+        # The message being answered and the person's few before it (set by
+        # run_turn), for tool guards. Empty elsewhere (voice): guards fail open.
+        self.last_user_message = ''
+        self.earlier_user_messages = ''
         # Paid tools run at most once per user message, whatever the model asks.
         self.paid_used = set()
         self.can_navigate = can_navigate
@@ -707,6 +804,16 @@ class Toolbelt:
         if not self.viewer.is_employee:
             specs += [{
                 'type': 'function',
+                'name': 'get_topup_status',
+                'description': (
+                    'Sus recargas y retiros de los últimos 30 días (los más recientes primero): estado, monto, '
+                    'cuándo los pidió y cuánto llegó. Úsala para "¿en qué estado está mi recarga?", "¿cuánto '
+                    'demora?" o "no me llegó" antes de pensar en pasar el caso al equipo.'
+                ),
+                'parameters': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False},
+                'strict': True,
+            }, {
+                'type': 'function',
                 'name': 'get_portfolio',
                 'description': (
                     'Lo que el usuario tiene y gasta: saldo en Confío Dollar y Confío Dollar+, sus acciones, '
@@ -807,6 +914,7 @@ class Toolbelt:
             'read_public_document': self.read_public_document,
             'get_portfolio': self.get_portfolio,
             'get_exchange_rate': self.get_exchange_rate,
+            'get_topup_status': self.get_topup_status,
             'search_market_news': self.search_market_news,
         }.get(name)
         if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
@@ -853,6 +961,11 @@ class Toolbelt:
         return {**reply, **{k: v for k, v in action.items() if k != 'type'}}
 
     def escalate_to_human(self, reason):
+        if handoff_not_needed(self.last_user_message, self.earlier_user_messages):
+            # Informational questions and "¿para cuándo…?" are answered, never
+            # handed off (the model kept escalating "¿Cuánto cuesta usar Confío?").
+            return {'ok': False, '_denied': True,
+                    'motivo': 'Esta pregunta no se pasa al equipo: contéstala tú con las respuestas aprobadas.'}
         self.result.handoff_reason = (reason or '').strip()[:280] or 'Solicitud del usuario'
         return {'ok': True, 'nota': 'El equipo humano verá esta conversación. Díselo al usuario en una línea.'}
 
@@ -934,6 +1047,9 @@ class Toolbelt:
 
     def get_exchange_rate(self, currency=None):
         return exchange_rate_data(self.viewer, currency)
+
+    def get_topup_status(self):
+        return topup_status_data(self.viewer)
 
     def read_public_document(self, document):
         path = PUBLIC_DOCUMENTS.get(document)
@@ -1022,6 +1138,9 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
     result = TurnResult(reply='')
     belt = Toolbelt(viewer, result, analyses_left=analyses_left, can_navigate=can_navigate,
                     reserve_analysis=reserve_analysis, reserve_news=reserve_news)
+    said = [item['content'] for item in history_items(history) if item['role'] == 'user']
+    belt.last_user_message = said[-1] if said else ''
+    belt.earlier_user_messages = ' '.join(said[-4:-1])
     try:
         return _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                          country=country)

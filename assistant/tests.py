@@ -1989,3 +1989,89 @@ class ExchangeRateToolTests(TestCase):
         for viewer in viewers:
             belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=1)
             self.assertLessEqual({t['name'] for t in _realtime_tools(belt)}, SERVER_TOOLS, viewer.account_type)
+
+
+class HandoffGuardAndTopupStatusTests(TestCase):
+    def test_informational_and_roadmap_questions_are_not_handed_off(self):
+        from .engine import handoff_not_needed
+        for text in ('¿Cuánto cuesta usar Confío?', '  ¿Es seguro?  ¿Quién controla mi dinero?',
+                     'Me puedes decir para que fecha más o menos se podría hacer recargas en ecuador',
+                     '¿Para cuándo habrá Pix en Argentina?'):
+            self.assertTrue(handoff_not_needed(text), text)
+        for text in ('Quiero hablar con una persona', 'Mi recarga no me llegó desde ayer',
+                     '¿Para cuándo llega mi dinero? Ya pagué', 'Creo que me estafaron', '',
+                     'Me cobraron dos veces el mismo pago', '¿Para cuándo me devuelven la plata?',
+                     '¿Para cuándo llegan mis dólares?', '¿Qué fecha llega el retiro que hice?',
+                     '¿Cuándo van a desbloquear mi cuenta?', '¿Cuándo van a verificar mis documentos?',
+                     '¿Para cuándo me responde alguien?', '¿Para cuándo se soluciona?',
+                     '¿Para cuándo habrá retiros? Quiero que me pasen con un asesor',
+                     '¿Para cuándo habrá retiros en Bolivia? Quiero hablar con un operador',
+                     '¿Para cuándo estará disponible la recarga? Ya transferí 500 soles',
+                     '¿Para cuándo habrá recargas en Ecuador? Me descontaron del banco',
+                     '¿Para cuándo estará disponible la recarga que pedí en Perú?',
+                     '¿para cuándo habrá retiro en Bolivia? lleva 5 días pendiente',
+                     '¿Para cuándo habrá reembolso en Bolivia?', '¿Para cuándo habilitan el retiro en Perú? quiero la devolución',
+                     '¿Para cuándo estará habilitado mí retiro en Bolivia?',
+                     '¿Para cuándo habrá retiro de nuestro saldo en Bolivia?',
+                     '¿Para cuándo habrá retiros en Bolivia? tengo saldo que no puedo sacar',
+                     '¿Para cuándo habrá retiro de la orden 12345 en Bolivia?',
+                     '¿Para cuándo habrá recargas en Bolivia? Tengo una recarga sin acreditar',
+                     '¿cuándo habrá retiros en venezuela? quiero un supervisor',
+                     '¿Cuándo habrá recargas en Ecuador? hackearon la cuenta',
+                     '¿Cuándo se acredita la recarga en Bolivia?', '¿Cuándo llega el retiro en Colombia?',
+                     '¿Cuándo se acredita la recarga en Perú, ya deposite?',
+                     '¿Cuándo vuelven los retiros en Colombia? están caídos',
+                     '¿Cuándo estará disponible la recarga en Perú?',
+                     '¿Para cuándo estará disponible el retiro en Colombia?',
+                     'cuando estara disponible recarga en peru'):
+            self.assertFalse(handoff_not_needed(text), text)
+        # A roadmap-looking follow-up after a money problem is that person's case.
+        self.assertFalse(handoff_not_needed('¿Para cuándo habrá recargas en Bolivia?',
+                                            'me descontaron 20 y no llegaron'))
+        self.assertFalse(handoff_not_needed('¿Es seguro? ¿Quién controla mi dinero?', 'me robaron 50 dólares'))
+        for earlier in ('transferí 300 bs ayer y nada', 'hackearon la cuenta', 'quiero hablar con un ejecutivo',
+                        'congelaron la cuenta'):
+            self.assertFalse(handoff_not_needed('¿Cuándo habrá retiros en Bolivia?', earlier), earlier)
+        for text in ('¿Para cuándo habrá Pago Móvil en Venezuela?', '¿Cuándo habrá retiros por QR en Bolivia?',
+                     'Hola, ¿qué fecha habrá recargas en mi país?'):
+            self.assertTrue(handoff_not_needed(text), text)
+
+    def test_escalate_refuses_an_informational_question(self):
+        viewer = Viewer(user=None, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        result = TurnResult(reply='')
+        belt = Toolbelt(viewer, result, analyses_left=0)
+        belt.last_user_message = '¿Cuánto cuesta usar Confío?'
+        self.assertTrue(belt.escalate_to_human('El usuario pregunta por las comisiones')['_denied'])
+        self.assertEqual(result.handoff_reason, '')
+        belt.last_user_message = 'Me cobraron dos veces'
+        self.assertTrue(belt.escalate_to_human('cobro doble')['ok'])
+        self.assertEqual(result.handoff_reason, 'cobro doble')
+
+    def test_topup_status_reads_only_this_accounts_ramps(self):
+        from decimal import Decimal
+
+        from ramps.models import RampTransaction
+
+        from .engine import topup_status_data
+        ana = User.objects.create_user(username='ana-ramp', firebase_uid='uid-ana-ramp')
+        luis = User.objects.create_user(username='luis-ramp', firebase_uid='uid-luis-ramp')
+        RampTransaction.objects.create(provider='koywe', direction='on_ramp', status='COMPLETED', actor_user=ana,
+                                       fiat_amount=Decimal('350'), fiat_currency='BOB',
+                                       final_amount=Decimal('26.662882'))
+        RampTransaction.objects.create(provider='koywe', direction='on_ramp', status='PENDING', actor_user=luis,
+                                       fiat_amount=Decimal('100'), fiat_currency='BOB')
+        viewer = Viewer(user=ana, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('America/La_Paz'))
+        data = topup_status_data(viewer)
+        self.assertEqual(len(data['movimientos']), 1)
+        move = data['movimientos'][0]
+        self.assertEqual((move['tipo'], move['estado'], move['monto'], move['llego_usd']),
+                         ('recarga', 'completada', '350 BOB', '26.66'))
+        RampTransaction.objects.create(provider='koywe', direction='off_ramp', status='COMPLETED', actor_user=ana,
+                                       fiat_amount=Decimal('500'), fiat_currency='BOB', final_amount=Decimal('40'))
+        moves = {m['tipo']: m for m in topup_status_data(viewer)['movimientos']}
+        self.assertNotIn('llego_usd', moves['retiro'])  # final_amount there is what left, not what arrived
+        employee = Viewer(user=ana, account=None, account_type='business', business_id=1,
+                          is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.assertFalse(topup_status_data(employee)['disponible'])
