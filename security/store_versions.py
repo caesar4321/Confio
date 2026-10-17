@@ -31,26 +31,49 @@ def ios_store_version():
     return results[0].get('version') if results else None
 
 
-def _play_service():
+def _play_credentials():
     from google.oauth2 import service_account
-    from googleapiclient.discovery import build
     path = getattr(settings, 'GOOGLE_PLAY_SERVICE_ACCOUNT_FILE', None) or \
         str(settings.BASE_DIR / 'config' / 'firebase-service-account.json')
-    credentials = service_account.Credentials.from_service_account_file(path, scopes=[PLAY_SCOPE])
-    return build('androidpublisher', 'v3', credentials=credentials, cache_discovery=False)
+    return service_account.Credentials.from_service_account_file(path, scopes=[PLAY_SCOPE])
 
 
-def release_version(release):
-    """Play releases carry version codes, not names; the release name is
-    Play Console's default "168 (5.2.3)" or a bare "5.2.3". A name with no
-    single X.Y.Z in it is skipped rather than guessed."""
-    found = set(VERSION_IN_NAME.findall(release.get('name') or ''))
-    return found.pop() if len(found) == 1 else None
+def _play_service():
+    from googleapiclient.discovery import build
+    return build('androidpublisher', 'v3', credentials=_play_credentials(), cache_discovery=False)
 
 
-def android_store_version():
-    """Newest fully rolled-out production release. A staged rollout
-    ('inProgress') would send most users to a Play page without the update."""
+PUBLISHED = 'RELEASE_LIFECYCLE_STATE_PUBLISHED'
+RELEASES_URL = ('https://androidpublisher.googleapis.com/androidpublisher/v3/'
+                f'applications/{ANDROID_PACKAGE}/tracks/production/releases')
+
+
+def published_releases():
+    """[(name, version codes)] of production releases Play has PUBLISHED.
+
+    Only tracks.releases.list carries the review state. The edits track says
+    'completed' the moment a full rollout is SUBMITTED, so with managed
+    publishing off a release still in review read as live there (5.2.5,
+    2026-10-17), and the live release it supersedes drops off it. The bundled
+    API client predates releases.list, so it is called directly."""
+    from google.auth.transport.requests import AuthorizedSession
+    response = AuthorizedSession(_play_credentials()).get(RELEASES_URL, timeout=15)
+    response.raise_for_status()
+    return [
+        (release.get('releaseName') or '',
+         {str(a.get('versionCode')) for a in release.get('activeArtifacts') or []})
+        for release in response.json().get('releases') or []
+        if release.get('releaseLifecycleState') == PUBLISHED
+    ]
+
+
+def full_rollout_version_codes():
+    """Version codes the edits production track holds at 100% ('completed').
+
+    'completed' alone is not live: with managed publishing off a full rollout
+    reads 'completed' the moment it is SUBMITTED. And 'PUBLISHED' alone is not
+    everyone: Play counts staged and halted rollouts as published. Only a
+    release that is both is served to every user."""
     edits = _play_service().edits()
     edit_id = edits.insert(packageName=ANDROID_PACKAGE, body={}).execute()['id']
     try:
@@ -60,13 +83,33 @@ def android_store_version():
             edits.delete(packageName=ANDROID_PACKAGE, editId=edit_id).execute()
         except Exception:
             logger.warning('Could not delete Play edit %s', edit_id, exc_info=True)
+    return {str(code) for release in track.get('releases') or []
+            if release.get('status') == 'completed'
+            for code in release.get('versionCodes') or []}
+
+
+def release_version(name):
+    """Play releases carry version codes, not names; the release name is
+    Play Console's default "168 (5.2.3)" or a bare "5.2.3". A name with no
+    single X.Y.Z in it is skipped rather than guessed."""
+    found = set(VERSION_IN_NAME.findall(name or ''))
+    return found.pop() if len(found) == 1 else None
+
+
+def android_store_version():
+    """Newest production release Play serves to everyone: published (not in
+    review) AND at 100% on the track (not staged or halted). While a newer
+    release is in review the live one drops off the track, so this returns
+    nothing and latest_version simply stays where it was (never lowered)."""
+    published = published_releases()
+    full_rollout = full_rollout_version_codes()
     versions = []
-    for release in track.get('releases') or []:
-        if release.get('status') != 'completed':
+    for name, codes in published:
+        if not codes or not codes <= full_rollout:
             continue
-        version = release_version(release)
+        version = release_version(name)
         if version is None:
-            logger.warning('Play release name %r has no X.Y.Z version; skipped', release.get('name'))
+            logger.warning('Play release name %r has no X.Y.Z version; skipped', name)
         else:
             versions.append(version)
     return max(versions, key=_version) if versions else None
