@@ -12,7 +12,7 @@ export const SHARE_LINKS = {
   // App store links (update these when live)
   stores: {
     android: 'https://play.google.com/store/apps/details?id=com.Confio.Confio',
-    ios: 'https://apps.apple.com/app/confio/id6473710976', // Update with actual ID
+    ios: 'https://apps.apple.com/app/id6472662314',
     testflight: 'https://testflight.apple.com/join/YOUR_CODE', // Update with actual code
   },
   

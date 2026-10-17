@@ -32,6 +32,7 @@ import { AppLockScreen } from './components/AppLockScreen';
 import { biometricAuthService } from './services/biometricAuthService';
 import { logBreadcrumb } from './services/crashLog';
 import { NumberLocaleProvider } from './contexts/NumberLocaleProvider';
+import { AppUpdateGate } from './components/AppUpdateGate';
 // Dev: attach derivation verifier helper
 if (__DEV__) {
   import('./dev/derivationVerifier').catch(() => { });
@@ -254,6 +255,8 @@ const AppContent: React.FC = () => {
         </NavigationContainer>
       </SafeAreaView>
       {splash && <BrandSplash onDone={() => setSplash(false)} />}
+      {/* After the splash, so the update prompt is the first thing seen, not hidden behind it. */}
+      {!splash && <AppUpdateGate />}
     </SafeAreaProvider>
   );
 };

@@ -1596,6 +1596,13 @@ class FaceReferenceAdmin(admin.ModelAdmin):
         return False
 
 
+class AppVersionPolicyAdmin(admin.ModelAdmin):
+    """One row per platform; the app reads it on launch and on foreground."""
+    list_display = ('platform', 'latest_version', 'minimum_version', 'updated_at')
+    fields = ('platform', 'latest_version', 'minimum_version', 'message', 'updated_at')
+    readonly_fields = ('updated_at',)
+
+
 class DiditFaceBlocklistEntryAdmin(admin.ModelAdmin):
     """Read-only: entries follow permanent bans (security/didit_blocklist.py)."""
     list_display = ('id', 'user', 'session_id', 'created_at', 'removed_at')

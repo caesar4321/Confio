@@ -1931,6 +1931,9 @@ confio_admin_site.register(FaceCheck, FaceCheckAdmin)
 from security.models import DiditFaceBlocklistEntry
 from security.admin import DiditFaceBlocklistEntryAdmin
 confio_admin_site.register(DiditFaceBlocklistEntry, DiditFaceBlocklistEntryAdmin)
+from security.models import AppVersionPolicy
+from security.admin import AppVersionPolicyAdmin
+confio_admin_site.register(AppVersionPolicy, AppVersionPolicyAdmin)
 confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)

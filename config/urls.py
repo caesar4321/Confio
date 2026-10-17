@@ -212,11 +212,13 @@ from ramps.views import koywe_webhook
 from ramps.stereum_views import webhook as stereum_test_webhook
 from payment_accounts.views import cobre_webhook, infinia_webhook
 from security.views import didit_webhook
+from security.app_version import app_version
 from users.funnel_ingest import funnel_ingest
 from content_ingestion.views import enqueue_ai_context_commit, enqueue_telegram_sync
 
 # Catch-all pattern should be last
 urlpatterns += [
+    path('api/app-version/', app_version, name='app_version'),
     path('api/didit/webhook/', didit_webhook, name='didit_webhook'),
     path('api/koywe/webhook/', koywe_webhook, name='koywe_webhook'),
     path('api/stereum/test/webhook/', stereum_test_webhook, name='stereum_test_webhook'),

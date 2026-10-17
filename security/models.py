@@ -698,6 +698,48 @@ class UserBan(SoftDeleteModel):
         return True
 
 
+APP_VERSION_PATTERN = r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}'
+
+
+class AppVersionPolicy(models.Model):
+    """Which app versions the server still serves, per store platform.
+
+    Read by GET /api/app-version/ (security/app_version.py). Below
+    minimum_version the app blocks itself behind "Actualiza Confío"; below
+    latest_version it offers the update once per launch. Raise
+    latest_version only after the store has published that build, or users
+    are sent to a store page that still shows the old one. Blank = no check.
+    """
+
+    PLATFORM_CHOICES = [('ios', 'iOS'), ('android', 'Android')]
+
+    platform = models.CharField(max_length=16, choices=PLATFORM_CHOICES, unique=True)
+    latest_version = models.CharField(max_length=16, blank=True,
+                                      help_text='Newest version live in the store, e.g. 5.2.3')
+    minimum_version = models.CharField(max_length=16, blank=True,
+                                       help_text='Older versions must update before using the app')
+    message = models.CharField(max_length=280, blank=True,
+                               help_text='Optional text shown in the update prompt (Spanish)')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        errors = {}
+        for field in ('latest_version', 'minimum_version'):
+            value = getattr(self, field)
+            if value and not re.fullmatch(APP_VERSION_PATTERN, value):
+                errors[field] = 'Use X.Y.Z, e.g. 5.2.3'
+        if not errors and self.latest_version and self.minimum_version:
+            as_tuple = lambda v: tuple(int(p) for p in v.split('.'))
+            if as_tuple(self.minimum_version) > as_tuple(self.latest_version):
+                errors['minimum_version'] = 'Cannot be above the latest version'
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f'{self.platform}: latest {self.latest_version or "-"}, min {self.minimum_version or "-"}'
+
+
 class DiditFaceBlocklistEntry(models.Model):
     """A verified Didit session whose face Confío put on Didit's face blocklist.
 
