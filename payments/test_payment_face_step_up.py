@@ -21,9 +21,20 @@ def _verify(user=None, business=None, number='1065000100'):
         verified_at=timezone.now(), **extra)
 
 
+def _passed(user, challenge='full', session='w-1'):
+    return FaceCheck.objects.create(user=user, purpose='withdrawal', liveness_session_id=session,
+                                    status='passed', challenge=challenge, completed_at=timezone.now())
+
+
+def _invoice(business, amount='10', token_type='USDT'):
+    from types import SimpleNamespace
+    return SimpleNamespace(merchant_business=business, merchant_business_id=getattr(business, 'id', None),
+                           merchant_account=None, amount=amount, token_type=token_type)
+
+
 @override_settings(FACE_STEP_UP_ENABLED=True)
 class PaymentFaceStepUpTests(TestCase):
-    """Pay stays face-free at verified merchants; Confío Face only where a ring routes money."""
+    """The same rule as Send: every personal payment by a KYC'd payer asks Confío Face."""
 
     def setUp(self):
         self.payer = User.objects.create(username='payer', email='payer@example.com', firebase_uid='payer-uid')
@@ -33,30 +44,40 @@ class PaymentFaceStepUpTests(TestCase):
         Account.objects.create(user=owner, account_type='business', business=self.shop)
         _verify(owner, business=self.shop, number='900100200')
 
-    def test_verified_merchant_never_asks(self):
+    def test_a_verified_merchant_asks_too(self):
+        self.assertEqual(_payment_step_up(self.payer, None, self.shop), fsu.FACE_STEP_UP_MESSAGE)
+        _passed(self.payer)
         self.assertEqual(_payment_step_up(self.payer, None, self.shop), '')
 
-    def test_unverified_merchant_asks_for_a_face(self):
-        shop = Business.objects.create(name='Tienda sin KYB')
-        self.assertEqual(_payment_step_up(self.payer, None, shop), fsu.FACE_STEP_UP_MESSAGE)
-        FaceCheck.objects.create(user=self.payer, purpose='withdrawal', liveness_session_id='w-1',
-                                 status='passed', completed_at=timezone.now())
-        self.assertEqual(_payment_step_up(self.payer, None, shop), '')
-
-    def test_paying_a_business_you_work_for_asks_even_if_verified(self):
-        BusinessEmployee.objects.create(user=self.payer, business=self.shop, role='cashier')
+    def test_a_small_payment_inside_confio_takes_the_light_check(self):
+        _passed(self.payer, challenge='light')
+        self.assertEqual(_payment_step_up(self.payer, None, self.shop, invoice=_invoice(self.shop)), '')
+        # Without the amount (or above the light limit) only the full check counts.
         self.assertEqual(_payment_step_up(self.payer, None, self.shop), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(_payment_step_up(self.payer, None, self.shop, invoice=_invoice(self.shop, amount='80')),
+                         fsu.FACE_STEP_UP_MESSAGE)
+
+    def test_paying_a_business_you_work_for_needs_the_full_check(self):
+        BusinessEmployee.objects.create(user=self.payer, business=self.shop, role='cashier')
+        _passed(self.payer, challenge='light')
+        self.assertEqual(_payment_step_up(self.payer, None, self.shop, invoice=_invoice(self.shop)),
+                         fsu.FACE_STEP_UP_MESSAGE)
 
     def test_a_deleted_employee_record_still_counts(self):
         employee = BusinessEmployee.objects.create(user=self.payer, business=self.shop, role='cashier')
         employee.soft_delete()
-        self.assertEqual(_payment_step_up(self.payer, None, self.shop), fsu.FACE_STEP_UP_MESSAGE)
+        _passed(self.payer, challenge='light')
+        self.assertEqual(_payment_step_up(self.payer, None, self.shop, invoice=_invoice(self.shop)),
+                         fsu.FACE_STEP_UP_MESSAGE)
 
-    def test_paying_your_own_business_asks(self):
+    def test_paying_your_own_business_needs_the_full_check(self):
         own = Business.objects.create(name='Mi negocio')
         Account.objects.create(user=self.payer, account_type='business', business=own)
         _verify(self.payer, business=own, number='900100300')
-        self.assertEqual(_payment_step_up(self.payer, None, own), fsu.FACE_STEP_UP_MESSAGE)
+        _passed(self.payer, challenge='light')
+        self.assertEqual(_payment_step_up(self.payer, None, own, invoice=_invoice(own)), fsu.FACE_STEP_UP_MESSAGE)
+        _passed(self.payer, session='w-2')
+        self.assertEqual(_payment_step_up(self.payer, None, own, invoice=_invoice(own)), '')
 
     def test_exempt_payers(self):
         shop = Business.objects.create(name='Tienda sin KYB')

@@ -96,8 +96,8 @@ export const payInvoiceBsc = async (
   })).data?.prepareBscInvoicePayment;
   let prep = await prepare();
   if (!prep?.success && isFaceStepUpRequired(prep?.error)) {
-    // Paying a business you own/work for, or one that never passed KYB:
-    // Confío Face, then once more. Verified merchants never ask.
+    // No usable check yet, or a light one where the full check is needed
+    // (into a business you own or work for): Confío Face, then once more.
     if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
     prep = await prepare();
   }

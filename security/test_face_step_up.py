@@ -826,11 +826,18 @@ class FaceChallengeLevelTests(TestCase):
             self.assertEqual(_send_face_terms(self.user, fsu.Decimal('20'), 'USDT', None, business.id)['cash_out'],
                              cash_out, business.name)
 
-    def test_a_face_gated_payment_is_never_light(self):
+    def test_payments_split_light_and_full_like_sends(self):
         from types import SimpleNamespace
         from payments.bsc_flow import _payment_face_terms
-        terms = _payment_face_terms(SimpleNamespace(amount=fsu.Decimal('5'), token_type='USDT'))
-        self.assertTrue(terms['cash_out'])
+        from users.models import Account, Business
+        own = Business.objects.create(name='Mi caja')
+        Account.objects.create(user=self.user, account_type='business', business=own)
+        other = Business.objects.create(name='Otra caja')
+        for business, cash_out in ((own, True), (other, False)):
+            invoice = SimpleNamespace(merchant_business=business, merchant_business_id=business.id,
+                                      merchant_account=None, amount=fsu.Decimal('5'), token_type='USDT')
+            terms = _payment_face_terms(self.user, invoice)
+            self.assertEqual((terms['cash_out'], terms['amount_usd']), (cash_out, fsu.Decimal('5')), business.name)
 
 
 class FaceStepUpStatusQueryTests(TestCase):

@@ -76,7 +76,7 @@ class CreatePersonalInvoiceTests(TestCase):
 
 @override_settings(FACE_STEP_UP_ENABLED=True)
 class PersonalMerchantFaceStepUpTests(TestCase):
-    """A person's own ID stands in for KYB: paying a verified person is face-free."""
+    """Paying a person follows Send's rule: Confío Face for a KYC'd payer, verified seller or not."""
 
     def setUp(self):
         self.payer = User.objects.create(username='payer', email='payer@example.com', firebase_uid='payer-uid')
@@ -87,13 +87,19 @@ class PersonalMerchantFaceStepUpTests(TestCase):
             merchant_business=None, merchant_business_id=None, merchant_account=account,
             amount='10', token_type='CUSD_PLUS')
 
-    def test_verified_person_never_asks(self):
+    def test_a_verified_person_asks_too_and_a_light_check_is_enough(self):
+        from security.models import FaceCheck
+        from django.utils import timezone
         _verify(self.seller, number='1065000200')
+        self.assertEqual(_payment_step_up(self.payer, None, None, invoice=self.invoice), fsu.FACE_STEP_UP_MESSAGE)
+        FaceCheck.objects.create(user=self.payer, purpose='withdrawal', liveness_session_id='p-1', status='passed',
+                                 challenge='light', completed_at=timezone.now())
         self.assertEqual(_payment_step_up(self.payer, None, None, invoice=self.invoice), '')
 
-    def test_unverified_person_asks_for_a_face(self):
-        self.assertEqual(_payment_step_up(self.payer, None, None, invoice=self.invoice),
-                         fsu.FACE_STEP_UP_MESSAGE)
+    def test_charging_yourself_needs_the_full_check(self):
+        from payments.bsc_flow import _payment_face_terms
+        self.invoice.merchant_account.user = self.payer
+        self.assertTrue(_payment_face_terms(self.payer, self.invoice)['cash_out'])
 
     def test_business_payer_exempt_as_before(self):
         self.assertEqual(_payment_step_up(self.payer, object(), None, invoice=self.invoice), '')

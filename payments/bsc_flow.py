@@ -254,41 +254,42 @@ def _personal_merchant(invoice):
     return getattr(invoice.merchant_account, 'user', None)
 
 
-def _payment_face_terms(invoice) -> dict:
-    """Always the full Confío Face: a payment only asks for a face when it
-    goes into a business the payer owns or works for, or one without KYB.
-    Both are routing hops (a business pays on without a face), never a
-    small movement inside Confío, so the light challenge never applies."""
+def _payment_face_terms(user, invoice) -> dict:
+    """What decides a light or full Confío Face for a payment, as for a send
+    (send/bsc_flow._send_face_terms): its dollar value, and whether it is a
+    routing hop — into a business the payer owns or works for (a business
+    pays on without a face), or the payer charging themself."""
     from security.face_step_up import dollar_amount
-    return {'amount_usd': dollar_amount(invoice.amount, invoice.token_type), 'cash_out': True}
+    merchant_business = invoice.merchant_business
+    if merchant_business is not None:
+        cash_out = _pays_own_business(user, merchant_business)
+    else:
+        merchant_user = _personal_merchant(invoice)
+        cash_out = merchant_user is None or merchant_user.id == user.id
+    return {'amount_usd': dollar_amount(invoice.amount, invoice.token_type), 'cash_out': cash_out}
 
 
 def _payment_step_up(user, payer_business, merchant_business, invoice=None, **claim) -> str:
     """'' or the Confío Face message for a payment.
 
-    Pay stays face-free at verified merchants. Confío Face (for payers who
-    went through KYC) only where a ring would route money: into a business
-    the payer owns or works for, or into one that never passed KYB. A person
-    who charges is verified by their own ID (KYC stands in for KYB). Business
-    payers are governed by KYB and limits, as for sends.
+    The same rule as Send (send/bsc_flow._send_step_up): every personal
+    payment by someone who went through KYC asks Confío Face, at a verified
+    merchant as much as anywhere — a ring pools a recruited account's money
+    through Pay as easily as through Send. A small dollar payment that stays
+    inside Confío gets the light check; a routing hop gets the full one.
+    Business payers are governed by KYB and limits, as for sends.
     """
     from security.identity_reuse import outgoing_identity_restriction
     restriction = outgoing_identity_restriction(user)
     if restriction:
         return restriction
-    merchant_user = _personal_merchant(invoice) if merchant_business is None else None
-    if payer_business is not None or (merchant_business is None and merchant_user is None):
+    if payer_business is not None:
         return ''
     from security.face_step_up import require_face_step_up, step_up_applies
     if not step_up_applies(user):
         return ''
-    if merchant_user is not None:
-        if merchant_user.id != user.id and merchant_user.has_verified_identity_document:
-            return ''
-    elif not _pays_own_business(user, merchant_business) and _merchant_kyb_verified(merchant_business):
-        return ''
     if invoice is not None:
-        claim.update(_payment_face_terms(invoice))
+        claim.update(_payment_face_terms(user, invoice))
     return require_face_step_up(user, 'withdrawal', **claim)
 
 

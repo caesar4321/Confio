@@ -116,19 +116,16 @@ export const PaymentProcessingScreen = () => {
   useEffect(() => {
     (async () => {
       if (bioChecked) return;
-      // BSC Pay: the server decides per invoice (payments/bsc_flow.py
-      // _payment_step_up) and payInvoiceBsc runs Confío Face only when the
-      // prepare step asks for it. Paying a verified merchant — a business
-      // with KYB, or a verified person — never asks, so no up-front check.
-      if ((transactionData as any)?.bscPay) {
-        setBioChecked(true);
-        return;
-      }
-      // No movement hint: the server only asks a face for payments into a
-      // business the payer owns or works for, or one without KYB. Those are
-      // routing hops and always need the full check (payments/bsc_flow.py
-      // _payment_face_terms), so a light check could never approve them.
-      const ok = await authenticateWithFace('withdrawal');
+      // The same rule as Send (payments/bsc_flow.py _payment_step_up): every
+      // payment by someone who went through KYC asks Confío Face, light for a
+      // small one inside Confío. The amount is only a hint: a payment into
+      // the payer's own business is refused as light and payInvoiceBsc asks
+      // again for the full check.
+      const ok = await authenticateWithFace('withdrawal', transactionData.amount ? {
+        amount: transactionData.amount,
+        tokenType: transactionData.currency || '',
+        leavesConfio: false,
+      } : undefined);
       if (!ok) {
         Alert.alert(
           'Autenticación requerida',
