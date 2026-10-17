@@ -41,13 +41,14 @@ class FaceOutflowTests(SimpleTestCase):
         self.assertFalse(has_external_outflow([
             call(sponsor.SEL_TRANSFER, [SIGNER, 10], sponsor.USDT_BSC)], SIGNER))
 
-    def test_business_external_transfer_remains_exempt(self):
-        with mock.patch('security.face_step_up.require_face_step_up') as gate:
+    def test_business_external_transfer_asks_the_signed_in_persons_face(self):
+        user = object()
+        with mock.patch('security.face_step_up.require_face_step_up', return_value='face') as gate:
             self.assertEqual(claim_external_outflow(
-                object(), {'account_type': 'business'},
+                user, {'account_type': 'business'},
                 [call(sponsor.SEL_TRANSFER, [RECIPIENT, 10], sponsor.USDT_BSC)],
-                SIGNER, namespace='test', identifier='same', payload={}), '')
-        gate.assert_not_called()
+                SIGNER, namespace='test', identifier='same', payload={}), 'face')
+        self.assertIs(gate.call_args.args[0], user)
 
     def test_claim_is_bound_to_exact_payload(self):
         transfer = call(sponsor.SEL_TRANSFER, [RECIPIENT, 10], sponsor.USDT_BSC)

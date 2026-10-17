@@ -629,27 +629,48 @@ class SendStepUpTests(TestCase):
     def test_every_personal_send_needs_a_recent_face(self):
         from send.bsc_flow import _send_step_up
         # Confío recipients too: pooling into a ring's own accounts is the first hop.
-        self.assertEqual(_send_step_up(self.user, None, None), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(_send_step_up(self.user, None), fsu.FACE_STEP_UP_MESSAGE)
         FaceCheck.objects.create(user=self.user, purpose='withdrawal', liveness_session_id='w-1',
                                  status='passed', completed_at=timezone.now())
-        self.assertEqual(_send_step_up(self.user, None, None), '')
+        self.assertEqual(_send_step_up(self.user, None), '')
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
-    def test_exempt_sends(self):
+    def test_only_the_activation_fee_is_exempt(self):
         from send.bsc_flow import _send_step_up
-        # From a business, or the server-only activation fee.
-        self.assertEqual(_send_step_up(self.user, object(), None), '')
-        self.assertEqual(_send_step_up(self.user, None, 'activation-1'), '')
+        # The server-only activation fee goes to Confío itself.
+        self.assertEqual(_send_step_up(self.user, 'activation-1'), '')
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_a_send_from_a_business_asks_the_signed_in_persons_face(self):
+        from send.bsc_flow import _send_face_terms, _send_step_up
+        from users.models import Account, Business
+        from users.models_employee import BusinessEmployee
+        owned = Business.objects.create(name='Mi negocio')
+        Account.objects.create(user=self.user, account_type='business', business=owned)
+        employer = Business.objects.create(name='Empleador')
+        BusinessEmployee.objects.create(user=self.user, business=employer, role='admin')
+        recipient = get_user_model().objects.create(username='send-recipient', email='r@example.com',
+                                        firebase_uid='send-recipient-uid')
+        inside = _send_face_terms(self.user, '10', 'USDT', recipient.id, None)
+        self.assertEqual(_send_step_up(self.user, None, **inside), fsu.FACE_STEP_UP_MESSAGE)
+        FaceCheck.objects.create(user=self.user, purpose='withdrawal', liveness_session_id='w-b',
+                                 status='passed', challenge='light', completed_at=timezone.now())
+        self.assertEqual(_send_step_up(self.user, None, **inside), '')
+        # Routing between the person's businesses is a hop out: full check.
+        for business in (owned, employer):
+            hop = _send_face_terms(self.user, '10', 'USDT', None, business.id)
+            self.assertTrue(hop['cash_out'])
+            self.assertEqual(_send_step_up(self.user, None, **hop), fsu.FACE_STEP_UP_MESSAGE)
 
     def test_nothing_is_asked_while_enforcement_is_off(self):
         from send.bsc_flow import _send_step_up
-        self.assertEqual(_send_step_up(self.user, None, None), '')
+        self.assertEqual(_send_step_up(self.user, None), '')
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_users_without_kyc_keep_sending(self):
         from send.bsc_flow import _send_step_up
         IdentityVerification.all_documents.filter(user=self.user).delete()
-        self.assertEqual(_send_step_up(self.user, None, None), '')
+        self.assertEqual(_send_step_up(self.user, None), '')
 
 
 @override_settings(FACE_STEP_UP_ENABLED=True)
@@ -813,7 +834,7 @@ class FaceChallengeLevelTests(TestCase):
         self.assertIsNone(_send_face_terms(self.user, fsu.Decimal('20'), 'CONFIO', 7, None)['amount_usd'])
 
     def test_a_send_into_the_senders_own_or_employer_business_is_never_light(self):
-        # A business sends on without a face: that hop leaves the holder's control.
+        # A business may send on without this face (a colleague who never did KYC).
         from send.bsc_flow import _send_face_terms
         from users.models import Account, Business
         from users.models_employee import BusinessEmployee

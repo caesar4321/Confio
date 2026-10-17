@@ -205,7 +205,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
     # The escrow is claimed into a Confío account: the money stays inside.
     from security.face_step_up import dollar_amount
     from .bsc_flow import _send_step_up
-    step_up = _send_step_up(user, sender_business, None,
+    step_up = _send_step_up(user, None,
                             amount_usd=dollar_amount(amount, requested_token), cash_out=False)
     if step_up:
         return {'success': False, 'error': step_up}
@@ -409,7 +409,7 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     face_action = withdrawal_action_key('invite', phone_invite.pk, [chain_id, inviter_addr, calls])
     from security.face_step_up import dollar_amount
     face_terms = {'amount_usd': dollar_amount(phone_invite.amount, phone_invite.token_type), 'cash_out': False}
-    step_up = _send_step_up(user, getattr(phone_invite.send_transaction, 'sender_business', None), None,
+    step_up = _send_step_up(user, None,
                             action_key=face_action, **face_terms)
     if step_up:
         return {'success': False, 'error': step_up}
@@ -442,7 +442,7 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     # the row's fate — leaving the funded slot with no way back. The UPDATE is
     # the lock: exactly one caller can move draft → creating, and only that
     # caller broadcasts.
-    step_up = _send_step_up(user, getattr(phone_invite.send_transaction, 'sender_business', None), None,
+    step_up = _send_step_up(user, None,
                             action_key=face_action, consume=True, **face_terms)
     if step_up:
         return {'success': False, 'error': step_up}

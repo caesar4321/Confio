@@ -713,6 +713,19 @@ class IdempotencyTests(SimpleTestCase):
         self.assertTrue(result['success'], result)
         gate.assert_not_called()
 
+    def test_a_send_from_a_business_asks_the_signed_in_persons_face(self):
+        user = _sender_user()
+        sender = SimpleNamespace(bsc_address=SENDER, business=SimpleNamespace(id=88))
+        with _recipient_resolution(_recipient_user('VE'), None, RECIPIENT), \
+             mock.patch('users.models.Account.objects') as acct_objs, \
+             mock.patch.object(bsc_flow, '_send_step_up', return_value='face required') as gate:
+            acct_objs.filter.return_value.first.return_value = sender
+            result = bsc_flow.prepare_bsc_send(
+                user, {'account_type': 'business', 'business_id': 88, 'account_index': 0},
+                '10', recipient_user_id='2')
+        self.assertEqual(result, {'success': False, 'error': 'face required'})
+        self.assertIs(gate.call_args.args[0], user)
+
     def test_different_amount_conflicts(self):
         result = self._prepare(self._existing(amount='10'), amount='20')
         self.assertEqual(result['error'], 'idempotency_key_conflict')

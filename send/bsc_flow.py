@@ -218,20 +218,21 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
     return None, None, None, 'recipient_required'
 
 
-def _send_step_up(user, sender_business, activation_id, **claim) -> str:
-    """'' or the face step-up message for a personal send.
+def _send_step_up(user, activation_id, **claim) -> str:
+    """'' or the face step-up message for a send.
 
     Every send, to a Confío user as much as to an external address: a ring
     pools a recruited account's money into its own Confío accounts before
-    taking it out, so the holder's face is needed at the first hop. Business
-    accounts are governed by KYB and limits (cashiers, API payers), and the
+    taking it out, so the holder's face is needed at the first hop. A send
+    from a business account asks the face of the signed-in person who holds
+    send permission there (owner or employee), under the same rule. The
     server-only activation fee goes to Confío itself.
     """
     from security.identity_reuse import outgoing_identity_restriction
     restriction = outgoing_identity_restriction(user)
     if restriction:
         return restriction
-    if sender_business is not None or activation_id:
+    if activation_id:
         return ''
     from security.face_step_up import require_face_step_up
     return require_face_step_up(user, 'withdrawal', **claim)
@@ -240,8 +241,9 @@ def _send_step_up(user, sender_business, activation_id, **claim) -> str:
 def _routes_to_own_business(user, recipient_business_id) -> bool:
     """The sender owns or works (or worked) for the recipient business.
 
-    A business account sends without Confío Face, so a personal send into
-    the sender's own or employer business is the first hop out, not a
+    A business account sends on with the face of whoever signs in there,
+    and a colleague who never went through KYC has none to give, so a send
+    into the sender's own or employer business is the first hop out, not a
     movement inside Confío. Soft-deleted records count, as in Pay.
     """
     if recipient_business_id is None:
@@ -256,7 +258,7 @@ def _send_face_terms(user, amount, token_type, recipient_user_id, recipient_busi
     """What decides a light or full Confío Face for a send
     (security.face_step_up.required_challenge): its dollar value and whether
     it leaves Confío: no Confío account behind the recipient address, or a
-    business of the sender's own that can send on without a face."""
+    business of the sender's own that may send on without this face."""
     from security.face_step_up import dollar_amount
     return {
         'amount_usd': dollar_amount(amount, token_type),
@@ -418,7 +420,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
     # an unspent approval there would strand retries of an already claimed
     # send; submission still validates/claims that operation's approval.
     # Every non-CONFIO shape moves `amount_usd` dollars.
-    step_up = _send_step_up(user, sender_business, activation_id, **_send_face_terms(
+    step_up = _send_step_up(user, activation_id, **_send_face_terms(
         user, amount_usd, 'CONFIO' if requested == 'CONFIO' else 'USDT',
         recipient_user.id if recipient_user else None,
         recipient_business.id if recipient_business else None))
@@ -1036,7 +1038,7 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
     face_action = withdrawal_action_key('send', send_tx.id, [chain_id, sender_addr, kind, calls])
     face_terms = _send_face_terms(user, send_tx.amount, send_tx.token_type,
                                   send_tx.recipient_user_id, send_tx.recipient_business_id)
-    step_up = _send_step_up(user, send_tx.sender_business, meta.get('activation_id'), action_key=face_action,
+    step_up = _send_step_up(user, meta.get('activation_id'), action_key=face_action,
                             **face_terms)
     if step_up:
         return {'success': False, 'error': step_up}
@@ -1059,7 +1061,7 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
             auth_dict = sponsor_7702.normalize_and_validate_authorization(
                 authorization, sender_addr, chain_id)
 
-        step_up = _send_step_up(user, send_tx.sender_business, meta.get('activation_id'),
+        step_up = _send_step_up(user, meta.get('activation_id'),
                                 action_key=face_action, consume=True, **face_terms)
         if step_up:
             return {'success': False, 'error': step_up}

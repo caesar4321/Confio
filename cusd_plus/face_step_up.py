@@ -56,14 +56,14 @@ def has_external_outflow(calls, signer, *, legacy=False):
 
 def claim_external_outflow(user, context, calls, signer, *, namespace,
                            identifier, payload, legacy=False):
+    """From a business account too: the signed-in owner or employee's face,
+    under the same rule as personal (send/bsc_flow._send_step_up)."""
     if not has_external_outflow(calls, signer, legacy=legacy):
         return ''
     from security.identity_reuse import outgoing_identity_restriction
     restriction = outgoing_identity_restriction(user)
     if restriction:
         return restriction
-    if context and context.get('account_type') == 'business':
-        return ''
     from security.face_step_up import require_face_step_up, withdrawal_action_key
     key = withdrawal_action_key(namespace, identifier, payload)
     return require_face_step_up(user, 'withdrawal', action_key=key, consume=True)

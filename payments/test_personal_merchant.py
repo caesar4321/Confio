@@ -91,15 +91,12 @@ class PersonalMerchantFaceStepUpTests(TestCase):
         from security.models import FaceCheck
         from django.utils import timezone
         _verify(self.seller, number='1065000200')
-        self.assertEqual(_payment_step_up(self.payer, None, None, invoice=self.invoice), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(_payment_step_up(self.payer, invoice=self.invoice), fsu.FACE_STEP_UP_MESSAGE)
         FaceCheck.objects.create(user=self.payer, purpose='withdrawal', liveness_session_id='p-1', status='passed',
                                  challenge='light', completed_at=timezone.now())
-        self.assertEqual(_payment_step_up(self.payer, None, None, invoice=self.invoice), '')
+        self.assertEqual(_payment_step_up(self.payer, invoice=self.invoice), '')
 
     def test_charging_yourself_needs_the_full_check(self):
         from payments.bsc_flow import _payment_face_terms
         self.invoice.merchant_account.user = self.payer
         self.assertTrue(_payment_face_terms(self.payer, self.invoice)['cash_out'])
-
-    def test_business_payer_exempt_as_before(self):
-        self.assertEqual(_payment_step_up(self.payer, object(), None, invoice=self.invoice), '')

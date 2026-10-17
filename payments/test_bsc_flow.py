@@ -296,6 +296,18 @@ class PrepareBatchTests(SimpleTestCase):
             self._invoice('10'))
         self.assertEqual(result['error'], 'self_pay_not_allowed')
 
+    def test_paying_from_a_business_asks_the_signed_in_persons_face(self):
+        user = self._user()
+        payer = SimpleNamespace(bsc_address=PAYER, business=SimpleNamespace(id=88))
+        with mock.patch('users.models.Account.objects') as acct_objs, \
+             mock.patch.object(bsc_flow, '_payment_step_up', return_value='face required') as gate:
+            acct_objs.filter.return_value.first.return_value = payer
+            result = bsc_flow.prepare_bsc_payment(
+                user, {'account_type': 'business', 'business_id': 88, 'account_index': 0},
+                self._invoice('10'))
+        self.assertEqual(result, {'success': False, 'error': 'face required'})
+        self.assertIs(gate.call_args.args[0], user)
+
     def _personal_invoice(self, seller_id=42):
         invoice = self._invoice('10')
         invoice.merchant_business = None

@@ -162,11 +162,12 @@ class IdentityReuseTests(TestCase):
             require_identity_for_autoswap(self.recycled, [pack(burn),
                 pack({'type': 'axfer', 'snd': actor, 'arcv': b'b' * 32, 'aamt': 100})], address)
 
-    def test_bsc_business_and_merchant_exemptions_do_not_bypass_hold(self):
+    def test_bsc_send_and_payment_do_not_bypass_hold(self):
         from send.bsc_flow import _send_step_up
         from payments.bsc_flow import _payment_step_up
-        self.assertEqual(_send_step_up(self.recycled, object(), None), MESSAGE)
-        self.assertEqual(_payment_step_up(self.recycled, object(), object()), MESSAGE)
+        self.assertEqual(_send_step_up(self.recycled, None), MESSAGE)
+        self.assertEqual(_send_step_up(self.recycled, 'activation-1'), MESSAGE)
+        self.assertEqual(_payment_step_up(self.recycled), MESSAGE)
 
     def test_bank_payout_business_exemption_does_not_bypass_hold(self):
         from types import SimpleNamespace

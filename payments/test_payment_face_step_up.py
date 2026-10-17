@@ -45,29 +45,29 @@ class PaymentFaceStepUpTests(TestCase):
         _verify(owner, business=self.shop, number='900100200')
 
     def test_a_verified_merchant_asks_too(self):
-        self.assertEqual(_payment_step_up(self.payer, None, self.shop), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(_payment_step_up(self.payer), fsu.FACE_STEP_UP_MESSAGE)
         _passed(self.payer)
-        self.assertEqual(_payment_step_up(self.payer, None, self.shop), '')
+        self.assertEqual(_payment_step_up(self.payer), '')
 
     def test_a_small_payment_inside_confio_takes_the_light_check(self):
         _passed(self.payer, challenge='light')
-        self.assertEqual(_payment_step_up(self.payer, None, self.shop, invoice=_invoice(self.shop)), '')
+        self.assertEqual(_payment_step_up(self.payer, invoice=_invoice(self.shop)), '')
         # Without the amount (or above the light limit) only the full check counts.
-        self.assertEqual(_payment_step_up(self.payer, None, self.shop), fsu.FACE_STEP_UP_MESSAGE)
-        self.assertEqual(_payment_step_up(self.payer, None, self.shop, invoice=_invoice(self.shop, amount='80')),
+        self.assertEqual(_payment_step_up(self.payer), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(_payment_step_up(self.payer, invoice=_invoice(self.shop, amount='80')),
                          fsu.FACE_STEP_UP_MESSAGE)
 
     def test_paying_a_business_you_work_for_needs_the_full_check(self):
         BusinessEmployee.objects.create(user=self.payer, business=self.shop, role='cashier')
         _passed(self.payer, challenge='light')
-        self.assertEqual(_payment_step_up(self.payer, None, self.shop, invoice=_invoice(self.shop)),
+        self.assertEqual(_payment_step_up(self.payer, invoice=_invoice(self.shop)),
                          fsu.FACE_STEP_UP_MESSAGE)
 
     def test_a_deleted_employee_record_still_counts(self):
         employee = BusinessEmployee.objects.create(user=self.payer, business=self.shop, role='cashier')
         employee.soft_delete()
         _passed(self.payer, challenge='light')
-        self.assertEqual(_payment_step_up(self.payer, None, self.shop, invoice=_invoice(self.shop)),
+        self.assertEqual(_payment_step_up(self.payer, invoice=_invoice(self.shop)),
                          fsu.FACE_STEP_UP_MESSAGE)
 
     def test_paying_your_own_business_needs_the_full_check(self):
@@ -75,13 +75,19 @@ class PaymentFaceStepUpTests(TestCase):
         Account.objects.create(user=self.payer, account_type='business', business=own)
         _verify(self.payer, business=own, number='900100300')
         _passed(self.payer, challenge='light')
-        self.assertEqual(_payment_step_up(self.payer, None, own, invoice=_invoice(own)), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(_payment_step_up(self.payer, invoice=_invoice(own)), fsu.FACE_STEP_UP_MESSAGE)
         _passed(self.payer, session='w-2')
-        self.assertEqual(_payment_step_up(self.payer, None, own, invoice=_invoice(own)), '')
+        self.assertEqual(_payment_step_up(self.payer, invoice=_invoice(own)), '')
 
-    def test_exempt_payers(self):
-        shop = Business.objects.create(name='Tienda sin KYB')
-        # A business payer, and a payer who never did KYC.
-        self.assertEqual(_payment_step_up(self.payer, object(), shop), '')
+    def test_paying_from_a_business_asks_the_signed_in_persons_face(self):
+        # The owner or employee holding pay permission, under the same rule.
+        own = Business.objects.create(name='Mi negocio')
+        Account.objects.create(user=self.payer, account_type='business', business=own)
+        other = Business.objects.create(name='Proveedor')
+        self.assertEqual(_payment_step_up(self.payer, invoice=_invoice(other)), fsu.FACE_STEP_UP_MESSAGE)
+        _passed(self.payer, challenge='light')
+        self.assertEqual(_payment_step_up(self.payer, invoice=_invoice(other)), '')
+
+    def test_a_payer_who_never_did_kyc_is_not_asked(self):
         no_kyc = User.objects.create(username='nokyc', email='nokyc@example.com', firebase_uid='nokyc-uid')
-        self.assertEqual(_payment_step_up(no_kyc, None, shop), '')
+        self.assertEqual(_payment_step_up(no_kyc, invoice=_invoice(self.shop)), '')

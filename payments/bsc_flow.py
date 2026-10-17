@@ -258,7 +258,7 @@ def _payment_face_terms(user, invoice) -> dict:
     """What decides a light or full Confío Face for a payment, as for a send
     (send/bsc_flow._send_face_terms): its dollar value, and whether it is a
     routing hop — into a business the payer owns or works for (a business
-    pays on without a face), or the payer charging themself."""
+    may pay on without this face), or the payer charging themself."""
     from security.face_step_up import dollar_amount
     merchant_business = invoice.merchant_business
     if merchant_business is not None:
@@ -269,22 +269,21 @@ def _payment_face_terms(user, invoice) -> dict:
     return {'amount_usd': dollar_amount(invoice.amount, invoice.token_type), 'cash_out': cash_out}
 
 
-def _payment_step_up(user, payer_business, merchant_business, invoice=None, **claim) -> str:
+def _payment_step_up(user, invoice=None, **claim) -> str:
     """'' or the Confío Face message for a payment.
 
-    The same rule as Send (send/bsc_flow._send_step_up): every personal
-    payment by someone who went through KYC asks Confío Face, at a verified
-    merchant as much as anywhere — a ring pools a recruited account's money
-    through Pay as easily as through Send. A small dollar payment that stays
-    inside Confío gets the light check; a routing hop gets the full one.
-    Business payers are governed by KYB and limits, as for sends.
+    The same rule as Send (send/bsc_flow._send_step_up): every payment by
+    someone who went through KYC asks Confío Face, at a verified merchant as
+    much as anywhere — a ring pools a recruited account's money through Pay
+    as easily as through Send. From a business account it is the face of the
+    signed-in owner or employee who holds pay permission. A small dollar
+    payment that stays inside Confío gets the light check; a routing hop gets
+    the full one.
     """
     from security.identity_reuse import outgoing_identity_restriction
     restriction = outgoing_identity_restriction(user)
     if restriction:
         return restriction
-    if payer_business is not None:
-        return ''
     from security.face_step_up import require_face_step_up, step_up_applies
     if not step_up_applies(user):
         return ''
@@ -422,8 +421,7 @@ def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '
     if not merchant_addr:
         _notify_merchant_needs_app(invoice, user)
         return {'success': False, 'error': 'merchant_no_bsc_address'}
-    step_up = _payment_step_up(user, payer_business, invoice.merchant_business,
-                               invoice=invoice)
+    step_up = _payment_step_up(user, invoice=invoice)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -1004,8 +1002,7 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
     face_action = withdrawal_action_key('payment', payment_tx.id, [
         int(getattr(settings, 'BSC_CHAIN_ID', 56)),
         (payment_tx.payer_address or '').lower(), payment_tx.blockchain_data or {}])
-    step_up = _payment_step_up(user, payment_tx.payer_business, invoice.merchant_business,
-                               action_key=face_action, invoice=invoice)
+    step_up = _payment_step_up(user, action_key=face_action, invoice=invoice)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -1038,8 +1035,7 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
             auth_dict = sponsor_7702.normalize_and_validate_authorization(
                 authorization, payer_addr, chain_id)
 
-        step_up = _payment_step_up(user, payment_tx.payer_business, invoice.merchant_business,
-                                   action_key=face_action, consume=True, invoice=invoice)
+        step_up = _payment_step_up(user, action_key=face_action, consume=True, invoice=invoice)
         if step_up:
             return {'success': False, 'error': step_up}
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
