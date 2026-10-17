@@ -346,7 +346,7 @@ export const DiscoverPostDetailScreen = () => {
           )}
           {activity ? (
             <View style={styles.activity}>
-              <ActivitySummary activity={activity} />
+              <ActivitySummary activity={activity} navigable />
             </View>
           ) : null}
           <View style={styles.blocksWrap}>

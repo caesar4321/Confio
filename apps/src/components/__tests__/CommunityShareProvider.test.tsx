@@ -8,6 +8,7 @@ const mockRefetch = jest.fn().mockResolvedValue({});
 const mockShareIntent = jest.fn();
 const mockNavigate = jest.fn();
 
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn() }) }));
 jest.mock('@apollo/client', () => ({
   useQuery: (query: string, options: any) => {
     if (query === 'GET_SHARE_SHEET_ACTIVITY') {

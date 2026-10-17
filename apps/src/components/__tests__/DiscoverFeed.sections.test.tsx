@@ -6,6 +6,12 @@ jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../ResponsiveImage', () => ({ ResponsiveImage: 'ResponsiveImage' }));
 jest.mock('../ContentPoll', () => ({ ContentPoll: () => null }));
 jest.mock('../EmptyState', () => ({ EmptyState: 'EmptyState' }));
+const mockNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mockNavigate }) }));
+let mockIsEmployee = false;
+jest.mock('../../contexts/AccountContext', () => ({
+  useAccount: () => ({ activeAccount: { isEmployee: mockIsEmployee } }),
+}));
 
 import { DISCOVER_SECTIONS, DiscoverFeed, DiscoverItem } from '../DiscoverFeed';
 
@@ -96,6 +102,46 @@ describe('DiscoverFeed sections', () => {
     expect(shown).toContain('Compró AAPL');
     expect(shown).toContain('Mi primera acción');
     expect(shown.some((text) => text.includes('Compró AAPL por US$50'))).toBe(false);
+  });
+
+  it('opens the stock or money screen from an activity, by kind', () => {
+    const tree = render({
+      items: [item({ id: 7, sourceName: 'ana' }), item({ id: 8, sourceName: 'ben' })],
+      postExtras: {
+        7: { contentItemId: '7', activity: { kind: 'stock_sell', ticker: 'SPY', headline: 'Vendió SPY' } },
+        8: { contentItemId: '8', activity: { kind: 'withdraw', rail: 'QR', headline: 'Retiró' } },
+      },
+    });
+    const press = (hint: string) =>
+      act(() => tree.root.find((node) => node.type === Pressable && node.props.accessibilityHint === hint).props.onPress());
+    const spy = tree.root.find((node) => node.type === Pressable && node.props.accessibilityHint === 'Ver SPY');
+    expect(spy.props.accessibilityLabel).toBe('Vendió SPY');
+    press('Ver SPY');
+    expect(mockNavigate).toHaveBeenLastCalledWith('StockDetail', { ticker: 'SPY' });
+    press('Retirar dólares');
+    expect(mockNavigate).toHaveBeenLastCalledWith('Sell', undefined);
+  });
+
+  it('offers the activity as an accessibility action on the card', () => {
+    const tree = render({
+      items: [item({ id: 7, sourceName: 'ana' })],
+      postExtras: { 7: { contentItemId: '7', activity: { kind: 'stock_buy', ticker: 'NVDA', headline: 'Compró NVDA' } } },
+    });
+    const card = tree.root.find((node) => node.type === Pressable && node.props.accessibilityHint === 'Abre la publicación');
+    expect(card.props.accessibilityActions).toEqual([{ name: 'openActivity', label: 'Ver NVDA' }]);
+    act(() => card.props.onAccessibilityAction({ nativeEvent: { actionName: 'openActivity' } }));
+    expect(mockNavigate).toHaveBeenLastCalledWith('StockDetail', { ticker: 'NVDA' });
+  });
+
+  it("never sends an employee to the owner's money screens", () => {
+    mockIsEmployee = true;
+    const tree = render({
+      items: [item({ id: 8, sourceName: 'ben' })],
+      postExtras: { 8: { contentItemId: '8', activity: { kind: 'top_up', headline: 'Recargó' } } },
+    });
+    expect(tree.root.findAll((node) => node.type === Pressable && node.props.accessibilityHint === 'Recargar dólares'))
+      .toHaveLength(0);
+    mockIsEmployee = false;
   });
 
   it('opens the author profile from a member byline, but not from official ones', () => {

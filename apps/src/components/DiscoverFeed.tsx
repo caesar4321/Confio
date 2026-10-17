@@ -16,7 +16,8 @@ import { EmptyState } from './EmptyState';
 import { PostByline } from './PostByline';
 import { ReactionBar } from './ReactionBar';
 import { VerifiedBadge } from './VerifiedBadge';
-import { ActivitySummary } from './ActivitySummary';
+import { useNavigation } from '@react-navigation/native';
+import { ActivitySummary, useActivityDestination } from './ActivitySummary';
 import { colors } from '../config/theme';
 import type { CommunityPostExtras } from '../hooks/useCommunityPostExtras';
 
@@ -110,6 +111,21 @@ export function DiscoverPostCard({ item, onOpenItem, onReact, commentCount, extr
     item.platformLinks?.some((entry) => entry.platform === platform && entry.url)
   );
   const isVideo = item.type === 'video' || Boolean(item.thumbnail);
+  // A screen reader focuses the whole card, never a button inside it: the
+  // activity and the author's profile are offered as actions on the card.
+  const navigation = useNavigation<any>();
+  const destination = useActivityDestination(activity);
+  const a11yActions = [
+    ...(destination ? [{ name: 'openActivity', label: destination.label }] : []),
+    ...(authorId && onOpenAuthor ? [{ name: 'openAuthor', label: `Ver el perfil de ${item.sourceName}` }] : []),
+  ];
+  const onA11yAction = (event: { nativeEvent: { actionName: string } }) => {
+    if (event.nativeEvent.actionName === 'openActivity' && destination) {
+      navigation.navigate(destination.route, destination.params);
+    } else if (event.nativeEvent.actionName === 'openAuthor' && authorId && onOpenAuthor) {
+      onOpenAuthor(authorId);
+    }
+  };
 
   return (
     <View style={styles.card}>
@@ -118,6 +134,8 @@ export function DiscoverPostCard({ item, onOpenItem, onReact, commentCount, extr
         style={({ pressed }) => [styles.cardPressable, pressed && styles.cardPressed]}
         accessibilityRole="button"
         accessibilityHint="Abre la publicación"
+        accessibilityActions={a11yActions.length ? a11yActions : undefined}
+        onAccessibilityAction={a11yActions.length ? onA11yAction : undefined}
       >
         {item.sourceName ? (
           <View style={styles.byline}>
@@ -138,7 +156,7 @@ export function DiscoverPostCard({ item, onOpenItem, onReact, commentCount, extr
         {activity ? (
           <>
             <View style={styles.activity}>
-              <ActivitySummary activity={activity} compact />
+              <ActivitySummary activity={activity} compact navigable />
             </View>
             {extras?.note ? (
               <Text style={styles.cardBody} numberOfLines={3}>

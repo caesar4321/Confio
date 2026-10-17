@@ -1,5 +1,7 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { useAccount } from '../contexts/AccountContext';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
@@ -95,15 +97,51 @@ function PnlLine({ a }: { a: ActivityShare }) {
   );
 }
 
+const OWNER_ONLY_ROUTES = new Set(['TopUp', 'Sell']);
+
+/**
+ * Where tapping a post's activity takes the reader: the stock's own page
+ * (where they can look and buy), or the matching money screen to do the
+ * same thing themselves. Null when there's nowhere sensible to go.
+ */
+export function activityDestination(activity: ActivityShare): { route: string; params?: object; label: string } | null {
+  switch (activity.kind) {
+    case 'stock_buy':
+    case 'stock_sell':
+      return activity.ticker
+        ? { route: 'StockDetail', params: { ticker: activity.ticker }, label: `Ver ${activity.ticker}` }
+        : null;
+    case 'top_up':
+      return { route: 'TopUp', label: 'Recargar dólares' };
+    case 'withdraw':
+      return { route: 'Sell', label: 'Retirar dólares' };
+    case 'send':
+    case 'receive':
+      return { route: 'Send', label: 'Enviar dinero' };
+    default:
+      return null;
+  }
+}
+
 /**
  * The verified part of a post made from a money movement: what happened,
  * the amount (unless the member hid it) and, for stocks, how it went.
  * Used by the share sheet's preview and by every feed card.
  */
-export function ActivitySummary({ activity, compact = false }: { activity: ActivityShare; compact?: boolean }) {
+export function ActivitySummary({
+  activity,
+  compact = false,
+  navigable = false,
+}: {
+  activity: ActivityShare;
+  compact?: boolean;
+  /** In the feed and post detail: tapping opens the stock or money screen. */
+  navigable?: boolean;
+}) {
   const amount = usd(activity.amountUsd);
   const detail = detailFor(activity);
-  return (
+  const destination = useActivityDestination(navigable ? activity : null);
+  const content = (
     <View style={[styles.box, compact && styles.compact]}>
       <View style={styles.icon}>
         <Icon name={ICONS[activity.kind] || 'activity'} size={18} color={colors.flowIn.textSmall} />
@@ -123,7 +161,54 @@ export function ActivitySummary({ activity, compact = false }: { activity: Activ
         <PnlLine a={activity} />
         <Text style={styles.verified}>Movimiento real en Confío</Text>
       </View>
+      {destination ? <Icon name="chevron-right" size={18} color={colors.text.light} style={styles.chevron} /> : null}
     </View>
+  );
+  if (!destination) return content;
+  return <NavigableSummary activity={activity} destination={destination}>{content}</NavigableSummary>;
+}
+
+type Destination = { route: string; params?: object; label: string };
+
+/** The activity's destination for this viewer: employees never reach the
+ * owner's money rails (Recargar / Retirar). Null for no activity. */
+export function useActivityDestination(activity: ActivityShare | null | undefined): Destination | null {
+  const { activeAccount } = useAccount();
+  const isEmployee = Boolean((activeAccount as { isEmployee?: boolean } | null)?.isEmployee);
+  const target = activity ? activityDestination(activity) : null;
+  return target && isEmployee && OWNER_ONLY_ROUTES.has(target.route) ? null : target;
+}
+
+/** What a screen reader says for the activity: the movement itself. */
+export const activityAccessibilityLabel = (activity: ActivityShare) => {
+  const parts = [activity.headline];
+  if (activity.pnlPct && activity.kind === 'stock_buy') {
+    parts.push(`${activity.position === 'closed' ? 'al vender' : 'desde la compra'} ${activity.pnlPct}%`);
+  }
+  return parts.join(', ');
+};
+
+function NavigableSummary({
+  activity,
+  destination,
+  children,
+}: {
+  activity: ActivityShare;
+  destination: Destination;
+  children: React.ReactNode;
+}) {
+  const navigation = useNavigation<any>();
+  return (
+    <Pressable
+      onPress={() => navigation.navigate(destination.route, destination.params)}
+      accessibilityRole="button"
+      // The movement is the content; where it goes is the hint.
+      accessibilityLabel={activityAccessibilityLabel(activity)}
+      accessibilityHint={destination.label}
+      style={({ pressed }) => (pressed ? styles.pressed : undefined)}
+    >
+      {children}
+    </Pressable>
   );
 }
 
@@ -154,4 +239,6 @@ const styles = StyleSheet.create({
   detail: { fontSize: 13, color: colors.text.secondary },
   pnl: { fontSize: 13, fontWeight: '600' },
   verified: { fontSize: 11, color: colors.text.light, marginTop: 2 },
+  chevron: { alignSelf: 'center' },
+  pressed: { opacity: 0.7 },
 });
