@@ -2776,12 +2776,10 @@ def _get_user_phone_country_alpha3(user) -> str:
 
 
 def _get_latest_personal_verification(user):
-    return (
-        IdentityVerification.objects
-        .filter(user=user, status='verified', risk_factors__account_type__isnull=True)
-        .order_by('-verified_at', '-updated_at', '-created_at')
-        .first()
-    )
+    # Koywe's delegated KYC needs the phone-country document: deliberately the
+    # primary one only, never an additional passport/ID.
+    from security.identity_status import phone_country_identity
+    return phone_country_identity(user)
 
 
 def _build_effective_ramp_address_snapshot(user):
@@ -2867,6 +2865,12 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
         last_name = str((override or {}).get('lastName') or '').strip()
     else:
         if not verification:
+            from security.identity_status import is_identity_verified
+            if is_identity_verified(user):
+                # Verified with another country's document only: say which one
+                # opens Koywe (older app builds pass their own gate on it).
+                raise KoyweError('Recargas y retiros necesitan el documento de identidad del país de tu número '
+                                 'de teléfono. Verifícalo en Perfil > Verificación.')
             raise KoyweError('Completa la verificación de identidad antes de usar recargas y retiros')
         first_name = str(getattr(verification, 'verified_first_name', None) or '').strip()
         last_name = str(getattr(verification, 'verified_last_name', None) or '').strip()

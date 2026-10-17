@@ -34,6 +34,16 @@ User = get_user_model()
 
 # Removed circular import - BankType will be imported dynamically
 
+
+def _identity_verified(user):
+    from security.identity_status import is_identity_verified
+    return bool(user) and is_identity_verified(user)
+
+
+def _business_verified(business):
+    from security.identity_status import is_business_verified
+    return bool(business) and is_business_verified(business.id)
+
 class P2PPaymentMethodType(graphene.ObjectType):
     id = graphene.ID()
     name = graphene.String()
@@ -198,10 +208,8 @@ class P2POfferType(DjangoObjectType):
                 }
             )
             # Ensure verification reflects current business verification status
-            try:
-                stats.is_verified = bool(getattr(business, 'is_verified', False))
-            except Exception:
-                pass
+            from security.identity_status import is_business_verified
+            stats.is_verified = is_business_verified(business.id)
             return stats
         elif user:
             # For personal offers, get or create stats for the user
@@ -216,13 +224,8 @@ class P2POfferType(DjangoObjectType):
                 }
             )
             # Ensure verification reflects current personal identity verification
-            try:
-                is_verified_personal = bool(getattr(user, 'is_identity_verified', None) and user.is_identity_verified)
-                if not is_verified_personal and hasattr(user, 'is_verified'):
-                    is_verified_personal = bool(user.is_identity_verified)
-                stats.is_verified = is_verified_personal
-            except Exception:
-                pass
+            from security.identity_status import is_identity_verified
+            stats.is_verified = is_identity_verified(user)
             return stats
         return None
     
@@ -672,7 +675,7 @@ class P2PTradeType(DjangoObjectType):
                 completed_trades=completed_trades,
                 success_rate=float((completed_trades / total_trades * 100)) if total_trades > 0 else 0.0,
                 avg_response_time=15,  # Default 15 minutes
-                is_verified=self.buyer_business.is_verified if hasattr(self.buyer_business, 'is_verified') else False,
+                is_verified=_business_verified(self.buyer_business),
                 last_seen_online=last_trade.created_at if last_trade else None,
                 avg_rating=float(avg_rating),
             )
@@ -708,7 +711,7 @@ class P2PTradeType(DjangoObjectType):
                 completed_trades=completed_trades,
                 success_rate=float((completed_trades / total_trades * 100)) if total_trades > 0 else 0.0,
                 avg_response_time=15,  # Default 15 minutes
-                is_verified=self.buyer_user.is_identity_verified if hasattr(self.buyer_user, 'is_identity_verified') else False,
+                is_verified=_identity_verified(self.buyer_user),
                 last_seen_online=last_trade.created_at if last_trade else None,
                 avg_rating=float(avg_rating),
             )
@@ -753,7 +756,7 @@ class P2PTradeType(DjangoObjectType):
                 completed_trades=completed_trades,
                 success_rate=float((completed_trades / total_trades * 100)) if total_trades > 0 else 0.0,
                 avg_response_time=15,  # Default 15 minutes
-                is_verified=self.seller_business.is_verified if hasattr(self.seller_business, 'is_verified') else False,
+                is_verified=_business_verified(self.seller_business),
                 last_seen_online=last_trade.created_at if last_trade else None,
                 avg_rating=float(avg_rating),
             )
@@ -789,7 +792,7 @@ class P2PTradeType(DjangoObjectType):
                 completed_trades=completed_trades,
                 success_rate=float((completed_trades / total_trades * 100)) if total_trades > 0 else 0.0,
                 avg_response_time=15,  # Default 15 minutes
-                is_verified=self.seller_user.is_identity_verified if hasattr(self.seller_user, 'is_identity_verified') else False,
+                is_verified=_identity_verified(self.seller_user),
                 last_seen_online=last_trade.created_at if last_trade else None,
                 avg_rating=float(avg_rating),
             )
@@ -1035,16 +1038,7 @@ class CreateP2POffer(graphene.Mutation):
                 try:
                     business = Business.objects.get(id=business_id)
                     # Enforce verified business before allowing offer creation
-                    try:
-                        from security.models import IdentityVerification
-                        biz_verified = IdentityVerification.objects.filter(
-                            status='verified',
-                            risk_factors__account_type='business',
-                            risk_factors__business_id=str(business.id)
-                        ).exists()
-                    except Exception:
-                        biz_verified = False
-                    if not biz_verified:
+                    if not _business_verified(business):
                         return CreateP2POffer(
                             offer=None,
                             success=False,
@@ -1061,13 +1055,7 @@ class CreateP2POffer(graphene.Mutation):
             else:
                 # Personal offer
                 # Enforce verified personal identity before allowing offer creation
-                try:
-                    is_verified_personal = bool(getattr(user, 'is_identity_verified', None) and user.is_identity_verified)
-                    if not is_verified_personal and hasattr(user, 'is_verified'):
-                        is_verified_personal = bool(user.is_identity_verified)
-                except Exception:
-                    is_verified_personal = False
-                if not is_verified_personal:
+                if not _identity_verified(user):
                     return CreateP2POffer(
                         offer=None,
                         success=False,

@@ -38,19 +38,12 @@ _DIDIT_TO_STATUS = {
 def _primary_identity(owner):
     """The identity the provider owner was opened with (it can be an additional
     passport), else the primary verification, else any verified personal document."""
-    from django.db.models import Q
-    from security.models import IdentityVerification
+    from security.identity_status import current_document
     profile = ProviderProfile.objects.filter(confio_account=owner, provider='infinia').select_related(
         'identity_verification').first()
     if profile and profile.identity_verification and profile.identity_verification.status == 'verified':
         return profile.identity_verification
-    # Not .exclude(account_type='business'): on a JSON key that also drops
-    # every row where the key is missing, i.e. every personal identity.
-    return (
-        IdentityVerification.all_documents.filter(user=owner.user, status='verified')
-        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        .order_by('is_additional_document', '-verified_at', '-updated_at').first()
-    )
+    return current_document(owner.user)
 
 
 def _expected_details(owner, identity):

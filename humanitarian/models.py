@@ -4,7 +4,6 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
-from django.db.models import Q
 from django.utils import timezone
 
 
@@ -120,14 +119,8 @@ class HumanitarianVolunteerApplication(models.Model):
 
     @property
     def has_verified_country_kyc(self):
-        country = (self.campaign.country_code or 'VEN').upper()
-        return self.user.security_verifications.filter(
-            Q(verified_country__iexact=country)
-            | Q(verified_nationality__iexact=country)
-            | Q(document_issuing_country__iexact=country),
-            status='verified',
-            deleted_at__isnull=True,
-        ).exists()
+        from security.identity_status import verified_document_of_country
+        return verified_document_of_country(self.user, self.campaign.country_code or 'VEN') is not None
 
     def approve(self, admin_user):
         self.status = 'approved'

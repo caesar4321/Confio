@@ -185,6 +185,12 @@ def _download_selfie(url: str) -> tuple[bytes, str]:
 
 
 def _newer_reference_exists(verification) -> bool:
+    if getattr(verification, 'is_additional_document', False):
+        # An additional document's selfie is the reference only for someone
+        # with none standing: it never displaces the primary document's.
+        standing = _active_reference(verification.user_id)
+        if standing:
+            return True
     # A reference whose KYC was rejected never blocks one from a verified KYC.
     active = FaceReference.objects.filter(
         user_id=verification.user_id, is_active=True, identity_verification__status='verified',

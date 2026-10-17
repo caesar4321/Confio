@@ -312,6 +312,18 @@ class FaceStepUpStatusType(graphene.ObjectType):
     required = graphene.Boolean()
 
 
+class IdentityStatusType(graphene.ObjectType):
+    """Who is verified (security/identity_status.py), for the signed-in person."""
+    # Any current verified personal document, primary or additional.
+    verified = graphene.Boolean(required=True)
+    # The primary (phone-country) document: what Recargar/Retirar (Koywe) need.
+    phone_country_verified = graphene.Boolean(required=True)
+    # Verified now, or verified and later expired.
+    ever_passed_kyc = graphene.Boolean(required=True)
+    status = graphene.String(required=True)
+    verified_at = graphene.DateTime()
+
+
 class SecurityQuery(graphene.ObjectType):
     # Lets the app decide whether a client-enforced step must ask for Confío
     # Face: only while the server actually enforces it.
@@ -321,6 +333,7 @@ class SecurityQuery(graphene.ObjectType):
     my_personal_kyc_status = graphene.Field(IdentityVerificationType)
     my_personal_verified_kyc = graphene.Field(IdentityVerificationType)
     my_identity_documents = graphene.List(graphene.NonNull(IdentityDocumentType), required=True)
+    my_identity_status = graphene.Field(IdentityStatusType)
     business_kyc_status = graphene.Field(IdentityVerificationType, business_id=graphene.ID(required=True))
     
     def resolve_face_step_up_status(self, info):
@@ -351,6 +364,9 @@ class SecurityQuery(graphene.ObjectType):
         user = info.context.user
         if not user.is_authenticated:
             return None
+        # The latest PRIMARY (phone-country) attempt, any status: the
+        # Verification screen's country row. Additional documents are listed by
+        # myIdentityDocuments; "is this person verified" is myIdentityStatus.
         # Exclude business-context verifications to reflect personal status only
         return IdentityVerification.objects.filter(
             user=user,
@@ -372,11 +388,22 @@ class SecurityQuery(graphene.ObjectType):
         user = info.context.user
         if not user.is_authenticated:
             return None
-        return IdentityVerification.objects.filter(
-            user=user,
-            status='verified',
-            risk_factors__account_type__isnull=True
-        ).order_by('-verified_at', '-updated_at', '-created_at').first()
+        # Any current personal document (additional ones included).
+        from .identity_status import current_documents
+        return current_documents(user).order_by('-verified_at', '-updated_at', '-created_at').first()
+
+    def resolve_my_identity_status(self, info):
+        user = info.context.user
+        if not user.is_authenticated:
+            return None
+        from . import identity_status as ids
+        return IdentityStatusType(
+            verified=ids.is_identity_verified(user),
+            phone_country_verified=ids.has_phone_country_identity(user),
+            ever_passed_kyc=ids.has_ever_passed_kyc(user),
+            status=ids.identity_status(user),
+            verified_at=ids.verified_at(user),
+        )
 
     def resolve_my_identity_documents(self, info):
         """Every personal document (additional ones included, which the default

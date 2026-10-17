@@ -24,7 +24,7 @@ import {
   GET_RAMP_AVAILABILITY,
   GET_RAMP_TEST_IDENTITY,
   GET_MY_RAMP_ADDRESS,
-  GET_MY_KYC_STATUS,
+  GET_MY_IDENTITY_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
 } from '../apollo/queries';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
@@ -34,6 +34,7 @@ import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
 import { useRampCountry } from '../hooks/useRampCountry';
 import { hasKoyweTestIdentity } from '../utils/koyweTestIdentity';
+import { hasRampIdentity } from '../utils/rampIdentity';
 import { USD_UNIT, formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
@@ -117,7 +118,7 @@ const TopUpScreen = () => {
   const isKoyweCountry = isKoyweRoutingEnabledForCountry(countryCode);
 
   const { data: meData } = useQuery(GET_ME);
-  const { data: kycData } = useQuery(GET_MY_KYC_STATUS);
+  const { data: identityData } = useQuery(GET_MY_IDENTITY_STATUS, { fetchPolicy: 'cache-and-network' });
   const { data: personalKycData } = useQuery(GET_MY_PERSONAL_KYC_STATUS);
   const { data: rampAddressData, loading: rampAddressLoading } = useQuery(GET_MY_RAMP_ADDRESS, {
     fetchPolicy: 'cache-and-network',
@@ -171,20 +172,11 @@ const TopUpScreen = () => {
   const isVerified = useMemo(() => {
     // Match Koywe's test identity, including servers predating the optional flag.
     if (isKoyweMapped && hasTestIdentity) return true;
-    const candidates = [
-      personalKycData?.myPersonalKycStatus?.status,
-      kycData?.myKycStatus?.status,
-      meData?.me?.verificationStatus,
-    ]
-      .filter(Boolean)
-      .map((status: string) => status.toLowerCase());
-    return candidates.includes('verified') || meData?.me?.isIdentityVerified;
+    return hasRampIdentity(identityData?.myIdentityStatus, personalKycData?.myPersonalKycStatus?.status);
   }, [
     isKoyweMapped,
     hasTestIdentity,
-    kycData?.myKycStatus?.status,
-    meData?.me?.isIdentityVerified,
-    meData?.me?.verificationStatus,
+    identityData?.myIdentityStatus,
     personalKycData?.myPersonalKycStatus?.status,
   ]);
   const hasCompleteRampAddress = Boolean(rampAddressData?.myRampAddress?.isComplete);

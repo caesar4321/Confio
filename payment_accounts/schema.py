@@ -85,22 +85,24 @@ def _active_account(info, *, permission=None, owner_only=False):
 
 
 def _verified_identity(account):
-    identities = IdentityVerification.objects.filter(user=account.user, status='verified')
-    if account.account_type == 'business':
-        identities = identities.filter(
-            risk_factors__provider='didit',
-            risk_factors__account_type='business',
-            risk_factors__business_id=str(account.business_id),
-            risk_factors__didit__session__session_kind='business',
-        )
-    else:
-        identities = identities.filter(risk_factors__provider='didit').exclude(
-            risk_factors__account_type='business'
-        )
-    identity = identities.order_by('-updated_at').first()
+    if account.account_type != 'business':
+        # Any current personal document, primary first (additional documents
+        # open rails too). Null-safe: personal rows carry no account_type key.
+        from security.identity_status import current_documents
+        identity = current_documents(account.user).filter(risk_factors__provider='didit').first()
+        if not identity:
+            raise PaymentAccountError('Verified Didit KYC required')
+        return identity
+    identity = IdentityVerification.objects.filter(
+        user=account.user,
+        status='verified',
+        risk_factors__provider='didit',
+        risk_factors__account_type='business',
+        risk_factors__business_id=str(account.business_id),
+        risk_factors__didit__session__session_kind='business',
+    ).order_by('-updated_at').first()
     if not identity:
-        requirement = 'business Didit KYB' if account.account_type == 'business' else 'Didit KYC'
-        raise PaymentAccountError(f'Verified {requirement} required')
+        raise PaymentAccountError('Verified business Didit KYB required')
     return identity
 
 

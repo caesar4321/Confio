@@ -397,15 +397,8 @@ def get_referral_reward_policy_stats():
         available_by_user[user_id] = available
 
     rewarded_user_ids = set(earned_by_user.keys())
-    verified_user_ids = set(
-        IdentityVerification.all_documents.filter(  # any document unlocks rewards
-            status='verified',
-            user_id__in=rewarded_user_ids,
-        )
-        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        .values_list('user_id', flat=True)
-        .distinct()
-    )
+    from security.identity_status import verified_user_ids as _verified_user_ids
+    verified_user_ids = set(_verified_user_ids(rewarded_user_ids))  # any document unlocks rewards
 
     verified_available_total = sum(
         available_by_user.get(user_id, Decimal('0'))

@@ -111,10 +111,9 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         fcm_reachability = get_fcm_reachability_metrics(now)
         context['fcm_active_users'] = fcm_reachability['active_users']
         context['fcm_recent_users'] = fcm_reachability['recent_users']
-        context['users_with_verification'] = IdentityVerification.objects.values('user').distinct().count()
-        context['verified_users'] = IdentityVerification.objects.filter(
-            status='verified'
-        ).values('user').distinct().count()
+        from security.identity_status import PERSONAL, verified_user_ids
+        context['users_with_verification'] = IdentityVerification.all_documents.filter(PERSONAL).values('user').distinct().count()
+        context['verified_users'] = verified_user_ids().count()
         context['verification_completion_rate'] = (
             context['verified_users'] / context['users_with_verification'] * 100
             if context['users_with_verification'] else 0
@@ -962,8 +961,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         ).order_by('-opened_at')[:5]
 
         # ID verifications (differentiate personal vs business)
-        context['pending_verifications_count'] = IdentityVerification.objects.filter(status='pending').count()
-        recent_verifs_qs = IdentityVerification.objects.select_related('user').order_by('-created_at')[:10]
+        context['pending_verifications_count'] = IdentityVerification.all_documents.filter(status='pending').count()
+        recent_verifs_qs = IdentityVerification.all_documents.select_related('user').order_by('-created_at')[:10]
         recent_verifs = []
         for v in recent_verifs_qs:
             rf = v.risk_factors or {}
@@ -1368,12 +1367,11 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         
         # Verification funnel
         context['users_total'] = User.objects.exclude(is_platform_test_account=True).filter(phone_number__isnull=False).count()
-        context['users_with_verification'] = IdentityVerification.objects.values(
+        from security.identity_status import PERSONAL, verified_user_ids
+        context['users_with_verification'] = IdentityVerification.all_documents.filter(PERSONAL).values(
             'user'
         ).distinct().count()
-        context['users_verified'] = IdentityVerification.objects.filter(
-            status='verified'
-        ).values('user').distinct().count()
+        context['users_verified'] = verified_user_ids().count()
         context['verification_completion_rate'] = (
             context['users_verified'] / context['users_with_verification'] * 100
             if context['users_with_verification'] else 0

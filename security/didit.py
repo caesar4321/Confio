@@ -1793,10 +1793,12 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         elif review_reason:
             verification.rejected_reason = review_reason
         verification.save()
-        if (status == 'verified' and not verification.is_additional_document
+        if (status == 'verified'
                 and (verification.risk_factors or {}).get('account_type') != 'business'):
             # Didit's media links expire; keep the selfie the face step-up
-            # compares against. A failure here is logged, not raised: KYC
+            # compares against. An additional document's selfie is stored only
+            # when no reference stands (someone verified by it alone still
+            # needs Confío Face). A failure here is logged, not raised: KYC
             # stands, and the backfill command can copy it later.
             transaction.on_commit(lambda: _store_face_reference(verification, response_payload))
     try:

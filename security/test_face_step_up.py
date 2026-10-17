@@ -570,7 +570,7 @@ class FaceStepUpTests(TestCase):
     def test_an_additional_document_alone_still_counts_as_kyc(self):
         # A passport verified for a local-money rail opens that rail by itself.
         IdentityVerification.all_documents.filter(user=self.user).update(is_additional_document=True)
-        self.assertFalse(self.user.is_identity_verified)
+        self.assertFalse(self.user.has_phone_country_identity)
         self.assertTrue(fsu.step_up_applies(self.user))
         self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
 

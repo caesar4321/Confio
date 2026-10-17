@@ -103,9 +103,6 @@ class _State:
 
 def _state(viewer, request_meta) -> _State:
     from ramps.models import RampTransaction
-    from django.db.models import Q
-
-    from security.models import IdentityVerification
     from users.funding import has_funded
 
     from .models import ProbeAnswer
@@ -121,8 +118,8 @@ def _state(viewer, request_meta) -> _State:
     # often verify with a second document (a passport, another country's ID)
     # when they don't have one from their phone's country. So: only when no
     # personal document of any kind is verified, and only for a recent attempt.
-    personal_docs = IdentityVerification.all_documents.filter(user=user).filter(
-        Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+    from security.identity_status import personal_documents
+    personal_docs = personal_documents(user)
     latest = personal_docs.order_by('-created_at').first()
     now = timezone.now()
     stage = _didit_stage(latest)

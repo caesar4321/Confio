@@ -1,9 +1,7 @@
 import graphene
-from django.db.models import Q
 from graphene_django import DjangoObjectType
 from graphql_jwt.decorators import login_required
 
-from security.models import IdentityVerification
 
 from .models import (
     HumanitarianCampaign,
@@ -175,16 +173,8 @@ class ApplyHumanitarianVolunteer(graphene.Mutation):
         if not campaign:
             return ApplyHumanitarianVolunteer(success=False, error='campaign_not_active')
 
-        campaign_country = (campaign.country_code or 'VEN').upper()
-        has_country_kyc = IdentityVerification.objects.filter(
-            Q(verified_country__iexact=campaign_country)
-            | Q(verified_nationality__iexact=campaign_country)
-            | Q(document_issuing_country__iexact=campaign_country),
-            user=user,
-            status='verified',
-            deleted_at__isnull=True,
-        ).exists()
-        if not has_country_kyc:
+        from security.identity_status import verified_document_of_country
+        if verified_document_of_country(user, campaign.country_code or 'VEN') is None:
             return ApplyHumanitarianVolunteer(success=False, error='country_kyc_required')
 
         application, _ = HumanitarianVolunteerApplication.objects.update_or_create(

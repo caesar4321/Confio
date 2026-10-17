@@ -384,106 +384,55 @@ class User(AbstractUser, SoftDeleteModel):
 
 
 
+    # Who is verified: security/identity_status.py is the one answer; these
+    # properties are thin aliases kept for existing callers and templates.
     @property
     def verification_status(self):
-        """Get the current verification status based on verification records
-        Priority: verified > pending > rejected > unverified
-        This avoids stale ordering issues when verified_at is null or when a
-        later rejected record exists after a previously verified one.
-        """
-        from security.models import IdentityVerification
-        # PERSONAL CONTEXT ONLY: exclude business-context verifications
-        # Business verifications should not mark personal user as verified
-        personal_verified = IdentityVerification.objects.filter(
-            user=self,
-            status='verified'
-        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        if personal_verified.exists():
-            return 'verified'
-        # Otherwise reflect active pending (personal) submissions if any
-        personal_pending = IdentityVerification.objects.filter(
-            user=self,
-            status='pending'
-        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        if personal_pending.exists():
-            return 'pending'
-        # Otherwise if only rejected (personal) submissions exist
-        personal_rejected = IdentityVerification.objects.filter(
-            user=self,
-            status='rejected'
-        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        if personal_rejected.exists():
-            return 'rejected'
-        return 'unverified'
+        """verified > pending > rejected > unverified, over every personal
+        document (primary and additional; business-context rows excluded)."""
+        from security.identity_status import identity_status
+        return identity_status(self)
+
+    @property
+    def is_identity_verified(self):
+        """"Identidad verificada": any current verified personal document,
+        primary or additional (a passport or ID from another country counts)."""
+        from security.identity_status import is_identity_verified
+        return is_identity_verified(self)
 
     @property
     def has_verified_identity_document(self):
-        """Any verified personal identity document, primary OR additional: a
-        passport or ID from another country counts. Rewards use this; Recargar
-        and Retirar keep `is_identity_verified`, which reads only the primary
-        (phone-country) document their providers require."""
-        from security.models import IdentityVerification
-        return IdentityVerification.all_documents.filter(
-            user=self,
-            status='verified'
-        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
+        """Alias of is_identity_verified."""
+        return self.is_identity_verified
+
+    @property
+    def has_phone_country_identity(self):
+        """Only the primary (phone-country) document. Read ONLY where a
+        provider requires it: Koywe's delegated KYC behind Recargar/Retirar."""
+        from security.identity_status import has_phone_country_identity
+        return has_phone_country_identity(self)
 
     @property
     def has_passed_identity_verification(self):
         """Ever passed KYC as a person: a verified personal document, or one
         that was verified and then expired (Didit "Kyc Expired"). Security
         gates that exist because someone went through KYC (Confío Face) read
-        this, so a document expiring never switches them off; features that
-        need a CURRENT document keep has_verified_identity_document."""
-        from security.models import PASSED_KYC, IdentityVerification
-        return IdentityVerification.all_documents.filter(user=self).filter(PASSED_KYC).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
-
-    @property
-    def is_identity_verified(self):
-        """Check if user has any verified identity records (personal context only)
-        Excludes business-context verifications so personal accounts are not
-        marked verified when only a business account has been verified.
-        """
-        from security.models import IdentityVerification
-        return IdentityVerification.objects.filter(
-            user=self,
-            status='verified'
-        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
+        this, so a document expiring never switches them off."""
+        from security.identity_status import has_ever_passed_kyc
+        return has_ever_passed_kyc(self)
 
     @property
     def last_verified_date(self):
-        """Get the date of the latest successful verification"""
-        from security.models import IdentityVerification
-        latest_verified = (
-            IdentityVerification.objects
-            .filter(user=self, status='verified')
-            .exclude(risk_factors__account_type='business')
-            .order_by('-verified_at', '-updated_at', '-created_at')
-            .first()
-        )
-        if not latest_verified:
-            return None
-        # Prefer explicit verified_at when available; otherwise fall back to updated_at/created_at
-        return (
-            latest_verified.verified_at
-            or latest_verified.updated_at
-            or latest_verified.created_at
-        )
-
-
+        """When the latest current personal document was verified."""
+        from security.identity_status import verified_at
+        return verified_at(self)
 
     @property
     def latest_verification(self):
         """Get the most recently updated verification record for this user"""
         # PERSONAL CONTEXT ONLY by default to reflect user's own status
-        from security.models import IdentityVerification
-        return (
-            IdentityVerification.objects
-            .filter(user=self)
-            .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-            .order_by('-updated_at', '-created_at')
-            .first()
-        )
+        from security.identity_status import personal_documents
+        return personal_documents(self).order_by('-updated_at', '-created_at').first()
 
 
     

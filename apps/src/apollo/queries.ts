@@ -210,6 +210,20 @@ export const GET_MY_PERSONAL_VERIFIED_KYC = gql`
   }
 `;
 
+// Who is verified (security/identity_status.py). Its own query: a server
+// predating it fails only this one, never GET_ME.
+export const GET_MY_IDENTITY_STATUS = gql`
+  query GetMyIdentityStatus {
+    myIdentityStatus {
+      verified
+      phoneCountryVerified
+      everPassedKyc
+      status
+      verifiedAt
+    }
+  }
+`;
+
 export const GET_ACTIVE_HUMANITARIAN_CAMPAIGNS = gql`
   query GetActiveHumanitarianCampaigns {
     activeHumanitarianCampaigns {

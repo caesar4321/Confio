@@ -311,11 +311,9 @@ def author_block(user) -> str | None:
 def is_verified_member(user) -> bool:
     """Comunidad needs a real, verified person, not a rail-specific document:
     any verified personal identity document counts (primary or additional,
-    e.g. a passport or another country's ID), the same rule as rewards.
-    `is_identity_verified` reads only the primary phone-country document the
-    Recargar/Retirar providers require, so a member verified with another
-    country's ID was wrongly told to verify again."""
-    return user.has_verified_identity_document
+    e.g. a passport or another country's ID), the same rule as rewards
+    (security/identity_status.is_identity_verified)."""
+    return user.is_identity_verified
 
 
 UPLOAD_TICKETS_PER_HOUR = 20
@@ -1084,15 +1082,10 @@ def personally_verified_count(user_ids) -> int:
     """Distinct users among user_ids with a verified PERSONAL identity
     document, the same predicate as is_verified_member (primary or additional;
     a business KYB does not count)."""
-    from django.db.models import Q
-
-    from security.models import IdentityVerification
+    from security.identity_status import verified_user_ids
 
     return (
-        IdentityVerification.all_documents.filter(user_id__in=user_ids, status='verified')
-        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        .values('user_id')
-        .distinct()
+        verified_user_ids(user_ids)
         .count()
     )
 

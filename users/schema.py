@@ -588,21 +588,7 @@ class UserType(DjangoObjectType):
 		return self.is_identity_verified
 	
 	def resolve_last_verified_date(self, info):
-		# Compute directly from IdentityVerification to avoid any serialization edge cases
-		try:
-			from security.models import IdentityVerification
-			# Personal-context verified record ONLY — account_type key missing or null
-			iv = (
-				IdentityVerification.objects
-				.filter(user=self, status='verified', risk_factors__account_type__isnull=True)
-				.order_by('-verified_at', '-updated_at', '-created_at')
-				.first()
-			)
-			if not iv:
-				return None
-			return iv.verified_at or iv.updated_at or iv.created_at
-		except Exception:
-			return None
+		return self.last_verified_date
 	
 	def resolve_verification_status(self, info):
 		return self.verification_status
@@ -681,6 +667,19 @@ class BusinessType(DjangoObjectType):
         model = Business
         fields = ('id', 'name', 'description', 'category', 'business_registration_number', 'address', 'created_at', 'updated_at')
 
+    def resolve_is_verified(self, info):
+        from security.identity_status import is_business_verified
+        return is_business_verified(self.id)
+
+    def resolve_verification_status(self, info):
+        from security.identity_status import business_status
+        return business_status(self.id)
+
+    def resolve_last_verified_date(self, info):
+        from security.identity_status import business_kyb
+        iv = business_kyb(self.id)
+        return (iv.verified_at or iv.updated_at or iv.created_at) if iv else None
+
 
 COUNTRY_DISPLAY_MIN = 5
 
@@ -746,50 +745,6 @@ class ReferralRewardEventType(DjangoObjectType):
 
     def resolve_trigger_display(self, info):
         return self.get_trigger_display()
-
-    def resolve_is_verified(self, info):
-        try:
-            from security.models import IdentityVerification
-            return IdentityVerification.objects.filter(
-                status='verified',
-                risk_factors__account_type='business',
-                risk_factors__business_id=str(self.id)
-            ).exists()
-        except Exception:
-            return False
-
-    def resolve_verification_status(self, info):
-        """Return business verification status: verified > pending > rejected > unverified"""
-        try:
-            from security.models import IdentityVerification
-            qs = IdentityVerification.objects.filter(
-                risk_factors__account_type='business',
-                risk_factors__business_id=str(self.id)
-            )
-            if qs.filter(status='verified').exists():
-                return 'verified'
-            if qs.filter(status='pending').exists():
-                return 'pending'
-            if qs.filter(status='rejected').exists():
-                return 'rejected'
-            return 'unverified'
-        except Exception:
-            return 'unverified'
-
-    def resolve_last_verified_date(self, info):
-        try:
-            from security.models import IdentityVerification
-            iv = (
-                IdentityVerification.objects
-                .filter(status='verified', risk_factors__account_type='business', risk_factors__business_id=str(self.id))
-                .order_by('-verified_at', '-updated_at', '-created_at')
-                .first()
-            )
-            if not iv:
-                return None
-            return iv.verified_at or iv.updated_at or iv.created_at
-        except Exception:
-            return None
 
     def resolve_claimable_confio(self, info):
         referral = getattr(self, "referral", None)
@@ -1661,12 +1616,8 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		active_users_30d = User.objects.filter(last_activity_at__gte=last_30d).count()
 
 		from security.models import IdentityVerification
-		didit_verified_users = (
-			IdentityVerification.objects
-			.filter(status='verified')
-			.filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-			.values('user_id').distinct().count()
-		)
+		from security.identity_status import verified_user_ids
+		didit_verified_users = verified_user_ids().count()
 
 		from django.db.models import Count
 		from .country_codes import COUNTRY_CODES
@@ -1921,10 +1872,11 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		if user_id:
 			if not user.is_staff and str(user.id) != user_id:
 				return []
-			return IdentityVerification.objects.filter(user_id=user_id)
+			return IdentityVerification.all_documents.filter(user_id=user_id)
 		
 		# If no user_id provided, return current user's verifications
-		return IdentityVerification.objects.filter(user=user)
+		# (all_documents: additional documents are this person's too)
+		return IdentityVerification.all_documents.filter(user=user)
 
 	def resolve_my_wallet_anchors(self, info):
 		"""Caller's own personal account (index 0) only. Never takes an id."""
@@ -2883,7 +2835,7 @@ class UpdateUserProfile(graphene.Mutation):
 		# A verified person's name is the verified one: no changes after ANY
 		# verified personal document (an additional ID counts too), or a member
 		# could rename themselves on Comunidad bylines after verifying.
-		if user.is_identity_verified or user.has_verified_identity_document:
+		if user.is_identity_verified:
 			return UpdateUserProfile(success=False, error="No se puede modificar el nombre de un usuario verificado", user=None)
 
 		# Validate input
@@ -5850,17 +5802,10 @@ class RequestPremiumUpgrade(graphene.Mutation):
 			# Guard: require verified identity (personal) or verified business when in business context
 			is_allowed = False
 			if account_type == 'business' and business_id:
-				try:
-					from security.models import IdentityVerification
-					is_allowed = IdentityVerification.objects.filter(
-						status='verified',
-						risk_factors__account_type='business',
-						risk_factors__business_id=str(business_id)
-					).exists()
-				except Exception:
-					is_allowed = False
+				from security.identity_status import is_business_verified
+				is_allowed = is_business_verified(business_id)
 			else:
-				is_allowed = bool(getattr(user, 'is_identity_verified', False))
+				is_allowed = user.is_identity_verified
 
 			if not is_allowed:
 				return RequestPremiumUpgrade(
