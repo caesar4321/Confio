@@ -44,7 +44,7 @@ import { CUSD_CONVERSION_UI_ENABLED, STOCKS_TRADING_UI_ENABLED } from '../config
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
-import { buyStockWithSavings, getSoftStockQuote } from '../services/ondoStocks';
+import { buyStockWithSavings, friendlyTradeError, getSoftStockQuote } from '../services/ondoStocks';
 import { createSponsoredRequestId } from '../services/sponsored7702';
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
@@ -169,7 +169,7 @@ export const BuyStockScreen = () => {
       void refetch().catch(() => undefined);
     } catch (e) {
       if (!isOutcomeUnknown(e)) requestIdRef.current = null;
-      setTradeError(e instanceof Error ? e.message : 'No pudimos completar la compra.');
+      setTradeError(friendlyTradeError(e, 'buy'));
       setPhase('input');
     } finally {
       confirmInFlight.current = false;

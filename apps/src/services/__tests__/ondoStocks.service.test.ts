@@ -38,7 +38,7 @@ jest.mock('../cusdPlusVault', () => ({
   sharesForUsdtOut: jest.fn(),
 }));
 
-import { sellStockToSavings } from '../ondoStocks';
+import { friendlyTradeError, sellStockToSavings } from '../ondoStocks';
 
 const quote = (tokenAmount: bigint) => ({
   success: true,
@@ -139,5 +139,34 @@ describe('Ondo Stocks sell orchestration', () => {
 
     expect(mockMutate).toHaveBeenCalledTimes(3);
     expect(mockExecuteSponsoredBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('Ondo Stocks sell minimum', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockQuery.mockResolvedValue({
+      data: {
+        cusdPlusSummary: { stocksTradingEnabled: true },
+        cusdPlusConvertParams: { vaultAddress: VAULT, stockRouterAddress: ROUTER, gmTradeFeeBps: 30 },
+      },
+    });
+    mockGetErc20BalanceWei.mockResolvedValue(100n * WAD);
+    mockGetVaultPrices.mockResolvedValue({ pPlusWad: WAD, oraclePriceWad: WAD });
+  });
+
+  it('never sends a sale whose net lands under Ondo\'s US$1 deposit minimum', async () => {
+    // 0.5 units at US$2 = US$1.00 gross, US$0.997 net: under the minimum.
+    mockMutate.mockResolvedValueOnce({ data: { prepareGmTrade: { quote: quote(WAD / 2n) } } });
+    await expect(sellStockToSavings({ symbol: 'TSLAon', grossAmountUsd: 1, sellAll: false }))
+      .rejects.toThrow('al menos US$1.00');
+    expect(mockExecuteSponsoredBatch).not.toHaveBeenCalled();
+  });
+
+  it('maps network refusals to copy a person can act on', () => {
+    expect(friendlyTradeError(new Error('sponsored batch rejected: simulation_reverted'), 'sell'))
+      .toContain('no se cobró nada');
+    expect(friendlyTradeError(new Error('execution reverted: 0x67627d07'), 'sell')).toContain('US$1.00');
+    expect(friendlyTradeError(new Error('Tu ahorro disponible no alcanza'), 'buy')).toBe('Tu ahorro disponible no alcanza');
   });
 });

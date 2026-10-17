@@ -250,6 +250,33 @@ export const buyStockWithSavings = async (params: {
   return { txHash: result.txHash, tokenAmountWei: BigInt(quote.tokenAmount), feeWei: fee };
 };
 
+/**
+ * A sale settles into Confío Dollar+ by minting USDY through Ondo's Instant
+ * Manager, which rejects deposits under US$1 (`minimumDepositUSD()` on BNB,
+ * reverting with DepositAmountTooSmall). The net is the sell quote (Ondo's
+ * bid, wider when U.S. markets are closed) minus our fee, so a ~US$1.01
+ * position can land under it. The exact minimum, no buffer: a buffer would
+ * block a MAX exit Ondo accepts. A refusal at the edge (USDT priced a hair
+ * under US$1) still comes back as readable copy via friendlyTradeError.
+ */
+export const SELL_NET_MIN_WEI = 1_000_000_000_000_000_000n;
+export const SELL_BELOW_MINIMUM_MESSAGE =
+  'Lo que recibes en tu ahorro debe ser al menos US$1.00 (mínimo de Ondo). Prueba con un monto mayor.';
+export const SELL_ALL_BELOW_MINIMUM_MESSAGE =
+  'Tu posición es muy pequeña para venderla ahora: recibirías menos de US$1.00, el mínimo de Ondo. Podrás venderla cuando valga un poco más o si compras más.';
+
+/** Copy for a trade the network refused before sending (nothing was charged). */
+export const friendlyTradeError = (error: unknown, side: 'buy' | 'sell'): string => {
+  const message = error instanceof Error ? error.message : '';
+  if (/DepositAmountTooSmall|0x67627d07/i.test(message)) return SELL_BELOW_MINIMUM_MESSAGE;
+  if (/simulation_reverted|simulation rejected|simulation reverted/i.test(message)) {
+    return side === 'sell'
+      ? 'La red rechazó la venta antes de enviarla y no se cobró nada. Si vendes poco, prueba con un monto mayor.'
+      : 'La red rechazó la compra antes de enviarla y no se cobró nada. Inténtalo de nuevo en un momento.';
+  }
+  return message || (side === 'sell' ? 'No pudimos completar la venta.' : 'No pudimos completar la compra.');
+};
+
 export const sellStockToSavings = async (params: {
   symbol: string;
   grossAmountUsd: number;
@@ -294,6 +321,9 @@ export const sellStockToSavings = async (params: {
   const expectedNet = quoteCost - expectedFee;
   if (params.minExpectedNetWei && expectedNet < params.minExpectedNetWei) {
     throw new Error('El precio cambió más de 1%. Revisa la nueva cotización antes de continuar.');
+  }
+  if (expectedNet < SELL_NET_MIN_WEI) {
+    throw new Error(params.sellAll ? SELL_ALL_BELOW_MINIMUM_MESSAGE : SELL_BELOW_MINIMUM_MESSAGE);
   }
   const { pPlusWad, oraclePriceWad } = await getVaultPrices(config.vaultAddress);
   const expectedShares = predictSubscribeSharesOut(expectedNet, pPlusWad, oraclePriceWad);

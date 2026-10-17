@@ -40,7 +40,14 @@ import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { STOCKS_TRADING_UI_ENABLED } from '../config/features';
-import { getSoftStockQuote, sellStockToSavings } from '../services/ondoStocks';
+import {
+  SELL_ALL_BELOW_MINIMUM_MESSAGE,
+  SELL_BELOW_MINIMUM_MESSAGE,
+  SELL_NET_MIN_WEI,
+  friendlyTradeError,
+  getSoftStockQuote,
+  sellStockToSavings,
+} from '../services/ondoStocks';
 import { createSponsoredRequestId } from '../services/sponsored7702';
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
@@ -150,8 +157,10 @@ export const SellStockScreen = () => {
   const tradability = tradabilityFor(stock);
   const overBalance = amount > available;
   const belowMin = amount > 0 && amount < MIN_AMOUNT_USD;
+  // Checked on the quote before sending: Ondo would reject it anyway.
+  const belowNetMin = quoteReady && softNetWei > 0n && softNetWei < SELL_NET_MIN_WEI;
   const canConfirm =
-    amount >= MIN_AMOUNT_USD && !overBalance && !quote.paused && tradability !== 'closed';
+    amount >= MIN_AMOUNT_USD && !overBalance && !belowNetMin && !quote.paused && tradability !== 'closed';
 
   const onConfirm = async () => {
     if (!canConfirm || confirmInFlight.current) return;
@@ -174,7 +183,7 @@ export const SellStockScreen = () => {
       void refetch().catch(() => undefined);
     } catch (e) {
       if (!isOutcomeUnknown(e)) requestIdRef.current = null;
-      setTradeError(e instanceof Error ? e.message : 'No pudimos completar la venta.');
+      setTradeError(friendlyTradeError(e, 'sell'));
       setPhase('input');
     } finally {
       confirmInFlight.current = false;
@@ -324,6 +333,9 @@ export const SellStockScreen = () => {
           )}
           {overBalance && (
             <Text style={styles.hintError}>Tu posición es {fmtUsd(available)}.</Text>
+          )}
+          {belowNetMin && !overBalance && (
+            <Text style={styles.hintError}>{sellAll ? SELL_ALL_BELOW_MINIMUM_MESSAGE : SELL_BELOW_MINIMUM_MESSAGE}</Text>
           )}
           {tradeError && <Text style={styles.hintError}>{tradeError}</Text>}
 
