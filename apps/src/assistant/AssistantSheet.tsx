@@ -24,6 +24,7 @@ import { Text, TextInput } from '../components/common/AppText';
 import { useAccount } from '../contexts/AccountContext';
 import { navigationRef } from '../navigation/RootNavigation';
 import { logDoorShown, usePaidOffers } from '../services/paidOffers';
+import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
 import { MARK_MESSAGE_CHANNEL_SEEN } from '../apollo/mutations';
 import { GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import { MessageInboxContent } from '../components/MessageInboxContent';
@@ -375,19 +376,19 @@ export default function AssistantSheet() {
     queuedVoice.current = null;
   }, [activeAccount?.id]);
 
-  // Confío IA+ strip (waitlist only): IA+ comes with Cuenta inteligente, so
-  // the strip opens that pitch and the server's Cuenta inteligente flag
-  // decides who sees it.
+  // Cuenta inteligente strip (waitlist only): it names the account, not the
+  // AI (Confío IA+ is one of its benefits, never the headline), opens its
+  // pitch, and the server's Cuenta inteligente flag decides who sees it.
   const smartAccountOffer = usePaidOffers().smart_account;
-  const showIaPlusPill = smartAccountOffer?.available === true && !plan?.isPlus;
+  const showSmartAccountStrip = smartAccountOffer?.available === true && !plan?.isPlus;
   // Counted only when the pill is actually on screen (Confio Assistant's own
   // header, with the AI on), never for Soporte or Julian's channel.
   useEffect(() => {
-    if (isOpen && showIaPlusPill && aiEnabled && available && channel === 'ia') {
+    if (isOpen && showSmartAccountStrip && aiEnabled && available && channel === 'ia') {
       logDoorShown('smart_account', 'assistant_header');
     }
-  }, [isOpen, showIaPlusPill, aiEnabled, available, channel]);
-  const openIaPlus = useCallback(() => {
+  }, [isOpen, showSmartAccountStrip, aiEnabled, available, channel]);
+  const openSmartAccount = useCallback(() => {
     close();
     setTimeout(
       () => (navigationRef as any).navigate('Main', {
@@ -919,21 +920,21 @@ export default function AssistantSheet() {
             </Pressable>
           ) : null}
         </View>
-        {aiEnabled && showIaPlusPill ? (
+        {aiEnabled && showSmartAccountStrip ? (
           // Its own line under the header (a pill inside the header row
           // squeezed the title into a letter-per-line column on phones).
           <Pressable
-            onPress={openIaPlus}
-            style={({ pressed }) => [styles.iaPlusStrip, pressed && styles.iaPlusStripPressed]}
+            onPress={openSmartAccount}
+            style={({ pressed }) => [styles.smartStrip, pressed && styles.smartStripPressed]}
             accessibilityRole="button"
-            accessibilityLabel="Confío IA+ con Cuenta inteligente, próximamente"
+            accessibilityLabel="Conoce Cuenta inteligente, próximamente"
           >
-            <View style={styles.iaPlusBadge}>
-              <Text style={styles.iaPlusBadgeText}>IA+</Text>
+            <View style={styles.smartStripMark}>
+              <CuentaInteligenteMark size={34} />
             </View>
-            <View style={styles.iaPlusStripText}>
-              <Text style={styles.iaPlusStripTitle} numberOfLines={1}>Confío IA+ con Cuenta inteligente</Text>
-              <Text style={styles.iaPlusStripSub} numberOfLines={1}>Próximamente · tu dinero y tu asistente</Text>
+            <View style={styles.smartStripText}>
+              <Text style={styles.smartStripTitle} numberOfLines={1}>Conoce Cuenta inteligente</Text>
+              <Text style={styles.smartStripSub} numberOfLines={1}>Próximamente · tu dinero según tus reglas</Text>
             </View>
             <Icon name="chevron-right" size={18} color="#065F46" />
           </Pressable>
@@ -1279,9 +1280,9 @@ const styles = StyleSheet.create({
     borderColor: '#A7F3D0',
   },
   petChipText: { fontSize: 12, fontWeight: '700', color: EMERALD },
-  // Confío IA+ probe: a quiet mint strip under the header, never violet
-  // (violet reads as an AI unlock, design review 11).
-  iaPlusStrip: {
+  // Cuenta inteligente probe: a quiet mint strip under the header, never
+  // violet (violet reads as an AI unlock, design review 11).
+  smartStrip: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 16,
@@ -1293,20 +1294,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#A7F3D0',
   },
-  iaPlusStripPressed: { backgroundColor: '#D1FAE5' },
-  iaPlusBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#065F46',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  iaPlusBadgeText: { fontSize: 12, fontWeight: '700', color: '#FCD34D' },
-  iaPlusStripText: { flex: 1 },
-  iaPlusStripTitle: { fontSize: 14, fontWeight: '700', color: '#065F46' },
-  iaPlusStripSub: { fontSize: 12, color: '#047857', marginTop: 1 },
+  smartStripPressed: { backgroundColor: '#D1FAE5' },
+  smartStripMark: { marginRight: 10 },
+  smartStripText: { flex: 1 },
+  smartStripTitle: { fontSize: 14, fontWeight: '700', color: '#065F46' },
+  smartStripSub: { fontSize: 12, color: '#047857', marginTop: 1 },
   starterPet: { borderColor: '#A7F3D0', backgroundColor: '#ECFDF5' },
   starterPetText: { fontSize: 13, color: EMERALD, fontWeight: '600' },
   bubbleTeam: { backgroundColor: '#EEF2FF', borderBottomLeftRadius: 6 },
