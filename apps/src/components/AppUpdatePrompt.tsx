@@ -132,8 +132,8 @@ const UpdateSheet: React.FC<{
             </Text>
 
             <View style={[styles.highlights, compact && styles.highlightsCompact]}>
-              {highlights.map(item => (
-                <View key={item.title} style={[styles.highlight, compact && styles.highlightCompact]}>
+              {highlights.map((item, index) => (
+                <View key={index} style={[styles.highlight, compact && styles.highlightCompact]}>
                   <View style={styles.highlightIcon}>
                     <Icon name={item.icon} size={18} color={ACCENT_TEXT} />
                   </View>
