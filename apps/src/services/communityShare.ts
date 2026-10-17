@@ -11,7 +11,7 @@
  * dropped (and may be asked again later).
  */
 
-export type ActivityShareGroup = 'stock' | 'send' | 'ramp';
+export type ActivityShareGroup = 'stock' | 'send' | 'ramp' | 'pay';
 
 export type ActivityShareRequest = {
   group: ActivityShareGroup;

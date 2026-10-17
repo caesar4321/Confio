@@ -34,7 +34,7 @@ jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../CommunityRulesSheet', () => ({ CommunityRulesSheet: 'CommunityRulesSheet' }));
 jest.mock('../PostByline', () => ({ PostByline: 'PostByline' }));
 
-import { CommunityShareProvider, applyChip } from '../CommunityShareProvider';
+import { CommunityShareProvider, applyChip, chipsFor, headlineFor } from '../CommunityShareProvider';
 import { requestActivityShare, resetActivityShareForTests } from '../../services/communityShare';
 
 const stockBuy = {
@@ -192,5 +192,13 @@ describe('applyChip', () => {
     expect(applyChip('A', 'A', chips, 280)).toBe('');
     expect(applyChip('mi nota', 'A', chips, 280)).toBe('mi nota A');
     expect(applyChip('mi nota', 'A', chips, 8)).toBe('mi nota');
+  });
+});
+
+describe('Pay in the share sheet', () => {
+  it('celebrates the business paid, or just the payment for a personal merchant', () => {
+    expect(headlineFor({ kind: 'pay', merchant: 'Café Luna', headline: '' } as any, false)).toBe('¡Pagado en Café Luna! 🛍️');
+    expect(headlineFor({ kind: 'pay', merchant: null, headline: '' } as any, false)).toBe('¡Pago listo! 🛍️');
+    expect(chipsFor('pay')).toContain('📱 Pagué con QR en segundos');
   });
 });

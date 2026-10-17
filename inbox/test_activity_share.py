@@ -522,3 +522,34 @@ class ScheduledNoteNotificationTests(CommunityTestBase):
                 self.captureOnCommitCallbacks(execute=True):
             self.run_review(intent.content_item, APPROVE)
         notify.assert_called_once()
+
+
+class PaySnapshotTests(CommunityTestBase):
+    def payment(self, payer, **extra):
+        values = {'payer_user_id': payer.id, 'payer_business_id': None, 'status': 'CONFIRMED', 'token_type': 'CUSD',
+                  'merchant_type': 'business', 'merchant_business_id': 9,
+                  'merchant_business': SimpleNamespace(name='Café Luna'), 'created_at': NOW, **extra}
+        return SimpleNamespace(**values)
+
+    def test_a_business_merchant_is_named(self):
+        payer = make_user()
+        snap = activity_share._pay_snapshot(self.payment(payer), '4.5', payer)
+        self.assertEqual((snap.kind, snap.data['merchant'], snap.data['amount_usd']), ('pay', 'Café Luna', '4.50'))
+        self.assertEqual(activity_share.activity_headline({**snap.data, 'show_amount': True}),
+                         'Pagó en Café Luna · US$4.50')
+
+    def test_a_personal_merchant_is_never_named(self):
+        payer = make_user()
+        snap = activity_share._pay_snapshot(
+            self.payment(payer, merchant_type='user', merchant_business_id=None, merchant_business=None), '3', payer)
+        self.assertIsNone(snap.data['merchant'])
+        self.assertEqual(activity_share.activity_headline({**snap.data, 'show_amount': True}), 'Pagó con QR · US$3.00')
+
+    def test_not_shareable_cases(self):
+        payer = make_user()
+        self.assertIsNone(activity_share._pay_snapshot(self.payment(payer), '1', make_user()))  # not theirs
+        self.assertIsNone(activity_share._pay_snapshot(self.payment(payer, payer_business_id=3), '1', payer))
+        self.assertIsNone(activity_share._pay_snapshot(self.payment(payer, token_type='CONFIO'), '1', payer))
+        self.assertIsNone(activity_share._pay_snapshot(self.payment(payer, status='SUBMITTED'), '1', payer))
+        self.assertIsNotNone(activity_share._pay_snapshot(self.payment(payer, status='SUBMITTED'), '1', payer, final=False))
+        self.assertIsNone(activity_share._pay_snapshot(self.payment(payer, status='FAILED'), '1', payer, final=False))

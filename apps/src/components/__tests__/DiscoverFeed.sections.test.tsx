@@ -135,6 +135,22 @@ describe('DiscoverFeed sections', () => {
     expect(mockNavigate).toHaveBeenLastCalledWith('StockDetail', { ticker: 'NVDA' });
   });
 
+  it('shows a Pay post by the business paid, never a personal merchant, and opens Pagar', () => {
+    const tree = render({
+      items: [item({ id: 9, sourceName: 'ana' }), item({ id: 10, sourceName: 'ben' })],
+      postExtras: {
+        9: { contentItemId: '9', activity: { kind: 'pay', merchant: 'Café Luna', amountUsd: '4.50', headline: 'Pagó en Café Luna' } },
+        10: { contentItemId: '10', activity: { kind: 'pay', merchant: null, headline: 'Pagó con QR' } },
+      },
+    });
+    const shown = texts(tree);
+    expect(shown).toContain('Pagó en Café Luna');
+    expect(shown).toContain('Pagó con QR');
+    const pay = tree.root.findAll((node) => node.type === Pressable && node.props.accessibilityHint === 'Pagar con QR');
+    act(() => pay[0].props.onPress());
+    expect(mockNavigate).toHaveBeenLastCalledWith('Scan', { mode: 'pagar' });
+  });
+
   it("never sends an employee to the owner's money screens", () => {
     mockIsEmployee = true;
     const tree = render({

@@ -9,7 +9,7 @@ import { colors } from '../config/theme';
 
 /** What a Comunidad post made from a money movement shows (communityPostExtras.activity). */
 export type ActivityShare = {
-  kind: 'stock_buy' | 'stock_sell' | 'top_up' | 'withdraw' | 'send' | 'receive' | string;
+  kind: 'stock_buy' | 'stock_sell' | 'top_up' | 'withdraw' | 'send' | 'receive' | 'pay' | string;
   date?: string | null;
   amountUsd?: string | null;
   ticker?: string | null;
@@ -17,6 +17,8 @@ export type ActivityShare = {
   rail?: string | null;
   country?: string | null;
   minutes?: number | null;
+  /** Pay: the business paid; null for a personal merchant (never named). */
+  merchant?: string | null;
   pnlUsd?: string | null;
   pnlPct?: string | null;
   position?: 'open' | 'closed' | string | null;
@@ -47,6 +49,7 @@ const ICONS: Record<string, string> = {
   withdraw: 'arrow-up-circle',
   send: 'send',
   receive: 'download',
+  pay: 'shopping-bag',
 };
 
 function titleFor(a: ActivityShare): string {
@@ -63,6 +66,8 @@ function titleFor(a: ActivityShare): string {
       return 'Envió a otro usuario de Confío';
     case 'receive':
       return 'Recibió de otro usuario de Confío';
+    case 'pay':
+      return a.merchant ? `Pagó en ${a.merchant}` : 'Pagó con QR';
     default:
       return a.headline;
   }
@@ -122,6 +127,8 @@ export function activityDestination(activity: ActivityShare): { route: string; p
     case 'send':
     case 'receive':
       return { route: 'Send', label: 'Enviar dinero' };
+    case 'pay':
+      return { route: 'Scan', params: { mode: 'pagar' }, label: 'Pagar con QR' };
     default:
       return null;
   }

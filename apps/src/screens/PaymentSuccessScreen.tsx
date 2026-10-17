@@ -28,6 +28,7 @@ import { formatTokenLabel } from '../utils/tokenDisplay';
 import { CategoryPrompt } from '../components/CategoryChips';
 import { useSettlementStatus } from '../hooks/useSettlementStatus';
 import { formatAmountString } from '../utils/numberLocale';
+import { requestActivityShare } from '../services/communityShare';
 
 type PaymentSuccessRouteProp = RouteProp<MainStackParamList, 'PaymentSuccess'>;
 
@@ -138,6 +139,15 @@ export const PaymentSuccessScreen = () => {
   // Only feeds the category prompt: a payment that fails after the screen
   // opened must stop asking what it was for.
   const settledStatus = useSettlementStatus('payment', transactionData.internalId, transactionData.status);
+
+  // The global "share to Comunidad" sheet, like every other movement. The
+  // server decides eligibility (personal payer, not $CONFIO) and never names
+  // a personal merchant.
+  useEffect(() => {
+    if (transactionData.internalId && transactionData.status !== 'FAILED') {
+      requestActivityShare({ group: 'pay', reference: String(transactionData.internalId) });
+    }
+  }, [transactionData.internalId, transactionData.status]);
 
   return (
     <SafeAreaView style={styles.container}>

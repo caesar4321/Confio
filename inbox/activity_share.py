@@ -1,6 +1,7 @@
 """Comunidad posts made from a member's own money movements.
 
-After a stock trade, a top-up, a withdrawal or a send between Confío users,
+After a stock trade, a top-up, a withdrawal, a send between Confío users
+or a Pay payment,
 the app offers a ready-made post. Nothing is ever published without the
 member tapping "Compartir": the snapshot below is only the template.
 
@@ -14,8 +15,9 @@ Time is the one thing never shown precisely: only the activity's date, read
 as "Hoy" / "Ayer" / "Esta semana". An exact amount plus an exact minute
 would point at one transaction on BscScan.
 
-Never shareable: $CONFIO (presale, rewards, CONFIO sends), raw USDT deposits
-and withdrawals to outside wallets, merchant payments, payroll, conversions.
+Never shareable: $CONFIO (presale, rewards, CONFIO sends or payments), raw
+USDT deposits and withdrawals to outside wallets, payroll, conversions. A Pay
+post names a business merchant, never a personal one.
 """
 from __future__ import annotations
 
@@ -39,13 +41,15 @@ TOP_UP = 'top_up'
 WITHDRAW = 'withdraw'
 SEND = 'send'
 RECEIVE = 'receive'
-KINDS = (STOCK_BUY, STOCK_SELL, TOP_UP, WITHDRAW, SEND, RECEIVE)
+PAY = 'pay'
+KINDS = (STOCK_BUY, STOCK_SELL, TOP_UP, WITHDRAW, SEND, RECEIVE, PAY)
 # What a success screen asks for: the newest unshared activity of its group.
 GROUPS = {
     'stock': (STOCK_BUY, STOCK_SELL),
     'ramp': (TOP_UP, WITHDRAW),
     'send': (SEND,),
     'receive': (RECEIVE,),
+    'pay': (PAY,),
 }
 # How far back a success screen's "latest" lookup reaches.
 RECENT_WINDOW = timedelta(hours=2)
@@ -114,6 +118,8 @@ def snapshot_for(row, user) -> Snapshot | None:
             return _local_transfer_snapshot(row, user)
         if row.send_transaction_id:
             return _send_snapshot(row, user)
+        if row.payment_transaction_id:
+            return _pay_snapshot(row.payment_transaction, row.amount, user)
     except Exception:  # noqa: BLE001 — an unreadable row is simply not shareable
         logger.exception('activity share: could not read unified row %s', row.id)
     return None
@@ -321,6 +327,30 @@ def _send_snapshot(row, user) -> Snapshot | None:
     })
 
 
+def _pay_snapshot(payment, amount, user, *, final=True) -> Snapshot | None:
+    """A Pay payment the member made. A business merchant is named (that
+    is promotion for them); a personal merchant never is: it is a private
+    person. $CONFIO payments and payments made as a business are not
+    shareable."""
+    if payment is None or payment.payer_user_id != user.id or payment.payer_business_id:
+        return None
+    if final and payment.status != 'CONFIRMED':
+        return None
+    if not final and payment.status == 'FAILED':
+        return None
+    if (payment.token_type or '').upper() == 'CONFIO':
+        return None
+    merchant = None
+    if payment.merchant_type == 'business' and payment.merchant_business_id:
+        merchant = (payment.merchant_business.name or '').strip()[:60] or None
+    return Snapshot(PAY, {
+        'kind': PAY,
+        'amount_usd': _money(_dec(amount)),
+        'merchant': merchant,
+        'date': _date(payment.created_at),
+    })
+
+
 # ── Finding and sharing ──────────────────────────────────────────────────────
 
 def _member_rows(user):
@@ -333,7 +363,7 @@ def _member_rows(user):
         deleted_at__isnull=True,
         status='CONFIRMED',
     ).select_related(
-        'sponsored_batch', 'ramp_transaction', 'send_transaction',
+        'sponsored_batch', 'ramp_transaction', 'send_transaction', 'payment_transaction__merchant_business',
         'local_money_flow__infinia_journey__local_account',
         'local_money_flow__infinia_journey__confio_account',
     )
@@ -366,9 +396,12 @@ def _reference_filter(reference: str):
         Q(ramp_transaction__provider_order_id=reference)
         | Q(ramp_transaction__external_id=reference)
         | Q(send_transaction__internal_id=reference)
+        | Q(payment_transaction__internal_id=reference)
     )
     if reference.lower().startswith('0x'):
-        match |= Q(sponsored_batch__tx_hash__iexact=reference) | Q(send_transaction__transaction_hash__iexact=reference)
+        match |= (Q(sponsored_batch__tx_hash__iexact=reference)
+                  | Q(send_transaction__transaction_hash__iexact=reference)
+                  | Q(payment_transaction__transaction_hash__iexact=reference))
     try:
         match |= Q(local_money_flow__infinia_journey__internal_id=uuid.UUID(reference))
     except ValueError:
@@ -588,6 +621,7 @@ def activity_payloads(items) -> dict:
             'rail': activity.get('rail'),
             'country': activity.get('country'),
             'minutes': activity.get('minutes'),
+            'merchant': activity.get('merchant'),
             'pnl_usd': None,
             'pnl_pct': None,
             'position': None,
@@ -621,6 +655,7 @@ KIND_VERBS = {
     WITHDRAW: 'Retiró',
     SEND: 'Envió dinero a otro usuario de Confío',
     RECEIVE: 'Recibió dinero de otro usuario de Confío',
+    PAY: 'Pagó con QR',
 }
 
 
@@ -647,6 +682,8 @@ def activity_headline(activity: dict) -> str:
         if activity.get('minutes'):
             parts.append(f"en {activity['minutes']} min")
         return ' · '.join(parts)
+    if kind == PAY and activity.get('merchant'):
+        verb = f"Pagó en {activity['merchant']}"
     return f'{verb} · {money}' if money else verb
 
 
@@ -715,6 +752,7 @@ def public_activity(raw: dict) -> dict:
 INTENT_WINDOWS = {
     'stock': timedelta(hours=2),
     'send': timedelta(hours=2),
+    'pay': timedelta(hours=2),
     'ramp': timedelta(hours=48),
 }
 PREVIEW_ONLY_KEYS = ('wallet', 'batch_id')
@@ -817,7 +855,15 @@ def _ramp_preview(user, reference):
     })
 
 
-PREVIEWERS = {'stock': _stock_preview, 'send': _send_preview, 'ramp': _ramp_preview}
+def _pay_preview(user, reference):
+    from payments.models import PaymentTransaction
+
+    payment = (PaymentTransaction.objects.select_related('merchant_business')
+               .filter(internal_id=reference).first())
+    return _pay_snapshot(payment, payment.amount if payment else None, user, final=False) if payment else None
+
+
+PREVIEWERS = {'stock': _stock_preview, 'send': _send_preview, 'ramp': _ramp_preview, 'pay': _pay_preview}
 
 
 def _row_for_reference(user, reference):
@@ -836,6 +882,10 @@ def references_for_row(row) -> set:
             refs.add(row.send_transaction.transaction_hash.lower())
     if row.ramp_transaction_id:
         refs.update(r for r in (row.ramp_transaction.provider_order_id, row.ramp_transaction.external_id) if r)
+    if row.payment_transaction_id:
+        refs.add(str(row.payment_transaction.internal_id))
+        if row.payment_transaction.transaction_hash:
+            refs.add(row.payment_transaction.transaction_hash.lower())
     if row.local_money_flow_id:
         journey = getattr(row.local_money_flow, 'infinia_journey', None)
         if journey is not None:

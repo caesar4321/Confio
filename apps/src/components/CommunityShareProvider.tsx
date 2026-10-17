@@ -69,6 +69,8 @@ export function headlineFor(activity: ActivityShare, pending: boolean): string {
       return pending ? '¡Retiro en camino! 🚀' : '¡Retiro listo! 🚀';
     case 'send':
       return '¡Enviado! 💸';
+    case 'pay':
+      return activity.merchant ? `¡Pagado en ${activity.merchant}! 🛍️` : '¡Pago listo! 🛍️';
     default:
       return '¡Listo! 🎉';
   }
@@ -80,6 +82,7 @@ const CHIPS: Record<string, string[]> = {
   top_up: ['⚡ Fue rapidísimo', '🏦 Sin ir al banco', '💵 Dólares en minutos'],
   withdraw: ['⚡ Llegó rapidísimo', '✅ Sin complicaciones', '🏦 Directo a mi cuenta'],
   send: ['💸 Sin comisiones', '🤝 A mi familia', '⚡ Llegó al instante'],
+  pay: ['📱 Pagué con QR en segundos', '💵 Sin efectivo', '☕ Mi lugar favorito'],
 };
 
 export const chipsFor = (kind: string): string[] => CHIPS[kind] || [];

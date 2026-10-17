@@ -4927,6 +4927,7 @@ const ACTIVITY_SHARE_FIELDS = `
   rail
   country
   minutes
+  merchant
   pnlUsd
   pnlPct
   position
