@@ -1598,8 +1598,8 @@ class FaceReferenceAdmin(admin.ModelAdmin):
 
 class AppVersionPolicyAdmin(admin.ModelAdmin):
     """One row per platform; the app reads it on launch and on foreground."""
-    list_display = ('platform', 'latest_version', 'minimum_version', 'updated_at')
-    fields = ('platform', 'latest_version', 'minimum_version', 'message', 'updated_at')
+    list_display = ('platform', 'latest_version', 'updated_at')
+    fields = ('platform', 'latest_version', 'message', 'updated_at')
     readonly_fields = ('updated_at',)
 
 

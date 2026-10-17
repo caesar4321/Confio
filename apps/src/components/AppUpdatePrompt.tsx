@@ -3,22 +3,19 @@ import { AppState, Modal, StyleSheet, TouchableOpacity, View } from 'react-nativ
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
-import { useEmergencyExitOpen } from '../hooks/useEmergencyExitOpen';
 import { AppUpdatePolicy, fetchAppUpdatePolicy, openAppStore } from '../services/appUpdate';
 
-// Re-ask on foreground at most this often, so a minimum raised while the
+// Re-ask on foreground at most this often, so a release published while the
 // app sits in the background still reaches users without a cold start.
 const RECHECK_AFTER_MS = 30 * 60 * 1000;
 
 /**
- * Below the server's minimum version the app is covered by a screen with
- * only "Actualizar"; below its latest version the update is offered once
- * per launch and can be put off. The policy is set per platform in the
- * admin (AppVersionPolicy). Once the on-chain heartbeat opens Salida de
- * emergencia the gate stands down, so a stale minimum served by a failing
- * Confío can never hide the exit.
+ * Suggests the update when the store has a newer version than this one
+ * (AppVersionPolicy, set per platform in the admin). Always a pop-up the
+ * user can put off — never a screen that blocks the app — and put off
+ * once per launch per version.
  */
-export const AppUpdateGate: React.FC = () => {
+export const AppUpdatePrompt: React.FC = () => {
   const [policy, setPolicy] = useState<AppUpdatePolicy | null>(null);
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const lastCheckRef = useRef(0);
@@ -26,8 +23,6 @@ export const AppUpdateGate: React.FC = () => {
   const check = useCallback(async () => {
     lastCheckRef.current = Date.now();
     const next = await fetchAppUpdatePolicy();
-    // A failed check keeps what we knew: an outage must not lift a
-    // requirement the server already stated, nor invent one.
     if (next) setPolicy(next);
   }, []);
 
@@ -39,36 +34,29 @@ export const AppUpdateGate: React.FC = () => {
     return () => subscription.remove();
   }, [check]);
 
-  const exitOpen = useEmergencyExitOpen(policy?.status === 'update_required');
-  const required = policy?.status === 'update_required' && !exitOpen;
-  const available = policy?.status === 'update_available' && dismissedVersion !== policy.latestVersion;
-  if (!policy || exitOpen || (!required && !available)) return null;
+  if (policy?.status !== 'update_available' || dismissedVersion === policy.latestVersion) return null;
+  const dismiss = () => setDismissedVersion(policy.latestVersion);
 
   return (
-    <Modal animationType="fade" transparent visible statusBarTranslucent onRequestClose={() => {
-      // Android back: a required update cannot be skipped.
-      if (!required) setDismissedVersion(policy.latestVersion);
-    }}>
-      <View style={[styles.backdrop, required && styles.backdropSolid]}>
+    <Modal animationType="fade" transparent visible statusBarTranslucent onRequestClose={dismiss}>
+      <View style={styles.backdrop}>
         <View style={styles.card}>
           <View style={styles.iconWrap}>
             <Icon name="download" size={24} color={colors.primaryDark} />
           </View>
-          <Text style={styles.title}>{required ? 'Actualiza Confío' : 'Nueva versión disponible'}</Text>
+          <Text style={styles.title}>Nueva versión disponible</Text>
           <Text style={styles.body}>
-            {policy.message || (required
-              ? 'Esta versión ya no es compatible. Actualiza la app para seguir usando Confío.'
-              : `Confío ${policy.latestVersion} ya está disponible con mejoras y correcciones.`)}
+            {policy.message || (policy.latestVersion
+              ? `Confío ${policy.latestVersion} ya está disponible con mejoras y correcciones.`
+              : 'Hay una nueva versión de Confío disponible con mejoras y correcciones.')}
           </Text>
-          <TouchableOpacity style={styles.primaryButton} onPress={openAppStore} accessibilityRole="button">
+          <TouchableOpacity style={styles.primaryButton} onPress={() => { dismiss(); openAppStore(); }}
+            accessibilityRole="button">
             <Text style={styles.primaryText}>Actualizar</Text>
           </TouchableOpacity>
-          {!required && (
-            <TouchableOpacity style={styles.secondaryButton} onPress={() => setDismissedVersion(policy.latestVersion)}
-              accessibilityRole="button">
-              <Text style={styles.secondaryText}>Ahora no</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={styles.secondaryButton} onPress={dismiss} accessibilityRole="button">
+            <Text style={styles.secondaryText}>Ahora no</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -83,7 +71,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
   },
-  backdropSolid: { backgroundColor: colors.white },
   card: {
     width: '100%',
     maxWidth: 420,

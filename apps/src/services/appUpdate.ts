@@ -3,7 +3,7 @@ import DeviceInfo from 'react-native-device-info';
 import { API_URL } from '../config/env';
 import { mobileClientHeaders } from './mobileClientHeaders';
 
-export type AppUpdateStatus = 'current' | 'update_available' | 'update_required';
+export type AppUpdateStatus = 'current' | 'update_available';
 
 export interface AppUpdatePolicy {
   status: AppUpdateStatus;
@@ -21,9 +21,8 @@ export const appVersionUrl = (graphqlUrl: string = API_URL): string =>
   graphqlUrl.replace(/graphql\/?$/, 'api/app-version/');
 
 /**
- * Asks the server whether this build must or may update. Fails open: a
- * network error or an unexpected answer returns null and the app runs, so a
- * server outage (or Confío going away) never locks anyone out of their money.
+ * Asks the server whether the store has a newer version than this build.
+ * A network error or an unexpected answer returns null: no prompt.
  */
 export const fetchAppUpdatePolicy = async (): Promise<AppUpdatePolicy | null> => {
   const controller = new AbortController();
@@ -36,7 +35,7 @@ export const fetchAppUpdatePolicy = async (): Promise<AppUpdatePolicy | null> =>
     });
     if (!response.ok) return null;
     const body = await response.json();
-    if (!['current', 'update_available', 'update_required'].includes(body?.status)) return null;
+    if (!['current', 'update_available'].includes(body?.status)) return null;
     return {
       status: body.status,
       latestVersion: typeof body.latestVersion === 'string' ? body.latestVersion : '',

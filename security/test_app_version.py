@@ -4,16 +4,16 @@ import json
 from django.test import RequestFactory, TestCase
 from django.urls import resolve
 
-from security.app_version import app_version, UPDATE_AVAILABLE, UPDATE_REQUIRED, CURRENT
+from security.app_version import app_version, UPDATE_AVAILABLE, CURRENT
 from security.models import AppVersionPolicy
 
 
 class AppVersionEndpointTests(TestCase):
     def setUp(self):
         AppVersionPolicy.objects.update_or_create(
-            platform='ios', defaults={'latest_version': '5.2.3', 'minimum_version': '5.1.0', 'message': ''})
+            platform='ios', defaults={'latest_version': '5.2.3', 'message': ''})
         AppVersionPolicy.objects.update_or_create(
-            platform='android', defaults={'latest_version': '', 'minimum_version': '', 'message': ''})
+            platform='android', defaults={'latest_version': '', 'message': ''})
 
     # The view is called directly: the test client's request signals close
     # the --keepdb connection under this project's settings.
@@ -28,11 +28,8 @@ class AppVersionEndpointTests(TestCase):
     def test_route(self):
         self.assertIs(resolve('/api/app-version/').func, app_version)
 
-    def test_below_minimum_is_required(self):
-        self.assertEqual(self.status(platform='ios', version='5.0.9'), UPDATE_REQUIRED)
-
-    def test_between_minimum_and_latest_is_available(self):
-        self.assertEqual(self.status(platform='ios', version='5.1.0'), UPDATE_AVAILABLE)
+    def test_older_than_latest_is_available(self):
+        self.assertEqual(self.status(platform='ios', version='4.0.0'), UPDATE_AVAILABLE)
         self.assertEqual(self.status(platform='ios', version='5.2.2'), UPDATE_AVAILABLE)
 
     def test_latest_or_newer_is_current(self):
@@ -48,16 +45,12 @@ class AppVersionEndpointTests(TestCase):
 
     def test_reads_mobile_headers(self):
         body = json.loads(self.get(HTTP_X_CONFIO_PLATFORM='ios', HTTP_X_CONFIO_VERSION='4.9.0').content)
-        self.assertEqual(body['status'], UPDATE_REQUIRED)
+        self.assertEqual(body['status'], UPDATE_AVAILABLE)
+        self.assertNotIn('minimumVersion', body)
         self.assertEqual(body['latestVersion'], '5.2.3')
 
     def test_unknown_platform_is_rejected(self):
         self.assertEqual(self.get({'platform': 'web'}).status_code, 400)
-
-    def test_minimum_above_latest_is_invalid(self):
-        policy = AppVersionPolicy(platform='ios', latest_version='5.2.0', minimum_version='5.3.0')
-        with self.assertRaises(ValidationError):
-            policy.clean()
 
     def test_malformed_version_is_invalid(self):
         with self.assertRaises(ValidationError):
