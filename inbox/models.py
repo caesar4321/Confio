@@ -852,3 +852,15 @@ class CommunityActivityShare(models.Model):
 
     def __str__(self):
         return f'{self.user_id} shared {self.kind} {self.unified_transaction_id}'
+
+
+class CommunityProfileSettings(models.Model):
+    """A member's Comunidad profile choices. The asset profile is public by
+    default; portfolio_hidden is the member's own switch to hide it."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name='community_profile_settings')
+    portfolio_hidden = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.user_id} portfolio {"hidden" if self.portfolio_hidden else "public"}'

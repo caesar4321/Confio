@@ -158,23 +158,31 @@ class CommunityPostingTests(CommunityTestBase):
         self.assertEqual(community.author_display_name(user), user.username)
         self.assertEqual(community.author_handle(user), f'@{user.username}')
 
-    def test_a_username_signup_derived_from_the_email_is_never_shown(self):
+    def test_a_username_signup_derived_from_the_email_shows_as_a_pseudonym(self):
         user = make_user()
         user.email = 'juan.perez@gmail.com'
         for generated in ('juanperezgmailcom', 'juanperezgmailcom_2', 'user_ab12'):
             user.username = generated
             self.assertTrue(community.username_is_generated(user), generated)
-            self.assertEqual(community.author_display_name(user), 'Miembro de Confío')
+            name = community.author_display_name(user)
+            self.assertTrue(name.startswith('inversor_'), name)
+            self.assertNotIn('juan', name)
         for chosen in ('juanp', 'juan_perez', 'juanperez_2'):
             user.username = chosen
             self.assertFalse(community.username_is_generated(user), chosen)
+            self.assertEqual(community.author_display_name(user), chosen)
 
-    def test_a_generated_username_must_be_replaced_before_posting(self):
+    def test_pseudonyms_are_stable_and_distinct(self):
+        names = {community.pseudonym(SimpleNamespace(id=i)) for i in range(1, 5001)}
+        self.assertEqual(len(names), 5000)
+        self.assertEqual(community.pseudonym(SimpleNamespace(id=42)), community.pseudonym(SimpleNamespace(id=42)))
+
+    def test_members_without_a_username_can_post(self):
         user = make_user()
         user.username = community._generated_username_bases(user)[0]
         user.save(update_fields=['username'])
-        self.assertEqual(community.posting_block(user, None), community.BLOCK_USERNAME)
-        self.assertEqual(community.commenting_block(user, None), community.BLOCK_USERNAME)
+        self.assertIsNone(community.posting_block(user, None))
+        self.assertIsNone(community.commenting_block(user, None))
 
 
 class CommunityReviewTests(CommunityTestBase):

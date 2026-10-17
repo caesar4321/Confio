@@ -10,6 +10,7 @@ import { Text } from '../components/common/AppText';
 import { EmptyState } from '../components/EmptyState';
 import { BylineAvatar } from '../components/PostByline';
 import { DiscoverItem, DiscoverPostCard } from '../components/DiscoverFeed';
+import { CommunityMemberPortfolio, CommunityPortfolioSection } from '../components/CommunityPortfolioSection';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import {
@@ -17,10 +18,12 @@ import {
   FOLLOW_COMMUNITY_MEMBER,
   REACT_TO_MESSAGE_CONTENT,
   SET_COMMUNITY_FOLLOW_NOTIFY,
+  SET_COMMUNITY_PORTFOLIO_HIDDEN,
   UNFOLLOW_COMMUNITY_MEMBER,
 } from '../apollo/mutations';
 import {
   GET_COMMUNITY_COMMENT_COUNTS,
+  GET_COMMUNITY_MEMBER_PORTFOLIO,
   GET_COMMUNITY_MEMBER_POSTS,
   GET_COMMUNITY_MEMBER_PROFILE,
 } from '../apollo/queries';
@@ -98,6 +101,9 @@ export const CommunityMemberProfileScreen = () => {
   const inFlight = useRef(false);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
+  // The asset profile is its own query: an older server rejects the unknown
+  // field, and any failure just leaves the section out.
+  const [portfolio, setPortfolio] = useState<CommunityMemberPortfolio | null>(null);
   const currentUserId = useRef(userId);
   useEffect(() => {
     if (currentUserId.current === userId) return;
@@ -106,7 +112,74 @@ export const CommunityMemberProfileScreen = () => {
     setItems([]);
     setHasMore(false);
     setPostsLoading(true);
+    setPortfolio(null);
   }, [userId]);
+
+  const [setPortfolioHidden] = useMutation(SET_COMMUNITY_PORTFOLIO_HIDDEN);
+  const [hiddenBusy, setHiddenBusy] = useState(false);
+  const portfolioGeneration = useRef(0);
+  const loadPortfolio = useCallback(async () => {
+    portfolioGeneration.current += 1;
+    const requested = portfolioGeneration.current;
+    const forUser = userId;
+    try {
+      const { data } = await client.query({
+        query: GET_COMMUNITY_MEMBER_PORTFOLIO,
+        variables: { userId: forUser },
+        fetchPolicy: 'network-only',
+        // Never share an in-flight read: one started before a hide-switch
+        // change would hand its stale "hidden" value to this load.
+        context: { queryDeduplication: false },
+      });
+      if (!mounted.current || portfolioGeneration.current !== requested || currentUserId.current !== forUser) return;
+      const next = data?.communityMemberPortfolio as CommunityMemberPortfolio | null | undefined;
+      setPortfolio(next && String(next.userId) === forUser ? next : null);
+    } catch {
+      if (mounted.current && portfolioGeneration.current === requested && currentUserId.current === forUser) {
+        setPortfolio(null);
+      }
+    }
+  }, [client, userId]);
+
+  useEffect(() => {
+    void loadPortfolio();
+  }, [loadPortfolio]);
+
+  const toggleHidden = async (nextHidden: boolean) => {
+    if (!portfolio || !portfolio.isSelf || hiddenBusy) return;
+    const forUser = userId;
+    const previous = portfolio.hidden;
+    // A refresh landing meanwhile must not undo the optimistic value.
+    portfolioGeneration.current += 1;
+    setPortfolio((current) => (current && String(current.userId) === forUser ? { ...current, hidden: nextHidden } : current));
+    setHiddenBusy(true);
+    const rollback = () => {
+      if (!mounted.current || currentUserId.current !== forUser) return;
+      setPortfolio((current) => (current && String(current.userId) === forUser ? { ...current, hidden: previous } : current));
+    };
+    try {
+      const { data } = await setPortfolioHidden({ variables: { hidden: nextHidden } });
+      const result = data?.setCommunityPortfolioHidden;
+      if (!result?.success) {
+        rollback();
+        Alert.alert('No pudimos guardar el cambio', 'Inténtalo de nuevo en un momento.');
+        return;
+      }
+      // A refresh started before the server confirmed may have read the old
+      // value: drop it, the confirmed answer wins.
+      portfolioGeneration.current += 1;
+      if (mounted.current && currentUserId.current === forUser) {
+        setPortfolio((current) =>
+          current && String(current.userId) === forUser ? { ...current, hidden: Boolean(result.hidden) } : current,
+        );
+      }
+    } catch {
+      rollback();
+      Alert.alert('No pudimos guardar el cambio', 'Revisa tu conexión e inténtalo de nuevo.');
+    } finally {
+      if (mounted.current) setHiddenBusy(false);
+    }
+  };
 
   const fetchPage = useCallback(
     (offset: number) =>
@@ -181,14 +254,15 @@ export const CommunityMemberProfileScreen = () => {
       setExtrasRefresh((value) => value + 1);
       refetchProfile().catch(() => {});
       void loadFirstPage();
-    }, [refetchProfile, loadFirstPage]),
+      void loadPortfolio();
+    }, [refetchProfile, loadFirstPage, loadPortfolio]),
   );
 
   const handleRefresh = async () => {
     setRefreshing(true);
     setUpdated(null);
     setExtrasRefresh((value) => value + 1);
-    await Promise.all([refetchProfile().catch(() => {}), loadFirstPage()]);
+    await Promise.all([refetchProfile().catch(() => {}), loadFirstPage(), loadPortfolio()]);
     if (mounted.current) setRefreshing(false);
   };
 
@@ -342,6 +416,7 @@ export const CommunityMemberProfileScreen = () => {
             onAction={() => {
               refetchProfile().catch(() => {});
               void loadFirstPage();
+              void loadPortfolio();
             }}
           />
         )}
@@ -349,73 +424,85 @@ export const CommunityMemberProfileScreen = () => {
     );
   }
 
+  const visiblePortfolio = portfolio && String(portfolio.userId) === userId ? portfolio : null;
+
   const profileHeader = (
-    <View style={styles.profileCard}>
-      <BylineAvatar name={profile.username} avatarUrl={profile.avatarUrl} size={72} />
-      <Text style={styles.username} numberOfLines={1}>
-        {profile.username}
-      </Text>
-      <Text style={styles.counts}>{followCountsLabel(profile.followerCount, profile.followingCount)}</Text>
-      {profile.isSelf ? null : (
-        <View style={styles.actions}>
-          <Pressable
-            onPress={() => {
-              void toggleFollow();
-            }}
-            disabled={followBusy}
-            style={({ pressed }) => [
-              styles.followButton,
-              profile.isFollowing ? styles.followingButton : styles.followPrimary,
-              (pressed || followBusy) && styles.pressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: profile.isFollowing, busy: followBusy }}
-            accessibilityLabel={profile.isFollowing ? 'Siguiendo. Toca para dejar de seguir.' : 'Seguir'}
-          >
-            {followBusy ? (
-              <ActivityIndicator size="small" color={profile.isFollowing ? colors.dark : colors.white} />
-            ) : (
-              <>
-                {profile.isFollowing ? <Icon name="check" size={16} color={colors.dark} /> : null}
-                <Text style={[styles.followText, profile.isFollowing && styles.followingText]}>
-                  {profile.isFollowing ? 'Siguiendo' : 'Seguir'}
-                </Text>
-              </>
-            )}
-          </Pressable>
-          {profile.isFollowing ? (
+    <View>
+      <View style={styles.profileCard}>
+        <BylineAvatar name={profile.username} avatarUrl={profile.avatarUrl} size={72} />
+        <Text style={styles.username} numberOfLines={1}>
+          {profile.username}
+        </Text>
+        <Text style={styles.counts}>{followCountsLabel(profile.followerCount, profile.followingCount)}</Text>
+        {profile.isSelf ? null : (
+          <View style={styles.actions}>
             <Pressable
               onPress={() => {
-                void toggleNotify();
+                void toggleFollow();
               }}
-              disabled={notifyBusy}
-              style={({ pressed }) => [styles.bellButton, (pressed || notifyBusy) && styles.pressed]}
-              hitSlop={6}
+              disabled={followBusy}
+              style={({ pressed }) => [
+                styles.followButton,
+                profile.isFollowing ? styles.followingButton : styles.followPrimary,
+                (pressed || followBusy) && styles.pressed,
+              ]}
               accessibilityRole="button"
-              accessibilityState={{ busy: notifyBusy }}
-              accessibilityLabel={profile.notify ? 'Silenciar sus publicaciones' : 'Avisarme de sus publicaciones'}
+              accessibilityState={{ selected: profile.isFollowing, busy: followBusy }}
+              accessibilityLabel={profile.isFollowing ? 'Siguiendo. Toca para dejar de seguir.' : 'Seguir'}
             >
-              <Icon
-                name={profile.notify ? 'bell' : 'bell-off'}
-                size={18}
-                color={profile.notify ? colors.primaryDeep : colors.textSecondary}
-              />
+              {followBusy ? (
+                <ActivityIndicator size="small" color={profile.isFollowing ? colors.dark : colors.white} />
+              ) : (
+                <>
+                  {profile.isFollowing ? <Icon name="check" size={16} color={colors.dark} /> : null}
+                  <Text style={[styles.followText, profile.isFollowing && styles.followingText]}>
+                    {profile.isFollowing ? 'Siguiendo' : 'Seguir'}
+                  </Text>
+                </>
+              )}
             </Pressable>
-          ) : null}
-        </View>
-      )}
-      {profile.isSelf ? null : (
-        <Pressable
-          onPress={confirmBlock}
-          disabled={blocking}
-          hitSlop={8}
-          style={({ pressed }) => [styles.blockLink, (pressed || blocking) && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel={`Bloquear a ${profile.username}`}
-        >
-          <Text style={styles.blockText}>Bloquear</Text>
-        </Pressable>
-      )}
+            {profile.isFollowing ? (
+              <Pressable
+                onPress={() => {
+                  void toggleNotify();
+                }}
+                disabled={notifyBusy}
+                style={({ pressed }) => [styles.bellButton, (pressed || notifyBusy) && styles.pressed]}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityState={{ busy: notifyBusy }}
+                accessibilityLabel={profile.notify ? 'Silenciar sus publicaciones' : 'Avisarme de sus publicaciones'}
+              >
+                <Icon
+                  name={profile.notify ? 'bell' : 'bell-off'}
+                  size={18}
+                  color={profile.notify ? colors.primaryDeep : colors.textSecondary}
+                />
+              </Pressable>
+            ) : null}
+          </View>
+        )}
+        {profile.isSelf ? null : (
+          <Pressable
+            onPress={confirmBlock}
+            disabled={blocking}
+            hitSlop={8}
+            style={({ pressed }) => [styles.blockLink, (pressed || blocking) && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Bloquear a ${profile.username}`}
+          >
+            <Text style={styles.blockText}>Bloquear</Text>
+          </Pressable>
+        )}
+      </View>
+      {visiblePortfolio ? (
+        <CommunityPortfolioSection
+          key={visiblePortfolio.userId}
+          portfolio={visiblePortfolio}
+          onToggleHidden={visiblePortfolio.isSelf ? (value) => void toggleHidden(value) : undefined}
+          hiddenBusy={hiddenBusy}
+        />
+      ) : null}
       <Text style={styles.sectionTitle}>Publicaciones</Text>
     </View>
   );

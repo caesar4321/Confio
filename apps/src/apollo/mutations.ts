@@ -1363,3 +1363,12 @@ export const SET_COMMUNITY_FOLLOW_NOTIFY = gql`
     }
   }
 `;
+
+export const SET_COMMUNITY_PORTFOLIO_HIDDEN = gql`
+  mutation SetCommunityPortfolioHidden($hidden: Boolean!) {
+    setCommunityPortfolioHidden(hidden: $hidden) {
+      success
+      hidden
+    }
+  }
+`;

@@ -863,6 +863,21 @@ export const ProfileScreen = () => {
             </View>
           </View>
           <View style={styles.cardOptions}>
+            {userProfile?.id ? (
+              <TouchableOpacity
+                style={styles.cardOption}
+                onPress={() => navigation.navigate('CommunityMemberProfile', { userId: String(userProfile.id) })}
+                accessibilityRole="button"
+                accessibilityLabel="Mi perfil en Comunidad"
+              >
+                <Icon name="user" size={18} color={colors.text.secondary} />
+                <View style={styles.biometricTextContainer}>
+                  <Text style={styles.biometricTitle}>Mi perfil en Comunidad</Text>
+                  <Text style={styles.biometricStatusText}>Cómo te ven los demás y tu perfil de inversor</Text>
+                </View>
+                <Icon name="chevron-right" size={16} color={colors.text.light} />
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               style={styles.cardOption}
               onPress={handleTelegramPress}

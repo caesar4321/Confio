@@ -359,14 +359,14 @@ class FollowTests(CommunityTestBase):
         self.assertTrue(CommunityBlock.objects.filter(blocker=member, blocked=fan).exists())
         self.assertFalse(CommunityFollow.objects.filter(follower=fan).exists())
 
-    def test_an_anonymous_follower_is_not_announced(self):
+    def test_a_follower_without_a_username_is_announced_by_pseudonym(self):
         member, _ = self.published_member()
         fan = make_user()
         fan.username = community._generated_username_bases(fan)[0]
         fan.save(update_fields=['username'])
         with patch('inbox.community._notify') as notify, self.captureOnCommitCallbacks(execute=True):
             community.follow_member(fan, member.id)
-        notify.assert_not_called()
+        self.assertTrue(notify.call_args.args[2].startswith('@inversor_'))
 
     def test_a_follower_muted_midway_is_skipped(self):
         member, item = self.published_member()

@@ -16,6 +16,7 @@ from security.s3_utils import build_s3_key, upload_object
 from .models import (
     CommunityActivityShare,
     CommunityFollow,
+    CommunityProfileSettings,
     AvatarType,
     Channel,
     ChannelMembership,
@@ -1227,4 +1228,16 @@ class CommunityActivityShareAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(CommunityProfileSettings)
+class CommunityProfileSettingsAdmin(admin.ModelAdmin):
+    list_display = ('user', 'portfolio_hidden', 'updated_at')
+    list_filter = ('portfolio_hidden',)
+    search_fields = ('user__username',)
+    list_select_related = ('user',)
+    readonly_fields = ('user', 'portfolio_hidden', 'updated_at')
+
+    def has_add_permission(self, request):
         return False

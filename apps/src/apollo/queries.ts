@@ -4987,3 +4987,44 @@ export const GET_COMMUNITY_MEMBER_POSTS = gql`
     }
   }
 `;
+
+// Asset profile: its own query (an older server rejects the unknown field).
+export const GET_COMMUNITY_MEMBER_PORTFOLIO = gql`
+  query GetCommunityMemberPortfolio($userId: ID!) {
+    communityMemberPortfolio(userId: $userId) {
+      userId
+      isSelf
+      hidden
+      totalUsd
+      dollarsUsd
+      stocksUsd
+      stocksChange24hUsd
+      presaleConfio
+      presaleInvestedUsd
+      tradeCount
+      avgHoldSeconds
+      memberSince
+      openPositions {
+        symbol
+        ticker
+        name
+        units
+        valueUsd
+        investedUsd
+        avgEntryUsd
+        pnlUsd
+        pnlPct
+        dayChangePct
+      }
+      closedPositions {
+        ticker
+        name
+        investedUsd
+        proceedsUsd
+        pnlUsd
+        pnlPct
+        closedOn
+      }
+    }
+  }
+`;

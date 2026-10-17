@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.5.1',
-    'last_updated': '2026-10-06',
+    'version': '1.6.0',
+    'last_updated': '2026-10-17',
     'is_legally_binding': True,
     'sections': [
         {
@@ -116,7 +116,8 @@ TERMS = {
         {
             'title': '11. Normas de la Comunidad',
             'content': [
-                'Comunidad, dentro de Descubrir, permite a personas con identidad verificada publicar textos y fotos, comentar, reaccionar y usar una foto de perfil. Su contenido se muestra a otros miembros junto con su nombre y la inicial de su apellido; las fotos publicadas y la foto de perfil también pueden verse con su enlace.',
+                'Comunidad, dentro de Descubrir, permite a personas con identidad verificada publicar textos y fotos, compartir sus propios movimientos (compras y ventas de acciones, recargas, retiros y envíos entre usuarios de Confío) con su monto y resultado, comentar, reaccionar, seguir a otros miembros y usar una foto de perfil. Nada de lo que usted mueve se publica sin que usted lo comparta. Su contenido se muestra a otros miembros con su nombre de usuario de Confío, o con un seudónimo si no eligió uno, nunca con su nombre real; las fotos publicadas y la foto de perfil también pueden verse con su enlace.',
+                'Cada miembro verificado tiene un perfil de inversor visible para otros miembros con su nombre de usuario o seudónimo: el valor de sus dólares en Confío, sus acciones con su resultado, sus posiciones cerradas, los CONFIO comprados en la preventa y sus estadísticas de operación. Usted puede ocultar su perfil de inversor en cualquier momento desde su perfil.',
                 'Tenemos tolerancia cero con el contenido ofensivo y con los usuarios abusivos. No está permitido publicar estafas o fraudes; promesas de ganancias o invitaciones a invertir; pedidos de dinero o la compra y venta de dólares o criptomonedas fuera de la app; datos de contacto o enlaces para continuar en privado; datos personales propios o de terceros; suplantación de Confío, de bancos o de autoridades; spam; odio, acoso o amenazas; contenido sexual; violencia; ni contenido ilegal.',
                 'Revisamos con sistemas automáticos, incluido un proveedor de inteligencia artificial (ver la Política de Privacidad), todo el contenido antes de publicarlo y podemos rechazarlo. Usted puede reportar contenido y bloquear a otros miembros desde la app. Revisamos los reportes y podemos retirar contenido en cualquier momento.',
                 'Si incumple estas normas podemos retirar su contenido y suspender o cancelar su acceso a Comunidad o a su cuenta.',
@@ -140,8 +141,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.8.1',
-    'last_updated': '2026-10-06',
+    'version': '1.9.0',
+    'last_updated': '2026-10-17',
     'is_legally_binding': True,
     'sections': [
         {
@@ -192,7 +193,8 @@ PRIVACY = {
                     'Conversaciones y mensajes de soporte',
                     'Preferencias y estados de lectura de notificaciones o contenido dentro de la app',
                     'Reacciones, suscripciones a canales y otra interacción con contenido publicado en la plataforma',
-                    'Publicaciones, comentarios, fotos y foto de perfil que usted comparte en Comunidad, junto con su nombre y la inicial de su apellido, que son visibles para otros miembros; los bloqueos y reportes que realiza; y el resultado de la revisión automática de ese contenido'
+                    'Publicaciones, comentarios, fotos y foto de perfil que usted comparte en Comunidad, y los movimientos que usted decide compartir con su monto y resultado, que son visibles para otros miembros con su nombre de usuario o un seudónimo; los miembros que sigue y que lo siguen; los bloqueos y reportes que realiza; y el resultado de la revisión automática de ese contenido',
+                    'Su perfil de inversor en Comunidad, visible para otros miembros con su nombre de usuario o seudónimo y nunca con su nombre real: el valor de sus dólares en Confío, sus acciones y su resultado, sus posiciones cerradas, los CONFIO comprados en la preventa y sus estadísticas de operación. Puede ocultarlo en cualquier momento desde su perfil'
                 ],
                 'business_and_payroll': [
                     'Datos de negocios, roles de empleados, permisos, notas internas y configuraciones operativas',

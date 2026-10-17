@@ -38,7 +38,7 @@ from .models import (
     SupportMessage,
     VisibilityPolicy,
 )
-from . import activity_share, community, profile_pictures
+from . import activity_share, community, member_portfolio, profile_pictures
 from .community import author_display_name
 from .official import all_official_channel_ids, official_channel_ids
 from .push_service import send_support_reply_push, send_support_staff_push
@@ -1004,6 +1004,122 @@ class CommunityMemberProfileType(graphene.ObjectType):
     notify = graphene.Boolean(required=True)
 
 
+def _money(value):
+    from decimal import Decimal
+
+    return None if value is None else format(Decimal(value).quantize(Decimal('0.01')), 'f')
+
+
+def _pct(value):
+    from decimal import Decimal
+
+    return None if value is None else format(Decimal(value).quantize(Decimal('0.01')), 'f')
+
+
+class PortfolioOpenPositionType(graphene.ObjectType):
+    symbol = graphene.String(required=True)
+    ticker = graphene.String(required=True)
+    name = graphene.String(required=True)
+    units = graphene.String(required=True)
+    value_usd = graphene.String()
+    invested_usd = graphene.String()
+    avg_entry_usd = graphene.String()
+    pnl_usd = graphene.String()
+    pnl_pct = graphene.String()
+    day_change_pct = graphene.String()
+
+
+class PortfolioClosedPositionType(graphene.ObjectType):
+    ticker = graphene.String(required=True)
+    name = graphene.String(required=True)
+    invested_usd = graphene.String(required=True)
+    proceeds_usd = graphene.String(required=True)
+    pnl_usd = graphene.String(required=True)
+    pnl_pct = graphene.String()
+    # YYYY-MM-DD
+    closed_on = graphene.String(required=True)
+
+
+class CommunityMemberPortfolioType(graphene.ObjectType):
+    """A member's asset profile. Amounts are strings with two decimals;
+    any of them is null when it couldn't be read (the app hides it)."""
+    user_id = graphene.ID(required=True)
+    is_self = graphene.Boolean(required=True)
+    # The member's own switch (only meaningful on their own profile).
+    hidden = graphene.Boolean(required=True)
+    total_usd = graphene.String()
+    dollars_usd = graphene.String()
+    stocks_usd = graphene.String()
+    stocks_change_24h_usd = graphene.String()
+    presale_confio = graphene.String()
+    presale_invested_usd = graphene.String()
+    # Null when the trade history couldn't be read (never a false 0).
+    trade_count = graphene.Int()
+    # Rounded to the hour: an exact figure would date a member's trade.
+    avg_hold_seconds = graphene.Int()
+    # YYYY-MM
+    member_since = graphene.String()
+    # Null (not empty) when holdings or history couldn't be read.
+    open_positions = graphene.List(graphene.NonNull(PortfolioOpenPositionType))
+    closed_positions = graphene.List(graphene.NonNull(PortfolioClosedPositionType))
+
+
+def build_member_portfolio(viewer, user_id):
+    target = community.followable_member(user_id, viewer=viewer)
+    if target is None or community.is_blocked_between(viewer.id, target.id):
+        return None
+    if not community.portfolio_visible_to(target, viewer):
+        return None
+    portfolio = member_portfolio.build_portfolio(target)
+    if portfolio is None:
+        return None
+    return CommunityMemberPortfolioType(
+        user_id=str(target.id),
+        is_self=target.id == viewer.id,
+        hidden=community.portfolio_hidden(target),
+        total_usd=_money(portfolio.total_usd),
+        dollars_usd=_money(portfolio.dollars_usd),
+        stocks_usd=_money(portfolio.stocks_usd),
+        stocks_change_24h_usd=_money(portfolio.stocks_change_24h_usd),
+        presale_confio=_money(portfolio.presale_confio),
+        presale_invested_usd=_money(portfolio.presale_invested_usd),
+        trade_count=portfolio.trade_count,
+        avg_hold_seconds=portfolio.avg_hold_seconds,
+        member_since=portfolio.member_since,
+        open_positions=None if portfolio.open_positions is None else [
+            PortfolioOpenPositionType(
+                symbol=p.symbol, ticker=p.ticker, name=p.name, units=format(p.units.normalize(), 'f'),
+                value_usd=_money(p.value_usd), invested_usd=_money(p.invested_usd),
+                avg_entry_usd=None if p.avg_entry_usd is None else format(p.avg_entry_usd.quantize(member_portfolio.Decimal('0.0001')), 'f'),
+                pnl_usd=_money(p.pnl_usd), pnl_pct=_pct(p.pnl_pct), day_change_pct=_pct(p.day_change_pct),
+            )
+            for p in portfolio.open_positions
+        ],
+        closed_positions=None if portfolio.closed_positions is None else [
+            PortfolioClosedPositionType(
+                ticker=c.ticker, name=c.name, invested_usd=_money(c.invested_usd),
+                proceeds_usd=_money(c.proceeds_usd), pnl_usd=_money(c.pnl_usd), pnl_pct=_pct(c.pnl_pct),
+                closed_on=c.closed_on,
+            )
+            for c in portfolio.closed_positions
+        ],
+    )
+
+
+class SetCommunityPortfolioHidden(graphene.Mutation):
+    """The member's own switch: hide (or show again) their asset profile."""
+    class Arguments:
+        hidden = graphene.Boolean(required=True)
+
+    success = graphene.Boolean(required=True)
+    hidden = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, hidden):
+        return SetCommunityPortfolioHidden(success=True, hidden=community.set_portfolio_hidden(info.context.user, hidden))
+
+
 class CommunityRulesType(graphene.ObjectType):
     version = graphene.String(required=True)
     accepted = graphene.Boolean(required=True)
@@ -1608,7 +1724,9 @@ def build_member_profile(viewer, user_id):
     follow = CommunityFollow.objects.filter(follower=viewer, followed=target).first()
     return CommunityMemberProfileType(
         id=str(target.id),
-        username=target.username,
+        # Never target.username: a signup username derived from the email
+        # shows as the member's pseudonym, here as everywhere else.
+        username=community.author_display_name(target),
         avatar_url=profile_pictures.picture_urls([target.id]).get(target.id),
         follower_count=followers,
         following_count=following,
@@ -1695,6 +1813,7 @@ class Query(graphene.ObjectType):
         reference=graphene.String(required=False),
     )
     community_member_profile = graphene.Field(CommunityMemberProfileType, user_id=graphene.ID(required=True))
+    community_member_portfolio = graphene.Field(CommunityMemberPortfolioType, user_id=graphene.ID(required=True))
     community_member_posts = graphene.Field(
         DiscoverFeedPageType,
         required=True,
@@ -1826,7 +1945,7 @@ class Query(graphene.ObjectType):
             is_member = item.owner_type == OwnerType.USER
             raw = (item.metadata or {}).get('activity')
             public = activities.get(item.id)
-            show_author = is_member and not community.username_is_generated(item.owner_user)
+            show_author = is_member
             out.append(CommunityPostExtrasType(
                 content_item_id=str(item.id),
                 author_id=str(item.owner_user_id) if show_author else None,
@@ -1860,6 +1979,10 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_community_member_profile(self, info, user_id):
         return build_member_profile(info.context.user, user_id)
+
+    @login_required
+    def resolve_community_member_portfolio(self, info, user_id):
+        return build_member_portfolio(info.context.user, user_id)
 
     @login_required
     def resolve_community_member_posts(self, info, user_id, offset=0, limit=10):
@@ -2741,3 +2864,4 @@ class Mutation(graphene.ObjectType):
     follow_community_member = FollowCommunityMember.Field()
     unfollow_community_member = UnfollowCommunityMember.Field()
     set_community_follow_notify = SetCommunityFollowNotify.Field()
+    set_community_portfolio_hidden = SetCommunityPortfolioHidden.Field()

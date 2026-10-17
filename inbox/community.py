@@ -91,6 +91,8 @@ BLOCK_NOT_VERIFIED = 'not_verified'
 BLOCK_DAILY_LIMIT = 'daily_limit'
 BLOCK_COMMENT_LIMIT = 'comment_limit'
 BLOCK_RULES = 'rules_required'
+# No longer returned (members without a username post under a pseudonym);
+# kept so app builds that map this code keep compiling against the server.
 BLOCK_USERNAME = 'username_required'
 MAX_MENTIONS = 5
 MAX_PARTICIPANTS = 200
@@ -177,11 +179,31 @@ def username_is_generated(user) -> bool:
     return False
 
 
+PSEUDONYM_PREFIX = 'inversor_'
+_BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz'
+
+
+def pseudonym(user) -> str:
+    """A stable public name for a member who never chose a username:
+    "inversor_k7f3qa". The id goes through a bijection on 32-bit integers
+    (an odd multiplier), so every member gets a different one and the
+    sequential id isn't readable from it."""
+    n = (int(user.id) * 2654435761) % (1 << 32)
+    digits = ''
+    while n:
+        n, r = divmod(n, 36)
+        digits = _BASE36[r] + digits
+    return PSEUDONYM_PREFIX + digits.rjust(7, '0')
+
+
 def author_display_name(user) -> str:
-    """The member's Confío username: Comunidad never shows a legal name.
-    A username signup derived from the email is never shown either."""
-    if user is None or username_is_generated(user):
+    """The member's Comunidad name: their chosen username, else a
+    pseudonym. Never a legal name, and never a username signup derived from
+    the email (it would publish the email address)."""
+    if user is None:
         return ANONYMOUS_MEMBER
+    if username_is_generated(user):
+        return pseudonym(user)
     return user.username
 
 
@@ -262,8 +284,6 @@ def posting_block(user, business, *, activity: bool = False) -> str | None:
         return BLOCK_BANNED
     if not is_verified_member(user):
         return BLOCK_NOT_VERIFIED
-    if username_is_generated(user):
-        return BLOCK_USERNAME
     if not has_accepted_rules(user):
         return BLOCK_RULES
     if not activity and _free_submissions_last_24h(user) >= settings.COMMUNITY_DAILY_POST_LIMIT:
@@ -1968,10 +1988,9 @@ class FollowError(Exception):
 
 
 def followable_member(user_id, viewer=None):
-    """A member whose profile can be shown: an active account with a chosen
-    username (an anonymous byline has no profile), and either visible
-    Comunidad content or a follow of the viewer (so "X empezó a seguirte"
-    opens X's profile)."""
+    """A member whose profile can be shown: an active account with either
+    visible Comunidad content or a follow of the viewer (so "X empezó a
+    seguirte" opens X's profile)."""
     from users.models import User
 
     from .models import CommunityFollow
@@ -1981,8 +2000,10 @@ def followable_member(user_id, viewer=None):
     except (TypeError, ValueError):
         return None
     target = User.objects.filter(id=user_id, deleted_at__isnull=True, is_active=True).first()
-    if target is None or username_is_generated(target):
+    if target is None:
         return None
+    if viewer is not None and viewer.id == target.id:
+        return target
     if has_visible_content(user_id):
         return target
     if viewer is not None and CommunityFollow.objects.filter(follower_id=user_id, followed_id=viewer.id).exists():
@@ -2135,10 +2156,30 @@ def notify_new_follower(follow_id: int):
     follow = CommunityFollow.objects.select_related('follower', 'followed').filter(id=follow_id).first()
     if follow is None or follow.follower.deleted_at is not None:
         return
-    # A follower with no chosen username has no profile to open.
-    if username_is_generated(follow.follower):
-        return
     handle = author_handle(follow.follower)
     _notify(follow.followed, NotificationType.COMMUNITY_NEW_FOLLOWER, f'{handle} empezó a seguirte',
             'Ahora verá lo que compartes en Comunidad.', action_url=member_link(follow.follower_id),
             data={'member_id': follow.follower_id})
+
+
+# ── Asset profile visibility ─────────────────────────────────────────────────
+
+def portfolio_hidden(user) -> bool:
+    from .models import CommunityProfileSettings
+
+    return CommunityProfileSettings.objects.filter(user=user, portfolio_hidden=True).exists()
+
+
+def set_portfolio_hidden(user, hidden: bool) -> bool:
+    from .models import CommunityProfileSettings
+
+    CommunityProfileSettings.objects.update_or_create(user=user, defaults={'portfolio_hidden': bool(hidden)})
+    return bool(hidden)
+
+
+def portfolio_visible_to(target, viewer) -> bool:
+    """Every Didit-verified member's asset profile is public unless they
+    hid it; the member always sees their own."""
+    if viewer is not None and viewer.id == target.id:
+        return True
+    return is_verified_member(target) and not portfolio_hidden(target)

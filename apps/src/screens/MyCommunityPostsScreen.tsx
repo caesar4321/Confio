@@ -14,6 +14,7 @@ import { GET_MY_COMMUNITY_POSTS } from '../apollo/queries';
 import { formatLocalDate } from '../utils/dateUtils';
 import { MainStackParamList } from '../types/navigation';
 import { usePollWhile } from '../hooks/usePollWhile';
+import { useAuth } from '../contexts/AuthContext';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 
@@ -45,6 +46,8 @@ const STATUS: Record<MyPost['status'], { label: string; icon: string; fg: string
 
 export const MyCommunityPostsScreen = () => {
   const navigation = useNavigation<Navigation>();
+  const { userProfile } = useAuth();
+  const ownUserId = userProfile?.id ? String(userProfile.id) : null;
   // One query for the whole loaded range: scrolling grows the limit, so a
   // poll or a refresh re-reads every loaded post and never drops pages.
   const [limit, setLimit] = useState(PAGE_SIZE);
@@ -197,15 +200,33 @@ export const MyCommunityPostsScreen = () => {
         refreshing={networkStatus === NetworkStatus.refetch}
         onRefresh={() => { refetch().catch(() => {}); }}
         ListHeaderComponent={
-          <Pressable
-            style={styles.blockedLink}
-            onPress={() => navigation.navigate('BlockedMembers')}
-            accessibilityRole="button"
-          >
-            <Icon name="slash" size={14} color={colors.textSecondary} />
-            <Text style={styles.blockedLinkText}>Personas bloqueadas</Text>
-            <Icon name="chevron-right" size={14} color={colors.textSecondary} />
-          </Pressable>
+          <View style={styles.listHeader}>
+            {ownUserId ? (
+              <Pressable
+                style={({ pressed }) => [styles.profileLink, pressed && styles.cardPressed]}
+                onPress={() => navigation.navigate('CommunityMemberProfile', { userId: ownUserId })}
+                accessibilityRole="button"
+              >
+                <View style={styles.profileLinkIcon}>
+                  <Icon name="user" size={16} color={colors.primaryDeep} />
+                </View>
+                <View style={styles.profileLinkText}>
+                  <Text style={styles.profileLinkTitle}>Mi perfil en Comunidad</Text>
+                  <Text style={styles.profileLinkSubtitle}>Cómo te ven los demás y tu perfil de inversor</Text>
+                </View>
+                <Icon name="chevron-right" size={16} color={colors.textSecondary} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={styles.blockedLink}
+              onPress={() => navigation.navigate('BlockedMembers')}
+              accessibilityRole="button"
+            >
+              <Icon name="slash" size={14} color={colors.textSecondary} />
+              <Text style={styles.blockedLinkText}>Personas bloqueadas</Text>
+              <Icon name="chevron-right" size={14} color={colors.textSecondary} />
+            </Pressable>
+          </View>
         }
         ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.loading} color={colors.primary} /> : null}
         ListEmptyComponent={
@@ -248,6 +269,41 @@ const styles = StyleSheet.create({
   },
   emptyList: {
     flexGrow: 1,
+  },
+  listHeader: {
+    gap: 8,
+  },
+  profileLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  profileLinkIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
+  },
+  profileLinkText: {
+    flex: 1,
+  },
+  profileLinkTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.dark,
+  },
+  profileLinkSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: colors.textSecondary,
   },
   blockedLink: {
     flexDirection: 'row',

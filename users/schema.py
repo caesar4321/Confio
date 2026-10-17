@@ -2847,6 +2847,10 @@ class UpdateUsername(graphene.Mutation):
 		is_valid, error_message = validate_username(username)
 		if not is_valid:
 			return UpdateUsername(success=False, error=error_message, user=None)
+		# Comunidad shows members without a chosen username as "inversor_…";
+		# a new username can't take that shape (existing ones are untouched).
+		if username.lower().startswith('inversor_') and username.lower() != (user.username or '').lower():
+			return UpdateUsername(success=False, error="Ese nombre de usuario está reservado.", user=None)
 
 		# Check if username is already taken (case-insensitive)
 		existing_user = User.objects.filter(username__iexact=username).exclude(id=user.id).first()
