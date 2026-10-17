@@ -135,6 +135,11 @@ class TrackFunnelEvent(graphene.Mutation):
             logger.info('[funnel] rejected client paid_offer_interest stage %r', properties.get('stage'))
             return cls(success=True, recorded=False)
 
+        if event_name == 'paid_offer_interest':
+            # Server-stamped (never the client's word): which pitch the build had.
+            from users.paid_offers import app_version
+            properties['app_version'] = app_version(getattr(info.context, 'META', {}))
+
         user = getattr(info.context, 'user', None)
         if user is not None and not getattr(user, 'is_authenticated', False):
             user = None

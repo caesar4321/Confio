@@ -91,16 +91,17 @@ it('remembers someone already on the list and asks only what is unanswered', asy
 });
 
 it('logs Solo miraba and goes back without joining', async () => {
+  // An old Confío IA+ link opens Cuenta inteligente, with IA+ as its perk.
   mockParams = {offer: 'ia_plus', door: 'chip', trigger: 'investing'};
-  mockOffers = [offer({product: 'ia_plus'})];
   await mount();
-  expect(texts(tree)).toContain('Confío IA+');
+  expect(texts(tree)).toContain('Cuenta inteligente');
+  expect(texts(tree)).toContain('Incluye Confío IA+');
   await act(async () => { press(tree, 'Solo miraba').props.onPress(); });
   expect(mockJoin).not.toHaveBeenCalled();
   expect(mockGoBack).toHaveBeenCalled();
   const calls = (AnalyticsService.logFunnelEvent as jest.Mock).mock.calls;
   const last = calls[calls.length - 1];
-  expect(last[1]).toMatchObject({stage: 'solo_miraba', offer: 'ia_plus', door: 'chip', trigger: 'investing'});
+  expect(last[1]).toMatchObject({stage: 'solo_miraba', offer: 'smart_account', door: 'chip', trigger: 'investing'});
 });
 
 it('says "Ya estás en la lista" when the server reports an earlier join', async () => {

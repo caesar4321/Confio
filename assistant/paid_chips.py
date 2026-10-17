@@ -11,6 +11,12 @@ cuenta-inteligente-fake-door.md):
 - `investing`: the turn used get_portfolio or get_stock_quote → Confío IA+,
   same 7-day cap.
 
+Since 2026-10-17 Confío IA+ is a benefit of Cuenta inteligente (like Nu+ or
+Robinhood Gold), not its own offer: with `ia_plus` off, on builds whose pitch
+shows the IA+ perk (paid_offers.ia_plus_bundled), the Confío IA+ doors open
+Cuenta inteligente instead (`asked_ia_plus`, `investing`). Older builds get no
+IA+ door at all, so their Cuenta inteligente numbers stay what they were.
+
 At most one paid chip per reply; never after an escalation (the reply then
 belongs to the team), never to employees or old builds (allowed_destinations).
 Every chip shown is logged once as a `door_shown` funnel event, which is also
@@ -57,23 +63,31 @@ def choose(viewer, user_text, result, allowed):
     result.actions = [a for a in result.actions if a.get('target') not in PAID_OFFERS]
     if result.handoff_reason or viewer.user is None:
         return None
+    from users.paid_offers import ia_plus_bundled
+
+    # Confío IA+ off but Cuenta inteligente on: IA+ comes with Cuenta inteligente.
+    ia_key = 'ia_plus' if 'ia_plus' in allowed else None
+    if ia_key is None and ia_plus_bundled(meta=viewer.request_meta, user_id=viewer.user.pk):
+        ia_key = 'cuenta_inteligente'
     chosen = None
     for key in PAID_OFFERS:
-        if key in allowed and ASKED[key].search(text):
-            chosen = (key, 'asked')
+        target = ia_key if key == 'ia_plus' else key
+        if target in allowed and ASKED[key].search(text):
+            chosen = (target, 'asked' if target == key else 'asked_ia_plus')
             break
     if chosen is None:
         for action in paid:
-            key = action['target']
+            # Confío IA+ has no pain point of its own: the model opened it
+            # for a reason the regex didn't name.
+            key, trigger = ((ia_key, 'model') if action['target'] == 'ia_plus'
+                            else (action['target'], 'pain_point'))
             if key in allowed and not capped(viewer.user, key):
-                # Confío IA+ has no pain point of its own: the model opened it
-                # for a reason the regex didn't name.
-                chosen = (key, 'pain_point' if key == 'cuenta_inteligente' else 'model')
+                chosen = (key, trigger)
                 break
     if chosen is None:
         used = {str(t.get('name', '')) for t in result.tools if isinstance(t, dict) and t.get('ok')}
-        if used & INVESTING_TOOLS and 'ia_plus' in allowed and not capped(viewer.user, 'ia_plus'):
-            chosen = ('ia_plus', 'investing')
+        if used & INVESTING_TOOLS and ia_key in allowed and not capped(viewer.user, ia_key):
+            chosen = (ia_key, 'investing')
     if chosen is None:
         return None
     result.actions.append(_action(*chosen))
@@ -85,7 +99,7 @@ def log_shown(viewer, chosen):
     from users.funnel import emit_event
     from users.paid_offers import EVENT
 
-    from users.paid_offers import previewing
+    from users.paid_offers import app_version, previewing
 
     key, trigger = chosen
     if previewing(getattr(viewer.user, 'pk', None)):
@@ -95,4 +109,4 @@ def log_shown(viewer, chosen):
                source_type=PAID_OFFERS[key],
                properties={'stage': 'door_shown', 'offer': PAID_OFFERS[key], 'door': 'chip',
                            'trigger': trigger, 'account_type': viewer.account_type,
-                           'funded': has_funded(viewer.user)})
+                           'funded': has_funded(viewer.user), 'app_version': app_version(viewer.request_meta)})

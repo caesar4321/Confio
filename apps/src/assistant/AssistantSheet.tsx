@@ -375,14 +375,16 @@ export default function AssistantSheet() {
     queuedVoice.current = null;
   }, [activeAccount?.id]);
 
-  // Confío IA+ probe pill (waitlist only): the server decides who sees it.
-  const iaPlusOffer = usePaidOffers().ia_plus;
-  const showIaPlusPill = iaPlusOffer?.available === true && !plan?.isPlus;
+  // Confío IA+ strip (waitlist only): IA+ comes with Cuenta inteligente, so
+  // the strip opens that pitch and the server's Cuenta inteligente flag
+  // decides who sees it.
+  const smartAccountOffer = usePaidOffers().smart_account;
+  const showIaPlusPill = smartAccountOffer?.available === true && !plan?.isPlus;
   // Counted only when the pill is actually on screen (Confio Assistant's own
   // header, with the AI on), never for Soporte or Julian's channel.
   useEffect(() => {
     if (isOpen && showIaPlusPill && aiEnabled && available && channel === 'ia') {
-      logDoorShown('ia_plus', 'assistant_header');
+      logDoorShown('smart_account', 'assistant_header');
     }
   }, [isOpen, showIaPlusPill, aiEnabled, available, channel]);
   const openIaPlus = useCallback(() => {
@@ -390,7 +392,7 @@ export default function AssistantSheet() {
     setTimeout(
       () => (navigationRef as any).navigate('Main', {
         screen: 'PaidOffer',
-        params: { offer: 'ia_plus', door: 'assistant_header' },
+        params: { offer: 'smart_account', door: 'assistant_header' },
       }),
       250,
     );
@@ -924,14 +926,14 @@ export default function AssistantSheet() {
             onPress={openIaPlus}
             style={({ pressed }) => [styles.iaPlusStrip, pressed && styles.iaPlusStripPressed]}
             accessibilityRole="button"
-            accessibilityLabel="Confío IA+, próximamente. Tu asistente financiero personal"
+            accessibilityLabel="Confío IA+ con Cuenta inteligente, próximamente"
           >
             <View style={styles.iaPlusBadge}>
               <Text style={styles.iaPlusBadgeText}>IA+</Text>
             </View>
             <View style={styles.iaPlusStripText}>
-              <Text style={styles.iaPlusStripTitle} numberOfLines={1}>Conoce Confío IA+</Text>
-              <Text style={styles.iaPlusStripSub} numberOfLines={1}>Próximamente · tu asistente financiero personal</Text>
+              <Text style={styles.iaPlusStripTitle} numberOfLines={1}>Confío IA+ con Cuenta inteligente</Text>
+              <Text style={styles.iaPlusStripSub} numberOfLines={1}>Próximamente · tu dinero y tu asistente</Text>
             </View>
             <Icon name="chevron-right" size={18} color="#065F46" />
           </Pressable>

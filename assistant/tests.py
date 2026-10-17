@@ -1899,6 +1899,45 @@ class PaidChipAuditFixTests(TestCase):
         self.assertEqual(paid_chips.choose(self.viewer, 'quiero algo más avanzado', result, {'ia_plus'}),
                          ('ia_plus', 'model'))
 
+    @override_settings(SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION='5.2.4', PAID_OFFER_PREVIEW_USER_IDS='')
+    def test_ia_plus_doors_open_cuenta_inteligente_once_merged(self):
+        from . import paid_chips
+        self.viewer.request_meta = {'HTTP_X_CONFIO_VERSION': '5.2.4'}
+
+        def result(actions=(), tools=()):
+            return TurnResult(reply='ok', actions=list(actions), tools=list(tools))
+        allowed = {'home', 'cuenta_inteligente'}
+        self.assertEqual(paid_chips.choose(self.viewer, '¿Qué es Confío IA+?', result(), allowed),
+                         ('cuenta_inteligente', 'asked_ia_plus'))
+        self.assertEqual(paid_chips.choose(self.viewer, '¿Qué es la cuenta inteligente?', result(), allowed),
+                         ('cuenta_inteligente', 'asked'))
+        model = result(actions=[{'type': 'navigate', 'destination': 'home', 'target': 'ia_plus'}])
+        self.assertEqual(paid_chips.choose(self.viewer, 'quiero algo más avanzado', model, allowed),
+                         ('cuenta_inteligente', 'model'))
+        self.assertEqual(model.actions[-1]['target'], 'cuenta_inteligente')
+        investing = result(tools=[{'name': 'get_portfolio', 'ok': True}])
+        self.assertEqual(paid_chips.choose(self.viewer, 'mi portafolio', investing, allowed),
+                         ('cuenta_inteligente', 'investing'))
+        # Neither offer on: no chip at all.
+        self.assertIsNone(paid_chips.choose(self.viewer, '¿Qué es Confío IA+?', result(), {'home'}))
+        # A build whose pitch has no IA+ perk never gets an IA+ door.
+        self.viewer.request_meta = {'HTTP_X_CONFIO_VERSION': '5.2.3'}
+        self.assertIsNone(paid_chips.choose(self.viewer, '¿Qué es Confío IA+?', result(), allowed))
+        self.assertIsNone(paid_chips.choose(self.viewer, 'mi portafolio',
+                                            result(tools=[{'name': 'get_portfolio', 'ok': True}]), allowed))
+
+    def test_prompt_mentions_ia_plus_only_where_the_pitch_shows_it(self):
+        from .prompts import build_system_prompt
+        common = dict(first_name='Ana', account_label='Personal', country='BO', screen='', local_now='now')
+        with override_settings(SMART_ACCOUNT_PROBE_ENABLED=True):
+            bundled = build_system_prompt(destinations=['home', 'cuenta_inteligente'], ia_plus_bundled=True, **common)
+            plain = build_system_prompt(destinations=['home', 'cuenta_inteligente'], **common)
+            both = build_system_prompt(destinations=['home', 'ia_plus', 'cuenta_inteligente'], ia_plus_bundled=True,
+                                       **common)
+        self.assertIn('incluye Confío IA+', bundled)
+        self.assertNotIn('Confío IA+', plain)
+        self.assertNotIn('no se ofrece por separado', both)  # standalone IA+ back on: no contradiction
+
     @override_settings(PAID_OFFER_PREVIEW_USER_IDS='')
     def test_shown_chips_are_logged_except_for_preview_testers(self):
         from users.models import FunnelEvent

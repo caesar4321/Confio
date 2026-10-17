@@ -142,7 +142,7 @@ class JoinPaidOfferWaitlist(graphene.Mutation):
             emit_event(paid_offers.EVENT, user=user, country=entry.country, source_type=product,
                        properties={'stage': 'avisame_tapped', 'offer': product, 'door': door,
                                    'trigger': trigger, 'account_type': entry.account_type,
-                                   'funded': entry.funded})
+                                   'funded': entry.funded, 'app_version': paid_offers.app_version(_meta(info))})
         return cls(success=True, waitlisted_at=entry.created_at, already_listed=not created)
 
 
@@ -191,7 +191,8 @@ class AnswerPaidOffer(graphene.Mutation):
         emit_event(paid_offers.EVENT, user=entry.user, country=entry.country, source_type=product,
                    properties={'stage': 'would_pay_answered' if would_pay is not None else 'volume_answered',
                                'offer': product, 'answer': would_pay or volume_range,
-                               'door': entry.door, 'funded': entry.funded})
+                               'door': entry.door, 'funded': entry.funded,
+                               'app_version': paid_offers.app_version(_meta(info))})
         return cls(success=True)
 
 

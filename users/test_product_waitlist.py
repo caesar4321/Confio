@@ -136,15 +136,32 @@ class PaidOfferWaitlistTests(TestCase):
                    PAID_OFFER_MIN_APP_VERSION='5.1.10', PAID_OFFER_PREVIEW_USER_IDS='5, 7')
 class PaidOfferPreviewTests(TestCase):
     def test_listed_people_preview_while_the_flags_are_off(self):
-        self.assertTrue(paid_offers.available('ia_plus', is_employee=False, meta=NEW_BUILD, user_id=5))
+        self.assertTrue(paid_offers.available('smart_account', is_employee=False, meta=NEW_BUILD, user_id=5))
         self.assertTrue(paid_offers.available('smart_account', is_employee=False, meta=NEW_BUILD, user_id=7))
-        self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=NEW_BUILD, user_id=55))
-        self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=NEW_BUILD))
+        self.assertFalse(paid_offers.available('smart_account', is_employee=False, meta=NEW_BUILD, user_id=55))
+        self.assertFalse(paid_offers.available('smart_account', is_employee=False, meta=NEW_BUILD))
         # A preview never bypasses the employee rule; it does skip the build
         # floor (a pre-release test build), for listed ids only.
-        self.assertFalse(paid_offers.available('ia_plus', is_employee=True, meta=NEW_BUILD, user_id=5))
-        self.assertTrue(paid_offers.available('ia_plus', is_employee=False, meta=OLD_BUILD, user_id=5))
-        self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=OLD_BUILD, user_id=55))
+        self.assertFalse(paid_offers.available('smart_account', is_employee=True, meta=NEW_BUILD, user_id=5))
+        self.assertTrue(paid_offers.available('smart_account', is_employee=False, meta=OLD_BUILD, user_id=5))
+        self.assertFalse(paid_offers.available('smart_account', is_employee=False, meta=OLD_BUILD, user_id=55))
+        # The standalone Confío IA+ is part of Cuenta inteligente now: a
+        # tester sees the merged offer, never the old IA+ door.
+        self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=NEW_BUILD, user_id=5))
+
+    def test_app_version_is_read_from_the_request_only_when_well_formed(self):
+        self.assertEqual(paid_offers.app_version({'HTTP_X_CONFIO_VERSION': '5.2.4'}), '5.2.4')
+        self.assertEqual(paid_offers.app_version({'HTTP_X_CONFIO_VERSION': 'x<script>'}), '')
+        self.assertEqual(paid_offers.app_version(None), '')
+
+    @override_settings(SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION='5.2.4')
+    def test_ia_plus_is_bundled_only_on_builds_with_the_perk(self):
+        self.assertTrue(paid_offers.ia_plus_bundled(meta={'HTTP_X_CONFIO_VERSION': '5.2.4'}))
+        self.assertFalse(paid_offers.ia_plus_bundled(meta={'HTTP_X_CONFIO_VERSION': '5.2.3'}))
+        self.assertFalse(paid_offers.ia_plus_bundled(meta={}))
+        self.assertTrue(paid_offers.ia_plus_bundled(meta={}, user_id=5))  # a preview tester
+        with override_settings(SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION=''):
+            self.assertFalse(paid_offers.ia_plus_bundled(meta={'HTTP_X_CONFIO_VERSION': '9.9.9'}))
 
 
 @override_settings(**PROBES_ON)
@@ -176,6 +193,8 @@ class PaidOfferAuditFixTests(TestCase):
                                              status='ACTIVE', expires_at=timezone.now() + timedelta(days=30))
         self.assertFalse(paid_offers.available('ia_plus', is_employee=False, meta=NEW_BUILD, user_id=self.ana.pk))
         self.assertTrue(paid_offers.available('smart_account', is_employee=False, meta=NEW_BUILD, user_id=self.ana.pk))
+        with self.settings(SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION='5.1.10'):
+            self.assertFalse(paid_offers.ia_plus_bundled(meta=NEW_BUILD, user_id=self.ana.pk))
 
     def test_clients_cannot_write_server_stages(self):
         from users.funnel_schema import _client_paid_offer_stage

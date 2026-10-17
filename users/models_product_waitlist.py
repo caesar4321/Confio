@@ -19,7 +19,8 @@ PRODUCTS = frozenset(key for key, _ in PRODUCT_CHOICES)
 
 # Where the pitch was opened from, and why.
 DOORS = frozenset({'billeteras', 'assistant_header', 'chip'})
-TRIGGERS = frozenset({'', 'investing', 'pain_point', 'model', 'asked'})
+# asked_ia_plus: asked about Confío IA+, shown Cuenta inteligente (IA+ comes with it).
+TRIGGERS = frozenset({'', 'investing', 'pain_point', 'model', 'asked', 'asked_ia_plus'})
 WOULD_PAY_CHOICES = [('yes', 'Sí'), ('no', 'No')]
 VOLUME_RANGES = ('lt_100', '100_500', '500_2000', 'gt_2000')
 VOLUME_CHOICES = [

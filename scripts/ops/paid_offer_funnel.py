@@ -8,6 +8,11 @@ split by door, then the waitlists: would-pay and volume answers, funded share an
 country. Preview users (PAID_OFFER_PREVIEW_USER_IDS, the founder's test account)
 are excluded. "Saw it" only counts builds at PAID_OFFER_MIN_APP_VERSION or later,
 so compare runs over time, not against total users.
+
+Since 2026-10-17 Confío IA+ is a perk of Cuenta inteligente: IA+ rows stop
+growing, and Cuenta inteligente is also split by pitch. Events carry the
+server-stamped app_version since then; builds at SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION
+or later saw "Incluye Confío IA+", older ones (and events without a version) the old pitch.
 """
 from collections import Counter, defaultdict
 
@@ -19,6 +24,15 @@ from users.models_product_waitlist import ProductWaitlistEntry
 PREVIEW = {int(p) for p in str(getattr(settings, 'PAID_OFFER_PREVIEW_USER_IDS', '') or '').split(',') if p.strip().isdigit()}
 STAGES = ('door_shown', 'detail_opened', 'avisame_tapped', 'solo_miraba', 'would_pay_answered', 'volume_answered')
 PRODUCTS = {'ia_plus': 'Confío IA+', 'smart_account': 'Cuenta inteligente'}
+BUNDLE_FLOOR = str(getattr(settings, 'SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION', '') or '')
+
+
+def bundled(props):
+    floor, version = BUNDLE_FLOOR.split('.'), str((props or {}).get('app_version') or '').split('.')
+    try:
+        return bool(BUNDLE_FLOOR) and tuple(map(int, version)) >= tuple(map(int, floor))
+    except ValueError:
+        return False
 
 events = FunnelEvent.objects.filter(event_name='paid_offer_interest', user__isnull=False).exclude(user_id__in=PREVIEW)
 first = events.order_by('created_at').values_list('created_at', flat=True).first()
@@ -60,6 +74,22 @@ for product, name in PRODUCTS.items():
         print(f"    country:     {Counter(waitlist.values_list('country', flat=True)).most_common(8)}")
         print(f"    door:        {dict(Counter(waitlist.values_list('door', flat=True)))}"
               f"  trigger: {dict(Counter(t or '-' for t in waitlist.values_list('trigger', flat=True)))}")
+
+print(f"\n=== Cuenta inteligente by pitch (IA+ perk from build {BUNDLE_FLOOR or 'none'}) ===")
+by_pitch = defaultdict(lambda: defaultdict(set))
+answers = defaultdict(dict)  # pitch -> user -> latest would-pay answer
+for uid, props in (events.filter(source_type='smart_account').order_by('created_at')
+                   .values_list('user_id', 'properties')):
+    pitch = 'with IA+' if bundled(props) else 'old'
+    by_pitch[pitch][(props or {}).get('stage')].add(uid)
+    if (props or {}).get('stage') == 'would_pay_answered':
+        answers[pitch][uid] = props.get('answer')
+for label in ('old', 'with IA+'):
+    users_at = by_pitch[label]
+    seen = len(users_at['door_shown'])
+    print(f"  {label:<9} saw {seen:>4}  opened {len(users_at['detail_opened']):>4}"
+          f"  joined {len(users_at['avisame_tapped']):>4} ({pct(len(users_at['avisame_tapped']), seen).strip()})"
+          f"  would pay {dict(Counter(answers[label].values()))}")
 
 both = (set(ProductWaitlistEntry.objects.filter(product='ia_plus').values_list('user_id', flat=True))
         & set(ProductWaitlistEntry.objects.filter(product='smart_account').values_list('user_id', flat=True))) - PREVIEW

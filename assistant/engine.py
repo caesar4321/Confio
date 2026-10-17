@@ -1160,6 +1160,8 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
 
 
 def _run_turn(belt, result, viewer, history, *, first_name, account_label, country):
+    from users import paid_offers
+
     local_now = timezone.now().astimezone(viewer.tz)
     system = build_system_prompt(
         first_name=first_name,
@@ -1169,6 +1171,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         local_now=f'{local_now:%Y-%m-%d %H:%M} ({viewer.tz})',
         destinations=belt.destinations,
         can_navigate=belt.can_navigate,
+        ia_plus_bundled=('cuenta_inteligente' in belt.destinations and paid_offers.ia_plus_bundled(
+            meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
     )
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     effort = conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')

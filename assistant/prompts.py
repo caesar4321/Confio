@@ -114,7 +114,7 @@ PAID_OFFER_SECTIONS = {
         '\n## Cuenta inteligente (lista de espera)\n'
         '- Cuenta inteligente es una cuenta que estamos preparando: pagos automáticos a Pix, Bre-B, CLABE y Alias, '
         'suscripciones con comercios, transferencias programadas, control de tus débitos y aviso antes de cada '
-        'cobro{price}. Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame".\n'
+        'cobro{price}.{ia_plus} Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame".\n'
         '- Si la persona cuenta que paga a mano cada mes (alquiler, familia, servicios), que quiere que su dinero se '
         'mueva solo, o que le cuesta mover dinero cada mes, menciónala en una frase y abre `cuenta_inteligente`. Si '
         'pregunta por ella, responde con esto y ábrela. Nunca des una fecha, nunca prometas beneficios fuera de esta '
@@ -122,7 +122,14 @@ PAID_OFFER_SECTIONS = {
 }
 
 
-def _paid_offer_sections(destinations):
+# Only where the person's pitch shows the perk and the standalone offer is off.
+IA_PLUS_IN_SMART_ACCOUNT = (
+    ' Además incluye Confío IA+: respuestas más avanzadas de Confío IA, conversación por voz en tiempo real (como '
+    'una llamada; los audios ya están en Confío IA), más uso cada día y seguimiento de tus metas. Confío IA+ no se '
+    'ofrece por separado: si preguntan por Confío IA+, dilo así y abre `cuenta_inteligente`.')
+
+
+def _paid_offer_sections(destinations, ia_plus_bundled=False):
     from users import paid_offers
 
     from .destinations import PAID_OFFERS
@@ -130,7 +137,9 @@ def _paid_offer_sections(destinations):
     for key, section in PAID_OFFER_SECTIONS.items():
         if key in destinations:
             amount = paid_offers.price(PAID_OFFERS[key])
-            out += section.format(price=f', por US${amount} al mes' if amount else '')
+            bundled = ia_plus_bundled and key == 'cuenta_inteligente' and 'ia_plus' not in destinations
+            out += section.format(price=f', por US${amount} al mes' if amount else '',
+                                  ia_plus=IA_PLUS_IN_SMART_ACCOUNT if bundled else '')
     return out
 
 
@@ -147,10 +156,11 @@ NO_RAMP_NOTE = ('En su país hoy no hay Recargar ni Retirar en la app: no le dig
                 'medios locales.\n')
 
 
-def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True):
+def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
+                        ia_plus_bundled=False):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
     prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text())
-              + _paid_offer_sections(destinations)
+              + _paid_offer_sections(destinations, ia_plus_bundled)
               + DESTINATIONS_SECTION.format(destinations=lines))
     if not can_navigate:
         prompt += NO_NAVIGATION_NOTE

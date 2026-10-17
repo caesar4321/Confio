@@ -1,5 +1,6 @@
-// The pitch behind the paid-offer probes (Confío IA+, Cuenta inteligente).
-// A waitlist only: nothing is sold, charged or unlocked here. "¡Anotado!"
+// The pitch behind the paid-offer probe: Cuenta inteligente, with Confío IA+
+// as an included benefit (like Nu+ or Robinhood Gold) since 2026-10-17; the
+// old standalone IA+ route opens this same pitch. A waitlist only: nothing is sold, charged or unlocked here. "¡Anotado!"
 // appears only after the server confirms the join (never optimistically), and
 // the price is the server's value. Design: docs/designs/cuenta-inteligente-fake-door.md.
 //
@@ -38,31 +39,25 @@ const BACK_SIZE = 40;
 
 type Benefit = { icon: string; name: string; line: string };
 
-// Matched copy: five benefits each, same price (design review + eng review D7).
-const OFFERS: Record<PaidOfferKey, { title: string; headline: string; benefits: Benefit[] }> = {
-  ia_plus: {
-    title: 'Confío IA+',
-    headline: 'Tu asistente financiero personal.',
-    benefits: [
-      { icon: 'message-circle', name: 'Respuestas más avanzadas', line: 'Modelos de IA más capaces para tus preguntas de dinero.' },
-      { icon: 'phone-call', name: 'Voz en tiempo real', line: 'Habla con Confío IA como en una llamada, sin esperar audios.' },
-      { icon: 'zap', name: 'Más uso de Confío IA', line: 'Más preguntas y análisis cada día.' },
-      { icon: 'pie-chart', name: 'Análisis de tus gastos, ahorros e inversiones', line: 'Con tus números reales.' },
-      { icon: 'target', name: 'Seguimiento personalizado', line: 'De tus metas y de cómo se mueve tu dinero.' },
-    ],
-  },
-  smart_account: {
-    title: 'Cuenta inteligente',
-    headline: 'Tu dinero se mueve según tus reglas.',
-    benefits: [
-      { icon: 'repeat', name: 'Pagos automáticos', line: 'A Pix, Bre-B, CLABE y Alias, que tú autorizas y cancelas cuando quieras.' },
-      { icon: 'credit-card', name: 'Suscripciones con comercios', line: 'Con el monto y la frecuencia que tú apruebas.' },
-      { icon: 'calendar', name: 'Transferencias programadas', line: 'A tu familia y a tus propias cuentas.' },
-      { icon: 'shield', name: 'Control de débitos', line: 'Tú apruebas cada permiso y lo puedes quitar.' },
-      { icon: 'bell', name: 'Aviso antes de cada cobro', line: 'Y si un cobro viene más alto de lo normal.' },
-    ],
-  },
+// The account is the offer; Confío IA+ comes with it, shown as one perk block.
+const OFFER: { title: string; headline: string; benefits: Benefit[] } = {
+  title: 'Cuenta inteligente',
+  headline: 'Tu dinero se mueve según tus reglas.',
+  benefits: [
+    { icon: 'repeat', name: 'Pagos automáticos', line: 'A Pix, Bre-B, CLABE y Alias, que tú autorizas y cancelas cuando quieras.' },
+    { icon: 'credit-card', name: 'Suscripciones con comercios', line: 'Con el monto y la frecuencia que tú apruebas.' },
+    { icon: 'calendar', name: 'Transferencias programadas', line: 'A tu familia y a tus propias cuentas.' },
+    { icon: 'shield', name: 'Control de débitos', line: 'Tú apruebas cada permiso y lo puedes quitar.' },
+    { icon: 'bell', name: 'Aviso antes de cada cobro', line: 'Y si un cobro viene más alto de lo normal.' },
+  ],
 };
+
+const IA_PLUS_PERKS = [
+  'Respuestas más avanzadas de Confío IA',
+  'Voz en tiempo real, como una llamada',
+  'Más preguntas y análisis cada día',
+  'Seguimiento de tus metas y de tu dinero',
+];
 
 const VOLUMES: { key: string; label: string }[] = [
   { key: 'lt_100', label: 'Menos de US$100' },
@@ -79,27 +74,16 @@ function shortDate(iso: string | null | undefined) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('es', { day: 'numeric', month: 'short' });
 }
 
-function OfferMark({ offer }: { offer: PaidOfferKey }) {
-  if (offer === 'smart_account') {
-    return <CuentaInteligenteMark size={64} />;
-  }
-  // Confío IA+: the same deep emerald disc family, with its name as the glyph
-  // (never a sparkle or violet, which read as an AI unlock).
-  return (
-    <View style={styles.iaMark}>
-      <Text style={styles.iaMarkText}>IA+</Text>
-    </View>
-  );
-}
-
 export function PaidOfferScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const route = useRoute<RouteProp<MainStackParamList, 'PaidOffer'>>();
-  const offer: PaidOfferKey = route.params?.offer === 'smart_account' ? 'smart_account' : 'ia_plus';
+  // Every door (Billeteras, the assistant strip, chips, an old IA+ link)
+  // opens Cuenta inteligente: Confío IA+ is no longer sold on its own.
+  const offer: PaidOfferKey = 'smart_account';
   const door = route.params?.door ?? 'chip';
   const trigger = route.params?.trigger ?? '';
-  const copy = OFFERS[offer];
+  const copy = OFFER;
   const state = usePaidOffers()[offer];
   const price = state?.monthlyPriceUsd ?? null;
 
@@ -219,7 +203,7 @@ export function PaidOfferScreen() {
         <View style={[styles.hero, { paddingTop: insets.top + 8 + BACK_SIZE }]}>
           <Rise index={0} style={styles.heroBody}>
             <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <OfferMark offer={offer} />
+              <CuentaInteligenteMark size={64} />
             </View>
             <View style={styles.soonTag}>
               <Text style={styles.soonTagText}>Próximamente</Text>
@@ -246,7 +230,28 @@ export function PaidOfferScreen() {
           ))}
         </Rise>
 
-        <Rise index={2} style={styles.priceCard}>
+        {/* Confío IA+: a perk of the account, never its own offer. Its badge is
+            the deep emerald disc with the name as the glyph (never a sparkle
+            or violet, which read as an AI unlock). */}
+        <Rise index={2} style={styles.perks}>
+          <View style={styles.perksHead} accessible accessibilityLabel="Incluye Confío IA+, tu asistente financiero personal">
+            <View style={styles.iaMark}>
+              <Text style={styles.iaMarkText}>IA+</Text>
+            </View>
+            <View style={styles.perksHeadText}>
+              <Text style={styles.perksTitle}>Incluye Confío IA+</Text>
+              <Text style={styles.perksSub}>Tu asistente financiero personal.</Text>
+            </View>
+          </View>
+          {IA_PLUS_PERKS.map((perk) => (
+            <View key={perk} style={styles.perk}>
+              <Icon name="check" size={16} color={EMERALD} />
+              <Text style={styles.perkText}>{perk}</Text>
+            </View>
+          ))}
+        </Rise>
+
+        <Rise index={3} style={styles.priceCard}>
           {price ? (
             <View style={styles.priceRow} accessible accessibilityLabel={`${price} dólares al mes al lanzar`}>
               <Text style={styles.priceAmount}>{`US$${price}`}</Text>
@@ -384,14 +389,28 @@ const styles = StyleSheet.create({
   statusBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: HERO, zIndex: 2, elevation: 4 },
   heroBody: { marginTop: 8 },
   iaMark: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: DEEP,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iaMarkText: { fontSize: 20, fontWeight: '700', color: '#FCD34D' },
+  iaMarkText: { fontSize: 15, fontWeight: '700', color: '#FCD34D' },
+  perks: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 20,
+    padding: 18,
+    ...shadow,
+  },
+  perksHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  perksHeadText: { flex: 1, marginLeft: 12 },
+  perksTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
+  perksSub: { fontSize: 14, color: MUTED, marginTop: 2 },
+  perk: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
+  perkText: { fontSize: 15, color: TEXT, marginLeft: 10, flexShrink: 1 },
   soonTag: {
     alignSelf: 'flex-start',
     marginTop: 16,

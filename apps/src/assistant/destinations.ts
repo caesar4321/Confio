@@ -39,7 +39,8 @@ export const DESTINATION_TARGETS: Record<string, Target> = {
   tokenomics: { screen: 'ConfioTokenomics' },
   // Paid-offer probes (waitlist pitches); the server only offers them on
   // builds that have this screen.
-  ia_plus: { screen: 'PaidOffer', params: { offer: 'ia_plus' } },
+  // Confío IA+ comes with Cuenta inteligente (2026-10-17): same pitch.
+  ia_plus: { screen: 'PaidOffer', params: { offer: 'smart_account' } },
   cuenta_inteligente: { screen: 'PaidOffer', params: { offer: 'smart_account' } },
 };
 

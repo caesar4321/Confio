@@ -10,6 +10,11 @@ Pure intent probes: nothing is sold, charged or unlocked. Who sees each door:
 
 Each probe has its own server flag, so App Review objections can turn one off
 alone. Prices come from settings, never from app copy.
+
+Since 2026-10-17 Confío IA+ is a benefit inside Cuenta inteligente (like Nu+
+or Robinhood Gold), not its own offer: IA_PLUS_PROBE_ENABLED is off and its
+doors open Cuenta inteligente. The preview list no longer turns the standalone
+IA+ back on, so a tester sees what everyone sees.
 """
 import re
 
@@ -36,10 +41,12 @@ def previewing(user_id):
 
 
 def enabled(product, user_id=None):
-    """The probe's flag, or a preview for listed people."""
+    """The probe's flag, or a preview for listed people (never for the
+    standalone Confío IA+, now part of Cuenta inteligente)."""
     if product not in PRODUCTS:
         return False
-    return bool(getattr(settings, FLAGS[product], False)) or previewing(user_id)
+    on = bool(getattr(settings, FLAGS[product], False))
+    return on or (product != PRODUCT_IA_PLUS and previewing(user_id))
 
 
 def price(product):
@@ -54,12 +61,23 @@ def _version(value):
     return tuple(int(part) for part in value.split('.'))
 
 
+def _at_least(meta, setting):
+    floor = _version(str(getattr(settings, setting, '') or ''))
+    version = _version(str((meta or {}).get('HTTP_X_CONFIO_VERSION', '') or ''))
+    return floor is not None and version is not None and version >= floor
+
+
+def app_version(meta):
+    """The build that made the request ("5.2.4"), or '' (stamped on probe
+    events so a pitch change is read by build, not by date)."""
+    value = str((meta or {}).get('HTTP_X_CONFIO_VERSION', '') or '')
+    return value if _version(value) else ''
+
+
 def client_supports(meta):
     """True on app builds that have the pitch screen, so old builds never get
     a chip that opens nothing (and are never counted as shown)."""
-    floor = _version(str(getattr(settings, 'PAID_OFFER_MIN_APP_VERSION', '') or ''))
-    version = _version(str((meta or {}).get('HTTP_X_CONFIO_VERSION', '') or ''))
-    return floor is not None and version is not None and version >= floor
+    return _at_least(meta, 'PAID_OFFER_MIN_APP_VERSION')
 
 
 def _has_plus(user_id):
@@ -76,6 +94,15 @@ def available(product, *, is_employee, meta, user_id=None):
     if not (enabled(product, user_id) and not is_employee and (client_supports(meta) or previewing(user_id))):
         return False
     return not (product == PRODUCT_IA_PLUS and user_id is not None and _has_plus(user_id))
+
+
+def ia_plus_bundled(*, meta, user_id=None):
+    """Does this person's Cuenta inteligente pitch include Confío IA+? Only on
+    builds that show the perk block (older pitches never mention it), and
+    never for someone who already has Assistant+."""
+    if not (_at_least(meta, 'SMART_ACCOUNT_IA_PLUS_MIN_APP_VERSION') or previewing(user_id)):
+        return False
+    return not (user_id is not None and _has_plus(user_id))
 
 
 def billeteras_row_visible(*, is_employee, meta, user_id=None):
