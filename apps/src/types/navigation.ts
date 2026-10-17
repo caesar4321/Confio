@@ -509,6 +509,7 @@ export type MainStackParamList = {
   ConfioTokenInfo: undefined;
   LatamCommunity: undefined;
   FundFlow: undefined;
+  StocksActivity: undefined;
   ProtectedSavings: undefined;
   HumanitarianAid: { slug?: string } | undefined;
   ConfioPresale: undefined;

@@ -92,6 +92,7 @@ import AchievementsScreen from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
 import { LatamCommunityScreen } from '../screens/LatamCommunityScreen';
 import { FundFlowScreen } from '../screens/FundFlowScreen';
+import { StocksActivityScreen } from '../screens/StocksActivityScreen';
 import { ProtectedSavingsScreen } from '../screens/ProtectedSavingsScreen';
 import { HumanitarianAidScreen } from '../screens/HumanitarianAidScreen';
 import { ConfioPresaleScreen } from '../screens/ConfioPresaleScreen';
@@ -646,6 +647,11 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="FundFlow"
           component={FundFlowScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="StocksActivity"
+          component={StocksActivityScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen

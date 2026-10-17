@@ -149,6 +149,16 @@ describe('HomeStatsSection layout', () => {
     mockStockTile = {assetCount: 458, investedUsd: null};
   });
 
+  it('opens Acciones en movimiento from the volume tile, like Movido opens its breakdown', () => {
+    mockStockTile = {assetCount: 458, investedUsd: null, tradedUsd: 3424.6};
+    mockNavigate.mockClear();
+    const root = render().root;
+    const tile = root.find((node: any) => node.props.accessibilityLabel?.startsWith?.('Acciones:') && node.props.onPress);
+    act(() => tile.props.onPress());
+    expect(mockNavigate).toHaveBeenCalledWith('StocksActivity');
+    mockStockTile = {assetCount: 458, investedUsd: null};
+  });
+
   it('shows money moved both ways and opens its breakdown', () => {
     const root = render().root;
     const movido = tileLabels(root)[2];

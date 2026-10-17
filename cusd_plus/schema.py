@@ -398,6 +398,28 @@ class GmCommunityType(graphene.ObjectType):
 GM_COMMUNITY_MIN_ASSET_HOLDERS = 3
 
 
+class GmTradingTopAssetType(graphene.ObjectType):
+    symbol = graphene.String(required=True)
+    ticker = graphene.String(required=True)
+    name = graphene.String(required=True)
+    trade_count = graphene.Int(required=True)
+    trader_count = graphene.Int(required=True)
+
+
+class GmTradingStatsType(graphene.ObjectType):
+    total_usd = graphene.Float(required=True)
+    # Null unless both sides have enough distinct traders (privacy floor).
+    buy_usd = graphene.Float()
+    sell_usd = graphene.Float()
+    buy_count = graphene.Int(required=True)
+    sell_count = graphene.Int(required=True)
+    trader_count = graphene.Int(required=True)
+    median_buy_usd = graphene.Float(description="Typical purchase; null below enough purchases")
+    since = graphene.DateTime()
+    top_assets = graphene.NonNull(graphene.List(graphene.NonNull(GmTradingTopAssetType)),
+                                  description="Most traded stocks, only those traded by enough people")
+
+
 _NAME_NOISE = (
     ' Common Stock', ' Class A', ' Class B', ' Class C', ', Inc.', ' Inc.',
     ' Corporation', ' Corp.', ' Holdings', ' Ltd.', ' PLC', ' N.V.', ' S.A.',
@@ -476,6 +498,10 @@ class Query(graphene.ObjectType):
         GmCommunityType,
         description="Marked-to-market aggregate holdings for eligible users; never settlement volume",
     )
+    gm_trading_stats = graphene.Field(
+        GmTradingStatsType,
+        description="Community stock trading (settled volume, buys/sales, most traded) for eligible users",
+    )
     gm_soft_quote = graphene.Field(
         GmTradeQuoteType,
         symbol=graphene.String(required=True),
@@ -549,6 +575,26 @@ class Query(graphene.ObjectType):
             return BscRpcResult(result=_json.dumps(_rpc(method, parsed)))
         except Exception as exc:  # noqa: BLE001
             return BscRpcResult(error=str(exc)[:200])
+
+    def resolve_gm_trading_stats(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
+            return None
+        from . import gm_trading_stats
+
+        stats = gm_trading_stats.trading_stats()
+        if stats is None:
+            return None
+        return GmTradingStatsType(
+            total_usd=stats.total_usd, buy_usd=stats.buy_usd, sell_usd=stats.sell_usd,
+            buy_count=stats.buy_count, sell_count=stats.sell_count, trader_count=stats.trader_count,
+            median_buy_usd=stats.median_buy_usd, since=stats.since,
+            top_assets=[GmTradingTopAssetType(
+                symbol=a.symbol, ticker=a.ticker, name=_display_name(a.name), trade_count=a.trade_count,
+                trader_count=a.trader_count) for a in stats.top_assets],
+        )
 
     def resolve_gm_community(self, info):
         user = getattr(info.context, 'user', None)

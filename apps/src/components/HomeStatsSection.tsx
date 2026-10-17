@@ -218,9 +218,9 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       // count query still starts in parallel, so it is ready when shown.
       // Volume traded is the activity number (founder, 2026-10-17): money
       // members actually moved through stocks, not a holdings snapshot. The
-      // older numbers stay as fallbacks for a server without it. Like every
-      // proof tile it opens the explanation (what Ondo Stocks is, what the
-      // community does), not the buy list: that is one tap further.
+      // older numbers stay as fallbacks for a server without it. Like
+      // Movido opens Dinero en movimiento, it opens its breakdown (Acciones
+      // en movimiento); buying and the Ondo explainer are one tap further.
       const stocks: Tile | null = !stocksEnabled
         ? null
         : stockTradedUsd != null && stockTradedUsd > 0
@@ -231,7 +231,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
           unit: 'USD',
           label: 'Acciones',
           descriptor: 'Operado en EE.UU.',
-          onPress: () => navigation.navigate('OndoStocksInfo'),
+          onPress: () => navigation.navigate('StocksActivity'),
         }
         : stockInvestedUsd != null
         ? {

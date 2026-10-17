@@ -3,6 +3,7 @@ import {
   Alert,
   Image,
   Linking,
+  Pressable,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -287,10 +288,16 @@ export const OndoStocksInfoScreen = () => {
               </Text>
             </View>
             {tradedLabel && (
-              <View style={styles.heroPill}>
+              <Pressable
+                onPress={() => navigation.navigate('StocksActivity')}
+                style={styles.heroPill}
+                accessibilityRole="button"
+                accessibilityHint="Ver la actividad de la comunidad"
+              >
                 <Icon name="repeat" size={14} color={colors.primary} />
                 <Text style={styles.heroPillText}>US${tradedLabel} operados</Text>
-              </View>
+                <Icon name="chevron-right" size={14} color={colors.primary} />
+              </Pressable>
             )}
             {stocksTvlLabel && (
               <View style={styles.heroPill}>
