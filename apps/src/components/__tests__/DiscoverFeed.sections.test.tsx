@@ -81,4 +81,33 @@ describe('DiscoverFeed sections', () => {
     const tree = render({ items: [item({})] });
     expect(tree.root.findAll((node) => node.type === Pressable && node.props.accessibilityRole === 'tab')).toHaveLength(0);
   });
+
+  it('renders an activity post as the verified movement plus the note, never the body', () => {
+    const tree = render({
+      items: [item({ id: 7, sourceName: 'ana', body: 'Compró AAPL por US$50\n\nMi primera acción', title: '' })],
+      postExtras: {
+        7: {
+          contentItemId: '7', authorId: '42', note: 'Mi primera acción',
+          activity: { kind: 'stock_buy', ticker: 'AAPL', amountUsd: '50.00', headline: 'Compró AAPL por US$50' },
+        },
+      },
+    });
+    const shown = texts(tree);
+    expect(shown).toContain('Compró AAPL');
+    expect(shown).toContain('Mi primera acción');
+    expect(shown.some((text) => text.includes('Compró AAPL por US$50'))).toBe(false);
+  });
+
+  it('opens the author profile from a member byline, but not from official ones', () => {
+    const onOpenAuthor = jest.fn();
+    const tree = render({
+      items: [item({ id: 1, sourceName: 'ana' }), item({ id: 2, sourceName: 'Confío', isOfficial: true })],
+      postExtras: { 1: { contentItemId: '1', authorId: '42' }, 2: { contentItemId: '2', authorId: '9' } },
+      onOpenAuthor,
+    });
+    const links = tree.root.findAll((node) => node.type === Pressable && /Ver el perfil/.test(node.props.accessibilityLabel || ''));
+    expect(links).toHaveLength(1);
+    act(() => links[0].props.onPress());
+    expect(onOpenAuthor).toHaveBeenCalledWith('42');
+  });
 });

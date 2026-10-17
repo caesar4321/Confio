@@ -249,15 +249,26 @@ export const CommunityComposeScreen = () => {
 
   if (!status || !status.canPost) {
     const needsVerification = status?.blockCode === 'not_verified';
+    // Posts are signed with the member's username: pick one, then come back
+    // (the focus refetch above lifts the block).
+    const needsUsername = status?.blockCode === 'username_required';
     return (
       <View style={styles.container}>
         {header}
         <View style={styles.stateWrap}>
           <View style={styles.stateIcon}>
-            <Icon name={needsVerification ? 'shield' : 'info'} size={28} color={colors.primaryDark} />
+            <Icon
+              name={needsVerification ? 'shield' : needsUsername ? 'at-sign' : 'info'}
+              size={28}
+              color={colors.primaryDark}
+            />
           </View>
           <Text style={styles.stateTitle}>
-            {needsVerification ? 'Verifica tu identidad para publicar' : 'No puedes publicar ahora'}
+            {needsVerification
+              ? 'Verifica tu identidad para publicar'
+              : needsUsername
+                ? 'Elige tu nombre de usuario'
+                : 'No puedes publicar ahora'}
           </Text>
           <Text style={styles.stateSubtitle}>
             {status?.blockMessage || 'No pudimos cargar la comunidad. Inténtalo de nuevo más tarde.'}
@@ -275,6 +286,14 @@ export const CommunityComposeScreen = () => {
                 <Text style={styles.primaryButtonText}>Verificar identidad</Text>
               </Pressable>
             </>
+          ) : needsUsername ? (
+            <Pressable
+              style={styles.primaryButton}
+              onPress={() => navigation.navigate('UpdateUsername')}
+              accessibilityRole="button"
+            >
+              <Text style={styles.primaryButtonText}>Elegir nombre de usuario</Text>
+            </Pressable>
           ) : !status ? (
             <Pressable
               style={[styles.primaryButton, retrying && styles.primaryButtonDisabled]}

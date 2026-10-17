@@ -118,11 +118,13 @@ type Props = {
   /** e.g. 'rules_required': offer the rules right here. */
   blockCode?: string | null;
   onRulesAccepted?: () => void;
+  /** 'username_required': opens the username screen (the caller refreshes on return). */
+  onChooseUsername?: () => void;
   maxChars: number;
 };
 
 export function CommunityComments({
-  contentItemId, canComment, blockMessage, blockCode, onRulesAccepted, maxChars,
+  contentItemId, canComment, blockMessage, blockCode, onRulesAccepted, onChooseUsername, maxChars,
 }: Props) {
   const client = useApolloClient();
   const variables = { contentItemId: String(contentItemId) };
@@ -508,6 +510,14 @@ export function CommunityComments({
           <Icon name="book-open" size={14} color={colors.primaryDark} />
           <Text style={styles.linkText}>Acepta las normas de la comunidad para comentar</Text>
         </Pressable>
+      ) : blockCode === 'username_required' && onChooseUsername ? (
+        <View style={styles.usernameBlock}>
+          {blockMessage ? <Text style={[styles.blocked, styles.blockedTight]}>{blockMessage}</Text> : null}
+          <Pressable onPress={onChooseUsername} style={styles.usernamePrompt} hitSlop={8} accessibilityRole="button">
+            <Icon name="at-sign" size={14} color={colors.primaryDark} />
+            <Text style={styles.linkText}>Elegir nombre de usuario</Text>
+          </Pressable>
+        </View>
       ) : blockMessage ? (
         <Text style={styles.blocked}>{blockMessage}</Text>
       ) : null}
@@ -666,6 +676,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     marginBottom: 12,
+  },
+  blockedTight: {
+    marginBottom: 6,
+  },
+  usernameBlock: {
+    marginBottom: 12,
+  },
+  usernamePrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingVertical: 4,
   },
   loading: {
     marginVertical: 12,

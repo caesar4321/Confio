@@ -15,6 +15,7 @@ import {
 } from '../utils/keychainInternetCredentials';
 import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 import { extractFcmTransactionData } from '../utils/fcmData';
+import { androidChannelFor, createCommunityChannel } from './notificationChannels';
 
 const FCM_TOKEN_SERVICE = 'confio_fcm_token';
 const DEVICE_ID_SERVICE = 'confio_device_id';
@@ -574,6 +575,7 @@ class MessagingService {
         name: 'Default Channel',
         importance: AndroidImportance.HIGH,
       });
+      await createCommunityChannel();
     }
 
     // Construct platform-specific config to avoid native type errors. Coerce
@@ -601,7 +603,7 @@ class MessagingService {
 
     if (Platform.OS === 'android') {
       notificationConfig.android = {
-        channelId: 'default',
+        channelId: androidChannelFor(remoteMessage.data),
         smallIcon: 'ic_stat_ic_notification',
         // largeIcon: 'ic_launcher', // Temporarily remove to rule out resource issues
         color: '#8b5cf6',
@@ -646,6 +648,7 @@ class MessagingService {
       lights: true,
       lightColor: '#72D9BC',  // Notification mint color for LED
     });
+    await createCommunityChannel();
   }
 
   private handleNotificationOpen(remoteMessage: any) {
@@ -1034,6 +1037,11 @@ class MessagingService {
         case 'community':
           if (parts[1] === 'my-posts') {
             this.navigateInsideMain('MyCommunityPosts');
+          } else if (parts[1] === 'member' && parts[2]) {
+            // COMMUNITY_NEW_FOLLOWER: confio://community/member/{userId}
+            this.navigateInsideMain('CommunityMemberProfile', { userId: String(parts[2]) });
+          } else if (transactionData?.member_id) {
+            this.navigateInsideMain('CommunityMemberProfile', { userId: String(transactionData.member_id) });
           } else {
             this.navigateInsideMain('Discover');
           }

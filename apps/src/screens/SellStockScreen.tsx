@@ -30,6 +30,7 @@ import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import { StockTradeSuccessContent } from '../components/common/StockTradeSuccessContent';
+import { ActivityShareCard } from '../components/ActivityShareCard';
 import { StockTradeLoadingOverlay } from '../components/common/StockTradeLoadingOverlay';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
@@ -82,6 +83,7 @@ export const SellStockScreen = () => {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [tradeError, setTradeError] = useState<string | null>(null);
   const [settledReceiveUsd, setSettledReceiveUsd] = useState(0);
+  const [settledTxHash, setSettledTxHash] = useState<string | null>(null);
   const [softNetWei, setSoftNetWei] = useState(0n);
   const confirmInFlight = useRef(false);
   const requestIdRef = useRef<string | null>(null);
@@ -167,6 +169,7 @@ export const SellStockScreen = () => {
         requestId,
       });
       setSettledReceiveUsd(Number(result.expectedNetWei) / 1e18);
+      setSettledTxHash(result.txHash || null);
       setPhase('success');
       void refetch().catch(() => undefined);
     } catch (e) {
@@ -216,6 +219,7 @@ export const SellStockScreen = () => {
             <Text style={styles.successMonthLinkText}>Ver el resultado en Tu mes</Text>
           </TouchableOpacity>
           )}
+          <ActivityShareCard group="stock" reference={settledTxHash} />
         </StockTradeSuccessContent>
       </View>
     );

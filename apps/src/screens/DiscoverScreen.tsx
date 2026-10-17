@@ -1,4 +1,3 @@
-import type { ContentPollData } from '../components/ContentPoll';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -19,6 +18,8 @@ import {
 } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
+import { toDiscoverItem } from '../utils/discoverItem';
+import { useCommunityPostExtras } from '../hooks/useCommunityPostExtras';
 import { useCommunityEntryState } from '../hooks/useCommunityComposeEntry';
 import { memberBlockVersion } from '../services/communityEvents';
 import { CommunityComposePrompt } from '../components/CommunityComposePrompt';
@@ -27,26 +28,6 @@ const PAGE_SIZE = 10;
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 
-type DiscoverFeedDto = {
-  id: string;
-  type: 'product' | 'video' | 'news';
-  tag: string;
-  tagColor: string;
-  title: string;
-  body: string;
-  time: string;
-  thumbnail: boolean;
-  platformLinks?: Array<{ platform: 'TikTok' | 'Instagram' | 'YouTube'; url: string }> | null;
-  imageUrl?: string | null;
-  reactionSummary?: Array<{ emoji: string; count: number }> | null;
-  viewerReaction?: string | null;
-  poll?: ContentPollData | null;
-  canReact?: boolean | null;
-  sourceName?: string | null;
-  isOfficial?: boolean | null;
-  sourceAvatarUrl?: string | null;
-  sourceAvatarEmoji?: string | null;
-};
 
 // A server with the earlier publisher-type sections rejects our keys this way:
 // an older server, not an outage.
@@ -97,26 +78,7 @@ export const DiscoverScreen = () => {
   }, [steppingDown]);
 
   const items = useMemo<DiscoverItem[]>(() => {
-    return (data?.discoverFeed?.items || []).map((item: DiscoverFeedDto) => ({
-      id: Number(item.id),
-      type: item.type,
-      tag: item.tag,
-      tagColor: item.tagColor,
-      title: item.title,
-      body: item.body,
-      time: item.time,
-      thumbnail: item.thumbnail,
-      platformLinks: item.platformLinks || [],
-      imageUrl: item.imageUrl || undefined,
-      reactionSummary: item.reactionSummary || [],
-      viewerReaction: item.viewerReaction,
-      poll: item.poll,
-      canReact: item.canReact ?? true,
-      sourceName: item.sourceName || undefined,
-      isOfficial: Boolean(item.isOfficial),
-      sourceAvatarUrl: item.sourceAvatarUrl || null,
-      sourceAvatarEmoji: item.sourceAvatarEmoji || null,
-    }));
+    return (data?.discoverFeed?.items || []).map(toDiscoverItem);
   }, [data]);
 
   // Comment counts for the cards, asked on their own so a server without
@@ -135,6 +97,11 @@ export const DiscoverScreen = () => {
     if (!countsSkipped) refetchCounts().catch(() => {});
   }, [countsSkipped, refetchCounts]);
   useFocusEffect(refreshCounts);
+  // Author and activity extras, also on their own query: an older server fails
+  // only this and the cards keep the body and a plain byline.
+  const [extrasRefresh, setExtrasRefresh] = useState(0);
+  const postExtras = useCommunityPostExtras(pageIds, !legacyServer && section !== 'official', extrasRefresh);
+
   const commentCounts = useMemo(() => {
     const counts: Record<number, number> = {};
     for (const entry of countsData?.communityCommentCounts || []) {
@@ -201,6 +168,7 @@ export const DiscoverScreen = () => {
   const handleRefresh = async () => {
     feedGeneration.current += 1;
     refreshCounts();
+    setExtrasRefresh((value) => value + 1);
     await refetch({ offset: 0, limit: PAGE_SIZE });
   };
 
@@ -295,6 +263,8 @@ export const DiscoverScreen = () => {
         activeSection={legacyServer ? 'for_you' : section}
         onSelectSection={selectSection}
         commentCounts={commentCounts}
+        postExtras={postExtras}
+        onOpenAuthor={(userId) => navigation.navigate('CommunityMemberProfile', { userId })}
         sectionAccessory={showPrompt || showMyPosts ? (
           <>
             {showPrompt ? (

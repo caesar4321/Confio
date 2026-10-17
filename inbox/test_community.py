@@ -153,9 +153,28 @@ class CommunityPostingTests(CommunityTestBase):
             self.post(make_user())
         self.assertEqual(ctx.exception.code, community.BLOCK_DISABLED)
 
-    def test_author_name_is_first_name_and_initial(self):
-        self.assertEqual(community.author_display_name(make_user('MARÍA JOSÉ', 'GONZÁLEZ PÉREZ')), 'María G.')
-        self.assertEqual(community.author_display_name(make_user('', '')), 'Miembro de Confío')
+    def test_author_name_is_the_username_never_the_legal_name(self):
+        user = make_user('MARÍA JOSÉ', 'GONZÁLEZ PÉREZ')
+        self.assertEqual(community.author_display_name(user), user.username)
+        self.assertEqual(community.author_handle(user), f'@{user.username}')
+
+    def test_a_username_signup_derived_from_the_email_is_never_shown(self):
+        user = make_user()
+        user.email = 'juan.perez@gmail.com'
+        for generated in ('juanperezgmailcom', 'juanperezgmailcom_2', 'user_ab12'):
+            user.username = generated
+            self.assertTrue(community.username_is_generated(user), generated)
+            self.assertEqual(community.author_display_name(user), 'Miembro de Confío')
+        for chosen in ('juanp', 'juan_perez', 'juanperez_2'):
+            user.username = chosen
+            self.assertFalse(community.username_is_generated(user), chosen)
+
+    def test_a_generated_username_must_be_replaced_before_posting(self):
+        user = make_user()
+        user.username = community._generated_username_bases(user)[0]
+        user.save(update_fields=['username'])
+        self.assertEqual(community.posting_block(user, None), community.BLOCK_USERNAME)
+        self.assertEqual(community.commenting_block(user, None), community.BLOCK_USERNAME)
 
 
 class CommunityReviewTests(CommunityTestBase):
@@ -174,7 +193,8 @@ class CommunityReviewTests(CommunityTestBase):
         item.refresh_from_db()
         self.assertEqual(item.status, ContentStatus.PUBLISHED)
         [card] = self.feed(make_user())
-        self.assertEqual((card.source_name, card.is_official, card.source_section), ('María G.', False, 'community'))
+        self.assertEqual((card.source_name, card.is_official, card.source_section),
+                         (item.owner_user.username, False, 'community'))
         self.assertEqual([c.id for c in self.feed(make_user(), section='official')], [])
 
     def test_clear_rejection_stays_unpublished_with_a_reason(self):

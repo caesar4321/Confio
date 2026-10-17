@@ -16,7 +16,9 @@ import { EmptyState } from './EmptyState';
 import { PostByline } from './PostByline';
 import { ReactionBar } from './ReactionBar';
 import { VerifiedBadge } from './VerifiedBadge';
+import { ActivitySummary } from './ActivitySummary';
 import { colors } from '../config/theme';
+import type { CommunityPostExtras } from '../hooks/useCommunityPostExtras';
 
 
 export type DiscoverReaction = {
@@ -86,6 +88,121 @@ const platformOrder: Array<'TikTok' | 'Instagram' | 'YouTube'> = ['TikTok', 'Ins
 export const postMeta = (tag: string | undefined, time: string) =>
   [tag?.trim(), time].filter(Boolean).join(' · ');
 
+type DiscoverPostCardProps = {
+  item: DiscoverItem;
+  onOpenItem?: (item: DiscoverItem) => void;
+  onReact?: (itemId: number, emoji: string) => Promise<void>;
+  commentCount?: number;
+  extras?: CommunityPostExtras;
+  onOpenAuthor?: (userId: string) => void;
+};
+
+/**
+ * One Descubrir card. An activity post (extras.activity) shows the verified
+ * movement and the member's note instead of the body, which repeats the
+ * headline for older builds. A member byline with a profile opens it.
+ */
+export function DiscoverPostCard({ item, onOpenItem, onReact, commentCount, extras, onOpenAuthor }: DiscoverPostCardProps) {
+  const activity = extras?.activity;
+  // Never on official or business sources: only a member's own profile opens.
+  const authorId = !item.isOfficial && extras?.authorId ? extras.authorId : null;
+  const platforms = platformOrder.filter((platform) =>
+    item.platformLinks?.some((entry) => entry.platform === platform && entry.url)
+  );
+  const isVideo = item.type === 'video' || Boolean(item.thumbnail);
+
+  return (
+    <View style={styles.card}>
+      <Pressable
+        onPress={() => onOpenItem?.(item)}
+        style={({ pressed }) => [styles.cardPressable, pressed && styles.cardPressed]}
+        accessibilityRole="button"
+        accessibilityHint="Abre la publicación"
+      >
+        {item.sourceName ? (
+          <View style={styles.byline}>
+            <PostByline
+              name={item.sourceName}
+              isOfficial={item.isOfficial}
+              avatarUrl={item.sourceAvatarUrl}
+              avatarEmoji={item.sourceAvatarEmoji}
+              meta={postMeta(item.tag, item.time)}
+              onPress={authorId && onOpenAuthor ? () => onOpenAuthor(authorId) : undefined}
+            />
+          </View>
+        ) : (
+          <Text style={styles.metaOnly}>{postMeta(item.tag, item.time)}</Text>
+        )}
+
+        {item.title ? <Text style={styles.cardTitle}>{item.title}</Text> : null}
+        {activity ? (
+          <>
+            <View style={styles.activity}>
+              <ActivitySummary activity={activity} compact />
+            </View>
+            {extras?.note ? (
+              <Text style={styles.cardBody} numberOfLines={3}>
+                {extras.note}
+              </Text>
+            ) : null}
+          </>
+        ) : item.body ? (
+          <Text style={styles.cardBody} numberOfLines={3}>
+            {item.body}
+          </Text>
+        ) : null}
+
+        {item.imageUrl ? (
+          <View style={styles.media}>
+            <ResponsiveImage uri={item.imageUrl} style={styles.postImage} />
+            {isVideo && (
+              <View style={styles.playOverlay} pointerEvents="none">
+                <View style={styles.playButton}>
+                  <Icon name="play" size={18} color={colors.dark} />
+                </View>
+              </View>
+            )}
+          </View>
+        ) : isVideo ? (
+          <View style={styles.videoPlaceholder}>
+            <View style={styles.playButton}>
+              <Icon name="play" size={18} color={colors.dark} />
+            </View>
+            {platforms.length ? (
+              <Text style={styles.videoPlaceholderText}>Disponible en {platforms.join(' · ')}</Text>
+            ) : null}
+          </View>
+        ) : null}
+      </Pressable>
+
+      <ContentPoll poll={item.poll} />
+      <View style={styles.reactions}>
+        {commentCount ? (
+          <Pressable
+            onPress={() => onOpenItem?.(item)}
+            style={styles.commentCount}
+            accessibilityRole="button"
+            accessibilityLabel={`${commentCount} ${commentCount === 1 ? 'comentario' : 'comentarios'}`}
+          >
+            <Icon name="message-circle" size={14} color={colors.textSecondary} />
+            <Text style={styles.commentCountText}>{commentCount}</Text>
+          </Pressable>
+        ) : null}
+        <View style={styles.reactionBar}>
+          <ReactionBar
+            reactions={item.reactionSummary}
+            viewerReaction={item.viewerReaction}
+            canReact={item.canReact !== false && Boolean(onReact)}
+            onReact={(emoji) => {
+              void onReact?.(item.id, emoji);
+            }}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 type DiscoverFeedProps = {
   items: DiscoverItem[];
   refreshing: boolean;
@@ -105,6 +222,10 @@ type DiscoverFeedProps = {
   sectionAccessory?: React.ReactNode;
   /** Comments per Comunidad post id; posts without comments are absent. */
   commentCounts?: Record<number, number>;
+  /** Author and activity extras per post id (absent on an older server). */
+  postExtras?: Record<number, CommunityPostExtras>;
+  /** Opens a member's profile from a byline. */
+  onOpenAuthor?: (userId: string) => void;
 };
 
 export function DiscoverFeed({
@@ -124,92 +245,19 @@ export function DiscoverFeed({
   onSelectSection,
   sectionAccessory,
   commentCounts,
+  postExtras,
+  onOpenAuthor,
 }: DiscoverFeedProps) {
-  const renderItem = ({ item }: { item: DiscoverItem }) => {
-    const platforms = platformOrder.filter((platform) =>
-      item.platformLinks?.some((entry) => entry.platform === platform && entry.url)
-    );
-    const isVideo = item.type === 'video' || Boolean(item.thumbnail);
-
-    return (
-      <View style={styles.card}>
-        <Pressable
-          onPress={() => onOpenItem?.(item)}
-          style={({ pressed }) => [styles.cardPressable, pressed && styles.cardPressed]}
-          accessibilityRole="button"
-          accessibilityHint="Abre la publicación"
-        >
-          {item.sourceName ? (
-            <View style={styles.byline}>
-              <PostByline
-                name={item.sourceName}
-                isOfficial={item.isOfficial}
-                avatarUrl={item.sourceAvatarUrl}
-                avatarEmoji={item.sourceAvatarEmoji}
-                meta={postMeta(item.tag, item.time)}
-              />
-            </View>
-          ) : (
-            <Text style={styles.metaOnly}>{postMeta(item.tag, item.time)}</Text>
-          )}
-
-          {item.title ? <Text style={styles.cardTitle}>{item.title}</Text> : null}
-          {item.body ? (
-            <Text style={styles.cardBody} numberOfLines={3}>
-              {item.body}
-            </Text>
-          ) : null}
-
-          {item.imageUrl ? (
-            <View style={styles.media}>
-              <ResponsiveImage uri={item.imageUrl} style={styles.postImage} />
-              {isVideo && (
-                <View style={styles.playOverlay} pointerEvents="none">
-                  <View style={styles.playButton}>
-                    <Icon name="play" size={18} color={colors.dark} />
-                  </View>
-                </View>
-              )}
-            </View>
-          ) : isVideo ? (
-            <View style={styles.videoPlaceholder}>
-              <View style={styles.playButton}>
-                <Icon name="play" size={18} color={colors.dark} />
-              </View>
-              {platforms.length ? (
-                <Text style={styles.videoPlaceholderText}>Disponible en {platforms.join(' · ')}</Text>
-              ) : null}
-            </View>
-          ) : null}
-        </Pressable>
-
-        <ContentPoll poll={item.poll} />
-        <View style={styles.reactions}>
-          {commentCounts?.[item.id] ? (
-            <Pressable
-              onPress={() => onOpenItem?.(item)}
-              style={styles.commentCount}
-              accessibilityRole="button"
-              accessibilityLabel={`${commentCounts[item.id]} ${commentCounts[item.id] === 1 ? 'comentario' : 'comentarios'}`}
-            >
-              <Icon name="message-circle" size={14} color={colors.textSecondary} />
-              <Text style={styles.commentCountText}>{commentCounts[item.id]}</Text>
-            </Pressable>
-          ) : null}
-          <View style={styles.reactionBar}>
-            <ReactionBar
-              reactions={item.reactionSummary}
-              viewerReaction={item.viewerReaction}
-              canReact={item.canReact !== false && Boolean(onReact)}
-              onReact={(emoji) => {
-                void onReact?.(item.id, emoji);
-              }}
-            />
-          </View>
-        </View>
-      </View>
-    );
-  };
+  const renderItem = ({ item }: { item: DiscoverItem }) => (
+    <DiscoverPostCard
+      item={item}
+      onOpenItem={onOpenItem}
+      onReact={onReact}
+      commentCount={commentCounts?.[item.id]}
+      extras={postExtras?.[item.id]}
+      onOpenAuthor={onOpenAuthor}
+    />
+  );
 
   const emptyState = sectionEmptyStates[activeSection];
   const sectionHeader = sections.length ? (
@@ -278,6 +326,9 @@ export function DiscoverFeed({
           <EmptyState icon={emptyState.icon} title={emptyState.title} subtitle={emptyState.subtitle} />
         )
       }
+      initialNumToRender={10}
+      maxToRenderPerBatch={10}
+      windowSize={11}
       onEndReachedThreshold={0.35}
       onEndReached={() => {
         if (hasMore && !loadingMore) {
@@ -367,6 +418,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 22,
     color: colors.dark,
+  },
+  activity: {
+    marginBottom: 8,
   },
   cardBody: {
     fontSize: 14,

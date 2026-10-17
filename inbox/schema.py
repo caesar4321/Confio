@@ -38,7 +38,7 @@ from .models import (
     SupportMessage,
     VisibilityPolicy,
 )
-from . import community, profile_pictures
+from . import activity_share, community, profile_pictures
 from .community import author_display_name
 from .official import all_official_channel_ids, official_channel_ids
 from .push_service import send_support_reply_push, send_support_staff_push
@@ -507,6 +507,7 @@ def build_discover_feed_item_payload(
     elif item.item_type == 'NEWS':
         item_type = 'news'
 
+    is_activity = item.owner_type == OwnerType.USER and bool(metadata.get('activity'))
     if item.owner_type == OwnerType.USER:
         # A member speaks as themselves, never as the channel that hosts the
         # post; the app draws their initial.
@@ -534,8 +535,11 @@ def build_discover_feed_item_payload(
         tag=tag_label,
         tag_color=tag_color,
         title=item.title or '',
-        body=item.body or '',
-        time=humanize_relative(item.published_at or item.created_at),
+        body=activity_share.display_body(item) if item.owner_type == OwnerType.USER else (item.body or ''),
+        time=(
+            activity_share.coarse_time_label(_display_date(item)) if is_activity
+            else humanize_relative(item.published_at or item.created_at)
+        ),
         thumbnail=item.item_type == 'VIDEO',
         platform_links=[
             PlatformLinkType(platform=platform, url=url)
@@ -552,8 +556,13 @@ def build_discover_feed_item_payload(
         viewer_reaction=viewer_reaction,
         can_react=True,
         **byline,
-        published_at=item.published_at or item.created_at,
+        published_at=activity_share.coarse_published_at(item),
     )
+
+
+def _display_date(item):
+    moment = item.published_at or item.created_at
+    return moment.astimezone(activity_share.DISPLAY_TZ).date().isoformat() if moment else None
 
 
 def published_discover_items():
@@ -931,6 +940,70 @@ class CommunityPostViewerType(graphene.ObjectType):
     author_name = graphene.String()
 
 
+class ActivityShareType(graphene.ObjectType):
+    """What a post made from a money movement shows. Amounts are strings
+    with two decimals; any of them is null when hidden or unknown."""
+    # stock_buy | stock_sell | top_up | withdraw | send | receive
+    kind = graphene.String(required=True)
+    # The activity's day (YYYY-MM-DD); never a time.
+    date = graphene.String()
+    amount_usd = graphene.String()
+    ticker = graphene.String()
+    name = graphene.String()
+    # 'QR', 'Bre-B', 'Pix', 'transferencia'
+    rail = graphene.String()
+    country = graphene.String()
+    minutes = graphene.Int()
+    # A sale: realized. A purchase: live until sold out, then frozen.
+    pnl_usd = graphene.String()
+    pnl_pct = graphene.String()
+    # Purchases only: 'open' | 'closed'
+    position = graphene.String()
+    headline = graphene.String(required=True)
+
+
+def build_activity_type(public: dict, raw: dict) -> ActivityShareType:
+    return ActivityShareType(
+        kind=public['kind'], date=public.get('date'), amount_usd=public.get('amount_usd'),
+        ticker=public.get('ticker'), name=public.get('name'), rail=public.get('rail'),
+        country=public.get('country'), minutes=public.get('minutes'), pnl_usd=public.get('pnl_usd'),
+        pnl_pct=public.get('pnl_pct'), position=public.get('position'),
+        headline=activity_share.activity_headline(raw),
+    )
+
+
+class CommunityPostExtrasType(graphene.ObjectType):
+    content_item_id = graphene.ID(required=True)
+    # Member posts only: whose profile the byline opens.
+    author_id = graphene.ID()
+    # The member's own note on an activity post (the feed body also carries
+    # the headline for older builds).
+    note = graphene.String()
+    activity = graphene.Field(ActivityShareType)
+
+
+class ShareableActivityType(graphene.ObjectType):
+    unified_transaction_id = graphene.ID(required=True)
+    activity = graphene.Field(ActivityShareType, required=True)
+    can_share = graphene.Boolean(required=True)
+    # Why not: not_verified | username_required | rules_required | banned | ...
+    block_code = graphene.String()
+    block_message = graphene.String()
+    note_max_chars = graphene.Int(required=True)
+
+
+class CommunityMemberProfileType(graphene.ObjectType):
+    id = graphene.ID(required=True)
+    username = graphene.String(required=True)
+    avatar_url = graphene.String()
+    follower_count = graphene.Int(required=True)
+    following_count = graphene.Int(required=True)
+    is_self = graphene.Boolean(required=True)
+    is_following = graphene.Boolean(required=True)
+    # The bell for this member: notified of each post while following.
+    notify = graphene.Boolean(required=True)
+
+
 class CommunityRulesType(graphene.ObjectType):
     version = graphene.String(required=True)
     accepted = graphene.Boolean(required=True)
@@ -1101,7 +1174,7 @@ def build_community_post_payload(item: ContentItem, comment_count=None):
     review = item.community_review
     return CommunityPostType(
         id=str(item.id),
-        body=item.body or '',
+        body=activity_share.display_body(item),
         image_url=(item.metadata or {}).get('image', {}).get('url') or None,
         has_image=bool(review.pending_image_key),
         status=review.status,
@@ -1449,6 +1522,102 @@ class UnblockCommunityMember(graphene.Mutation):
         return UnblockCommunityMember(success=community.unblock_member(info.context.user, user_id))
 
 
+class ShareActivity(graphene.Mutation):
+    """Publish one of the member's own money movements, on their tap."""
+    class Arguments:
+        unified_transaction_id = graphene.ID(required=True)
+        note = graphene.String(required=False)
+        show_amount = graphene.Boolean(required=False)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    error_code = graphene.String()
+    post = graphene.Field(CommunityPostType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, unified_transaction_id, note=None, show_amount=True):
+        user, account, business, _ = get_context_models(info)
+        try:
+            item = activity_share.share_activity(
+                user, business, unified_transaction_id, note or '', show_amount is not False)
+        except activity_share.ActivityShareError as error:
+            return ShareActivity(success=False, error=error.message, error_code=error.code, post=None)
+        item = own_community_items(user).get(id=item.id)
+        return ShareActivity(success=True, error=None, error_code=None, post=build_community_post_payload(item))
+
+
+class FollowCommunityMember(graphene.Mutation):
+    class Arguments:
+        user_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    profile = graphene.Field(CommunityMemberProfileType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, user_id):
+        try:
+            community.follow_member(info.context.user, user_id)
+        except community.FollowError as error:
+            return FollowCommunityMember(success=False, error=error.message, profile=None)
+        return FollowCommunityMember(success=True, error=None, profile=build_member_profile(info.context.user, user_id))
+
+
+class UnfollowCommunityMember(graphene.Mutation):
+    class Arguments:
+        user_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+    profile = graphene.Field(CommunityMemberProfileType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, user_id):
+        community.unfollow_member(info.context.user, user_id)
+        return UnfollowCommunityMember(success=True, profile=build_member_profile(info.context.user, user_id))
+
+
+class SetCommunityFollowNotify(graphene.Mutation):
+    class Arguments:
+        user_id = graphene.ID(required=True)
+        notify = graphene.Boolean(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    profile = graphene.Field(CommunityMemberProfileType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, user_id, notify):
+        try:
+            community.set_follow_notify(info.context.user, user_id, notify)
+        except community.FollowError as error:
+            return SetCommunityFollowNotify(success=False, error=error.message, profile=None)
+        return SetCommunityFollowNotify(success=True, error=None, profile=build_member_profile(info.context.user, user_id))
+
+
+def build_member_profile(viewer, user_id):
+    from .models import CommunityFollow
+
+    target = community.followable_member(user_id, viewer=viewer)
+    if target is None or community.is_blocked_between(viewer.id, target.id):
+        return None
+    followers, following = community.follow_counts(target.id)
+    follow = CommunityFollow.objects.filter(follower=viewer, followed=target).first()
+    return CommunityMemberProfileType(
+        id=str(target.id),
+        username=target.username,
+        avatar_url=profile_pictures.picture_urls([target.id]).get(target.id),
+        follower_count=followers,
+        following_count=following,
+        is_self=target.id == viewer.id,
+        is_following=follow is not None,
+        notify=bool(follow and follow.notify),
+    )
+
+
 class Query(graphene.ObjectType):
     message_inbox = graphene.Field(MessageInboxType, context_key=graphene.String(required=False))
     message_inbox_unread_count = graphene.Int(context_key=graphene.String(required=False))
@@ -1512,6 +1681,26 @@ class Query(graphene.ObjectType):
         graphene.NonNull(CommunityCommentCountType),
         required=True,
         content_item_ids=graphene.List(graphene.NonNull(graphene.ID), required=True),
+    )
+    community_post_extras = graphene.List(
+        graphene.NonNull(CommunityPostExtrasType),
+        required=True,
+        content_item_ids=graphene.List(graphene.NonNull(graphene.ID), required=True),
+    )
+    shareable_activity = graphene.Field(
+        ShareableActivityType,
+        unified_transaction_id=graphene.ID(required=False),
+        group=graphene.String(required=False),
+        # A status screen's own id (ramp order id, local-transfer reference).
+        reference=graphene.String(required=False),
+    )
+    community_member_profile = graphene.Field(CommunityMemberProfileType, user_id=graphene.ID(required=True))
+    community_member_posts = graphene.Field(
+        DiscoverFeedPageType,
+        required=True,
+        user_id=graphene.ID(required=True),
+        offset=graphene.Int(required=False),
+        limit=graphene.Int(required=False),
     )
     portal_support_conversations = graphene.List(
         PortalSupportConversationType,
@@ -1616,6 +1805,89 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_discover_sections(self, info):
         return []
+
+    @login_required
+    def resolve_community_post_extras(self, info, content_item_ids):
+        user = info.context.user
+        ids = []
+        for raw in content_item_ids[:50]:
+            try:
+                ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        blocked = community.block_relation_ids(user)
+        items = [
+            item for item in published_discover_items().filter(id__in=ids).select_related('owner_user').distinct()
+            if not (item.owner_type == OwnerType.USER and item.owner_user_id in blocked)
+        ]
+        activities = activity_share.activity_payloads(items)
+        out = []
+        for item in items:
+            is_member = item.owner_type == OwnerType.USER
+            raw = (item.metadata or {}).get('activity')
+            public = activities.get(item.id)
+            show_author = is_member and not community.username_is_generated(item.owner_user)
+            out.append(CommunityPostExtrasType(
+                content_item_id=str(item.id),
+                author_id=str(item.owner_user_id) if show_author else None,
+                note=(item.body or '') if raw else None,
+                activity=build_activity_type(public, raw) if public else None,
+            ))
+        return out
+
+    @login_required
+    def resolve_shareable_activity(self, info, unified_transaction_id=None, group=None, reference=None):
+        user, account, business, _ = get_context_models(info)
+        if business is not None:
+            return None
+        found = activity_share.find_activity(
+            user, unified_id=unified_transaction_id, group=group, reference=reference)
+        if found is None:
+            return None
+        row, snap = found
+        raw = {**snap.data, 'show_amount': True}
+        public = activity_share.public_activity(raw)
+        block = community.posting_block(user, business, activity=True)
+        return ShareableActivityType(
+            unified_transaction_id=str(row.id),
+            activity=build_activity_type(public, raw),
+            can_share=block is None,
+            block_code=block,
+            block_message=community.BLOCK_MESSAGES.get(block) if block else None,
+            note_max_chars=activity_share.NOTE_MAX_CHARS,
+        )
+
+    @login_required
+    def resolve_community_member_profile(self, info, user_id):
+        return build_member_profile(info.context.user, user_id)
+
+    @login_required
+    def resolve_community_member_posts(self, info, user_id, offset=0, limit=10):
+        user, account, business, _ = get_context_models(info)
+        target = community.followable_member(user_id, viewer=user)
+        if target is None or community.is_blocked_between(user.id, target.id):
+            return DiscoverFeedPageType(items=[], has_more=False)
+        offset = max(offset or 0, 0)
+        limit = min(max(limit or 10, 1), 20)
+        queryset = (
+            published_discover_items()
+            .filter(owner_type=OwnerType.USER, owner_user=target)
+            .select_related('channel', 'owner_user')
+            .prefetch_related('reactions__reaction_type', 'surfaces')
+            .distinct()
+            .order_by('-published_at', '-id')
+        )
+        page_items = list(queryset[offset:offset + limit + 1])
+        has_more = len(page_items) > limit
+        page_items = page_items[:limit]
+        avatar_urls = profile_pictures.picture_urls([target.id])
+        return DiscoverFeedPageType(
+            items=[
+                build_discover_feed_item_payload(item, user, account, business, None, set(), avatar_urls)
+                for item in page_items
+            ],
+            has_more=has_more,
+        )
 
     @login_required
     def resolve_community_posting_status(self, info):
@@ -2465,3 +2737,7 @@ class Mutation(graphene.ObjectType):
     accept_community_rules = AcceptCommunityRules.Field()
     block_community_member = BlockCommunityMember.Field()
     unblock_community_member = UnblockCommunityMember.Field()
+    share_activity = ShareActivity.Field()
+    follow_community_member = FollowCommunityMember.Field()
+    unfollow_community_member = UnfollowCommunityMember.Field()
+    set_community_follow_notify = SetCommunityFollowNotify.Field()

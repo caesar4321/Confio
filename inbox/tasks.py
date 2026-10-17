@@ -198,3 +198,10 @@ def remove_member_content_task(self, user_id: int, kind: str):
     }
     category, reason = reasons.get(kind, ('account_removed', 'Contenido retirado.'))
     return remove_member_content(user_id, category=category, reason=reason)
+
+
+@shared_task(bind=True, queue='push', max_retries=2, default_retry_delay=30)
+def notify_followers_task(self, content_item_id: int):
+    from .community import notify_followers
+
+    return notify_followers(content_item_id)

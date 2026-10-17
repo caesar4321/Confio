@@ -28,6 +28,8 @@ import { EmptyState } from '../components/EmptyState';
 import { PostByline } from '../components/PostByline';
 import { ReactionBar } from '../components/ReactionBar';
 import { CommunityPostActions } from '../components/CommunityPostActions';
+import { ActivitySummary } from '../components/ActivitySummary';
+import { useCommunityPostExtras } from '../hooks/useCommunityPostExtras';
 import { formatLocalDate } from '../utils/dateUtils';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 import { trackContentPlatformClick } from '../services/contentClickTrackingService';
@@ -215,6 +217,12 @@ export const DiscoverPostDetailScreen = () => {
       }
     | undefined;
 
+  // Author and activity on their own query: an older server fails only this
+  // and the post renders from its body as before.
+  const extras = useCommunityPostExtras([contentItemId])[Number(contentItemId)];
+  const activity = extras?.activity;
+  const authorId = !source?.isOfficial && extras?.authorId ? extras.authorId : null;
+
   const handleOpenLink = async (
     url: string,
     platform?: 'TikTok' | 'Instagram' | 'YouTube'
@@ -285,7 +293,15 @@ export const DiscoverPostDetailScreen = () => {
     );
   }
 
-  const detailBlocks = normalizeDetailBlocks(post.blocks, post.body, post.imageUrl);
+  const postBlocks = normalizeDetailBlocks(post.blocks, post.body, post.imageUrl);
+  // An activity post's body repeats the headline for older builds: show the
+  // verified movement and only the member's note (and any picture) instead.
+  const detailBlocks: typeof postBlocks = activity
+    ? [
+        ...(extras?.note ? [{ id: 'activity-note', type: 'paragraph' as const, text: extras.note }] : []),
+        ...postBlocks.filter((block) => block.type === 'image'),
+      ]
+    : postBlocks;
   const availablePlatformLinks = platformOrder
     .map((platform) => post.platformLinks?.find((item) => item.platform === platform))
     .filter((item): item is NonNullable<typeof item> => Boolean(item?.url));
@@ -318,11 +334,21 @@ export const DiscoverPostDetailScreen = () => {
                   readingTimeLabel(detailBlocks),
                 ].filter(Boolean).join(' · ')}
                 size="detail"
+                onPress={
+                  authorId
+                    ? () => navigation.navigate('CommunityMemberProfile', { userId: authorId })
+                    : undefined
+                }
               />
             </View>
           ) : (
             <Text style={styles.metaOnly}>{post.time}</Text>
           )}
+          {activity ? (
+            <View style={styles.activity}>
+              <ActivitySummary activity={activity} />
+            </View>
+          ) : null}
           <View style={styles.blocksWrap}>
             {detailBlocks.map((block, index) => {
               if (block.type === 'image') {
@@ -505,6 +531,9 @@ const styles = StyleSheet.create({
   },
   quoteInlineLink: {
     color: colors.accent,
+  },
+  activity: {
+    marginBottom: 14,
   },
   blocksWrap: {
     marginTop: 2,

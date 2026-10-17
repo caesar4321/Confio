@@ -14,6 +14,8 @@ from PIL import Image, ImageOps
 from security.s3_utils import build_s3_key, upload_object
 
 from .models import (
+    CommunityActivityShare,
+    CommunityFollow,
     AvatarType,
     Channel,
     ChannelMembership,
@@ -1193,6 +1195,33 @@ class CommunityRulesAcceptanceAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__email')
     list_select_related = ('user',)
     readonly_fields = ('user', 'version', 'accepted_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(CommunityFollow)
+class CommunityFollowAdmin(admin.ModelAdmin):
+    list_display = ('follower', 'followed', 'notify', 'created_at')
+    list_filter = ('notify',)
+    search_fields = ('follower__username', 'followed__username')
+    list_select_related = ('follower', 'followed')
+    readonly_fields = ('follower', 'followed', 'notify', 'created_at')
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(CommunityActivityShare)
+class CommunityActivityShareAdmin(admin.ModelAdmin):
+    list_display = ('user', 'kind', 'content_item', 'unified_transaction', 'created_at')
+    list_filter = ('kind',)
+    search_fields = ('user__username',)
+    list_select_related = ('user', 'content_item', 'unified_transaction')
+    readonly_fields = ('user', 'kind', 'content_item', 'unified_transaction', 'created_at')
 
     def has_add_permission(self, request):
         return False

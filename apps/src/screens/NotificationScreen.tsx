@@ -408,6 +408,11 @@ export const NotificationScreen = () => {
         navigation.navigate('DiscoverPostDetail', { contentItemId: Number(discoverPost[1]) });
         return;
       }
+      const communityMember = normalizedUrl.match(/community\/member\/(\d+)/);
+      if (communityMember) {
+        navigation.navigate('CommunityMemberProfile', { userId: communityMember[1] });
+        return;
+      }
       if (normalizedUrl.includes('community/my-posts')) {
         navigation.navigate('MyCommunityPosts');
         return;

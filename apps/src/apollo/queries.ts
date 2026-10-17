@@ -4887,3 +4887,103 @@ export const GET_MY_BLOCKED_MEMBERS = gql`
     }
   }
 `;
+
+// Activity shares and follows. Each is its own query: an older server
+// rejects an unknown field and would fail any shared query carrying it.
+const ACTIVITY_SHARE_FIELDS = `
+  kind
+  date
+  amountUsd
+  ticker
+  name
+  rail
+  country
+  minutes
+  pnlUsd
+  pnlPct
+  position
+  headline
+`;
+
+export const GET_COMMUNITY_POST_EXTRAS = gql`
+  query GetCommunityPostExtras($contentItemIds: [ID!]!) {
+    communityPostExtras(contentItemIds: $contentItemIds) {
+      contentItemId
+      authorId
+      note
+      activity {
+        ${ACTIVITY_SHARE_FIELDS}
+      }
+    }
+  }
+`;
+
+export const GET_SHAREABLE_ACTIVITY = gql`
+  query GetShareableActivity($unifiedTransactionId: ID, $group: String, $reference: String) {
+    shareableActivity(unifiedTransactionId: $unifiedTransactionId, group: $group, reference: $reference) {
+      unifiedTransactionId
+      canShare
+      blockCode
+      blockMessage
+      noteMaxChars
+      activity {
+        ${ACTIVITY_SHARE_FIELDS}
+      }
+    }
+  }
+`;
+
+export const COMMUNITY_MEMBER_PROFILE_FIELDS = `
+  id
+  username
+  avatarUrl
+  followerCount
+  followingCount
+  isSelf
+  isFollowing
+  notify
+`;
+
+export const GET_COMMUNITY_MEMBER_PROFILE = gql`
+  query GetCommunityMemberProfile($userId: ID!) {
+    communityMemberProfile(userId: $userId) {
+      ${COMMUNITY_MEMBER_PROFILE_FIELDS}
+    }
+  }
+`;
+
+export const GET_COMMUNITY_MEMBER_POSTS = gql`
+  query GetCommunityMemberPosts($userId: ID!, $offset: Int, $limit: Int) {
+    communityMemberPosts(userId: $userId, offset: $offset, limit: $limit) {
+      hasMore
+      items {
+        id
+        type
+        tag
+        tagColor
+        title
+        body
+        time
+        thumbnail
+        imageUrl
+        blocks
+        reactionSummary {
+          emoji
+          count
+        }
+        viewerReaction
+        canReact
+        sourceName
+        sourceSection
+        isOfficial
+        sourceAvatarUrl
+        sourceAvatarEmoji
+        publishedAt
+        platformLinks {
+          platform
+          url
+        }
+      }
+    }
+  }
+`;

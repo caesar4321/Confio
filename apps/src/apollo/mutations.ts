@@ -1,4 +1,5 @@
 import { gql } from '@apollo/client';
+import { COMMUNITY_MEMBER_PROFILE_FIELDS } from './queries';
 
 export const CREATE_MEMBER_PAYMENT_INTENT = gql`
   mutation CreateMemberPaymentIntent($obligationId: String!) {
@@ -1308,6 +1309,57 @@ export const UNBLOCK_COMMUNITY_MEMBER = gql`
   mutation UnblockCommunityMember($userId: ID!) {
     unblockCommunityMember(userId: $userId) {
       success
+    }
+  }
+`;
+
+// Activity shares and follows (fields shared with queries.ts).
+export const SHARE_ACTIVITY = gql`
+  mutation ShareActivity($unifiedTransactionId: ID!, $note: String, $showAmount: Boolean) {
+    shareActivity(unifiedTransactionId: $unifiedTransactionId, note: $note, showAmount: $showAmount) {
+      success
+      error
+      errorCode
+      post {
+        id
+        status
+        reason
+      }
+    }
+  }
+`;
+
+export const FOLLOW_COMMUNITY_MEMBER = gql`
+  mutation FollowCommunityMember($userId: ID!) {
+    followCommunityMember(userId: $userId) {
+      success
+      error
+      profile {
+        ${COMMUNITY_MEMBER_PROFILE_FIELDS}
+      }
+    }
+  }
+`;
+
+export const UNFOLLOW_COMMUNITY_MEMBER = gql`
+  mutation UnfollowCommunityMember($userId: ID!) {
+    unfollowCommunityMember(userId: $userId) {
+      success
+      profile {
+        ${COMMUNITY_MEMBER_PROFILE_FIELDS}
+      }
+    }
+  }
+`;
+
+export const SET_COMMUNITY_FOLLOW_NOTIFY = gql`
+  mutation SetCommunityFollowNotify($userId: ID!, $notify: Boolean!) {
+    setCommunityFollowNotify(userId: $userId, notify: $notify) {
+      success
+      error
+      profile {
+        ${COMMUNITY_MEMBER_PROFILE_FIELDS}
+      }
     }
   }
 `;

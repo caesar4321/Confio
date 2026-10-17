@@ -16,6 +16,9 @@ export const StockTradeSuccessContent: React.FC<Props> = ({ children }) => (
     style={styles.scroll}
     contentContainerStyle={styles.content}
     showsVerticalScrollIndicator={false}
+    // The share card's note field: a tap on "Compartir" must not only dismiss the keyboard.
+    keyboardShouldPersistTaps="handled"
+    automaticallyAdjustKeyboardInsets
   >
     {children}
   </ScrollView>

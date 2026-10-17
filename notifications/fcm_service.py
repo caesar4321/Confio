@@ -206,7 +206,8 @@ def send_user_push(
         body=notification.message,
         data=push_data,
         badge_count=unread_count,
-        notification=notification
+        notification=notification,
+        channel_id=android_channel_for(notification.notification_type),
     )
 
 
@@ -252,6 +253,13 @@ def send_broadcast_push(
         notification=notification,
         channel_id='announcements'
     )
+
+
+def android_channel_for(notification_type) -> str:
+    """Comunidad gets its own Android channel, so a member can silence it in
+    system settings without losing their money notifications. An app version
+    without that channel falls back to the default one."""
+    return 'community' if str(notification_type or '').startswith('COMMUNITY_') else 'default'
 
 
 def send_batch_notifications(

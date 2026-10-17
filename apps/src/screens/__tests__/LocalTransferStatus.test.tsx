@@ -23,6 +23,7 @@ jest.mock('../../components/ramps/RampActionBar', () => ({RampActionBar: 'Action
 jest.mock('../../components/ramps/RampHero', () => ({RampHero: 'Hero'}));
 jest.mock('../../components/ramps/RampReveal', () => ({RampReveal: 'Reveal'}));
 jest.mock('../../components/ramps/RampStepHeader', () => ({RampStepHeader: 'Step'}));
+jest.mock('../../components/ActivityShareCard', () => ({ActivityShareCard: 'ActivityShareCard'}));
 jest.mock('../../services/localMoney', () => ({
   LOCAL_JOURNEY: 'journey', LOCAL_JOURNEY_BRIDGE: 'bridge', LOCAL_JOURNEYS: 'journeys',
   journeySteps: () => ['Convirtiendo', 'Completado'], journeyStepIndex: () => 0,

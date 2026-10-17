@@ -23,6 +23,7 @@ import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { formatRampMoney } from '../utils/rampFormat';
 import { infiniaStage } from '../services/infiniaJourney';
+import { ActivityShareCard } from '../components/ActivityShareCard';
 import {
   journeyStepIndex,
   journeySteps,
@@ -299,11 +300,18 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
             </View>
           </RampReveal>
           <RampActionBar primaryLabel="Listo" onPrimaryPress={() => navigation.popToTop()} />
+          {journey.stage === 'completed' ? (
+            <View style={shareCardStyle}>
+              <ActivityShareCard group="ramp" reference={journey.internalId} />
+            </View>
+          ) : null}
         </>
       )}
     </ScrollView>
   );
 }
+
+const shareCardStyle = { marginHorizontal: 22 } as const;
 
 const PAGE = 20;
 

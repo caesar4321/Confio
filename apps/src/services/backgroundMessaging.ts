@@ -3,6 +3,7 @@ import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import notificationDedup from './notificationDeduplication';
 import { savePendingNotificationOpen } from './notificationOpenStore';
 import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
+import { androidChannelFor, createCommunityChannel } from './notificationChannels';
 
 // Register background handler
 setBackgroundMessageHandler(getMessaging(), async remoteMessage => {
@@ -16,11 +17,14 @@ setBackgroundMessageHandler(getMessaging(), async remoteMessage => {
   }
 
   // Display notification using Notifee
-  const channelId = await notifee.createChannel({
+  const defaultChannelId = await notifee.createChannel({
     id: 'default',
     name: 'Default Channel',
     importance: AndroidImportance.HIGH,
   });
+  const communityChannelId = await createCommunityChannel();
+  // COMMUNITY_* pushes go on the Comunidad channel, like the server's own.
+  const channelId = androidChannelFor(remoteMessage.data) === 'default' ? defaultChannelId : communityChannelId;
 
   // Generate unique notification ID — coerce to string defensively in case any
   // upstream value is unexpectedly an object on this Android build.

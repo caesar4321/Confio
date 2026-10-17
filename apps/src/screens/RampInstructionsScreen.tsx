@@ -33,6 +33,7 @@ import { formatRampMoney } from '../utils/rampFormat';
 import { buildRampInstructionView } from '../utils/rampInstructions';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { ActivityShareCard } from '../components/ActivityShareCard';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'RampInstructions'>;
 type RouteProps = RouteProp<MainStackParamList, 'RampInstructions'>;
@@ -536,6 +537,12 @@ export const RampInstructionsScreen = () => {
           </RampReveal>
         ) : null}
 
+        {isTerminalSuccess ? (
+          <View style={styles.shareCard}>
+            <ActivityShareCard group="ramp" reference={orderId} />
+          </View>
+        ) : null}
+
         <RampReveal delay={300}>
         <TouchableOpacity
           style={styles.historyButton}
@@ -579,6 +586,11 @@ const styles = StyleSheet.create({
   },
   card: {
     gap: 12,
+  },
+  shareCard: {
+    marginHorizontal: 22,
+    marginTop: -16,
+    marginBottom: 16,
   },
   variantCard: {
     borderWidth: 1,

@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { useMutation, useQuery } from '@apollo/client';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { MainStackParamList } from '../types/navigation';
 import { notifyMemberBlocked } from '../services/communityEvents';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 import Icon from 'react-native-vector-icons/Feather';
@@ -144,6 +147,16 @@ export function CommunityPostActions({ contentItemId, onDeleted }: Props) {
     fetchPolicy: 'network-only',
   });
   const viewer = data?.communityPostViewer;
+  // Back from choosing a username: ask again so the comment box opens.
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const awaitingUsername = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!awaitingUsername.current) return;
+      awaitingUsername.current = false;
+      refetch().catch(() => {});
+    }, [refetch]),
+  );
   // A transient error keeps the last state (and any comment being typed);
   // only a server without Comunidad hides this.
   if (isSchemaMismatch(error) || !viewer?.isCommunity) return null;
@@ -156,6 +169,10 @@ export function CommunityPostActions({ contentItemId, onDeleted }: Props) {
         blockMessage={viewer.commentBlockMessage}
         blockCode={viewer.commentBlockCode}
         onRulesAccepted={() => { refetch(); }}
+        onChooseUsername={() => {
+          awaitingUsername.current = true;
+          navigation.navigate('UpdateUsername');
+        }}
         maxChars={viewer.commentMaxChars || 500}
       />
     </>

@@ -41,6 +41,7 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: jest.fn() }),
   useFocusEffect: () => {},
 }));
+jest.mock('../../hooks/useCommunityPostExtras', () => ({ useCommunityPostExtras: () => ({}) }));
 jest.mock('../../components/SkeletonLoader', () => ({ OfferCardSkeleton: 'OfferCardSkeleton' }));
 jest.mock('../../components/DiscoverFeed', () => ({
   DISCOVER_SECTIONS: [

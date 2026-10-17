@@ -1863,8 +1863,10 @@ from payroll.models import PayrollRun, PayrollItem, PayrollRecipient
 from inbox.models import (
     Channel,
     ChannelMembership,
+    CommunityActivityShare,
     CommunityBlock,
     CommunityComment,
+    CommunityFollow,
     CommunityCommentReaction,
     CommunityCommentReport,
     CommunityPostReport,
@@ -1886,7 +1888,9 @@ from inbox.models import (
 from inbox.admin import (
     ChannelAdmin,
     ChannelMembershipAdmin,
+    CommunityActivityShareAdmin,
     CommunityBlockAdmin,
+    CommunityFollowAdmin,
     CommunityCommentAdmin,
     CommunityCommentReactionAdmin,
     CommunityCommentReportAdmin,
@@ -2172,6 +2176,8 @@ confio_admin_site.register(CommunityCommentReaction, CommunityCommentReactionAdm
 confio_admin_site.register(ProfilePictureSubmission, ProfilePictureSubmissionAdmin)
 confio_admin_site.register(PublicObject, PublicObjectAdmin)
 confio_admin_site.register(CommunityBlock, CommunityBlockAdmin)
+confio_admin_site.register(CommunityFollow, CommunityFollowAdmin)
+confio_admin_site.register(CommunityActivityShare, CommunityActivityShareAdmin)
 confio_admin_site.register(CommunityRulesAcceptance, CommunityRulesAcceptanceAdmin)
 confio_admin_site.register(ContentPlatformClick, ContentPlatformClickAdmin)
 confio_admin_site.register(ContentPlatformClickDailyStat, ContentPlatformClickDailyStatAdmin)

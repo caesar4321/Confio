@@ -814,3 +814,41 @@ class CommunityRulesAcceptance(models.Model):
 
     def __str__(self):
         return f'{self.user_id} accepted rules {self.version}'
+
+
+class CommunityFollow(models.Model):
+    """A member following another. A follower hears about every post the
+    followed member publishes unless they turned that member's bell off."""
+    follower = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_following')
+    followed = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_followers')
+    notify = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['follower', 'followed'], name='inbox_community_follow_uniq'),
+            models.CheckConstraint(condition=~Q(follower=models.F('followed')), name='inbox_community_follow_not_self'),
+        ]
+        indexes = [models.Index(fields=['followed', 'notify'], name='inbox_follow_followed_idx')]
+
+    def __str__(self):
+        return f'{self.follower_id} follows {self.followed_id}'
+
+
+class CommunityActivityShare(models.Model):
+    """A member post made from one of their own money movements (a stock
+    trade, a top-up, a withdrawal, a send). The post's metadata holds the
+    snapshot readers see; this row ties it to the activity so one movement
+    is shared at most once while its post stands."""
+    content_item = models.OneToOneField(ContentItem, on_delete=models.CASCADE, related_name='activity_share')
+    unified_transaction = models.ForeignKey(
+        'users.UnifiedTransactionTable', on_delete=models.PROTECT, related_name='community_shares')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_activity_shares')
+    kind = models.CharField(max_length=20)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['unified_transaction'], name='inbox_activity_share_tx_idx')]
+
+    def __str__(self):
+        return f'{self.user_id} shared {self.kind} {self.unified_transaction_id}'

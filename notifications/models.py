@@ -94,6 +94,8 @@ class NotificationType(models.TextChoices):
     COMMUNITY_COMMENT = 'COMMUNITY_COMMENT', 'Community Comment'
     COMMUNITY_REPLY = 'COMMUNITY_REPLY', 'Community Reply'
     COMMUNITY_MENTION = 'COMMUNITY_MENTION', 'Community Mention'
+    COMMUNITY_FOLLOWED_POST = 'COMMUNITY_FOLLOWED_POST', 'Community Followed Member Post'
+    COMMUNITY_NEW_FOLLOWER = 'COMMUNITY_NEW_FOLLOWER', 'Community New Follower'
 
 
 class Notification(models.Model):

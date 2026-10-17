@@ -22,6 +22,7 @@ import {
 import { GET_NOTIFICATION_PREFERENCES } from '../graphql/queries/notifications';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { createCommunityChannel } from '../services/notificationChannels';
 
 const NotificationSettingsScreen: React.FC = () => {
   const [systemNotificationsEnabled, setSystemNotificationsEnabled] = useState(false);
@@ -120,6 +121,7 @@ const NotificationSettingsScreen: React.FC = () => {
           name: 'Default Channel',
           importance: AndroidImportance.HIGH,
         });
+        await createCommunityChannel();
       }
       
       // Test local notification with Notifee

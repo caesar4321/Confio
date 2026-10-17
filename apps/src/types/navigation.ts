@@ -66,6 +66,7 @@ export type MainStackParamList = {
   };
   CommunityCompose: { initialBody?: string } | undefined;
   MyCommunityPosts: undefined;
+  CommunityMemberProfile: { userId: string };
   BlockedMembers: undefined;
   CreateBusiness: undefined;
   EditBusiness: undefined;

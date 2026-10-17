@@ -91,6 +91,7 @@ BLOCK_NOT_VERIFIED = 'not_verified'
 BLOCK_DAILY_LIMIT = 'daily_limit'
 BLOCK_COMMENT_LIMIT = 'comment_limit'
 BLOCK_RULES = 'rules_required'
+BLOCK_USERNAME = 'username_required'
 MAX_MENTIONS = 5
 MAX_PARTICIPANTS = 200
 
@@ -102,6 +103,7 @@ BLOCK_MESSAGES = {
     BLOCK_DAILY_LIMIT: 'Llegaste al límite de publicaciones de hoy. Vuelve mañana.',
     BLOCK_COMMENT_LIMIT: 'Llegaste al límite de comentarios de hoy. Vuelve mañana.',
     BLOCK_RULES: 'Acepta las normas de la comunidad para publicar.',
+    BLOCK_USERNAME: 'Elige tu nombre de usuario para publicar en la comunidad.',
 }
 
 FAILED_REASON = 'No pudimos revisar tu publicación en este momento. Inténtalo de nuevo en unos minutos.'
@@ -139,17 +141,54 @@ def community_channel() -> Channel:
     return channel
 
 
+ANONYMOUS_MEMBER = 'Miembro de Confío'
+_USERNAME_STRIP = re.compile(r'[^a-zA-Z0-9_]')
+_USERNAME_SUFFIX = re.compile(r'^(.*)_(\d+)$')
+
+
+def _generated_username_bases(user) -> list[str]:
+    """What generate_compliant_username would have produced from this
+    person's signup seeds (email, else Firebase uid)."""
+    bases = []
+    for seed in (getattr(user, 'email', ''), getattr(user, 'firebase_uid', '')):
+        base = _USERNAME_STRIP.sub('', (seed or '').strip())[:20].lower()
+        if not base:
+            continue
+        if len(base) < 3:
+            base = (base + 'confio')[:20]
+        bases.append(base)
+    return bases
+
+
+def username_is_generated(user) -> bool:
+    """True while the username is still the one signup derived from the
+    email address (its punctuation stripped: "juanperezgmailcom") or the
+    Firebase uid. Showing that in a public feed would publish the email, so
+    such a member has to pick their own before they post or comment."""
+    username = (getattr(user, 'username', '') or '').lower()
+    if not username or username.startswith('user_'):
+        return True
+    for base in _generated_username_bases(user):
+        if username == base:
+            return True
+        match = _USERNAME_SUFFIX.match(username)
+        if match and match.group(1) == base[:20 - len(match.group(2)) - 1]:
+            return True
+    return False
+
+
 def author_display_name(user) -> str:
-    """First name and last initial ("María G."): a real person, never a full
-    legal name in a public feed of a money app."""
-    if user is None:
-        return 'Miembro de Confío'
-    first = (user.first_name or '').strip().split(' ')[0].strip()
-    last = (user.last_name or '').strip()
-    if first:
-        first = first[:1].upper() + first[1:].lower()
-        return f'{first} {last[:1].upper()}.' if last else first
-    return 'Miembro de Confío'
+    """The member's Confío username: Comunidad never shows a legal name.
+    A username signup derived from the email is never shown either."""
+    if user is None or username_is_generated(user):
+        return ANONYMOUS_MEMBER
+    return user.username
+
+
+def author_handle(user) -> str:
+    """The name as a notification title shows it: "@carlos"."""
+    name = author_display_name(user)
+    return name if name == ANONYMOUS_MEMBER else f'@{name}'
 
 
 def member_post_blocks(item: ContentItem) -> list:
@@ -158,9 +197,12 @@ def member_post_blocks(item: ContentItem) -> list:
     Member posts are plain text plus one image, not editorial blocks; without
     this the post detail got an empty block list and showed neither.
     """
+    from .activity_share import display_body
+
     blocks = []
-    if item.body:
-        blocks.append({'id': 'body', 'type': 'paragraph', 'text': item.body})
+    text = display_body(item)
+    if text:
+        blocks.append({'id': 'body', 'type': 'paragraph', 'text': text})
     image_url = ((item.metadata or {}).get('image') or {}).get('url')
     if image_url:
         blocks.append({'id': 'image', 'type': 'image', 'image': {'url': image_url}})
@@ -191,20 +233,24 @@ def is_member_content(item: ContentItem) -> bool:
 
 # ── Posting ──────────────────────────────────────────────────────────────────
 
-def _submissions_last_24h(user) -> int:
+def _free_submissions_last_24h(user) -> int:
+    """Free-text posts only; activity shares do not count."""
     since = timezone.now() - timedelta(hours=24)
     return (
         CommunityPostReview.objects.filter(
             content_item__owner_user=user,
             created_at__gte=since,
+            content_item__activity_share__isnull=True,
         )
         .exclude(status=CommunityReviewStatus.FAILED)
         .count()
     )
 
 
-def posting_block(user, business) -> str | None:
-    """Why this person cannot post right now, or None."""
+def posting_block(user, business, *, activity: bool = False) -> str | None:
+    """Why this person cannot post right now, or None. A post made from one
+    of their own money movements has no daily limit: each movement can be
+    shared once, which already bounds it."""
     if not getattr(settings, 'COMMUNITY_POSTING_ENABLED', True):
         return BLOCK_DISABLED
     if business is not None:
@@ -216,9 +262,11 @@ def posting_block(user, business) -> str | None:
         return BLOCK_BANNED
     if not is_verified_member(user):
         return BLOCK_NOT_VERIFIED
+    if username_is_generated(user):
+        return BLOCK_USERNAME
     if not has_accepted_rules(user):
         return BLOCK_RULES
-    if _submissions_last_24h(user) >= settings.COMMUNITY_DAILY_POST_LIMIT:
+    if not activity and _free_submissions_last_24h(user) >= settings.COMMUNITY_DAILY_POST_LIMIT:
         return BLOCK_DAILY_LIMIT
     return None
 
@@ -673,6 +721,18 @@ def _finalize(review_id, claim, verdict, *, escalated, verdicts, image=None) -> 
         # An upload error rolls this back and the task retries.
         # Eligibility can change while the AI works (a ban, a revoked KYC).
         block = author_block(review.content_item.owner_user) if verdict['decision'] == 'approve' else None
+        if not block and verdict['decision'] == 'approve' and (review.content_item.metadata or {}).get('activity'):
+            from users.models import User
+
+            from .activity_share import ALREADY_SHARED, has_other_share
+
+            # Same lock as share_activity and restore, so two copies can't
+            # each see the other as not yet live.
+            User.objects.select_for_update().filter(pk=review.content_item.owner_user_id).first()
+            if has_other_share(review.content_item):
+                verdict = {'decision': 'reject', 'category': 'ineligible', 'confidence': 1.0,
+                           'reason': ALREADY_SHARED, 'model': 'eligibility-check'}
+                verdicts = [*verdicts, verdict]
         if block:
             # Recorded as the final verdict, so a later restore never mistakes
             # the model's approval for a publication.
@@ -700,6 +760,8 @@ def _finalize(review_id, claim, verdict, *, escalated, verdicts, image=None) -> 
             item.published_at = now
             item.save(update_fields=['metadata', 'status', 'published_at', 'updated_at'])
             ContentSurface.objects.get_or_create(content_item=item, surface=ContentSurfaceType.DISCOVER)
+            item_id = item.id
+            transaction.on_commit(lambda: enqueue_follower_notifications(item_id))
         else:
             review.status = CommunityReviewStatus.REJECTED
             review.reason = str(verdict.get('reason') or '')[:280]
@@ -771,6 +833,11 @@ def _take_down(review, *, removed_by=None, category='', reason=''):
     if item.status != ContentStatus.ARCHIVED:
         item.status = ContentStatus.ARCHIVED
         item.save(update_fields=['status', 'updated_at'])
+    # Follower alerts quote the post (an activity's amount, the note): they
+    # go with it, now and again after commit for any still being sent.
+    item_id = item.id
+    erase_comment_notifications(content_item_ids=[item_id])
+    transaction.on_commit(lambda: erase_comment_notifications(content_item_ids=[item_id]))
     if (item.metadata or {}).get('image'):
         # The public URL must stop working, not just drop out of the feed.
         review_id = review.id
@@ -925,10 +992,20 @@ def restore(review_id: int):
                 or item.published_at is None:
             raise NotRestorable(f'Post review {review_id} was never approved; re-review it instead.')
         if review.category in NEVER_RESTORE_CATEGORIES or (item.metadata or {}).get(ERASE_FLAG) \
-                or not item.body or (item.owner_user and item.owner_user.deleted_at is not None):
+                or not (item.body or (item.metadata or {}).get('activity')) \
+                or (item.owner_user and item.owner_user.deleted_at is not None):
             raise NotRestorable(f'Post review {review_id} was deleted by its author, erased, or its account is gone.')
         if author_block(item.owner_user):
             raise NotRestorable(f'Post review {review_id}: its author can no longer publish (ban or KYC).')
+        from users.models import User
+
+        from .activity_share import has_other_share
+
+        # The author's row is the lock share_activity takes: no new share of
+        # this activity can land between the check and the republish.
+        User.objects.select_for_update().filter(pk=item.owner_user_id).first()
+        if has_other_share(item, include_pending=True):
+            raise NotRestorable(f'Post review {review_id}: its author already shared this activity again.')
         metadata = dict(item.metadata or {})
         private_key = metadata.get('removed_image_key')
         if private_key and image_key:
@@ -960,8 +1037,16 @@ def restore(review_id: int):
 def rereview(review_id: int) -> bool:
     """Staff: send a rejected or failed post through the AI again."""
     with transaction.atomic():
-        review = CommunityPostReview.objects.select_for_update().get(id=review_id)
+        review = CommunityPostReview.objects.select_for_update().select_related('content_item').get(id=review_id)
         if review.status not in (CommunityReviewStatus.REJECTED, CommunityReviewStatus.FAILED):
+            return False
+        from users.models import User
+
+        from .activity_share import has_other_share
+
+        User.objects.select_for_update().filter(pk=review.content_item.owner_user_id).first()
+        if has_other_share(review.content_item, include_pending=True):
+            # Its activity went up again in another post meanwhile.
             return False
         review.status = CommunityReviewStatus.PENDING
         review.reason = ''
@@ -1163,7 +1248,7 @@ def notify_comment_published(comment_id: int):
     )
     if comment is None:
         return
-    name = author_display_name(comment.author)
+    name = author_handle(comment.author)
     snippet = comment.body if len(comment.body) <= 120 else comment.body[:117] + '…'
     recipients = {}
     post_author = comment.content_item.owner_user
@@ -1428,12 +1513,14 @@ def _take_down_comment(comment, *, removed_by=None, category='', reason=''):
     transaction.on_commit(lambda: erase_comment_notifications(ids))
 
 
-COMMUNITY_COMMENT_NOTIFICATION_TYPES = ('COMMUNITY_COMMENT', 'COMMUNITY_REPLY', 'COMMUNITY_MENTION')
+COMMUNITY_COMMENT_NOTIFICATION_TYPES = ('COMMUNITY_COMMENT', 'COMMUNITY_REPLY', 'COMMUNITY_MENTION',
+                                        'COMMUNITY_FOLLOWED_POST')
 
 
 def erase_comment_notifications(comment_ids=None, *, content_item_ids=None) -> int:
-    """Delete the comment/reply/mention notifications that quote these
-    comments (or any comment on these posts)."""
+    """Delete the notifications that quote these comments, or anything on
+    these posts: comments, replies, mentions, and the follower alert that
+    carried the post itself (its activity and note)."""
     from notifications.models import Notification
 
     qs = Notification.objects.filter(notification_type__in=COMMUNITY_COMMENT_NOTIFICATION_TYPES)
@@ -1688,13 +1775,26 @@ def block_member(user, target_id) -> None:
     # block + myBlockedMembers would look up any Confío user's name by id.
     if not take_upload_ticket(user, 'block'):
         raise CommunityPostError('rate_limited', 'Demasiados bloqueos seguidos. Inténtalo más tarde.')
-    visible_post = ContentItem.objects.filter(
-        READABLE, owner_type=OwnerType.USER, owner_user_id=target_id,
-        status=ContentStatus.PUBLISHED, community_review__status=CommunityReviewStatus.APPROVED,
-    ).exists()
-    if not visible_post and not visible_comments_any_post().filter(author_id=target_id).exists():
+    from .models import CommunityFollow
+
+    # Anyone whose content you can see, or who follows you (a follower with
+    # no posts still reaches you through notifications).
+    follows_you = CommunityFollow.objects.filter(follower_id=target_id, followed_id=user.id).exists()
+    if not has_visible_content(target_id) and not follows_you:
         raise CommunityPostError('not_found', 'No encontramos a esa persona.')
     CommunityBlock.objects.get_or_create(blocker=user, blocked_id=target_id)
+    drop_follows_between(user.id, target_id)
+
+
+def has_visible_content(user_id) -> bool:
+    """A live post or comment in Comunidad. Anything that resolves a member
+    by id (block, follow, profile) requires it, so ids can't be used to look
+    up any Confío user's name."""
+    visible_post = ContentItem.objects.filter(
+        READABLE, owner_type=OwnerType.USER, owner_user_id=user_id,
+        status=ContentStatus.PUBLISHED, community_review__status=CommunityReviewStatus.APPROVED,
+    ).exists()
+    return visible_post or visible_comments_any_post().filter(author_id=user_id).exists()
 
 
 def unblock_member(user, target_id) -> bool:
@@ -1807,7 +1907,7 @@ def purge_removed_content(limit: int = 200) -> dict:
     owed = (
         ContentItem.objects.filter(owner_type=OwnerType.USER, community_review__status=CommunityReviewStatus.REMOVED)
         .filter(erase_post)
-        .filter(Q(body__gt='') | Q(metadata__has_key='removed_image_key'))
+        .filter(Q(body__gt='') | Q(metadata__has_key='removed_image_key') | Q(metadata__has_key='activity'))
     )
     # Oldest-touched first; a failing row is touched, so it can't starve the rest.
     posts = list(owed.order_by('updated_at').values_list('id', flat=True)[:limit])
@@ -1835,6 +1935,8 @@ def purge_removed_content(limit: int = 200) -> dict:
                     continue
             item.body = ''
             item.title = ''
+            # An activity post's snapshot (amount, P&L, wallet) is content too.
+            metadata.pop('activity', None)
             item.metadata = metadata
             item.save(update_fields=['body', 'title', 'metadata', 'updated_at'])
             erased_post_ids.append(item.id)
@@ -1854,3 +1956,189 @@ def purge_removed_content(limit: int = 200) -> dict:
         id__in=list(comments), status=CommunityReviewStatus.REMOVED,
     ).update(body='', updated_at=timezone.now())
     return {'posts': len(erased_post_ids), 'comments': erased_comments}
+
+
+# ── Follows ──────────────────────────────────────────────────────────────────
+
+class FollowError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def followable_member(user_id, viewer=None):
+    """A member whose profile can be shown: an active account with a chosen
+    username (an anonymous byline has no profile), and either visible
+    Comunidad content or a follow of the viewer (so "X empezó a seguirte"
+    opens X's profile)."""
+    from users.models import User
+
+    from .models import CommunityFollow
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    target = User.objects.filter(id=user_id, deleted_at__isnull=True, is_active=True).first()
+    if target is None or username_is_generated(target):
+        return None
+    if has_visible_content(user_id):
+        return target
+    if viewer is not None and CommunityFollow.objects.filter(follower_id=user_id, followed_id=viewer.id).exists():
+        return target
+    return None
+
+
+def follow_member(follower, followed_id):
+    from .models import CommunityFollow
+
+    target = followable_member(followed_id, viewer=follower)
+    if target is None or target.id == follower.id or is_blocked_between(follower.id, target.id):
+        raise FollowError('not_found', 'No encontramos a este miembro.')
+    follow, created = CommunityFollow.objects.get_or_create(follower=follower, followed=target)
+    if created:
+        transaction.on_commit(lambda: notify_new_follower(follow.id))
+    return follow
+
+
+def unfollow_member(follower, followed_id) -> bool:
+    from .models import CommunityFollow
+
+    try:
+        followed_id = int(followed_id)
+    except (TypeError, ValueError):
+        return False
+    deleted, _ = CommunityFollow.objects.filter(follower=follower, followed_id=followed_id).delete()
+    return bool(deleted)
+
+
+def set_follow_notify(follower, followed_id, notify: bool):
+    from .models import CommunityFollow
+
+    follow = CommunityFollow.objects.filter(follower=follower, followed_id=followed_id).first()
+    if follow is None:
+        raise FollowError('not_following', 'Primero sigue a este miembro.')
+    if follow.notify != notify:
+        follow.notify = notify
+        follow.save(update_fields=['notify'])
+    return follow
+
+
+def drop_follows_between(a_id, b_id):
+    """A block ends any follow in either direction."""
+    from .models import CommunityFollow
+
+    CommunityFollow.objects.filter(
+        Q(follower_id=a_id, followed_id=b_id) | Q(follower_id=b_id, followed_id=a_id)
+    ).delete()
+
+
+def follow_counts(user_id) -> tuple[int, int]:
+    """(followers, following), counting only members others can still see."""
+    from .models import CommunityFollow
+
+    followers = CommunityFollow.objects.filter(followed_id=user_id, follower__deleted_at__isnull=True).count()
+    following = CommunityFollow.objects.filter(follower_id=user_id, followed__deleted_at__isnull=True).count()
+    return followers, following
+
+
+def enqueue_follower_notifications(content_item_id: int):
+    from .tasks import notify_followers_task
+
+    notify_followers_task.delay(content_item_id)
+
+
+def post_notification_text(item: ContentItem) -> str:
+    activity = (item.metadata or {}).get('activity')
+    if activity:
+        from .activity_share import activity_headline
+
+        text = activity_headline(activity)
+        if item.body:
+            text = f'{text}: {item.body}'
+    else:
+        text = item.body or 'Publicó una foto'
+    return text if len(text) <= 120 else text[:117] + '…'
+
+
+FOLLOWERS_NOTIFIED = 'followers_notified'
+
+
+def notify_followers(content_item_id: int) -> int:
+    """Tell every follower with the bell on that this member just posted.
+    No frequency cap by design: the bell per member is the control."""
+    from notifications.models import NotificationType
+
+    from .models import CommunityFollow
+
+    item = (
+        ContentItem.objects.select_related('owner_user')
+        .filter(READABLE, id=content_item_id, status=ContentStatus.PUBLISHED, owner_type=OwnerType.USER)
+        .first()
+    )
+    if item is None or item.owner_user is None:
+        return 0
+    # Once per post: a re-queued or duplicated task must not notify everyone
+    # again. Claimed before sending; a crash midway leaves some followers
+    # unnotified rather than notifying others twice.
+    with transaction.atomic():
+        locked = ContentItem.objects.select_for_update().get(id=item.id)
+        if (locked.metadata or {}).get(FOLLOWERS_NOTIFIED):
+            return 0
+        # Re-checked under the lock: a takedown that committed after the read
+        # above must stop every push (a delivered push can't be recalled).
+        if not ContentItem.objects.filter(READABLE, id=item.id, status=ContentStatus.PUBLISHED).exists():
+            return 0
+        locked.metadata = {**(locked.metadata or {}), FOLLOWERS_NOTIFIED: True}
+        locked.save(update_fields=['metadata', 'updated_at'])
+    author = item.owner_user
+    blocked = block_relation_ids(author)
+    title = f'{author_handle(author)} publicó'
+    message = post_notification_text(item)
+    data = {'content_item_id': item.id, 'author_id': author.id}
+    sent = 0
+    follows = (
+        CommunityFollow.objects.select_related('follower')
+        .filter(followed=author, notify=True, follower__deleted_at__isnull=True)
+        .exclude(follower_id__in=blocked)
+        .order_by('id')
+    )
+    live = ContentItem.objects.filter(READABLE, id=item.id, status=ContentStatus.PUBLISHED)
+    for follow in follows.iterator():
+        # Every delivery re-checks: a takedown midway stops the rest at once,
+        # and an unfollow, a muted bell or a block since the list was read
+        # skips that follower.
+        if not live.exists():
+            break
+        still_following = CommunityFollow.objects.filter(id=follow.id, notify=True).exists()
+        if not still_following or is_blocked_between(author.id, follow.follower_id):
+            continue
+        _notify(follow.follower, NotificationType.COMMUNITY_FOLLOWED_POST, title, message,
+                action_url=_post_link(item.id), data=data)
+        sent += 1
+    # Taken down while these went out: its takedown erased nothing yet.
+    if not ContentItem.objects.filter(READABLE, id=item.id, status=ContentStatus.PUBLISHED).exists():
+        erase_comment_notifications(content_item_ids=[item.id])
+    return sent
+
+
+def member_link(user_id) -> str:
+    return f'confio://community/member/{user_id}'
+
+
+def notify_new_follower(follow_id: int):
+    from notifications.models import NotificationType
+
+    from .models import CommunityFollow
+
+    follow = CommunityFollow.objects.select_related('follower', 'followed').filter(id=follow_id).first()
+    if follow is None or follow.follower.deleted_at is not None:
+        return
+    # A follower with no chosen username has no profile to open.
+    if username_is_generated(follow.follower):
+        return
+    handle = author_handle(follow.follower)
+    _notify(follow.followed, NotificationType.COMMUNITY_NEW_FOLLOWER, f'{handle} empezó a seguirte',
+            'Ahora verá lo que compartes en Comunidad.', action_url=member_link(follow.follower_id),
+            data={'member_id': follow.follower_id})
