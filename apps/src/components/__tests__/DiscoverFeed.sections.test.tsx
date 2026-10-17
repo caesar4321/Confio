@@ -151,6 +151,22 @@ describe('DiscoverFeed sections', () => {
     expect(mockNavigate).toHaveBeenLastCalledWith('Scan', { mode: 'pagar' });
   });
 
+  it('labels local transfers by rail and country, never the other side', () => {
+    const tree = render({
+      items: [item({ id: 11, sourceName: 'ana' }), item({ id: 12, sourceName: 'ben' }), item({ id: 13, sourceName: 'cy' })],
+      postExtras: {
+        11: { contentItemId: '11', activity: { kind: 'send', local: true, rail: 'Bre-B', country: 'CO', headline: 'x' } },
+        12: { contentItemId: '12', activity: { kind: 'receive', local: true, country: 'CO', headline: 'x' } },
+        13: { contentItemId: '13', activity: { kind: 'pay', local: true, merchant: null, country: 'AR', headline: 'x' } },
+      },
+    });
+    const shown = texts(tree);
+    expect(shown).toContain('Envió por Bre-B');
+    expect(shown).toContain('Recibió por su cuenta local');
+    expect(shown).toContain('Pagó con QR');
+    expect(shown.some((t) => t.includes('Colombia'))).toBe(true);
+  });
+
   it("never sends an employee to the owner's money screens", () => {
     mockIsEmployee = true;
     const tree = render({

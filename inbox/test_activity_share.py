@@ -553,3 +553,62 @@ class PaySnapshotTests(CommunityTestBase):
         self.assertIsNone(activity_share._pay_snapshot(self.payment(payer, status='SUBMITTED'), '1', payer))
         self.assertIsNotNone(activity_share._pay_snapshot(self.payment(payer, status='SUBMITTED'), '1', payer, final=False))
         self.assertIsNone(activity_share._pay_snapshot(self.payment(payer, status='FAILED'), '1', payer, final=False))
+
+
+class LocalTransferClassificationTests(CommunityTestBase):
+    def journey(self, direction, **extra):
+        values = {'direction': direction, 'destination_snapshot': {'destination_internal_id': 'd1'},
+                  'local_account': SimpleNamespace(payin_rail='BRE-B', country='COL'), 'funding_credit': None,
+                  'confio_account': None, **extra}
+        return SimpleNamespace(**values)
+
+    def classify(self, journey, destination=None, own=False):
+        from unittest.mock import MagicMock
+
+        lookup = MagicMock()
+        lookup.filter.return_value.first.return_value = destination
+        with patch('payment_accounts.models.PayoutDestination.objects', lookup), \
+                patch.object(activity_share, '_payout_is_own', return_value=own):
+            return activity_share.classify_journey(journey)
+
+    def test_paying_a_scanned_qr_is_a_payment(self):
+        for method in ('co_qr', 'ar_qr', 'br_qr'):
+            dest = SimpleNamespace(kind='breb_key', provider_data={'method_id': method}, details={})
+            self.assertEqual(self.classify(self.journey('to_bank'), dest), ('pay', 'QR'))
+
+    def test_older_qr_destinations_without_a_method_are_still_payments(self):
+        for dest in (SimpleNamespace(kind='qr', provider_data={}, details={}),
+                     SimpleNamespace(kind='bank_account', provider_data={}, details={'type': 'BR_CODE'})):
+            self.assertEqual(self.classify(self.journey('to_bank'), dest), ('pay', 'QR'))
+
+    def test_groups_only_draw_from_their_own_source(self):
+        send_row = SimpleNamespace(send_transaction_id=1, ramp_transaction_id=None, local_money_flow_id=None)
+        local_row = SimpleNamespace(send_transaction_id=None, ramp_transaction_id=None, local_money_flow_id=7)
+        self.assertFalse(activity_share._in_group(send_row, 'ramp'))
+        self.assertTrue(activity_share._in_group(local_row, 'ramp'))
+        self.assertTrue(activity_share._in_group(send_row, 'send'))
+
+    def test_a_bank_send_is_retiro_only_to_your_own_account(self):
+        dest = SimpleNamespace(kind='breb_key', provider_data={'method_id': 'co_breb'}, details={'type': 'BREB_KEY'})
+        self.assertEqual(self.classify(self.journey('to_bank'), dest, own=True), ('withdraw', 'Bre-B'))
+        self.assertEqual(self.classify(self.journey('to_bank'), dest, own=False), ('send', 'Bre-B'))
+
+    def test_incoming_from_yourself_is_a_top_up_otherwise_received(self):
+        own = SimpleNamespace(payin_admission=SimpleNamespace(reason='same_owner'))
+        other = SimpleNamespace(payin_admission=SimpleNamespace(reason='third_party_enabled'))
+        self.assertEqual(self.classify(self.journey('to_wallet', funding_credit=own))[0], 'top_up')
+        self.assertEqual(self.classify(self.journey('to_wallet', funding_credit=other))[0], 'receive')
+        self.assertEqual(self.classify(self.journey('to_wallet'))[0], 'receive')
+
+    def test_local_headlines_never_name_the_other_side(self):
+        headline = activity_share.activity_headline
+        self.assertEqual(headline({'kind': 'send', 'local': True, 'rail': 'Bre-B', 'amount_usd': '20.00',
+                                   'show_amount': True}), 'Envió por Bre-B · US$20.00')
+        self.assertEqual(headline({'kind': 'receive', 'local': True, 'amount_usd': '15.00', 'show_amount': True}),
+                         'Recibió por su cuenta local · US$15.00')
+        self.assertEqual(headline({'kind': 'pay', 'merchant': None, 'local': True, 'amount_usd': '3.00',
+                                   'show_amount': True}), 'Pagó con QR · US$3.00')
+
+    def test_own_account_needs_a_matching_kyc_document(self):
+        dest = SimpleNamespace(holder_id_type='', holder_id_number='')
+        self.assertFalse(activity_share._payout_is_own(SimpleNamespace(confio_account=None), dest))

@@ -19,6 +19,8 @@ export type ActivityShare = {
   minutes?: number | null;
   /** Pay: the business paid; null for a personal merchant (never named). */
   merchant?: string | null;
+  /** A local-account transfer (Infinia): send/receive name the rail only. */
+  local?: boolean | null;
   pnlUsd?: string | null;
   pnlPct?: string | null;
   position?: 'open' | 'closed' | string | null;
@@ -63,9 +65,9 @@ function titleFor(a: ActivityShare): string {
     case 'withdraw':
       return 'Retiró dólares';
     case 'send':
-      return 'Envió a otro usuario de Confío';
+      return a.local ? `Envió por ${a.rail || 'transferencia'}` : 'Envió a otro usuario de Confío';
     case 'receive':
-      return 'Recibió de otro usuario de Confío';
+      return a.local ? 'Recibió por su cuenta local' : 'Recibió de otro usuario de Confío';
     case 'pay':
       return a.merchant ? `Pagó en ${a.merchant}` : 'Pagó con QR';
     default:
@@ -84,6 +86,10 @@ function detailFor(a: ActivityShare): string | null {
       a.country ? `${flag(a.country)} ${COUNTRY_NAMES[a.country] || a.country}`.trim() : null,
     ].filter(Boolean);
     return parts.length ? parts.join(' · ') : null;
+  }
+  if (a.local && a.country) {
+    // Local payments, sends and receipts: where, never who.
+    return `${flag(a.country)} ${COUNTRY_NAMES[a.country] || a.country}`.trim();
   }
   return null;
 }

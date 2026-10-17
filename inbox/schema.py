@@ -956,6 +956,8 @@ class ActivityShareType(graphene.ObjectType):
     minutes = graphene.Int()
     # Pay: the business paid (never a personal merchant).
     merchant = graphene.String()
+    # A local-account transfer (Infinia): send / receive name the rail only.
+    local = graphene.Boolean()
     # A sale: realized. A purchase: live until sold out, then frozen.
     pnl_usd = graphene.String()
     pnl_pct = graphene.String()
@@ -969,6 +971,7 @@ def build_activity_type(public: dict, raw: dict) -> ActivityShareType:
         kind=public['kind'], date=public.get('date'), amount_usd=public.get('amount_usd'),
         ticker=public.get('ticker'), name=public.get('name'), rail=public.get('rail'),
         country=public.get('country'), minutes=public.get('minutes'), merchant=public.get('merchant'),
+        local=public.get('local'),
         pnl_usd=public.get('pnl_usd'),
         pnl_pct=public.get('pnl_pct'), position=public.get('position'),
         headline=activity_share.activity_headline(raw),

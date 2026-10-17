@@ -46,11 +46,29 @@ KINDS = (STOCK_BUY, STOCK_SELL, TOP_UP, WITHDRAW, SEND, RECEIVE, PAY)
 # What a success screen asks for: the newest unshared activity of its group.
 GROUPS = {
     'stock': (STOCK_BUY, STOCK_SELL),
-    'ramp': (TOP_UP, WITHDRAW),
+    # Ramp orders and local-account transfers: a local transfer can also be
+    # a QR payment, a send to someone else, or money received from someone.
+    'ramp': (TOP_UP, WITHDRAW, PAY, SEND, RECEIVE),
     'send': (SEND,),
     'receive': (RECEIVE,),
     'pay': (PAY,),
 }
+# Which ledger sources each group may draw from: kinds alone overlap (a
+# local transfer can be a send or a payment, like a Confío send or a Pay).
+GROUP_SOURCES = {
+    'stock': ('sponsored_batch_id',),
+    'ramp': ('ramp_transaction_id', 'local_money_flow_id'),
+    'send': ('send_transaction_id',),
+    'receive': ('send_transaction_id',),
+    'pay': ('payment_transaction_id',),
+}
+
+
+def _in_group(row, group) -> bool:
+    sources = GROUP_SOURCES.get(group or '')
+    return sources is None or any(getattr(row, field, None) for field in sources)
+
+
 # How far back a success screen's "latest" lookup reaches.
 RECENT_WINDOW = timedelta(hours=2)
 # Older activity can still be shared from its receipt, within reason.
@@ -255,13 +273,6 @@ def _ramp_snapshot(row, user) -> Snapshot | None:
     })
 
 
-LOCAL_RAILS = {
-    'qr': 'QR',
-    'breb_key': 'Bre-B',
-    'pix_key': 'Pix',
-    'bank_account': 'transferencia',
-    'bank_details': 'transferencia',
-}
 
 
 def _country2(value) -> str | None:
@@ -273,9 +284,57 @@ def _country2(value) -> str | None:
         return None
 
 
-def _local_transfer_snapshot(row, user) -> Snapshot | None:
+RAIL_NAMES = {'breb_key': 'Bre-B', 'bank_account': 'transferencia', 'qr': 'QR'}
+
+
+def _payout_is_own(journey, destination) -> bool:
+    """The same rule as Tu mes (users.cashflow, R2): the destination is the
+    member's own only when its holder document equals their verified KYC
+    document. Missing data means not proven, so a third party."""
+    from payment_accounts.models import ProviderProfile
+    from users.cashflow import _doc_family, _norm_id
+
+    if destination is None or not _norm_id(destination.holder_id_number):
+        return False
+    profile = (ProviderProfile.objects.filter(confio_account=journey.confio_account)
+               .exclude(identity_snapshot={}).order_by('-id').first())
+    snap = getattr(profile, 'identity_snapshot', None) or {}
+    number = _norm_id(snap.get('document_number'))
+    if not number:
+        return False
+    return (_doc_family(destination.holder_id_type), _norm_id(destination.holder_id_number)) == \
+        (_doc_family(snap.get('document_type')), number)
+
+
+def classify_journey(journey) -> tuple[str, str | None]:
+    """(kind, rail) for a local-account transfer, never naming the other side:
+    - out, paying a scanned QR (method co_qr / ar_qr / br_qr) → PAY;
+    - out, to the member's own account (R2 document match) → WITHDRAW;
+    - out, to anyone else → SEND ("Envió por Bre-B / transferencia");
+    - in, from the member's own name (pay-in admission 'same_owner') → TOP_UP;
+    - in, from anyone else → RECEIVE ("Recibió por cuenta local")."""
     from payment_accounts.models import PayoutDestination
 
+    if journey.direction == 'to_bank':
+        internal_id = (journey.destination_snapshot or {}).get('destination_internal_id')
+        destination = PayoutDestination.objects.filter(internal_id=internal_id).first() if internal_id else None
+        method_id = str(((destination.provider_data or {}) if destination else {}).get('method_id') or '')
+        details_type = str(((destination.details or {}) if destination else {}).get('type') or '')
+        # A scanned QR: the method says so; older destinations (or ones made
+        # through createPayoutDestination) carry it as their kind or type.
+        if method_id.endswith('_qr') or (destination is not None and (
+                destination.kind == 'qr' or details_type in ('QR_CODE', 'BR_CODE'))):
+            return PAY, 'QR'
+        rail = RAIL_NAMES.get(destination.kind if destination else '', 'transferencia')
+        return (WITHDRAW if _payout_is_own(journey, destination) else SEND), rail
+    payin = (journey.local_account.payin_rail or '').strip()
+    rail = 'QR' if 'QR' in payin.upper() else (payin or 'transferencia')
+    credit = journey.funding_credit
+    reason = getattr(getattr(credit, 'payin_admission', None), 'reason', None) if credit else None
+    return (TOP_UP if reason == 'same_owner' else RECEIVE), rail
+
+
+def _local_transfer_snapshot(row, user) -> Snapshot | None:
     flow = row.local_money_flow
     journey = getattr(flow, 'infinia_journey', None)
     if journey is None or journey.stage != 'completed':
@@ -283,21 +342,14 @@ def _local_transfer_snapshot(row, user) -> Snapshot | None:
     owner = journey.confio_account
     if owner.user_id != user.id or owner.account_type == 'business':
         return None
-    if journey.direction == 'to_bank':
-        kind = WITHDRAW
-        internal_id = (journey.destination_snapshot or {}).get('destination_internal_id')
-        destination = PayoutDestination.objects.filter(internal_id=internal_id).first() if internal_id else None
-        rail = LOCAL_RAILS.get(destination.kind if destination else '', 'transferencia')
-    else:
-        kind = TOP_UP
-        payin = (journey.local_account.payin_rail or '').strip()
-        rail = 'QR' if 'QR' in payin.upper() else (payin or 'transferencia')
+    kind, rail = classify_journey(journey)
     return Snapshot(kind, {
         'kind': kind,
         'amount_usd': _money(_dec(row.amount)),
         'rail': rail,
         'country': _country2(journey.local_account.country),
-        'minutes': _minutes(flow.created_at, flow.completed_at),
+        'local': True,
+        'minutes': _minutes(flow.created_at, flow.completed_at) if kind in (TOP_UP, WITHDRAW) else None,
         'date': _date(flow.completed_at or flow.created_at),
     })
 
@@ -366,6 +418,7 @@ def _member_rows(user):
         'sponsored_batch', 'ramp_transaction', 'send_transaction', 'payment_transaction__merchant_business',
         'local_money_flow__infinia_journey__local_account',
         'local_money_flow__infinia_journey__confio_account',
+        'local_money_flow__infinia_journey__funding_credit__payin_admission',
     )
 
 
@@ -438,7 +491,8 @@ def find_activity(user, *, unified_id=None, group=None, reference=None):
         row = rows.filter(match).order_by('-id').first() if match is not None else None
         snap = snapshot_for(row, user)
         kinds = GROUPS.get(group or '')
-        ok = snap and (not kinds or snap.kind in kinds) and not is_shared(row.id, user)
+        ok = (snap and (not kinds or snap.kind in kinds) and _in_group(row, group)
+              and not is_shared(row.id, user))
         return (row, snap) if ok else None
     if unified_id is not None:
         try:
@@ -454,7 +508,7 @@ def find_activity(user, *, unified_id=None, group=None, reference=None):
     since = timezone.now() - RECENT_WINDOW
     for row in rows.filter(updated_at__gte=since).order_by('-updated_at', '-id')[:20]:
         snap = snapshot_for(row, user)
-        if snap and snap.kind in kinds and not is_shared(row.id, user):
+        if snap and snap.kind in kinds and _in_group(row, group) and not is_shared(row.id, user):
             return row, snap
     return None
 
@@ -622,6 +676,7 @@ def activity_payloads(items) -> dict:
             'country': activity.get('country'),
             'minutes': activity.get('minutes'),
             'merchant': activity.get('merchant'),
+            'local': bool(activity.get('local')),
             'pnl_usd': None,
             'pnl_pct': None,
             'position': None,
@@ -684,6 +739,12 @@ def activity_headline(activity: dict) -> str:
         return ' · '.join(parts)
     if kind == PAY and activity.get('merchant'):
         verb = f"Pagó en {activity['merchant']}"
+    if activity.get('local'):
+        # Local-account transfers: the rail, never the other side's name.
+        if kind == SEND:
+            verb = f"Envió por {activity.get('rail') or 'transferencia'}"
+        elif kind == RECEIVE:
+            verb = 'Recibió por su cuenta local'
     return f'{verb} · {money}' if money else verb
 
 
@@ -846,12 +907,12 @@ def _ramp_preview(user, reference):
         return None
     if journey.confio_account.user_id != user.id or journey.confio_account.account_type == 'business':
         return None
-    kind = WITHDRAW if journey.direction == 'to_bank' else TOP_UP
-    amount = journey.money_flow.source_amount if kind == WITHDRAW else None
+    kind, rail = classify_journey(journey)
+    amount = journey.money_flow.source_amount if journey.direction == 'to_bank' else None
     return Snapshot(kind, {
         'kind': kind, 'amount_usd': _money(_dec(amount)) if amount is not None else None,
-        'rail': 'QR' if 'QR' in (journey.local_account.payin_rail or '').upper() else None,
-        'country': _country2(journey.local_account.country), 'minutes': None, 'date': _date(timezone.now()),
+        'rail': rail, 'country': _country2(journey.local_account.country), 'local': True,
+        'minutes': None, 'date': _date(timezone.now()),
     })
 
 

@@ -4928,6 +4928,7 @@ const ACTIVITY_SHARE_FIELDS = `
   country
   minutes
   merchant
+  local
   pnlUsd
   pnlPct
   position
