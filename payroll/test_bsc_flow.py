@@ -408,6 +408,12 @@ def _user():
     BSC_PAYROLL_ENABLED=True,
 )
 class PreparePayoutTests(SimpleTestCase):
+    def setUp(self):
+        # Pool and signature logic only: the Confío Face gate has its own tests.
+        face = mock.patch.object(bsc_flow, '_payroll_face_step_up', return_value='')
+        self.face_gate = face.start()
+        self.addCleanup(face.stop)
+
     def _prepare(self, item, eligible=True, escrow=10_000 * WAD,
                  is_delegate=True, locked_recipient_addr=None):
         business_account = SimpleNamespace(
@@ -668,6 +674,12 @@ class PreparePayoutTests(SimpleTestCase):
     BSC_PAYROLL_ENABLED=True,
 )
 class SubmitPayoutTests(SimpleTestCase):
+    def setUp(self):
+        # Pool and signature logic only: the Confío Face gate has its own tests.
+        face = mock.patch.object(bsc_flow, '_payroll_face_step_up', return_value='')
+        self.face_gate = face.start()
+        self.addCleanup(face.stop)
+
     def _prepared_item(self):
         import time as _time
         item = _item()
@@ -882,3 +894,69 @@ class PendingItemsPermissionTests(SimpleTestCase):
         self.assertFalse(check_role_permission('cashier', 'send_funds'))
         for role in ('admin', 'manager', 'owner'):
             self.assertTrue(check_role_permission(role, 'send_funds'), role)
+
+
+class PayrollFaceGateTests(SimpleTestCase):
+    """Payroll asks the paying person's Confío Face, once per run."""
+
+    def _run(self, *amounts, token='CUSD_PLUS', recipient_business=None):
+        items = [SimpleNamespace(internal_id=f'i{n}', recipient_account_id=100 + n, net_amount=a,
+                                 gross_amount=a, token_type=token,
+                                 recipient_account=SimpleNamespace(business_id=recipient_business))
+                 for n, a in enumerate(amounts)]
+        run = SimpleNamespace(pk=9, token_type=token,
+                              items=SimpleNamespace(select_related=lambda *_: items))
+        for item in items:
+            item.run, item.run_id = run, 9
+        return items
+
+    def _gate(self, item, consume=False, own_business=False):
+        owned = mock.Mock(**{'filter.return_value.exists.return_value': own_business})
+        with mock.patch('security.face_step_up.require_face_step_up', return_value='') as gate, \
+                mock.patch('users.models.Account.all_objects', owned), \
+                mock.patch('users.models_employee.BusinessEmployee.all_objects', owned):
+            bsc_flow._payroll_face_step_up(SimpleNamespace(pk=1), item, consume=consume)
+        return gate.call_args
+
+    def test_one_approval_covers_every_item_of_the_run(self):
+        first, second = self._run('10', '15')
+        self.assertEqual(self._gate(first).kwargs['action_key'], self._gate(second).kwargs['action_key'])
+
+    def test_changing_who_is_paid_or_how_much_needs_a_new_face(self):
+        a = self._gate(self._run('10', '15')[0]).kwargs['action_key']
+        b = self._gate(self._run('10', '16')[0]).kwargs['action_key']
+        self.assertNotEqual(a, b)
+
+    def test_judged_on_the_run_total_inside_confio(self):
+        call = self._gate(self._run('10', '15')[0], consume=True)
+        self.assertEqual(str(call.kwargs['amount_usd']), '25')
+        self.assertFalse(call.kwargs['cash_out'])
+        self.assertTrue(call.kwargs['consume'])
+
+    def test_preparing_an_item_keeps_the_run_approval(self):
+        first, second = self._run('10', '15')
+        before = self._gate(second).kwargs['action_key']
+        first.token_type = 'CUSD_BSC'  # prepare rewrites it to what the employee receives
+        self.assertEqual(self._gate(second).kwargs['action_key'], before)
+
+    def test_paying_into_own_business_is_a_hop_out(self):
+        item = self._run('10', recipient_business=55)[0]
+        self.assertTrue(self._gate(item, own_business=True).kwargs['cash_out'])
+        self.assertFalse(self._gate(item, own_business=False).kwargs['cash_out'])
+
+    def test_cusd_bsc_runs_count_in_dollars(self):
+        call = self._gate(self._run('10', '15', token='CUSD_BSC')[0])
+        self.assertEqual(str(call.kwargs['amount_usd']), '25')
+
+    def test_prepare_refuses_without_a_face_check(self):
+        item = self._run('10')[0]
+        item.status = 'PENDING'
+        item.run.business_id = 77
+        business = SimpleNamespace(id=77)
+        with mock.patch.object(bsc_flow, '_flags_error', return_value=None), \
+                mock.patch.object(bsc_flow, '_business_context',
+                                  return_value=(business, None, BUSINESS_ADDR, BUSINESS_ADDR, None)), \
+                mock.patch.object(bsc_flow, '_payroll_face_step_up', return_value='face please'), \
+                mock.patch('security.identity_reuse.outgoing_identity_restriction', return_value=''):
+            result = bsc_flow.prepare_bsc_payroll_payout(SimpleNamespace(pk=1), None, item)
+        self.assertEqual(result, {'success': False, 'error': 'face please'})

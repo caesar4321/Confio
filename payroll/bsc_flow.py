@@ -874,6 +874,45 @@ def _notify_recipient_needs_app(recipient_user, business) -> None:
         logger.exception('payroll recipient-needs-app notification failed')
 
 
+def _payroll_face_step_up(user, item, *, consume=False) -> str:
+    """'' or the Confío Face message for paying a payroll item.
+
+    Payroll is a business outflow like a send or a payment (0037972a): the
+    signed-in person executing it (owner or employee with the permission)
+    proves their own face under the same rule. One check covers the whole
+    run: the approval is bound to every item's id, recipient and amount, so
+    paying all employees asks once, and any change to who gets paid or how
+    much needs a new face. Item token types are left out: preparing an item
+    rewrites its token to what the employee receives, which must not void
+    the approval for the rest of the run. Light or full is decided on the
+    run's total, and a run paying into a business the payer owns or works
+    for is a hop out of Confío, as in a send.
+    """
+    from decimal import Decimal as _D
+
+    from security.face_step_up import dollar_amount, require_face_step_up, withdrawal_action_key
+    from users.models import Account
+    from users.models_employee import BusinessEmployee
+
+    run = item.run
+    items = list(run.items.select_related('recipient_account'))
+    terms = sorted(
+        (str(i.internal_id), i.recipient_account_id, str(i.net_amount), str(i.gross_amount))
+        for i in items
+    )
+    total = sum((_D(str(row[3])) for row in terms), _D('0'))
+    action_key = withdrawal_action_key('payroll_run', run.pk, [run.token_type, terms])
+    businesses = {i.recipient_account.business_id for i in items if i.recipient_account.business_id}
+    # The send rule (_routes_to_own_business), batched over the run.
+    cash_out = bool(businesses) and (
+        Account.all_objects.filter(business_id__in=businesses, user=user).exists()
+        or BusinessEmployee.all_objects.filter(business_id__in=businesses, user=user).exists())
+    # cUSD on BSC is a dollar token like cUSD; CONFIO stays unknown (full).
+    token = 'CUSD' if run.token_type == 'CUSD_BSC' else run.token_type
+    return require_face_step_up(user, 'withdrawal', action_key=action_key, consume=consume,
+                                amount_usd=dollar_amount(total, token), cash_out=cash_out)
+
+
 def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
     from security.identity_reuse import outgoing_identity_restriction
     restriction = outgoing_identity_restriction(user)
@@ -906,6 +945,9 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
         return {'success': False, 'error': 'item_not_pending'}
     if not signer_addr:
         return {'success': False, 'error': 'no_bsc_address'}
+    step_up = _payroll_face_step_up(user, item)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     recipient_addr = ((item.recipient_account.bsc_address or '') or '').lower()
     if not recipient_addr:
@@ -1090,6 +1132,11 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
         return {'success': False, 'error': 'not_your_payroll'}
     if item.status != 'PREPARED':
         return {'success': False, 'error': 'item_not_prepared'}
+    # Rechecked: an item prepared earlier (or before enforcement) must not
+    # pay once the face window has lapsed. Claimed below, before broadcast.
+    step_up = _payroll_face_step_up(user, item)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     payout = (item.blockchain_data or {}).get('bsc_payout')
     if not payout or payout.get('business') != business_addr:
@@ -1128,6 +1175,10 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
         logger.warning('[PAYROLL][BSC] payout simulation reverted for %s: %s',
                        item.internal_id, exc)
         return {'success': False, 'error': 'simulation_reverted'}
+
+    step_up = _payroll_face_step_up(user, item, consume=True)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     gas = GAS_PAYOUT_REDEEM if payout['redeem_to_usdt'] else GAS_PAYOUT_TRANSFER
     gas_price = max(int(_rpc('eth_gasPrice', []), 16),

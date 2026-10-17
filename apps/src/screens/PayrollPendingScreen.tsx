@@ -176,7 +176,13 @@ export const PayrollPendingScreen = () => {
       const { payBscPayrollItem, bscPayrollErrorMessage } = await import('../services/bscPayroll');
       try {
         setProcessingMessage('Firmando pago…');
-        await payBscPayrollItem(item.internalId);
+        await payBscPayrollItem(item.internalId, async (showing) => {
+          // iOS presents one modal at a time: let the overlay finish
+          // dismissing before Face slides in, and Face before it returns.
+          if (showing) setIsProcessing(false);
+          await new Promise<void>(resolve => setTimeout(resolve, 400));
+          if (!showing) setIsProcessing(true);
+        });
         setIsProcessing(false);
         Alert.alert('Pago enviado', 'La transacción de nómina fue enviada.');
         refetch();

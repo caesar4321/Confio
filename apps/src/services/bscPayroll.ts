@@ -255,25 +255,48 @@ export const runBscPayrollAdmin = async (
  * context — that key is what the on-chain allowlist knows. */
 export const payBscPayrollItem = async (
   payrollItemId: string,
+  /** Hide the caller's own modal (a loading overlay) before Confío Face
+   * presents its own, and restore it after: iOS shows one modal at a time. */
+  onFaceCheck?: (showing: boolean) => Promise<void> | void,
 ): Promise<{ txHash: string; redeemToUsdt: boolean }> => {
   const { apolloClient } = await import('../apollo/client');
   const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
 
-  const { data } = await apolloClient.mutate({
+  const { ensureFaceCheck, FACE_STEP_UP_MESSAGE, FaceCheckError, isFaceStepUpRequired } =
+    await import('./faceStepUp');
+  // Payroll is a business outflow: the person paying proves their face once
+  // per run (the server binds the approval to the whole run), then retries.
+  const withFace = async <T extends { success?: boolean; error?: string } | undefined>(
+    call: () => Promise<T>,
+  ): Promise<T> => {
+    let result = await call();
+    if (!result?.success && isFaceStepUpRequired(result?.error)) {
+      await onFaceCheck?.(true);
+      let passed = false;
+      try {
+        passed = await ensureFaceCheck('withdrawal');
+      } finally {
+        await onFaceCheck?.(false);
+      }
+      if (!passed) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+      result = await call();
+    }
+    return result;
+  };
+
+  const prep = await withFace(async () => (await apolloClient.mutate({
     mutation: PREPARE_PAYOUT,
     variables: { payrollItemId },
-  });
-  const prep = data?.prepareBscPayrollPayout;
+  })).data?.prepareBscPayrollPayout);
   if (!prep?.success) throw new Error(prep?.error || 'prepare_failed');
 
   const personal = await getActiveEvmWallet({ type: 'personal', index: 0 });
   const signature = signIntentDigest(hexToBytes(prep.digest), personal.privKeyHex);
 
-  const res = await apolloClient.mutate({
+  const sub = await withFace(async () => (await apolloClient.mutate({
     mutation: SUBMIT_PAYOUT,
     variables: { payrollItemId, signature },
-  });
-  const sub = res.data?.submitBscPayrollPayout;
+  })).data?.submitBscPayrollPayout);
   if (!sub?.success) throw new Error(sub?.error || 'submit_failed');
   return { txHash: sub.transactionHash, redeemToUsdt: !!prep.redeemToUsdt };
 };
