@@ -143,8 +143,8 @@ const SEND_RAILS: LocalRail[] = [
   },
   // SEPA is the one rail that is a REGION, not a country: one IBAN format
   // covers the whole euro area, so it gets a single row instead of one per
-  // country. `EU` is not an ISO-2 country code — countryFlag/countryName
-  // resolve it through the pseudo-entries below.
+  // country. `EU` is not an ISO-2 country code — countryName resolves it
+  // through the pseudo-entries below, and CountryFlag has its own EU image.
   {
     id: 'send_eu_sepa',
     country: 'EU',
@@ -315,15 +315,10 @@ export const toIso2 = (code: string | null | undefined): string => {
 
 // SEPA is a currency area, not a country, so it has no ISO-2 entry in the
 // app's country table. It gets a pseudo-entry rather than a special case at
-// every call site — the alternative was a blank flag and the literal string
-// "EU" rendering as the country name in the picker.
-const PSEUDO_REGIONS: Record<string, { flag: string; name: string }> = {
-  EU: { flag: '🇪🇺', name: 'Zona euro' },
-};
-
-export const countryFlag = (iso: string): string => {
-  const code = toIso2(iso);
-  return PSEUDO_REGIONS[code]?.flag || getCountryByIso(code)?.[3] || '';
+// every call site — the alternative was the literal string "EU" rendering
+// as the country name in the picker.
+const PSEUDO_REGIONS: Record<string, { name: string }> = {
+  EU: { name: 'Zona euro' },
 };
 
 export const countryName = (iso: string): string => {

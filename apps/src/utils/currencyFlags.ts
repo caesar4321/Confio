@@ -1,3 +1,5 @@
+import { isoFromFlagEmoji } from './flagIso';
+
 /**
  * Currency to flag mapping
  * Maps currency codes to their primary/most recognizable country flag
@@ -152,11 +154,7 @@ export const CURRENCY_TO_FLAG: { [key: string]: string } = {
   'MGA': '🇲🇬',  // Malagasy Ariary
 };
 
-/**
- * Get flag emoji for a currency code
- * @param currencyCode ISO 4217 currency code (e.g., 'USD', 'EUR')
- * @returns Flag emoji or world emoji if not found
- */
-export function getFlagForCurrency(currencyCode: string): string {
-  return CURRENCY_TO_FLAG[currencyCode.toUpperCase()] || '🌎';
+/** ISO-2 of the currency's flag country (e.g. 'EUR' → 'EU'), '' when unknown. */
+export function getFlagIsoForCurrency(code: string): string {
+  return isoFromFlagEmoji(CURRENCY_TO_FLAG[String(code || '').toUpperCase()]);
 }

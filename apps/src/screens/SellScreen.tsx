@@ -32,7 +32,7 @@ import {
   GET_USER_BANK_ACCOUNTS,
 } from '../apollo/queries';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
-import { getCountryByIso } from '../utils/countries';
+import { FlagLabel } from '../components/CountryFlag';
 import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
@@ -189,12 +189,7 @@ export const SellScreen = () => {
     meData?.me?.username, countryCode, testIdentityData?.rampAvailability,
   );
   const methods: RampMethod[] = availability?.offRampMethods || [];
-  const derivedCountryTuple = useMemo(
-    () => (countryCode ? getCountryByIso(countryCode) : undefined),
-    [countryCode],
-  );
   const fiatCurrency = availability?.fiatCurrency || 'USD';
-  const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
   const isKoyweMapped = isKoyweCountry && !!availability?.offRampEnabled && methods.length > 0;
   const isBoliviaOffRampUnavailable = isKoyweCountry && availability?.countryCode === 'BO' && !availabilityLoading && methods.length === 0;
   const selectedMethod = useMemo(
@@ -642,7 +637,9 @@ export const SellScreen = () => {
               <View style={styles.emptyStateIconWrap}>
                 <Icon name="info" size={22} color={colors.primaryDark} />
               </View>
-              <Text style={styles.emptyStateTitle}>{countryFlag ? `${countryFlag} ` : ''}Solo Recarga disponible</Text>
+              <FlagLabel iso={countryCode} style={styles.emptyStateTitleRow} textStyle={styles.emptyStateTitle}>
+                Solo Recarga disponible
+              </FlagLabel>
               <Text style={styles.emptyStateText}>
                 Aún no puedes retirar a bolivianos desde Confío. Si quieres agregar saldo en Bolivia, usa Recarga con QR interoperable.
               </Text>
@@ -678,7 +675,9 @@ export const SellScreen = () => {
             <Icon name="shield" size={16} color={colors.primary} />
           </View>
           <View style={styles.bannerCopy}>
-            <Text style={styles.bannerTitle}>{countryFlag ? `${countryFlag} ` : ''}Datos de cobro</Text>
+            <FlagLabel iso={countryCode} style={styles.bannerTitleRow} textStyle={[styles.bannerTitle, styles.bannerTitleInRow]}>
+              Datos de cobro
+            </FlagLabel>
             <Text style={styles.bannerText}>
               Puedes guardar tu cuenta o billetera para no volver a cargarla en próximos retiros.
             </Text>
@@ -697,7 +696,7 @@ export const SellScreen = () => {
         {availabilityLoading ? (
           <View style={styles.loadingCard}>
             <ActivityIndicator color={colors.primary} size="small" />
-            <Text style={styles.loadingText}>Cargando retiros para {countryFlag ? `${countryFlag} ` : ''}{countryCode}...</Text>
+            <Text style={styles.loadingText}>Cargando retiros para {countryCode}...</Text>
           </View>
         ) : (
           <>
@@ -707,7 +706,8 @@ export const SellScreen = () => {
               <RampStepHeader
                 number={1}
                 title="Monto"
-                meta={`${countryFlag ? `${countryFlag} ` : ''}${availability.countryName} · ${fiatCurrency}`}
+                meta={`${availability.countryName} · ${fiatCurrency}`}
+                metaCountry={countryCode}
                 accentColor={colors.primaryDark}
                 accentBackground={colors.primaryLight}
                 titleColor={colors.dark}
@@ -1059,6 +1059,12 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     marginBottom: 4,
   },
+  bannerTitleRow: {
+    marginBottom: 4,
+  },
+  bannerTitleInRow: {
+    marginBottom: 0,
+  },
   bannerText: {
     fontSize: 13,
     lineHeight: 19,
@@ -1383,6 +1389,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
+  },
+  emptyStateTitleRow: {
+    alignSelf: 'center',
   },
   emptyStateTitle: {
     fontWeight: '800',

@@ -7,6 +7,7 @@ import {
   ScrollView,
   Share,
   StatusBar,
+  StyleSheet,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -21,7 +22,8 @@ import { useApolloClient, useQuery } from '@apollo/client';
 
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
-import { countryFlag, countryName } from '../config/localRails';
+import { countryName } from '../config/localRails';
+import { FlagLabel } from '../components/CountryFlag';
 import { useBrebLocationPass } from '../components/breb/BrebLocationGate';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
@@ -204,7 +206,6 @@ function InfiniaLocalReceiveScreen() {
   const aliveRef = useRef(true);
   useEffect(() => () => { aliveRef.current = false; }, []);
 
-  const flag = account ? countryFlag(account.country) : '';
   const place = account ? countryName(account.country) : '';
   const currency = account ? currencyName(account.asset) : 'moneda local';
 
@@ -283,7 +284,9 @@ function InfiniaLocalReceiveScreen() {
           <RampReveal delay={80}>
             <View style={styles.section}>
               <Text style={styles.savedTitle}>{`Activa ${copy.label.replace('Tu ', 'tu ')}`}</Text>
-              <Text style={styles.detailMeta}>{`${flag ? `${flag} ` : ''}${place} · ${account.asset}`}</Text>
+              <FlagLabel iso={account.country} style={flagStyles.detailMetaRow} textStyle={[styles.detailMeta, flagStyles.flush]}>
+                {`${place} · ${account.asset}`}
+              </FlagLabel>
               <View style={styles.inputCard}>
                 {account.status === 'provisioning' ? (
                   <View style={styles.emptyQuote}>
@@ -333,7 +336,9 @@ function InfiniaLocalReceiveScreen() {
             <RampReveal delay={80}>
               <View style={styles.section}>
                 <Text style={styles.savedTitle}>Tus datos para recibir</Text>
-                <Text style={styles.detailMeta}>{`${flag ? `${flag} ` : ''}${place} · ${account.asset}`}</Text>
+                <FlagLabel iso={account.country} style={flagStyles.detailMetaRow} textStyle={[styles.detailMeta, flagStyles.flush]}>
+                  {`${place} · ${account.asset}`}
+                </FlagLabel>
                 <View style={styles.inputCard}>
                   <Text style={styles.inputLabel}>{copy.label}</Text>
                   {isPixQr ? (
@@ -469,3 +474,9 @@ function InfiniaLocalReceiveScreen() {
     </SafeAreaView>
   );
 }
+
+// detailMeta's top margin moves to the flag row so the flag centers on the text.
+const flagStyles = StyleSheet.create({
+  detailMetaRow: { marginTop: 6 },
+  flush: { marginTop: 0 },
+});

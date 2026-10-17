@@ -28,7 +28,7 @@ import {
   GET_MY_PERSONAL_KYC_STATUS,
 } from '../apollo/queries';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
-import { getCountryByIso } from '../utils/countries';
+import { FlagLabel } from '../components/CountryFlag';
 import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
@@ -140,12 +140,7 @@ const TopUpScreen = () => {
     meData?.me?.username, countryCode, testIdentityData?.rampAvailability,
   );
   const methods: RampMethod[] = availability?.onRampMethods || [];
-  const derivedCountryTuple = useMemo(
-    () => (countryCode ? getCountryByIso(countryCode) : undefined),
-    [countryCode],
-  );
   const fiatCurrency = availability?.fiatCurrency || 'USD';
-  const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
   const isKoyweMapped = isKoyweCountry && !!availability?.onRampEnabled && methods.length > 0;
   const selectedMethod = useMemo(
     () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
@@ -542,7 +537,9 @@ const TopUpScreen = () => {
             <Icon name="globe" size={16} color={colors.primary} />
           </View>
           <View style={styles.noticeCopy}>
-            <Text style={styles.noticeTitle}>{countryFlag ? `${countryFlag} ` : ''}Según tu país</Text>
+            <FlagLabel iso={countryCode} style={styles.noticeTitleRow} textStyle={[styles.noticeTitle, styles.noticeTitleInRow]}>
+              Según tu país
+            </FlagLabel>
             <Text style={styles.noticeText}>Te mostramos los medios de pago disponibles para {availability?.countryName || countryCode}.</Text>
           </View>
           <TouchableOpacity
@@ -559,7 +556,7 @@ const TopUpScreen = () => {
         {availabilityLoading ? (
           <View style={styles.loadingCard}>
             <ActivityIndicator color={colors.primary} size="small" />
-            <Text style={styles.loadingText}>Cargando opciones para {countryFlag ? `${countryFlag} ` : ''}{countryCode}...</Text>
+            <Text style={styles.loadingText}>Cargando opciones para {countryCode}...</Text>
           </View>
         ) : !isKoyweMapped ? (
           <View style={styles.loadingCard}>
@@ -572,7 +569,8 @@ const TopUpScreen = () => {
               <RampStepHeader
                 number={1}
                 title="Monto"
-                meta={`${countryFlag ? `${countryFlag} ` : ''}${availability.countryName} · ${fiatCurrency}`}
+                meta={`${availability.countryName} · ${fiatCurrency}`}
+                metaCountry={countryCode}
                 accentColor={colors.primaryDark}
                 accentBackground={colors.primaryLight}
                 titleColor={colors.textFlat}
@@ -877,6 +875,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primaryDark,
     marginBottom: 4,
+  },
+  noticeTitleRow: {
+    marginBottom: 4,
+  },
+  noticeTitleInRow: {
+    marginBottom: 0,
   },
   noticeText: {
     fontSize: 13,

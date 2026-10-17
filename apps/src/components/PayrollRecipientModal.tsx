@@ -7,6 +7,8 @@ import { CHECK_USERS_BY_PHONES, CHECK_USERS_BY_USERNAMES } from '../apollo/queri
 import { CREATE_PAYROLL_RECIPIENT } from '../apollo/mutations/payroll';
 import { countries } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
+import { CountryFlag } from './CountryFlag';
+import { colors } from '../config/theme';
 
 type Props = {
   visible: boolean;
@@ -147,7 +149,9 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
                   onPress={() => selectCountry(selectedCountry || countries[0])}
                 >
                   <View style={styles.countrySelectorContent}>
-                    <Text style={styles.flag}>{selectedCountry?.[3] || '🌍'}</Text>
+                    {selectedCountry
+                      ? <CountryFlag iso={selectedCountry[2]} size={26} />
+                      : <Icon name="globe" size={24} color={colors.text.secondary} />}
                     <Text style={styles.countryNameSelector}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
                   </View>
                   <Text style={styles.countryCode}>{selectedCountry?.[1] || '+58'}</Text>
@@ -255,7 +259,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   countrySelectorContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  flag: { fontSize: 24 },
   countryNameSelector: { fontSize: 16, color: '#111827', fontWeight: '600' },
   countryCode: { fontSize: 16, color: '#6b7280', fontWeight: '700' },
   phoneInputContainer: { flexDirection: 'row', gap: 8 },

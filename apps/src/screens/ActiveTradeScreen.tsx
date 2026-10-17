@@ -27,6 +27,7 @@ import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { MainStackParamList } from '../types/navigation';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import { FlagLabel } from '../components/CountryFlag';
 import { useQuery } from '@apollo/client';
 import { GET_P2P_TRADE } from '../apollo/queries';
 import { p2pSponsoredService } from '../services/p2pSponsoredService';
@@ -521,8 +522,8 @@ export const ActiveTradeScreen: React.FC = () => {
                   color="#fff"
                 />
               </View>
-              <View>
-                <Text style={styles.paymentMethodName}>{trade.paymentMethod || 'N/A'}</Text>
+              <View style={styles.paymentMethodText}>
+                <FlagLabel iso={trade.countryCode} textStyle={styles.paymentMethodName}>{trade.paymentMethod || 'N/A'}</FlagLabel>
                 <Text style={styles.paymentMethodSubtitle}>Método seleccionado</Text>
               </View>
             </View>
@@ -1813,6 +1814,9 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  paymentMethodText: {
+    flexShrink: 1,
   },
   paymentMethodName: {
     fontSize: 16,

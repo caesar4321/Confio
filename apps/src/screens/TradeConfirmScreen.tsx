@@ -18,6 +18,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
+import { CountryFlag } from '../components/CountryFlag';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { MainStackParamList } from '../types/navigation';
@@ -338,9 +339,7 @@ export const TradeConfirmScreen: React.FC = () => {
                 <Text style={styles.paymentMethodName}>
                   {selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'Método de pago'}
                 </Text>
-                {selectedPaymentMethod?.bank?.country?.flagEmoji && (
-                  <Text style={styles.countryFlag}>{selectedPaymentMethod.bank.country.flagEmoji}</Text>
-                )}
+                <CountryFlag emoji={selectedPaymentMethod?.bank?.country?.flagEmoji} size={20} />
               </View>
               <Text style={styles.paymentMethodDescription}>
                 {getPaymentMethodDescription(selectedPaymentMethod)}
@@ -424,9 +423,7 @@ export const TradeConfirmScreen: React.FC = () => {
                         <Text style={[styles.paymentOptionText, !isConfigured && styles.paymentOptionTextDisabled]}>
                           {method.displayName || method.name}
                         </Text>
-                        {method.bank?.country?.flagEmoji && (
-                          <Text style={styles.countryFlagSmall}>{method.bank.country.flagEmoji}</Text>
-                        )}
+                        <CountryFlag emoji={method.bank?.country?.flagEmoji} size={17} style={styles.countryFlagSmall} />
                         {!isConfigured && (
                           <View style={styles.notConfiguredBadge}>
                             <Text style={styles.notConfiguredText}>No configurado</Text>
@@ -668,11 +665,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
-  countryFlag: {
-    fontSize: 18,
-  },
   countryFlagSmall: {
-    fontSize: 16,
     marginLeft: 4,
   },
   bottomButtonContainer: {

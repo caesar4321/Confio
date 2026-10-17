@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
 import { colors } from '../config/theme';
+import { CountryFlag, hasCountryFlag } from '../components/CountryFlag';
 import { Header } from '../navigation/Header';
 import { useAuth } from '../contexts/AuthContext';
 import { MainStackParamList } from '../types/navigation';
@@ -25,15 +26,6 @@ type CountryStat = {
   countryIso: string;
   countryName: string;
   verifiedCount: number;
-};
-
-const isoToFlag = (iso?: string | null) => {
-  if (!iso || iso.length !== 2) return '🌎';
-  const base = 0x1f1e6;
-  const a = iso.toUpperCase().charCodeAt(0) - 65;
-  const b = iso.toUpperCase().charCodeAt(1) - 65;
-  if (a < 0 || a > 25 || b < 0 || b > 25) return '🌎';
-  return String.fromCodePoint(base + a) + String.fromCodePoint(base + b);
 };
 
 export const LatamCommunityScreen = () => {
@@ -69,7 +61,9 @@ export const LatamCommunityScreen = () => {
       <View style={[styles.row, isUser && styles.rowHighlight]}>
         <View style={styles.rowHeader}>
           <Text style={styles.rank}>{index + 1}</Text>
-          <Text style={styles.flag}>{isoToFlag(item.countryIso)}</Text>
+          {hasCountryFlag(item.countryIso)
+                    ? <CountryFlag iso={item.countryIso} size={22} />
+                    : <Icon name="globe" size={20} color={colors.text.light} />}
           <View style={styles.countryBlock}>
             <Text style={styles.countryName} numberOfLines={1}>
               {item.countryName}
@@ -233,9 +227,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.text.light,
-  },
-  flag: {
-    fontSize: 22,
   },
   countryBlock: {
     flex: 1,

@@ -25,6 +25,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { colors } from '../config/theme';
+import { CountryFlag } from '../components/CountryFlag';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { exitToDiscover } from '../navigation/exitToDiscover';
@@ -377,7 +378,11 @@ export const CreateOfferScreen = () => {
             disabled
           >
             <View style={styles.countryDisplay}>
-              <Text style={styles.countryFlag}>{selectedCountry?.[3] || '🌍'}</Text>
+              {selectedCountry ? (
+                <CountryFlag iso={selectedCountry[2]} size={26} style={styles.countryFlag} />
+              ) : (
+                <Icon name="globe" size={24} color={colors.textSecondary} style={styles.countryFlag} />
+              )}
               <Text style={styles.countryName}>
                 {selectedCountry?.[0] || 'Seleccionar país'}
               </Text>
@@ -641,7 +646,7 @@ export const CreateOfferScreen = () => {
                 ]}
                 onPress={() => selectCountry(item)}
               >
-                <Text style={styles.countryFlag}>{item[3]}</Text>
+                <CountryFlag iso={item[2]} size={26} style={styles.countryFlag} />
                 <Text style={styles.countryItemName}>{item[0]}</Text>
                 <Text style={styles.countryCode}>{item[1]}</Text>
                 {selectedCountry?.[2] === item[2] && (
@@ -887,7 +892,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   countryFlag: {
-    fontSize: 24,
     marginRight: 12,
   },
   countryName: {

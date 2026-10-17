@@ -5,6 +5,7 @@ import {
   SafeAreaView,
   ScrollView,
   StatusBar,
+  StyleSheet,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -21,7 +22,8 @@ import { MainStackParamList } from '../types/navigation';
 import { GET_MY_RAMP_ADDRESS } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
-import { countryFlag, countryName } from '../config/localRails';
+import { countryName } from '../config/localRails';
+import { FlagLabel } from '../components/CountryFlag';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
@@ -186,7 +188,6 @@ function InfiniaLocalSendScreen() {
       row.country === method?.country && row.id.endsWith('_qr') && row.status === 'live');
   const limits: LocalLimits | undefined = limitsQuery.data?.localMoneyLimits;
   const saved: LocalDestination[] = savedQuery.data?.localSavedDestinations || [];
-  const flag = method ? countryFlag(method.country) : '';
   const place = method ? countryName(method.country) : '';
 
   // Dollar and local accounts are resolved server-side; the app only needs
@@ -732,7 +733,9 @@ function InfiniaLocalSendScreen() {
               <Icon name="send" size={16} color={colors.primary} />
             </View>
             <View style={styles.bannerCopy}>
-              <Text style={styles.bannerTitle}>{flag ? `${flag} ` : ''}Envío a {place || 'otro país'}</Text>
+              <FlagLabel iso={method?.country} style={flagStyles.bannerTitleRow} textStyle={[styles.bannerTitle, flagStyles.flush]}>
+                Envío a {place || 'otro país'}
+              </FlagLabel>
               <Text style={styles.bannerText}>Guardamos a quién le envías para que la próxima vez sea más rápido.</Text>
             </View>
             <TouchableOpacity style={styles.historyPill} onPress={() => navigation.navigate('LocalTransferStatus')}
@@ -782,7 +785,8 @@ function InfiniaLocalSendScreen() {
                 <RampStepHeader
                   number={1}
                   title="Destinatario"
-                  meta={method ? `${flag ? `${flag} ` : ''}${place} · ${method.asset}` : null}
+                  meta={method ? `${place} · ${method.asset}` : null}
+                  metaCountry={method?.country}
                   accentColor={colors.primaryDark}
                   accentBackground={colors.primaryLight}
                   titleColor={colors.dark}
@@ -1112,3 +1116,9 @@ function InfiniaLocalSendScreen() {
     </SafeAreaView>
   );
 }
+
+// The banner title's bottom margin moves to the flag row so the flag centers on the text.
+const flagStyles = StyleSheet.create({
+  bannerTitleRow: { marginBottom: 4 },
+  flush: { marginBottom: 0 },
+});

@@ -1,50 +1,45 @@
 import React from 'react';
 import { StyleProp, StyleSheet, TextStyle, View, ViewStyle } from 'react-native';
-import { SvgProps } from 'react-native-svg';
+import { SvgXml } from 'react-native-svg';
 import { Text } from './common/AppText';
-import { countryFlag, toIso2 } from '../config/localRails';
-import AR from '../assets/flags/ar.svg';
-import BO from '../assets/flags/bo.svg';
-import BR from '../assets/flags/br.svg';
-import CL from '../assets/flags/cl.svg';
-import CO from '../assets/flags/co.svg';
-import EC from '../assets/flags/ec.svg';
-import EU from '../assets/flags/eu.svg';
-import GB from '../assets/flags/gb.svg';
-import MX from '../assets/flags/mx.svg';
-import PE from '../assets/flags/pe.svg';
-import PY from '../assets/flags/py.svg';
-import US from '../assets/flags/us.svg';
-import UY from '../assets/flags/uy.svg';
-import VE from '../assets/flags/ve.svg';
+import { toIso2 } from '../config/localRails';
+import { FLAG_XML } from '../assets/flags/flagXml';
+import { emojiFromIso2, isoFromFlagEmoji } from '../utils/flagIso';
+
+export { isoFromFlagEmoji };
 
 // Round flags bundled with the app (HatScripts/circle-flags, MIT — see
 // assets/flags/LICENSE.md), so every phone draws the same flag: emoji flags
 // render as rectangles on iPhone and as bare letters on some Android fonts.
-// Only the countries the money rails list; add a file here to add one.
-const FLAGS: Record<string, React.FC<SvgProps>> = {
-  AR, BO, BR, CL, CO, EC, EU, GB, MX, PE, PY, US, UY, VE,
-};
+// Every country in utils/countries.ts has one, plus EU.
 
-export const hasCountryFlag = (iso: string): boolean => Boolean(FLAGS[toIso2(iso)]);
+const resolveIso = (iso?: string | null, emoji?: string | null): string =>
+  toIso2(iso) || isoFromFlagEmoji(emoji);
+
+export const hasCountryFlag = (iso?: string | null, emoji?: string | null): boolean =>
+  Boolean(FLAG_XML[resolveIso(iso, emoji)]);
 
 interface Props {
-  /** ISO-2 or ISO-3 (payment_accounts stores ISO-3). */
-  iso: string;
+  /** ISO-2, or one of the ISO-3 codes config/localRails maps. */
+  iso?: string | null;
+  /** A flag emoji, for data that carries one instead of a code. */
+  emoji?: string | null;
   size?: number;
   /** A ring around the circle, e.g. the background color where flags overlap. */
   ringColor?: string;
   style?: StyleProp<ViewStyle>;
 }
 
-/** A circular country flag; a country without a bundled image falls back to its emoji. */
-export const CountryFlag: React.FC<Props> = ({ iso, size = 20, ringColor, style }) => {
-  const Flag = FLAGS[toIso2(iso)];
-  if (!Flag) {
-    const emoji = countryFlag(iso);
-    if (!emoji) return null;
+/** A circular country flag. A code without an image falls back to its
+ * emoji; nothing usable renders nothing. */
+export const CountryFlag: React.FC<Props> = ({ iso, emoji, size = 20, ringColor, style }) => {
+  const code = resolveIso(iso, emoji);
+  const xml = FLAG_XML[code];
+  if (!xml) {
+    const fallback = emoji || emojiFromIso2(code);
+    if (!fallback) return null;
     const emojiStyle: TextStyle = { fontSize: size * 0.9, lineHeight: size * 1.15 };
-    return <Text style={[emojiStyle, style as StyleProp<TextStyle>]}>{emoji}</Text>;
+    return <Text style={[emojiStyle, style as StyleProp<TextStyle>]}>{fallback}</Text>;
   }
   const ring = ringColor ? Math.max(1.5, Math.round(size / 12)) : 0;
   const outer = size + ring * 2;
@@ -59,11 +54,36 @@ export const CountryFlag: React.FC<Props> = ({ iso, size = 20, ringColor, style 
         style,
       ]}
     >
-      <Flag width={size} height={size} />
+      <SvgXml xml={xml} width={size} height={size} />
+    </View>
+  );
+};
+
+interface FlagLabelProps extends Omit<Props, 'style'> {
+  children?: React.ReactNode;
+  textStyle?: StyleProp<TextStyle>;
+  style?: StyleProp<ViewStyle>;
+  numberOfLines?: number;
+}
+
+/** A flag followed by text — where copy used to read `${flag} ${text}`. The
+ * flag sits beside the Text rather than inside it, so its size and baseline
+ * don't depend on the font. Without a usable flag it is just the text. */
+export const FlagLabel: React.FC<FlagLabelProps> = ({
+  children, textStyle, style, numberOfLines, size, ...flag
+}) => {
+  const fontSize = (StyleSheet.flatten(textStyle) as TextStyle | undefined)?.fontSize ?? 14;
+  return (
+    <View style={[styles.label, style]}>
+      <CountryFlag {...flag} size={size ?? Math.round(fontSize * 1.15)} style={styles.labelFlag} />
+      <Text style={[styles.labelText, textStyle]} numberOfLines={numberOfLines}>{children}</Text>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  label: { flexDirection: 'row', alignItems: 'center' },
+  labelFlag: { marginRight: 6 },
+  labelText: { flexShrink: 1 },
 });

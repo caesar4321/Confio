@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { gql, useQuery } from '@apollo/client';
 import { colors } from '../config/theme';
+import { CountryFlag, hasCountryFlag } from '../components/CountryFlag';
 import { Header } from '../navigation/Header';
 import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
@@ -59,15 +60,6 @@ const MONTHS_ES = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ];
-
-const isoToFlag = (iso?: string | null) => {
-  if (!iso || iso.length !== 2) return '🌎';
-  const base = 0x1f1e6;
-  const a = iso.toUpperCase().charCodeAt(0) - 65;
-  const b = iso.toUpperCase().charCodeAt(1) - 65;
-  if (a < 0 || a > 25 || b < 0 || b > 25) return '🌎';
-  return String.fromCodePoint(base + a) + String.fromCodePoint(base + b);
-};
 
 /** "menos de N" must be strictly true: N is the next whole unit ABOVE the
  * median (floor + 1), so a 9.5-min median reads "menos de 10 minutos" and an
@@ -203,7 +195,9 @@ export const FundFlowScreen = () => {
               {countries.map((c) => (
                 <View key={c.countryIso} style={styles.row}>
                   <View style={styles.rowHeader}>
-                    <Text style={styles.flag}>{isoToFlag(c.countryIso)}</Text>
+                    {hasCountryFlag(c.countryIso)
+                    ? <CountryFlag iso={c.countryIso} size={22} />
+                    : <Icon name="globe" size={20} color={colors.text.light} />}
                     <Text style={styles.countryName} numberOfLines={1}>{c.countryName}</Text>
                     <Text style={styles.count}>{whole(c.operationCount)}</Text>
                   </View>
@@ -302,7 +296,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   rowHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  flag: { fontSize: 22 },
   countryName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.dark },
   count: { fontSize: 15, fontWeight: '700', color: colors.dark },
   barTrack: {

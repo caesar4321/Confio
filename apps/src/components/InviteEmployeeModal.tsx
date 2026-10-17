@@ -17,6 +17,8 @@ import { INVITE_EMPLOYEE } from '../apollo/queries';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useAccount } from '../contexts/AccountContext';
+import { CountryFlag } from './CountryFlag';
+import { colors } from '../config/theme';
 
 interface InviteEmployeeModalProps {
   visible: boolean;
@@ -132,7 +134,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
         setShowCountryPicker(false);
       }}
     >
-      <Text style={styles.countryFlag}>{item[3]}</Text>
+      <CountryFlag iso={item[2]} size={26} style={styles.countryFlag} />
       <Text style={styles.countryName}>{item[0]}</Text>
       <Text style={styles.countryCode}>{item[1]}</Text>
       {selectedCountry?.[2] === item[2] && (
@@ -248,7 +250,9 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
                     onPress={() => setShowCountryPicker(true)}
                   >
                     <View style={styles.countrySelectorContent}>
-                      <Text style={styles.flag}>{selectedCountry?.[3] || '🌍'}</Text>
+                      {selectedCountry
+                        ? <CountryFlag iso={selectedCountry[2]} size={26} />
+                        : <Icon name="globe" size={24} color={colors.text.secondary} />}
                       <Text style={styles.countryNameSelector}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
                     </View>
                     <Icon name="chevron-down" size={20} color="#6b7280" />
@@ -490,9 +494,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  flag: {
-    fontSize: 24,
-  },
   countryNameSelector: {
     fontSize: 16,
     color: '#1a1a1a',
@@ -724,7 +725,6 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f0f0f0',
   },
   countryFlag: {
-    fontSize: 24,
     marginRight: 16,
   },
   countryName: {

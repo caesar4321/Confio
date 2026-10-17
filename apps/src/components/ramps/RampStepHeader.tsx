@@ -2,11 +2,14 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text } from '../common/AppText';
 import { colors } from '../../config/theme';
+import { FlagLabel } from '../CountryFlag';
 
 type Props = {
   number: number;
   title: string;
   meta?: string | null;
+  /** ISO code whose round flag leads the meta text. */
+  metaCountry?: string | null;
   accentColor?: string;
   accentBackground?: string;
   titleColor?: string;
@@ -17,6 +20,7 @@ export const RampStepHeader = ({
   number,
   title,
   meta,
+  metaCountry,
   accentColor = '#047857',
   accentBackground = colors.primaryLight,
   titleColor = colors.text.primary,
@@ -31,7 +35,13 @@ export const RampStepHeader = ({
           </View>
           <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
         </View>
-        {meta ? <Text style={[styles.meta, { color: metaColor }]}>{meta}</Text> : null}
+        {meta && metaCountry ? (
+          <FlagLabel iso={metaCountry} style={styles.metaRow} textStyle={[styles.meta, styles.metaInRow, { color: metaColor }]}>
+            {meta}
+          </FlagLabel>
+        ) : meta ? (
+          <Text style={[styles.meta, { color: metaColor }]}>{meta}</Text>
+        ) : null}
       </View>
       <View style={styles.divider} />
     </View>
@@ -80,5 +90,12 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     flexShrink: 1,
     textAlign: 'right',
+  },
+  metaRow: {
+    marginLeft: 12,
+    flexShrink: 1,
+  },
+  metaInRow: {
+    marginLeft: 0,
   },
 });

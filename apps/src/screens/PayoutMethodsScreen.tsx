@@ -26,6 +26,7 @@ import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { AddPayoutMethodModal } from '../components/AddPayoutMethodModal';
 import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
+import { CountryFlag } from '../components/CountryFlag';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { EmptyState } from '../components/EmptyState';
 import { Header } from '../navigation/Header';
@@ -205,7 +206,7 @@ const PayoutMethodCard = ({
       <View style={styles.cardInner}>
         {/* Row 1: flag + name + verified + actions */}
         <View style={styles.cardRow}>
-          {flagEmoji ? <Text style={styles.cardFlag}>{flagEmoji}</Text> : null}
+          <CountryFlag emoji={flagEmoji} size={20} style={styles.cardFlag} />
           <Text style={styles.cardBankName} numberOfLines={1} ellipsizeMode="tail">
             {displayName}
           </Text>
@@ -628,7 +629,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   cardFlag: {
-    fontSize: 18,
     marginRight: 6,
     flexShrink: 0,
   },

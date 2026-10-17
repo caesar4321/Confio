@@ -3,6 +3,7 @@ import { StyleSheet, TouchableOpacity, View, ViewStyle } from 'react-native';
 import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { countryInfo } from '../utils/humanitarianCountry';
+import { CountryFlag } from './CountryFlag';
 import { formatDecimal } from '../utils/numberLocale';
 
 type Campaign = {
@@ -32,7 +33,7 @@ export function HumanitarianHomeBanner({
   onPress: () => void;
   style?: ViewStyle;
 }) {
-  const flag = countryInfo(campaign.countryCode).flag;
+  const { iso2 } = countryInfo(campaign.countryCode);
   const goal = toNumber(campaign.goalAmount);
   const donated = toNumber(campaign.totalDonated);
   const donationCount = campaign.donationCount || 0;
@@ -52,7 +53,7 @@ export function HumanitarianHomeBanner({
       accessibilityLabel={`Campaña humanitaria: ${campaign.title || 'Ayuda humanitaria directa'}`}
     >
       <View style={styles.flagWrap}>
-        <Text style={styles.flag}>{flag}</Text>
+        {iso2 ? <CountryFlag iso={iso2} size={24} /> : <Icon name="globe" size={20} color="#0284C7" />}
       </View>
       <View style={styles.body}>
         <Text style={styles.title} numberOfLines={2}>
@@ -104,7 +105,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  flag: { fontSize: 22 },
   body: { flex: 1 },
   title: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: '#111827', marginBottom: 6 },
   track: { height: 5, borderRadius: 3, backgroundColor: '#E0F2FE', overflow: 'hidden' }, // sky-100

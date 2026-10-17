@@ -29,10 +29,10 @@ import { APPLY_HUMANITARIAN_VOLUNTEER } from '../apollo/mutations';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
-import { flagFromIso2 } from '../utils/humanitarianCountry';
 import algorandService from '../services/algorandService';
 import { HumanitarianWsSession } from '../services/humanitarianWs';
 import { countryInfo } from '../utils/humanitarianCountry';
+import { CountryFlag } from '../components/CountryFlag';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { useRampCountry } from '../hooks/useRampCountry';
 import { formatDecimal, sanitizeAmountInput } from '../utils/numberLocale';
@@ -358,7 +358,9 @@ export const HumanitarianAidScreen = () => {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} />}
       >
         <View style={styles.emptyTopBar}>{renderBackButton()}</View>
-        <Text style={styles.emptyFlag}>{country.flag}</Text>
+        {country.iso2
+          ? <CountryFlag iso={country.iso2} size={34} />
+          : <Icon name="globe" size={30} color={colors.textSecondary} />}
         <Text style={styles.emptyTitle}>Ayuda humanitaria</Text>
         <Text style={styles.emptyText}>Todavía no hay una campaña activa.</Text>
       </ScrollView>
@@ -394,7 +396,9 @@ export const HumanitarianAidScreen = () => {
 
         <View style={styles.heroBody}>
           <View style={styles.kickerRow}>
-            <Text style={styles.heroFlag}>{country.flag}</Text>
+            {country.iso2
+              ? <CountryFlag iso={country.iso2} size={24} />
+              : <Icon name="globe" size={20} color={colors.white} />}
             <Text style={styles.kicker}>CONFÍO · AYUDA HUMANITARIA</Text>
           </View>
           <Text style={styles.title}>{campaign.title || 'Ayuda humanitaria directa'}</Text>
@@ -668,7 +672,6 @@ export const HumanitarianAidScreen = () => {
         {donations.map((donation: any) => {
           const name = donation.donorDisplayName || 'Donante Confío';
           const c = avatarColor(name);
-          const donorFlag = flagFromIso2(donation.donorCountryCode);
           return (
             <View key={donation.publicId} style={styles.donorRow}>
               <View style={[styles.avatar, { backgroundColor: c.bg }]}>
@@ -677,7 +680,7 @@ export const HumanitarianAidScreen = () => {
               <View style={styles.donorInfo}>
                 <View style={styles.donorNameRow}>
                   <Text style={styles.donorName} numberOfLines={1}>{name}</Text>
-                  {!!donorFlag && <Text style={styles.donorFlag}>{donorFlag}</Text>}
+                  <CountryFlag iso={donation.donorCountryCode} size={16} />
                 </View>
                 <View style={styles.donorMetaRow}>
                   {!!donation.donatedAt && <Text style={styles.timeText}>{timeAgo(donation.donatedAt)}</Text>}
@@ -736,7 +739,6 @@ const styles = StyleSheet.create({
   heroTopBar: { alignItems: 'flex-start', marginBottom: 12 },
   heroBody: {},
   kickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  heroFlag: { fontSize: 22 },
   kicker: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4, color: 'rgba(255,255,255,0.9)' },
   title: { fontSize: 26, lineHeight: 32, fontWeight: '800', color: colors.white, marginBottom: 8 },
   description: { fontSize: 14, lineHeight: 21, color: 'rgba(255,255,255,0.9)' },
@@ -823,13 +825,11 @@ const styles = StyleSheet.create({
   donorInfo: { flex: 1 },
   donorNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   donorName: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textFlat },
-  donorFlag: { fontSize: 14 },
   donorTxText: { fontSize: 12, fontWeight: '700', color: colors.primaryDark },
 
   applicationCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primarySoft, borderRadius: 12, borderWidth: 1, borderColor: colors.primaryMuted, padding: 14 },
   applicationText: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.primaryDark, textTransform: 'capitalize' },
 
-  emptyFlag: { fontSize: 30 },
   emptyTitle: { fontSize: 18, fontWeight: '800', color: colors.textFlat, marginTop: 12 },
   emptyText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   input: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.borderMedium, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 10, fontSize: 15, color: colors.textFlat },

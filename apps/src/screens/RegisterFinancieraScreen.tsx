@@ -23,6 +23,7 @@ import { Country, filterCountries, getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Header as AppHeader } from '../navigation/Header';
+import { FlagLabel } from '../components/CountryFlag';
 import {
   FINANCIERA_SERVICES,
   MANDATORY_SERVICE_ID,
@@ -93,9 +94,9 @@ const CountryPickerModal = ({
                   setQ('');
                 }}
               >
-                <Text style={styles.optionLabel}>
-                  {item[3]}  {item[0]}
-                </Text>
+                <FlagLabel iso={item[2]} style={styles.optionFlagLabel} textStyle={styles.optionLabel}>
+                  {item[0]}
+                </FlagLabel>
                 <Text style={styles.optionCode}>{item[1]}</Text>
               </TouchableOpacity>
             )}
@@ -436,9 +437,13 @@ export const RegisterFinancieraScreen = () => {
               disabled={!!edit}
               onPress={() => setCountryModal(true)}
             >
-              <Text style={[styles.selectText, !country && { color: colors.text.light }]}>
-                {country ? `${country[3]}  ${country[0]}` : 'Selecciona el país'}
-              </Text>
+              {country ? (
+                <FlagLabel iso={country[2]} style={styles.optionFlagLabel} textStyle={styles.selectText}>
+                  {country[0]}
+                </FlagLabel>
+              ) : (
+                <Text style={[styles.selectText, { color: colors.text.light }]}>Selecciona el país</Text>
+              )}
               <Icon name="chevron-down" size={18} color={colors.text.secondary} />
             </TouchableOpacity>
           </View>
@@ -795,6 +800,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
   },
+  optionFlagLabel: { flexShrink: 1 },
   optionLabel: { fontSize: 15, color: colors.text.primary },
   optionCode: { fontSize: 14, color: colors.text.light },
 

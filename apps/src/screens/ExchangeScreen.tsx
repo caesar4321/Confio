@@ -37,6 +37,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { EmptyState } from '../components/EmptyState';
 import { OfferCardSkeleton, TradeCardSkeleton } from '../components/SkeletonLoader';
 import { colors } from '../config/theme';
+import { CountryFlag } from '../components/CountryFlag';
 import { formatAmountString, formatDecimal, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 // Colors from the design
@@ -641,9 +642,7 @@ export const ExchangeScreen = () => {
           (() => {
             const method = trade.paymentMethod;
             if (!method) return 'N/A';
-            const displayName = method.displayName || method.name || 'N/A';
-            const countryFlag = method.bank?.country?.flagEmoji || '';
-            return countryFlag ? `${displayName} ${countryFlag}` : displayName;
+            return method.displayName || method.name || 'N/A';
           })(),
         rate: trade.rateUsed.toString(),
         tradeType,
@@ -1589,26 +1588,32 @@ export const ExchangeScreen = () => {
             <View style={styles.paymentMethodsContainer}>
               {!isExpanded ? (
                 <View style={styles.paymentMethodsCollapsed}>
-                  <Text style={styles.detailValue}>
-                    {(() => {
-                      const methods = offer.paymentMethods || [];
-                      if (methods.length === 0) return 'N/A';
+                  {(() => {
+                    const methods = offer.paymentMethods || [];
+                    if (methods.length === 0) return <Text style={styles.detailValue}>N/A</Text>;
 
-                      const maxVisible = 2; // Show first 2 methods
-                      const visibleMethods = methods.slice(0, maxVisible);
-                      const remainingCount = methods.length - maxVisible;
+                    const maxVisible = 2; // Show first 2 methods
+                    const visibleMethods = methods.slice(0, maxVisible);
+                    const remainingCount = methods.length - maxVisible;
 
-                      let text = visibleMethods.map((pm: any) => {
-                        const countryFlag = pm.bank?.country?.flagEmoji || '';
-                        return countryFlag ? `${pm.displayName} ${countryFlag}` : pm.displayName;
-                      }).join(', ');
-                      if (remainingCount > 0) {
-                        text += `, +${remainingCount} más`;
-                      }
-
-                      return text;
-                    })()}
-                  </Text>
+                    return (
+                      <View style={styles.paymentMethodsSummary}>
+                        {visibleMethods.map((pm: any, index: number) => {
+                          const isLast = index === visibleMethods.length - 1 && remainingCount <= 0;
+                          return (
+                            <View key={pm.id || index} style={styles.paymentMethodsSummaryItem}>
+                              <Text style={styles.paymentMethodsSummaryText}>{pm.displayName}</Text>
+                              <CountryFlag emoji={pm.bank?.country?.flagEmoji} size={13} style={styles.paymentMethodsSummaryFlag} />
+                              {!isLast && <Text style={styles.paymentMethodsSummaryText}>, </Text>}
+                            </View>
+                          );
+                        })}
+                        {remainingCount > 0 && (
+                          <Text style={styles.paymentMethodsSummaryText}>+{remainingCount} más</Text>
+                        )}
+                      </View>
+                    );
+                  })()}
                   {offer.paymentMethods?.length > 2 && (
                     <Icon name="chevron-down" size={16} color="#6B7280" style={{ marginLeft: 4 }} />
                   )}
@@ -1623,10 +1628,8 @@ export const ExchangeScreen = () => {
                           size={14}
                           color="#6B7280"
                         />
-                        <Text style={styles.paymentMethodName}>
-                          {pm.displayName || pm.name}
-                          {pm.bank?.country?.flagEmoji ? ` ${pm.bank.country.flagEmoji}` : ''}
-                        </Text>
+                        <Text style={styles.paymentMethodName}>{pm.displayName || pm.name}</Text>
+                        <CountryFlag emoji={pm.bank?.country?.flagEmoji} size={14} />
                       </View>
                     ))}
                   </View>
@@ -1735,7 +1738,7 @@ export const ExchangeScreen = () => {
     // Use the offer's original country currency, not the selected country currency
     const getOfferCountryInfo = (countryCode: string) => {
       const country = countries.find(c => c[2] === countryCode) as Country | undefined;
-      if (!country) return { name: countryCode, currency: 'USD', symbol: '$', flag: '🌍' };
+      if (!country) return { name: countryCode, currency: 'USD', symbol: '$', iso: '' };
 
       const currency = getCurrencyForCountry(country);
       const symbol = getCurrencySymbol(currency);
@@ -1744,7 +1747,7 @@ export const ExchangeScreen = () => {
         name: country[0], // Country name
         currency: currency, // Currency code from utility
         symbol: symbol, // Currency symbol from utility
-        flag: country[3] // Flag emoji
+        iso: country[2]
       };
     };
 
@@ -1809,7 +1812,11 @@ export const ExchangeScreen = () => {
 
         {/* Country Label */}
         <View style={styles.myOfferCountryContainer}>
-          <Text style={styles.myOfferCountryFlag}>{countryInfo.flag}</Text>
+          {countryInfo.iso ? (
+            <CountryFlag iso={countryInfo.iso} size={17} style={styles.myOfferCountryFlag} />
+          ) : (
+            <Icon name="globe" size={16} color={colors.textSecondary} style={styles.myOfferCountryFlag} />
+          )}
           <Text style={[styles.myOfferCountryText, offer.status === 'PAUSED' && { opacity: 0.6 }]}>
             {countryInfo.name} • {countryInfo.currency}
           </Text>
@@ -1852,17 +1859,19 @@ export const ExchangeScreen = () => {
               {isExpanded ? (
                 <>
                   {offer.paymentMethods.map((method) => (
-                    <Text key={method.id} style={styles.myOfferPaymentTag}>
-                      {method.displayName}{method.bank?.country?.flagEmoji ? ` ${method.bank.country.flagEmoji}` : ''}
-                    </Text>
+                    <View key={method.id} style={styles.myOfferPaymentTag}>
+                      <Text style={styles.myOfferPaymentTagText}>{method.displayName}</Text>
+                      <CountryFlag emoji={method.bank?.country?.flagEmoji} size={12} style={styles.myOfferPaymentTagFlag} />
+                    </View>
                   ))}
                 </>
               ) : (
                 <>
                   {offer.paymentMethods.slice(0, 2).map((method) => (
-                    <Text key={method.id} style={styles.myOfferPaymentTag}>
-                      {method.displayName}{method.bank?.country?.flagEmoji ? ` ${method.bank.country.flagEmoji}` : ''}
-                    </Text>
+                    <View key={method.id} style={styles.myOfferPaymentTag}>
+                      <Text style={styles.myOfferPaymentTagText}>{method.displayName}</Text>
+                      <CountryFlag emoji={method.bank?.country?.flagEmoji} size={12} style={styles.myOfferPaymentTagFlag} />
+                    </View>
                   ))}
                   {offer.paymentMethods.length > 2 && (
                     <Text style={styles.myOfferPaymentMore}>
@@ -2678,7 +2687,11 @@ export const ExchangeScreen = () => {
                       style={styles.countryFilterSelector}
                       onPress={openCountryModal}
                     >
-                      <Text style={styles.countryFilterFlag}>{selectedCountry?.[3] || '🌍'}</Text>
+                      {selectedCountry ? (
+                        <CountryFlag iso={selectedCountry[2]} size={17} style={styles.countryFilterFlag} />
+                      ) : (
+                        <Icon name="globe" size={16} color={colors.textSecondary} style={styles.countryFilterFlag} />
+                      )}
                       <Text style={styles.countryFilterName}>
                         {selectedCountry?.[0] || 'Todos los países'}
                       </Text>
@@ -3184,7 +3197,7 @@ export const ExchangeScreen = () => {
                 ]}
                 onPress={() => selectCountry(item)}
               >
-                <Text style={styles.countryModalFlag}>{item[3]}</Text>
+                <CountryFlag iso={item[2]} size={26} style={styles.countryModalFlag} />
                 <Text style={styles.countryModalName}>{item[0]}</Text>
                 <Text style={styles.countryModalCode}>{item[1]}</Text>
                 {selectedCountry?.[2] === item[2] && (
@@ -3907,6 +3920,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  paymentMethodsSummary: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  paymentMethodsSummaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  paymentMethodsSummaryText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#1F2937',
+  },
+  paymentMethodsSummaryFlag: {
+    marginLeft: 4,
+  },
   paymentMethodsExpanded: {
     alignItems: 'flex-end',
   },
@@ -4577,7 +4609,6 @@ const styles = StyleSheet.create({
     minHeight: 36,
   },
   countryFilterFlag: {
-    fontSize: 16,
     marginRight: 6,
   },
   countryFilterName: {
@@ -4621,7 +4652,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryLight,
   },
   countryModalFlag: {
-    fontSize: 24,
     marginRight: 12,
   },
   countryModalName: {
@@ -4781,7 +4811,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   myOfferCountryFlag: {
-    fontSize: 16,
     marginRight: 8,
   },
   myOfferCountryText: {
@@ -4879,14 +4908,21 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   myOfferPaymentTag: {
-    fontSize: 11,
-    color: '#374151',
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#F3F4F6',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
     marginRight: 6,
     marginBottom: 4,
+  },
+  myOfferPaymentTagText: {
+    fontSize: 11,
+    color: '#374151',
+  },
+  myOfferPaymentTagFlag: {
+    marginLeft: 4,
   },
   myOfferPaymentMore: {
     fontSize: 11,

@@ -25,6 +25,7 @@ import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
+import { CountryFlag } from '../components/CountryFlag';
 
 type Navigation = NavigationProp<MainStackParamList>;
 type EconomicActivityOption = {
@@ -183,7 +184,6 @@ export const RampAddressScreen: React.FC = () => {
   };
 
   const countryName = rampAddress?.countryName || phoneCountry?.[0] || phoneCountryIso || 'Sin configurar';
-  const countryFlag = phoneCountry?.[3] || '';
   const isButtonDisabled = isSaving || !hasChanges;
 
   return (
@@ -236,7 +236,7 @@ export const RampAddressScreen: React.FC = () => {
               <ActivityIndicator size="small" color={colors.primaryDark} />
             ) : (
               <View style={styles.readOnlyInner}>
-                {countryFlag ? <Text style={styles.flagEmoji}>{countryFlag}</Text> : null}
+                <CountryFlag iso={phoneCountry?.[2]} size={22} />
                 <Text style={styles.readOnlyValue}>{countryName}</Text>
               </View>
             )}
@@ -533,9 +533,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-  },
-  flagEmoji: {
-    fontSize: 20,
   },
   readOnlyValue: {
     fontSize: 15,

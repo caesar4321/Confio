@@ -6,7 +6,6 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import type { RouteOption } from '../components/RouteSheet';
 import {
-  countryFlag,
   countryName,
   COMING_SOON_NOTE,
   getReceiveRails,
@@ -136,7 +135,6 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
   const methodToOption = useCallback((method: LocalMethod) => ({
     id: method.id,
     icon: isIdentityBlocked(method) ? 'clock' : method.direction === 'send' ? 'send' : 'download',
-    flag: countryFlag(method.country),
     country: method.country,
     title: method.title,
     subtitle: method.subtitle,
@@ -219,7 +217,6 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
       // without it React would key three of them identically.
       id: rail.id,
       icon: rail.status === 'live' ? (direction === 'send' ? 'send' : 'download') : 'clock',
-      flag: countryFlag(rail.country),
       country: rail.country,
       title: rail.title,
       subtitle: rail.subtitle,
@@ -257,7 +254,6 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
           .map(instruction => ({
             id: instruction.internalId,
             icon: 'download',
-            flag: countryFlag(account.country),
             country: account.country,
             title: instruction.kind === 'breb_key' ? 'Tu llave Bre-B' : instruction.displayValue,
             subtitle: instruction.kind === 'breb_key'

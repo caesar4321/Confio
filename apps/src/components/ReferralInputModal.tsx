@@ -19,6 +19,7 @@ import { countries, Country } from '../utils/countries';
 import { useAuth } from '../contexts/AuthContext';
 import { colors } from '../config/theme';
 import { Button } from './common/Button';
+import { CountryFlag, FlagLabel } from './CountryFlag';
 
 const CHECK_REFERRAL_STATUS = gql`
   mutation CheckReferralStatus {
@@ -250,9 +251,9 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
                     style={styles.countryCodeButton}
                     onPress={() => setShowCountryPicker(true)}
                   >
-                    <Text style={styles.countryCodeText}>
-                      {selectedCountry[3]} {selectedCountry[1]}
-                    </Text>
+                    <FlagLabel iso={selectedCountry[2]} textStyle={styles.countryCodeText}>
+                      {selectedCountry[1]}
+                    </FlagLabel>
                     <Icon name="chevron-down" size={16} color="#6B7280" />
                   </TouchableOpacity>
                   <TextInput
@@ -361,7 +362,9 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
                     setShowCountryPicker(false);
                   }}
                 >
-                  <Text style={styles.countryFlag}>{item[3]}</Text>
+                  <View style={styles.countryFlag}>
+                    <CountryFlag iso={item[2]} size={24} />
+                  </View>
                   <Text style={styles.countryName}>{item[0]}</Text>
                   <Text style={styles.countryCode}>{item[1]}</Text>
                   {selectedCountry[2] === item[2] && (
@@ -610,8 +613,10 @@ const styles = StyleSheet.create({
   countryItemSelected: {
     backgroundColor: '#F0FDF4',
   },
+  // Fixed height so each row is 16+32+16+1 = 65, the getItemLayout length.
   countryFlag: {
-    fontSize: 24,
+    height: 32,
+    justifyContent: 'center',
     marginRight: 12,
   },
   countryName: {

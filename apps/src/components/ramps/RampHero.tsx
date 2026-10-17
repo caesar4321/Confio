@@ -10,9 +10,12 @@ import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 
 import { colors } from '../../config/theme';
+import { FlagLabel } from '../CountryFlag';
 
 type Props = {
   eyebrow: string;
+  /** ISO code whose round flag leads the eyebrow. */
+  eyebrowCountry?: string | null;
   title: string;
   subtitle: string;
   onBack: () => void;
@@ -30,6 +33,7 @@ type Props = {
  */
 export const RampHero = ({
   eyebrow,
+  eyebrowCountry,
   title,
   subtitle,
   onBack,
@@ -55,7 +59,13 @@ export const RampHero = ({
         <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
           <Icon name="arrow-left" size={20} color={colors.white} />
         </TouchableOpacity>
-        <Text style={styles.eyebrow}>{eyebrow}</Text>
+        {eyebrowCountry ? (
+          <FlagLabel iso={eyebrowCountry} size={14} style={styles.eyebrowRow} textStyle={[styles.eyebrow, styles.eyebrowInRow]}>
+            {eyebrow}
+          </FlagLabel>
+        ) : (
+          <Text style={styles.eyebrow}>{eyebrow}</Text>
+        )}
         <Text style={[styles.title, compact && styles.titleCompact]}>{title}</Text>
         <Text style={styles.subtitle}>{subtitle}</Text>
       </View>
@@ -91,6 +101,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: 'rgba(255,255,255,0.7)',
     marginBottom: 8,
+  },
+  eyebrowRow: {
+    marginBottom: 8,
+  },
+  eyebrowInRow: {
+    marginBottom: 0,
   },
   title: {
     fontSize: 28,

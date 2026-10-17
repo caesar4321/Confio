@@ -29,6 +29,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { buildInviteLink } from '../utils/inviteLinks';
 import { AnalyticsService } from '../services/analyticsService';
 import { OfferCardSkeleton } from '../components/SkeletonLoader';
+import { CountryFlag, FlagLabel } from '../components/CountryFlag';
 import {
   Financiera,
   USDT_BSC_TAG,
@@ -74,7 +75,6 @@ const Stars = ({ rating, size = 14 }: { rating: number; size?: number }) => (
   </View>
 );
 
-const flagFor = (iso: string) => getCountryByIso(iso)?.[3] || '';
 const countryNameFor = (iso: string) => getCountryByIso(iso)?.[0] || iso;
 
 // The headline figure is always the USD value of what reviewers reported, so
@@ -144,9 +144,13 @@ const CountryPickerModal = ({
                     setQ('');
                   }}
                 >
-                  <Text style={[styles.optionLabel, selected && styles.optionLabelSelected]}>
-                    {item[3]}  {item[0]}
-                  </Text>
+                  <FlagLabel
+                    iso={item[2]}
+                    style={styles.optionFlagLabel}
+                    textStyle={[styles.optionLabel, selected && styles.optionLabelSelected]}
+                  >
+                    {item[0]}
+                  </FlagLabel>
                   {selected ? (
                     <Icon name="check" size={18} color={colors.primaryDark} />
                   ) : listingCounts[String(item[2])] ? (
@@ -234,9 +238,9 @@ const LocationFilterModal = ({
 
           {(draft.state || draft.city) && (
             <View style={styles.breadcrumbRow}>
-              <Text style={styles.breadcrumb}>
-                {flagFor(countryIso)} {countryNameFor(countryIso)}
-              </Text>
+              <FlagLabel iso={countryIso} textStyle={styles.breadcrumb}>
+                {countryNameFor(countryIso)}
+              </FlagLabel>
               {draft.state && <Text style={styles.breadcrumb}> › {draft.state}</Text>}
               {draft.city && <Text style={styles.breadcrumb}> › {draft.city}</Text>}
             </View>
@@ -542,11 +546,10 @@ export const FinancierasScreen = () => {
               <Icon name="plus" size={24} color={colors.white} />
             </TouchableOpacity>
           </View>
-          <Text style={styles.headerSubtitle}>
-            {selectedCountryIso ? `${flagFor(selectedCountryIso)} ` : ''}
+          <FlagLabel iso={selectedCountryIso} size={15} style={styles.headerSubtitleRow} textStyle={styles.headerSubtitle}>
             Financieras verificadas
             {selectedCountryIso ? ` de ${countryNameFor(selectedCountryIso)}` : ''}
-          </Text>
+          </FlagLabel>
           </View>
         </View>
       </SafeAreaView>
@@ -610,7 +613,7 @@ export const FinancierasScreen = () => {
 
             <View style={styles.filterRow}>
               <TouchableOpacity style={[styles.locationPill, styles.countryPill]} onPress={() => setCountryModal(true)}>
-                <Text style={styles.countryFlag}>{selectedCountryIso ? flagFor(selectedCountryIso) : ''}</Text>
+                {selectedCountryIso ? <CountryFlag iso={selectedCountryIso} size={18} /> : null}
                 <Text style={styles.locationPillText} numberOfLines={1}>
                   {selectedCountryIso ? countryNameFor(selectedCountryIso) : 'País'}
                 </Text>
@@ -810,7 +813,8 @@ const styles = StyleSheet.create({
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.white },
-  headerSubtitle: { fontSize: 13, color: colors.white, opacity: 0.9, marginTop: 8, lineHeight: 18 },
+  headerSubtitleRow: { marginTop: 8 },
+  headerSubtitle: { fontSize: 13, color: colors.white, opacity: 0.9, lineHeight: 18 },
 
   listContent: { padding: 16, paddingBottom: 40 },
 
@@ -865,7 +869,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   countryPill: { flexBasis: 136, flexGrow: 0, flexShrink: 0 },
-  countryFlag: { fontSize: 16 },
   locationPillText: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.text.primary },
 
   // Sort + result count
@@ -1041,7 +1044,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text.secondary,
   },
-  breadcrumbRow: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 6 },
+  breadcrumbRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingVertical: 6 },
   breadcrumb: { fontSize: 12, color: colors.text.secondary },
   optionRow: {
     flexDirection: 'row',
@@ -1051,6 +1054,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
   },
+  optionFlagLabel: { flexShrink: 1 },
   optionLabel: { fontSize: 15, color: colors.text.primary },
   optionLabelSelected: { fontWeight: '700', color: colors.primaryDark },
   optionCode: { fontSize: 14, color: colors.text.light },

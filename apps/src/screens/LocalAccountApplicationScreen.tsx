@@ -10,7 +10,7 @@ import { GET_MY_RAMP_ADDRESS } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
 import { LoadingOverlay } from '../components/LoadingOverlay';
-import { countryFlag, countryName } from '../config/localRails';
+import { countryName } from '../config/localRails';
 import { useBrebLocationScope } from '../components/breb/BrebLocationGate';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
@@ -106,7 +106,6 @@ function Application({ methodId }: { methodId: string }) {
   const [locationOk, setLocationOk] = useState(() => brebLocationPassValid(locationScope));
 
   const country = method?.country || (isBreb ? 'CO' : '');
-  const flag = countryFlag(country);
   const place = countryName(country);
   const currency = method ? currencyName(method.asset) : 'moneda local';
   const rail = RAIL[country] || 'transferencia';
@@ -287,7 +286,8 @@ function Application({ methodId }: { methodId: string }) {
   const hero = (
     <RampReveal delay={0}>
       <RampHero
-        eyebrow={`${flag ? `${flag} ` : ''}${place || 'Cuenta local'}`}
+        eyebrow={place || 'Cuenta local'}
+        eyebrowCountry={country}
         title={brebKey || hiddenKey ? 'Tu llave Bre-B' : copy.title}
         subtitle={direction === 'receive'
           ? `${copy.item} para recibir ${currency} por ${rail}, siempre la misma.`
@@ -329,7 +329,8 @@ function Application({ methodId }: { methodId: string }) {
           {hero}
           <RampReveal delay={80}>
             <View style={styles.section}>
-              <RampStepHeader number={1} title="Compártela para que te paguen" meta={`${flag} Colombia · COP`}
+              <RampStepHeader number={1} title="Compártela para que te paguen" meta="Colombia · COP"
+                metaCountry={country}
                 accentColor={colors.primaryDark} accentBackground={colors.primaryLight} titleColor={colors.dark}
                 metaColor={colors.textSecondary} />
               <View style={styles.inputCard}>
@@ -495,7 +496,8 @@ function Application({ methodId }: { methodId: string }) {
           <>
             <RampReveal delay={80}>
               <View style={styles.section}>
-                <RampStepHeader number={1} title="Qué obtienes" meta={`${flag ? `${flag} ` : ''}${place} · ${method.asset}`}
+                <RampStepHeader number={1} title="Qué obtienes" meta={`${place} · ${method.asset}`}
+                  metaCountry={country}
                   accentColor={colors.primaryDark} accentBackground={colors.primaryLight} titleColor={colors.dark}
                   metaColor={colors.textSecondary} />
                 <View style={styles.inputCard}>

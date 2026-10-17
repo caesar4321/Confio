@@ -28,6 +28,7 @@ import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { PhoneRelinkModal } from '../components/PhoneRelinkModal';
+import { CountryFlag } from '../components/CountryFlag';
 import { usePhoneRelinkPrompt } from '../hooks/usePhoneRelinkPrompt';
 import { createPhoneRelinkFlow, PhoneVerificationResult } from '../utils/phoneRelinkFlow';
 
@@ -357,7 +358,7 @@ const PhoneVerificationScreen = () => {
       style={styles.countryItem}
       onPress={() => selectCountry(item)}
     >
-      <Text style={styles.flag}>{item[3]}</Text>
+      <CountryFlag iso={item[2]} size={24} style={styles.flag} />
       <Text style={styles.countryName}>{item[0]}</Text>
       <Text style={styles.countryCode}>{item[1]}</Text>
     </TouchableOpacity>
@@ -396,7 +397,9 @@ const PhoneVerificationScreen = () => {
           activeOpacity={0.8}
         >
           <View style={styles.countrySelectorContent}>
-            <Text style={styles.flag}>{selectedCountry?.[3] || '🌍'}</Text>
+            {selectedCountry
+              ? <CountryFlag iso={selectedCountry[2]} size={24} style={styles.flag} />
+              : <Feather name="globe" size={22} color={colors.grayText} style={styles.flag} />}
             <Text style={styles.countryName}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
           </View>
           <Feather name="chevron-down" size={22} color={colors.grayText} />
@@ -742,7 +745,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   flag: {
-    fontSize: 22,
     marginRight: 10,
   },
   countryName: {

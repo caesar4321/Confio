@@ -25,6 +25,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
+import { CountryFlag } from './CountryFlag';
 import { InlineBanner } from './common/InlineBanner';
 
 // Colors matching app design
@@ -1105,7 +1106,7 @@ export const AddPayoutMethodModal = ({
           setShowCountryPicker(false);
         }}
       >
-        <Text style={styles.countryFlag}>{country.flagEmoji}</Text>
+        <CountryFlag emoji={country.flagEmoji} size={22} style={styles.countryFlag} />
         <Text style={styles.pickerItemText}>{country.name}</Text>
         {selectedCountry?.id === country.id && (
           <Icon name="check" size={20} color={colors.primary} />
@@ -1452,7 +1453,7 @@ export const AddPayoutMethodModal = ({
               <View style={styles.pickerContent}>
                 {selectedCountry ? (
                   <>
-                    <Text style={styles.countryFlag}>{selectedCountry.flagEmoji}</Text>
+                    <CountryFlag emoji={selectedCountry.flagEmoji} size={22} style={styles.countryFlag} />
                     <Text style={styles.pickerText}>{selectedCountry.name}</Text>
                   </>
                 ) : (
@@ -1732,7 +1733,6 @@ const styles = StyleSheet.create({
     color: colors.text.light,
   },
   countryFlag: {
-    fontSize: 20,
     marginRight: 8,
   },
   textInput: {

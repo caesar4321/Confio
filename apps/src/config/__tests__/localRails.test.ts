@@ -1,5 +1,5 @@
+import { hasCountryFlag } from '../../components/CountryFlag';
 import {
-  countryFlag,
   countryName,
   getReceiveRails,
   getSendRails,
@@ -36,13 +36,13 @@ describe('toIso2', () => {
 
 describe('country display helpers', () => {
   it('resolves flag and name from either code width', () => {
-    expect(countryFlag('CO')).toBe(countryFlag('COL'));
-    expect(countryFlag('CO')).not.toBe('');
+    expect(hasCountryFlag('CO')).toBe(true);
+    expect(hasCountryFlag('COL')).toBe(true);
     expect(countryName('MEX')).toBe(countryName('MX'));
   });
 
   it('never renders a broken flag for an unknown country', () => {
-    expect(countryFlag('ZZZ')).toBe('');
+    expect(hasCountryFlag('ZZZ')).toBe(false);
   });
 });
 
@@ -81,7 +81,7 @@ describe('rail ordering', () => {
 // and the literal string "EU" where a country name belongs.
 describe('the SEPA pseudo-region', () => {
   it('renders a flag and a readable name', () => {
-    expect(countryFlag('EU')).toBe('🇪🇺');
+    expect(hasCountryFlag('EU')).toBe(true);
     expect(countryName('EU')).toBe('Zona euro');
   });
 

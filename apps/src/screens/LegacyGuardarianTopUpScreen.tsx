@@ -30,7 +30,8 @@ import { getCurrencyForCountry, getCurrencySymbol } from '../utils/currencyMappi
 import { countries, getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
 import { useCurrencyByCode } from '../hooks/useCurrency';
-import { getFlagForCurrency } from '../utils/currencyFlags';
+import { getFlagIsoForCurrency } from '../utils/currencyFlags';
+import { CountryFlag } from '../components/CountryFlag';
 import { useMutation, useQuery, gql } from '@apollo/client';
 import algorandService from '../services/algorandService';
 import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
@@ -172,6 +173,7 @@ const TopUpScreen = () => {
   const email = userProfile?.email || '';
 
   const { formatAmount } = useCurrencyByCode(currencyCode || 'USD');
+  const currencyFlagIso = getFlagIsoForCurrency(currencyCode);
 
   useEffect(() => {
     // When fiat options load, check if derived currency is available
@@ -484,7 +486,11 @@ const TopUpScreen = () => {
 
           <View style={styles.amountInputContainer}>
             <View style={styles.currencyBadge}>
-              <Text style={styles.flagEmoji}>{getFlagForCurrency(currencyCode)}</Text>
+              {currencyFlagIso ? (
+                <CountryFlag iso={currencyFlagIso} size={22} />
+              ) : (
+                <Icon name="globe" size={20} color={colors.textSecondary} />
+              )}
               <Text style={styles.currencyCodeText}>{currencyCode}</Text>
             </View>
             <TextInput
@@ -860,9 +866,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     gap: 6,
     marginRight: 12,
-  },
-  flagEmoji: {
-    fontSize: 20,
   },
   currencyCodeText: {
     fontSize: 14,

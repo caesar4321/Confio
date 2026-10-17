@@ -23,6 +23,7 @@ import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { getCountryByIso } from '../utils/countries';
+import { CountryFlag } from '../components/CountryFlag';
 import { useNumberFormat } from '../utils/numberFormatting';
 import {
   Financiera,
@@ -229,8 +230,9 @@ export const FinancieraDetailScreen = () => {
           </View>
           <View style={styles.locationRow}>
             <Icon name="map-pin" size={14} color={colors.text.secondary} />
+            <CountryFlag iso={country?.[2]} size={15} />
             <Text style={styles.locationText}>
-              {country?.[3]} {financiera.neighborhood ? `${financiera.neighborhood}, ` : ''}
+              {financiera.neighborhood ? `${financiera.neighborhood}, ` : ''}
               {financiera.city}, {financiera.state}, {country?.[0]}
             </Text>
           </View>
