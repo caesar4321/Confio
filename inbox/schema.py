@@ -983,7 +983,10 @@ class CommunityPostExtrasType(graphene.ObjectType):
 
 
 class ShareableActivityType(graphene.ObjectType):
-    unified_transaction_id = graphene.ID(required=True)
+    # Null while the activity is still settling (preview from the source record).
+    unified_transaction_id = graphene.ID()
+    # True while it settles: "Compartir" schedules the post for settlement.
+    pending = graphene.Boolean()
     activity = graphene.Field(ActivityShareType, required=True)
     can_share = graphene.Boolean(required=True)
     # Why not: not_verified | username_required | rules_required | banned | ...
@@ -1663,6 +1666,39 @@ class ShareActivity(graphene.Mutation):
         return ShareActivity(success=True, error=None, error_code=None, post=build_community_post_payload(item))
 
 
+class ShareActivityIntent(graphene.Mutation):
+    """The share sheet's "Compartir": publishes now when the activity is
+    final, else schedules the post for the moment it settles."""
+    class Arguments:
+        group = graphene.String(required=True)
+        reference = graphene.String(required=True)
+        note = graphene.String(required=False)
+        show_amount = graphene.Boolean(required=False)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    error_code = graphene.String()
+    # published | in_review | scheduled
+    status = graphene.String()
+    post = graphene.Field(CommunityPostType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, group, reference, note=None, show_amount=True):
+        user, account, business, _ = get_context_models(info)
+        try:
+            outcome, obj = activity_share.share_or_schedule(
+                user, business, group, reference, note or '', show_amount is not False)
+        except activity_share.ActivityShareError as error:
+            return ShareActivityIntent(success=False, error=error.message, error_code=error.code)
+        if outcome == 'scheduled':
+            return ShareActivityIntent(success=True, status='scheduled')
+        item = own_community_items(user).get(id=obj.id)
+        post = build_community_post_payload(item)
+        return ShareActivityIntent(
+            success=True, status='published' if post.status == 'APPROVED' else 'in_review', post=post)
+
+
 class FollowCommunityMember(graphene.Mutation):
     class Arguments:
         user_id = graphene.ID(required=True)
@@ -1811,6 +1847,9 @@ class Query(graphene.ObjectType):
         group=graphene.String(required=False),
         # A status screen's own id (ramp order id, local-transfer reference).
         reference=graphene.String(required=False),
+        # The share sheet: a preview while the activity still settles.
+        # Builds without it only ever get a final, shareable activity.
+        allow_pending=graphene.Boolean(required=False),
     )
     community_member_profile = graphene.Field(CommunityMemberProfileType, user_id=graphene.ID(required=True))
     community_member_portfolio = graphene.Field(CommunityMemberPortfolioType, user_id=graphene.ID(required=True))
@@ -1955,20 +1994,29 @@ class Query(graphene.ObjectType):
         return out
 
     @login_required
-    def resolve_shareable_activity(self, info, unified_transaction_id=None, group=None, reference=None):
+    def resolve_shareable_activity(self, info, unified_transaction_id=None, group=None, reference=None,
+                                   allow_pending=False):
         user, account, business, _ = get_context_models(info)
         if business is not None:
             return None
-        found = activity_share.find_activity(
-            user, unified_id=unified_transaction_id, group=group, reference=reference)
-        if found is None:
-            return None
-        row, snap = found
+        if allow_pending and reference and unified_transaction_id is None:
+            preview = activity_share.preview_activity(user, group, reference)
+            if preview is None:
+                return None
+            row, snap, final = preview
+        else:
+            found = activity_share.find_activity(
+                user, unified_id=unified_transaction_id, group=group, reference=reference)
+            if found is None:
+                return None
+            row, snap = found
+            final = True
         raw = {**snap.data, 'show_amount': True}
         public = activity_share.public_activity(raw)
         block = community.posting_block(user, business, activity=True)
         return ShareableActivityType(
-            unified_transaction_id=str(row.id),
+            unified_transaction_id=str(row.id) if row is not None else None,
+            pending=not final,
             activity=build_activity_type(public, raw),
             can_share=block is None,
             block_code=block,
@@ -2861,6 +2909,7 @@ class Mutation(graphene.ObjectType):
     block_community_member = BlockCommunityMember.Field()
     unblock_community_member = UnblockCommunityMember.Field()
     share_activity = ShareActivity.Field()
+    share_activity_intent = ShareActivityIntent.Field()
     follow_community_member = FollowCommunityMember.Field()
     unfollow_community_member = UnfollowCommunityMember.Field()
     set_community_follow_notify = SetCommunityFollowNotify.Field()

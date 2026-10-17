@@ -4,6 +4,7 @@ import { MainStackParamList } from '../types/navigation';
 import { BottomTabNavigator } from './BottomTabNavigator';
 import { AssistantProvider } from '../assistant/AssistantContext';
 import AssistantOverlay from '../assistant/AssistantOverlay';
+import { CommunityShareProvider } from '../components/CommunityShareProvider';
 import LegalDocumentScreen from '../screens/LegalDocumentScreen';
 import VerificationScreen from '../screens/VerificationScreen';
 import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
@@ -746,6 +747,8 @@ export const MainNavigator = () => {
       */}
       </Stack.Navigator>
       <AssistantOverlay />
+      {/* The one "share to Comunidad" sheet, above every screen (services/communityShare). */}
+      <CommunityShareProvider />
       <MigrationModal />
       <OnboardingModalCoordinator />
     </AssistantProvider>

@@ -13,6 +13,9 @@ type Props = {
   visible: boolean;
   onAccepted: () => void;
   onClose: () => void;
+  /** Opens the full Terms. Defaults to navigating from the host screen; a
+   * host outside any screen (the global share sheet) passes its own. */
+  onOpenTerms?: () => void;
 };
 
 /**
@@ -20,7 +23,7 @@ type Props = {
  * first post, comment or profile photo. The text comes from the server, so
  * what people agree to is exactly what the server enforces.
  */
-export function CommunityRulesSheet({ visible, onAccepted, onClose }: Props) {
+export function CommunityRulesSheet({ visible, onAccepted, onClose, onOpenTerms }: Props) {
   const navigation = useNavigation<any>();
   const focused = useIsFocused();
   const { data, loading, refetch } = useQuery(GET_COMMUNITY_RULES, {
@@ -67,7 +70,7 @@ export function CommunityRulesSheet({ visible, onAccepted, onClose }: Props) {
                 </View>
               ))}
               <Pressable
-                onPress={() => navigation.navigate('LegalDocument', { docType: 'terms' })}
+                onPress={() => (onOpenTerms ? onOpenTerms() : navigation.navigate('LegalDocument', { docType: 'terms' }))}
                 accessibilityRole="link"
               >
                 <Text style={styles.link}>Leer los Términos de Servicio completos</Text>

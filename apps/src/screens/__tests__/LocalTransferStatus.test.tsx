@@ -23,12 +23,13 @@ jest.mock('../../components/ramps/RampActionBar', () => ({RampActionBar: 'Action
 jest.mock('../../components/ramps/RampHero', () => ({RampHero: 'Hero'}));
 jest.mock('../../components/ramps/RampReveal', () => ({RampReveal: 'Reveal'}));
 jest.mock('../../components/ramps/RampStepHeader', () => ({RampStepHeader: 'Step'}));
-jest.mock('../../components/ActivityShareCard', () => ({ActivityShareCard: 'ActivityShareCard'}));
+jest.mock('../../services/communityShare', () => ({requestActivityShare: jest.fn()}));
 jest.mock('../../services/localMoney', () => ({
   LOCAL_JOURNEY: 'journey', LOCAL_JOURNEY_BRIDGE: 'bridge', LOCAL_JOURNEYS: 'journeys',
   journeySteps: () => ['Convirtiendo', 'Completado'], journeyStepIndex: () => 0,
 }));
 import Screen from '../LocalTransferStatusScreen';
+import {requestActivityShare} from '../../services/communityShare';
 
 // RefreshControl is a React element prop with an owner cycle, not screen text.
 const screenText = (tree: renderer.ReactTestRenderer) =>
@@ -106,5 +107,25 @@ it('shows the refresh spinner and prevents overlapping manual refreshes', async 
   expect(mockRefetch).toHaveBeenCalledTimes(2);
   await act(async () => {finish({}); await pending;});
   expect(tree.root.findByType(RefreshControl).props.refreshing).toBe(false);
+  await act(async () => tree.unmount());
+});
+
+it('offers the global Comunidad share sheet when a transfer completes while watched', async () => {
+  (requestActivityShare as jest.Mock).mockClear();
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(requestActivityShare).not.toHaveBeenCalled();
+  mockStage = 'completed'; mockDirection = 'to_wallet';
+  await act(async () => {tree.update(<Screen />);});
+  expect(requestActivityShare).toHaveBeenCalledWith({group: 'ramp', reference: 'journey'});
+  await act(async () => tree.unmount());
+});
+
+it('never offers it when reopening a transfer that was already completed', async () => {
+  (requestActivityShare as jest.Mock).mockClear();
+  mockStage = 'completed'; mockDirection = 'to_wallet';
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(requestActivityShare).not.toHaveBeenCalled();
   await act(async () => tree.unmount());
 });

@@ -205,3 +205,10 @@ def notify_followers_task(self, content_item_id: int):
     from .community import notify_followers
 
     return notify_followers(content_item_id)
+
+
+@shared_task(bind=True, max_retries=0)
+def resolve_activity_share_intents_task(self):
+    from .activity_share import resolve_share_intents
+
+    return resolve_share_intents()

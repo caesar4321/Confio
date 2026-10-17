@@ -14,6 +14,7 @@ from PIL import Image, ImageOps
 from security.s3_utils import build_s3_key, upload_object
 
 from .models import (
+    ActivityShareIntent,
     CommunityActivityShare,
     CommunityFollow,
     CommunityProfileSettings,
@@ -1238,6 +1239,18 @@ class CommunityProfileSettingsAdmin(admin.ModelAdmin):
     search_fields = ('user__username',)
     list_select_related = ('user',)
     readonly_fields = ('user', 'portfolio_hidden', 'updated_at')
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(ActivityShareIntent)
+class ActivityShareIntentAdmin(admin.ModelAdmin):
+    list_display = ('user', 'group', 'reference', 'status', 'attempts', 'created_at', 'expires_at', 'resolved_at')
+    list_filter = ('status', 'group')
+    search_fields = ('user__username', 'reference')
+    list_select_related = ('user',)
+    readonly_fields = [f.name for f in ActivityShareIntent._meta.fields]
 
     def has_add_permission(self, request):
         return False

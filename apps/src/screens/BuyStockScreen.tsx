@@ -34,7 +34,7 @@ import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import { StockTradeSuccessContent } from '../components/common/StockTradeSuccessContent';
-import { ActivityShareCard } from '../components/ActivityShareCard';
+import { requestActivityShare } from '../services/communityShare';
 import { StockTradeLoadingOverlay } from '../components/common/StockTradeLoadingOverlay';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
@@ -75,7 +75,6 @@ export const BuyStockScreen = () => {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [tradeError, setTradeError] = useState<string | null>(null);
   const [settledTokens, setSettledTokens] = useState(0);
-  const [settledTxHash, setSettledTxHash] = useState<string | null>(null);
   const confirmInFlight = useRef(false);
   const requestIdRef = useRef<string | null>(null);
 
@@ -162,8 +161,9 @@ export const BuyStockScreen = () => {
         requestId,
       });
       setSettledTokens(Number(result.tokenAmountWei) / 1e18);
-      setSettledTxHash(result.txHash || null);
       setPhase('success');
+      // The global share sheet opens right away (the server previews a trade still settling).
+      requestActivityShare({ group: 'stock', reference: result.txHash });
       // Chain execution is the settlement boundary. A stale portfolio query
       // must never turn a completed trade back into a retryable input form.
       void refetch().catch(() => undefined);
@@ -215,7 +215,6 @@ export const BuyStockScreen = () => {
             <Text style={styles.successMonthLinkText}>Ver cómo va en Tu mes</Text>
           </TouchableOpacity>
           )}
-          <ActivityShareCard group="stock" reference={settledTxHash} />
         </StockTradeSuccessContent>
       </View>
     );

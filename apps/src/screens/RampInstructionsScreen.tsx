@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import Clipboard from '@react-native-clipboard/clipboard';
 import {
@@ -33,7 +33,7 @@ import { formatRampMoney } from '../utils/rampFormat';
 import { buildRampInstructionView } from '../utils/rampInstructions';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
-import { ActivityShareCard } from '../components/ActivityShareCard';
+import { requestActivityShare } from '../services/communityShare';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'RampInstructions'>;
 type RouteProps = RouteProp<MainStackParamList, 'RampInstructions'>;
@@ -207,6 +207,21 @@ export const RampInstructionsScreen = () => {
     || Boolean(instructionView.qrImageUri)
     || Boolean(qrPayload)
     || Boolean(instructionView.note);
+
+  // An order that is delivered WHILE this screen watches it offers the global
+  // "share to Comunidad" sheet. Opening an old, already delivered order from
+  // history never does: the moment to share has passed.
+  const sawUndelivered = useRef(false);
+  useEffect(() => {
+    // Only a fresh answer counts: cache-and-network first replays the cached
+    // (possibly pending) status of an order that completed while away.
+    if (!statusCode || loading) return;
+    if (!isTerminalSuccess) {
+      sawUndelivered.current = true;
+      return;
+    }
+    if (sawUndelivered.current) requestActivityShare({ group: 'ramp', reference: orderId });
+  }, [statusCode, isTerminalSuccess, orderId, loading]);
 
   const copyInstructionValue = (label: string, value: string) => {
     Clipboard.setString(value);
@@ -537,12 +552,6 @@ export const RampInstructionsScreen = () => {
           </RampReveal>
         ) : null}
 
-        {isTerminalSuccess ? (
-          <View style={styles.shareCard}>
-            <ActivityShareCard group="ramp" reference={orderId} />
-          </View>
-        ) : null}
-
         <RampReveal delay={300}>
         <TouchableOpacity
           style={styles.historyButton}
@@ -586,11 +595,6 @@ const styles = StyleSheet.create({
   },
   card: {
     gap: 12,
-  },
-  shareCard: {
-    marginHorizontal: 22,
-    marginTop: -16,
-    marginBottom: 16,
   },
   variantCard: {
     borderWidth: 1,

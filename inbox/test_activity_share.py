@@ -408,3 +408,117 @@ class ReferenceLookupTests(CommunityTestBase):
         self.assertIsNotNone(activity_share._reference_filter('KOY-123'))
         with patch.object(activity_share, 'snapshot_for', return_value=None):
             self.assertIsNone(activity_share.find_activity(member, group='ramp', reference='KOY-123'))
+
+
+class ShareIntentTests(CommunityTestBase):
+    def setUp(self):
+        super().setUp()
+        self.member = make_user()
+        self.snap = activity_share.Snapshot(STOCK_BUY, {k: v for k, v in buy_activity().items() if k != 'show_amount'})
+        notify = patch('inbox.community.enqueue_follower_notifications')
+        notify.start()
+        self.addCleanup(notify.stop)
+
+    def test_a_tap_before_settlement_is_scheduled_then_published(self):
+        from .models import ActivityShareIntent
+
+        with patch.object(activity_share, 'find_activity', return_value=None), \
+                patch.dict(activity_share.PREVIEWERS, {'stock': lambda user, ref: self.snap}):
+            outcome, intent = activity_share.share_or_schedule(self.member, None, 'stock', '0xabc', 'nota')
+        self.assertEqual((outcome, intent.status, intent.note), ('scheduled', 'pending', 'nota'))
+        row = UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount='5', token_type='CUSD_PLUS', status='CONFIRMED',
+            sender_user=self.member, transaction_date=NOW)
+        with patch.object(activity_share, 'find_activity', return_value=(row, self.snap)), \
+                patch.object(activity_share, 'snapshot_for', return_value=self.snap), \
+                self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(activity_share.resolve_share_intents()['published'], 1)
+        intent = ActivityShareIntent.objects.get(id=intent.id)
+        self.assertEqual(intent.status, 'published')
+        self.assertEqual(intent.content_item.body, 'nota')
+
+    def test_unsettled_intents_wait_and_expire(self):
+        from .models import ActivityShareIntent
+
+        intent = ActivityShareIntent.objects.create(user=self.member, group='stock', reference='0xabc',
+                                                    expires_at=timezone.now() + timedelta(minutes=5))
+        with patch.object(activity_share, 'find_activity', return_value=None), \
+                patch.dict(activity_share.PREVIEWERS, {'stock': lambda user, ref: self.snap}):
+            activity_share.resolve_share_intents()
+        intent.refresh_from_db()
+        self.assertEqual((intent.status, intent.attempts), ('pending', 1))
+        ActivityShareIntent.objects.filter(id=intent.id).update(expires_at=timezone.now() - timedelta(seconds=1))
+        activity_share.resolve_share_intents()
+        intent.refresh_from_db()
+        self.assertEqual(intent.status, 'expired')
+
+    def test_an_activity_that_failed_drops_its_intent(self):
+        from .models import ActivityShareIntent
+
+        intent = ActivityShareIntent.objects.create(user=self.member, group='stock', reference='0xabc',
+                                                    expires_at=timezone.now() + timedelta(minutes=5))
+        with patch.object(activity_share, 'find_activity', return_value=None), \
+                patch.dict(activity_share.PREVIEWERS, {'stock': lambda user, ref: None}):
+            activity_share.resolve_share_intents()
+        intent.refresh_from_db()
+        self.assertEqual(intent.status, 'failed')
+
+    def test_someone_elses_reference_is_not_shareable(self):
+        with patch.object(activity_share, 'find_activity', return_value=None), \
+                patch.dict(activity_share.PREVIEWERS, {'stock': lambda user, ref: None}):
+            with self.assertRaises(activity_share.ActivityShareError) as ctx:
+                activity_share.share_or_schedule(self.member, None, 'stock', '0xabc')
+        self.assertEqual(ctx.exception.code, 'not_shareable')
+
+    def test_the_preview_never_exposes_the_wallet(self):
+        public = activity_share.public_activity({**self.snap.data, 'show_amount': True})
+        self.assertNotIn('wallet', public)
+        self.assertNotIn('batch_id', public)
+
+
+class IntentConsumptionTests(ShareActivityTests):
+    def test_a_direct_share_consumes_the_waiting_intent(self):
+        from .models import ActivityShareIntent
+
+        intent = ActivityShareIntent.objects.create(user=self.member, group='stock', reference='0xABC',
+                                                    expires_at=timezone.now() + timedelta(minutes=5))
+        with patch.object(activity_share, 'references_for_row', return_value={'0xabc'}):
+            item = self.share()
+        intent.refresh_from_db()
+        self.assertEqual((intent.status, intent.content_item_id), ('published', item.id))
+
+    def test_the_resolver_never_republishes_after_a_direct_share(self):
+        from .models import ActivityShareIntent
+
+        self.share()
+        intent = ActivityShareIntent.objects.create(user=self.member, group='stock', reference='0xabc',
+                                                    expires_at=timezone.now() + timedelta(minutes=5))
+        with patch.object(activity_share, '_row_for_reference', return_value=self.row):
+            activity_share.resolve_share_intents()
+        intent.refresh_from_db()
+        self.assertEqual((intent.status, intent.last_error), ('published', 'shared directly'))
+
+
+class ScheduledNoteNotificationTests(CommunityTestBase):
+    def test_a_scheduled_note_tells_its_author_the_review_outcome(self):
+        from .models import ActivityShareIntent
+
+        member = make_user()
+        snap = activity_share.Snapshot(STOCK_BUY, {k: v for k, v in buy_activity().items() if k != 'show_amount'})
+        row = UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount='5', token_type='CUSD_PLUS', status='CONFIRMED',
+            sender_user=member, transaction_date=NOW)
+        intent = ActivityShareIntent.objects.create(user=member, group='stock', reference='0xabc', note='nota',
+                                                    expires_at=timezone.now() + timedelta(minutes=30))
+        with patch.object(activity_share, 'find_activity', return_value=(row, snap)), \
+                patch.object(activity_share, 'snapshot_for', return_value=snap), \
+                patch.object(activity_share, '_row_for_reference', return_value=None), \
+                patch('inbox.community.enqueue_follower_notifications'), \
+                self.captureOnCommitCallbacks(execute=True):
+            activity_share.resolve_share_intents()
+        intent.refresh_from_db()
+        with patch('inbox.community.notify_post_reviewed') as notify, \
+                patch('inbox.community.enqueue_follower_notifications'), \
+                self.captureOnCommitCallbacks(execute=True):
+            self.run_review(intent.content_item, APPROVE)
+        notify.assert_called_once()

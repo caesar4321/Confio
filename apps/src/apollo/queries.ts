@@ -5028,3 +5028,21 @@ export const GET_COMMUNITY_MEMBER_PORTFOLIO = gql`
     }
   }
 `;
+
+// The global share sheet: a preview at success time, while the activity may
+// still be settling (allowPending). Own query: older servers reject it.
+export const GET_SHARE_SHEET_ACTIVITY = gql`
+  query GetShareSheetActivity($group: String!, $reference: String!) {
+    shareableActivity(group: $group, reference: $reference, allowPending: true) {
+      unifiedTransactionId
+      pending
+      canShare
+      blockCode
+      blockMessage
+      noteMaxChars
+      activity {
+        ${ACTIVITY_SHARE_FIELDS}
+      }
+    }
+  }
+`;

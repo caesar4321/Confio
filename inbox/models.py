@@ -864,3 +864,40 @@ class CommunityProfileSettings(models.Model):
 
     def __str__(self):
         return f'{self.user_id} portfolio {"hidden" if self.portfolio_hidden else "public"}'
+
+
+class ActivityShareIntentStatus(models.TextChoices):
+    PENDING = 'pending', 'Pending'
+    PUBLISHED = 'published', 'Published'
+    EXPIRED = 'expired', 'Expired'
+    FAILED = 'failed', 'Failed'
+
+
+class ActivityShareIntent(models.Model):
+    """A member tapped "Compartir" before their activity was final (a trade
+    still settling on-chain, a top-up the provider hasn't delivered). It is
+    published as soon as the activity settles, exactly as a share made then
+    would be; past expires_at it is dropped."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='activity_share_intents')
+    group = models.CharField(max_length=16)
+    reference = models.CharField(max_length=128)
+    note = models.TextField(blank=True, default='')
+    show_amount = models.BooleanField(default=True)
+    status = models.CharField(max_length=16, choices=ActivityShareIntentStatus.choices,
+                              default=ActivityShareIntentStatus.PENDING)
+    content_item = models.ForeignKey(ContentItem, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    last_error = models.CharField(max_length=200, blank=True, default='')
+    attempts = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'group', 'reference'],
+                                    condition=Q(status='pending'), name='inbox_share_intent_pending_uniq'),
+        ]
+        indexes = [models.Index(fields=['status', 'expires_at'], name='inbox_share_intent_status_idx')]
+
+    def __str__(self):
+        return f'{self.user_id} {self.group}:{self.reference} {self.status}'

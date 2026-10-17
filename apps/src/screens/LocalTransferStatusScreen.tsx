@@ -23,7 +23,7 @@ import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { formatRampMoney } from '../utils/rampFormat';
 import { infiniaStage } from '../services/infiniaJourney';
-import { ActivityShareCard } from '../components/ActivityShareCard';
+import { requestActivityShare } from '../services/communityShare';
 import {
   journeyStepIndex,
   journeySteps,
@@ -108,6 +108,17 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
       bridgeQuery.startPolling(10000);
     }
   }, [journey?.stage]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A transfer that completes WHILE this screen watches it offers the global
+  // "share to Comunidad" sheet; reopening a finished one from the list never does.
+  const sawIncomplete = useRef(false);
+  useEffect(() => {
+    if (!journey?.stage) return;
+    if (journey.stage !== 'completed') {
+      sawIncomplete.current = true;
+      return;
+    }
+    if (sawIncomplete.current) requestActivityShare({ group: 'ramp', reference: journey.internalId });
+  }, [journey?.stage, journey?.internalId]);
   const refreshOnFocus = useRef(() => {});
   const refresh = async () => {
     if (refreshBusy.current) return;
@@ -300,18 +311,12 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
             </View>
           </RampReveal>
           <RampActionBar primaryLabel="Listo" onPrimaryPress={() => navigation.popToTop()} />
-          {journey.stage === 'completed' ? (
-            <View style={shareCardStyle}>
-              <ActivityShareCard group="ramp" reference={journey.internalId} />
-            </View>
-          ) : null}
         </>
       )}
     </ScrollView>
   );
 }
 
-const shareCardStyle = { marginHorizontal: 22 } as const;
 
 const PAGE = 20;
 

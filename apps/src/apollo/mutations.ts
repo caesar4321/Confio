@@ -1372,3 +1372,19 @@ export const SET_COMMUNITY_PORTFOLIO_HIDDEN = gql`
     }
   }
 `;
+
+export const SHARE_ACTIVITY_INTENT = gql`
+  mutation ShareActivityIntent($group: String!, $reference: String!, $note: String, $showAmount: Boolean) {
+    shareActivityIntent(group: $group, reference: $reference, note: $note, showAmount: $showAmount) {
+      success
+      error
+      errorCode
+      status
+      post {
+        id
+        status
+        reason
+      }
+    }
+  }
+`;

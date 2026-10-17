@@ -59,6 +59,8 @@ STUCK_REVIEW_AFTER = timedelta(minutes=10)
 MAX_REVIEW_ATTEMPTS = 5
 # How long the app's composer waits for a verdict (REVIEW_WAIT_MS).
 COMPOSER_WAIT = timedelta(seconds=55)
+# Set on a scheduled share's post: notify the author of its review outcome.
+NOTIFY_ON_REVIEW = 'notify_on_review'
 
 # Links are the main phishing vector in a money app; v1 has none.
 URL_RE = re.compile(
@@ -787,8 +789,9 @@ def _finalize(review_id, claim, verdict, *, escalated, verdicts, image=None) -> 
             review.reason = str(verdict.get('reason') or '')[:280]
         review.save()
         # The composer waits about a minute; past that the author has left and
-        # hears the outcome as a notification instead.
-        if now - review.created_at > COMPOSER_WAIT:
+        # hears the outcome as a notification instead. A scheduled share asks
+        # for it outright: its author tapped long before this review began.
+        if now - review.created_at > COMPOSER_WAIT or (item.metadata or {}).get(NOTIFY_ON_REVIEW):
             transaction.on_commit(lambda: notify_post_reviewed(review_id))
         return review.status
 

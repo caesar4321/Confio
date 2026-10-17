@@ -15,7 +15,7 @@ import RNShare from 'react-native-share';
 import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { CategoryPrompt } from '../components/CategoryChips';
-import { ActivityShareCard } from '../components/ActivityShareCard';
+import { requestActivityShare } from '../services/communityShare';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
@@ -351,10 +351,19 @@ export const TransactionSuccessScreen = () => {
   const needsInvitation = transactionData.type === 'sent'
     && !Boolean(transactionData.isOnConfio)
     && Boolean(transactionData.recipientPhone);
+  // Sends to another Confío user (never external wallets or the CONFIO token;
+  // the server filters too) offer the global "share to Comunidad" sheet right
+  // away: the server previews a send still settling and publishes it once
+  // confirmed, so there is no need to wait for CONFIRMED here.
   const canOfferCommunityShare = transactionData.type === 'sent'
-    && isConfirmed
     && transactionData.isOnConfio === true
     && String(transactionData.currency || '').toUpperCase() !== 'CONFIO';
+  const communityShareReference: string | null = canOfferCommunityShare
+    ? (transactionData as any).internalId || (transactionData as any).transactionHash || null
+    : null;
+  useEffect(() => {
+    if (communityShareReference) requestActivityShare({ group: 'send', reference: communityShareReference });
+  }, [communityShareReference]);
   const conversionFee = Number(transactionData.feeAmount || 0);
   const hasConversionFee = Number.isFinite(conversionFee) && conversionFee > 0;
   const displayedAmount = hasConversionFee && transactionData.netAmount
@@ -525,18 +534,6 @@ export const TransactionSuccessScreen = () => {
           </View>
         )}
 
-        {/* Offer to share in Comunidad only once the server says CONFIRMED, and
-            only for sends to another Confío user (never external wallets or
-            the CONFIO token; the server filters too). */}
-        {canOfferCommunityShare && (
-          <View style={styles.communityShareWrap}>
-            <ActivityShareCard
-              group="send"
-              reference={(transactionData as any).internalId || (transactionData as any).transactionHash || null}
-            />
-          </View>
-        )}
-
         {/* Quiet secondary actions */}
         <View style={styles.secondaryRow}>
           {transactionData.type === 'sent' && (
@@ -640,9 +637,6 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   // Compact receipt card (captured by ViewShot together with the hero)
-  communityShareWrap: {
-    marginHorizontal: 24,
-  },
   card: {
     marginHorizontal: 24,
     borderWidth: 1,

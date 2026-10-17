@@ -80,6 +80,13 @@ app.conf.beat_schedule.setdefault('ramps-refresh-koywe-limits', {
 # A payout whose confirmer exhausted its retries before the chain answered
 # has nothing else watching it: the wage paid, the item stays SUBMITTED, the
 # run stays PARTIAL, and no ledger row or notification is ever written.
+# Comunidad shares tapped before the activity settled: published as soon
+# as it does (a stock trade finalizes in seconds).
+app.conf.beat_schedule.setdefault('inbox-resolve-activity-share-intents', {
+    'task': 'inbox.tasks.resolve_activity_share_intents_task',
+    'schedule': 15.0,
+})
+
 app.conf.beat_schedule.setdefault('payroll-reconcile-stranded-bsc', {
     'task': 'payroll.reconcile_stranded_bsc_payroll',
     'schedule': crontab(minute='*/15'),

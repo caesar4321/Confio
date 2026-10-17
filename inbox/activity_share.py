@@ -19,8 +19,10 @@ and withdrawals to outside wallets, merchant payments, payroll, conversions.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
+from types import SimpleNamespace
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
@@ -476,6 +478,7 @@ def share_activity(user, business, unified_id, note: str = '', show_amount: bool
             content_item=item, unified_transaction=row, user=user, kind=snap.kind)
         review = CommunityPostReview.objects.create(content_item=item)
         review_id = review.id
+        consume_intents_for(row, user, item)
         if note:
             transaction.on_commit(lambda: community.enqueue_review(review_id))
         else:
@@ -698,3 +701,302 @@ def public_activity(raw: dict) -> dict:
     from types import SimpleNamespace
 
     return activity_payloads([SimpleNamespace(id=0, metadata={'activity': raw})])[0]
+
+
+# ── Sharing at once, before the activity is final ────────────────────────────
+#
+# Success screens show success when the trade is mined or the order placed,
+# seconds (a trade) to hours (a top-up) before the ledger row is final. The
+# share sheet opens right then with a preview built from the source record;
+# a tap on "Compartir" either publishes at once (already final) or leaves an
+# intent that resolve_share_intents publishes the moment it settles. What is
+# published always comes from the final ledger row, never from the preview.
+
+INTENT_WINDOWS = {
+    'stock': timedelta(hours=2),
+    'send': timedelta(hours=2),
+    'ramp': timedelta(hours=48),
+}
+PREVIEW_ONLY_KEYS = ('wallet', 'batch_id')
+
+
+def _stock_preview(user, reference):
+    from blockchain.models import SponsoredBatch
+    from cusd_plus.sponsor_7702 import _decode_stock_call
+    from cusd_plus.stock_month import Trade
+
+    if not (reference or '').lower().startswith('0x'):
+        return None
+    batch = SponsoredBatch.objects.filter(
+        tx_hash__iexact=reference, kind__in=(STOCK_BUY, STOCK_SELL),
+        status__in=('signed', 'sent', 'confirmed')).first()
+    if batch is None or _personal_account(user, batch.user_bsc_address) is None:
+        return None
+    try:
+        actions = [a for c in json.loads(batch.calls_json or '[]')
+                   if (a := _decode_stock_call(c, historical=True)) is not None]
+    except Exception:  # noqa: BLE001
+        return None
+    if len(actions) != 1 or actions[0]['kind'] != batch.kind:
+        return None
+    action = actions[0]
+    from cusd_plus.stock_month import _symbol_by_address
+
+    symbol = _symbol_by_address().get(action['asset'])
+    units = Decimal(action['quantity']) / Decimal(10 ** 18)
+    usd = Decimal(int(action['history_amount_wei'])) / Decimal(10 ** 18)
+    if not symbol or units <= 0 or usd <= 0:
+        return None
+    ticker, name = _ticker_and_name(symbol)
+    data = {
+        'kind': batch.kind, 'symbol': symbol, 'ticker': ticker, 'name': name,
+        'units': format(units.normalize(), 'f'), 'amount_usd': _money(usd),
+        'price_usd': format((usd / units).quantize(Decimal('0.0001')), 'f'),
+        'date': _date(batch.created_at), 'wallet': batch.user_bsc_address.lower(), 'batch_id': batch.id,
+    }
+    if batch.kind == STOCK_SELL:
+        trades = [(bid, t) for bid, t in _wallet_trades(batch.user_bsc_address) if bid != batch.id]
+        trades.append((batch.id, Trade(symbol=symbol, kind=STOCK_SELL, units=units, usd=usd, when=batch.created_at)))
+        realized = _realized(trades, batch.id)
+        if realized is not None:
+            basis, proceeds = realized
+            data['pnl_usd'] = _money(proceeds - basis)
+            data['pnl_pct'] = format(((proceeds - basis) / basis * 100).quantize(Decimal('0.01')), 'f') if basis > 0 else None
+    return Snapshot(batch.kind, data)
+
+
+def _send_preview(user, reference):
+    from send.models import SendTransaction
+
+    send = SendTransaction.objects.filter(internal_id=reference).first()
+    if send is None or send.status in ('FAILED', 'AML_REVIEW') or send.sender_user_id != user.id:
+        return None
+    probe = SimpleNamespace(amount=send.amount, send_transaction=SimpleNamespace(
+        status='CONFIRMED', token_type=send.token_type, sender_user_id=send.sender_user_id,
+        recipient_user_id=send.recipient_user_id, sender_business_id=send.sender_business_id,
+        recipient_business_id=send.recipient_business_id, created_at=send.created_at))
+    return _send_snapshot(probe, user)
+
+
+def _ramp_preview(user, reference):
+    import uuid
+
+    from payment_accounts.models import InfiniaJourney
+    from ramps.models import RampTransaction
+
+    ramp = (RampTransaction.objects.filter(provider_order_id=reference).first()
+            or RampTransaction.objects.filter(external_id=reference).first())
+    if ramp is not None:
+        if ramp.status == 'FAILED' or ramp.actor_user_id != user.id or ramp.actor_business_id:
+            return None
+        kind = TOP_UP if ramp.direction == 'on_ramp' else WITHDRAW
+        # Dollars in or out of the wallet: delivered/sent crypto, estimated
+        # until the provider reports the actual.
+        amount = ramp.crypto_amount_actual or ramp.crypto_amount_estimated
+        return Snapshot(kind, {
+            'kind': kind, 'amount_usd': _money(_dec(amount)),
+            'rail': _ramp_rail((ramp.metadata or {}).get('payment_method_code', '')),
+            'country': (ramp.country_code or '').upper()[:2] or None, 'minutes': None,
+            'date': _date(timezone.now()),
+        })
+    try:
+        journey = InfiniaJourney.objects.select_related('local_account', 'confio_account', 'money_flow').filter(
+            internal_id=uuid.UUID(str(reference))).first()
+    except ValueError:
+        journey = None
+    if journey is None or journey.stage in ('failed', 'refunded'):
+        return None
+    if journey.confio_account.user_id != user.id or journey.confio_account.account_type == 'business':
+        return None
+    kind = WITHDRAW if journey.direction == 'to_bank' else TOP_UP
+    amount = journey.money_flow.source_amount if kind == WITHDRAW else None
+    return Snapshot(kind, {
+        'kind': kind, 'amount_usd': _money(_dec(amount)) if amount is not None else None,
+        'rail': 'QR' if 'QR' in (journey.local_account.payin_rail or '').upper() else None,
+        'country': _country2(journey.local_account.country), 'minutes': None, 'date': _date(timezone.now()),
+    })
+
+
+PREVIEWERS = {'stock': _stock_preview, 'send': _send_preview, 'ramp': _ramp_preview}
+
+
+def _row_for_reference(user, reference):
+    match = _reference_filter(reference)
+    return _member_rows(user).filter(match).order_by('-id').first() if match is not None else None
+
+
+def references_for_row(row) -> set:
+    """Every status-screen id that points at this ledger row."""
+    refs = set()
+    if row.sponsored_batch_id and row.sponsored_batch.tx_hash:
+        refs.add(row.sponsored_batch.tx_hash.lower())
+    if row.send_transaction_id:
+        refs.add(str(row.send_transaction.internal_id))
+        if row.send_transaction.transaction_hash:
+            refs.add(row.send_transaction.transaction_hash.lower())
+    if row.ramp_transaction_id:
+        refs.update(r for r in (row.ramp_transaction.provider_order_id, row.ramp_transaction.external_id) if r)
+    if row.local_money_flow_id:
+        journey = getattr(row.local_money_flow, 'infinia_journey', None)
+        if journey is not None:
+            refs.add(str(journey.internal_id))
+    return refs
+
+
+def consume_intents_for(row, user, content_item):
+    """A share of this activity exists: any intent still waiting for it is
+    done, so it can never publish a second copy later (e.g. after the
+    member deletes the first)."""
+    from django.db.models import Q
+    from django.db.models.functions import Lower
+
+    from .models import ActivityShareIntent, ActivityShareIntentStatus
+
+    refs = references_for_row(row)
+    if not refs:
+        return 0
+    lowered = {r.lower() for r in refs}
+    return (ActivityShareIntent.objects.annotate(ref_lower=Lower('reference'))
+            .filter(Q(ref_lower__in=lowered), user=user, status=ActivityShareIntentStatus.PENDING)
+            .update(status=ActivityShareIntentStatus.PUBLISHED, content_item=content_item,
+                    resolved_at=timezone.now(), last_error='shared directly'))
+
+
+def preview_activity(user, group, reference):
+    """(row or None, snapshot, final) for the member's activity behind a
+    success screen: the final ledger view when it has settled, else a
+    preview from the source record. None when it isn't theirs, failed, or
+    isn't shareable."""
+    found = find_activity(user, group=group, reference=reference)
+    if found is not None:
+        row, snap = found
+        return row, snap, True
+    previewer = PREVIEWERS.get(group or '')
+    if previewer is None or not reference:
+        return None
+    try:
+        snap = previewer(user, reference)
+    except Exception:  # noqa: BLE001 — a preview is never worth a crash
+        logger.exception('activity share: preview failed for %s', group)
+        return None
+    if snap is None or snap.kind not in GROUPS.get(group, ()):
+        return None
+    return None, snap, False
+
+
+def share_or_schedule(user, business, group, reference, note='', show_amount=True):
+    """The member tapped "Compartir" on the sheet. Publish now when the
+    activity is final; otherwise record an intent published at settlement.
+    Returns ('published', item) or ('scheduled', intent)."""
+    from django.db import IntegrityError
+
+    from . import community
+    from .models import ActivityShareIntent, ActivityShareIntentStatus
+
+    note = (note or '').strip()
+    if len(note) > NOTE_MAX_CHARS:
+        raise ActivityShareError('too_long', f'Tu comentario supera los {NOTE_MAX_CHARS} caracteres.')
+    if community.URL_RE.search(note):
+        raise ActivityShareError('links', community.LINK_REASON)
+    block = community.posting_block(user, business, activity=True)
+    if block:
+        raise ActivityShareError(block, community.BLOCK_MESSAGES[block])
+    preview = preview_activity(user, group, reference)
+    if preview is None:
+        raise ActivityShareError('not_shareable', NOT_SHAREABLE)
+    row, _snap, final = preview
+    if final:
+        return 'published', share_activity(user, business, row.id, note, show_amount)
+    settled = _row_for_reference(user, reference)
+    if settled is not None and is_shared(settled.id, user):
+        raise ActivityShareError('already_shared', ALREADY_SHARED)
+    try:
+        intent, _ = ActivityShareIntent.objects.update_or_create(
+            user=user, group=group, reference=reference[:128], status=ActivityShareIntentStatus.PENDING,
+            defaults={'note': note, 'show_amount': bool(show_amount),
+                      'expires_at': timezone.now() + INTENT_WINDOWS.get(group, timedelta(hours=2))},
+        )
+    except IntegrityError:
+        intent = ActivityShareIntent.objects.get(
+            user=user, group=group, reference=reference[:128], status=ActivityShareIntentStatus.PENDING)
+    return 'scheduled', intent
+
+
+def resolve_share_intents(limit: int = 200) -> dict:
+    """Publish pending intents whose activity has settled; drop expired ones."""
+    from . import community
+    from .models import ActivityShareIntent, ActivityShareIntentStatus
+
+    now = timezone.now()
+    out = {'published': 0, 'expired': 0, 'failed': 0}
+    expired = ActivityShareIntent.objects.filter(status=ActivityShareIntentStatus.PENDING, expires_at__lt=now)
+    out['expired'] = expired.update(status=ActivityShareIntentStatus.EXPIRED, resolved_at=now,
+                                    last_error='activity did not settle in time')
+    # Fewest checks first: intents that keep not settling (a slow top-up)
+    # sink, so they never starve newer ones that already have.
+    pending = list(ActivityShareIntent.objects.filter(status=ActivityShareIntentStatus.PENDING)
+                   .select_related('user').order_by('attempts', 'created_at')[:limit])
+    from users.models import User
+
+    for intent in pending:
+        with transaction.atomic():
+            # The author's row first, the lock share_activity takes: a direct
+            # share (user, then this intent via consume_intents_for) and this
+            # resolver always lock in the same order.
+            User.objects.select_for_update().filter(pk=intent.user_id).first()
+            locked = ActivityShareIntent.objects.select_for_update(skip_locked=True).filter(
+                id=intent.id, status=ActivityShareIntentStatus.PENDING).first()
+            if locked is None:
+                continue
+            settled = _row_for_reference(locked.user, locked.reference)
+            if settled is not None and is_shared(settled.id, locked.user):
+                # Shared directly meanwhile: this intent is done.
+                from .models import CommunityActivityShare
+
+                existing = CommunityActivityShare.objects.filter(
+                    unified_transaction_id=settled.id, user=locked.user).order_by('-id').first()
+                locked.status = ActivityShareIntentStatus.PUBLISHED
+                locked.content_item_id = existing.content_item_id if existing else None
+                locked.last_error = 'shared directly'
+                locked.resolved_at = now
+                locked.save(update_fields=['status', 'content_item', 'last_error', 'resolved_at'])
+                continue
+            found = find_activity(locked.user, group=locked.group, reference=locked.reference)
+            if found is None:
+                # Settled but no longer shareable (failed, refunded) ends it;
+                # otherwise it is still settling.
+                if preview_activity(locked.user, locked.group, locked.reference) is None:
+                    locked.status = ActivityShareIntentStatus.FAILED
+                    locked.last_error = 'activity is no longer shareable'
+                    locked.resolved_at = now
+                    locked.save(update_fields=['status', 'last_error', 'resolved_at'])
+                    out['failed'] += 1
+                else:
+                    locked.attempts += 1
+                    locked.save(update_fields=['attempts'])
+                continue
+            row, _snap = found
+            try:
+                item = share_activity(locked.user, None, row.id, locked.note, locked.show_amount)
+            except ActivityShareError as exc:
+                locked.status = ActivityShareIntentStatus.FAILED
+                locked.last_error = exc.code[:200]
+                locked.resolved_at = now
+                locked.save(update_fields=['status', 'last_error', 'resolved_at'])
+                out['failed'] += 1
+                continue
+            locked.status = ActivityShareIntentStatus.PUBLISHED
+            locked.content_item = item
+            locked.resolved_at = now
+            locked.save(update_fields=['status', 'content_item', 'resolved_at'])
+            out['published'] += 1
+            # The sheet said "se publicará" and stopped following: always tell
+            # the member how it went. A template is up now; a note is told
+            # when its review finishes, however quickly.
+            if locked.note:
+                item.metadata = {**(item.metadata or {}), community.NOTIFY_ON_REVIEW: True}
+                item.save(update_fields=['metadata', 'updated_at'])
+            else:
+                review_id = item.community_review.id
+                transaction.on_commit(lambda rid=review_id: community.notify_post_reviewed(rid))
+    return out
