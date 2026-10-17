@@ -18,6 +18,7 @@ import { ReactionBar } from './ReactionBar';
 import { VerifiedBadge } from './VerifiedBadge';
 import { useNavigation } from '@react-navigation/native';
 import { ActivitySummary, useActivityDestination } from './ActivitySummary';
+import { useRampCountry } from '../hooks/useRampCountry';
 import { colors } from '../config/theme';
 import type { CommunityPostExtras } from '../hooks/useCommunityPostExtras';
 
@@ -114,6 +115,7 @@ export function DiscoverPostCard({ item, onOpenItem, onReact, commentCount, extr
   // A screen reader focuses the whole card, never a button inside it: the
   // activity and the author's profile are offered as actions on the card.
   const navigation = useNavigation<any>();
+  const { navigateToRampOrEfectivo } = useRampCountry();
   const destination = useActivityDestination(activity);
   const a11yActions = [
     ...(destination ? [{ name: 'openActivity', label: destination.label }] : []),
@@ -121,7 +123,11 @@ export function DiscoverPostCard({ item, onOpenItem, onReact, commentCount, extr
   ];
   const onA11yAction = (event: { nativeEvent: { actionName: string } }) => {
     if (event.nativeEvent.actionName === 'openActivity' && destination) {
-      navigation.navigate(destination.route, destination.params);
+      if (destination.route === 'TopUp' || destination.route === 'Sell') {
+        navigateToRampOrEfectivo(destination.route, destination.params as any);
+      } else {
+        navigation.navigate(destination.route, destination.params);
+      }
     } else if (event.nativeEvent.actionName === 'openAuthor' && authorId && onOpenAuthor) {
       onOpenAuthor(authorId);
     }

@@ -9,6 +9,8 @@ jest.mock('../EmptyState', () => ({ EmptyState: 'EmptyState' }));
 const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mockNavigate }) }));
 let mockIsEmployee = false;
+const mockRampNavigate = jest.fn();
+jest.mock('../../hooks/useRampCountry', () => ({ useRampCountry: () => ({ navigateToRampOrEfectivo: mockRampNavigate }) }));
 jest.mock('../../contexts/AccountContext', () => ({
   useAccount: () => ({ activeAccount: { isEmployee: mockIsEmployee } }),
 }));
@@ -119,7 +121,7 @@ describe('DiscoverFeed sections', () => {
     press('Ver SPY');
     expect(mockNavigate).toHaveBeenLastCalledWith('StockDetail', { ticker: 'SPY' });
     press('Retirar dólares');
-    expect(mockNavigate).toHaveBeenLastCalledWith('Sell', undefined);
+    expect(mockRampNavigate).toHaveBeenLastCalledWith('Sell', { destination: 'cusd_plus' });
   });
 
   it('offers the activity as an accessibility action on the card', () => {

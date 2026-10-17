@@ -907,9 +907,28 @@ def share_or_schedule(user, business, group, reference, note='', show_amount=Tru
     row, _snap, final = preview
     if final:
         return 'published', share_activity(user, business, row.id, note, show_amount)
+    with transaction.atomic():
+        # The author lock, as share_activity and the resolver take it: a
+        # direct share can't publish (and consume intents) between this
+        # check and the new intent, leaving one that would publish again.
+        from users.models import User
+
+        User.objects.select_for_update().filter(pk=user.pk).first()
+        return _schedule_locked(user, group, reference, note, show_amount)
+
+
+def _schedule_locked(user, group, reference, note, show_amount):
+    from django.db import IntegrityError
+
+    from .models import ActivityShareIntent, ActivityShareIntentStatus
+
     settled = _row_for_reference(user, reference)
     if settled is not None and is_shared(settled.id, user):
         raise ActivityShareError('already_shared', ALREADY_SHARED)
+    found = find_activity(user, group=group, reference=reference)
+    if found is not None:
+        # Settled while we looked: share it now rather than schedule.
+        return 'published', share_activity(user, None, found[0].id, note, show_amount)
     try:
         intent, _ = ActivityShareIntent.objects.update_or_create(
             user=user, group=group, reference=reference[:128], status=ActivityShareIntentStatus.PENDING,

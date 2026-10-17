@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAccount } from '../contexts/AccountContext';
+import { useRampCountry } from '../hooks/useRampCountry';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
@@ -111,10 +112,13 @@ export function activityDestination(activity: ActivityShare): { route: string; p
       return activity.ticker
         ? { route: 'StockDetail', params: { ticker: activity.ticker }, label: `Ver ${activity.ticker}` }
         : null;
+    // The promoted dollar rail (USDT on BSC → Confío Dollar / Dollar+), the
+    // same door Recibir's "Recargar" and Enviar's "Retirar" open. Without a
+    // destination these screens would pick the legacy Algorand cUSD.
     case 'top_up':
-      return { route: 'TopUp', label: 'Recargar dólares' };
+      return { route: 'TopUp', params: { destination: 'cusd_plus' }, label: 'Recargar dólares' };
     case 'withdraw':
-      return { route: 'Sell', label: 'Retirar dólares' };
+      return { route: 'Sell', params: { destination: 'cusd_plus' }, label: 'Retirar dólares' };
     case 'send':
     case 'receive':
       return { route: 'Send', label: 'Enviar dinero' };
@@ -165,7 +169,11 @@ export function ActivitySummary({
     </View>
   );
   if (!destination) return content;
-  return <NavigableSummary activity={activity} destination={destination}>{content}</NavigableSummary>;
+  return OWNER_ONLY_ROUTES.has(destination.route) ? (
+    <RampSummary activity={activity} destination={destination}>{content}</RampSummary>
+  ) : (
+    <NavigableSummary activity={activity} destination={destination}>{content}</NavigableSummary>
+  );
 }
 
 type Destination = { route: string; params?: object; label: string };
@@ -188,19 +196,34 @@ export const activityAccessibilityLabel = (activity: ActivityShare) => {
   return parts.join(', ');
 };
 
-function NavigableSummary({
-  activity,
-  destination,
-  children,
-}: {
-  activity: ActivityShare;
-  destination: Destination;
-  children: React.ReactNode;
-}) {
+type SummaryLinkProps = { activity: ActivityShare; destination: Destination; children: React.ReactNode };
+
+function NavigableSummary({ activity, destination, children }: SummaryLinkProps) {
   const navigation = useNavigation<any>();
   return (
+    <SummaryLink activity={activity} destination={destination}
+      onPress={() => navigation.navigate(destination.route, destination.params)}>
+      {children}
+    </SummaryLink>
+  );
+}
+
+/** Recargar / Retirar go through the same country gate as everywhere else:
+ * where no ramp provider operates, it opens the cash directory instead. */
+function RampSummary({ activity, destination, children }: SummaryLinkProps) {
+  const { navigateToRampOrEfectivo } = useRampCountry();
+  return (
+    <SummaryLink activity={activity} destination={destination}
+      onPress={() => navigateToRampOrEfectivo(destination.route as 'TopUp' | 'Sell', destination.params as any)}>
+      {children}
+    </SummaryLink>
+  );
+}
+
+function SummaryLink({ activity, destination, children, onPress }: SummaryLinkProps & { onPress: () => void }) {
+  return (
     <Pressable
-      onPress={() => navigation.navigate(destination.route, destination.params)}
+      onPress={onPress}
       accessibilityRole="button"
       // The movement is the content; where it goes is the hint.
       accessibilityLabel={activityAccessibilityLabel(activity)}
