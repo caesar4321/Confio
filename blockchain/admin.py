@@ -7,7 +7,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from .models import (
     Balance, IndexerAssetCursor, OndoStockTrade, PendingAutoSwap,
-    ProcessedIndexerTransaction, SponsoredBatch, StockHoldings,
+    ProcessedIndexerTransaction, SponsoredBatch, StockHoldings, StockRiskAcknowledgement,
 )
 
 logger = logging.getLogger(__name__)
@@ -210,3 +210,13 @@ class OndoStockTradeAdmin(SponsoredBatchAdmin):
             '<a href="{}/tx/{}" target="_blank" rel="noopener">{}…</a>',
             explorer, obj.tx_hash, obj.tx_hash[:12],
         )
+
+
+@admin.register(StockRiskAcknowledgement)
+class StockRiskAcknowledgementAdmin(admin.ModelAdmin):
+    list_display = ['user', 'version', 'acknowledged_at']
+    search_fields = ['user__username', 'user__email']
+    readonly_fields = ['user', 'version', 'acknowledged_at']
+
+    def has_add_permission(self, request):
+        return False                     # only the person can acknowledge, in the app

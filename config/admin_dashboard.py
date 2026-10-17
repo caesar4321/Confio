@@ -2195,6 +2195,9 @@ from blockchain.admin import BalanceAdmin, ProcessedIndexerTransactionAdmin, Ind
 from blockchain.models import StockHoldings
 confio_admin_site.register(Balance, BalanceAdmin)
 confio_admin_site.register(StockHoldings, StockHoldingsAdmin)
+from blockchain.admin import StockRiskAcknowledgementAdmin
+from blockchain.models import StockRiskAcknowledgement
+confio_admin_site.register(StockRiskAcknowledgement, StockRiskAcknowledgementAdmin)
 confio_admin_site.register(ProcessedIndexerTransaction, ProcessedIndexerTransactionAdmin)
 confio_admin_site.register(IndexerAssetCursor, IndexerAssetCursorAdmin)
 

@@ -6,6 +6,7 @@ let mockChartLoading: boolean;
 let mockChartFailed: boolean;
 let mockDescription: string | null;
 let mockWarning: {ticker: string; badge: string; message: string} | undefined;
+let mockFactor: number | undefined;
 
 const mockStock = {
   symbol: 'NVDAon',
@@ -69,6 +70,8 @@ jest.mock('../../hooks/useGmMarket', () => ({
   }),
   useGmAssetDescription: () => mockDescription,
   useGmHighlights: () => ({shelves: [], warningFor: () => mockWarning}),
+  useGmComplexProducts: () => ({factorFor: () => mockFactor}),
+  leverageLabel: (f: number) => `${f < 0 ? '\u2212' : ''}${Math.abs(f)}x`,
   sparklineFor: () => [178, 180],
 }));
 
@@ -174,5 +177,13 @@ describe('StockDetailScreen server description', () => {
     const text = render();
     expect(text.indexOf('Pensado para un solo día.')).toBeGreaterThanOrEqual(0);
     expect(text.indexOf('Riesgo alto')).toBeLessThan(text.indexOf('$180'));
+  });
+
+  it('names the daily factor in the warning title', () => {
+    mockWarning = {ticker: 'NVDA', badge: 'Riesgo alto', message: 'Pensado para un solo día.'};
+    mockFactor = -3;
+    const text = render();
+    expect(text).toContain('\u22123x diario · Riesgo alto');
+    mockFactor = undefined;
   });
 });

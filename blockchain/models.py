@@ -539,6 +539,26 @@ class StockHoldings(models.Model):
         return f'{self.bsc_address} - {len(self.held)} positions'
 
 
+class StockRiskAcknowledgement(models.Model):
+    """A person confirmed they understand leveraged and inverse funds
+    (cusd_plus/complex_products.py) before their first purchase of one.
+
+    Per person, not per account: whoever is signed in reads the warning,
+    whichever account (personal or business) buys. `version` lets a changed
+    disclosure ask everyone again."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name='stock_risk_acknowledgement')
+    version = models.PositiveSmallIntegerField()
+    acknowledged_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = 'Stock risk acknowledgement'
+        verbose_name_plural = 'Stock risk acknowledgements'
+
+    def __str__(self):
+        return f'{self.user_id} v{self.version}'
+
+
 class OndoStockTrade(SponsoredBatch):
     """Stock-only admin view over the immutable sponsorship audit ledger.
 

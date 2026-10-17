@@ -62,5 +62,6 @@
       "badge": "Plazo corto",
       "message": "Gana cuando el mercado baja y está pensado para plazos cortos. Si lo mantienes mucho tiempo, su resultado puede alejarse bastante de lo que esperas."
     }
-  }
+  },
+  "leverage": {"TQQQ": 3, "SQQQ": -3, "SOXL": 3, "SOXS": -3, "PSQ": -1}
 }

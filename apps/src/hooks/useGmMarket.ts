@@ -314,6 +314,62 @@ export const useGmHighlights = (enabled = true) => {
   }, [data, previousData, enabled]);
 };
 
+// Leveraged and inverse funds (TQQQ, SQQQ, SOXL, SOXS, PSQ): their daily
+// factor, and whether this person already confirmed they understand them
+// (asked once, before the first purchase; the server refuses the purchase
+// without it). Own query: an older server without it rejects the field and
+// the list simply shows no separate section.
+export const GM_COMPLEX_PRODUCTS = gql`
+  query GmComplexProducts {
+    gmComplexProducts {
+      version
+      acknowledged
+      title
+      points
+      products {
+        ticker
+        factor
+      }
+    }
+  }
+`;
+
+export const ACKNOWLEDGE_GM_COMPLEX_PRODUCTS = gql`
+  mutation AcknowledgeGmComplexProducts($version: Int!) {
+    acknowledgeGmComplexProducts(version: $version) {
+      success
+      error
+    }
+  }
+`;
+
+/** "3x", "−3x", "−1x": the fund's daily exposure as a row label. */
+export const leverageLabel = (factor: number): string =>
+  `${factor < 0 ? '\u2212' : ''}${Math.abs(factor)}x`;
+
+export const useGmComplexProducts = (enabled = true) => {
+  const { data, previousData, refetch } = useQuery(GM_COMPLEX_PRODUCTS, {
+    skip: !enabled,
+    fetchPolicy: 'cache-and-network',
+  });
+  return useMemo(() => {
+    const payload = enabled ? (data ?? previousData)?.gmComplexProducts : null;
+    const byTicker: Record<string, number> = {};
+    (payload?.products || []).forEach((product: { ticker: string; factor: number }) => {
+      if (product?.ticker && Number.isFinite(product.factor)) byTicker[product.ticker] = product.factor;
+    });
+    return {
+      loaded: !!payload,
+      version: (payload?.version as number | undefined) ?? null,
+      acknowledged: !!payload?.acknowledged,
+      title: (payload?.title as string | undefined) || '',
+      points: ((payload?.points as string[] | undefined) || []).filter(Boolean),
+      factorFor: (ticker: string): number | undefined => byTicker[ticker],
+      refetch,
+    };
+  }, [data, previousData, enabled, refetch]);
+};
+
 // Deterministic fallback sparkline so charts render when the 24h series is
 // missing for an asset (never used as a price display).
 export const sparklineFor = (ticker: string, points = 24): number[] => {

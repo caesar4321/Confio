@@ -31,6 +31,8 @@ import {
   useGmOhlc,
   useGmAssetDescription,
   useGmHighlights,
+  useGmComplexProducts,
+  leverageLabel,
   sparklineFor,
   GM_RANGES,
   GM_RANGE_ACCESSIBILITY_LABELS,
@@ -70,6 +72,7 @@ export const StockDetailScreen = () => {
   const warning = useGmHighlights(stockHoldings.enabled).warningFor(
     route.params.ticker,
   );
+  const factor = useGmComplexProducts(stockHoldings.enabled).factorFor(route.params.ticker);
 
   // Range chart from gmOhlc closes. On 1D the market sparkline stands in
   // until candles arrive (same real data source, coarser); deterministic
@@ -150,7 +153,9 @@ export const StockDetailScreen = () => {
           <View style={styles.riskBanner} accessibilityRole="alert">
             <Icon name="alert-triangle" size={16} color={colors.warning.icon} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.riskBannerTitle}>{warning.badge}</Text>
+              <Text style={styles.riskBannerTitle}>
+                {factor !== undefined ? `${leverageLabel(factor)} diario · ${warning.badge}` : warning.badge}
+              </Text>
               <Text style={styles.riskBannerText}>{warning.message}</Text>
             </View>
           </View>

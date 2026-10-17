@@ -41,10 +41,13 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useAccount } from '../contexts/AccountContext';
 import { openTuMesNow } from '../hooks/useStockMonthNow';
 import { CUSD_CONVERSION_UI_ENABLED, STOCKS_TRADING_UI_ENABLED } from '../config/features';
-import { useGmMarket } from '../hooks/useGmMarket';
+import { useGmMarket, useGmComplexProducts } from '../hooks/useGmMarket';
+import { StockRiskSheet } from '../components/StockRiskSheet';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
-import { buyStockWithSavings, friendlyTradeError, getSoftStockQuote } from '../services/ondoStocks';
+import {
+  buyStockWithSavings, friendlyTradeError, getSoftStockQuote, isComplexProductAckRequired,
+} from '../services/ondoStocks';
 import { createSponsoredRequestId } from '../services/sponsored7702';
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
@@ -66,6 +69,13 @@ export const BuyStockScreen = () => {
   const { byTicker, tradabilityFor } = useGmMarket(stocks.enabled);
 
   const stock = byTicker(route.params.ticker);
+  // Leveraged/inverse funds: confirmed once before the first purchase.
+  const complex = useGmComplexProducts(stocks.enabled);
+  const isComplex = complex.factorFor(route.params.ticker) !== undefined;
+  const [riskSheet, setRiskSheet] = useState(false);
+  // Set the moment the person confirms, before the query refetch lands, so
+  // the purchase that follows doesn't ask again.
+  const riskAcknowledged = useRef(false);
   const available = savings.balanceUsd;
 
   const [raw, setRaw] = useState('');
@@ -77,9 +87,35 @@ export const BuyStockScreen = () => {
   const [settledTokens, setSettledTokens] = useState(0);
   const confirmInFlight = useRef(false);
   const requestIdRef = useRef<string | null>(null);
+  // The latest onConfirm, for continuing a purchase after the risk sheet
+  // (declared with the other hooks, above the early return).
+  const onConfirmRef = useRef<() => Promise<void>>(async () => undefined);
+  // Each risk-sheet opening is a flow; dismissing it, changing the amount or
+  // leaving the screen starts a new one, so a confirmation that lands late
+  // (or its delayed continuation) can never buy anything the person didn't
+  // just ask for.
+  const riskFlow = useRef(0);
+  const riskTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    riskFlow.current += 1;
+    if (riskTimer.current) clearTimeout(riskTimer.current);
+  }, []);
+  const openRiskSheet = (delayMs = 0) => {
+    riskFlow.current += 1;
+    const flow = riskFlow.current;
+    if (riskTimer.current) clearTimeout(riskTimer.current);
+    if (delayMs <= 0) {
+      setRiskSheet(true);
+      return;
+    }
+    riskTimer.current = setTimeout(() => {
+      if (flow === riskFlow.current) setRiskSheet(true);
+    }, delayMs);
+  };
 
   const changeAmount = (value: string) => {
     requestIdRef.current = null;
+    riskFlow.current += 1;
     setRaw((prev) => sanitizeAmountInput(value, 2, undefined, prev));
   };
 
@@ -148,6 +184,10 @@ export const BuyStockScreen = () => {
     // React state updates on the next render; the ref closes the same-frame
     // double-tap window before either network request can start.
     if (!canConfirm || confirmInFlight.current) return;
+    if (isComplex && !complex.acknowledged && !riskAcknowledged.current) {
+      openRiskSheet();
+      return;
+    }
     confirmInFlight.current = true;
     setTradeError(null);
     setPhase('processing');
@@ -169,12 +209,25 @@ export const BuyStockScreen = () => {
       void refetch().catch(() => undefined);
     } catch (e) {
       if (!isOutcomeUnknown(e)) requestIdRef.current = null;
+      if (isComplexProductAckRequired(e)) {
+        // The server knows this fund needs the confirmation even when the
+        // list hadn't loaded here. Nothing was quoted or charged.
+        riskAcknowledged.current = false;
+        setPhase('input');
+        void complex.refetch().catch(() => undefined);
+        // iOS shows one modal at a time: let the loading overlay finish
+        // closing before the sheet slides in.
+        openRiskSheet(400);
+        return;
+      }
       setTradeError(friendlyTradeError(e, 'buy'));
       setPhase('input');
     } finally {
       confirmInFlight.current = false;
     }
   };
+
+  onConfirmRef.current = onConfirm;
 
   if (phase === 'success') {
     return (
@@ -369,6 +422,33 @@ export const BuyStockScreen = () => {
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
+      <StockRiskSheet
+        visible={riskSheet}
+        title={complex.title}
+        points={complex.points}
+        version={complex.version}
+        onRefresh={complex.refetch}
+        onClose={() => {
+          riskFlow.current += 1;
+          setRiskSheet(false);
+        }}
+        beginAccept={() => riskFlow.current}
+        onAccepted={(flow) => {
+          // Saved on the server either way: the person did confirm.
+          riskAcknowledged.current = true;
+          void complex.refetch().catch(() => undefined);
+          // The flow of the sheet the person actually tapped. Dismissing,
+          // editing or reopening since then started a new one: no purchase.
+          if (flow === undefined || flow !== riskFlow.current) return;
+          setRiskSheet(false);
+          // Continue the purchase the person started, once the sheet is gone
+          // (the loading overlay is another modal).
+          if (riskTimer.current) clearTimeout(riskTimer.current);
+          riskTimer.current = setTimeout(() => {
+            if (flow === riskFlow.current) void onConfirmRef.current();
+          }, 400);
+        }}
+      />
       <StockTradeLoadingOverlay
         visible={phase === 'processing'}
         side="buy"

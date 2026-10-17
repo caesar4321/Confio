@@ -21,9 +21,12 @@ jest.mock('@react-navigation/native', () => ({useNavigation: () => ({navigate: m
 jest.mock('../../components/TickerLogo', () => ({TickerLogo: 'TickerLogo'}));
 let mockShelves: any[] = [];
 let mockWarnings: Record<string, {ticker: string; badge: string; message: string}> = {};
+let mockFactors: Record<string, number> = {};
 jest.mock('../../hooks/useGmMarket', () => ({
   useGmMarket: () => ({session: 'core', stocks: mockStocks, loading: false}),
   useGmHighlights: () => ({shelves: mockShelves, warningFor: (t: string) => mockWarnings[t]}),
+  useGmComplexProducts: () => ({factorFor: (t: string) => mockFactors[t]}),
+  leverageLabel: (f: number) => `${f < 0 ? '\u2212' : ''}${Math.abs(f)}x`,
 }));
 let mockEnabled = true;
 let mockKnown = true;
@@ -73,6 +76,7 @@ beforeEach(() => {
   mockPositions = [];
   mockShelves = [];
   mockWarnings = {};
+  mockFactors = {};
   mockEnabled = true;
   mockKnown = true;
   mockPortfolioLoading = false;
@@ -184,6 +188,22 @@ it('renders server shelves with only live assets, and badges risky funds', async
   expect(t).toContain('Sube y baja con bitcoin');
   expect(t).not.toContain('Sube y baja con ether');
   expect(t.filter(x => x === 'Riesgo alto')).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
+
+it('moves leveraged and inverse funds to their own section, badged with the factor', async () => {
+  mockWarnings = {TQQQ: {ticker: 'TQQQ', badge: 'Riesgo alto', message: 'Un solo día.'}};
+  mockFactors = {TQQQ: 3};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  const t = texts(tree);
+  // Out of "Todas" (6 listed assets, one leveraged) and into its own section after it.
+  expect(t).toContain(`Todas · ${mockStocks.length - 1}`);
+  const all = t.indexOf(`Todas · ${mockStocks.length - 1}`);
+  const section = t.indexOf('Apalancados e inversos');
+  expect(section).toBeGreaterThan(all);
+  expect(t.lastIndexOf('TQQQ')).toBeGreaterThan(section);
+  expect(t).toContain('3x · Riesgo alto');
   await act(async () => tree.unmount());
 });
 

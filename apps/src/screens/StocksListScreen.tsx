@@ -26,7 +26,7 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { FEATURED_STOCK_TICKERS, STOCK_TAGLINES } from '../config/stockPresentation';
 import { useNumberFormat } from '../utils/numberFormatting';
-import { useGmMarket, useGmHighlights, GmStock } from '../hooks/useGmMarket';
+import { useGmMarket, useGmHighlights, useGmComplexProducts, leverageLabel, GmStock } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
@@ -44,6 +44,7 @@ export const StocksListScreen = () => {
   const { savings, stocks: myStocks, loading: portfolioLoading, refetch: refetchPortfolio } = useSavingsPortfolio();
   const { session, stocks, loading } = useGmMarket(myStocks.enabled);
   const highlights = useGmHighlights(myStocks.enabled);
+  const complex = useGmComplexProducts(myStocks.enabled);
   // Tu mes is owners only (employees never see the month): no door to it.
   const { activeAccount } = useAccount();
   const canOpenMonth = !activeAccount?.isEmployee;
@@ -84,11 +85,22 @@ export const StocksListScreen = () => {
     const mine = stocks
       .filter(stock => (positionByTicker[stock.ticker] || 0) > 0)
       .sort((a, b) => (positionByTicker[b.ticker] || 0) - (positionByTicker[a.ticker] || 0));
+    // Leveraged and inverse funds get their own section at the end instead
+    // of sitting between ordinary stocks: they behave differently (daily
+    // reset) and should never be found by scrolling past the big names.
+    const plain = stocks.filter(stock => complex.factorFor(stock.ticker) === undefined);
+    const leveraged = stocks.filter(stock => complex.factorFor(stock.ticker) !== undefined);
     return [
       { key: 'mine', title: 'Tus acciones', data: mine },
-      { key: 'all', title: `Todas · ${stocks.length}`, data: stocks },
+      { key: 'all', title: `Todas · ${plain.length}`, data: plain },
+      {
+        key: 'complex',
+        title: 'Apalancados e inversos',
+        subtitle: 'Multiplican o invierten el movimiento de un día. Pensados para plazos cortos, no para mantener.',
+        data: leveraged,
+      },
     ].filter(section => section.data.length > 0);
-  }, [query, filtered, stocks, positionByTicker]);
+  }, [query, filtered, stocks, positionByTicker, complex]);
 
   // What the investment is made of: the four largest positions, the rest
   // folded into "Otras". Shares of the total, so the bar always adds up.
@@ -210,6 +222,10 @@ export const StocksListScreen = () => {
     const up = item.dayChangePct >= 0;
     const positionValue = positionByTicker[item.ticker] || 0;
     const warning = highlights.warningFor(item.ticker);
+    const factor = complex.factorFor(item.ticker);
+    const badge = factor !== undefined
+      ? [leverageLabel(factor), warning?.badge].filter(Boolean).join(' · ')
+      : warning?.badge;
     return (
       <TouchableOpacity
         style={styles.row}
@@ -220,11 +236,11 @@ export const StocksListScreen = () => {
         <View style={{ flex: 1 }}>
           <View style={styles.rowTickerLine}>
             <Text style={styles.rowTicker}>{item.ticker}</Text>
-            {warning && (
+            {badge ? (
               <View style={styles.riskBadge}>
-                <Text style={styles.riskBadgeText}>{warning.badge}</Text>
+                <Text style={styles.riskBadgeText}>{badge}</Text>
               </View>
-            )}
+            ) : null}
           </View>
           <Text style={styles.rowName} numberOfLines={1}>
             {item.name}
@@ -398,11 +414,15 @@ export const StocksListScreen = () => {
         stickySectionHeadersEnabled={false}
         keyExtractor={(s) => s.ticker}
         renderItem={renderRow}
-        renderSectionHeader={({ section }) => (
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle} accessibilityRole="header">{section.title}</Text>
-          </View>
-        )}
+        renderSectionHeader={({ section }) => {
+          const subtitle = (section as { subtitle?: string }).subtitle;
+          return (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle} accessibilityRole="header">{section.title}</Text>
+              {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
+            </View>
+          );
+        }}
         contentContainerStyle={styles.listContent}
         initialNumToRender={12}
         maxToRenderPerBatch={10}
@@ -536,6 +556,7 @@ const styles = StyleSheet.create({
   listContent: { padding: 16, paddingBottom: 40 },
   sectionHeader: { paddingTop: 12, paddingBottom: 10 },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+  sectionSubtitle: { fontSize: 12, color: colors.text.secondary, marginTop: 2, lineHeight: 17 },
   inviteHero: { marginTop: 14 },
   monthLink: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 12, minHeight: 32 },
   monthLinkText: { fontSize: 13, fontWeight: '700', color: colors.white, fontVariant: ['tabular-nums'] },

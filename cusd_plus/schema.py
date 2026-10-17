@@ -320,6 +320,21 @@ class GmHighlightsType(graphene.ObjectType):
     warnings = graphene.List(graphene.NonNull(GmAssetWarningType))
 
 
+class GmComplexProductType(graphene.ObjectType):
+    ticker = graphene.String()
+    factor = graphene.Int(description="Daily exposure: 3 = three times the index, -3 = three times its fall, -1 = inverse")
+
+
+class GmComplexProductsType(graphene.ObjectType):
+    """Leveraged and inverse funds, and whether the signed-in person already
+    confirmed they understand them (asked once, before the first purchase)."""
+    version = graphene.Int(description="Disclosure version an acknowledgement must carry")
+    acknowledged = graphene.Boolean()
+    title = graphene.String(description="Heading of the disclosure the app shows before the first purchase")
+    points = graphene.List(graphene.NonNull(graphene.String), description="The disclosure, one statement per item")
+    products = graphene.List(graphene.NonNull(GmComplexProductType))
+
+
 class GmHomeTileType(graphene.ObjectType):
     asset_count = graphene.Int(description="U.S. assets on offer (priced rows of the cached market)")
     invested_usd = graphene.Float(
@@ -516,6 +531,10 @@ class Query(graphene.ObjectType):
     gm_home_tile = graphene.Field(
         GmHomeTileType,
         description="The Home stats tile for Acciones: invested total once it is meaningful, else assets on offer",
+    )
+    gm_complex_products = graphene.Field(
+        GmComplexProductsType,
+        description='Leveraged/inverse funds and the signed-in person\'s acknowledgement (own query: older servers lack it)',
     )
     gm_highlights = graphene.Field(
         GmHighlightsType,
@@ -788,6 +807,23 @@ class Query(graphene.ObjectType):
             asset_count=asset_count,
             invested_usd=invested if invested is not None and invested >= threshold else None,
             traded_usd=gm_volume.traded_usd(),
+        )
+
+    def resolve_gm_complex_products(self, info):
+        from . import complex_products
+
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
+            return None
+        return GmComplexProductsType(
+            version=complex_products.ACK_VERSION,
+            acknowledged=complex_products.acknowledged(user),
+            title=complex_products.DISCLOSURE_TITLE,
+            points=list(complex_products.DISCLOSURE_POINTS),
+            products=[GmComplexProductType(ticker=ticker, factor=factor)
+                      for ticker, factor in complex_products.factors().items()],
         )
 
     def resolve_gm_highlights(self, info):
@@ -1775,6 +1811,13 @@ class SponsorBscBatch(graphene.Mutation):
                     return SponsorBscBatch(success=False, error='trade_not_available')
                 if kind == 'stock_buy' and not _stock_buy_enabled(user, meta):
                     return SponsorBscBatch(success=False, error='trade_not_available')
+                if kind == 'stock_buy':
+                    # The quote gate alone is not enough: a quote is not bound
+                    # to the person who requested it.
+                    from . import complex_products
+                    if (complex_products.buys_complex_product(norm_calls)
+                            and not complex_products.acknowledged(user)):
+                        return SponsorBscBatch(success=False, error='complex_product_ack_required')
             intent_id = sponsor_7702.intent_id_for(
                 kind, client_request_id=request_id or None)
             digest = sponsor_7702.intent_digest(
@@ -2103,6 +2146,29 @@ class RegisterBscUsdtArrival(graphene.Mutation):
         return RegisterBscUsdtArrival(success=True, recorded=recorded)
 
 
+class AcknowledgeGmComplexProducts(graphene.Mutation):
+    """The signed-in person confirms they understand leveraged and inverse
+    funds. `version` is the disclosure the app showed; an outdated one is
+    refused so a changed text is always read before it counts."""
+
+    class Arguments:
+        version = graphene.Int(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    def mutate(self, info, version):
+        from . import complex_products
+
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return AcknowledgeGmComplexProducts(success=False, error='AUTH_REQUIRED')
+        if version != complex_products.ACK_VERSION:
+            return AcknowledgeGmComplexProducts(success=False, error='OUTDATED_DISCLOSURE')
+        complex_products.acknowledge(user)
+        return AcknowledgeGmComplexProducts(success=True)
+
+
 class PrepareGmTrade(graphene.Mutation):
     """Create one binding Ondo attestation for the JWT account.
 
@@ -2162,6 +2228,12 @@ class PrepareGmTrade(graphene.Mutation):
         if request['side'] == 'buy':
             if not _stock_buy_enabled(user, meta):
                 return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='TRADE_NOT_AVAILABLE'))
+            from . import complex_products
+            if (complex_products.factor_for_symbol(request['symbol']) is not None
+                    and not complex_products.acknowledged(user)):
+                return PrepareGmTrade(quote=GmTradeQuoteType(
+                    success=False, error_code=complex_products.ACK_REQUIRED_CODE,
+                    error_message=complex_products.ACK_REQUIRED_MESSAGE))
 
         cache_key = f'gm_firm_attestation:{user.id}:{account.id}:{request_id}'
         cached = cache.get(cache_key)
@@ -2210,3 +2282,4 @@ class Mutation(graphene.ObjectType):
     register_bsc_usdt_arrival = RegisterBscUsdtArrival.Field()
     sponsor_bsc_batch = SponsorBscBatch.Field()
     prepare_gm_trade = PrepareGmTrade.Field()
+    acknowledge_gm_complex_products = AcknowledgeGmComplexProducts.Field()

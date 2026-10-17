@@ -133,8 +133,20 @@ const stockError = (quote: Partial<GmTradeQuote>): Error => {
     QUOTE_IN_PROGRESS: 'La cotización ya se está preparando. Inténtalo de nuevo en un momento.',
     BAD_NOTIONAL: 'El monto está fuera de los límites permitidos.',
   };
-  return new Error(messages[code] || quote.errorMessage || 'No pudimos obtener una cotización de Ondo.');
+  // The code travels with the error so a screen can act on it (e.g. open
+  // the leveraged-fund confirmation) instead of matching copy.
+  return Object.assign(
+    new Error(messages[code] || quote.errorMessage || 'No pudimos obtener una cotización de Ondo.'),
+    { code },
+  );
 };
+
+/** The server refused a leveraged/inverse purchase until the person confirms the risks. */
+export const COMPLEX_PRODUCT_ACK_REQUIRED = 'COMPLEX_PRODUCT_ACK_REQUIRED';
+export const isComplexProductAckRequired = (error: unknown): boolean =>
+  (error as { code?: string } | null)?.code === COMPLEX_PRODUCT_ACK_REQUIRED
+  // The sponsorship step refuses with the same rule (lower-case error).
+  || /complex_product_ack_required/i.test(error instanceof Error ? error.message : '');
 
 const fetchConfig = async (): Promise<StockConfig> => {
   const { apolloClient } = await import('../apollo/client');
