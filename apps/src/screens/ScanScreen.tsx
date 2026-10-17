@@ -17,7 +17,8 @@ import { GET_INVOICE } from '../apollo/queries';
 import { parseInstitutionLink } from '../utils/institutionLinks';
 import { localPaymentQrRoute } from '../utils/localPaymentQr';
 import { LOCAL_MONEY_METHODS, LocalMethod } from '../services/localMoney';
-import { countryFlag, countryName } from '../config/localRails';
+import { countryName } from '../config/localRails';
+import { CountryFlag } from '../components/CountryFlag';
 
 type ScanScreenRouteProp = RouteProp<BottomTabParamList, 'Scan'>;
 
@@ -460,7 +461,12 @@ export const ScanScreen = () => {
                 {liveQrRails.length > 0 ? 'Paga QR en' : 'Paga QR con tus dólares'}
               </Text>
               {liveQrRails.length > 0 && (
-                <Text style={styles.railsPillFlag}>{liveQrRails.map(m => countryFlag(m.country)).join('')}</Text>
+                <View style={styles.railsPillFlags}>
+                  {liveQrRails.map((m, index) => (
+                    <CountryFlag key={m.id} iso={m.country} size={22} ringColor={PILL_FLAG_RING}
+                      style={index > 0 ? styles.railsPillFlagOverlap : undefined} />
+                  ))}
+                </View>
               )}
               <Icon name="info" size={15} color="rgba(255,255,255,0.8)" />
             </TouchableOpacity>
@@ -530,7 +536,7 @@ export const ScanScreen = () => {
                 accessibilityRole={method.status === 'live' ? 'text' : 'button'}
                 accessibilityLabel={`${QR_RAILS[method.id]}, ${countryName(method.country)}: ${method.status === 'live' ? 'listo' : 'verifica tu documento para pagar'}`}
               >
-                <Text style={styles.sheetFlag}>{countryFlag(method.country)}</Text>
+                <CountryFlag iso={method.country} size={30} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.sheetRowTitle}>{QR_RAILS[method.id]}</Text>
                   <Text style={styles.sheetRowSub}>{countryName(method.country)}</Text>
@@ -561,6 +567,11 @@ const scanFrameSize = width * 0.7;
 
 const DIM = 'rgba(0,0,0,0.55)';
 const CORNER = 34;
+
+const PILL_BG = 'rgba(17,24,39,0.85)';
+// Opaque, near the pill's color: a translucent ring would let the flag
+// underneath show through where they overlap.
+const PILL_FLAG_RING = '#151B27';
 
 const styles = StyleSheet.create({
   container: {
@@ -618,7 +629,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 22,
-    backgroundColor: 'rgba(17,24,39,0.85)',
+    backgroundColor: PILL_BG,
   },
   railsPillText: {
     color: '#FFFFFF',
@@ -626,8 +637,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginRight: 2,
   },
-  railsPillFlag: {
-    fontSize: 18,
+  railsPillFlags: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  railsPillFlagOverlap: {
+    marginLeft: -7,
   },
   middleRow: {
     flexDirection: 'row',
@@ -752,9 +767,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: colors.borderLight,
-  },
-  sheetFlag: {
-    fontSize: 24,
   },
   sheetRowTitle: {
     fontSize: 15,

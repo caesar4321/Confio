@@ -11,4 +11,8 @@ module.exports = {
   // Backs entropyGuard's native CSPRNG with Node's. The guard has no runtime
   // environment exemption by design, so the test substitution belongs here.
   setupFiles: ['<rootDir>/jest.setup.js'],
+  // .svg imports are components only under Metro's svg transformer.
+  moduleNameMapper: {
+    '\\.svg$': '<rootDir>/__mocks__/svgMock.js',
+  },
 };

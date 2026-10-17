@@ -34,6 +34,7 @@ let mockAccount: any = {id: 'user-1', type: 'personal'};
 jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: mockAccount})}));
 jest.mock('../../components/common/Button', () => ({Button: 'Button'}));
 import {ScanScreen} from '../ScanScreen';
+import { CountryFlag } from '../../components/CountryFlag';
 
 beforeEach(() => {
   jest.clearAllMocks(); mockMode = 'pagar'; mockChipMethods = [];
@@ -171,7 +172,7 @@ it('shows only live rails in the pill, and routes a pending rail from the sheet'
   await act(async () => tree.unmount());
 });
 
-it('groups live country flags without spaces in the QR pill', async () => {
+it('shows one round flag per live country in the QR pill, in order', async () => {
   mockChipMethods = [
     {id: 'br_qr', status: 'live', country: 'BR'},
     {id: 'co_qr', status: 'live', country: 'CO'},
@@ -179,7 +180,8 @@ it('groups live country flags without spaces in the QR pill', async () => {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {tree = renderer.create(<ScanScreen />);});
   const pill = tree.root.findByProps({accessibilityLabel: 'Paga QR en Brasil, Colombia'});
-  expect(pill.findAll(node => node.props.children === '🇧🇷🇨🇴').length).toBeGreaterThan(0);
+  const flags = pill.findAll(node => node.type === CountryFlag).map(node => node.props.iso);
+  expect(flags).toEqual(['BR', 'CO']);
   await act(async () => tree.unmount());
 });
 
