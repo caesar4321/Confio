@@ -474,7 +474,14 @@ export default function AssistantBubble() {
           )}
         </Pressable>
         {unread > 0 ? (
-          <View style={[styles.badge, docked && side === 'right' && styles.badgeLeft]} pointerEvents="none">
+          <View
+            // Always exactly one horizontal offset: switching from `right` to
+            // `left` with `right: undefined` left both set natively, and the
+            // badge stretched into a bar across the bubble.
+            key={docked && side === 'right' ? 'badge-left' : 'badge-right'}
+            style={[styles.badge, docked && side === 'right' ? styles.badgeLeft : styles.badgeRight]}
+            pointerEvents="none"
+          >
             <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
           </View>
         ) : null}
@@ -535,7 +542,6 @@ const styles = StyleSheet.create({
   badge: {
     position: 'absolute',
     top: -2,
-    right: -2,
     minWidth: 20,
     height: 20,
     borderRadius: 10,
@@ -547,8 +553,9 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  badgeRight: { right: -2 },
   // Docked on the right edge: keep the badge on the visible side.
-  badgeLeft: { right: undefined, left: -2 },
+  badgeLeft: { left: -2 },
   callDot: {
     position: 'absolute',
     bottom: -2,
