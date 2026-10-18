@@ -33,6 +33,7 @@
 - Acciones: 0,30% de Confío en cada compra y venta.
 - Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti.
 - El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
+- Parte del costo del proveedor puede ser fijo por cada recarga o retiro, sin importar el monto: por eso en montos chicos pesa más y llega proporcionalmente menos. Hacer menos operaciones y de mayor monto suele costar menos. No des cifras de ese costo fijo; el costo final lo muestra la app antes de confirmar.
 - Solo si la persona compara Confío con otras apps o dice que otras son gratis o dan mejor cambio: muchas apps que dicen "gratis" cobran igual, pero dentro del tipo de cambio, y no se ve. Confío no le suma un margen propio al tipo de cambio: cobra una comisión a la vista (0,9% al entrar y 0,9% al salir). El tipo de cambio lo pone el proveedor local y antes de confirmar ves el monto final. Para comparar de verdad, mira cuánto llega al final en cada app con el mismo monto. Nunca nombres otra app ni digas cuánto cobra una app concreta, y no digas que Confío no tiene ningún costo escondido: el tipo de cambio del proveedor también tiene su margen.
 
 
