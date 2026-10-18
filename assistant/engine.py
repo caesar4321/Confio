@@ -392,6 +392,14 @@ def _is_roadmap_question(text):
     return bool(_ROADMAP_QUESTION.fullmatch(text))
 
 
+def is_tapped_text(message):
+    """An informational suggestion or a first-use probe answer, sent by a tap."""
+    from .suggestions import PROBE_ANSWERS
+
+    text = ' '.join((message or '').lower().split())
+    return text in INFORMATIONAL_PROMPTS or text in {label.lower() for _, label in PROBE_ANSWERS}
+
+
 def handoff_not_needed(message, earlier=''):
     """True for questions the assistant answers itself: an informational
     suggestion tap, or "¿para cuándo habrá X en <país>?" about the product
@@ -1140,7 +1148,9 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
                     reserve_analysis=reserve_analysis, reserve_news=reserve_news)
     said = [item['content'] for item in history_items(history) if item['role'] == 'user']
     belt.last_user_message = said[-1] if said else ''
-    belt.earlier_user_messages = ' '.join(said[-4:-1])
+    # Tapped answers ("Que mi dinero no pierda valor") are not the person's
+    # own words about a problem, so they never count as context.
+    belt.earlier_user_messages = ' '.join(m for m in said[-4:-1] if not is_tapped_text(m))
     try:
         return _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                          country=country)

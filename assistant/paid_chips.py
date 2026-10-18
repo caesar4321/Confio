@@ -14,7 +14,7 @@ cuenta-inteligente-fake-door.md):
 Since 2026-10-17 Confío IA+ is a benefit of Cuenta inteligente (like Nu+ or
 Robinhood Gold), not its own offer: with `ia_plus` off, on builds whose pitch
 lists IA+ as a benefit (paid_offers.ia_plus_bundled), the Confío IA+ doors open
-Cuenta inteligente instead (`asked_ia_plus`, `investing`). Older builds get no
+Cuenta inteligente instead (`asked_ia_plus`; never `investing`, a mismatch). Older builds get no
 IA+ door at all, so their Cuenta inteligente numbers stay what they were.
 
 At most one paid chip per reply; never after an escalation (the reply then
@@ -86,7 +86,10 @@ def choose(viewer, user_text, result, allowed):
                 break
     if chosen is None:
         used = {str(t.get('name', '')) for t in result.tools if isinstance(t, dict) and t.get('ok')}
-        if used & INVESTING_TOOLS and ia_key in allowed and not capped(viewer.user, ia_key):
+        # Only the standalone Confío IA+: an investing or "protect my money"
+        # chat sent to Cuenta inteligente's automatic payments was a mismatch
+        # (u12595, u12614 on 2026-10-17).
+        if used & INVESTING_TOOLS and ia_key == 'ia_plus' and ia_key in allowed and not capped(viewer.user, ia_key):
             chosen = (ia_key, 'investing')
     if chosen is None:
         return None

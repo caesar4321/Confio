@@ -1916,8 +1916,7 @@ class PaidChipAuditFixTests(TestCase):
                          ('cuenta_inteligente', 'model'))
         self.assertEqual(model.actions[-1]['target'], 'cuenta_inteligente')
         investing = result(tools=[{'name': 'get_portfolio', 'ok': True}])
-        self.assertEqual(paid_chips.choose(self.viewer, 'mi portafolio', investing, allowed),
-                         ('cuenta_inteligente', 'investing'))
+        self.assertIsNone(paid_chips.choose(self.viewer, 'mi portafolio', investing, allowed))
         # Neither offer on: no chip at all.
         self.assertIsNone(paid_chips.choose(self.viewer, '¿Qué es Confío IA+?', result(), {'home'}))
         # A build whose pitch doesn't list IA+ never gets an IA+ door.
@@ -2068,6 +2067,10 @@ class HandoffGuardAndTopupStatusTests(TestCase):
         self.assertFalse(handoff_not_needed('¿Para cuándo habrá recargas en Bolivia?',
                                             'me descontaron 20 y no llegaron'))
         self.assertFalse(handoff_not_needed('¿Es seguro? ¿Quién controla mi dinero?', 'me robaron 50 dólares'))
+        # A tapped probe answer is not a money problem (u12614, 2026-10-18).
+        from .engine import is_tapped_text
+        self.assertTrue(is_tapped_text('Que mi dinero no pierda valor'))
+        self.assertFalse(is_tapped_text('me descontaron 20 y no llegaron'))
         for earlier in ('transferí 300 bs ayer y nada', 'hackearon la cuenta', 'quiero hablar con un ejecutivo',
                         'congelaron la cuenta'):
             self.assertFalse(handoff_not_needed('¿Cuándo habrá retiros en Bolivia?', earlier), earlier)
