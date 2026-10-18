@@ -901,3 +901,43 @@ class ActivityShareIntent(models.Model):
 
     def __str__(self):
         return f'{self.user_id} {self.group}:{self.reference} {self.status}'
+
+
+class ActivityShareImpression(models.Model):
+    """The share sheet asked about one of the member's movements: what the
+    server offered, from which app build, and how it ended.
+
+    One row per (member, movement). The sheet's preview request creates it
+    (inbox/share_impressions.py); "Compartir" marks it shared on the server,
+    and the app reports "Ahora no" / closing as dismissed. Answers "did they
+    see the sheet, on which version, and what did they do" from data."""
+    OUTCOME_SHARED = 'shared'
+    OUTCOME_DISMISSED = 'dismissed'
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='activity_share_impressions')
+    group = models.CharField(max_length=16)
+    reference = models.CharField(max_length=128)
+    unified_transaction_id = models.BigIntegerField(null=True, blank=True)
+    # True when the server returned something the sheet shows (shareable, or
+    # shareable once the rules are accepted); False = the sheet closed quietly.
+    offered = models.BooleanField(default=False)
+    # Why it can't be shared right away (rules_required, not_verified, ...),
+    # or 'unavailable' when there was nothing to preview.
+    block_code = models.CharField(max_length=40, blank=True, default='')
+    platform = models.CharField(max_length=16, blank=True, default='')
+    app_version = models.CharField(max_length=20, blank=True, default='')
+    fetches = models.PositiveIntegerField(default=1)
+    outcome = models.CharField(max_length=16, blank=True, default='')
+    first_seen_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'group', 'reference'], name='inbox_share_impression_uniq'),
+        ]
+        indexes = [models.Index(fields=['first_seen_at'], name='inbox_share_impr_seen_idx')]
+
+    def __str__(self):
+        return f'{self.user_id} {self.group}:{self.reference} {self.outcome or "open"}'

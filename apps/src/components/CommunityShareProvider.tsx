@@ -20,7 +20,7 @@ import { CommunityRulesSheet } from './CommunityRulesSheet';
 import { PostByline } from './PostByline';
 import { colors } from '../config/theme';
 import { GET_MY_COMMUNITY_POST, GET_MY_PROFILE_PICTURE, GET_SHARE_SHEET_ACTIVITY } from '../apollo/queries';
-import { SHARE_ACTIVITY_INTENT } from '../apollo/mutations';
+import { RECORD_ACTIVITY_SHARE_DISMISSAL, SHARE_ACTIVITY_INTENT } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { navigate, navigationRef } from '../navigation/RootNavigation';
 import { setActivityShareListener, type ActivityShareGroup } from '../services/communityShare';
@@ -151,6 +151,7 @@ function ActivityShareSheet({ request, onClose }: { request: Request; onClose: (
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [shareIntent, { loading: sharing }] = useMutation(SHARE_ACTIVITY_INTENT);
+  const [recordDismissal] = useMutation(RECORD_ACTIVITY_SHARE_DISMISSAL);
 
   const rulesRequired = !!shareable && !shareable.canShare && shareable.blockCode === 'rules_required';
   const offerable =
@@ -241,7 +242,14 @@ function ActivityShareSheet({ request, onClose }: { request: Request; onClose: (
   if (!done && (!offerable || !shareable?.activity)) return null;
 
   const dismiss = () => {
-    if (!sharing) onClose();
+    if (sharing) return;
+    // Bookkeeping ("did they see it, and what did they do"): fire and
+    // forget, so a slow or older server never holds the sheet open. A sheet
+    // that already shared is recorded as shared on the server.
+    if (!done) {
+      recordDismissal({ variables: { group: request.group, reference: request.reference } }).catch(() => undefined);
+    }
+    onClose();
   };
 
   return (

@@ -1373,6 +1373,16 @@ export const SET_COMMUNITY_PORTFOLIO_HIDDEN = gql`
   }
 `;
 
+// The share sheet closed without sharing. Own operation: an older server
+// without it rejects only this call, which the sheet ignores.
+export const RECORD_ACTIVITY_SHARE_DISMISSAL = gql`
+  mutation RecordActivityShareDismissal($group: String!, $reference: String!) {
+    recordActivityShareDismissal(group: $group, reference: $reference) {
+      success
+    }
+  }
+`;
+
 export const SHARE_ACTIVITY_INTENT = gql`
   mutation ShareActivityIntent($group: String!, $reference: String!, $note: String, $showAmount: Boolean) {
     shareActivityIntent(group: $group, reference: $reference, note: $note, showAmount: $showAmount) {

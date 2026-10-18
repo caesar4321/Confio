@@ -15,6 +15,7 @@ from security.s3_utils import build_s3_key, upload_object
 
 from .models import (
     ActivityShareIntent,
+    ActivityShareImpression,
     CommunityActivityShare,
     CommunityFollow,
     CommunityProfileSettings,
@@ -1251,6 +1252,19 @@ class ActivityShareIntentAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'reference')
     list_select_related = ('user',)
     readonly_fields = [f.name for f in ActivityShareIntent._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(ActivityShareImpression)
+class ActivityShareImpressionAdmin(admin.ModelAdmin):
+    list_display = ('user', 'group', 'reference', 'offered', 'block_code', 'platform', 'app_version',
+                    'outcome', 'fetches', 'first_seen_at', 'closed_at')
+    list_filter = ('outcome', 'offered', 'group', 'platform', 'app_version')
+    search_fields = ('user__username', 'reference')
+    list_select_related = ('user',)
+    readonly_fields = [f.name for f in ActivityShareImpression._meta.fields]
 
     def has_add_permission(self, request):
         return False

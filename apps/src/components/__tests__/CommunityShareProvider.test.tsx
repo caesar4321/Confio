@@ -6,6 +6,7 @@ let mockQueryError: any = null;
 let mockAccountType = 'personal';
 const mockRefetch = jest.fn().mockResolvedValue({});
 const mockShareIntent = jest.fn();
+const mockDismissal = jest.fn(() => Promise.resolve({}));
 const mockNavigate = jest.fn();
 
 jest.mock('../../hooks/useRampCountry', () => ({ useRampCountry: () => ({ navigateToRampOrEfectivo: jest.fn() }) }));
@@ -17,14 +18,17 @@ jest.mock('@apollo/client', () => ({
     }
     return { data: undefined, loading: false, startPolling: jest.fn(), stopPolling: jest.fn() };
   },
-  useMutation: () => [mockShareIntent, { loading: false }],
+  useMutation: (doc: string) => (doc === 'RECORD_ACTIVITY_SHARE_DISMISSAL' ? [mockDismissal, { loading: false }] : [mockShareIntent, { loading: false }]),
 }));
 jest.mock('../../apollo/queries', () => ({
   GET_SHARE_SHEET_ACTIVITY: 'GET_SHARE_SHEET_ACTIVITY',
   GET_MY_COMMUNITY_POST: 'GET_MY_COMMUNITY_POST',
   GET_MY_PROFILE_PICTURE: 'GET_MY_PROFILE_PICTURE',
 }));
-jest.mock('../../apollo/mutations', () => ({ SHARE_ACTIVITY_INTENT: 'SHARE_ACTIVITY_INTENT' }));
+jest.mock('../../apollo/mutations', () => ({
+  SHARE_ACTIVITY_INTENT: 'SHARE_ACTIVITY_INTENT',
+  RECORD_ACTIVITY_SHARE_DISMISSAL: 'RECORD_ACTIVITY_SHARE_DISMISSAL',
+}));
 jest.mock('../../contexts/AccountContext', () => ({ useAccount: () => ({ activeAccount: { type: mockAccountType } }) }));
 jest.mock('../../navigation/RootNavigation', () => ({
   navigate: (...args: any[]) => mockNavigate(...args),
@@ -59,6 +63,7 @@ beforeEach(() => {
   mockQueryError = null;
   mockAccountType = 'personal';
   mockShareIntent.mockReset();
+  mockDismissal.mockClear();
   mockNavigate.mockReset();
   mockRefetch.mockClear();
 });
@@ -78,6 +83,8 @@ describe('requestActivityShare', () => {
     expect(requestActivityShare({ group: 'send', reference: 'S1' })).toBe(false);
     await act(async () => { byTestId(tree, 'community-share-dismiss')[0].props.onPress(); });
     expect(text(tree)).toBe('null');
+    // "Ahora no" is reported (bookkeeping) for this movement.
+    expect(mockDismissal).toHaveBeenCalledWith({ variables: { group: 'stock', reference: '0xabc' } });
     // The same activity never reopens in this session; a new one does.
     expect(requestActivityShare({ group: 'stock', reference: '0xabc' })).toBe(false);
     let next = false;
@@ -99,6 +106,8 @@ describe('CommunityShareProvider sheet', () => {
     const tree = await mount();
     await act(async () => { requestActivityShare({ group: 'stock', reference: '0xnull' }); });
     expect(text(tree)).toBe('null');
+    // A quiet close is not a dismissal: the person never saw a sheet.
+    expect(mockDismissal).not.toHaveBeenCalled();
     await act(async () => tree.unmount());
   });
 
@@ -144,6 +153,8 @@ describe('CommunityShareProvider sheet', () => {
       variables: { group: 'stock', reference: '0xabc', note: '📈 A largo plazo', showAmount: false },
     });
     expect(text(tree)).toContain('Se publicará en cuanto se confirme tu movimiento.');
+    // Closing after a share is not a dismissal (the server already marked it shared).
+    expect(mockDismissal).not.toHaveBeenCalled();
     await act(async () => tree.unmount());
   });
 

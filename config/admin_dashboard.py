@@ -1862,6 +1862,7 @@ from inbox.models import (
     Channel,
     ChannelMembership,
     ActivityShareIntent,
+    ActivityShareImpression,
     CommunityActivityShare,
     CommunityBlock,
     CommunityComment,
@@ -1889,6 +1890,7 @@ from inbox.admin import (
     ChannelAdmin,
     ChannelMembershipAdmin,
     ActivityShareIntentAdmin,
+    ActivityShareImpressionAdmin,
     CommunityActivityShareAdmin,
     CommunityBlockAdmin,
     CommunityFollowAdmin,
@@ -2182,6 +2184,7 @@ confio_admin_site.register(CommunityFollow, CommunityFollowAdmin)
 confio_admin_site.register(CommunityActivityShare, CommunityActivityShareAdmin)
 confio_admin_site.register(CommunityProfileSettings, CommunityProfileSettingsAdmin)
 confio_admin_site.register(ActivityShareIntent, ActivityShareIntentAdmin)
+confio_admin_site.register(ActivityShareImpression, ActivityShareImpressionAdmin)
 confio_admin_site.register(CommunityRulesAcceptance, CommunityRulesAcceptanceAdmin)
 confio_admin_site.register(ContentPlatformClick, ContentPlatformClickAdmin)
 confio_admin_site.register(ContentPlatformClickDailyStat, ContentPlatformClickDailyStatAdmin)
