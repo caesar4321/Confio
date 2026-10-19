@@ -704,14 +704,19 @@ APP_VERSION_PATTERN = r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}'
 class AppVersionPolicy(models.Model):
     """The newest app version live in each store, per platform.
 
-    Read by GET /api/app-version/ (security/app_version.py). Older apps get
-    a pop-up suggesting the update, which the user can put off; nothing is
-    ever blocked. latest_version is auto-synced hourly from the App Store
-    and the fully rolled-out Play production release
-    (security/store_versions.py), which only ever raises it. Setting it by
-    hand is an override that sticks until the store passes it; set it no
-    higher than what the store serves, or users are sent to a store page
-    that still shows the old build. Blank = no prompt until the next sync.
+    Read by GET /api/app-version/ (security/app_version.py). Apps below
+    latest_version get a pop-up suggesting the update, which the user can
+    put off. latest_version is auto-synced hourly from the App Store and the
+    fully rolled-out Play production release (security/store_versions.py),
+    which only ever raises it. Setting it by hand is an override that sticks
+    until the store passes it; set it no higher than what the store serves,
+    or users are sent to a store page that still shows the old build.
+    Blank = no prompt until the next sync.
+
+    minimum_version is set only by hand and is blank (off) by default.
+    Apps below it are covered by "Actualiza Confío" until they update
+    (except once Salida de emergencia opens). Raise it only after that
+    build is live in BOTH stores; it may not exceed latest_version.
     """
 
     PLATFORM_CHOICES = [('ios', 'iOS'), ('android', 'Android')]
@@ -719,17 +724,30 @@ class AppVersionPolicy(models.Model):
     platform = models.CharField(max_length=16, choices=PLATFORM_CHOICES, unique=True)
     latest_version = models.CharField(max_length=16, blank=True,
                                       help_text='Auto-synced hourly from the store (only ever raised). Edit only to override, e.g. 5.2.3')
+    minimum_version = models.CharField(max_length=16, blank=True,
+                                       help_text='Older versions must update before using the app. Blank = never block. Manual only, e.g. 5.2.6')
     message = models.CharField(max_length=280, blank=True,
                                help_text='Optional "Novedades" for the update pop-up, one per line, up to 4 (Spanish)')
     updated_at = models.DateTimeField(auto_now=True)
 
     def clean(self):
         from django.core.exceptions import ValidationError
-        if self.latest_version and not re.fullmatch(APP_VERSION_PATTERN, self.latest_version):
-            raise ValidationError({'latest_version': 'Use X.Y.Z, e.g. 5.2.3'})
+        errors = {}
+        for field in ('latest_version', 'minimum_version'):
+            value = getattr(self, field)
+            if value and not re.fullmatch(APP_VERSION_PATTERN, value):
+                errors[field] = 'Use X.Y.Z, e.g. 5.2.3'
+        if not errors and self.minimum_version:
+            as_tuple = lambda v: tuple(int(p) for p in v.split('.'))
+            # Above the store's version, users would be locked out with
+            # nothing in the store to update to.
+            if not self.latest_version or as_tuple(self.minimum_version) > as_tuple(self.latest_version):
+                errors['minimum_version'] = 'Cannot be above the latest version live in the store'
+        if errors:
+            raise ValidationError(errors)
 
     def __str__(self):
-        return f'{self.platform}: latest {self.latest_version or "-"}'
+        return f'{self.platform}: latest {self.latest_version or "-"}, min {self.minimum_version or "-"}'
 
 
 class DiditFaceBlocklistEntry(models.Model):

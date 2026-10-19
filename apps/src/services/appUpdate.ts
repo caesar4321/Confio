@@ -3,13 +3,34 @@ import DeviceInfo from 'react-native-device-info';
 import { API_URL } from '../config/env';
 import { mobileClientHeaders } from './mobileClientHeaders';
 
-export type AppUpdateStatus = 'current' | 'update_available';
+// 'update_required' only comes from servers with minimum_version set;
+// older servers never send it, so this build simply never blocks there.
+export type AppUpdateStatus = 'current' | 'update_available' | 'update_required';
 
 export interface AppUpdatePolicy {
   status: AppUpdateStatus;
   latestVersion: string;
   message: string;
 }
+
+export type AppUpdateView = 'blocked' | 'prompt' | null;
+
+/**
+ * What the app shows for a policy. A required update blocks until the
+ * build updates, except once Salida de emergencia is open: a stale minimum
+ * served by a failing Confío must never hide the exit. An available update
+ * is a pop-up, put off once per launch per version.
+ */
+export const appUpdateView = (
+  policy: AppUpdatePolicy | null,
+  dismissedVersion: string | null,
+  emergencyExitOpen: boolean,
+): AppUpdateView => {
+  if (!policy || emergencyExitOpen) return null;
+  if (policy.status === 'update_required') return 'blocked';
+  if (policy.status === 'update_available' && dismissedVersion !== policy.latestVersion) return 'prompt';
+  return null;
+};
 
 const IOS_APP_STORE_ID = '6472662314';
 const ANDROID_PACKAGE = 'com.Confio.Confio';
@@ -35,7 +56,7 @@ export const fetchAppUpdatePolicy = async (): Promise<AppUpdatePolicy | null> =>
     });
     if (!response.ok) return null;
     const body = await response.json();
-    if (!['current', 'update_available'].includes(body?.status)) return null;
+    if (!['current', 'update_available', 'update_required'].includes(body?.status)) return null;
     return {
       status: body.status,
       latestVersion: typeof body.latestVersion === 'string' ? body.latestVersion : '',

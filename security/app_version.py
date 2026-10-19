@@ -1,4 +1,4 @@
-"""Tells the app whether its store has a newer version to suggest.
+"""Tells the app whether it must, or may, update from its store.
 
 Public and unauthenticated: the check runs before sign-in, and a version
 number is no secret. The app reports what it is (query params, else the
@@ -13,16 +13,25 @@ from security.models import AppVersionPolicy
 
 CURRENT = 'current'
 UPDATE_AVAILABLE = 'update_available'
+# Builds older than this status (before 5.2.6) ignore it and keep running;
+# only the gate shipped with it can block.
+UPDATE_REQUIRED = 'update_required'
 
 
 def update_status(policy, version):
-    """An unparseable client version gets no prompt: a header we cannot
-    read is our bug, not a reason to nag."""
+    """An unparseable client version is never prompted or forced: a header
+    we cannot read is our bug, and locking users out over it would be worse.
+    A blank minimum_version never blocks."""
     reported = _version(version)
-    latest = _version(policy.latest_version) if policy else None
-    if reported is None or latest is None or reported >= latest:
+    if policy is None or reported is None:
         return CURRENT
-    return UPDATE_AVAILABLE
+    minimum = _version(policy.minimum_version)
+    if minimum is not None and reported < minimum:
+        return UPDATE_REQUIRED
+    latest = _version(policy.latest_version)
+    if latest is not None and reported < latest:
+        return UPDATE_AVAILABLE
+    return CURRENT
 
 
 @require_GET
@@ -35,6 +44,7 @@ def app_version(request):
     response = JsonResponse({
         'platform': platform,
         'latestVersion': policy.latest_version if policy else '',
+        'minimumVersion': policy.minimum_version if policy else '',
         'message': policy.message if policy else '',
         'status': update_status(policy, version),
     })

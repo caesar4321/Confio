@@ -5,17 +5,20 @@ import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
-import { AppUpdatePolicy, fetchAppUpdatePolicy, openAppStore } from '../services/appUpdate';
+import { useEmergencyExitOpen } from '../hooks/useEmergencyExitOpen';
+import { AppUpdatePolicy, appUpdateView, fetchAppUpdatePolicy, openAppStore } from '../services/appUpdate';
 
-// Re-ask on foreground at most this often, so a release published while the
-// app sits in the background still reaches users without a cold start.
+// Re-ask on foreground at most this often, so a release or a minimum
+// published while the app sits in the background still reaches users
+// without a cold start.
 const RECHECK_AFTER_MS = 30 * 60 * 1000;
 
 /**
  * Suggests the update when the store has a newer version than this one
- * (AppVersionPolicy, set per platform in the admin). Always a pop-up the
- * user can put off — never a screen that blocks the app — and put off
- * once per launch per version.
+ * (AppVersionPolicy, set per platform in the admin): a pop-up the user can
+ * put off once per launch per version. Below the admin's minimum_version
+ * (blank = off) the app is covered by "Actualiza Confío" with only the
+ * store button, until Salida de emergencia opens (appUpdateView).
  */
 export const AppUpdatePrompt: React.FC = () => {
   const [policy, setPolicy] = useState<AppUpdatePolicy | null>(null);
@@ -25,6 +28,8 @@ export const AppUpdatePrompt: React.FC = () => {
   const check = useCallback(async () => {
     lastCheckRef.current = Date.now();
     const next = await fetchAppUpdatePolicy();
+    // A failed check keeps what we knew: an outage neither invents a
+    // requirement nor lifts one the server already stated.
     if (next) setPolicy(next);
   }, []);
 
@@ -36,7 +41,10 @@ export const AppUpdatePrompt: React.FC = () => {
     return () => subscription.remove();
   }, [check]);
 
-  if (policy?.status !== 'update_available' || dismissedVersion === policy.latestVersion) return null;
+  const exitOpen = useEmergencyExitOpen(policy?.status === 'update_required');
+  const view = appUpdateView(policy, dismissedVersion, exitOpen);
+  if (!policy || !view) return null;
+  if (view === 'blocked') return <RequiredUpdateScreen latestVersion={policy.latestVersion} />;
   const dismiss = () => setDismissedVersion(policy.latestVersion);
 
   return (
@@ -162,6 +170,55 @@ const UpdateSheet: React.FC<{
   );
 };
 
+/** Covers the app; Android back does nothing, the store is the only way on. */
+const RequiredUpdateScreen: React.FC<{ latestVersion: string }> = ({ latestVersion }) => {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal transparent={false} visible animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
+      <View style={[styles.blocked, { paddingTop: insets.top + 24, paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+        <Svg style={StyleSheet.absoluteFillObject} width="100%" height="100%">
+          <Defs>
+            <LinearGradient id="appUpdateRequired" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor={HERO_TOP} />
+              <Stop offset="55%" stopColor={colors.white} />
+            </LinearGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#appUpdateRequired)" />
+        </Svg>
+        <ScrollView contentContainerStyle={styles.blockedContent} bounces={false} showsVerticalScrollIndicator={false}>
+          <View style={[styles.badge, styles.blockedBadge]}>
+            <Icon name="download" size={34} color={ACCENT} />
+          </View>
+          <Text style={[styles.title, styles.blockedTitle]}>Actualiza Confío</Text>
+          <Text style={styles.subtitle}>
+            Esta versión de la app ya no es compatible. Actualiza para seguir usando Confío; tarda menos de un minuto.
+          </Text>
+          <View style={[styles.highlights, styles.blockedHighlights]}>
+            {DEFAULT_HIGHLIGHTS.slice(-1).map((item, index) => (
+              <View key={index} style={styles.highlight}>
+                <View style={styles.highlightIcon}>
+                  <Icon name={item.icon} size={18} color={ACCENT_TEXT} />
+                </View>
+                <View style={styles.highlightText}>
+                  <Text style={styles.highlightTitle}>{item.title}</Text>
+                  {item.body ? <Text style={styles.highlightBody}>{item.body}</Text> : null}
+                </View>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+        <View style={styles.footer}>
+          <TouchableOpacity style={styles.primaryButton} onPress={openAppStore} activeOpacity={0.85}
+            accessibilityRole="button">
+            <Text style={styles.primaryText}>{latestVersion ? `Actualizar a ${latestVersion}` : 'Actualizar ahora'}</Text>
+            <Icon name="arrow-right" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 const TOP_GAP = 24;
 const COMPACT_BELOW = 740;
 // A light mint field (emerald-100 → emerald-50): an invitation, not an alert.
@@ -267,4 +324,9 @@ const styles = StyleSheet.create({
   primaryText: { color: colors.white, fontSize: 16, fontWeight: '700' },
   secondaryButton: { paddingVertical: 14, alignItems: 'center', marginTop: 4 },
   secondaryText: { color: colors.textSecondary, fontSize: 15, fontWeight: '600' },
+  blocked: { flex: 1, backgroundColor: colors.white },
+  blockedContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'stretch', paddingHorizontal: 24 },
+  blockedTitle: { marginTop: 24 },
+  blockedBadge: { alignSelf: 'center' },
+  blockedHighlights: { marginTop: 4 },
 });
