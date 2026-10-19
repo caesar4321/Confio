@@ -537,7 +537,7 @@ export function ownMoneyRows(t: MonthTotals): { label: string; amount: number; b
   if (savings > 0) rows.push({ label: 'Guardaste', amount: savings, bucket: 'savings' });
   if (savings < 0) rows.push({ label: 'Retiraste del ahorro', amount: -savings, bucket: 'savings' });
   if (investment > 0) rows.push({ label: 'Invertiste', amount: investment, bucket: 'investment' });
-  if (investment < 0) rows.push({ label: 'Vendiste acciones', amount: -investment, bucket: 'investment' });
+  if (investment < 0) rows.push({ label: 'Vendiste', amount: -investment, bucket: 'investment' });
   return rows;
 }
 
