@@ -2,6 +2,7 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 
 let mockCaps: any = null;
+let mockHoldings: any[] | null = [];
 const mockNavigate = jest.fn();
 const mockAssets = [
   { symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin', category: 'crypto', priceUsd: 100000, dayChangePct: 1.2 },
@@ -34,7 +35,7 @@ jest.mock('../../hooks/useGmMarket', () => ({
 jest.mock('../../hooks/useCrypto', () => ({
   useCryptoCapabilities: () => ({ capabilities: mockCaps, refetch: () => Promise.resolve() }),
   useCryptoMarket: (enabled: boolean) => ({ assets: enabled ? mockAssets : [] }),
-  useCryptoHoldings: () => ({ holdings: [] }),
+  useCryptoHoldings: () => ({ holdings: mockHoldings }),
 }));
 
 import { InvestScreen } from '../InvestScreen';
@@ -48,7 +49,7 @@ const render = async () => {
   return tree;
 };
 
-beforeEach(() => { mockCaps = { enabled: true }; mockNavigate.mockReset(); });
+beforeEach(() => { mockCaps = { enabled: true }; mockHoldings = []; mockNavigate.mockReset(); });
 
 it('orders the cards stocks → Oro y Bitcoin → $CONFIO, one row per listed asset', async () => {
   const tree = await render();
@@ -79,4 +80,32 @@ it('hides the card unless cryptoCapabilities.enabled', async () => {
   expect(strings(await render())).not.toContain('Oro y Bitcoin');
   mockCaps = null; // older server: the query failed
   expect(strings(await render())).not.toContain('Oro y Bitcoin');
+});
+
+it('a country-blocked holder still sees what they hold, sell-only, and can open it (Codex P1)', async () => {
+  mockCaps = { enabled: false };
+  mockHoldings = [{
+    symbol: 'ETH', ticker: 'ETH', name: 'Ethereum', address: '0xeth', custody: 'binance_peg', listed: false,
+    category: 'crypto', units: '1000', decimals: 18, valueUsd: 12.5, dayChangePct: null,
+  }];
+  const tree = await render();
+  const s = strings(tree);
+  expect(s).toContain('Oro y Bitcoin');
+  expect(s).toContain('Ethereum');
+  expect(s).toContain('ETH · Solo venta');
+  expect(s).not.toContain('Bitcoin'); // no catalog rows while blocked
+  const row = tree.root.find((n) => n.props?.accessibilityLabel === 'Ethereum' && typeof n.props.onPress === 'function');
+  await act(async () => { row.props.onPress(); });
+  expect(mockNavigate).toHaveBeenCalledWith('CryptoDetail', { symbol: 'ETH' });
+});
+
+it('a delisted holding shows next to the listed rows when discovery is on', async () => {
+  mockHoldings = [{
+    symbol: 'ETH', ticker: 'ETH', name: 'Ethereum', address: '0xeth', custody: 'binance_peg', listed: false,
+    category: 'crypto', units: '1000', decimals: 18, valueUsd: 12.5, dayChangePct: null,
+  }];
+  const s = strings(await render());
+  expect(s).toContain('Bitcoin');
+  expect(s).toContain('Tether Gold');
+  expect(s).toContain('ETH · Solo venta');
 });

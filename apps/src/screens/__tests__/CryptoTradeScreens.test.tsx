@@ -5,6 +5,11 @@ import { TouchableOpacity } from 'react-native';
 let mockCaps: any;
 let mockHoldings: any;
 let mockSheetProps: any = null;
+let mockReceipt: any = null;
+let mockRouteSymbol = 'BTCB';
+let mockMarketAsset: any;
+const mockRefetchHoldings = jest.fn(() => Promise.resolve());
+const mockPreviewBuy = jest.fn();
 const mockAsset = {
   symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin', address: '0xbtc', decimals: 18, category: 'crypto',
   featured: true, custody: 'binance_peg', maxOrderUsd: null, priceUsd: 100000, dayChangePct: 1.5,
@@ -18,7 +23,7 @@ let mockSellPreviewOut = 50n * 10n ** 18n;
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ goBack: jest.fn(), navigate: mockNavigate }),
-  useRoute: () => ({ params: { symbol: 'BTCB' } }),
+  useRoute: () => ({ params: { symbol: mockRouteSymbol } }),
 }));
 jest.mock('@apollo/client', () => ({
   gql: () => ({}),
@@ -30,7 +35,7 @@ jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
 jest.mock('../../components/CryptoAssetMark', () => ({ CryptoAssetMark: 'CryptoAssetMark' }));
 jest.mock('../../components/common/StockTradeLoadingOverlay', () => ({ StockTradeLoadingOverlay: () => null }));
 jest.mock('../../components/common/SuccessHero', () => ({ SuccessHero: 'SuccessHero' }));
-jest.mock('../../components/common/ReceiptCard', () => ({ ReceiptCard: 'ReceiptCard' }));
+jest.mock('../../components/common/ReceiptCard', () => ({ ReceiptCard: (props: any) => { mockReceipt = props; return null; } }));
 jest.mock('../../components/common/StockTradeSuccessContent', () => ({ StockTradeSuccessContent: ({ children }: any) => children }));
 jest.mock('../../components/StockRiskSheet', () => ({ StockRiskSheet: (props: any) => { mockSheetProps = props; return null; } }));
 jest.mock('../../services/communityShare', () => ({ requestActivityShare: (...a: any[]) => mockShare(...a) }));
@@ -43,14 +48,14 @@ jest.mock('../../hooks/useSavingsPortfolio', () => ({
 }));
 jest.mock('../../hooks/useCrypto', () => ({
   useCryptoCapabilities: () => ({ capabilities: mockCaps, loading: false, refetch: () => Promise.resolve() }),
-  useCryptoMarket: () => ({ assets: [mockAsset], bySymbol: () => mockAsset, loading: false }),
-  useCryptoHoldings: () => ({ holdings: mockHoldings, loading: false, refetch: () => Promise.resolve() }),
+  useCryptoMarket: () => ({ assets: mockMarketAsset ? [mockMarketAsset] : [], bySymbol: () => mockMarketAsset, loading: false }),
+  useCryptoHoldings: () => ({ holdings: mockHoldings, loading: false, refetch: mockRefetchHoldings }),
 }));
 jest.mock('../../services/cryptoTrading', () => {
   const actual = jest.requireActual('../../services/cryptoTrading');
   return {
     ...actual,
-    previewCryptoBuy: async () => ({ expectedOut: '100000000000000', poolFeeBps: 5, priceImpactBps: 9, netWei: 0n }),
+    previewCryptoBuy: (...a: any[]) => mockPreviewBuy(...a),
     previewCryptoSell: async () => ({
       expectedOut: mockSellPreviewOut.toString(), poolFeeBps: 5, priceImpactBps: 9,
       netWei: mockSellPreviewOut - (mockSellPreviewOut * 90n + 9_999n) / 10_000n,
@@ -99,11 +104,21 @@ const press = async (tree: renderer.ReactTestRenderer, id: string) => {
 beforeEach(() => {
   jest.useFakeTimers();
   mockCaps = caps();
-  mockHoldings = [{ symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin', category: 'crypto', units: '1000000000000000', decimals: 18, valueUsd: 100, dayChangePct: 1 }];
+  mockMarketAsset = mockAsset;
+  mockRouteSymbol = 'BTCB';
+  mockReceipt = null;
+  mockRefetchHoldings.mockClear();
+  mockPreviewBuy.mockReset().mockResolvedValue({ expectedOut: '100000000000000', poolFeeBps: 5, priceImpactBps: 9, netWei: 0n });
+  mockHoldings = [{
+    symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin', address: '0xbtc', custody: 'binance_peg', listed: true,
+    category: 'crypto', units: '1000000000000000', decimals: 18, valueUsd: 100, dayChangePct: 1,
+  }];
   mockSheetProps = null;
   mockSellPreviewOut = 50n * 10n ** 18n;
-  mockBuy.mockReset().mockResolvedValue({ txHash: '0xbuytx', tokenOutUnits: 10n ** 14n });
-  mockSell.mockReset().mockResolvedValue({ txHash: '0xselltx', unitsSold: 10n ** 15n, expectedNetWei: 49n * 10n ** 18n, dollar: 1 });
+  mockBuy.mockReset().mockResolvedValue({ txHash: '0xbuytx', tokenOutUnits: 10n ** 14n, feeWei: 9n * 10n ** 16n, feeBps: 90 });
+  mockSell.mockReset().mockResolvedValue({
+    txHash: '0xselltx', unitsSold: 10n ** 15n, expectedNetWei: 49n * 10n ** 18n, feeWei: 45n * 10n ** 16n, feeBps: 90, dollar: 1,
+  });
   mockShare.mockReset();
 });
 afterEach(() => jest.useRealTimers());
@@ -209,6 +224,112 @@ describe('CryptoDetailScreen', () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<CryptoDetailScreen />); });
     expect(text(tree)).toContain('No disponible en tu país.');
+    await act(async () => tree.unmount());
+  });
+});
+
+const commission = () => mockReceipt?.items.find((i: any) => i.label === 'Comisión de Confío')?.value;
+const ids = (tree: renderer.ReactTestRenderer, id: string) => tree.root.findAll((n) => n.props?.testID === id);
+
+describe('Codex follow-ups (screens)', () => {
+  it('P2: a buy refetches holdings so Detail, Sell and Home update', async () => {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<BuyCryptoScreen />); });
+    await typeAmount(tree, 'crypto-buy-amount', '10');
+    await press(tree, 'crypto-buy-confirm');
+    expect(mockRefetchHoldings).toHaveBeenCalled();
+    expect(commission()).toMatch(/^\$0\.09 \(/);
+    await act(async () => tree.unmount());
+  });
+
+  it('P2: after PRICE_MOVED the buy re-quotes and waits for a new confirmation', async () => {
+    mockBuy.mockReset().mockRejectedValueOnce(Object.assign(new Error('moved'), { code: 'PRICE_MOVED' }));
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<BuyCryptoScreen />); });
+    await typeAmount(tree, 'crypto-buy-amount', '10');
+    expect(mockPreviewBuy).toHaveBeenCalledTimes(1);
+    mockPreviewBuy.mockResolvedValue({ expectedOut: '90000000000000', poolFeeBps: 5, priceImpactBps: 9, netWei: 0n });
+    await press(tree, 'crypto-buy-confirm');
+    expect(ids(tree, 'crypto-price-moved').length).toBeGreaterThan(0);
+    expect(mockBuy).toHaveBeenCalledTimes(1); // no silent retry
+    await flush(400);
+    await flush(0);
+    expect(mockPreviewBuy).toHaveBeenCalledTimes(2);
+    mockBuy.mockResolvedValue({ txHash: '0xbuytx2', tokenOutUnits: 9n * 10n ** 13n, feeWei: 0n, feeBps: 90 });
+    await press(tree, 'crypto-buy-confirm');
+    expect(mockBuy).toHaveBeenCalledTimes(2);
+    expect(mockBuy.mock.calls[1][0].previewTokenOut).toBe(9n * 10n ** 13n);
+    await act(async () => tree.unmount());
+  });
+
+  it('P2: after PRICE_MOVED the sale re-quotes too', async () => {
+    mockSell.mockReset().mockRejectedValueOnce(Object.assign(new Error('moved'), { code: 'PRICE_MOVED' }));
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<SellCryptoScreen />); });
+    await typeAmount(tree, 'crypto-sell-amount', '50');
+    await press(tree, 'crypto-sell-confirm');
+    expect(ids(tree, 'crypto-price-moved').length).toBeGreaterThan(0);
+    expect(byTestId(tree, 'crypto-sell-confirm').props.disabled).toBe(true); // re-quoting
+    await flush(400);
+    await flush(0);
+    expect(byTestId(tree, 'crypto-sell-confirm').props.disabled).toBe(false);
+    expect(mockSell).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+  });
+
+  it('P2: a MAX sale keeps its commission on the receipt after holdings refetch', async () => {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<SellCryptoScreen />); });
+    const max = tree.root.findAll((n) => typeof n.props?.onPress === 'function'
+      && n.findAll((c) => c.children.includes('MAX' as any)).length > 0)[0];
+    await act(async () => { max.props.onPress(); });
+    await flush(400);
+    await flush(0);
+    await press(tree, 'crypto-sell-confirm');
+    expect(mockSell.mock.calls[0][0].sellAll).toBe(true);
+    mockHoldings = []; // the position is gone after the refetch
+    await act(async () => { tree.update(<SellCryptoScreen />); });
+    expect(commission()).toMatch(/^\$0\.45 \(/);
+    await act(async () => tree.unmount());
+  });
+
+  it('P1: a country-blocked holder of a delisted token can still sell, from the holding alone', async () => {
+    mockCaps = caps({ enabled: false, buyEnabled: false, blockedMessage: 'No disponible en tu país.' });
+    mockMarketAsset = undefined;
+    mockRouteSymbol = 'ETH';
+    mockHoldings = [{
+      symbol: 'ETH', ticker: 'ETH', name: 'Ethereum', address: '0xeth', custody: 'binance_peg', listed: false,
+      category: 'crypto', units: '2000000000000000000', decimals: 18, valueUsd: 50, dayChangePct: null,
+    }];
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<SellCryptoScreen />); });
+    await typeAmount(tree, 'crypto-sell-amount', '25');
+    await press(tree, 'crypto-sell-confirm');
+    expect(mockSell.mock.calls[0][0].asset).toMatchObject({ symbol: 'ETH', address: '0xeth' });
+    expect(mockSell.mock.calls[0][0].units).toBe(10n ** 18n);
+    await act(async () => tree.unmount());
+  });
+
+  it('P1: Detail keeps Vender and hides Comprar when blocked or delisted', async () => {
+    mockCaps = caps({ enabled: false, buyEnabled: false });
+    mockMarketAsset = undefined;
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<CryptoDetailScreen />); });
+    expect(ids(tree, 'crypto-detail-buy')).toHaveLength(0);
+    expect(ids(tree, 'crypto-detail-sell').length).toBeGreaterThan(0);
+    await act(async () => tree.unmount());
+
+    mockCaps = caps();
+    mockMarketAsset = mockAsset;
+    mockHoldings = [{ ...mockHoldings[0], listed: false }];
+    await act(async () => { tree = renderer.create(<CryptoDetailScreen />); });
+    expect(ids(tree, 'crypto-detail-buy')).toHaveLength(0);
+    expect(ids(tree, 'crypto-detail-sell').length).toBeGreaterThan(0);
+    await act(async () => tree.unmount());
+
+    mockHoldings = [{ ...mockHoldings[0], listed: true }];
+    await act(async () => { tree = renderer.create(<CryptoDetailScreen />); });
+    expect(ids(tree, 'crypto-detail-buy').length).toBeGreaterThan(0);
     await act(async () => tree.unmount());
   });
 });

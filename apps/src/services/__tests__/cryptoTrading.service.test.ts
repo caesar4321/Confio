@@ -13,6 +13,7 @@ const mockBalance = jest.fn();
 const mockAllowance = jest.fn();
 const mockPrices = jest.fn();
 const mockShares = jest.fn();
+const mockCurrentOracle = jest.fn();
 const mockBuyEncode = jest.fn((..._args: any[]) => '0xbuy');
 const mockSellEncode = jest.fn((..._args: any[]) => '0xsell');
 
@@ -33,6 +34,7 @@ jest.mock('../cusdPlusVault', () => ({
   getErc20Allowance: (...a: any[]) => mockAllowance(...a),
   getErc20BalanceWei: (...a: any[]) => mockBalance(...a),
   getVaultPrices: (...a: any[]) => mockPrices(...a),
+  getCurrentOraclePrice: (...a: any[]) => mockCurrentOracle(...a),
   getVaultShares: (...a: any[]) => mockShares(...a),
   sharesForUsdtOut: (usdt: bigint, pps: bigint) => (usdt * WAD + pps - 1n) / pps + 2n,
 }));
@@ -45,6 +47,7 @@ import {
   isCryptoAckRequired,
   sellCrypto,
   unitsForUsd,
+  usdToWei,
 } from '../cryptoTrading';
 
 const caps = (over: Record<string, unknown> = {}) => ({
@@ -75,6 +78,7 @@ beforeEach(() => {
   mockBalance.mockResolvedValue(100n * WAD);
   mockPrices.mockResolvedValue({ pPlusWad: WAD, oraclePriceWad: WAD });
   mockShares.mockResolvedValue(100n * WAD);
+  mockCurrentOracle.mockResolvedValue(WAD);
   mockExecute.mockResolvedValue({ txHash: '0xtx' });
 });
 
@@ -152,7 +156,7 @@ describe('sellCrypto', () => {
     });
     expect(mockSellEncode.mock.calls[0][0]).toMatchObject({
       dollar: 1, tokenIn: TOKEN, amountIn: 777n, route: ROUTE,
-      minUsdtOut: 97_777_777_788_777_777_777n, minDestOut: 95_928_800_010_791_989_999n, maxFeeBps: 90n,
+      minUsdtOut: 97_777_777_788_777_777_777n, minDestOut: 96_897_777_788_678_777_777n, maxFeeBps: 90n,
     });
     expect(mockExecute.mock.calls[0][0].calls.map((c: any) => c.to)).toEqual([TOKEN, ROUTER]);
     expect(result.unitsSold).toBe(777n);
@@ -201,5 +205,69 @@ describe('unitsForUsd', () => {
     expect(unitsForUsd(1_000_000n, 100, 25)).toBe(250_000n);
     expect(unitsForUsd(1_000_000n, 100, 150)).toBe(1_000_000n);
     expect(unitsForUsd(1_000_000n, 0, 10)).toBe(0n);
+  });
+});
+
+describe('Codex follow-ups', () => {
+  it('P1: a buy signs the floor of the DISPLAYED quote when the fresh one is within slippage', async () => {
+    mockQuery.mockImplementation(answer(caps(), okQuote(991_000n)));
+    await buyCrypto({
+      asset: ASSET, grossAmountUsd: 10, expectedFeeBps: 90, expectedFunding: 'cusd', previewTokenOut: 1_000_000n,
+    });
+    expect(mockBuyEncode.mock.calls[0][0].minTokenOut).toBe(990_000n); // not 981_090
+  });
+
+  it('P1: a sale signs the displayed USDT floor, and refuses when the fresh quote is under it', async () => {
+    mockQuery.mockImplementation(answer(caps(), okQuote(991n * 10n ** 16n)));
+    await sellCrypto({
+      asset: ASSET, units: 5n, expectedFeeBps: 90, expectedFunding: 'cusd', previewUsdtOut: 10n * WAD,
+    });
+    expect(mockSellEncode.mock.calls[0][0].minUsdtOut).toBe(99n * 10n ** 17n);
+
+    mockQuery.mockImplementation(answer(caps(), okQuote(98n * 10n ** 17n)));
+    await expect(sellCrypto({
+      asset: ASSET, units: 5n, expectedFeeBps: 90, expectedFunding: 'cusd', previewUsdtOut: 10n * WAD,
+    })).rejects.toMatchObject({ code: 'PRICE_MOVED' });
+    expect(mockSellEncode).toHaveBeenCalledTimes(1);
+  });
+
+  it('P1: a sale needs only the holding (address + symbol), no market', async () => {
+    mockQuery.mockImplementation(answer(caps({ enabled: false, buyEnabled: false }), okQuote(10n * WAD)));
+    const holding = { symbol: 'ETH', address: `0x${'99'.repeat(20)}` };
+    await sellCrypto({ asset: holding, units: 5n, expectedFeeBps: 90, expectedFunding: 'cusd' });
+    expect(mockSellEncode.mock.calls[0][0].tokenIn).toBe(holding.address);
+    const quoteCall = mockQuery.mock.calls.find((c) => c[0].variables?.side === 'sell');
+    expect(quoteCall[0].variables.symbol).toBe('ETH');
+  });
+
+  it('P2: cUSD+ sale floors mint at the current oracle, not lastOraclePrice', async () => {
+    mockQuery.mockImplementation(answer(caps({ fundingDollar: 'cusd_plus' }), okQuote(13n * WAD)));
+    const pps = 1_010_000_000_000_000_000n;
+    const current = 1_120_100_000_000_000_000n;
+    mockPrices.mockResolvedValue({ pPlusWad: pps, oraclePriceWad: 1_120_000_000_000_000_000n });
+    mockCurrentOracle.mockResolvedValue(current);
+    await sellCrypto({ asset: ASSET, units: 5n, expectedFeeBps: 90, expectedFunding: 'cusd_plus' });
+    expect(mockCurrentOracle).toHaveBeenCalledWith(VAULT);
+    const { minUsdtOut, minDestOut } = mockSellEncode.mock.calls[0][0];
+    const entry = minUsdtOut - (minUsdtOut * 90n + 9_999n) / 10_000n;
+    const shares = ((entry * WAD) / current) * current / pps;
+    expect(minDestOut).toBe((shares * 9_999n) / 10_000n);
+  });
+
+  it('P2: dollars convert to wei without binary-float error', async () => {
+    expect(usdToWei(1.1)).toBe(1_100_000_000_000_000_000n);
+    expect(usdToWei('1.1')).toBe(1_100_000_000_000_000_000n);
+    expect(usdToWei(0.07)).toBe(70_000_000_000_000_000n);
+    expect(usdToWei(123456.78)).toBe(123_456_780_000_000_000_000_000n);
+    expect(usdToWei(-1)).toBe(0n);
+    mockQuery.mockImplementation(answer(caps(), okQuote(5n)));
+    await buyCrypto({ asset: ASSET, grossAmountUsd: 1.1, expectedFeeBps: 90, expectedFunding: 'cusd' });
+    expect(mockBuyEncode.mock.calls[0][0].amountIn).toBe(1_100_000_000_000_000_000n);
+  });
+
+  it('returns the signed fee rate for a frozen receipt', async () => {
+    mockQuery.mockImplementation(answer(caps(), okQuote(10n * WAD)));
+    const sold = await sellCrypto({ asset: ASSET, units: 5n, expectedFeeBps: 90, expectedFunding: 'cusd' });
+    expect(sold).toMatchObject({ feeBps: 90, feeWei: 9n * 10n ** 16n });
   });
 });

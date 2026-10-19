@@ -447,7 +447,7 @@ export const getVaultPrices = async (
 };
 
 /** Live oracle value the vault's next accrue()/mint will consume. */
-const getCurrentOraclePrice = async (vaultAddress: string): Promise<bigint> => {
+export const getCurrentOraclePrice = async (vaultAddress: string): Promise<bigint> => {
   const { selector } = await import('./evmWallet');
   const oracleWord = (await ethCall(vaultAddress, selector('ORACLE()'))).replace(/^0x/, '');
   if (oracleWord.length < 64) throw new Error('invalid USDY oracle address');

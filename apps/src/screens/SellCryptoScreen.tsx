@@ -5,6 +5,10 @@
 // A cUSD+ sale netting under US$1.000001 is refused by the relay (Ondo's
 // mint floor): the screen says so before confirming and offers to receive
 // the sale in Confío Dollar instead, which is always open.
+//
+// Everything a sale needs comes from the holding (cryptoHoldings), never
+// from the discovery catalog: a holder whose country was blocked (no
+// cryptoMarket) or whose token was delisted can always sell.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -31,7 +35,7 @@ import { StockTradeLoadingOverlay } from '../components/common/StockTradeLoading
 import { CryptoAssetMark } from '../components/CryptoAssetMark';
 import { colors } from '../config/theme';
 import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
-import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket } from '../hooks/useCrypto';
+import { useCryptoCapabilities, useCryptoHoldings } from '../hooks/useCrypto';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { requestActivityShare } from '../services/communityShare';
 import { createSponsoredRequestId } from '../services/sponsored7702';
@@ -60,11 +64,13 @@ export const SellCryptoScreen = () => {
   const route = useRoute<SellRoute>();
   const { formatNumber } = useNumberFormat();
   const { capabilities, refetch: refetchCaps } = useCryptoCapabilities();
-  const { bySymbol } = useCryptoMarket(Boolean(capabilities?.enabled));
   const { holdings, refetch: refetchHoldings } = useCryptoHoldings();
   const { refetch: refetchPortfolio } = useSavingsPortfolio();
-  const asset = bySymbol(route.params.symbol);
   const position = (holdings ?? []).find((h) => h.symbol === route.params.symbol);
+  // Kept after a MAX sale empties the position (the refetch drops the row).
+  const [lastPosition, setLastPosition] = useState(position);
+  useEffect(() => { if (position) setLastPosition(position); }, [position]);
+  const asset = position ?? lastPosition;
   const heldUnits = useMemo(() => {
     try {
       return BigInt(position?.units || '0');
@@ -88,6 +94,10 @@ export const SellCryptoScreen = () => {
   const [tradeError, setTradeError] = useState<string | null>(null);
   const [settledNetUsd, setSettledNetUsd] = useState(0);
   const [settledUnits, setSettledUnits] = useState(0n);
+  // The receipt shows what was signed, frozen at settlement.
+  const [settledFee, setSettledFee] = useState<{ usd: number; bps: number } | null>(null);
+  const [quoteNonce, setQuoteNonce] = useState(0);
+  const [priceMoved, setPriceMoved] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [settledDest, setSettledDest] = useState<string>(fundingDollarName(funding));
   const confirmInFlight = useRef(false);
@@ -95,6 +105,7 @@ export const SellCryptoScreen = () => {
 
   const changeAmount = (value: string, isMax = false) => {
     requestIdRef.current = null;
+    setPriceMoved(null);
     setSellAll(isMax && heldUnits > 0n);
     setRaw((prev) => (isMax ? value : sanitizeAmountInput(value, 2, undefined, prev)));
   };
@@ -128,7 +139,7 @@ export const SellCryptoScreen = () => {
     }, 350);
     return () => { cancelled = true; clearTimeout(timer); };
     // `units` is a bigint: compare by value through its string.
-  }, [asset, feeBps, capabilities?.tradingEnabled, units.toString()]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [asset?.symbol, feeBps, capabilities?.tradingEnabled, units.toString(), quoteNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -176,11 +187,12 @@ export const SellCryptoScreen = () => {
         expectedFeeBps: feeBps,
         expectedFunding: funding,
         intoCusd: funding === 'cusd_plus' && intoCusd,
-        previewNetWei: preview?.netWei,
+        previewUsdtOut: preview?.usdtOut,
         requestId,
       });
       setSettledNetUsd(Number(result.expectedNetWei) / 1e18);
       setSettledUnits(result.unitsSold);
+      setSettledFee({ usd: Number(result.feeWei) / 1e18, bps: result.feeBps });
       setSettledDest(result.dollar === DOLLAR ? 'Confío Dollar' : 'Confío Dollar+');
       setPhase('success');
       requestActivityShare({ group: 'crypto', reference: result.txHash });
@@ -190,9 +202,15 @@ export const SellCryptoScreen = () => {
       if (!isOutcomeUnknown(e)) requestIdRef.current = null;
       const code = cryptoErrorCode(e);
       if (code === 'FEE_CHANGED' || code === 'FUNDING_CHANGED') void refetchCaps().catch(() => undefined);
+      setPhase('input');
+      if (code === 'PRICE_MOVED' || code === 'bad_crypto_floor') {
+        // Re-quote; the person confirms the new amount.
+        setPriceMoved(cryptoTradeError(e, 'sell'));
+        setQuoteNonce((n) => n + 1);
+        return;
+      }
       setErrorCode(code);
       setTradeError(cryptoTradeError(e, 'sell'));
-      setPhase('input');
     } finally {
       confirmInFlight.current = false;
     }
@@ -213,8 +231,8 @@ export const SellCryptoScreen = () => {
             style={{ marginTop: 4 }}
             items={[
               { label: 'Vendiste', value: `${formatUnits(settledUnits, asset.decimals)} ${asset.ticker}` },
-              ...(feeBps != null
-                ? [{ label: 'Comisión de Confío', value: `${fmtUsd(feeUsd)} (${feePctLabel(feeBps)}%)` }]
+              ...(settledFee
+                ? [{ label: 'Comisión de Confío', value: `${fmtUsd(settledFee.usd)} (${feePctLabel(settledFee.bps)}%)` }]
                 : []),
               { label: `Recibido en ${settledDest}`, value: `≈ ${fmtUsd(settledNetUsd)}`, color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
@@ -320,6 +338,7 @@ export const SellCryptoScreen = () => {
               </TouchableOpacity>
             </View>
           )}
+          {priceMoved && <Text style={styles.hintError} testID="crypto-price-moved">{priceMoved}</Text>}
           {overBalance && <Text style={styles.hintError}>Tu posición es {fmtUsd(positionUsd ?? 0)}.</Text>}
           {tradeError && <Text style={styles.hintError}>{tradeError}</Text>}
           {destIsPlus && (errorCode === 'savings_mint_too_small' || errorCode === 'savings_not_available') && (

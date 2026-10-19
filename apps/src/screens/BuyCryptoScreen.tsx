@@ -35,7 +35,7 @@ import { StockRiskSheet } from '../components/StockRiskSheet';
 import { CryptoAssetMark } from '../components/CryptoAssetMark';
 import { colors } from '../config/theme';
 import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
-import { useCryptoCapabilities, useCryptoMarket } from '../hooks/useCrypto';
+import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket } from '../hooks/useCrypto';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { requestActivityShare } from '../services/communityShare';
 import { createSponsoredRequestId } from '../services/sponsored7702';
@@ -76,6 +76,8 @@ export const BuyCryptoScreen = () => {
   const { bySymbol } = useCryptoMarket(enabled);
   const asset = bySymbol(route.params.symbol);
   const { savings, cusdBalanceUsd, refetch: refetchPortfolio } = useSavingsPortfolio();
+  // Shares Apollo's cache with Detail, Sell and Home: refetched after a buy.
+  const { refetch: refetchHoldings } = useCryptoHoldings(false, 0);
   const [acknowledgeRisk] = useMutation(ACKNOWLEDGE_CRYPTO_RISK);
 
   const funding = capabilities?.fundingDollar ?? 'cusd';
@@ -91,6 +93,12 @@ export const BuyCryptoScreen = () => {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [tradeError, setTradeError] = useState<string | null>(null);
   const [settledUnits, setSettledUnits] = useState<bigint>(0n);
+  // The receipt shows what was signed, frozen at settlement.
+  const [settledFee, setSettledFee] = useState<{ usd: number; bps: number } | null>(null);
+  // A fresh quote moved past what was shown: re-quote and make the person
+  // confirm the new amount (never retry against the stale preview).
+  const [quoteNonce, setQuoteNonce] = useState(0);
+  const [priceMoved, setPriceMoved] = useState<string | null>(null);
   const [riskSheet, setRiskSheet] = useState(false);
   const riskAcknowledged = useRef(false);
   const confirmInFlight = useRef(false);
@@ -120,6 +128,7 @@ export const BuyCryptoScreen = () => {
   const changeAmount = (value: string, isMax = false) => {
     requestIdRef.current = null;
     riskFlow.current += 1;
+    setPriceMoved(null);
     setSpendAll(isMax && cap === balance && balance > 0);
     setRaw((prev) => (isMax ? value : sanitizeAmountInput(value, 2, undefined, prev)));
   };
@@ -147,7 +156,7 @@ export const BuyCryptoScreen = () => {
         .finally(() => { if (!cancelled) setQuoteLoading(false); });
     }, 350);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [amount, asset, cap, capabilities?.buyEnabled, feeBps]);
+  }, [amount, asset, cap, capabilities?.buyEnabled, feeBps, quoteNonce]);
 
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -198,9 +207,11 @@ export const BuyCryptoScreen = () => {
         requestId,
       });
       setSettledUnits(result.tokenOutUnits);
+      setSettledFee({ usd: Number(result.feeWei) / 1e18, bps: result.feeBps });
       setPhase('success');
       requestActivityShare({ group: 'crypto', reference: result.txHash });
       void refetchPortfolio().catch(() => undefined);
+      void refetchHoldings().catch(() => undefined);
     } catch (e) {
       if (!isOutcomeUnknown(e)) requestIdRef.current = null;
       if (isCryptoAckRequired(e)) {
@@ -213,8 +224,13 @@ export const BuyCryptoScreen = () => {
       const code = cryptoErrorCode(e);
       // A changed fee or funding dollar re-prices the trade: show it first.
       if (code === 'FEE_CHANGED' || code === 'FUNDING_CHANGED') void refetchCaps().catch(() => undefined);
-      setTradeError(cryptoTradeError(e, 'buy'));
       setPhase('input');
+      if (code === 'PRICE_MOVED' || code === 'bad_crypto_floor') {
+        setPriceMoved(cryptoTradeError(e, 'buy'));
+        setQuoteNonce((n) => n + 1);
+        return;
+      }
+      setTradeError(cryptoTradeError(e, 'buy'));
     } finally {
       confirmInFlight.current = false;
     }
@@ -238,8 +254,8 @@ export const BuyCryptoScreen = () => {
             style={{ marginTop: 4 }}
             items={[
               { label: `Pagaste con ${fundingName}`, value: fmtUsd(amount) },
-              ...(feeBps != null
-                ? [{ label: 'Comisión de Confío', value: `${fmtUsd(feeUsd)} (${feePctLabel(feeBps)}%)` }]
+              ...(settledFee
+                ? [{ label: 'Comisión de Confío', value: `${fmtUsd(settledFee.usd)} (${feePctLabel(settledFee.bps)}%)` }]
                 : []),
               { label: 'Recibiste', value: `≈ ${units} ${asset.ticker}`, color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
@@ -339,6 +355,7 @@ export const BuyCryptoScreen = () => {
           {belowMin && <Text style={styles.hintError}>El monto mínimo es {fmtUsd(MIN_CRYPTO_BUY_USD)}.</Text>}
           {overBalance && <Text style={styles.hintError}>Tu saldo en {fundingName} es {fmtUsd(balance)}.</Text>}
           {overCap && <Text style={styles.hintError}>El máximo por compra de {asset.ticker} es {fmtUsd(cap)}.</Text>}
+          {priceMoved && <Text style={styles.hintError} testID="crypto-price-moved">{priceMoved}</Text>}
           {tradeError && <Text style={styles.hintError}>{tradeError}</Text>}
 
           {feeBps != null && (

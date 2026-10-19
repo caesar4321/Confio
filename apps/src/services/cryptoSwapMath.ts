@@ -87,13 +87,37 @@ export const buyFloors = (params: {
   minTokenOut: slipFloor(params.quotedTokenOut, params.slipBps),
 });
 
+/**
+ * The output floor to sign for a fresh quote, bound to what the person was
+ * SHOWN: never weaker than the displayed quote's slippage floor (a fresh
+ * quote within slippage must not get a second full allowance on top), and
+ * never weaker than the relay's floor of the fresh quote. Null when the two
+ * conflict (the fresh quote is already below what the person was promised):
+ * refuse with PRICE_MOVED rather than sign a weaker floor.
+ */
+export const boundFloor = (freshOut: bigint, slipBps: bigint, displayedOut?: bigint): bigint | null => {
+  const relay = slipFloor(freshOut, slipBps);
+  if (!displayedOut || displayedOut <= 0n) return relay;
+  const shown = slipFloor(displayedOut, slipBps);
+  if (shown > freshOut) return null;
+  return shown > relay ? shown : relay;
+};
+
+/** cUSD+ shares drift only with pPlus accrual between signing and mining
+ * (well under 1 bp in an intent's ≤30 min): the dollar floor allows 1 bp,
+ * not a second market slippage. */
+export const SHARE_DRIFT_BPS = 1n;
+
 /** Floors for sell(dollar, token, amountIn, route, minUsdtOut, minDestOut, fee). */
 export const sellFloors = (params: {
   dollar: CryptoDollar;
   quotedUsdtOut: bigint;
   feeBps: bigint;
   slipBps: bigint;
+  /** Mint-side prices: pPlus and the vault's CURRENT oracle (what subscribe uses). */
   prices?: VaultPrices;
+  /** The USDT floor to sign, when bound to a displayed quote (boundFloor). */
+  minUsdtOut?: bigint;
 }): {
   minUsdtOut: bigint;
   /** Dollars that re-enter at the USDT floor, after Confío's fee. */
@@ -104,16 +128,21 @@ export const sellFloors = (params: {
   /** cUSD+ only: the relay refuses mints under SAVINGS_MIN_MINT_WEI. */
   savingsMintTooSmall: boolean;
 } => {
-  const minUsdtOut = slipFloor(params.quotedUsdtOut, params.slipBps);
+  const minUsdtOut = params.minUsdtOut ?? slipFloor(params.quotedUsdtOut, params.slipBps);
   const entryNetWei = minUsdtOut - perimeterFee(minUsdtOut, params.feeBps);
   const expectedDest = params.dollar === DOLLAR
     ? entryNetWei
     : plusSubscribeShares(entryNetWei, params.prices?.pPlusWad ?? 0n, params.prices?.oraclePriceWad ?? 0n);
+  // The USDT floor already carries the market slippage. cUSD then mints
+  // exact math (entry net, no further allowance); cUSD+ allows only share
+  // drift. Both stay at or above the relay's own slippage floor.
+  const tight = params.dollar === DOLLAR ? expectedDest : slipFloor(expectedDest, SHARE_DRIFT_BPS);
+  const relayFloor = slipFloor(expectedDest, params.slipBps);
   return {
     minUsdtOut,
     entryNetWei,
     expectedDest,
-    minDestOut: slipFloor(expectedDest, params.slipBps),
+    minDestOut: tight > relayFloor ? tight : relayFloor,
     savingsMintTooSmall: params.dollar === DOLLAR_PLUS && entryNetWei < SAVINGS_MIN_MINT_WEI,
   };
 };

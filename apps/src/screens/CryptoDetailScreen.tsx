@@ -26,6 +26,7 @@ import { CryptoAssetMark } from '../components/CryptoAssetMark';
 import { colors } from '../config/theme';
 import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
 import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket } from '../hooks/useCrypto';
+import { fromBaseUnits } from '../services/cryptoSwapMath';
 import { MainStackParamList } from '../types/navigation';
 import { useNumberFormat } from '../utils/numberFormatting';
 import {
@@ -50,10 +51,22 @@ export const CryptoDetailScreen = () => {
   const { capabilities, loading: capsLoading } = useCryptoCapabilities();
   const enabled = Boolean(capabilities?.enabled);
   const { bySymbol, loading: marketLoading } = useCryptoMarket(enabled);
-  const { holdings } = useCryptoHoldings();
+  const { holdings, loading: holdingsLoading } = useCryptoHoldings();
 
-  const asset = bySymbol(route.params.symbol);
+  const listedAsset = bySymbol(route.params.symbol);
   const position = (holdings ?? []).find((h) => h.symbol === route.params.symbol);
+  // A holding carries what a sale needs: a blocked-country or delisted
+  // holder sees their position and Vender without the catalog.
+  const asset = listedAsset ?? (position ? {
+    symbol: position.symbol,
+    ticker: position.ticker,
+    name: position.name,
+    category: position.category,
+    custody: position.custody,
+    priceUsd: null as number | null,
+    dayChangePct: null as number | null,
+    sparkline24h: null as number[] | null,
+  } : undefined);
   const holds = (() => {
     try {
       return Boolean(position) && BigInt(position!.units || '0') > 0n;
@@ -77,7 +90,7 @@ export const CryptoDetailScreen = () => {
       .join(' ');
   }, [series]);
 
-  if (!asset && (capsLoading || (enabled && marketLoading))) {
+  if (!asset && (capsLoading || holdingsLoading || (enabled && marketLoading))) {
     return (
       <View style={[styles.container, styles.center]}>
         <ActivityIndicator color={colors.primaryDark} />
@@ -85,7 +98,7 @@ export const CryptoDetailScreen = () => {
     );
   }
 
-  if (!enabled || !asset) {
+  if (!asset) {
     return (
       <View style={[styles.container, styles.center]}>
         <Text style={styles.unavailable}>
@@ -103,7 +116,9 @@ export const CryptoDetailScreen = () => {
   const chartUp = series.length >= 2 ? series[series.length - 1] >= series[0] : up;
   const funding = fundingDollarName(capabilities?.fundingDollar);
   const tradingOn = CRYPTO_TRADING_UI_ENABLED && Boolean(capabilities?.tradingEnabled);
-  const canBuy = tradingOn && Boolean(capabilities?.buyEnabled);
+  // Comprar only for a listed asset the person may buy; Vender always for a holding.
+  const canBuy = tradingOn && enabled && Boolean(capabilities?.buyEnabled)
+    && Boolean(listedAsset) && position?.listed !== false;
   const custody = custodyNote(asset.custody);
   const feeBps = capabilities?.feeBps ?? null;
 
@@ -122,7 +137,11 @@ export const CryptoDetailScreen = () => {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
-          <Text style={styles.price}>{formatUsdPrice(asset.priceUsd)}</Text>
+          <Text style={styles.price}>
+            {formatUsdPrice(asset.priceUsd ?? (position?.valueUsd != null && holds
+              ? position.valueUsd / fromBaseUnits(position.units, position.decimals)
+              : null))}
+          </Text>
           {change != null ? (
             <Text style={[styles.change, !up && styles.changeDown]}>
               {up ? '▲' : '▼'} {formatNumber(Math.abs(change), { maximumFractionDigits: 2 })}% en 24 h
@@ -178,16 +197,19 @@ export const CryptoDetailScreen = () => {
         {tradingOn ? (
           <>
             <View style={styles.ctaRow}>
+              {canBuy && (
+                <TouchableOpacity
+                  style={styles.ctaBuy}
+                  onPress={() => navigation.navigate('BuyCrypto', { symbol: asset.symbol })}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  testID="crypto-detail-buy"
+                >
+                  <Text style={styles.ctaBuyText}>Comprar</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
-                style={[styles.ctaBuy, !canBuy && styles.ctaDisabled]}
-                onPress={() => navigation.navigate('BuyCrypto', { symbol: asset.symbol })}
-                disabled={!canBuy}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-              >
-                <Text style={styles.ctaBuyText}>Comprar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+                testID="crypto-detail-sell"
                 style={[styles.ctaSell, !holds && styles.ctaDisabled]}
                 onPress={() => navigation.navigate('SellCrypto', { symbol: asset.symbol })}
                 disabled={!holds}

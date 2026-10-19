@@ -59,7 +59,9 @@ export const InvestScreen = () => {
   const { capabilities: crypto, refetch: refetchCrypto } = useCryptoCapabilities(isEmployee);
   const cryptoEnabled = Boolean(crypto?.enabled) && !isEmployee;
   const { assets: cryptoAssets } = useCryptoMarket(cryptoEnabled);
-  const { holdings: cryptoHoldings } = useCryptoHoldings(!cryptoEnabled);
+  // Always read for owners: a holder whose country was blocked, or whose
+  // token was delisted, must still see it and reach Vender.
+  const { holdings: cryptoHoldings } = useCryptoHoldings(isEmployee);
   const { data: presaleData, refetch: refetchPresale } = useQuery(GET_ACTIVE_PRESALE, { fetchPolicy: 'cache-and-network', skip: isEmployee });
   const { data: statusData, refetch: refetchStatus } = useQuery(GET_PRESALE_STATUS, { fetchPolicy: 'cache-and-network', skip: isEmployee });
   // The live curve — the same source ConfioPresaleScreen buys at. The phase
@@ -132,6 +134,19 @@ export const InvestScreen = () => {
   // null = unknown: never print a confident $0.00 for someone who holds.
   const cryptoValueKnown = cryptoHoldings !== null && heldCrypto.every(h => h.valueUsd != null);
   const cryptoTotal = heldCrypto.reduce((sum, h) => sum + (h.valueUsd ?? 0), 0);
+  // One row per listed asset (when discovery is on) plus any held asset the
+  // market doesn't list for this person: those are sell-only.
+  const listedSymbols = new Set(cryptoEnabled ? cryptoAssets.map(a => a.symbol) : []);
+  const cryptoRows = [
+    ...(cryptoEnabled ? cryptoAssets : []).map(a => ({
+      symbol: a.symbol, ticker: a.ticker, name: a.name, category: a.category,
+      priceUsd: a.priceUsd, dayChangePct: a.dayChangePct, valueUsd: null as number | null, sellOnly: false,
+    })),
+    ...heldCrypto.filter(h => !listedSymbols.has(h.symbol)).map(h => ({
+      symbol: h.symbol, ticker: h.ticker, name: h.name, category: h.category,
+      priceUsd: null as number | null, dayChangePct: null as number | null, valueUsd: h.valueUsd, sellOnly: true,
+    })),
+  ];
 
   return (
     <View style={styles.screen}>
@@ -235,11 +250,11 @@ export const InvestScreen = () => {
             </View>
           )}
 
-          {cryptoEnabled && cryptoAssets.length > 0 && (
+          {cryptoRows.length > 0 && (cryptoEnabled || holdsCrypto) && (
             <View style={styles.card} testID="invest-crypto-card">
               <View style={styles.cardHead}>
                 <View style={styles.cryptoHeadMarks}>
-                  {cryptoAssets.slice(0, 2).map((asset, index) => (
+                  {cryptoRows.slice(0, 2).map((asset, index) => (
                     <View key={asset.symbol} style={index > 0 ? styles.cryptoHeadMarkOverlap : undefined}>
                       <CryptoAssetMark ticker={asset.ticker} category={asset.category} size={index === 0 ? 34 : 30} />
                     </View>
@@ -257,7 +272,7 @@ export const InvestScreen = () => {
               </View>
 
               <View style={styles.cryptoRows}>
-                {cryptoAssets.map(asset => {
+                {cryptoRows.map(asset => {
                   const change = asset.dayChangePct;
                   const up = (change ?? 0) >= 0;
                   return (
@@ -276,10 +291,12 @@ export const InvestScreen = () => {
                       <CryptoAssetMark ticker={asset.ticker} category={asset.category} size={36} />
                       <View style={styles.cardHeadText}>
                         <Text style={styles.cryptoName}>{asset.name}</Text>
-                        <Text style={styles.cardSub}>{asset.ticker}</Text>
+                        <Text style={styles.cardSub}>{asset.sellOnly ? `${asset.ticker} · Solo venta` : asset.ticker}</Text>
                       </View>
                       <View style={styles.cardValue}>
-                        <Text style={styles.cryptoPrice}>{formatUsdPrice(asset.priceUsd)}</Text>
+                        <Text style={styles.cryptoPrice}>
+                          {asset.sellOnly ? formatUsdPrice(asset.valueUsd) : formatUsdPrice(asset.priceUsd)}
+                        </Text>
                         {change != null ? (
                           <Text style={[styles.delta, !up && styles.deltaDown]}>
                             {up ? '▲' : '▼'} {formatNumber(Math.abs(change), { maximumFractionDigits: 2 })}% 24h

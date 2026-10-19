@@ -1,5 +1,7 @@
 import {
+  boundFloor,
   buyFloors,
+  plusSubscribeShares,
   DOLLAR,
   DOLLAR_PLUS,
   exceedsMaxOrder,
@@ -64,7 +66,9 @@ describe('sell floors (relay parity)', () => {
     expect(f.minUsdtOut).toBe(97_777_777_788_777_777_777n);
     expect(f.entryNetWei).toBe(96_897_777_788_678_777_777n);
     expect(f.expectedDest).toBe(f.entryNetWei);
-    expect(f.minDestOut).toBe(95_928_800_010_791_989_999n);
+    // cUSD mints exact math: the dollar floor is the entry net itself, no
+    // second slippage (the relay's own floor, 95_928_800_010_791_989_999, is weaker).
+    expect(f.minDestOut).toBe(f.entryNetWei);
     expect(f.savingsMintTooSmall).toBe(false);
   });
 
@@ -75,7 +79,10 @@ describe('sell floors (relay parity)', () => {
     expect(f.minUsdtOut).toBe(5_377_788_777_777_778_877n);
     expect(f.entryNetWei).toBe(5_329_388_678_777_778_867n);
     expect(f.expectedDest).toBe(5_151_318_462_453_079_325n);
-    expect(f.minDestOut).toBe(5_099_805_277_828_548_531n);
+    // Only pPlus drift (1 bp) on top of the USDT floor; the relay accepts
+    // anything at or above 5_099_805_277_828_548_531.
+    expect(f.minDestOut).toBe((5_151_318_462_453_079_325n * 9_999n) / 10_000n);
+    expect(f.minDestOut).toBeGreaterThanOrEqual(5_099_805_277_828_548_531n);
   });
 
   it('flags a cUSD+ sale netting under US$1.000001, never a cUSD one', () => {
@@ -107,5 +114,54 @@ describe('units and market cost', () => {
     expect(marketCostPct(25, 3)).toBe(0.25);
     expect(marketCostPct(5, null)).toBe(0.05);
     expect(marketCostPct(null, null)).toBeNull();
+  });
+});
+
+describe('floors bound to the displayed quote (Codex P1)', () => {
+  it('a fresh quote within slippage never gets a second allowance', () => {
+    // Shown 1,000,000 at 100 bps; fresh 991,000. Old code signed 981,090
+    // (−1.891% vs shown); the bound floor keeps the promised 1%.
+    expect(boundFloor(991_000n, SLIP, 1_000_000n)).toBe(990_000n);
+  });
+
+  it('a better fresh quote raises the floor to its own relay floor', () => {
+    expect(boundFloor(1_020_000n, SLIP, 1_000_000n)).toBe(1_009_800n);
+  });
+
+  it('refuses (null) when the fresh quote is already below the promise', () => {
+    expect(boundFloor(989_999n, SLIP, 1_000_000n)).toBeNull();
+  });
+
+  it('without a displayed quote it is the relay floor', () => {
+    expect(boundFloor(1_000_000n, SLIP)).toBe(990_000n);
+  });
+
+  it('a sale signs the bound USDT floor and derives its dollar floor from it', () => {
+    const quoted = 991n * 10n ** 16n; // $9.91 fresh, $10.00 shown
+    const minUsdtOut = boundFloor(quoted, SLIP, 10n * 10n ** 18n) as bigint;
+    expect(minUsdtOut).toBe(99n * 10n ** 17n);
+    const f = sellFloors({ dollar: DOLLAR, quotedUsdtOut: quoted, feeBps: FEE, slipBps: SLIP, minUsdtOut });
+    expect(f.minUsdtOut).toBe(minUsdtOut);
+    expect(f.minDestOut).toBe(minUsdtOut - (minUsdtOut * 90n + 9_999n) / 10_000n);
+  });
+});
+
+describe('cUSD+ sale floors use the live oracle (Codex P2)', () => {
+  it('expected shares follow the current oracle the relay uses, and the floor clears the relay', () => {
+    // Codex: pPlus 1.01, lastOraclePrice 1.12, current getPrice() 1.1201,
+    // fee 90, slippage 100 bps, $13 quote.
+    const pps = 1_010_000_000_000_000_000n;
+    const last = 1_120_000_000_000_000_000n;
+    const current = 1_120_100_000_000_000_000n;
+    const quoted = 13n * 10n ** 18n;
+    const relay = sellFloors({
+      dollar: DOLLAR_PLUS, quotedUsdtOut: quoted, feeBps: FEE, slipBps: SLIP,
+      prices: { pPlusWad: pps, oraclePriceWad: current },
+    });
+    const relayFloor = slipFloor(relay.expectedDest, SLIP);
+    expect(relay.minDestOut).toBeGreaterThanOrEqual(relayFloor);
+    expect(relay.expectedDest).toBe(plusSubscribeShares(relay.entryNetWei, pps, current));
+    // The same math at the stale oracle predicts different shares.
+    expect(plusSubscribeShares(relay.entryNetWei, pps, last)).not.toBe(relay.expectedDest);
   });
 });

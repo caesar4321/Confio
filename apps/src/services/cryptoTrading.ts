@@ -16,7 +16,7 @@ import { gql } from '@apollo/client';
 import { BatchCall, encodeCall } from './evmWallet';
 import { encodeCryptoBuyCall, encodeCryptoSellCall } from './cryptoSwapAbi';
 import {
-  buyFloors,
+  boundFloor,
   CryptoDollar,
   dollarFor,
   DOLLAR,
@@ -26,11 +26,13 @@ import {
   plusRedeemGross,
   sellFloors,
   sellNetUsdt,
+  toBaseUnits,
   VaultPrices,
 } from './cryptoSwapMath';
 import { installBscServerTransport } from './bscServerRpc';
 import {
   getErc20Allowance,
+  getCurrentOraclePrice,
   getErc20BalanceWei,
   getVaultPrices,
   getVaultShares,
@@ -93,6 +95,9 @@ export const GET_CRYPTO_HOLDINGS = gql`
       symbol
       ticker
       name
+      address
+      custody
+      listed
       category
       units
       decimals
@@ -172,6 +177,13 @@ export interface CryptoHolding {
   symbol: string;
   ticker: string;
   name: string;
+  /** Everything a sale needs comes with the holding: a holder whose
+   * country was blocked (no cryptoMarket) or whose token was delisted
+   * must still be able to sell. */
+  address: string;
+  custody: string;
+  /** False = sell only (delisted or deferred): no Comprar. */
+  listed: boolean;
   category: CryptoCategory;
   /** Base units, exact. */
   units: string;
@@ -303,10 +315,15 @@ const requireSponsored = async () => {
   return sponsored.delegateAddress;
 };
 
-export const usdToWei = (value: number): bigint => {
-  if (!Number.isFinite(value) || value <= 0) return 0n;
-  const [whole, frac = ''] = value.toFixed(18).split('.');
-  return BigInt(whole) * WAD + BigInt(frac.padEnd(18, '0').slice(0, 18));
+/** Dollars → wei from the DECIMAL the person typed, never through binary
+ * float math (1.1 must be 1.1e18 exactly, not 1100000000000000089).
+ * String(number) is the shortest decimal that round-trips, i.e. what was
+ * typed; exponent forms (absurdly small/large) fall back to fixed. */
+export const usdToWei = (value: number | string): bigint => {
+  const text = typeof value === 'string' ? value.trim() : String(value);
+  if (typeof value === 'number' && (!Number.isFinite(value) || value <= 0)) return 0n;
+  const plain = /e/i.test(text) ? Number(text).toFixed(18) : text;
+  return toBaseUnits(plain, 18);
 };
 
 /** Trading config for one execution, re-read from the server every time. */
@@ -346,7 +363,7 @@ const approveCall = (token: string, spender: string): BatchCall => ({
 /** Buy preview: quote the net USDT a gross dollar amount leaves after the fee. */
 export const previewCryptoBuy = async (params: {
   symbol: string;
-  grossAmountUsd: number;
+  grossAmountUsd: number | string;
   feeBps: number;
 }): Promise<CryptoQuote & { netWei: bigint }> => {
   const { netWei } = exitUsdt(DOLLAR, usdToWei(params.grossAmountUsd), BigInt(params.feeBps));
@@ -380,11 +397,14 @@ export interface CryptoBuyResult {
   grossWei: bigint;
   feeWei: bigint;
   netWei: bigint;
+  /** The fee rate the trade was signed at (for the receipt). */
+  feeBps: number;
 }
 
 export const buyCrypto = async (params: {
   asset: Pick<CryptoAsset, 'symbol' | 'address' | 'maxOrderUsd'>;
-  grossAmountUsd: number;
+  /** The typed amount; a decimal string is converted exactly. */
+  grossAmountUsd: number | string;
   /** MAX: spend the whole funding balance. */
   spendAll?: boolean;
   /** Fee and funding dollar the screen displayed; anything else is refused. */
@@ -443,12 +463,11 @@ export const buyCrypto = async (params: {
 
   const quote = await getCryptoQuote(params.asset.symbol, 'buy', netWei);
   const expectedOut = BigInt(quote.expectedOut);
-  if (params.previewTokenOut && expectedOut < (params.previewTokenOut * (10_000n - config.slipBps)) / 10_000n) {
-    throw codedError('PRICE_MOVED', CRYPTO_PRICE_MOVED_MESSAGE);
-  }
-  const { minUsdtOut, minTokenOut } = buyFloors({
-    netUsdtWei: netWei, quotedTokenOut: expectedOut, slipBps: config.slipBps,
-  });
+  // Bound to what the screen showed: one slippage allowance in total.
+  const minTokenOut = boundFloor(expectedOut, config.slipBps, params.previewTokenOut);
+  if (minTokenOut === null) throw codedError('PRICE_MOVED', CRYPTO_PRICE_MOVED_MESSAGE);
+  // The exact exit net: never above what the exit yields (relay + router).
+  const minUsdtOut = netWei;
   if (minUsdtOut <= 0n || minTokenOut <= 0n) throw codedError('BAD_AMOUNT');
 
   const needsApprove = (await getErc20Allowance(wallet.address, config.router, pulled)) < amountIn;
@@ -469,7 +488,7 @@ export const buyCrypto = async (params: {
     },
   ];
   const result = await executeSponsoredBatch({ wallet, calls, delegateAddress, requestId });
-  return { txHash: result.txHash, tokenOutUnits: expectedOut, grossWei, feeWei, netWei };
+  return { txHash: result.txHash, tokenOutUnits: expectedOut, grossWei, feeWei, netWei, feeBps: Number(config.feeBps) };
 };
 
 export interface CryptoSellResult {
@@ -478,10 +497,13 @@ export interface CryptoSellResult {
   /** Expected dollars back (USD wei, after Confío's fee). */
   expectedNetWei: bigint;
   feeWei: bigint;
+  /** The fee rate the trade was signed at (for the receipt). */
+  feeBps: number;
   dollar: CryptoDollar;
 }
 
 export const sellCrypto = async (params: {
+  /** From the holding (cryptoHoldings) or the market: a sale never needs the catalog. */
   asset: Pick<CryptoAsset, 'symbol' | 'address'>;
   /** Base units to sell; ignored with sellAll (the exact on-chain balance). */
   units: bigint;
@@ -490,8 +512,9 @@ export const sellCrypto = async (params: {
   expectedFunding: FundingDollar;
   /** Receive the sale in Confío Dollar instead of Dollar+ (always open). */
   intoCusd?: boolean;
-  /** The preview's expected net; a fresh quote below its slippage floor stops. */
-  previewNetWei?: bigint;
+  /** The preview's quoted USDT; the signed floor never goes below its
+   * slippage floor, and a fresh quote under it stops with PRICE_MOVED. */
+  previewUsdtOut?: bigint;
   requestId?: string;
 }): Promise<CryptoSellResult> => {
   installBscServerTransport();
@@ -510,16 +533,24 @@ export const sellCrypto = async (params: {
 
   const quote = await getCryptoQuote(params.asset.symbol, 'sell', units);
   const quotedUsdt = BigInt(quote.expectedOut);
+  const minUsdtOut = boundFloor(quotedUsdt, config.slipBps, params.previewUsdtOut);
+  if (minUsdtOut === null) throw codedError('PRICE_MOVED', CRYPTO_PRICE_MOVED_MESSAGE);
   if (dollar !== DOLLAR && !addresses.vaultAddress) throw codedError('crypto_trading_disabled');
-  const prices = dollar === DOLLAR ? undefined : await getVaultPrices(addresses.vaultAddress);
+  // Minting cUSD+ runs at the vault's CURRENT oracle (ORACLE().getPrice()),
+  // as the relay's expected shares do — not lastOraclePrice().
+  let prices: VaultPrices | undefined;
+  if (dollar !== DOLLAR) {
+    const [{ pPlusWad }, oraclePriceWad] = await Promise.all([
+      getVaultPrices(addresses.vaultAddress),
+      getCurrentOraclePrice(addresses.vaultAddress),
+    ]);
+    prices = { pPlusWad, oraclePriceWad };
+  }
   const floors = sellFloors({
-    dollar, quotedUsdtOut: quotedUsdt, feeBps: config.feeBps, slipBps: config.slipBps, prices,
+    dollar, quotedUsdtOut: quotedUsdt, feeBps: config.feeBps, slipBps: config.slipBps, prices, minUsdtOut,
   });
   if (floors.savingsMintTooSmall) throw codedError('savings_mint_too_small');
   const expectedNetWei = sellNetUsdt(quotedUsdt, config.feeBps);
-  if (params.previewNetWei && expectedNetWei < (params.previewNetWei * (10_000n - config.slipBps)) / 10_000n) {
-    throw codedError('PRICE_MOVED', CRYPTO_PRICE_MOVED_MESSAGE);
-  }
   if (floors.minUsdtOut <= 0n || floors.minDestOut <= 0n) {
     throw new Error('El monto es demasiado pequeño para vender.');
   }
@@ -547,6 +578,7 @@ export const sellCrypto = async (params: {
     unitsSold: units,
     expectedNetWei,
     feeWei: quotedUsdt - expectedNetWei,
+    feeBps: Number(config.feeBps),
     dollar,
   };
 };
