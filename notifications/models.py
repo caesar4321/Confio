@@ -246,7 +246,9 @@ class FCMDeviceToken(models.Model):
         if self.failure_count >= 5:
             self.is_active = False
         
-        self.save()
+        # Only the bookkeeping fields: updated_at must keep meaning "the app
+        # last registered" (notify_outdated_builds picks the main device by it).
+        self.save(update_fields=['failure_count', 'last_failure', 'last_failure_reason', 'is_active'])
     
     def mark_success(self):
         """Reset failure count on successful send"""
@@ -254,7 +256,7 @@ class FCMDeviceToken(models.Model):
             self.failure_count = 0
             self.last_failure = None
             self.last_failure_reason = ""
-            self.save()
+            self.save(update_fields=['failure_count', 'last_failure', 'last_failure_reason'])
         
         # Update last used
         self.last_used = timezone.now()

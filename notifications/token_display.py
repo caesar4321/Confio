@@ -17,6 +17,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 TOKEN_LABELS = {
     'CUSD': 'cUSD',
+    'CUSD_BSC': 'cUSD',
     'CUSD_PLUS': 'cUSD+',
     'CONFIO': 'CONFIO',
     'USDC': 'USDC',

@@ -570,6 +570,24 @@ class CryptoHoldings(models.Model):
         return f'{self.bsc_address} - {len(self.held)} positions'
 
 
+class CryptoTrade(models.Model):
+    """The exact settlement of one confirmed crypto/metal swap, written from
+    its receipt events with the history row (cusd_plus/unified.py). A buy's
+    units exist only in the receipt (the DEX decides them), so this is the
+    ledger that realized and live P&L (Comunidad shares) read."""
+    batch = models.OneToOneField(SponsoredBatch, on_delete=models.CASCADE, related_name='crypto_trade')
+    wallet = models.CharField(max_length=42, db_index=True, help_text='Lowercase BSC wallet address')
+    symbol = models.CharField(max_length=20)
+    kind = models.CharField(max_length=16, help_text='crypto_buy | crypto_sell')
+    units = models.DecimalField(max_digits=50, decimal_places=18, help_text='Token units bought or sold')
+    usd = models.DecimalField(max_digits=30, decimal_places=18,
+                              help_text='USD that left (buy) or re-entered (sell) Confío dollars, fee included')
+    traded_at = models.DateTimeField()
+
+    def __str__(self):
+        return f'{self.kind} {self.units} {self.symbol} (${self.usd})'
+
+
 class CryptoPricePoint(models.Model):
     """A PancakeSwap $100-buy price for one catalog token
     (cusd_plus/crypto_prices.py), every 15 minutes, kept 8 days. Source of

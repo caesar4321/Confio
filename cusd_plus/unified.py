@@ -312,7 +312,13 @@ def crypto_history_prefix(category: str) -> str:
 
 
 def _crypto_event_amount(receipt, kind: str, user_addr: str, router_addr: str, asset_addr: str):
-    """Exact USD value that left (buy) or re-entered (sell) Confío dollars.
+    settled = _crypto_event_settlement(receipt, kind, user_addr, router_addr, asset_addr)
+    return settled['usd_wei'] if settled else None
+
+
+def _crypto_event_settlement(receipt, kind: str, user_addr: str, router_addr: str, asset_addr: str):
+    """{'usd_wei', 'units'} from the receipt: the exact USD value that left
+    (buy) or re-entered (sell) Confío dollars, and the token units traded.
 
     The router event gives the USDT that crossed the DEX; cUSD's own
     settlement event in the same receipt gives the perimeter fee. A buy debits
@@ -334,6 +340,7 @@ def _crypto_event_amount(receipt, kind: str, user_addr: str, router_addr: str, a
     user_topic = (user_addr or '').lower().replace('0x', '').rjust(64, '0')
     asset_topic = (asset_addr or '').lower().replace('0x', '').rjust(64, '0')
     usdt = None
+    units = None
     for log in receipt.get('logs') or []:
         topics = log.get('topics') or []
         if ((log.get('address') or '').lower() != (router_addr or '').lower()
@@ -345,10 +352,12 @@ def _crypto_event_amount(receipt, kind: str, user_addr: str, router_addr: str, a
             raw = bytes.fromhex((log.get('data') or '0x')[2:])
             if len(raw) != 32 * 4:
                 continue
-            _dollar, _amount_in, usdt_crossed, _out = decode(['uint256'] * 4, raw)
+            _dollar, amount_in, usdt_crossed, out = decode(['uint256'] * 4, raw)
         except (TypeError, ValueError):
             continue
         usdt = int(usdt_crossed)
+        # Buy: tokens the user received; sell: tokens the user gave up.
+        units = int(out) if kind == 'crypto_buy' else int(amount_in)
         break
     if usdt is None:
         return None
@@ -356,7 +365,8 @@ def _crypto_event_amount(receipt, kind: str, user_addr: str, router_addr: str, a
     fees = [e['fee_wei'] for e in _cusd_fee_events(receipt) if e['direction'] == direction]
     if len(fees) != 1:
         return None
-    return usdt + fees[0] if kind == 'crypto_buy' else usdt - fees[0]
+    usd_wei = usdt + fees[0] if kind == 'crypto_buy' else usdt - fees[0]
+    return {'usd_wei': usd_wei, 'units': units}
 
 
 def sync_unified_from_crypto_batch(batch, receipt=None, *, require_event: bool = False) -> None:
@@ -391,12 +401,11 @@ def sync_unified_from_crypto_batch(batch, receipt=None, *, require_event: bool =
         raise ValueError('crypto batch account not found')
 
     router = (getattr(settings, 'CRYPTO_SWAP_ROUTER_ADDRESS', '') or '').lower()
-    amount_wei = _crypto_event_amount(
+    settled = _crypto_event_settlement(
         receipt, batch.kind, batch.user_bsc_address, router, action['asset'])
-    if amount_wei is None and require_event:
+    if settled is None and require_event:
         raise ValueError('crypto receipt has no matching exact settlement event')
-    if amount_wei is None:
-        amount_wei = int(action['history_amount_wei'])
+    amount_wei = settled['usd_wei'] if settled else int(action['history_amount_wei'])
     amount = format((Decimal(amount_wei) / Decimal(10 ** 18)).normalize(), 'f')
     token = action['token']
     is_buy = batch.kind == 'crypto_buy'
@@ -438,6 +447,21 @@ def sync_unified_from_crypto_batch(batch, receipt=None, *, require_event: bool =
             **relation,
         },
     )
+    if settled is not None:
+        from blockchain.models import CryptoTrade
+
+        token = action['token']
+        CryptoTrade.objects.update_or_create(
+            batch=batch,
+            defaults={
+                'wallet': batch.user_bsc_address.lower(),
+                'symbol': token.symbol,
+                'kind': batch.kind,
+                'units': Decimal(settled['units']) / Decimal(10 ** token.decimals),
+                'usd': Decimal(settled['usd_wei']) / Decimal(10 ** 18),
+                'traded_at': batch.created_at,
+            },
+        )
     # A scanner may have seen the dollar mint on a sell before finality as an
     # "external" deposit: this swap owns that movement.
     now = timezone.now()

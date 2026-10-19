@@ -300,6 +300,21 @@ class CryptoHistoryAmountTests(SimpleTestCase):
         self.assertEqual(_crypto_event_amount(receipt, 'crypto_sell', USER, ROUTER, BTCB.address),
                          991 * WAD // 10)
 
+    def test_settlement_carries_exact_units(self):
+        from cusd_plus.unified import _crypto_event_settlement
+
+        buy = self._receipt('crypto_buy', 991 * WAD // 10,
+                            'SavingsExitSettled(address,uint256,uint256,uint256,uint256)', 9 * 10 ** 17,
+                            ['0x' + ROUTER[2:].rjust(64, '0')])
+        self.assertEqual(_crypto_event_settlement(buy, 'crypto_buy', USER, ROUTER, BTCB.address),
+                         {'usd_wei': 100 * WAD, 'units': 10 ** 15})
+        sell = self._receipt('crypto_sell', 100 * WAD,
+                             'MintedWithFee(address,address,uint256,uint256,uint256,uint256)', 9 * 10 ** 17,
+                             ['0x' + ROUTER[2:].rjust(64, '0'), '0x' + USER[2:].rjust(64, '0')])
+        # Sell: the units the user gave up (amountIn), not the router's output.
+        self.assertEqual(_crypto_event_settlement(sell, 'crypto_sell', USER, ROUTER, BTCB.address)['units'],
+                         100 * WAD)
+
     def test_missing_router_event_is_unknown(self):
         from cusd_plus.unified import _crypto_event_amount
 

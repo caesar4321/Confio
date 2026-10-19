@@ -943,7 +943,8 @@ class CommunityPostViewerType(graphene.ObjectType):
 class ActivityShareType(graphene.ObjectType):
     """What a post made from a money movement shows. Amounts are strings
     with two decimals; any of them is null when hidden or unknown."""
-    # stock_buy | stock_sell | top_up | withdraw | send | receive | pay
+    # stock_buy | stock_sell | crypto_buy | crypto_sell | top_up | withdraw
+    # | send | receive | pay. Older builds render an unknown kind by headline.
     kind = graphene.String(required=True)
     # The activity's day (YYYY-MM-DD); never a time.
     date = graphene.String()
@@ -963,17 +964,36 @@ class ActivityShareType(graphene.ObjectType):
     pnl_pct = graphene.String()
     # Purchases only: 'open' | 'closed'
     position = graphene.String()
+    # Crypto-class posts: 'crypto' | 'metal' (null for stocks and others).
+    category = graphene.String()
     headline = graphene.String(required=True)
 
 
-def build_activity_type(public: dict, raw: dict) -> ActivityShareType:
+# Builds that predate crypto posts render an unknown kind badly (amount twice,
+# a sale's P&L labelled "Desde la compra"); they do render stock kinds right.
+_LEGACY_KIND = {'crypto_buy': 'stock_buy', 'crypto_sell': 'stock_sell'}
+
+
+def _client_kind(kind: str, meta) -> str:
+    """The kind this client can render: crypto kinds become their stock
+    twin for builds below CRYPTO_SHARE_MIN_APP_VERSION (blank = every build,
+    until the release with crypto screens ships)."""
+    if kind not in _LEGACY_KIND:
+        return kind
+    from users.paid_offers import _at_least
+
+    return kind if _at_least(meta, 'CRYPTO_SHARE_MIN_APP_VERSION') else _LEGACY_KIND[kind]
+
+
+def build_activity_type(public: dict, raw: dict, meta=None) -> ActivityShareType:
     return ActivityShareType(
-        kind=public['kind'], date=public.get('date'), amount_usd=public.get('amount_usd'),
+        kind=_client_kind(public['kind'], meta), date=public.get('date'), amount_usd=public.get('amount_usd'),
         ticker=public.get('ticker'), name=public.get('name'), rail=public.get('rail'),
         country=public.get('country'), minutes=public.get('minutes'), merchant=public.get('merchant'),
         local=public.get('local'),
         pnl_usd=public.get('pnl_usd'),
         pnl_pct=public.get('pnl_pct'), position=public.get('position'),
+        category=public.get('category'),
         headline=activity_share.activity_headline(raw),
     )
 
@@ -1003,7 +1023,7 @@ class ShareableActivityType(graphene.ObjectType):
 
 
 
-def _shareable_activity_result(user, business, unified_transaction_id, group, reference, sheet):
+def _shareable_activity_result(user, business, unified_transaction_id, group, reference, sheet, meta=None):
     if sheet:
         preview = activity_share.preview_activity(user, group, reference)
         if preview is None:
@@ -1022,7 +1042,7 @@ def _shareable_activity_result(user, business, unified_transaction_id, group, re
     return ShareableActivityType(
         unified_transaction_id=str(row.id) if row is not None else None,
         pending=not final,
-        activity=build_activity_type(public, raw),
+        activity=build_activity_type(public, raw, meta),
         can_share=block is None,
         block_code=block,
         block_message=community.BLOCK_MESSAGES.get(block) if block else None,
@@ -2043,7 +2063,8 @@ class Query(graphene.ObjectType):
                 content_item_id=str(item.id),
                 author_id=str(item.owner_user_id) if show_author else None,
                 note=(item.body or '') if raw else None,
-                activity=build_activity_type(public, raw) if public else None,
+                activity=(build_activity_type(public, raw, getattr(info.context, 'META', {}))
+                          if public else None),
             ))
         return out
 
@@ -2054,7 +2075,9 @@ class Query(graphene.ObjectType):
         if business is not None:
             return None
         sheet = bool(allow_pending and reference and unified_transaction_id is None)
-        result = _shareable_activity_result(user, business, unified_transaction_id, group, reference, sheet)
+        result = _shareable_activity_result(
+            user, business, unified_transaction_id, group, reference, sheet,
+            meta=getattr(info.context, 'META', {}))
         if sheet:
             # The share sheet asked: remember what it was offered and by which build.
             from . import share_impressions

@@ -37,15 +37,25 @@ logger = logging.getLogger(__name__)
 
 STOCK_BUY = 'stock_buy'
 STOCK_SELL = 'stock_sell'
+CRYPTO_BUY = 'crypto_buy'
+CRYPTO_SELL = 'crypto_sell'
 TOP_UP = 'top_up'
 WITHDRAW = 'withdraw'
 SEND = 'send'
 RECEIVE = 'receive'
 PAY = 'pay'
-KINDS = (STOCK_BUY, STOCK_SELL, TOP_UP, WITHDRAW, SEND, RECEIVE, PAY)
+KINDS = (STOCK_BUY, STOCK_SELL, CRYPTO_BUY, CRYPTO_SELL, TOP_UP, WITHDRAW, SEND, RECEIVE, PAY)
+# Investment trades share one P&L engine (average cost over the wallet's own
+# Confío trades of the same asset class).
+STOCK_KINDS = (STOCK_BUY, STOCK_SELL)
+CRYPTO_KINDS = (CRYPTO_BUY, CRYPTO_SELL)
+BUY_KINDS = (STOCK_BUY, CRYPTO_BUY)
+SELL_KINDS = (STOCK_SELL, CRYPTO_SELL)
 # What a success screen asks for: the newest unshared activity of its group.
 GROUPS = {
     'stock': (STOCK_BUY, STOCK_SELL),
+    # Crypto & metals swaps (ConfioSwapRouter): one group for both classes.
+    'crypto': (CRYPTO_BUY, CRYPTO_SELL),
     # Ramp orders and local-account transfers: a local transfer can also be
     # a QR payment, a send to someone else, or money received from someone.
     'ramp': (TOP_UP, WITHDRAW, PAY, SEND, RECEIVE),
@@ -57,6 +67,7 @@ GROUPS = {
 # local transfer can be a send or a payment, like a Confío send or a Pay).
 GROUP_SOURCES = {
     'stock': ('sponsored_batch_id',),
+    'crypto': ('sponsored_batch_id',),
     'ramp': ('ramp_transaction_id', 'local_money_flow_id'),
     'send': ('send_transaction_id',),
     'receive': ('send_transaction_id',),
@@ -129,6 +140,8 @@ def snapshot_for(row, user) -> Snapshot | None:
         return None
     try:
         if row.sponsored_batch_id:
+            if row.sponsored_batch.kind in CRYPTO_KINDS:
+                return _crypto_snapshot(row, user)
             return _stock_snapshot(row, user)
         if row.ramp_transaction_id:
             return _ramp_snapshot(row, user)
@@ -202,7 +215,7 @@ def _realized(trades, batch_id) -> tuple[Decimal, Decimal] | None:
             return cost * min(t.units / units, Decimal('1')), t.usd
         if t.usd is None:
             return None
-        if t.kind == STOCK_BUY:
+        if t.kind in BUY_KINDS:
             units += t.units
             cost += t.usd
         else:
@@ -250,6 +263,84 @@ def _stock_snapshot(row, user) -> Snapshot | None:
             pnl = proceeds - basis
             data['pnl_usd'] = _money(pnl)
             data['pnl_pct'] = format((pnl / basis * 100).quantize(Decimal('0.01')), 'f') if basis > 0 else None
+    return Snapshot(batch.kind, data)
+
+
+def _crypto_wallet_trades(bsc_address):
+    """[(batch_id, Trade)] for every confirmed Confío crypto/metal swap of
+    the wallet, oldest first, from the exact CryptoTrade ledger."""
+    from blockchain.models import CryptoTrade
+    from cusd_plus.stock_month import Trade
+
+    from blockchain.models import SponsoredBatch
+
+    wallet = (bsc_address or '').lower()
+    rows = list(CryptoTrade.objects.filter(wallet=wallet, batch__status='confirmed')
+                .order_by('traded_at', 'batch_id'))
+    trades = [(r.batch_id, Trade(symbol=r.symbol, kind=r.kind, units=r.units, usd=r.usd, when=r.traded_at))
+              for r in rows]
+    # A confirmed swap without its ledger row (not synced yet, or older than
+    # the ledger) makes every average cost unexplainable: an unreadable
+    # trade ('?' symbol) poisons P&L instead of silently skewing it.
+    have = {r.batch_id for r in rows}
+    for batch in SponsoredBatch.objects.filter(
+            user_bsc_address__iexact=wallet, kind__in=CRYPTO_KINDS, status='confirmed').exclude(id__in=have):
+        trades.append((batch.id, Trade(symbol=f'?{batch.id}', kind=batch.kind, units=Decimal('0'),
+                                       usd=None, when=batch.created_at)))
+    trades.sort(key=lambda item: (item[1].when, item[0]))
+    return trades
+
+
+def _crypto_token(symbol: str):
+    from cusd_plus.crypto_catalog import by_symbol
+
+    return by_symbol(symbol, include_unlisted=True)
+
+
+def _crypto_data(batch, symbol: str, units: Decimal, usd: Decimal) -> dict | None:
+    token = _crypto_token(symbol)
+    if token is None or units <= 0 or usd <= 0:
+        return None
+    return {
+        'kind': batch.kind,
+        'symbol': symbol,
+        'ticker': token.ticker,
+        'name': token.name,
+        'category': token.category,
+        'units': format(units.normalize(), 'f'),
+        'amount_usd': _money(usd),
+        'price_usd': format((usd / units).quantize(Decimal('0.0001')), 'f'),
+        'date': _date(batch.created_at),
+        # Server-side only, for live P&L; never serialized.
+        'wallet': batch.user_bsc_address.lower(),
+        'batch_id': batch.id,
+    }
+
+
+def _with_realized(data: dict, trades, batch_id) -> dict:
+    realized = _realized(trades, batch_id)
+    if realized is not None:
+        basis, proceeds = realized
+        pnl = proceeds - basis
+        data['pnl_usd'] = _money(pnl)
+        data['pnl_pct'] = format((pnl / basis * 100).quantize(Decimal('0.01')), 'f') if basis > 0 else None
+    return data
+
+
+def _crypto_snapshot(row, user) -> Snapshot | None:
+    batch = row.sponsored_batch
+    if batch.kind not in CRYPTO_KINDS or batch.status != 'confirmed':
+        return None
+    if _personal_account(user, batch.user_bsc_address) is None:
+        return None
+    trade = getattr(batch, 'crypto_trade', None)
+    if trade is None:
+        return None
+    data = _crypto_data(batch, trade.symbol, trade.units, trade.usd)
+    if data is None:
+        return None
+    if batch.kind == CRYPTO_SELL:
+        data = _with_realized(data, _crypto_wallet_trades(batch.user_bsc_address), batch.id)
     return Snapshot(batch.kind, data)
 
 
@@ -600,6 +691,16 @@ def approve_template(review_id: int) -> str:
 
 # ── Reading ──────────────────────────────────────────────────────────────────
 
+def _crypto_price_map() -> dict:
+    try:
+        from cusd_plus.crypto_prices import latest_prices
+
+        return latest_prices()
+    except Exception:  # noqa: BLE001 — no live price: the post shows no live P&L
+        logger.warning('activity share: live crypto prices unavailable')
+        return {}
+
+
 def _price_map() -> dict:
     try:
         from cusd_plus import gm_api
@@ -622,13 +723,15 @@ def _position_state(activity, trades_by_wallet) -> tuple[str, Decimal | None]:
     wallet = activity.get('wallet')
     if not wallet:
         return 'unknown', None
-    if wallet not in trades_by_wallet:
+    crypto = activity.get('kind') in CRYPTO_KINDS
+    key = ('crypto' if crypto else 'stock', wallet)
+    if key not in trades_by_wallet:
         try:
-            trades_by_wallet[wallet] = _wallet_trades(wallet)
+            trades_by_wallet[key] = (_crypto_wallet_trades if crypto else _wallet_trades)(wallet)
         except Exception:  # noqa: BLE001
             logger.warning('activity share: could not read trades of a wallet')
-            trades_by_wallet[wallet] = None
-    trades = trades_by_wallet[wallet]
+            trades_by_wallet[key] = None
+    trades = trades_by_wallet[key]
     if not trades:
         return 'unknown', None
     symbol = activity['symbol']
@@ -639,7 +742,7 @@ def _position_state(activity, trades_by_wallet) -> tuple[str, Decimal | None]:
             return 'unknown', None
         if t.symbol != symbol:
             continue
-        units += t.units if t.kind == STOCK_BUY else -t.units
+        units += t.units if t.kind in BUY_KINDS else -t.units
         if units < 0 and -units > t.units * UNITS_TOLERANCE:
             # Sold more than Confío's ledger holds: units came from outside.
             return 'unknown', None
@@ -647,7 +750,7 @@ def _position_state(activity, trades_by_wallet) -> tuple[str, Decimal | None]:
             found = True
             peak = units
             continue
-        if found and t.kind == STOCK_SELL and units <= peak * UNITS_TOLERANCE:
+        if found and t.kind in SELL_KINDS and units <= peak * UNITS_TOLERANCE:
             if not t.usd or t.units <= 0:
                 return 'unknown', None
             return 'closed', t.usd / t.units
@@ -661,6 +764,7 @@ def activity_payloads(items) -> dict:
     `items`. Only whitelisted fields leave the server; live P&L is computed
     here for purchases."""
     prices = None
+    crypto_prices = None
     trades_by_wallet: dict = {}
     out = {}
     for item in items:
@@ -682,18 +786,25 @@ def activity_payloads(items) -> dict:
             'pnl_usd': None,
             'pnl_pct': None,
             'position': None,
+            # 'crypto' | 'metal' for crypto-class posts (absent for stocks).
+            'category': activity.get('category'),
         }
-        if activity['kind'] == STOCK_SELL:
+        if activity['kind'] in SELL_KINDS:
             public['pnl_pct'] = activity.get('pnl_pct')
             public['pnl_usd'] = activity.get('pnl_usd') if show_amount else None
-        elif activity['kind'] == STOCK_BUY:
+        elif activity['kind'] in BUY_KINDS:
             buy_price = _dec(activity.get('price_usd'))
             state, close_price = _position_state(activity, trades_by_wallet)
             price = close_price
             if state == 'open':
-                if prices is None:
-                    prices = _price_map()
-                price = prices.get(activity.get('symbol'))
+                if activity['kind'] == CRYPTO_BUY:
+                    if crypto_prices is None:
+                        crypto_prices = _crypto_price_map()
+                    price = crypto_prices.get(activity.get('symbol'))
+                else:
+                    if prices is None:
+                        prices = _price_map()
+                    price = prices.get(activity.get('symbol'))
             public['position'] = state if state != 'unknown' else None
             if state != 'unknown' and buy_price and price:
                 pct = (price / buy_price - 1) * 100
@@ -708,6 +819,8 @@ def activity_payloads(items) -> dict:
 KIND_VERBS = {
     STOCK_BUY: 'Compró',
     STOCK_SELL: 'Vendió',
+    CRYPTO_BUY: 'Compró',
+    CRYPTO_SELL: 'Vendió',
     TOP_UP: 'Recargó',
     WITHDRAW: 'Retiró',
     SEND: 'Envió dinero a otro usuario de Confío',
@@ -723,11 +836,11 @@ def activity_headline(activity: dict) -> str:
     verb = KIND_VERBS.get(kind, 'Compartió una actividad')
     amount = activity.get('amount_usd') if activity.get('show_amount', True) else None
     money = f'US${amount}' if amount else None
-    if kind in (STOCK_BUY, STOCK_SELL):
+    if kind in BUY_KINDS + SELL_KINDS:
         parts = [f"{verb} {activity.get('ticker') or ''}".strip()]
         if money:
             parts.append(money)
-        if kind == STOCK_SELL and activity.get('pnl_pct') is not None:
+        if kind in SELL_KINDS and activity.get('pnl_pct') is not None:
             pct = _dec(activity['pnl_pct'])
             if pct is not None:
                 parts.append(f"{'+' if pct >= 0 else ''}{pct}%")
@@ -814,6 +927,7 @@ def public_activity(raw: dict) -> dict:
 
 INTENT_WINDOWS = {
     'stock': timedelta(hours=2),
+    'crypto': timedelta(hours=2),
     'send': timedelta(hours=2),
     'pay': timedelta(hours=2),
     'ramp': timedelta(hours=48),
@@ -926,7 +1040,55 @@ def _pay_preview(user, reference):
     return _pay_snapshot(payment, payment.amount if payment else None, user, final=False) if payment else None
 
 
-PREVIEWERS = {'stock': _stock_preview, 'send': _send_preview, 'ramp': _ramp_preview, 'pay': _pay_preview}
+def _crypto_preview(user, reference):
+    """Preview from the signed calldata while the swap settles. A buy's
+    units are the user's signed floor (≈), the USD the dollar exit; what is
+    published always comes from the final CryptoTrade row."""
+    from blockchain.models import SponsoredBatch
+    from cusd_plus.crypto_policy import CryptoPolicyError, decode_crypto_call
+    from cusd_plus.stock_month import Trade
+
+    if not (reference or '').lower().startswith('0x'):
+        return None
+    batch = SponsoredBatch.objects.filter(
+        tx_hash__iexact=reference, kind__in=CRYPTO_KINDS,
+        status__in=('signed', 'sent', 'confirmed')).first()
+    if batch is None or _personal_account(user, batch.user_bsc_address) is None:
+        return None
+    try:
+        actions = [a for c in json.loads(batch.calls_json or '[]')
+                   if (a := decode_crypto_call(c, historical=True)) is not None]
+    except (CryptoPolicyError, ValueError):
+        return None
+    if len(actions) != 1 or actions[0]['kind'] != batch.kind:
+        return None
+    action = actions[0]
+    token = action['token']
+    raw_units = action['min_out'] if batch.kind == CRYPTO_BUY else action['amount_in']
+    units = Decimal(raw_units) / Decimal(10 ** token.decimals)
+    fee_bps = int(action['max_fee'])  # the router binds it to cUSD's live fee
+    floor = Decimal(int(action['min_usdt']))
+    if batch.kind == CRYPTO_SELL:
+        # The signed USDT floor minus the entry fee: what at least re-enters.
+        usd_wei = floor - (floor * fee_bps + 9_999) // 10_000
+    elif action['dollar'] == 1:  # cUSD: the exact gross that leaves
+        usd_wei = Decimal(int(action['amount_in']))
+    else:  # cUSD+: gross that yields the net floor after the exit fee
+        usd_wei = floor * 10_000 / (10_000 - fee_bps)
+    usd = usd_wei / Decimal(10 ** 18)
+    data = _crypto_data(batch, token.symbol, units, usd)
+    if data is None:
+        return None
+    if batch.kind == CRYPTO_SELL:
+        trades = [(bid, t) for bid, t in _crypto_wallet_trades(batch.user_bsc_address) if bid != batch.id]
+        trades.append((batch.id, Trade(symbol=token.symbol, kind=CRYPTO_SELL, units=units, usd=usd,
+                                       when=batch.created_at)))
+        data = _with_realized(data, trades, batch.id)
+    return Snapshot(batch.kind, data)
+
+
+PREVIEWERS = {'stock': _stock_preview, 'crypto': _crypto_preview, 'send': _send_preview,
+              'ramp': _ramp_preview, 'pay': _pay_preview}
 
 
 def _row_for_reference(user, reference):
