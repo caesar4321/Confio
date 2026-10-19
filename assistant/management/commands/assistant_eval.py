@@ -74,6 +74,9 @@ SCENARIOS = {
     'newuser': [
         'Ahorrar en dólares',
         'Que mi dinero no pierda valor',
+        # A real reply on 2026-10-18 ended with "primero reviso tu portafolio"
+        # and no tool call: it must answer, not promise.
+        'Para generar ingresos',
     ],
     # Asked from Venezuela, where there is no Recargar/Retirar yet (Pago Móvil is
     # coming): a real reply on 2026-10-08 said local top-ups and withdrawals work.
@@ -93,6 +96,8 @@ SCENARIOS = {
     'topup_estimate': [
         'Si deposito 500 bolivianos, ¿cuánto estará en mi cuenta de Confío?',
         '¿Cuántos dólares me llegan si recargo 1000 Bs?',
+        # A real reply on 2026-10-18 answered "about US$0.85" from the Home rate.
+        'Y si mi dinero es en Bolivianos cuánto me lo cambia en dólares por ejemplo 10 bs',
     ],
     'network': [
         'Mandé USDT desde Binance por la red ERC20 a mi dirección de Confío y no me llega',
