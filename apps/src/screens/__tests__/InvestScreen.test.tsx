@@ -51,6 +51,12 @@ jest.mock('../../hooks/useSavingsPortfolio', () => ({
     },
   }),
 }));
+// Bitcoin & gold are covered in InvestScreen.crypto.test.tsx; off here.
+jest.mock('../../hooks/useCrypto', () => ({
+  useCryptoCapabilities: () => ({ capabilities: null, refetch: () => Promise.resolve() }),
+  useCryptoMarket: () => ({ assets: [] }),
+  useCryptoHoldings: () => ({ holdings: null }),
+}));
 jest.mock('../../contexts/AccountContext', () => ({ useAccount: () => ({ activeAccount: { isEmployee: mockEmployee } }) }));
 jest.mock('../../apollo/queries', () => ({
   GET_ACTIVE_PRESALE: 'active', GET_PRESALE_STATUS: 'status',
@@ -98,6 +104,8 @@ it('shows each door with a live signal: market tickers and the raise progress', 
   const t = text(tree);
   expect(t).toContain('S&P 500');
   expect(t).toContain('NASDAQ 100');
+  // Gold has its own card now: never twice on this tab.
+  expect(t).not.toContain('"Oro"');
   expect(t).toContain('Participar en la preventa');
   expect(t).toContain('Fase 1');
   expect(t).toContain('312 participantes');

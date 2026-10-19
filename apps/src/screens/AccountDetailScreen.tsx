@@ -63,6 +63,7 @@ import { colors } from '../config/theme';
 import { getTierMeta } from '../components/StatusTierBadge';
 import { formatTokenLabel, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
 import { formatDecimal, formatPercent, parseAmountInput } from '../utils/numberLocale';
+import { investmentTitle, isInvestmentMovement } from '../utils/investmentMovement';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 // Color palette
@@ -802,7 +803,7 @@ export const AccountDetailScreen = () => {
 
         // A stock sale is an internal Ondo settlement, not money deposited
         // by a stranger, even though Ondo has no Confío user identity.
-        const isStockMovement = tx.description?.startsWith('Ondo Stocks: ');
+        const isStockMovement = isInvestmentMovement(tx.description);
         const isExternalDeposit = !isStockMovement && !isReward && type === 'received' && tx.senderType?.toLowerCase() === 'external';
         const rewardDescription = isReward ? (tx.displayDescription || tx.description || 'Recompensa por referidos') : undefined;
         const presaleDescription = isPresale ? (tx.displayDescription || tx.description || 'Compra de preventa $CONFIO') : undefined;
@@ -1051,9 +1052,7 @@ export const AccountDetailScreen = () => {
 
   // Helper functions for transaction display
   const getTransactionTitle = (transaction: Transaction) => {
-    const stockTitle = transaction.description?.startsWith('Ondo Stocks: ')
-      ? transaction.description.slice('Ondo Stocks: '.length)
-      : undefined;
+    const stockTitle = investmentTitle(transaction.description);
 
     // Debug payment transactions
     if (transaction.type === 'payment') {
@@ -1104,7 +1103,7 @@ export const AccountDetailScreen = () => {
   // arrives typed as a plain send or receive, so the journey id is what tells
   // it apart — without this it fell through to the default arrow.
   const getTransactionVisual = (transaction: Transaction) => {
-    const kind = transaction.description?.startsWith('Ondo Stocks: ') ? 'stocks'
+    const kind = isInvestmentMovement(transaction.description) ? 'stocks'
       : transaction.localTransferId ? 'local_transfer'
       : transaction.type;
     // Credits carry a leading +, which is the same signal the row already
@@ -1321,7 +1320,7 @@ export const AccountDetailScreen = () => {
     const isPresaleTransaction = transaction.type === 'presale';
 
     // Determine if counterparty is an external wallet (no phone + address present + no user)
-    const isStockMovement = transaction.description?.startsWith('Ondo Stocks: ');
+    const isStockMovement = isInvestmentMovement(transaction.description);
     const isExternalSent = !isStockMovement && transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
     // senderType is the server's own answer about the SENDER, so it settles a
     // received row on its own. The fallback below cannot: hasCounterpartyUser
@@ -1351,9 +1350,7 @@ export const AccountDetailScreen = () => {
       if (transaction.localTransferId) return transaction.description || (transaction.type === 'sent'
         ? 'Envío a banco o billetera' : 'Ingreso por cuenta local');
       let baseTitle = '';
-      const stockTitle = transaction.description?.startsWith('Ondo Stocks: ')
-        ? transaction.description.slice('Ondo Stocks: '.length)
-        : undefined;
+      const stockTitle = investmentTitle(transaction.description);
       switch (transaction.type) {
         case 'received':
           baseTitle = stockTitle || `Recibido de ${contactInfo.displayName}`;
@@ -1514,7 +1511,7 @@ export const AccountDetailScreen = () => {
               return from && to ? `${from} → ${to}` : undefined;
             })() :
             isStockMovement
-              ? transaction.description?.slice('Ondo Stocks: '.length) :
+              ? investmentTitle(transaction.description) :
             transaction.type === 'ramp' && transaction.rampDirection === 'off_ramp' ? 'Retiro' :
             transaction.type === 'ramp' ? 'Recarga' :
             transaction.type === 'humanitarian' ? transaction.description :

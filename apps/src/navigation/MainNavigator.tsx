@@ -30,6 +30,9 @@ import { StocksListScreen } from '../screens/StocksListScreen';
 import { StockDetailScreen } from '../screens/StockDetailScreen';
 import { BuyStockScreen } from '../screens/BuyStockScreen';
 import { SellStockScreen } from '../screens/SellStockScreen';
+import { CryptoDetailScreen } from '../screens/CryptoDetailScreen';
+import { BuyCryptoScreen } from '../screens/BuyCryptoScreen';
+import { SellCryptoScreen } from '../screens/SellCryptoScreen';
 import { FinancierasScreen } from '../screens/FinancierasScreen';
 import { FinancieraDetailScreen } from '../screens/FinancieraDetailScreen';
 import { FinancieraReviewScreen } from '../screens/FinancieraReviewScreen';
@@ -396,6 +399,27 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="SellStock"
           component={SellStockScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="CryptoDetail"
+          component={CryptoDetailScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="BuyCrypto"
+          component={BuyCryptoScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="SellCrypto"
+          component={SellCryptoScreen}
           options={{
             headerShown: false,
           }}

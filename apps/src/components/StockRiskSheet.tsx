@@ -22,6 +22,9 @@ type Props = {
   onClose: () => void;
   /** Reload the disclosure, e.g. after the server says the text changed. */
   onRefresh: () => Promise<unknown>;
+  /** Saves the confirmation of `version`. Defaults to the leveraged-fund
+   * mutation; Bitcoin & gold pass acknowledgeCryptoRisk. */
+  acknowledge?: (version: number) => Promise<{ success: boolean; error?: string | null } | null | undefined>;
 };
 
 /**
@@ -29,8 +32,12 @@ type Props = {
  * any of them. Selling never asks. The server refuses the purchase without
  * this confirmation, so the sheet is the only way through, never a formality.
  */
-export function StockRiskSheet({ visible, title, points, version, onAccepted, beginAccept, onClose, onRefresh }: Props) {
-  const [acknowledge, { loading: saving }] = useMutation(ACKNOWLEDGE_GM_COMPLEX_PRODUCTS);
+export function StockRiskSheet({
+  visible, title, points, version, onAccepted, beginAccept, onClose, onRefresh, acknowledge: acknowledgeOther,
+}: Props) {
+  const [acknowledgeGm, { loading: savingGm }] = useMutation(ACKNOWLEDGE_GM_COMPLEX_PRODUCTS);
+  const [savingOther, setSavingOther] = useState(false);
+  const saving = savingGm || savingOther;
   const [error, setError] = useState<string | null>(null);
   const ready = version !== null && points.length > 0;
 
@@ -39,8 +46,18 @@ export function StockRiskSheet({ visible, title, points, version, onAccepted, be
     const token = beginAccept?.();
     setError(null);
     try {
-      const { data } = await acknowledge({ variables: { version } });
-      const result = data?.acknowledgeGmComplexProducts;
+      let result: { success: boolean; error?: string | null } | null | undefined;
+      if (acknowledgeOther) {
+        setSavingOther(true);
+        try {
+          result = await acknowledgeOther(version as number);
+        } finally {
+          setSavingOther(false);
+        }
+      } else {
+        const { data } = await acknowledgeGm({ variables: { version } });
+        result = data?.acknowledgeGmComplexProducts;
+      }
       if (!result?.success) {
         if (result?.error === 'OUTDATED_DISCLOSURE') {
           setError('El texto cambió. Léelo de nuevo antes de confirmar.');

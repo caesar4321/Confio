@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApolloClient } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 
-import { GET_COMMUNITY_POST_EXTRAS } from '../apollo/queries';
+import { GET_COMMUNITY_POST_CATEGORIES, GET_COMMUNITY_POST_EXTRAS } from '../apollo/queries';
 import type { ActivityShare } from '../components/ActivitySummary';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 
@@ -36,6 +36,9 @@ export function useCommunityPostExtras(
   const [extras, setExtras] = useState<Record<number, CommunityPostExtras>>({});
   const requested = useRef(new Set<string>());
   const unsupported = useRef(false);
+  // Bitcoin & gold `category`: a separate, newer read (see the query).
+  const [categories, setCategories] = useState<Record<number, string | null>>({});
+  const categoriesUnsupported = useRef(false);
   const mounted = useRef(true);
   const [round, setRound] = useState(0);
   const newRound = useCallback(() => {
@@ -86,6 +89,31 @@ export function useCommunityPostExtras(
             for (const row of rows) next[Number(row.contentItemId)] = row;
             return next;
           });
+          // Trades only (a crypto post may arrive spelled stock_* on
+          // older-build paths; the category is what tells them apart).
+          const trades = rows
+            .filter((row) => /^(stock|crypto)_(buy|sell)$/.test(row.activity?.kind || ''))
+            .map((row) => String(row.contentItemId));
+          if (!trades.length || categoriesUnsupported.current) return;
+          client
+            .query({
+              query: GET_COMMUNITY_POST_CATEGORIES,
+              variables: { contentItemIds: trades },
+              fetchPolicy: 'network-only',
+            })
+            .then((res) => {
+              const found: Array<{ contentItemId: string; activity?: { category?: string | null } | null }> =
+                res?.data?.communityPostExtras || [];
+              if (!mounted.current || !found.length) return;
+              setCategories((previous) => {
+                const next = { ...previous };
+                for (const row of found) next[Number(row.contentItemId)] = row.activity?.category ?? null;
+                return next;
+              });
+            })
+            .catch((categoryError) => {
+              if (isSchemaMismatch(categoryError)) categoriesUnsupported.current = true;
+            });
         })
         .catch((error) => {
           if (isSchemaMismatch(error)) {
@@ -97,5 +125,17 @@ export function useCommunityPostExtras(
     }
   }, [client, enabled, key, round]);
 
-  return extras;
+  return useMemo(() => {
+    const ids = Object.keys(categories);
+    if (!ids.length) return extras;
+    const merged = { ...extras };
+    for (const id of ids) {
+      const row = merged[Number(id)];
+      const category = categories[Number(id)];
+      if (row?.activity && category && !row.activity.category) {
+        merged[Number(id)] = { ...row, activity: { ...row.activity, category } };
+      }
+    }
+    return merged;
+  }, [extras, categories]);
 }

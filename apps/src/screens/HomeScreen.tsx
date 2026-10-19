@@ -26,7 +26,8 @@ import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
-import StocksMark from '../components/svg/StocksMark';
+import InvestMark from '../components/svg/InvestMark';
+import { useInvestmentsSummary } from '../hooks/useInvestmentsSummary';
 import { colors } from '../config/theme';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import InviteClaimBanner from '../components/InviteClaimBanner';
@@ -226,6 +227,8 @@ export const HomeScreen = () => {
   // Ahorros e Inversiones portfolio total for the wallet-row entry (stubbed
   // until the cUSD+/stocks backend lands; single wiring point in the hook).
   const savingsPortfolio = useSavingsPortfolio();
+  // Stocks + Bitcoin + gold: one row, one term in the total.
+  const investments = useInvestmentsSummary();
   // Cuenta inteligente probe row (waitlist only): the server decides who sees
   // it (flag on, never employees, this build or newer).
   const smartAccountRow = usePaidOffers().smart_account?.rowVisible === true;
@@ -583,17 +586,17 @@ export const HomeScreen = () => {
   // price plus the cUSD+ savings position AND raw wallet USDT (Mercado Pago
   // model: the spendable AND yielding dollars are one headline number, and
   // money must never vanish between transient USDT landing and the silent
-  // cUSD/cUSD+ conversion). Stocks stay
-  // out — the home number must never have a red day; Acciones live in
-  // their own row.
+  // cUSD/cUSD+ conversion), plus the Inversiones row's known value
+  // (stocks, Bitcoin, gold) as exactly one term. Deltas and red days
+  // still live one tap away in Invertir, never on Home.
   const totalUSDValue = React.useMemo(
     () =>
       cUSDBalance + usdcBalance + confioUsdValue +
       savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd +
-      savingsPortfolio.usdtBalanceUsd,
+      savingsPortfolio.usdtBalanceUsd + investments.totalUsd,
     [cUSDBalance, usdcBalance, confioUsdValue,
      savingsPortfolio.savings.balanceUsd, savingsPortfolio.cusdBalanceUsd,
-     savingsPortfolio.usdtBalanceUsd]
+     savingsPortfolio.usdtBalanceUsd, investments.totalUsd]
   );
 
   // Use real exchange rate from API only - no fallbacks
@@ -842,16 +845,6 @@ export const HomeScreen = () => {
   // Positions never swap (muscle memory). Only the emphasis moves: with
   // nothing to send, the useful door is Recibir, so it is the filled one.
   const balancesLoaded = !myBalancesLoading && !savingsPortfolio.loading;
-  // Positions, not the dollar total: a position marked at $0.00 is still
-  // something the user owns.
-  const hasStockHoldings = savingsPortfolio.stocks.positions.length > 0
-    || savingsPortfolio.stocks.totalUsd > 0;
-  // One short line like the other wallets (founder 2026-10-06): company
-  // names wrapped to three lines here; they live in the Invertir tab.
-  const stockCount = savingsPortfolio.stocks.positions.length;
-  const stockHoldingsSummary = stockCount === 0
-    ? 'Inversiones · Ondo'
-    : `${stockCount} ${stockCount === 1 ? 'acción' : 'acciones'}`;
   const primaryAction: 'send' | 'receive' =
     balancesLoaded && totalUSDValue < 0.01 ? 'receive' : 'send';
 
@@ -1716,46 +1709,40 @@ export const HomeScreen = () => {
                 </View>
               </Pressable>
 
-              {/* Acciones de EE.UU. — investments get their own row (split
-                  from the old combined Ahorros hub): stocks have red days
-                  and belong visually apart from the payment dollar. Shown
-                  for stocks-enabled users and anyone still holding. */}
-              {/* Issuer eligibility is authoritative: cached holdings must
-                  never resurrect the U.S. stocks surface for a blocked geo. */}
-              {savingsPortfolio.stocks.enabled && (
+              {/* Inversiones — ONE row for U.S. stocks, Bitcoin and gold
+                  (founder 2026-10-19): investments have red days and sit
+                  apart from the payment dollar; the breakdown and the
+                  deltas live in the Invertir tab. Shown when any surface is
+                  enabled or anything is held. Stock eligibility stays
+                  authoritative inside the summary (cached holdings never
+                  resurrect stocks for a blocked geo). */}
+              {investments.visible && (
                 <Pressable
                   style={({ pressed }) => [
                     styles.walletCard,
                     pressed && { opacity: 0.7 }
                   ]}
-                  onPress={() => navigation.navigate('StocksList')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Inversiones"
+                  accessibilityHint="Abre Invertir"
+                  onPress={() => navigation.navigate('BottomTabs', { screen: 'Invest' })}
                 >
                   <View style={styles.walletCardContent}>
-                    {/* NOT a token logo: this slot holds 400+ tickers, not one
-                        asset — it once wore the cUSD+ mark and read as a
-                        second Confío Dollar+ row. It is a category mark with
-                        its own navy disc (design review 12, S1), so it belongs
-                        in the column without posing as a coin; the plain
-                        Feather arrow it replaced read as a button. Ondo's logo is deliberately not it: they issue
-                        the shares, they don't own the slot (attribution stays
-                        the "En alianza con" line inside the hub). */}
+                    {/* A category mark, not a token logo: the row holds
+                        stocks, metal and coins (design review 12, S1). */}
                     <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
-                      <StocksMark size={44} />
+                      <InvestMark size={44} />
                     </View>
-                    {/* Nothing invested yet: the subtitle invites, the balance
-                        is a plain $0,00 like any wallet (the Invertir tab is
-                        the place to explore; no "Explorar" pill here). */}
                     <View style={styles.walletInfo}>
-                      <Text style={styles.walletName}>Acciones de EE.UU.</Text>
-                      <Text style={styles.walletSymbol}>
-                        {hasStockHoldings ? stockHoldingsSummary : 'Compra fracciones con tus dólares'}
-                      </Text>
+                      <Text style={styles.walletName}>Inversiones</Text>
+                      <Text style={styles.walletSymbol} numberOfLines={1}>{investments.subtitle}</Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
                       <Text style={styles.walletBalanceText}>
-                        {(canViewBalance && showBalance)
-                          ? `$${formatFixedFloor(savingsPortfolio.stocks.totalUsd, 2)}`
-                          : '••••'}
+                        {!(canViewBalance && showBalance)
+                          ? '••••'
+                          : !investments.totalKnown ? '—'
+                          : `$${formatFixedFloor(investments.totalUsd, 2)}`}
                       </Text>
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>

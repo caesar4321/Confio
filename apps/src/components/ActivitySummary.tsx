@@ -6,10 +6,11 @@ import { useRampCountry } from '../hooks/useRampCountry';
 import Icon from 'react-native-vector-icons/Feather';
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
+import { CryptoAssetMark } from './CryptoAssetMark';
 
 /** What a Comunidad post made from a money movement shows (communityPostExtras.activity). */
 export type ActivityShare = {
-  kind: 'stock_buy' | 'stock_sell' | 'top_up' | 'withdraw' | 'send' | 'receive' | 'pay' | string;
+  kind: 'stock_buy' | 'stock_sell' | 'crypto_buy' | 'crypto_sell' | 'top_up' | 'withdraw' | 'send' | 'receive' | 'pay' | string;
   date?: string | null;
   amountUsd?: string | null;
   ticker?: string | null;
@@ -24,8 +25,25 @@ export type ActivityShare = {
   pnlUsd?: string | null;
   pnlPct?: string | null;
   position?: 'open' | 'closed' | string | null;
+  /** Bitcoin & gold posts: 'crypto' | 'metal'. Builds below the server's
+   * CRYPTO_SHARE_MIN_APP_VERSION get these as stock_buy/stock_sell, so a
+   * set category, not the kind, is what marks a crypto/gold post. */
+  category?: 'crypto' | 'metal' | string | null;
   headline: string;
 };
+
+/** 'crypto' | 'metal' for a Bitcoin & gold post, whichever kind spelling it came with; null otherwise. */
+export function cryptoCategoryOf(a: Pick<ActivityShare, 'kind' | 'category'>): string | null {
+  if (a.category) return a.category;
+  return a.kind === 'crypto_buy' || a.kind === 'crypto_sell' ? 'crypto' : null;
+}
+
+/** buy | sell for any investment trade (stock or crypto, either spelling); null otherwise. */
+export function tradeSide(a: Pick<ActivityShare, 'kind'>): 'buy' | 'sell' | null {
+  if (a.kind === 'stock_buy' || a.kind === 'crypto_buy') return 'buy';
+  if (a.kind === 'stock_sell' || a.kind === 'crypto_sell') return 'sell';
+  return null;
+}
 
 const COUNTRY_NAMES: Record<string, string> = {
   AR: 'Argentina', BO: 'Bolivia', BR: 'Brasil', CL: 'Chile', CO: 'Colombia', EC: 'Ecuador',
@@ -55,6 +73,11 @@ const ICONS: Record<string, string> = {
 };
 
 function titleFor(a: ActivityShare): string {
+  const side = tradeSide(a);
+  if (side && cryptoCategoryOf(a)) {
+    const what = a.ticker || (cryptoCategoryOf(a) === 'metal' ? 'oro' : 'cripto');
+    return `${side === 'buy' ? 'Compró' : 'Vendió'} ${what}`;
+  }
   switch (a.kind) {
     case 'stock_buy':
       return `Compró ${a.ticker || 'acciones'}`;
@@ -76,7 +99,7 @@ function titleFor(a: ActivityShare): string {
 }
 
 function detailFor(a: ActivityShare): string | null {
-  if (a.kind === 'stock_buy' || a.kind === 'stock_sell') {
+  if (tradeSide(a)) {
     return a.name && a.name !== a.ticker ? a.name : null;
   }
   if (a.kind === 'top_up' || a.kind === 'withdraw') {
@@ -99,7 +122,7 @@ function PnlLine({ a }: { a: ActivityShare }) {
   const n = Number(a.pnlPct);
   const color = n > 0 ? colors.flowIn.text : n < 0 ? colors.error.icon : colors.text.secondary;
   const label =
-    a.kind === 'stock_sell' ? 'Resultado' : a.position === 'closed' ? 'Al vender' : 'Desde la compra';
+    tradeSide(a) === 'sell' ? 'Resultado' : a.position === 'closed' ? 'Al vender' : 'Desde la compra';
   const money = a.pnlUsd ? ` (${signed(a.pnlUsd).replace(/^([+−]?)/, '$1US$')})` : '';
   return (
     <Text style={[styles.pnl, { color }]}>
@@ -117,6 +140,11 @@ const OWNER_ONLY_ROUTES = new Set(['TopUp', 'Sell']);
  * same thing themselves. Null when there's nowhere sensible to go.
  */
 export function activityDestination(activity: ActivityShare): { route: string; params?: object; label: string } | null {
+  // Bitcoin & gold: the Invertir tab, where the card lists them (the
+  // detail screen needs the market's symbol, which a post doesn't carry).
+  if (tradeSide(activity) && cryptoCategoryOf(activity)) {
+    return { route: 'BottomTabs', params: { screen: 'Invest' }, label: 'Ver oro y bitcoin' };
+  }
   switch (activity.kind) {
     case 'stock_buy':
     case 'stock_sell':
@@ -160,9 +188,15 @@ export function ActivitySummary({
   const destination = useActivityDestination(navigable ? activity : null);
   const content = (
     <View style={[styles.box, compact && styles.compact]}>
-      <View style={styles.icon}>
-        <Icon name={ICONS[activity.kind] || 'activity'} size={18} color={colors.flowIn.textSmall} />
-      </View>
+      {cryptoCategoryOf(activity) && tradeSide(activity) ? (
+        <View style={styles.markIcon} testID="activity-crypto-mark">
+          <CryptoAssetMark ticker={activity.ticker} category={cryptoCategoryOf(activity)} size={32} />
+        </View>
+      ) : (
+        <View style={styles.icon}>
+          <Icon name={ICONS[activity.kind] || 'activity'} size={18} color={colors.flowIn.textSmall} />
+        </View>
+      )}
       <View style={styles.body}>
         <View style={styles.row}>
           <Text style={styles.title} numberOfLines={1}>
@@ -203,7 +237,7 @@ export function useActivityDestination(activity: ActivityShare | null | undefine
 /** What a screen reader says for the activity: the movement itself. */
 export const activityAccessibilityLabel = (activity: ActivityShare) => {
   const parts = [activity.headline];
-  if (activity.pnlPct && activity.kind === 'stock_buy') {
+  if (activity.pnlPct && tradeSide(activity) === 'buy') {
     parts.push(`${activity.position === 'closed' ? 'al vender' : 'desde la compra'} ${activity.pnlPct}%`);
   }
   return parts.join(', ');
@@ -268,6 +302,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  markIcon: { width: 32, height: 32 },
   body: { flex: 1, gap: 2 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   title: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text.primary },

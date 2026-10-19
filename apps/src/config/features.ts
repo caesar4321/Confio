@@ -15,3 +15,9 @@ export const CUSD_CONVERSION_UI_ENABLED = false;
 // capability is ON; the server's stocksTradingEnabled / stocksBuyEnabled
 // fields remain the operational and jurisdiction-aware kill switches.
 export const STOCKS_TRADING_UI_ENABLED = true;
+
+// CRYPTO_TRADING_UI_ENABLED — the Comprar/Vender entry points for Bitcoin &
+// gold (CryptoDetail CTAs + Buy/SellCrypto screens). Compiled ON like
+// stocks; the server's cryptoCapabilities (enabled / tradingEnabled /
+// buyEnabled) stay the operational and country-aware switches.
+export const CRYPTO_TRADING_UI_ENABLED = true;

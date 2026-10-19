@@ -573,7 +573,15 @@ export function deriveIntentId(calls: BatchCall[], requestId?: string): string {
   const wrapCusd = selector('wrapCusd(uint256,uint256,address)').slice(2);
   const unwrapToCusd = selector('unwrapToCusd(uint256,uint256,address)').slice(2);
   const mintCusd = selector('mintWithFee(uint256,uint256,address)').slice(2);
-  const kind = selectors.has(stockBuy)
+  // Bitcoin & gold (ConfioSwapRouter) first: a crypto buy's dollar exit is
+  // not a redeem. Same order as sponsor_7702.classify_calls_kind.
+  const cryptoBuy = selector('buy(uint8,uint256,uint256,bytes,address,uint256,uint256)').slice(2);
+  const cryptoSell = selector('sell(uint8,address,uint256,bytes,uint256,uint256,uint256)').slice(2);
+  const kind = selectors.has(cryptoBuy)
+    ? 'crypto_buy'
+    : selectors.has(cryptoSell)
+      ? 'crypto_sell'
+      : selectors.has(stockBuy)
     ? 'stock_buy'
     : selectors.has(stockSell)
       ? 'stock_sell'

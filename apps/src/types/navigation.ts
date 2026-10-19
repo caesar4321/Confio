@@ -195,6 +195,10 @@ export type MainStackParamList = {
   StockDetail: { ticker: string };
   BuyStock: { ticker: string };
   SellStock: { ticker: string };
+  // Bitcoin & gold (ConfioSwapRouter): keyed by the catalog symbol (BTCB, XAUT).
+  CryptoDetail: { symbol: string };
+  BuyCrypto: { symbol: string };
+  SellCrypto: { symbol: string };
   Financieras: undefined;
   FinancieraDetail: { financieraId: string };
   FinancieraReview: { financieraId: string };

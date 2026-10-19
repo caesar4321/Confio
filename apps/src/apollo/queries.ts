@@ -4963,6 +4963,21 @@ export const GET_SHAREABLE_ACTIVITY = gql`
   }
 `;
 
+// Bitcoin & gold posts add `category`. On its own query: an older server
+// rejects the unknown field, and only this read fails (the cards still
+// render from the kind).
+export const GET_COMMUNITY_POST_CATEGORIES = gql`
+  query GetCommunityPostCategories($contentItemIds: [ID!]!) {
+    communityPostExtras(contentItemIds: $contentItemIds) {
+      contentItemId
+      activity {
+        kind
+        category
+      }
+    }
+  }
+`;
+
 export const COMMUNITY_MEMBER_PROFILE_FIELDS = `
   id
   username
@@ -5072,6 +5087,25 @@ export const GET_SHARE_SHEET_ACTIVITY = gql`
       noteMaxChars
       activity {
         ${ACTIVITY_SHARE_FIELDS}
+      }
+    }
+  }
+`;
+
+// The same sheet for a Bitcoin or gold trade (group 'crypto'): only servers
+// that know that group, and so `category`, are ever asked.
+export const GET_SHARE_SHEET_CRYPTO_ACTIVITY = gql`
+  query GetShareSheetCryptoActivity($group: String!, $reference: String!) {
+    shareableActivity(group: $group, reference: $reference, allowPending: true) {
+      unifiedTransactionId
+      pending
+      canShare
+      blockCode
+      blockMessage
+      noteMaxChars
+      activity {
+        ${ACTIVITY_SHARE_FIELDS}
+        category
       }
     }
   }

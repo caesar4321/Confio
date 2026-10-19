@@ -51,6 +51,7 @@ import { formatTokenLabel, explorerFor, conversionPair, isConversionIncoming, se
 import { phoneKeyToE164, parsePhoneKey } from '../utils/phoneKey';
 import { transactionFriendRoute } from '../utils/transactionFriend';
 import { formatDecimal, formatPercent } from '../utils/numberLocale';
+import { isInvestmentMovement } from '../utils/investmentMovement';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -851,7 +852,7 @@ export const TransactionDetailScreen = () => {
   // Their route payload is already complete; querying sendTransaction(id:
   // unified-row-id) only produces a misleading not-found request and flash.
   const isStockMovement = Boolean((transactionData as any)?.isStockMovement)
-    || String((transactionData as any)?.description || '').startsWith('Ondo Stocks: ');
+    || isInvestmentMovement(String((transactionData as any)?.description || ''));
   const needsFetch = Boolean(
     !isStockMovement &&
     (transactionData?.id || transactionData?.transaction_id) &&
@@ -1569,7 +1570,7 @@ export const TransactionDetailScreen = () => {
     const raw = tx?.amount;
     const incoming = typeof raw === 'string' ? !raw.startsWith('-') : Number(raw) >= 0;
     const kind = tx?.localTransferId ? 'local_transfer'
-      : typeof tx?.description === 'string' && tx.description.startsWith('Ondo Stocks: ') ? 'stocks'
+      : isInvestmentMovement(tx?.description) ? 'stocks'
       : tx?.type;
     const visual = transactionVisual(kind, incoming);
     return <Glyph name={visual.glyph} color={visual.color} size={24} />;

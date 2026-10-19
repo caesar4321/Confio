@@ -14,17 +14,22 @@ import {
 } from '../apollo/queries';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import StocksMark from '../components/svg/StocksMark';
+import { CryptoAssetMark } from '../components/CryptoAssetMark';
 import OndoLogo from '../assets/png/Ondo.png';
 import { FEATURED_STOCK_TICKERS } from '../config/stockPresentation';
 import { colors } from '../config/theme';
 import { useAccount } from '../contexts/AccountContext';
 import { useGmMarket } from '../hooks/useGmMarket';
+import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket } from '../hooks/useCrypto';
+import { formatUsdPrice } from '../utils/cryptoPresentation';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { MainStackParamList } from '../types/navigation';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
+
+const METAL_ETF_TICKERS = new Set(['GLD', 'SLV']);
 
 const num = (v: unknown): number | null => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
@@ -49,6 +54,12 @@ export const InvestScreen = () => {
   const isEmployee = Boolean(activeAccount?.isEmployee);
 
   const { stocks: market } = useGmMarket(stocks.enabled && !isEmployee);
+  // Bitcoin & gold: its own country policy, separate from Ondo's. The list is
+  // whatever the server lists (two at launch); nothing is hard-coded here.
+  const { capabilities: crypto, refetch: refetchCrypto } = useCryptoCapabilities(isEmployee);
+  const cryptoEnabled = Boolean(crypto?.enabled) && !isEmployee;
+  const { assets: cryptoAssets } = useCryptoMarket(cryptoEnabled);
+  const { holdings: cryptoHoldings } = useCryptoHoldings(!cryptoEnabled);
   const { data: presaleData, refetch: refetchPresale } = useQuery(GET_ACTIVE_PRESALE, { fetchPolicy: 'cache-and-network', skip: isEmployee });
   const { data: statusData, refetch: refetchStatus } = useQuery(GET_PRESALE_STATUS, { fetchPolicy: 'cache-and-network', skip: isEmployee });
   // The live curve — the same source ConfioPresaleScreen buys at. The phase
@@ -65,19 +76,22 @@ export const InvestScreen = () => {
   useFocusEffect(
     useCallback(() => {
       if (isEmployee) return;
+      refetchCrypto().catch(() => {});
       refetchPresale().catch(() => {});
       refetchStatus().catch(() => {});
       refetchCurve().catch(() => {});
       if (claimsOpen) refetchOnchain().catch(() => {});
-    }, [isEmployee, claimsOpen, refetchPresale, refetchStatus, refetchCurve, refetchOnchain]),
+    }, [isEmployee, claimsOpen, refetchCrypto, refetchPresale, refetchStatus, refetchCurve, refetchOnchain]),
   );
 
   const usd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
-  // Today's market in three names people know: the featured indices/metals.
+  // Today's market in names people know: the featured indices. Gold has its
+  // own card now (Oro y Bitcoin), so Ondo's gold/silver ETFs stay inside the
+  // stocks list but leave this strip — gold is never shown twice here.
   const tickerStrip = useMemo(
-    () => FEATURED_STOCK_TICKERS.slice(0, 3)
+    () => FEATURED_STOCK_TICKERS.filter(ticker => !METAL_ETF_TICKERS.has(ticker)).slice(0, 3)
       .map(ticker => market.find(stock => stock.ticker === ticker))
       .filter((stock): stock is NonNullable<typeof stock> => !!stock),
     [market],
@@ -111,6 +125,13 @@ export const InvestScreen = () => {
 
   const holdsStocks = stocks.positions.length > 0 || stocks.totalUsd > 0;
   const todayDelta = formatUsdDeltaAbs(stocks.earnedTodayUsd);
+  const heldCrypto = (cryptoHoldings ?? []).filter(h => {
+    try { return BigInt(h.units || '0') > 0n; } catch { return false; }
+  });
+  const holdsCrypto = heldCrypto.length > 0;
+  // null = unknown: never print a confident $0.00 for someone who holds.
+  const cryptoValueKnown = cryptoHoldings !== null && heldCrypto.every(h => h.valueUsd != null);
+  const cryptoTotal = heldCrypto.reduce((sum, h) => sum + (h.valueUsd ?? 0), 0);
 
   return (
     <View style={styles.screen}>
@@ -211,6 +232,69 @@ export const InvestScreen = () => {
                 </View>
               </View>
               <Text style={styles.mutedNote}>No se ofrece a residentes de EE.UU. ni de Brasil.</Text>
+            </View>
+          )}
+
+          {cryptoEnabled && cryptoAssets.length > 0 && (
+            <View style={styles.card} testID="invest-crypto-card">
+              <View style={styles.cardHead}>
+                <View style={styles.cryptoHeadMarks}>
+                  {cryptoAssets.slice(0, 2).map((asset, index) => (
+                    <View key={asset.symbol} style={index > 0 ? styles.cryptoHeadMarkOverlap : undefined}>
+                      <CryptoAssetMark ticker={asset.ticker} category={asset.category} size={index === 0 ? 34 : 30} />
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.cardHeadText}>
+                  <Text style={styles.cardTitle}>Oro y Bitcoin</Text>
+                  <Text style={styles.cardSub}>{holdsCrypto ? 'Tu inversión' : 'Para guardar valor, 24/7'}</Text>
+                </View>
+                {holdsCrypto && (
+                  <View style={styles.cardValue}>
+                    <Text style={styles.cardValueText}>{cryptoValueKnown ? usd(cryptoTotal) : '—'}</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.cryptoRows}>
+                {cryptoAssets.map(asset => {
+                  const change = asset.dayChangePct;
+                  const up = (change ?? 0) >= 0;
+                  return (
+                    <Pressable
+                      key={asset.symbol}
+                      accessibilityRole="button"
+                      accessibilityLabel={asset.name}
+                      accessibilityHint={[
+                        asset.priceUsd != null ? `Precio ${formatUsdPrice(asset.priceUsd)}` : null,
+                        change != null ? `24 horas ${up ? 'más' : 'menos'} ${formatNumber(Math.abs(change), { maximumFractionDigits: 2 })}%` : null,
+                        'Abre el detalle',
+                      ].filter(Boolean).join('. ')}
+                      onPress={() => navigation.navigate('CryptoDetail', { symbol: asset.symbol })}
+                      style={({ pressed }) => [styles.cryptoRow, pressed && styles.pressed]}
+                    >
+                      <CryptoAssetMark ticker={asset.ticker} category={asset.category} size={36} />
+                      <View style={styles.cardHeadText}>
+                        <Text style={styles.cryptoName}>{asset.name}</Text>
+                        <Text style={styles.cardSub}>{asset.ticker}</Text>
+                      </View>
+                      <View style={styles.cardValue}>
+                        <Text style={styles.cryptoPrice}>{formatUsdPrice(asset.priceUsd)}</Text>
+                        {change != null ? (
+                          <Text style={[styles.delta, !up && styles.deltaDown]}>
+                            {up ? '▲' : '▼'} {formatNumber(Math.abs(change), { maximumFractionDigits: 2 })}% 24h
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Icon name="chevron-right" size={18} color={colors.text.light} />
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {/* Stated on the card: these move day and night. */}
+              <Text style={styles.riskNote}>
+                Su precio sube y baja todo el tiempo, también de noche y en fines de semana.
+              </Text>
             </View>
           )}
 
@@ -315,6 +399,20 @@ const styles = StyleSheet.create({
   cardValue: { alignItems: 'flex-end' },
   cardValueText: { fontSize: 18, fontWeight: '800', color: colors.text.primary },
   confioLogo: { width: 44, height: 44, borderRadius: 22 },
+  cryptoHeadMarks: { flexDirection: 'row', alignItems: 'center', width: 44 },
+  cryptoHeadMarkOverlap: { marginLeft: -20, marginTop: 14 },
+  cryptoRows: { marginTop: 12 },
+  cryptoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 56,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  cryptoName: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  cryptoPrice: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
 
   tickers: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
   ticker: {
