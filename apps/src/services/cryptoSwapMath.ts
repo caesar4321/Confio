@@ -105,8 +105,30 @@ export const boundFloor = (freshOut: bigint, slipBps: bigint, displayedOut?: big
 
 /** cUSD+ shares drift only with pPlus accrual between signing and mining
  * (well under 1 bp in an intent's ≤30 min): the dollar floor allows 1 bp,
- * not a second market slippage. */
+ * not a second market slippage. The growth pending since the vault's last
+ * interaction is NOT drift: projectPPlus prices it in first. */
 export const SHARE_DRIFT_BPS = 1n;
+
+const WAD = 10n ** 18n;
+
+/**
+ * pPlus after the accrue() that subscribeAndMint runs first: holders keep
+ * (1 − CONFIO_YIELD_SHARE_BPS/1e4) of the oracle growth since
+ * lastOraclePrice. Mirrors CusdPlusVault._applyGrowth to the wei (mulDiv
+ * floors = bigint division on non-negatives). No growth (or a lower read,
+ * which trips the guard and reverts anyway) leaves pPlus unchanged.
+ */
+export const projectPPlus = (
+  pPlusWad: bigint,
+  lastOracleWad: bigint,
+  currentOracleWad: bigint,
+  yieldShareBps: bigint,
+): bigint => {
+  if (lastOracleWad <= 0n || currentOracleWad <= lastOracleWad) return pPlusWad;
+  const growthWad = ((currentOracleWad - lastOracleWad) * WAD) / lastOracleWad;
+  const keptWad = (growthWad * (BPS - yieldShareBps)) / BPS;
+  return (pPlusWad * (WAD + keptWad)) / WAD;
+};
 
 /** Floors for sell(dollar, token, amountIn, route, minUsdtOut, minDestOut, fee). */
 export const sellFloors = (params: {
@@ -114,8 +136,12 @@ export const sellFloors = (params: {
   quotedUsdtOut: bigint;
   feeBps: bigint;
   slipBps: bigint;
-  /** Mint-side prices: pPlus and the vault's CURRENT oracle (what subscribe uses). */
+  /** Mint-side prices: STORED pPlus and the vault's CURRENT oracle (what
+   * the relay prices the expected shares at). */
   prices?: VaultPrices;
+  /** pPlus after the mint's own accrue() (projectPPlus): what the shares
+   * will actually be minted at. Defaults to the stored pPlus. */
+  projectedPPlusWad?: bigint;
   /** The USDT floor to sign, when bound to a displayed quote (boundFloor). */
   minUsdtOut?: bigint;
 }): {
@@ -130,14 +156,18 @@ export const sellFloors = (params: {
 } => {
   const minUsdtOut = params.minUsdtOut ?? slipFloor(params.quotedUsdtOut, params.slipBps);
   const entryNetWei = minUsdtOut - perimeterFee(minUsdtOut, params.feeBps);
+  const oracle = params.prices?.oraclePriceWad ?? 0n;
+  const storedPps = params.prices?.pPlusWad ?? 0n;
   const expectedDest = params.dollar === DOLLAR
     ? entryNetWei
-    : plusSubscribeShares(entryNetWei, params.prices?.pPlusWad ?? 0n, params.prices?.oraclePriceWad ?? 0n);
+    : plusSubscribeShares(entryNetWei, params.projectedPPlusWad ?? storedPps, oracle);
   // The USDT floor already carries the market slippage. cUSD then mints
   // exact math (entry net, no further allowance); cUSD+ allows only share
-  // drift. Both stay at or above the relay's own slippage floor.
+  // drift on top of the projected accrual. Both stay at or above the
+  // relay's own slippage floor, which it prices at the STORED pPlus.
   const tight = params.dollar === DOLLAR ? expectedDest : slipFloor(expectedDest, SHARE_DRIFT_BPS);
-  const relayFloor = slipFloor(expectedDest, params.slipBps);
+  const relayExpected = params.dollar === DOLLAR ? entryNetWei : plusSubscribeShares(entryNetWei, storedPps, oracle);
+  const relayFloor = slipFloor(relayExpected, params.slipBps);
   return {
     minUsdtOut,
     entryNetWei,

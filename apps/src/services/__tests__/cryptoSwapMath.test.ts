@@ -2,6 +2,7 @@ import {
   boundFloor,
   buyFloors,
   plusSubscribeShares,
+  projectPPlus,
   DOLLAR,
   DOLLAR_PLUS,
   exceedsMaxOrder,
@@ -163,5 +164,43 @@ describe('cUSD+ sale floors use the live oracle (Codex P2)', () => {
     expect(relay.expectedDest).toBe(plusSubscribeShares(relay.entryNetWei, pps, current));
     // The same math at the stale oracle predicts different shares.
     expect(plusSubscribeShares(relay.entryNetWei, pps, last)).not.toBe(relay.expectedDest);
+  });
+});
+
+describe('cUSD+ sale floor with pending accrual (Codex P2, re-review)', () => {
+  const ONE = 10n ** 18n;
+  const stored = ONE;          // pPlus and lastOraclePrice both 1.0
+  const current = 1_000_200_000_000_000_000n; // oracle 1.0002
+  const share = 1_500n;        // CONFIO_YIELD_SHARE_BPS
+
+  it('projects pPlus exactly like _applyGrowth', () => {
+    expect(projectPPlus(stored, ONE, current, share)).toBe(1_000_170_000_000_000_000n);
+    // mulDiv floors at each step.
+    const growth = ((1_000_000_000_000_000_007n - ONE) * ONE) / ONE;
+    expect(projectPPlus(ONE, ONE, 1_000_000_000_000_000_007n, share)).toBe((ONE * (ONE + (growth * 8_500n) / 10_000n)) / ONE);
+    expect(projectPPlus(stored, ONE, ONE, share)).toBe(stored);
+    expect(projectPPlus(stored, ONE, ONE - 1n, share)).toBe(stored); // a lower read trips the guard instead
+  });
+
+  it('a sale settling at its USDT floor never reverts on "insufficient dollars out"', () => {
+    // $100 shown; the fresh quote sits at the permitted $99 floor and the
+    // swap delivers exactly that.
+    const minUsdtOut = boundFloor(99n * ONE, SLIP, 100n * ONE) as bigint;
+    expect(minUsdtOut).toBe(99n * ONE);
+    const prices = { pPlusWad: stored, oraclePriceWad: current };
+    const projected = projectPPlus(stored, ONE, current, share);
+    const f = sellFloors({
+      dollar: DOLLAR_PLUS, quotedUsdtOut: 99n * ONE, feeBps: FEE, slipBps: SLIP, prices, minUsdtOut,
+      projectedPPlusWad: projected,
+    });
+    // What the vault mints after accrue(): usdy = net·1e18/p, shares = usdy·p/pPlus'.
+    const entry = minUsdtOut - (minUsdtOut * FEE + 9_999n) / 10_000n;
+    const minted = (((entry * ONE) / current) * current) / projected;
+    expect(f.minDestOut).toBeLessThanOrEqual(minted);
+    // …and still clears the relay's floor (priced at the stored pPlus).
+    expect(f.minDestOut).toBeGreaterThanOrEqual(slipFloor(plusSubscribeShares(entry, stored, current), SLIP));
+    // The unprojected floor is the bug: above what the vault mints.
+    const unprojected = sellFloors({ dollar: DOLLAR_PLUS, quotedUsdtOut: 99n * ONE, feeBps: FEE, slipBps: SLIP, prices, minUsdtOut });
+    expect(unprojected.minDestOut).toBeGreaterThan(minted);
   });
 });

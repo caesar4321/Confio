@@ -24,6 +24,7 @@ import {
   exitUsdt,
   FundingDollar,
   plusRedeemGross,
+  projectPPlus,
   sellFloors,
   sellNetUsdt,
   toBaseUnits,
@@ -32,6 +33,7 @@ import {
 import { installBscServerTransport } from './bscServerRpc';
 import {
   getErc20Allowance,
+  getConfioYieldShareBps,
   getCurrentOraclePrice,
   getErc20BalanceWei,
   getVaultPrices,
@@ -537,17 +539,23 @@ export const sellCrypto = async (params: {
   if (minUsdtOut === null) throw codedError('PRICE_MOVED', CRYPTO_PRICE_MOVED_MESSAGE);
   if (dollar !== DOLLAR && !addresses.vaultAddress) throw codedError('crypto_trading_disabled');
   // Minting cUSD+ runs at the vault's CURRENT oracle (ORACLE().getPrice()),
-  // as the relay's expected shares do — not lastOraclePrice().
+  // as the relay's expected shares do — not lastOraclePrice(). And it runs
+  // after accrue(), which first applies ALL growth pending since the
+  // vault's last interaction: the shares are priced at the projected pPlus.
   let prices: VaultPrices | undefined;
+  let projectedPPlusWad: bigint | undefined;
   if (dollar !== DOLLAR) {
-    const [{ pPlusWad }, oraclePriceWad] = await Promise.all([
+    const [stored, oraclePriceWad, yieldShareBps] = await Promise.all([
       getVaultPrices(addresses.vaultAddress),
       getCurrentOraclePrice(addresses.vaultAddress),
+      getConfioYieldShareBps(addresses.vaultAddress),
     ]);
-    prices = { pPlusWad, oraclePriceWad };
+    prices = { pPlusWad: stored.pPlusWad, oraclePriceWad };
+    projectedPPlusWad = projectPPlus(stored.pPlusWad, stored.oraclePriceWad, oraclePriceWad, yieldShareBps);
   }
   const floors = sellFloors({
     dollar, quotedUsdtOut: quotedUsdt, feeBps: config.feeBps, slipBps: config.slipBps, prices, minUsdtOut,
+    projectedPPlusWad,
   });
   if (floors.savingsMintTooSmall) throw codedError('savings_mint_too_small');
   const expectedNetWei = sellNetUsdt(quotedUsdt, config.feeBps);

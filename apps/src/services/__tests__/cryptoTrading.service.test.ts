@@ -14,6 +14,7 @@ const mockAllowance = jest.fn();
 const mockPrices = jest.fn();
 const mockShares = jest.fn();
 const mockCurrentOracle = jest.fn();
+const mockYieldShare = jest.fn();
 const mockBuyEncode = jest.fn((..._args: any[]) => '0xbuy');
 const mockSellEncode = jest.fn((..._args: any[]) => '0xsell');
 
@@ -35,6 +36,7 @@ jest.mock('../cusdPlusVault', () => ({
   getErc20BalanceWei: (...a: any[]) => mockBalance(...a),
   getVaultPrices: (...a: any[]) => mockPrices(...a),
   getCurrentOraclePrice: (...a: any[]) => mockCurrentOracle(...a),
+  getConfioYieldShareBps: (...a: any[]) => mockYieldShare(...a),
   getVaultShares: (...a: any[]) => mockShares(...a),
   sharesForUsdtOut: (usdt: bigint, pps: bigint) => (usdt * WAD + pps - 1n) / pps + 2n,
 }));
@@ -79,6 +81,7 @@ beforeEach(() => {
   mockPrices.mockResolvedValue({ pPlusWad: WAD, oraclePriceWad: WAD });
   mockShares.mockResolvedValue(100n * WAD);
   mockCurrentOracle.mockResolvedValue(WAD);
+  mockYieldShare.mockResolvedValue(1_500n);
   mockExecute.mockResolvedValue({ txHash: '0xtx' });
 });
 
@@ -250,7 +253,10 @@ describe('Codex follow-ups', () => {
     expect(mockCurrentOracle).toHaveBeenCalledWith(VAULT);
     const { minUsdtOut, minDestOut } = mockSellEncode.mock.calls[0][0];
     const entry = minUsdtOut - (minUsdtOut * 90n + 9_999n) / 10_000n;
-    const shares = ((entry * WAD) / current) * current / pps;
+    // Minted after accrue(): pPlus grows by 85% of 1.12 → 1.1201.
+    const growth = ((current - 1_120_000_000_000_000_000n) * WAD) / 1_120_000_000_000_000_000n;
+    const projected = (pps * (WAD + (growth * 8_500n) / 10_000n)) / WAD;
+    const shares = ((entry * WAD) / current) * current / projected;
     expect(minDestOut).toBe((shares * 9_999n) / 10_000n);
   });
 
@@ -269,5 +275,24 @@ describe('Codex follow-ups', () => {
     mockQuery.mockImplementation(answer(caps(), okQuote(10n * WAD)));
     const sold = await sellCrypto({ asset: ASSET, units: 5n, expectedFeeBps: 90, expectedFunding: 'cusd' });
     expect(sold).toMatchObject({ feeBps: 90, feeWei: 9n * 10n ** 16n });
+  });
+});
+
+describe('cUSD+ sale with pending accrual (Codex P2, re-review)', () => {
+  it('reads the yield share and signs a floor the post-accrue mint can meet', async () => {
+    // Stored pPlus = lastOracle = 1, current oracle 1.0002; $100 shown, quote at the $99 floor.
+    mockQuery.mockImplementation(answer(caps({ fundingDollar: 'cusd_plus' }), okQuote(99n * WAD)));
+    mockPrices.mockResolvedValue({ pPlusWad: WAD, oraclePriceWad: WAD });
+    mockCurrentOracle.mockResolvedValue(1_000_200_000_000_000_000n);
+    await sellCrypto({
+      asset: ASSET, units: 5n, expectedFeeBps: 90, expectedFunding: 'cusd_plus', previewUsdtOut: 100n * WAD,
+    });
+    expect(mockYieldShare).toHaveBeenCalledWith(VAULT);
+    const { minUsdtOut, minDestOut } = mockSellEncode.mock.calls[0][0];
+    expect(minUsdtOut).toBe(99n * WAD);
+    const entry = minUsdtOut - (minUsdtOut * 90n + 9_999n) / 10_000n;
+    const current = 1_000_200_000_000_000_000n;
+    const minted = (((entry * WAD) / current) * current) / 1_000_170_000_000_000_000n;
+    expect(minDestOut).toBeLessThanOrEqual(minted);
   });
 });

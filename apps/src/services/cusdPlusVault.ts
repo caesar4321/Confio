@@ -446,6 +446,17 @@ export const getVaultPrices = async (
   };
 };
 
+/** The vault's immutable fee share of USDY growth (bps, 1500 = 15%):
+ * holders keep the rest on every accrue(). */
+export const getConfioYieldShareBps = async (vaultAddress: string): Promise<bigint> => {
+  const { selector } = await import('./evmWallet');
+  const hex = await ethCall(vaultAddress, selector('CONFIO_YIELD_SHARE_BPS()'));
+  if (!hex || hex === '0x') throw new Error('invalid vault yield share');
+  const bps = BigInt(hex);
+  if (bps > 10_000n) throw new Error('invalid vault yield share');
+  return bps;
+};
+
 /** Live oracle value the vault's next accrue()/mint will consume. */
 export const getCurrentOraclePrice = async (vaultAddress: string): Promise<bigint> => {
   const { selector } = await import('./evmWallet');
