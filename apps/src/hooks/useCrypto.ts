@@ -3,7 +3,7 @@
 // fails, and a failure reads as "not available", never as zero.
 
 import { useMemo } from 'react';
-import { useQuery } from '@apollo/client';
+import { gql, useQuery } from '@apollo/client';
 
 import { useAuthReady } from '../contexts/AuthContext';
 import {
@@ -14,6 +14,7 @@ import {
   GET_CRYPTO_HOLDINGS,
   GET_CRYPTO_MARKET,
 } from '../services/cryptoTrading';
+import { GmRange, gmApiRangeFor, gmOhlcState } from './useGmMarket';
 
 export const useCryptoCapabilities = (skip = false) => {
   const authReady = useAuthReady();
@@ -46,4 +47,30 @@ export const useCryptoHoldings = (skip = false, pollMs = 60_000) => {
   });
   const holdings: CryptoHolding[] | null = data ? data.cryptoHoldings ?? null : null;
   return { holdings, loading: loading && !data, refetch };
+};
+
+// Range chart for the detail screen: same ranges and slicing as stocks
+// (1H/6H/12H cut from 1D's 15-minute candles). Display only; trades are
+// priced by PancakeSwap. Its own query: an older server fails only this.
+const GET_CRYPTO_OHLC = gql`
+  query CryptoOhlc($symbol: String!, $range: String) {
+    cryptoOhlc(symbol: $symbol, range: $range) {
+      timestamp
+      close
+    }
+  }
+`;
+
+export const useCryptoOhlc = (symbol: string | undefined, range: GmRange, enabled = true) => {
+  const authReady = useAuthReady();
+  const { data, loading, error } = useQuery(GET_CRYPTO_OHLC, {
+    variables: { symbol, range: gmApiRangeFor(range) },
+    skip: !enabled || !symbol || !authReady,
+    fetchPolicy: 'cache-and-network',
+    pollInterval: 300_000,
+  });
+  return useMemo(
+    () => gmOhlcState(data?.cryptoOhlc ?? [], range, enabled, loading, !!error || data?.cryptoOhlc === null),
+    [data, loading, error, enabled, range],
+  );
 };

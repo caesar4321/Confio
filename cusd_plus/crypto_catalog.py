@@ -42,6 +42,8 @@ class CryptoToken:
     # Buy-direction hops: (token, fee, token, fee, ..., token) for v3,
     # (token, token, ...) for v2. Addresses lower-case.
     route_path: tuple
+    # Display-only price history source (crypto_chart, OKX instId).
+    chart_instrument: str = ''
 
     def route_bytes(self, side: str) -> bytes:
         """The exact `route` argument the router must receive."""
@@ -97,6 +99,7 @@ def _parse(entry: dict) -> CryptoToken:
         max_order_usd=int(entry['max_order_usd']) if entry.get('max_order_usd') else None,
         route_kind=kind,
         route_path=path,
+        chart_instrument=entry.get('chart_instrument') or '',
     )
 
 

@@ -50,7 +50,9 @@ jest.mock('../../hooks/useCrypto', () => ({
   useCryptoCapabilities: () => ({ capabilities: mockCaps, loading: false, refetch: () => Promise.resolve() }),
   useCryptoMarket: () => ({ assets: mockMarketAsset ? [mockMarketAsset] : [], bySymbol: () => mockMarketAsset, loading: false }),
   useCryptoHoldings: () => ({ holdings: mockHoldings, loading: false, refetch: mockRefetchHoldings }),
+  useCryptoOhlc: (_symbol: string, range: string) => mockOhlc(range),
 }));
+const mockOhlc = jest.fn((_range: string) => ({ closes: [] as number[], loading: false, failed: false }));
 jest.mock('../../services/cryptoTrading', () => {
   const actual = jest.requireActual('../../services/cryptoTrading');
   return {
@@ -213,9 +215,27 @@ describe('CryptoDetailScreen', () => {
     expect(shown).toContain('Tu inversión');
     expect(shown).toContain('Confío Dollar+');
     expect(tree.root.findAll((n) => n.props?.testID === 'crypto-sparkline').length).toBeGreaterThan(0);
-    const buttons = tree.root.findAllByType(TouchableOpacity);
-    await act(async () => { buttons[0].props.onPress(); });
+    const comprar = tree.root.findAllByType(TouchableOpacity)
+      .find((b) => b.findAll((n) => n.props?.children === 'Comprar').length > 0);
+    await act(async () => { comprar!.props.onPress(); });
     expect(mockNavigate).toHaveBeenCalledWith('BuyCrypto', { symbol: 'BTCB' });
+    await act(async () => tree.unmount());
+  });
+
+  it('charts the selected range from cryptoOhlc, never a stale 24h line', async () => {
+    mockOhlc.mockImplementation((range: string) => (range === '1Y'
+      ? { closes: [60000, 70000, 82000], loading: false, failed: false }
+      : { closes: [], loading: false, failed: range === '1M' }));
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<CryptoDetailScreen />); });
+    const pill = (label: string) => tree.root.findAll((n) => n.props?.accessibilityLabel === label)[0];
+    await act(async () => { pill('1 año').props.onPress(); });
+    expect(mockOhlc).toHaveBeenLastCalledWith('1Y');
+    expect(tree.root.findAll((n) => n.props?.testID === 'crypto-sparkline').length).toBeGreaterThan(0);
+    await act(async () => { pill('1 mes').props.onPress(); });
+    expect(tree.root.findAll((n) => n.props?.testID === 'crypto-sparkline').length).toBe(0);
+    expect(text(tree)).toContain('No se pudo cargar el gráfico');
+    mockOhlc.mockImplementation(() => ({ closes: [], loading: false, failed: false }));
     await act(async () => tree.unmount());
   });
 

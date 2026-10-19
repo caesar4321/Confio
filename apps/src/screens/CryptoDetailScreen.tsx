@@ -2,11 +2,12 @@
 // the buy/sell entry.
 //
 // Same grammar as StockDetailScreen, simpler: these trade 24/7 on
-// PancakeSwap, so there is no market-hours line and one real series (the
-// server's 24h sparkline). The funding line names the Confío dollar the
+// PancakeSwap, so there is no market-hours line. The chart has the stock
+// range selector (1H–MAX, cryptoOhlc); on 1D the server's 24h sparkline
+// stands in until candles arrive. The funding line names the Confío dollar the
 // person actually holds (cUSD+ if Ondo-eligible, otherwise cUSD).
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -25,7 +26,8 @@ import { Header } from '../navigation/Header';
 import { CryptoAssetMark } from '../components/CryptoAssetMark';
 import { colors } from '../config/theme';
 import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
-import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket } from '../hooks/useCrypto';
+import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket, useCryptoOhlc } from '../hooks/useCrypto';
+import { GM_RANGES, GM_RANGE_ACCESSIBILITY_LABELS, GmRange } from '../hooks/useGmMarket';
 import { fromBaseUnits } from '../services/cryptoSwapMath';
 import { MainStackParamList } from '../types/navigation';
 import { useNumberFormat } from '../utils/numberFormatting';
@@ -75,7 +77,14 @@ export const CryptoDetailScreen = () => {
     }
   })();
 
-  const series = asset?.sparkline24h ?? [];
+  const [range, setRange] = useState<GmRange>('1D');
+  const { closes, loading: chartLoading, failed: chartFailed } = useCryptoOhlc(
+    route.params.symbol, range, Boolean(asset));
+  const series = useMemo(() => {
+    if (closes.length >= 2) return closes;
+    if (range !== '1D' || chartFailed) return [];
+    return asset?.sparkline24h ?? [];
+  }, [closes, range, chartFailed, asset?.sparkline24h]);
   const points = useMemo(() => {
     if (series.length < 2) return '';
     const min = Math.min(...series);
@@ -161,13 +170,36 @@ export const CryptoDetailScreen = () => {
               </Svg>
             ) : (
               <View style={styles.chartEmpty}>
-                <Text style={styles.chartEmptyText}>Aún no hay suficientes datos</Text>
+                <Text style={styles.chartEmptyText}>
+                  {chartLoading
+                    ? 'Cargando gráfico…'
+                    : chartFailed
+                      ? 'No se pudo cargar el gráfico'
+                      : 'Aún no hay suficientes datos'}
+                </Text>
               </View>
             )}
           </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rangeRow}>
+            {GM_RANGES.map((r) => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.rangePill, range === r && styles.rangePillActive]}
+                onPress={() => setRange(r)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={GM_RANGE_ACCESSIBILITY_LABELS[r]}
+                accessibilityState={{ selected: range === r }}
+              >
+                <Text style={[styles.rangeText, range === r && styles.rangeTextActive]}>
+                  {r === 'MAX' ? 'Máx' : r}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
           <View style={styles.marketRow}>
             <View style={styles.marketDot} />
-            <Text style={styles.marketText}>Opera 24/7 · últimas 24 horas</Text>
+            <Text style={styles.marketText}>Opera 24/7</Text>
           </View>
         </View>
 
@@ -276,6 +308,18 @@ const styles = StyleSheet.create({
   chartWrap: { marginTop: 14 },
   chartEmpty: { height: CHART_H, alignItems: 'center', justifyContent: 'center' },
   chartEmptyText: { fontSize: 12, color: colors.text.secondary },
+  rangeRow: { flexDirection: 'row', gap: 6, marginTop: 10, paddingRight: 4 },
+  rangePill: {
+    width: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  rangePillActive: { backgroundColor: colors.primaryLight },
+  rangeText: { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
+  rangeTextActive: { color: colors.primaryDark },
   marketRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
   marketDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#10B981' },
   marketText: { fontSize: 12, color: colors.text.secondary },

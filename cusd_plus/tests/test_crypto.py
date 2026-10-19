@@ -449,3 +449,71 @@ class CryptoHoldingsResolverTests(SimpleTestCase):
         self.assertEqual(rows['ETH'].address, eth.address)
         self.assertEqual(rows['ETH'].value_usd, 2400.0)
         live.assert_called_once()
+
+
+class CryptoChartTests(SimpleTestCase):
+    """cryptoOhlc: display-only OKX history, same shape as gmOhlc."""
+
+    def _candle(self, ts, close):
+        return [str(ts), '1', '1', '1', str(close), '0', '0', '0', '1']
+
+    def test_paginates_older_pages_and_returns_ascending(self):
+        from cusd_plus import crypto_chart
+
+        now = 1_800_000_000_000
+        page1 = [self._candle(now - i * 1000, 100 + i) for i in range(crypto_chart.PAGE)]
+        page2 = [self._candle(now - (crypto_chart.PAGE + i) * 1000, 999) for i in range(3)]
+        calls = []
+
+        def fake_get(url, params, timeout):
+            calls.append(dict(params))
+            body = {'code': '0', 'data': page1 if 'after' not in params else page2}
+            return mock.Mock(json=lambda: body, raise_for_status=lambda: None)
+
+        with mock.patch('cusd_plus.crypto_chart.requests.get', side_effect=fake_get), \
+                mock.patch('cusd_plus.crypto_chart.time.time', return_value=now / 1000):
+            rows = crypto_chart._fetch('BTC-USDT', '1Wutc', None)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]['after'], page1[-1][0])
+        self.assertEqual(len(rows), crypto_chart.PAGE + 3)
+        self.assertEqual([r['timestamp'] for r in rows], sorted(r['timestamp'] for r in rows))
+        self.assertEqual(rows[-1]['close'], 100.0)
+
+    def test_lookback_drops_older_candles_and_stops(self):
+        from cusd_plus import crypto_chart
+
+        now = 1_800_000_000_000
+        page = [self._candle(now - i * 3_600_000, 1) for i in range(crypto_chart.PAGE)]
+        with mock.patch('cusd_plus.crypto_chart.requests.get',
+                        return_value=mock.Mock(json=lambda: {'code': '0', 'data': page},
+                                               raise_for_status=lambda: None)) as get, \
+                mock.patch('cusd_plus.crypto_chart.time.time', return_value=now / 1000):
+            rows = crypto_chart._fetch('XAUT-USDT', '1H', crypto_chart.DAY_MS)
+        self.assertEqual(get.call_count, 1)
+        self.assertEqual(len(rows), 25)  # 0h..24h inclusive
+
+    def test_upstream_error_code_raises(self):
+        from cusd_plus import crypto_chart
+
+        with mock.patch('cusd_plus.crypto_chart.requests.get',
+                        return_value=mock.Mock(json=lambda: {'code': '51001', 'msg': 'bad'},
+                                               raise_for_status=lambda: None)):
+            with self.assertRaises(RuntimeError):
+                crypto_chart._fetch('BTC-USDT', '15m', crypto_chart.DAY_MS)
+
+    def test_listed_tokens_have_a_chart_source(self):
+        for token in crypto_catalog.tokens():
+            self.assertTrue(token.chart_instrument, token.symbol)
+
+    def test_resolver_null_on_failure_empty_on_unknown(self):
+        from cusd_plus.crypto_schema import Query
+
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=True), META={}))
+        self.assertEqual(Query().resolve_crypto_ohlc(info, 'NOPE', '1D'), [])
+        self.assertEqual(Query().resolve_crypto_ohlc(info, 'BTCB', '5Y'), [])
+        with mock.patch('cusd_plus.crypto_chart.ohlc', side_effect=RuntimeError('down')):
+            self.assertIsNone(Query().resolve_crypto_ohlc(info, 'BTCB', '1D'))
+        with mock.patch('cusd_plus.crypto_chart.ohlc',
+                        return_value=[{'timestamp': 1, 'open': 1, 'high': 1, 'low': 1, 'close': 2.5}]):
+            rows = Query().resolve_crypto_ohlc(info, 'BTCB', '1M')
+        self.assertEqual((rows[0].timestamp, rows[0].close), (1.0, 2.5))

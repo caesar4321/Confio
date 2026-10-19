@@ -70,6 +70,11 @@ class CryptoHoldingType(graphene.ObjectType):
     day_change_pct = graphene.Float()
 
 
+class CryptoCandleType(graphene.ObjectType):
+    timestamp = graphene.Float(required=True, description='ms epoch')
+    close = graphene.Float(required=True)
+
+
 class CryptoCapabilitiesType(graphene.ObjectType):
     enabled = graphene.Boolean(required=True, description='Discovery (switch + country policy)')
     trading_enabled = graphene.Boolean(required=True)
@@ -98,6 +103,12 @@ class Query(graphene.ObjectType):
     crypto_holdings = graphene.List(
         graphene.NonNull(CryptoHoldingType),
         description='Null = unknown (scan failed, never scanned); [] = holds nothing',
+    )
+    crypto_ohlc = graphene.List(
+        graphene.NonNull(CryptoCandleType),
+        symbol=graphene.String(required=True),
+        range=graphene.String(default_value='1D', description='1D | 1M | 3M | 6M | 1Y | MAX'),
+        description='Display-only price history; null = upstream failed',
     )
     crypto_quote = graphene.Field(
         CryptoQuoteType,
@@ -201,6 +212,24 @@ class Query(graphene.ObjectType):
                 value_usd=value, day_change_pct=row['day_change_pct'] if row else None,
             ))
         return out
+
+    def resolve_crypto_ohlc(self, info, symbol, range='1D'):
+        from . import crypto_chart
+
+        user = _user(info)
+        if user is None or range not in crypto_chart.RANGES:
+            return []
+        # Holders of a token keep its chart even when the market is hidden.
+        token = crypto_catalog.by_symbol(symbol, include_unlisted=True)
+        if token is None:
+            return []
+        try:
+            candles = crypto_chart.ohlc(token, range)
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).exception('crypto_ohlc upstream failed')
+            return None
+        return [CryptoCandleType(timestamp=float(c['timestamp']), close=c['close']) for c in candles]
 
     def resolve_crypto_quote(self, info, symbol, side, amount_in):
         from . import crypto_risk
