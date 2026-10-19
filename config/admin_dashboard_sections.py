@@ -87,7 +87,10 @@ def _admin_cached(key, build, *, refresh=False):
             return hit
     value = build(use_cache=not refresh)
     source = value.get('source') if isinstance(value, dict) else getattr(value, 'source', None)
-    if source != 'unavailable':
+    if source == 'unavailable':
+        # Never let an older healthy read outlive a failed refresh.
+        cache.delete(key)
+    else:
         cache.set(key, value, CHAIN_CACHE_SECONDS)
     return value
 
@@ -1344,7 +1347,7 @@ def _item(level, title, detail='', url=None, count=None):
     return {'level': level, 'title': title, 'detail': detail, 'url': url, 'count': count}
 
 
-def needs_attention(w, *, refresh=False):
+def needs_attention(w, request, *, refresh=False):
     """Only what is wrong right now, each with the list that fixes it.
 
     Every check states "don't know" as its own item: a chain read that fails
@@ -1373,8 +1376,12 @@ def needs_attention(w, *, refresh=False):
         elif metrics.source != 'unconfigured' and metrics.is_undercollateralised:
             items.append(_item(CRITICAL, f'{label} is undercollateralised',
                                f'Backing ratio {metrics.backing_ratio_bps / 100:.2f}%.', _url(page)))
-        if getattr(metrics, 'paused', False):
+        paused = getattr(metrics, 'paused', False)
+        if paused:
             items.append(_item(CRITICAL, f'{label} contract is paused', '', _url(page)))
+        elif paused is None and metrics.source not in ('unavailable', 'unconfigured'):
+            items.append(_item(WARNING, f'{label}: pause state unreadable',
+                               'Supply was read but the pause flag was not; the exit may be closed.', _url(page)))
         if getattr(metrics, 'redeem_blocked_reason', None):
             items.append(_item(WARNING, f'{label} redemptions blocked', metrics.redeem_blocked_reason, _url(page)))
 
@@ -1420,10 +1427,19 @@ def needs_attention(w, *, refresh=False):
         items.append(_item(WARNING, 'Guardarian sessions on hold', '',
                            _url('usdc_transactions_guardariantransaction_changelist', 'status__exact=hold'),
                            guardarian_hold))
-    infinia_stalled = _infinia_stalled(w)
-    if infinia_stalled:
-        items.append(_item(WARNING, 'Infinia transfers not moving for over an hour', '',
-                           _url('payment_accounts_infiniajourney_changelist'), infinia_stalled))
+    # Same permission the Money page's Infinia section requires.
+    if request.user.has_perm('payment_accounts.view_infiniajourney'):
+        from payment_accounts.monitoring import needs_review_count, stalled_count
+
+        infinia_stalled = stalled_count()
+        if infinia_stalled:
+            items.append(_item(WARNING, 'Infinia transfers not moving for over an hour', '',
+                               _url('payment_accounts_infiniajourney_changelist'), infinia_stalled))
+        infinia_review = needs_review_count()
+        if infinia_review:
+            items.append(_item(WARNING, 'Infinia transfers halted for review', '',
+                               _url('payment_accounts_infiniajourney_changelist', 'stage__exact=needs_review'),
+                               infinia_review))
 
     # Identity.
     pending_ids = IdentityVerification.all_documents.filter(status='pending').count()
@@ -1451,13 +1467,6 @@ def needs_attention(w, *, refresh=False):
 
     items.sort(key=lambda item: item['level'] != CRITICAL)
     return items
-
-
-def _infinia_stalled(w):
-    """Same end-to-end status rule as the Money page's 'stalled' count."""
-    from payment_accounts.monitoring import stalled_count
-
-    return stalled_count()
 
 
 def today_money(w, *, refresh=False):

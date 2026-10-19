@@ -697,7 +697,7 @@ def _chain(fn):
 
 ConfioAdminSite.DASH_PAGES = [
     ('today', 'Today', [
-        lambda w, request, refresh: {'attention': sections.needs_attention(w, refresh=refresh)},
+        lambda w, request, refresh: {'attention': sections.needs_attention(w, request, refresh=refresh)},
         _chain(sections.today_money),
         _w(sections.today_growth),
     ], [], {'template': 'admin/dash/today.html', 'chain': True, 'heading': 'Today'}),

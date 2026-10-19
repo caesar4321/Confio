@@ -65,6 +65,14 @@ class MonitoringTests(TestCase):
         self.assertEqual(stalled_count(), 1)
         self.assertEqual(dashboard_context(self.request())['infinia_sections'][0]['counts']['stalled'], 1)
 
+    def test_needs_review_is_counted_apart_from_stalled(self):
+        from payment_accounts.monitoring import needs_review_count, stalled_count
+
+        j, _ = self.incoming_arrived()
+        InfiniaJourney.objects.filter(pk=j.pk).update(stage='needs_review')
+        self.assertEqual(needs_review_count(), 1)
+        self.assertEqual(stalled_count(), 0)
+
     def test_completed_net_wallet_credit_and_template(self):
         j = self.complete()
         self.assertEqual(delivered_usd(j), Decimal('1.982'))

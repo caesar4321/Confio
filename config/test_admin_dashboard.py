@@ -39,6 +39,11 @@ class DashboardPagesTests(TestCase):
             username='dash-admin', email='dash@example.test', password=None)
         self.user.is_verified = lambda: True
 
+    def staff(self, *perms):
+        request = RequestFactory().get('/')
+        request.user = mock.Mock(has_perm=lambda perm: perm in perms)
+        return request
+
     def get(self, name, **query):
         request = RequestFactory().get(reverse(f'confio_admin:{name}'), query)
         request.user = self.user
@@ -66,14 +71,14 @@ class DashboardPagesTests(TestCase):
     def test_today_reports_unknown_collateral_instead_of_passing(self):
         # "Could not read the vault" must surface, never read as healthy.
         with chain_reads():
-            titles = [item['title'] for item in sections.needs_attention(sections.Window.current())]
+            titles = [item['title'] for item in sections.needs_attention(sections.Window.current(), self.staff())]
         self.assertIn('cUSD (BSC): chain read unavailable', titles)
         self.assertIn('cUSD+: chain read unavailable', titles)
 
     def test_undercollateralised_vault_is_critical_and_listed_first(self):
         short = dataclasses.replace(UNAVAILABLE_PLUS, source='bsc', backing_ratio_bps=9_800)
         with chain_reads(plus=short):
-            items = sections.needs_attention(sections.Window.current())
+            items = sections.needs_attention(sections.Window.current(), self.staff())
         self.assertEqual(items[0]['level'], sections.CRITICAL)
         self.assertEqual(items[0]['title'], 'cUSD+ is undercollateralised')
         self.assertIn('98.00%', items[0]['detail'])
@@ -81,7 +86,7 @@ class DashboardPagesTests(TestCase):
     def test_unconfigured_vault_is_not_an_alert(self):
         unwired = dataclasses.replace(UNAVAILABLE_BSC, wired=False, source='unconfigured')
         with chain_reads(bsc=unwired):
-            titles = [item['title'] for item in sections.needs_attention(sections.Window.current())]
+            titles = [item['title'] for item in sections.needs_attention(sections.Window.current(), self.staff())]
         self.assertFalse([t for t in titles if t.startswith('cUSD (BSC)')])
 
     def test_chain_reads_are_cached_until_refresh(self):
@@ -107,3 +112,32 @@ class DashboardPagesTests(TestCase):
             sections.cusd_bsc(sections.Window.current())
             sections.cusd_bsc(sections.Window.current())
         self.assertEqual(read.call_count, 2)
+
+    def test_unreadable_pause_flag_is_reported(self):
+        partial = dataclasses.replace(UNAVAILABLE_BSC, source='bsc', backing_ratio_bps=10_000, paused=None)
+        with chain_reads(bsc=partial):
+            titles = [i['title'] for i in sections.needs_attention(sections.Window.current(), self.staff())]
+        self.assertIn('cUSD (BSC): pause state unreadable', titles)
+
+    def test_infinia_counts_need_the_infinia_view_permission(self):
+        with chain_reads(), \
+                mock.patch('payment_accounts.monitoring.stalled_count', return_value=2) as stalled, \
+                mock.patch('payment_accounts.monitoring.needs_review_count', return_value=1):
+            hidden = [i['title'] for i in sections.needs_attention(sections.Window.current(), self.staff())]
+            stalled.assert_not_called()
+            shown = [i['title'] for i in sections.needs_attention(
+                sections.Window.current(), self.staff('payment_accounts.view_infiniajourney'))]
+        self.assertFalse([t for t in hidden if t.startswith('Infinia')])
+        self.assertIn('Infinia transfers not moving for over an hour', shown)
+        self.assertIn('Infinia transfers halted for review', shown)
+
+    def test_failed_refresh_drops_the_older_healthy_read(self):
+        healthy = dataclasses.replace(UNAVAILABLE_BSC, source='bsc', backing_ratio_bps=10_000)
+        w = sections.Window.current()
+        with mock.patch('cusd_plus.metrics.get_cusd_bsc_platform_metrics', return_value=healthy):
+            sections.cusd_bsc(w)
+        with mock.patch('cusd_plus.metrics.get_cusd_bsc_platform_metrics', return_value=UNAVAILABLE_BSC):
+            sections.cusd_bsc(w, refresh=True)
+        with mock.patch('cusd_plus.metrics.get_cusd_bsc_platform_metrics', return_value=UNAVAILABLE_BSC) as read:
+            self.assertEqual(sections.cusd_bsc(w)['cusd_bsc_metrics'].source, 'unavailable')
+        read.assert_called_once()

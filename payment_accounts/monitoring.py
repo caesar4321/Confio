@@ -55,6 +55,12 @@ def stalled_count():
     return InfiniaJourney.objects.annotate(reported_stage=reported_stage()).filter(stalled_q()).count()
 
 
+def needs_review_count():
+    """Journeys halted for a person to look at (excluded from 'stalled')."""
+    return InfiniaJourney.objects.annotate(reported_stage=reported_stage()).filter(
+        reported_stage='needs_review').count()
+
+
 def dashboard_context(request):
     if not request.user.has_perm('payment_accounts.view_infiniajourney'):
         return {}
