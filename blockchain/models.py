@@ -16,6 +16,12 @@ PAYMENT_BATCH_KINDS = (
     'pay_usdt',
     'pay_confio',
 )
+# Investment trades: one router call (plus an approve) whose history row,
+# holdings and fee accounting are settled by the trade itself, never by the
+# generic deposit/withdrawal reconcilers.
+STOCK_BATCH_KINDS = ('stock_buy', 'stock_sell')
+CRYPTO_BATCH_KINDS = ('crypto_buy', 'crypto_sell')
+INVESTMENT_BATCH_KINDS = STOCK_BATCH_KINDS + CRYPTO_BATCH_KINDS
 LIVE_SPONSORED_BATCH_STATUSES = ('signed', 'sent', 'confirmed')
 
 
@@ -539,6 +545,57 @@ class StockHoldings(models.Model):
         return f'{self.bsc_address} - {len(self.held)} positions'
 
 
+class CryptoHoldings(models.Model):
+    """A wallet's crypto & metals balances (cusd_plus/crypto_tokens.json)
+    from its last COMPLETE scan (cusd_plus/crypto_holdings.py).
+
+    Same shape and staleness rules as StockHoldings: one row per wallet so
+    "scanned, holds nothing" is storable; `blocks` records the block each
+    balance was read at; marked stale when one of the wallet's own swaps is
+    broadcast or confirms."""
+    bsc_address = models.CharField(max_length=42, unique=True, help_text='Lowercase BSC wallet address')
+    account = models.ForeignKey(Account, null=True, blank=True, on_delete=models.SET_NULL,
+                                related_name='crypto_holdings')
+    held = models.JSONField(default=dict, help_text='{symbol: base units as string} for every nonzero balance')
+    blocks = models.JSONField(default=dict, help_text='{symbol: block the balance was read at}')
+    scanned_at = models.DateTimeField()
+    is_stale = models.BooleanField(default=False, help_text='True if the next read must re-scan the chain')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Crypto holdings'
+        verbose_name_plural = 'Crypto holdings'
+
+    def __str__(self):
+        return f'{self.bsc_address} - {len(self.held)} positions'
+
+
+class CryptoPricePoint(models.Model):
+    """A PancakeSwap $100-buy price for one catalog token
+    (cusd_plus/crypto_prices.py), every 15 minutes, kept 8 days. Source of
+    the displayed price, 24h change and sparkline."""
+    symbol = models.CharField(max_length=20)
+    price_usd = models.DecimalField(max_digits=30, decimal_places=12)
+    at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=['symbol', 'at'], name='crypto_price_sym_at_idx')]
+
+    def __str__(self):
+        return f'{self.symbol} {self.price_usd} @ {self.at:%Y-%m-%d %H:%M}'
+
+
+class CryptoRiskAcknowledgement(models.Model):
+    """A person confirmed the crypto & metals disclosure
+    (cusd_plus/crypto_risk.py) before their first purchase."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='crypto_risk_ack')
+    version = models.PositiveIntegerField()
+    acknowledged_at = models.DateTimeField()
+
+    def __str__(self):
+        return f'{self.user_id} v{self.version}'
+
+
 class StockRiskAcknowledgement(models.Model):
     """A person confirmed they understand leveraged and inverse funds
     (cusd_plus/complex_products.py) before their first purchase of one.
@@ -573,3 +630,14 @@ class OndoStockTrade(SponsoredBatch):
         proxy = True
         verbose_name = 'Ondo stock trade'
         verbose_name_plural = 'Ondo stock trades'
+
+
+class CryptoSwapTrade(SponsoredBatch):
+    """Crypto & metals admin view over the sponsorship ledger (same model
+    as OndoStockTrade: the batch is the execution record, its unified row the
+    exact settlement)."""
+
+    class Meta:
+        proxy = True
+        verbose_name = 'Crypto swap trade'
+        verbose_name_plural = 'Crypto swap trades'

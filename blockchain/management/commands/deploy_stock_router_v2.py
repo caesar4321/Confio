@@ -119,14 +119,40 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("DRY RUN — nothing broadcast"))
             self._print_safe_call(impl_addr)
             return
+        from cusd_plus.sponsor_7702 import PolicyError, require_shared_nonce_lock
+        try:
+            require_shared_nonce_lock()
+        except PolicyError:
+            raise CommandError(
+                "broadcast must run on the production host (ssh confio-prod) after this code is "
+                "deployed there: no fresh relay heartbeat in this process's cache, so the sponsor "
+                "nonce lock would not be shared with the relay")
         if balance < gas * gas_price * 13 // 10:
             raise CommandError("insufficient deployer BNB for conservative maximum")
 
-        raw, _ = signer.sign_transaction({
-            "chainId": chain_id, "nonce": nonce, "gasPrice": gas_price, "gas": gas,
-            "to": b"", "value": 0, "data": "0x" + data.hex(),
-        })
-        sent = _rpc(rpc_url, "eth_sendRawTransaction", [raw])
+        from django.core.cache import cache
+
+        from cusd_plus.sponsor_7702 import acquire_sponsor_nonce_lock, release_sponsor_nonce_lock
+
+        # The production relay signs from this same KMS account: take the
+        # shared nonce lock, read the nonce inside it, and re-check the lease
+        # right before broadcasting.
+        token = acquire_sponsor_nonce_lock(ttl_s=120)
+        if token is None:
+            raise CommandError("could not acquire the sponsor nonce lock; retry")
+        try:
+            nonce = int(_rpc(rpc_url, "eth_getTransactionCount", [deployer, "pending"]), 16)
+            impl_addr = to_checksum_address(
+                keccak(rlp.encode([bytes.fromhex(deployer[2:]), nonce]))[-20:])
+            raw, _ = signer.sign_transaction({
+                "chainId": chain_id, "nonce": nonce, "gasPrice": gas_price, "gas": gas,
+                "to": b"", "value": 0, "data": "0x" + data.hex(),
+            })
+            if cache.get("bsc_sponsor_nonce_lock") != token:
+                raise CommandError("lost the sponsor nonce lock; nothing was sent, retry")
+            sent = _rpc(rpc_url, "eth_sendRawTransaction", [raw])
+        finally:
+            release_sponsor_nonce_lock(token)
         for _ in range(90):
             receipt = _rpc(rpc_url, "eth_getTransactionReceipt", [sent])
             if receipt:

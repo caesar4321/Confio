@@ -6,7 +6,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from .models import (
-    Balance, IndexerAssetCursor, OndoStockTrade, PendingAutoSwap,
+    Balance, CryptoSwapTrade, IndexerAssetCursor, OndoStockTrade, PendingAutoSwap,
     ProcessedIndexerTransaction, SponsoredBatch, StockHoldings, StockRiskAcknowledgement,
 )
 
@@ -210,6 +210,26 @@ class OndoStockTradeAdmin(SponsoredBatchAdmin):
             '<a href="{}/tx/{}" target="_blank" rel="noopener">{}…</a>',
             explorer, obj.tx_hash, obj.tx_hash[:12],
         )
+
+
+@admin.register(CryptoSwapTrade)
+class CryptoSwapTradeAdmin(OndoStockTradeAdmin):
+    """Read-only crypto & metals projection (PancakeSwap via ConfioSwapRouter)."""
+
+    def get_queryset(self, request):
+        return (
+            super(OndoStockTradeAdmin, self).get_queryset(request)
+            .filter(kind__in=('crypto_buy', 'crypto_sell'))
+            .select_related('unified_transaction')
+        )
+
+    @admin.display(description='Side', ordering='kind')
+    def trade_side(self, obj):
+        return 'Buy' if obj.kind == 'crypto_buy' else 'Sell'
+
+    @admin.display(description='Asset')
+    def stock_symbol(self, obj):
+        return super().stock_symbol(obj)
 
 
 @admin.register(StockRiskAcknowledgement)

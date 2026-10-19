@@ -316,9 +316,9 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
         kind = 'donation' if direction == 'sent' else 'income_person'
     elif ttype in ('send', 'exchange'):
         batch_kind = getattr(getattr(row, 'sponsored_batch', None), 'kind', '') or ''
-        if batch_kind == 'stock_buy':
+        if batch_kind in ('stock_buy', 'crypto_buy'):
             kind = 'investment_in'
-        elif batch_kind == 'stock_sell':
+        elif batch_kind in ('stock_sell', 'crypto_sell'):
             kind = 'investment_out'
         elif direction == 'received' and _norm_address(row.transaction_hash) in ctx.ramp_arrival_hashes:
             return None  # the USDT landing of an on-ramp already counted as top_up

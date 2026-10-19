@@ -100,6 +100,11 @@ GAS_PER_SELECTOR = {
     SEL_UNWRAP_TO_CUSD: 750_000,
     SEL_STOCK_BUY: 1_700_000,
     SEL_STOCK_SELL: 1_900_000,
+    # ConfioSwapRouter, fork-measured 2026-10-19 (gas report, live Pancake +
+    # vaults): buy max 773k (cUSD+ leg), sell max 811k. Budgeted for the
+    # InstantManager's expensive path on the cUSD+ leg (see redeemToUsdt).
+    _sel('buy(uint8,uint256,uint256,bytes,address,uint256,uint256)'): 1_300_000,
+    _sel('sell(uint8,address,uint256,bytes,uint256,uint256,uint256)'): 1_300_000,
     SEL_PRESALE_BUY: 200_000,  # curve integral + 2 ledger writes + transferFrom
     SEL_PAY: 240_000,  # 2 transferFroms + invoice write + accrual + ecrecover/EIP712 auth
     # v4's redeem branch adds a vault call: Ondo redemption dominates
@@ -553,7 +558,15 @@ def batch_matches_stock_intent(batch, calls: list) -> bool:
 
 
 def classify_calls_kind(calls: list) -> str:
+    from .crypto_policy import SEL_CRYPTO_BUY, SEL_CRYPTO_SELL
+
     selectors = {c['data'][2:10].lower() for c in calls}
+    # Investment trades first: their batch also carries an approve, and the
+    # client's deriveIntentId (services/evmWallet.ts) uses the same order.
+    if SEL_CRYPTO_BUY in selectors:
+        return 'crypto_buy'
+    if SEL_CRYPTO_SELL in selectors:
+        return 'crypto_sell'
     if SEL_STOCK_BUY in selectors:
         return 'stock_buy'
     if SEL_STOCK_SELL in selectors:
@@ -588,6 +601,13 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
     if stock_action and len(calls) > 2:
         raise PolicyError('bad_stock_batch')
     router = _stock_router_address()
+
+    crypto_action = _single_crypto_action(calls)
+    if crypto_action and (stock_action or len(calls) > 2):
+        raise PolicyError('bad_crypto_batch')
+    if crypto_action:
+        _validate_crypto_batch(calls, crypto_action, vault, cusd)
+        return
 
     # One request represents one economic conversion. Approvals may precede
     # it, but two mint/redeem/wrap calls in the same generic batch could debit
@@ -732,6 +752,44 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
                 raise PolicyError('selector_not_allowed')
         else:
             raise PolicyError('destination_not_allowed')
+
+
+def _single_crypto_action(calls: list) -> dict | None:
+    from .crypto_policy import CryptoPolicyError, decode_crypto_call
+
+    try:
+        actions = [a for c in calls if (a := decode_crypto_call(c)) is not None]
+    except CryptoPolicyError as exc:
+        raise PolicyError(str(exc)) from exc
+    if len(actions) > 1:
+        raise PolicyError('multiple_crypto_trades')
+    return actions[0] if actions else None
+
+
+def _validate_crypto_batch(calls: list, action: dict, vault: str, cusd: str | None) -> None:
+    """Besides the router call, only ONE approve of exactly the asset the
+    router pulls (the user's dollar on a buy, the token on a sell), with the
+    swap router as spender."""
+    from .crypto_policy import DOLLAR_PLUS, router_address
+
+    router = router_address()
+    if action['kind'] == 'crypto_buy':
+        expected_token = vault if action['dollar'] == DOLLAR_PLUS else cusd
+    else:
+        expected_token = action['asset']
+    if not expected_token:
+        raise PolicyError('cusd_not_configured')
+    for c in calls:
+        if int(c['value']) != 0:
+            raise PolicyError('value_not_allowed')
+        if c['to'] == router:
+            continue
+        data_hex = c['data'][2:].lower()
+        if (c['to'] != expected_token or data_hex[:8] != SEL_APPROVE
+                or len(data_hex) != 8 + 128):
+            raise PolicyError('bad_crypto_batch')
+        if _word(data_hex, 0)[-40:] != router[2:]:
+            raise PolicyError('approve_spender_not_allowed')
 
 
 # ── transaction assembly ────────────────────────────────────────────────
@@ -959,6 +1017,28 @@ def wait_for_execution_briefly(tx_hash: str, user_addr: str, nonce: int):
         time.sleep(poll_s)
 
 
+RELAY_CACHE_HEARTBEAT_KEY = 'confio_relay_cache_heartbeat'
+
+
+def require_shared_nonce_lock() -> None:
+    """Refuse unless the nonce lock is shared with the production relay.
+
+    The lock lives in Django's cache. Off the production host (a laptop) the
+    cache is process-local, so a lock taken there protects nothing: an
+    operator broadcast and a relay broadcast could sign the same sponsor
+    nonce. Sponsor-signing ops commands must run where the relay runs
+    (`ssh confio-prod`), whose cache is the shared Redis."""
+    backend = (settings.CACHES.get('default') or {}).get('BACKEND', '')
+    if 'redis' not in backend.lower():
+        raise PolicyError('sponsor_nonce_lock_not_shared')
+    # A Redis backend alone proves nothing (a laptop loading .env.mainnet
+    # with its own local Redis passes). Production's celery beat writes this
+    # heartbeat into the relay's Redis every minute; only a process sharing
+    # that Redis can read a fresh one (Codex 2026-10-19).
+    if not cache.get(RELAY_CACHE_HEARTBEAT_KEY):
+        raise PolicyError('sponsor_nonce_lock_not_shared')
+
+
 def release_sponsor_nonce_lock(token=None) -> None:
     """Release ONLY if we still own the lock (token matches). A None token
     is the legacy unconditional release — avoid it on new call sites."""
@@ -993,7 +1073,8 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     # boundary (which excludes mandatory incoming funding fees). Domain sends,
     # Pay, payroll, bridge funding and purchases must not bypass identity holds.
     if kind not in {'subscribe', 'redeem', 'wrap_cusd', 'unwrap_to_cusd',
-                    'mint_cusd', 'stock_buy', 'stock_sell', 'invite_claim', 'invite_reclaim',
+                    'mint_cusd', 'stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell',
+                    'invite_claim', 'invite_reclaim',
                     'payroll_withdraw', 'payroll_set_delegate'}:
         from security.identity_reuse import outgoing_identity_restriction
         restriction = outgoing_identity_restriction(user)

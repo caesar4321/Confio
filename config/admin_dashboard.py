@@ -2231,10 +2231,13 @@ confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 # EVM sponsorship ledger + cross-rail auto-swap queue. PendingAutoSwap was
 # never registered, which left the BSC 'BNB' rows — the authoritative
 # allowlist for outbound native BNB — with no admin surface at all.
-from blockchain.models import OndoStockTrade, PendingAutoSwap, SponsoredBatch
-from blockchain.admin import OndoStockTradeAdmin, PendingAutoSwapAdmin, SponsoredBatchAdmin
+from blockchain.models import CryptoSwapTrade, OndoStockTrade, PendingAutoSwap, SponsoredBatch
+from blockchain.admin import (
+    CryptoSwapTradeAdmin, OndoStockTradeAdmin, PendingAutoSwapAdmin, SponsoredBatchAdmin,
+)
 confio_admin_site.register(SponsoredBatch, SponsoredBatchAdmin)
 confio_admin_site.register(OndoStockTrade, OndoStockTradeAdmin)
+confio_admin_site.register(CryptoSwapTrade, CryptoSwapTradeAdmin)
 confio_admin_site.register(PendingAutoSwap, PendingAutoSwapAdmin)
 
 # Institutional collections pilot. Financial rows are read-only; operators

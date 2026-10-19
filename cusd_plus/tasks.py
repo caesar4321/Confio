@@ -803,7 +803,7 @@ def _source_row_covers(tx_hash: str, recipient: str) -> bool:
         from blockchain.models import SponsoredBatch
         if SponsoredBatch.objects.filter(
                 tx_hash__iexact=tx_hash,
-                kind__in=('stock_buy', 'stock_sell', 'payment_bridge'),
+                kind__in=('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell', 'payment_bridge'),
                 user_bsc_address__iexact=r,
                 status__in=('signed', 'sent', 'confirmed')).exists():
             return True
@@ -1332,6 +1332,13 @@ def mark_saga_delivered_as_usdt(
         return 0
 
 
+def _investment_kinds() -> tuple:
+    """Stock and crypto trade kinds (blockchain.models, imported lazily)."""
+    from blockchain.models import INVESTMENT_BATCH_KINDS
+
+    return INVESTMENT_BATCH_KINDS
+
+
 def _cusd_fee_events(receipt):
     """Return every authoritative cUSD perimeter event in a receipt."""
     from eth_utils import keccak
@@ -1390,7 +1397,7 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
     from users.models import Account
     from payment_accounts.activity import local_mint_journey_id
 
-    if getattr(batch, 'kind', None) in ('stock_buy', 'stock_sell'):
+    if getattr(batch, 'kind', None) in _investment_kinds():
         # Router v2 stock trades cross the cUSD perimeter (exit on buy, entry
         # on sell), but the fee is already part of the trade's own history
         # row (unified._stock_event_amount). Ingesting it here would add a
@@ -1969,6 +1976,9 @@ def check_sponsored_batch_receipt(self, batch_id: int):
                 # ledger will never get: drop it with the trade.
                 from .gm_holdings import invalidate_holdings
                 invalidate_holdings(batch.user_bsc_address)
+            if batch.kind in ('crypto_buy', 'crypto_sell'):
+                from .crypto_holdings import invalidate_holdings as invalidate_crypto
+                invalidate_crypto(batch.user_bsc_address)
             # A read between inclusion and the reorg stored the post-
             # transaction balances: stale again.
             _mark_receipt_balances_stale(batch.user_bsc_address, receipt)
@@ -1979,6 +1989,16 @@ def check_sponsored_batch_receipt(self, batch_id: int):
                            batch.tx_hash, blk_num)
             return
         raise self.retry(countdown=_retry_countdown(self.request.retries))
+
+    if batch.kind in ('crypto_buy', 'crypto_sell'):
+        # Same rule as stocks: the exact event-backed history row is written
+        # before the batch turns terminal, so a DB failure stays retryable.
+        from .unified import sync_unified_from_crypto_batch
+        try:
+            sync_unified_from_crypto_batch(batch, receipt, require_event=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('crypto history sync failed for %s: %s', batch.tx_hash, exc)
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
 
     if batch.kind in ('stock_buy', 'stock_sell'):
         # A confirmed trade without its account-history row is not a complete
@@ -2025,6 +2045,9 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         # first, any scan cached from here on read the final chain.
         from .gm_holdings import invalidate_holdings
         invalidate_holdings(batch.user_bsc_address, min_block=blk_num)
+    if batch.kind in ('crypto_buy', 'crypto_sell'):
+        from .crypto_holdings import invalidate_holdings as invalidate_crypto
+        invalidate_crypto(batch.user_bsc_address, min_block=blk_num)
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
@@ -2253,7 +2276,7 @@ def reconcile_stock_batches():
     grace_min = int(getattr(settings, 'CUSD_PLUS_SIGNED_GRACE_MIN', 3))
     give_up_h = int(getattr(settings, 'CUSD_PLUS_RECOVERY_GIVE_UP_HOURS', 6))
     stuck = list(SponsoredBatch.objects.filter(
-        kind__in=('stock_buy', 'stock_sell'),
+        kind__in=_investment_kinds(),
         status='sent',
         updated_at__lt=now - timedelta(minutes=grace_min),
         created_at__gte=now - timedelta(hours=give_up_h),
@@ -2733,3 +2756,27 @@ def snapshot_savings_daily():
         return 'error'
     logger.info('savings snapshot: %s', status)
     return status
+
+
+@shared_task(name='cusd_plus.snapshot_crypto_prices', ignore_result=True)
+def snapshot_crypto_prices():
+    """PancakeSwap prices for the crypto catalog (no-op while disabled)."""
+    if not getattr(settings, 'CRYPTO_ENABLED', False):
+        return 0
+    from .crypto_prices import snapshot_prices
+
+    return snapshot_prices()
+
+
+@shared_task(name='cusd_plus.relay_cache_heartbeat', ignore_result=True)
+def relay_cache_heartbeat():
+    """Prove to sponsor-signing ops commands that they share this Redis
+    (sponsor_7702.require_shared_nonce_lock). Expires after 3 missed beats."""
+    import socket
+    from django.core.cache import cache
+    from django.utils import timezone
+
+    from .sponsor_7702 import RELAY_CACHE_HEARTBEAT_KEY
+
+    cache.set(RELAY_CACHE_HEARTBEAT_KEY,
+              {'host': socket.gethostname(), 'at': timezone.now().isoformat()}, 180)

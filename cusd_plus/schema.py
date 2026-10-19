@@ -1845,6 +1845,19 @@ class SponsorBscBatch(graphene.Mutation):
             # signed) is derived from the selectors; the client derives the
             # SAME value. source_id is omitted (no domain row here).
             kind = sponsor_7702.classify_calls_kind(norm_calls)
+            if kind in ('crypto_buy', 'crypto_sell'):
+                from . import crypto_risk
+                from .crypto_policy import decode_crypto_call
+                # validate_policy already decoded and accepted the one router
+                # call; read its dollar for the destination gate.
+                crypto_dollar = next(
+                    (a['dollar'] for c in norm_calls
+                     if (a := decode_crypto_call(c, historical=True)) is not None),
+                    None)
+                refusal = crypto_risk.sponsor_gate(
+                    kind, user, getattr(info.context, 'META', {}), dollar=crypto_dollar)
+                if refusal:
+                    return SponsorBscBatch(success=False, error=refusal)
             if kind in ('stock_buy', 'stock_sell'):
                 meta = getattr(info.context, 'META', {})
                 if not _stock_issuer_eligible(user, meta):
@@ -2009,6 +2022,17 @@ class SponsorBscBatch(graphene.Mutation):
                     confirmed_already = False
                 if not confirmed_already:
                     drop_fresh_holdings(user_addr)
+            if kind in ('crypto_buy', 'crypto_sell'):
+                # Past the broadcast: never raise. No crypto scan is stored
+                # while this swap is on the wire (crypto_holdings asks the DB).
+                try:
+                    from . import vault as _vault
+                    from .crypto_holdings import invalidate_holdings as _invalidate_crypto
+                    _vault.invalidate_position(user_addr)
+                    _invalidate_crypto(user_addr)
+                except Exception:  # noqa: BLE001
+                    logger.warning('crypto post-broadcast invalidation failed for %s',
+                                   user_addr, exc_info=True)
             if mint_call is not None and mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
                 # Gate passed and the batch is on the wire: record the mint as
                 # history. subscribeAndMint(uint256 usdtAmount, ...) — first

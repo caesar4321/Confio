@@ -34,6 +34,20 @@ app.conf.beat_schedule.setdefault('cusd-plus-snapshot-savings-daily', {
 
 # Tu mes "Tu dólar te protegió": keep one Binance P2P rate per day (the 1st
 # of the month is the baseline where there is no Confío on-ramp).
+# Crypto & metals prices from PancakeSwap (cusd_plus/crypto_prices.py): the
+# displayed price, 24h change and sparkline. Cheap (one quote per token).
+# Heartbeat in the relay's Redis: sponsor-signing ops commands refuse to
+# broadcast unless they can read it (they must share the sponsor nonce lock).
+app.conf.beat_schedule.setdefault('relay-cache-heartbeat', {
+    'task': 'cusd_plus.relay_cache_heartbeat',
+    'schedule': crontab(minute='*'),
+})
+
+app.conf.beat_schedule.setdefault('crypto-snapshot-prices', {
+    'task': 'cusd_plus.snapshot_crypto_prices',
+    'schedule': crontab(minute='*/15'),
+})
+
 app.conf.beat_schedule.setdefault('exchange-rates-snapshot-daily-rates', {
     'task': 'exchange_rates.snapshot_daily_rates',
     'schedule': crontab(minute=20),

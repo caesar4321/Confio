@@ -103,6 +103,38 @@ CONFIO_STOCK_BUY_POLICY = GeoPolicy(
 )
 
 
+# ── Crypto & metals (ConfioSwapRouter) ─────────────────────────────────
+# Not an Ondo product: Ondo's issuer lists do not apply (Venezuela, Brazil,
+# the EEA… may trade). The hard baseline is the comprehensively sanctioned
+# jurisdictions, which Tether's terms (XAUt) also prohibit; operations can
+# add any ISO-2 code through CRYPTO_BLOCKED_COUNTRIES without a deploy.
+CRYPTO_SANCTIONED = frozenset({'KP', 'CU', 'IR', 'SY'})
+
+CRYPTO_INELIGIBLE_MESSAGE = (
+    'La compra de criptomonedas y oro digital no está disponible en tu país. '
+    'Si ya tienes, puedes venderlas cuando quieras.'
+)
+
+
+def _crypto_blocked_countries():
+    configured = getattr(settings, 'CRYPTO_BLOCKED_COUNTRIES', ())
+    if isinstance(configured, str):
+        configured = configured.split(',')
+    return CRYPTO_SANCTIONED | frozenset(
+        str(country).strip().upper() for country in configured if str(country).strip()
+    )
+
+
+CRYPTO_POLICY = GeoPolicy(
+    name='crypto',
+    phone_blocked=_crypto_blocked_countries,
+    message=CRYPTO_INELIGIBLE_MESSAGE,
+    allow_missing_phone=False,
+    ip_blocked=_crypto_blocked_countries,
+    ip_fails_open_on_error=True,
+)
+
+
 def is_ondo_eligible(user) -> bool:
     """Phone country ONLY — the half-check.
 

@@ -1,0 +1,51 @@
+{
+  "_comment": "Confío crypto & metals catalog (BSC, PancakeSwap). Source of truth for the relay policy, quotes, holdings and the app mirror. Routes are the BUY direction from USDT; sells use the exact reverse. Every entry must pass the screening (docs/research/bsc-token-screen-2026-10/) and have its address verified against the issuer before listing. Quote/route checks 2026-10-19: BTCB, ETH, WBNB on USDT V3 0.01%; XAUt on USDT V3 0.05%.",
+  "tokens": [
+    {
+      "symbol": "BTCB",
+      "ticker": "BTC",
+      "name": "Bitcoin",
+      "address": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": true,
+      "custody": "binance_peg",
+      "route": {"kind": "v3", "path": ["0x55d398326f99059fF775485246999027B3197955", 100, "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c"]}
+    },
+    {
+      "symbol": "ETH",
+      "ticker": "ETH",
+      "name": "Ethereum",
+      "address": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": true,
+      "custody": "binance_peg",
+      "route": {"kind": "v3", "path": ["0x55d398326f99059fF775485246999027B3197955", 100, "0x2170Ed0880ac9A755fd29B2688956BD959F933F8"]}
+    },
+    {
+      "symbol": "WBNB",
+      "ticker": "BNB",
+      "name": "BNB",
+      "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": true,
+      "custody": "wrapped_native",
+      "route": {"kind": "v3", "path": ["0x55d398326f99059fF775485246999027B3197955", 100, "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"]}
+    },
+    {
+      "symbol": "XAUT",
+      "ticker": "XAUT",
+      "name": "Tether Gold",
+      "address": "0x21cAef8A43163Eea865baeE23b9C2E327696A3bf",
+      "decimals": 6,
+      "category": "metal",
+      "featured": true,
+      "custody": "tether_gold",
+      "listed": false,
+      "_listing_gate": "Address verified on-chain (name 'Tether Gold', proxy, ~13.7k supply, deep USDT 0.05% pool) but NOT yet against tether.to's supported-protocols page. Flip listed=true only after that check.",
+      "route": {"kind": "v3", "path": ["0x55d398326f99059fF775485246999027B3197955", 500, "0x21cAef8A43163Eea865baeE23b9C2E327696A3bf"]}
+    }
+  ]
+}

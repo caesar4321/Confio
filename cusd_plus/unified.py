@@ -299,3 +299,155 @@ def sync_unified_from_stock_batch(
         if strict:
             raise
         logger.exception('unified stock mirror failed for batch %s', getattr(batch, 'id', None))
+
+
+# ── Crypto & metals (ConfioSwapRouter) ─────────────────────────────────
+
+CRYPTO_COUNTERPARTY = 'PancakeSwap'
+
+
+def crypto_history_prefix(category: str) -> str:
+    """Description prefix the app keys on ("Cripto: …" / "Oro: …")."""
+    return 'Oro' if category == 'metal' else 'Cripto'
+
+
+def _crypto_event_amount(receipt, kind: str, user_addr: str, router_addr: str, asset_addr: str):
+    """Exact USD value that left (buy) or re-entered (sell) Confío dollars.
+
+    The router event gives the USDT that crossed the DEX; cUSD's own
+    settlement event in the same receipt gives the perimeter fee. A buy debits
+    usdtSpent + exit fee; a sell credits usdtProceeds - entry fee.
+    """
+    if not receipt:
+        return None
+    from eth_abi import decode
+    from eth_utils import keccak
+
+    from .tasks import _cusd_fee_events
+
+    signature = (
+        'CryptoBought(address,address,uint8,uint256,uint256,uint256)'
+        if kind == 'crypto_buy'
+        else 'CryptoSold(address,address,uint8,uint256,uint256,uint256)'
+    )
+    topic = '0x' + keccak(text=signature).hex()
+    user_topic = (user_addr or '').lower().replace('0x', '').rjust(64, '0')
+    asset_topic = (asset_addr or '').lower().replace('0x', '').rjust(64, '0')
+    usdt = None
+    for log in receipt.get('logs') or []:
+        topics = log.get('topics') or []
+        if ((log.get('address') or '').lower() != (router_addr or '').lower()
+                or len(topics) < 3 or topics[0].lower() != topic
+                or topics[1].lower().replace('0x', '') != user_topic
+                or topics[2].lower().replace('0x', '') != asset_topic):
+            continue
+        try:
+            raw = bytes.fromhex((log.get('data') or '0x')[2:])
+            if len(raw) != 32 * 4:
+                continue
+            _dollar, _amount_in, usdt_crossed, _out = decode(['uint256'] * 4, raw)
+        except (TypeError, ValueError):
+            continue
+        usdt = int(usdt_crossed)
+        break
+    if usdt is None:
+        return None
+    direction = 'exit' if kind == 'crypto_buy' else 'entry'
+    fees = [e['fee_wei'] for e in _cusd_fee_events(receipt) if e['direction'] == direction]
+    if len(fees) != 1:
+        return None
+    return usdt + fees[0] if kind == 'crypto_buy' else usdt - fees[0]
+
+
+def sync_unified_from_crypto_batch(batch, receipt=None, *, require_event: bool = False) -> None:
+    """Mirror one final crypto/metal swap into the activity ledger (raises on
+    failure: the receipt task retries rather than finalize without it)."""
+    from django.conf import settings
+    from django.utils import timezone
+    from send.models import SendTransaction
+    from users.models import Account
+    from users.models_unified import UnifiedTransactionTable
+
+    from .crypto_policy import DOLLAR_PLUS, CryptoPolicyError, decode_crypto_call
+
+    if batch.kind not in ('crypto_buy', 'crypto_sell') or not batch.tx_hash:
+        return
+    calls = json.loads(batch.calls_json or '[]')
+    actions = []
+    for call in calls:
+        try:
+            action = decode_crypto_call(call, historical=True)
+        except CryptoPolicyError as exc:
+            raise ValueError(f'crypto batch call undecodable: {exc}') from exc
+        if action is not None:
+            actions.append(action)
+    if len(actions) != 1 or actions[0]['kind'] != batch.kind:
+        raise ValueError('crypto batch has no unique matching router call')
+    action = actions[0]
+    account = Account.objects.filter(
+        bsc_address__iexact=batch.user_bsc_address, deleted_at__isnull=True,
+    ).select_related('user', 'business').first()
+    if account is None:
+        raise ValueError('crypto batch account not found')
+
+    router = (getattr(settings, 'CRYPTO_SWAP_ROUTER_ADDRESS', '') or '').lower()
+    amount_wei = _crypto_event_amount(
+        receipt, batch.kind, batch.user_bsc_address, router, action['asset'])
+    if amount_wei is None and require_event:
+        raise ValueError('crypto receipt has no matching exact settlement event')
+    if amount_wei is None:
+        amount_wei = int(action['history_amount_wei'])
+    amount = format((Decimal(amount_wei) / Decimal(10 ** 18)).normalize(), 'f')
+    token = action['token']
+    is_buy = batch.kind == 'crypto_buy'
+    token_type = 'CUSD_PLUS' if action['dollar'] == DOLLAR_PLUS else 'CUSD_BSC'
+    user_name = (
+        account.business.name if account.business_id
+        else (account.user.get_full_name() or account.user.username or '')
+    )
+    relation = {
+        'sender_user': account.user if is_buy else None,
+        'sender_business': account.business if is_buy else None,
+        'sender_type': 'business' if not is_buy or account.business_id else 'user',
+        'sender_display_name': user_name if is_buy else CRYPTO_COUNTERPARTY,
+        'sender_phone': (getattr(account.user, 'phone_number', '') or '') if is_buy else '',
+        'sender_address': batch.user_bsc_address if is_buy else router,
+        'counterparty_user': None if is_buy else account.user,
+        'counterparty_business': None if is_buy else account.business,
+        'counterparty_type': 'business' if (is_buy or account.business_id) else 'user',
+        'counterparty_display_name': CRYPTO_COUNTERPARTY if is_buy else user_name,
+        'counterparty_phone': None,
+        'counterparty_address': '' if is_buy else batch.user_bsc_address,
+        'from_address': batch.user_bsc_address if is_buy else router,
+        'to_address': router if is_buy else batch.user_bsc_address,
+    }
+    prefix = crypto_history_prefix(token.category)
+    row, _ = UnifiedTransactionTable.objects.update_or_create(
+        sponsored_batch=batch,
+        defaults={
+            'transaction_type': 'send',
+            'amount': amount,
+            'token_type': token_type,
+            'amount_denomination': 'USD_VALUE',
+            'status': 'CONFIRMED',
+            'error_message': '',
+            'transaction_hash': batch.tx_hash,
+            'description': f"{prefix}: {'Compra' if is_buy else 'Venta'} de {token.ticker}",
+            'transaction_date': batch.created_at,
+            'deleted_at': None,
+            **relation,
+        },
+    )
+    # A scanner may have seen the dollar mint on a sell before finality as an
+    # "external" deposit: this swap owns that movement.
+    now = timezone.now()
+    UnifiedTransactionTable.objects.filter(
+        transaction_hash__iexact=batch.tx_hash, transaction_type='send',
+        sender_type='external', to_address__iexact=batch.user_bsc_address,
+        token_type__in=('USDT', 'CUSD_PLUS', 'CUSD_BSC'), deleted_at__isnull=True,
+    ).exclude(pk=row.pk).update(deleted_at=now)
+    SendTransaction.all_objects.filter(
+        transaction_hash__iexact=batch.tx_hash, sender_type='external',
+        recipient_address__iexact=batch.user_bsc_address,
+        token_type__in=('USDT', 'CUSD_PLUS', 'CUSD_BSC'), deleted_at__isnull=True,
+    ).update(deleted_at=now)
