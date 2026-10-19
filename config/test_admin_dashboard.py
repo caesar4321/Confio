@@ -133,11 +133,27 @@ class DashboardPagesTests(TestCase):
 
     def test_failed_refresh_drops_the_older_healthy_read(self):
         healthy = dataclasses.replace(UNAVAILABLE_BSC, source='bsc', backing_ratio_bps=10_000)
-        w = sections.Window.current()
+        # Three separate page loads, each with its own window.
         with mock.patch('cusd_plus.metrics.get_cusd_bsc_platform_metrics', return_value=healthy):
-            sections.cusd_bsc(w)
+            sections.cusd_bsc(sections.Window.current())
         with mock.patch('cusd_plus.metrics.get_cusd_bsc_platform_metrics', return_value=UNAVAILABLE_BSC):
-            sections.cusd_bsc(w, refresh=True)
+            sections.cusd_bsc(sections.Window.current(), refresh=True)
         with mock.patch('cusd_plus.metrics.get_cusd_bsc_platform_metrics', return_value=UNAVAILABLE_BSC) as read:
-            self.assertEqual(sections.cusd_bsc(w)['cusd_bsc_metrics'].source, 'unavailable')
+            self.assertEqual(sections.cusd_bsc(sections.Window.current())['cusd_bsc_metrics'].source, 'unavailable')
         read.assert_called_once()
+
+    def test_one_page_shows_one_read_per_vault_even_on_refresh(self):
+        # Alerts and tiles on Today must describe the same chain read.
+        w = sections.Window.current()
+        with chain_reads(), mock.patch(
+                'cusd_plus.metrics.get_cusd_bsc_platform_metrics', return_value=UNAVAILABLE_BSC) as read:
+            sections.needs_attention(w, self.staff(), refresh=True)
+            sections.today_money(w, refresh=True)
+        read.assert_called_once()
+
+    def test_failed_fee_ledger_reads_unavailable_not_empty(self):
+        from django.template.loader import render_to_string
+
+        html = render_to_string('admin/dash/today.html', {'fee_ledger': None, 'dash_tabs': []})
+        self.assertIn('unavailable', html)
+        self.assertNotIn('none yet', html)

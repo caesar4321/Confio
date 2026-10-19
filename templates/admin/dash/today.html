@@ -31,7 +31,7 @@
         </div>
         <div class="kpi">
             <div class="kpi-label">Confío fees, last 30 days</div>
-            <div class="kpi-value">{% if fee_ledger.total.count %}${{ fee_ledger.total.fee_usd_30d|floatformat:2|intcomma }}{% else %}<span class="unknown">{% if fee_ledger.pending %}building…{% else %}none yet{% endif %}</span>{% endif %}</div>
+            <div class="kpi-value">{% if fee_ledger.total.count %}${{ fee_ledger.total.fee_usd_30d|floatformat:2|intcomma }}{% else %}<span class="unknown">{% if fee_ledger is None %}unavailable{% elif fee_ledger.pending %}building…{% else %}none yet{% endif %}</span>{% endif %}</div>
             <div class="kpi-sub">{% if fee_ledger.total.count %}${{ fee_ledger.total.fee_usd|floatformat:2|intcomma }} all time{% endif %}</div>
         </div>
         <div class="kpi">

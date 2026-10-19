@@ -7,7 +7,7 @@ The chain reads (vault/contract RPC) sit behind short admin-side caches,
 because the main cost of the old single page was sequential BSC RPC calls,
 not SQL.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -45,6 +45,9 @@ class Window:
     last_24h: datetime
     last_7_start: datetime
     rolling_30_start: datetime
+    # Chain reads made while building this request's page: every section
+    # that shows a vault sees the same read, so alerts match the tiles.
+    reads: dict = field(default_factory=dict, compare=False, repr=False)
 
     @classmethod
     def current(cls):
@@ -76,10 +79,17 @@ def get_fcm_reachability_metrics(now=None):
     }
 
 
-def _admin_cached(key, build, *, refresh=False):
+def _admin_cached(key, build, w, *, refresh=False):
     """Admin-only cache in front of a chain read. `refresh` (the page's
     ?refresh=1) rebuilds it, bypassing the helper's own short cache too; a
     failed build is never cached. `build` takes the helpers' `use_cache`."""
+    if key in w.reads:
+        return w.reads[key]
+    w.reads[key] = value = _admin_cached_read(key, build, refresh)
+    return value
+
+
+def _admin_cached_read(key, build, refresh):
     key = f'admin_dash:{key}'
     if not refresh:
         hit = cache.get(key)
@@ -1266,10 +1276,10 @@ def cusd_bsc(w, *, refresh=False):
     )
 
     return {
-        'cusd_bsc_metrics': _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, refresh=refresh),
+        'cusd_bsc_metrics': _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, w, refresh=refresh),
         'fee_ledger': get_fee_ledger_summary(),
         # The fee table lists the legacy router fee still uncollected there.
-        'stock_router_metrics': _admin_cached('stock_router', get_stock_router_metrics, refresh=refresh),
+        'stock_router_metrics': _admin_cached('stock_router', get_stock_router_metrics, w, refresh=refresh),
     }
 
 
@@ -1288,11 +1298,11 @@ def cusd_plus(w, *, refresh=False):
         get_savings_saga_stats,
     )
 
-    metrics = _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, refresh=refresh)
+    metrics = _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, w, refresh=refresh)
     return {
         'cusd_plus_metrics': metrics,
         # cUSD+ conversions pay the shared cUSD perimeter fee.
-        'cusd_bsc_metrics': _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, refresh=refresh),
+        'cusd_bsc_metrics': _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, w, refresh=refresh),
         'cusd_plus_circulating': metrics.circulating_cusd_plus,
         'cusd_plus_reserve': metrics.usdy_reserve_usd,
         'cusd_plus_source': metrics.source,
@@ -1321,7 +1331,7 @@ def stocks(w, *, refresh=False):
     return {
         'stock_stats_24h': get_stock_trade_stats(since=w.last_24h),
         'stock_stats_30d': get_stock_trade_stats(since=w.rolling_30_start),
-        'stock_router_metrics': _admin_cached('stock_router', get_stock_router_metrics, refresh=refresh),
+        'stock_router_metrics': _admin_cached('stock_router', get_stock_router_metrics, w, refresh=refresh),
         'stock_portfolio': stock_portfolio,
     }
 
@@ -1369,7 +1379,7 @@ def needs_attention(w, request, *, refresh=False):
         ('cUSD (BSC)', 'cusd_bsc', get_cusd_bsc_platform_metrics, 'dash_money'),
         ('cUSD+', 'cusd_plus', get_cusd_plus_platform_metrics, 'dash_savings'),
     ):
-        metrics = _admin_cached(key, build, refresh=refresh)
+        metrics = _admin_cached(key, build, w, refresh=refresh)
         if metrics.source == 'unavailable':
             items.append(_item(WARNING, f'{label}: chain read unavailable',
                                'Supply and reserve could not be read; collateral is unknown.', _url(page)))
@@ -1481,7 +1491,7 @@ def today_money(w, *, refresh=False):
     except Exception:  # noqa: BLE001 — shown as unavailable, never as zero
         movido = None
     portfolio = gm_tvl.snapshot()
-    cusd_bsc_metrics = _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, refresh=refresh)
+    cusd_bsc_metrics = _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, w, refresh=refresh)
     return {
         'movido': movido,
         'fee_ledger': get_fee_ledger_summary(),
@@ -1489,7 +1499,7 @@ def today_money(w, *, refresh=False):
         'cusd_bsc_backing_pct': (
             cusd_bsc_metrics.backing_ratio_bps / 100 if cusd_bsc_metrics.backing_ratio_bps is not None else None
         ),
-        'cusd_plus_metrics': _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, refresh=refresh),
+        'cusd_plus_metrics': _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, w, refresh=refresh),
         'stock_portfolio_value': (portfolio or {}).get('value_usd'),
         'stock_stats_24h': get_stock_trade_stats(since=w.last_24h),
     }
