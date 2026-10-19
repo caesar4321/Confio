@@ -97,8 +97,8 @@ class DashboardPagesTests(TestCase):
             self.assertEqual(read.call_count, 1)
             sections.cusd_bsc(sections.Window.current(), refresh=True)
             self.assertEqual(read.call_count, 2)
-        # Refresh must also skip the helper's own 30s cache.
-        self.assertEqual(read.call_args_list[-1], mock.call(use_cache=False))
+        # Every rebuild skips the helper's own 30s cache.
+        self.assertEqual(read.call_args_list, [mock.call(use_cache=False)] * 2)
 
     def test_pages_carry_metrics_their_partials_borrow(self):
         # cUSD+ shows the shared cUSD fee; Money's fee table shows the router fee.

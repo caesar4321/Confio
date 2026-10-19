@@ -81,8 +81,9 @@ def get_fcm_reachability_metrics(now=None):
 
 def _admin_cached(key, build, w, *, refresh=False):
     """Admin-only cache in front of a chain read. `refresh` (the page's
-    ?refresh=1) rebuilds it, bypassing the helper's own short cache too; a
-    failed build is never cached. `build` takes the helpers' `use_cache`."""
+    ?refresh=1) rebuilds it; a failed build is never cached. Every rebuild
+    reads the chain live (the helper's own 30s cache is skipped), so a value
+    older than a failed read can never come back through either layer."""
     if key in w.reads:
         return w.reads[key]
     w.reads[key] = value = _admin_cached_read(key, build, refresh)
@@ -95,7 +96,7 @@ def _admin_cached_read(key, build, refresh):
         hit = cache.get(key)
         if hit is not None:
             return hit
-    value = build(use_cache=not refresh)
+    value = build(use_cache=False)
     source = value.get('source') if isinstance(value, dict) else getattr(value, 'source', None)
     if source == 'unavailable':
         # Never let an older healthy read outlive a failed refresh.
