@@ -217,3 +217,45 @@ def fund_flow_breakdown() -> dict:
         'countries': countries,
         'since': first_at,
     }
+
+
+def public_fund_flow_snapshot() -> dict:
+    """The exact "Movido" figures the website and app show (fundFlowStats),
+    cached 10 minutes under the key the public resolver always used. The
+    admin dashboard reads this same snapshot, so the two can never drift.
+
+    Perimeter deposits + withdrawals of Confío dollars (ramps, outside USDT,
+    sends to outside wallets, Pay). Stock, Bitcoin and gold trades are
+    investments, not deposits or withdrawals, and are not counted here.
+    """
+    from django.core.cache import cache
+
+    cached = cache.get('fund_flow_stats_v4')
+    if cached:
+        return cached
+    from users.country_codes import COUNTRY_CODES
+    from users.country_names_es import COUNTRY_NAMES_ES
+
+    # One snapshot for the tile and the screen: the total, the split, the
+    # countries and the timing all come from the same operation sets.
+    flow = fund_flow_breakdown()
+    iso_to_en = {row[2]: row[0] for row in COUNTRY_CODES}
+    data = {
+        'deposited_usd': float(flow['deposited_usd']),
+        'withdrawn_usd': float(flow['withdrawn_usd']),
+        'total_usd': float(flow['deposited_usd'] + flow['withdrawn_usd']),
+        'deposit_count': flow['deposit_count'],
+        'withdrawal_count': flow['withdrawal_count'],
+        'operation_count': flow['deposit_count'] + flow['withdrawal_count'],
+        'median_withdrawal_minutes': flow['median_withdrawal_minutes'],
+        'withdrawal_timing_samples': flow['withdrawal_timing_samples'],
+        'since': flow['since'].isoformat() if flow['since'] else None,
+        'countries': [
+            {'country_iso': code,
+             'country_name': COUNTRY_NAMES_ES.get(code) or iso_to_en.get(code) or code,
+             'operation_count': n}
+            for code, n in flow['countries']
+        ],
+    }
+    cache.set('fund_flow_stats_v4', data, 600)
+    return data

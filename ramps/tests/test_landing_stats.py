@@ -10,7 +10,7 @@ class LandingStatsTests(SimpleTestCase):
     def tearDown(self):
         cache.delete('landing_stats_v3')
         cache.delete('fund_flow_stats_v4')
-        cache.delete('stats_summary_v13')
+        cache.delete('stats_summary_v14')
 
     def test_cached_public_stats_include_registered_users(self):
         cache.set(
@@ -29,7 +29,7 @@ class LandingStatsTests(SimpleTestCase):
 
     def test_uncached_stats_use_combined_provider_metric(self):
         cache.delete('landing_stats_v3')
-        cache.set('stats_summary_v13', {'total_users': 123}, 60)
+        cache.set('stats_summary_v14', {'total_users': 123}, 60)
         with patch('ramps.metrics.deposited_volume_by_provider', return_value={
             'koywe': Decimal('10'), 'infinia': Decimal('1.982'), 'cobre': Decimal('2')}), \
                 patch('presale.models.PresalePhase.objects.all', return_value=[]):

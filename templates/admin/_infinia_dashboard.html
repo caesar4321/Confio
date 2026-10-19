@@ -1,9 +1,15 @@
 {% load humanize %}
 {% if infinia_sections %}
 <h2 class="section-title">Infinia local payments</h2>
-<div class="metric-card"><div class="metric-label">Website deposited volume — all providers, all time (USD)</div><div class="metric-value">${{ deposited_all_providers|floatformat:2|intcomma }}</div>
+<div class="metrics-grid">
+<div class="metric-card"><div class="metric-label">Movido — exactly what the website and app show (USD)</div>
+<div class="metric-value">{% if website_movido %}${{ website_movido.total_usd|floatformat:2|intcomma }}{% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}</div>
+<div class="metric-change">{% if website_movido %}Deposits ${{ website_movido.deposited_usd|floatformat:2|intcomma }} ({{ website_movido.deposit_count|intcomma }}) · Withdrawals ${{ website_movido.withdrawn_usd|floatformat:2|intcomma }} ({{ website_movido.withdrawal_count|intcomma }}){% endif %}</div>
+<p>Every deposit and withdrawal of Confío dollars across all rails (ramps, outside USDT, sends to outside wallets, Pay): deposits gross, withdrawals net of the fee. Stock, Bitcoin and gold trades are investments and are not counted. Same 10-minute snapshot as the public page.</p></div>
+<div class="metric-card"><div class="metric-label">Deposits delivered by local-money providers, all time (USD)</div><div class="metric-value">${{ deposited_all_providers|floatformat:2|intcomma }}</div>
 <div class="metric-change">{% for provider, volume in deposited_provider_volumes.items %}{{ provider|title }}: ${{ volume|floatformat:2|intcomma }} · {% endfor %}</div>
-<p>Recorded incoming settlements only. Excludes outgoing payments and intermediate legs. This total is not affected by the filters below. Transak history requires imported settlement records.</p></div>
+<p>Provider-side view: incoming settlements only, net of the fee. A subset of Movido's deposits (it excludes outside USDT and all withdrawals). Not affected by the filters below; Transak history requires imported settlement records.</p></div>
+</div>
 <p><a href="{% url 'admin:payment_accounts_infiniajourney_changelist' %}">All transfers and provider legs</a>
 {% if infinia_unstarted != None %} · <a href="{% url 'admin:payment_accounts_automaticpayin_changelist' %}">Automatic deposit processing</a> · {{ infinia_unstarted }} deposits without a started transfer{% endif %}</p>
 <form method="get" class="data-table" style="padding:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">

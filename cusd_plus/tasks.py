@@ -1640,7 +1640,18 @@ def monitor_cusd_fee_events(self):
                 tx_hash = log.get('transactionHash')
                 if tx_hash:
                     by_tx[tx_hash].append(log)
+            block_times: dict = {}
             for tx_hash, tx_logs in by_tx.items():
+                # The fee ledger records EVERY perimeter fee, including a
+                # permissionless exit by an address that isn't a Confío
+                # account (skipped below for the activity ledger).
+                from .fee_ledger import block_time, record_fee_events
+                for fee_log in tx_logs:
+                    try:
+                        block_time(_rpc, int(fee_log.get('blockNumber', '0x0'), 16), block_times)
+                    except (TypeError, ValueError):
+                        pass
+                record_fee_events(tx_hash, tx_logs, block_times)
                 # Preserve domain identity for sponsored sends. Falling back
                 # to tx.from would see the sponsor, lose kind/source_id, and
                 # recreate the Conversion activity row that send settlement
@@ -2780,3 +2791,16 @@ def relay_cache_heartbeat():
 
     cache.set(RELAY_CACHE_HEARTBEAT_KEY,
               {'host': socket.gethostname(), 'at': timezone.now().isoformat()}, 180)
+
+
+@shared_task(name='cusd_plus.refresh_fee_ledger_summary', ignore_result=True)
+def refresh_fee_ledger_summary_task():
+    """Admin fee-by-source summary, off the request path."""
+    from django.core.cache import cache
+
+    from .metrics import refresh_fee_ledger_summary
+
+    try:
+        refresh_fee_ledger_summary()
+    finally:
+        cache.delete('confio_fee_ledger_summary:refreshing')

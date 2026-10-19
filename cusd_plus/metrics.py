@@ -46,6 +46,13 @@ class CUSDBscPlatformMetrics:
     as_of: object
 
     @property
+    def accrued_fees_usd(self) -> Optional[Decimal]:
+        """Entry + exit fees still uncollected in the vault (None if unknown)."""
+        if self.accrued_entry_fees_usd is None or self.accrued_exit_fees_usd is None:
+            return None
+        return self.accrued_entry_fees_usd + self.accrued_exit_fees_usd
+
+    @property
     def is_undercollateralised(self) -> bool:
         return (
             self.backing_ratio_bps is not None
@@ -643,3 +650,50 @@ def get_bnb_autoconvert_stats() -> dict:
     counts['pending_amount'] = counts['pending_amount'] or Decimal('0')
     counts['total'] = rows.count()
     return counts
+
+
+FEE_LEDGER_SUMMARY_KEY = 'confio_fee_ledger_summary:v1'
+
+
+def refresh_fee_ledger_summary():
+    """Compute the fee summary (a full ledger pass) and cache it. Runs in
+    Celery every 10 minutes, never inside an admin request."""
+    from django.core.cache import cache
+
+    from .fee_ledger import summary
+
+    result = summary()
+    cache.set(FEE_LEDGER_SUMMARY_KEY, result, 30 * 60)
+    return result
+
+
+def get_fee_ledger_summary():
+    """The cached fee summary for the dashboard. On a cold cache it queues
+    one refresh and returns {'pending': True} instead of blocking the page;
+    None only when the cache itself is unreadable."""
+    from django.conf import settings
+    from django.core.cache import cache
+
+    backend = (settings.CACHES.get('default') or {}).get('BACKEND', '')
+    if 'redis' not in backend.lower():
+        # A process-local cache (dev) can't receive the Celery worker's
+        # result: compute inline rather than show "pending" forever.
+        try:
+            return refresh_fee_ledger_summary()
+        except Exception:  # noqa: BLE001 — ops page must remain available
+            logger.warning('fee ledger summary failed', exc_info=True)
+            return None
+    try:
+        cached = cache.get(FEE_LEDGER_SUMMARY_KEY)
+    except Exception:  # noqa: BLE001 — ops page must remain available
+        logger.warning('fee ledger cache unreadable', exc_info=True)
+        return None
+    if cached is not None:
+        return cached
+    try:
+        if cache.add('confio_fee_ledger_summary:refreshing', 1, 300):
+            from .tasks import refresh_fee_ledger_summary_task
+            refresh_fee_ledger_summary_task.delay()
+    except Exception:  # noqa: BLE001
+        logger.warning('could not queue fee ledger refresh', exc_info=True)
+    return {'pending': True}

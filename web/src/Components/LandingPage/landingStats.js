@@ -1,8 +1,9 @@
 import { gql } from '@apollo/client';
 
-// Live traction numbers — same definitions the admin dashboard uses
-// (Koywe grey-box on-chain deposited volume; presale raised). Server
-// caches 10 min. Callers render NOTHING when live data is absent
+// Live traction numbers. "Movido" (fundFlowStats) is the same snapshot the
+// admin dashboard shows (ramps.metrics.public_fund_flow_snapshot): every
+// deposit and withdrawal of Confío dollars; presale raised. Server caches
+// 10 min. Callers render NOTHING when live data is absent
 // (DESIGN.md: real numbers or nothing — no client-side fallbacks).
 export const LANDING_STATS = gql`
   query LandingStats {

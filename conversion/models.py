@@ -338,6 +338,41 @@ class CusdFeeScanState(models.Model):
         db_table = 'cusd_fee_scan_state'
 
 
+class CusdFeeEvent(models.Model):
+    """One finalized cUSD perimeter fee event, exactly as the chain emitted it.
+
+    The single fee ledger: every 0.9% Confío charges (deposits, withdrawals,
+    ramps, sends, Pay, stock and crypto trades, permissionless exits) shows
+    up as a MintedWithFee / RedeemedWithFee / SavingsEntrySettled /
+    SavingsExitSettled log on the cUSD vault. Recorded by the finalized-log
+    scanner (cusd_plus.tasks.monitor_cusd_fee_events), never by app flows,
+    so it is complete and counts each fee once. Where a fee came from is
+    derived at read time (cusd_plus/fee_ledger.py), because ramp attribution
+    can land after the scan.
+    """
+
+    tx_hash = models.CharField(max_length=66, db_index=True)
+    log_index = models.PositiveIntegerField()
+    block_number = models.PositiveBigIntegerField(db_index=True)
+    block_time = models.DateTimeField(null=True, blank=True, db_index=True)
+    direction = models.CharField(max_length=8)  # entry | exit
+    event_type = models.CharField(max_length=24)  # usdt_to_cusd | cusd_to_usdt | to_savings | from_savings
+    gross_wei = models.DecimalField(max_digits=40, decimal_places=0)
+    fee_wei = models.DecimalField(max_digits=40, decimal_places=0)
+    net_wei = models.DecimalField(max_digits=40, decimal_places=0)
+    fee_bps = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'cusd_fee_event'
+        constraints = [
+            models.UniqueConstraint(fields=['tx_hash', 'log_index'], name='cusd_fee_event_tx_log_uniq'),
+        ]
+
+    def __str__(self):
+        return f'{self.direction} fee {self.fee_wei} @ {self.tx_hash[:10]}#{self.log_index}'
+
+
 # Update unified user activity on new conversions
 from django.db.models.signals import post_save
 from django.dispatch import receiver

@@ -1675,38 +1675,10 @@ class Query(graphene.ObjectType):
     )
 
     def resolve_fund_flow_stats(self, info):
-        from django.core.cache import cache
+        from ramps.metrics import public_fund_flow_snapshot
 
-        cached = cache.get('fund_flow_stats_v4')
-        if cached:
-            return _fund_flow_type(cached)
-
-        from ramps.metrics import fund_flow_breakdown
-        from users.country_codes import COUNTRY_CODES
-        from users.country_names_es import COUNTRY_NAMES_ES
-        # One snapshot for the tile and the screen: the total, the split, the
-        # countries and the timing all come from the same operation sets.
-        flow = fund_flow_breakdown()
-        iso_to_en = {row[2]: row[0] for row in COUNTRY_CODES}
-        data = {
-            'deposited_usd': float(flow['deposited_usd']),
-            'withdrawn_usd': float(flow['withdrawn_usd']),
-            'total_usd': float(flow['deposited_usd'] + flow['withdrawn_usd']),
-            'deposit_count': flow['deposit_count'],
-            'withdrawal_count': flow['withdrawal_count'],
-            'operation_count': flow['deposit_count'] + flow['withdrawal_count'],
-            'median_withdrawal_minutes': flow['median_withdrawal_minutes'],
-            'withdrawal_timing_samples': flow['withdrawal_timing_samples'],
-            'since': flow['since'].isoformat() if flow['since'] else None,
-            'countries': [
-                {'country_iso': code,
-                 'country_name': COUNTRY_NAMES_ES.get(code) or iso_to_en.get(code) or code,
-                 'operation_count': n}
-                for code, n in flow['countries']
-            ],
-        }
-        cache.set('fund_flow_stats_v4', data, 600)
-        return _fund_flow_type(data)
+        # The same snapshot the admin dashboard shows as "Movido".
+        return _fund_flow_type(public_fund_flow_snapshot())
 
 
     def resolve_landing_stats(self, info):
@@ -1724,7 +1696,7 @@ class Query(graphene.ObjectType):
 
         # Reuse the canonical admin/$CONFIO summary metric when available.
         # Its predicate is a completed phone registration—not Didit KYC or MAU.
-        summary = cache.get('stats_summary_v13') or {}
+        summary = cache.get('stats_summary_v14') or {}
         registered_users = summary.get('total_users')
         if registered_users is None:
             from users.models import User

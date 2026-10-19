@@ -100,8 +100,13 @@ def dashboard_context(request):
         if country:
             pending = pending.filter(entry__financial_account__country=country)
         waiting = pending.count()
-    from ramps.metrics import deposited_volume_by_provider
+    from ramps.metrics import deposited_volume_by_provider, public_fund_flow_snapshot
     provider_volumes = deposited_volume_by_provider()
+    try:
+        website_movido = public_fund_flow_snapshot()
+    except Exception:  # noqa: BLE001 — never break the dashboard over a stat
+        website_movido = None
     return {'infinia_sections': sections, 'infinia_countries': countries,
         'deposited_provider_volumes': provider_volumes, 'deposited_all_providers': sum(provider_volumes.values(), Decimal(0)),
+        'website_movido': website_movido,
         'infinia_country': country, 'infinia_direction': direction, 'infinia_unstarted': waiting}

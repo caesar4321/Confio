@@ -902,6 +902,9 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['stock_stats_24h'] = get_stock_trade_stats(since=last_24h)
         context['stock_stats_30d'] = get_stock_trade_stats(since=rolling_30_start)
         context['stock_router_metrics'] = get_stock_router_metrics()
+        # Every Confío fee, once, by source (cUSD's on-chain fee events).
+        from cusd_plus.metrics import get_fee_ledger_summary
+        context['fee_ledger'] = get_fee_ledger_summary()
         # Same chain-derived, marked-to-market snapshot served to the app.
         # Never substitute settlement volume: volume is a flow, while this is
         # the current value of tokens still held by Confío stock traders.

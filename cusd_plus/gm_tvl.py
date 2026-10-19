@@ -111,6 +111,7 @@ def _publish(result: dict) -> dict:
     # rolling deploy cannot keep serving the prior shape/value.
     cache.delete('stats_summary_v12')
     cache.delete('stats_summary_v13')
+    cache.delete('stats_summary_v14')
     return result
 
 
