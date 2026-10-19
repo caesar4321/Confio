@@ -1,0 +1,51 @@
+{% load humanize %}
+<!-- BSC sponsorship: the rail every user-facing BSC action rides -->
+<h2 class="section-title">BSC Sponsorship (EIP-7702)</h2>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Sponsored Batches (24h)</div>
+        <div class="metric-value">{{ sponsorship_stats.total|intcomma }}</div>
+        <div class="metric-change">{{ sponsorship_stats_7d.total|intcomma }} last 7 days</div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Failed (24h)</div>
+        <div class="metric-value {% if sponsorship_stats.failed %}negative{% endif %}">
+            {{ sponsorship_stats.failed|intcomma }}
+        </div>
+        <div class="metric-change">
+            {{ sponsorship_stats.reverted }} reverted &middot;
+            {{ sponsorship_stats.noop_failed }} no-op &middot;
+            {{ sponsorship_stats.dropped }} dropped &middot;
+            {{ sponsorship_stats.reorged }} reorged
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Unresolved</div>
+        <div class="metric-value {% if sponsorship_stats.unresolved_all_time %}negative{% endif %}">
+            {{ sponsorship_stats.unresolved_all_time|intcomma }}
+        </div>
+        <div class="metric-change">
+            All-time signed/sent with no receipt — escalate, never terminalize by hand
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">BNB Rescues Pending</div>
+        <div class="metric-value {% if bnb_autoconvert_stats.pending %}negative{% endif %}">
+            {{ bnb_autoconvert_stats.pending|intcomma }}
+        </div>
+        <div class="metric-change">
+            {{ bnb_autoconvert_stats.pending_amount|floatformat:4 }} BNB awaiting client signature
+        </div>
+    </div>
+</div>
+<div style="margin-bottom: 20px;">
+    <a href="{% url 'confio_admin:blockchain_sponsoredbatch_changelist' %}" class="action-button secondary"
+        style="margin-right: 10px;">Sponsorship Ledger</a>
+    <a href="{% url 'confio_admin:blockchain_pendingautoswap_changelist' %}?asset_type__exact=BNB"
+        class="action-button secondary" style="margin-right: 10px;">BNB Auto-Swaps</a>
+    <a href="{% url 'confio_admin:conversion_conversion_changelist' %}?status__exact=STUCK"
+        class="action-button secondary">Stuck Sagas</a>
+</div>

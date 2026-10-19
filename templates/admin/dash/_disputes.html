@@ -1,0 +1,22 @@
+{% load humanize %}
+<!-- Alert boxes for urgent matters -->
+{% if escalated_disputes > 0 %}
+<div class="alert-box critical">
+    <span class="alert-icon">🚨</span>
+    <div>
+        <strong>{{ escalated_disputes }} Escalated Disputes</strong> require immediate attention.
+        <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_changelist' %}?status__exact=ESCALATED">View all</a>
+    </div>
+</div>
+{% endif %}
+
+{% if open_disputes > 5 %}
+<div class="alert-box">
+    <span class="alert-icon">⚠️</span>
+    <div>
+        <strong>{{ open_disputes }} Open Disputes</strong> are pending review.
+        <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_changelist' %}?status__in=OPEN,UNDER_REVIEW">Review
+            disputes</a>
+    </div>
+</div>
+{% endif %}

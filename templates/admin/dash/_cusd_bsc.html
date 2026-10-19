@@ -1,0 +1,91 @@
+{% load humanize %}
+<!-- Dollar rail 2: universal cUSD on BNB Smart Chain -->
+<h2 class="section-title">cUSD — BNB Smart Chain payment rail</h2>
+{% if cusd_bsc_metrics.source == "unconfigured" %}
+<div class="alert"
+    style="background: #f3f4f6; color: #374151; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+    <strong>cUSD vault not wired in this environment</strong> — set
+    <code>CUSD_VAULT_ADDRESS</code> to read live supply, reserve, and fees.
+</div>
+{% elif cusd_bsc_metrics.source == "unavailable" %}
+<div class="alert"
+    style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+    <strong>⚠️ cUSD vault unreadable</strong> — chain-derived supply,
+    reserve, and fee accounting are unavailable rather than shown as zero.
+</div>
+{% elif cusd_bsc_metrics.is_undercollateralised %}
+<div class="alert"
+    style="background: #fee2e2; color: #991b1b; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+    <strong>🚨 cUSD under-collateralised</strong> — backing ratio
+    {{ cusd_bsc_metrics.backing_ratio_bps }} bps (below 10,000).
+</div>
+{% endif %}
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Circulating cUSD</div>
+        <div class="metric-value">
+            {% if cusd_bsc_metrics.circulating_cusd is not None %}
+            ${{ cusd_bsc_metrics.circulating_cusd|floatformat:0|intcomma }}
+            {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+        </div>
+        <div class="metric-change">Owed to holders (on-chain)</div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">USDT Reserve</div>
+        <div class="metric-value">
+            {% if cusd_bsc_metrics.usdt_reserve_usd is not None %}
+            ${{ cusd_bsc_metrics.usdt_reserve_usd|floatformat:0|intcomma }}
+            {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+        </div>
+        <div class="metric-change">
+            {% if cusd_bsc_metrics.backing_ratio_bps is not None %}
+            Backing {{ cusd_bsc_metrics.backing_ratio_bps }} bps
+            {% else %}Backing unreadable{% endif %}
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Conversion Fee</div>
+        <div class="metric-value">
+            {% if cusd_bsc_metrics.fee_pct is not None %}
+            {{ cusd_bsc_metrics.fee_pct|floatformat:"-2" }}%
+            {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+        </div>
+        <div class="metric-change">
+            {% if cusd_bsc_metrics.fee_bps is not None %}
+            {{ cusd_bsc_metrics.fee_bps }} bps on USDT entry and exit
+            {% else %}On-chain fee unreadable{% endif %}
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Accrued Entry Fees</div>
+        <div class="metric-value">
+            {% if cusd_bsc_metrics.accrued_entry_fees_usd is not None %}
+            ${{ cusd_bsc_metrics.accrued_entry_fees_usd|floatformat:2|intcomma }}
+            {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+        </div>
+        <div class="metric-change">Uncollected USDT &middot; every entry (deposits, on-ramps, stock/crypto sales)</div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Accrued Exit Fees</div>
+        <div class="metric-value">
+            {% if cusd_bsc_metrics.accrued_exit_fees_usd is not None %}
+            ${{ cusd_bsc_metrics.accrued_exit_fees_usd|floatformat:2|intcomma }}
+            {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+        </div>
+        <div class="metric-change">Uncollected USDT &middot; every exit (withdrawals, off-ramps, Pay, stock/crypto buys)</div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Conversion Status</div>
+        <div class="metric-value" style="font-size: 18px;">
+            {% if cusd_bsc_metrics.paused is None %}—
+            {% elif cusd_bsc_metrics.paused %}<span style="color:#991b1b;">Paused</span>
+            {% else %}<span style="color:#065f46;">Open</span>{% endif %}
+        </div>
+        <div class="metric-change">USDT ↔ cUSD perimeter</div>
+    </div>
+</div>

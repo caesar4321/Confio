@@ -1,0 +1,23 @@
+{% load humanize %}
+<h2 class="section-title">☁️ V2 Security & Migration</h2>
+<div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Google Drive Backups</div>
+            <div class="metric-value">{{ security_stats.drive_count|intcomma }}</div>
+            <div class="metric-change">{{ security_stats.drive_pct|floatformat:1 }}% coverage</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">V2 Keyless Migrated</div>
+            <div class="metric-value">{{ security_stats.migrated_count|intcomma }}</div>
+            <div class="metric-change" style="color: #3b82f6;">{{ security_stats.migrated_pct|floatformat:1 }}%
+                migrated</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">V2 Safety Score</div>
+            <div class="metric-value" {% if security_stats.safe_v2_pct < 50 %}style="color: #ef4444;" {% else
+                %}style="color: #10b981;" {% endif %}>
+                {{ security_stats.safe_v2_pct|floatformat:1 }}%
+            </div>
+            <div class="metric-change">Migrated + Backup Verified</div>
+        </div>
+    </div>

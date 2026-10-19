@@ -1,0 +1,107 @@
+{% load humanize %}
+<h2 class="section-title">📣 Content Engagement</h2>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Platform Clicks (All Time)</div>
+        <div class="metric-value">{{ content_click_stats.total|intcomma }}</div>
+        <div class="metric-change">Raw tracked outbound clicks</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Platform Clicks (7d)</div>
+        <div class="metric-value">{{ content_click_stats.last_7d|intcomma }}</div>
+        <div class="metric-change">{{ content_click_stats.last_24h|intcomma }} in last 24h</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Unique Clickers (7d)</div>
+        <div class="metric-value">{{ content_click_stats.unique_users_7d|intcomma }}</div>
+        <div class="metric-change">Users who tapped at least one platform link</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Surface Split (7d)</div>
+        <div class="metric-value">{{ content_click_stats.discover_7d|intcomma }}/{{ content_click_stats.channel_7d|intcomma }}</div>
+        <div class="metric-change">Discover / Channel</div>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+    <div class="data-table" style="margin-bottom: 0;">
+        <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+            Platform Breakdown (7d)
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Platform</th>
+                    <th style="text-align: right;">Clicks</th>
+                    <th style="text-align: right;">Users</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in platform_breakdown_7d %}
+                <tr>
+                    <td style="font-weight: 500;">{{ row.platform }}</td>
+                    <td style="text-align: right;">{{ row.click_count|intcomma }}</td>
+                    <td style="text-align: right; color: #6b7280;">{{ row.unique_users|intcomma }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="3" style="padding: 16px; color: #6b7280;">No platform clicks tracked yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="data-table" style="margin-bottom: 0;">
+        <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+            Quick Links
+        </div>
+        <table>
+            <tbody>
+                <tr>
+                    <td><a href="{% url 'confio_admin:inbox_contentitem_changelist' %}">Content Items</a></td>
+                    <td style="text-align: right; color: #6b7280;">with click columns</td>
+                </tr>
+                <tr>
+                    <td><a href="{% url 'confio_admin:inbox_contentplatformclick_changelist' %}">Raw Click Events</a></td>
+                    <td style="text-align: right; color: #6b7280;">event-level detail</td>
+                </tr>
+                <tr>
+                    <td><a href="{% url 'confio_admin:inbox_contentplatformclickdailystat_changelist' %}">Daily Click Stats</a></td>
+                    <td style="text-align: right; color: #6b7280;">rollups after cleanup job</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="data-table">
+    <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+        Top Clicked Content (30d)
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Content</th>
+                <th>Channel</th>
+                <th>Surface</th>
+                <th style="text-align: right;">Clicks</th>
+                <th style="text-align: right;">Users</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in top_clicked_content %}
+            <tr>
+                <td style="font-weight: 500;">{{ row.content_item__title|default:"(Untitled)" }}</td>
+                <td>{{ row.content_item__channel__title|default:"-" }}</td>
+                <td>{{ row.surface }}</td>
+                <td style="text-align: right;">{{ row.click_count|intcomma }}</td>
+                <td style="text-align: right; color: #6b7280;">{{ row.unique_users|intcomma }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" style="padding: 16px; color: #6b7280;">No clicked content yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

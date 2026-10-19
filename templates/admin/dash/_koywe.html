@@ -1,0 +1,39 @@
+{% load humanize %}
+<!-- Koywe Integration -->
+<h3 class="section-title"
+    style="margin-top: 30px; font-size: 18px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; margin-bottom: 20px;">
+    💸 Koywe Integration Filters
+</h3>
+<div class="data-table" style="padding: 16px; margin-bottom: 20px;">
+    <form method="get" style="display: flex; gap: 16px; align-items: end; flex-wrap: wrap;">
+        <div>
+            <div class="metric-label">Direction</div>
+            <select name="koywe_direction" style="padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; min-width: 180px;">
+                <option value="all" {% if koywe_direction_filter == 'all' %}selected{% endif %}>All</option>
+                <option value="on_ramp" {% if koywe_direction_filter == 'on_ramp' %}selected{% endif %}>On-ramp only</option>
+                <option value="off_ramp" {% if koywe_direction_filter == 'off_ramp' %}selected{% endif %}>Off-ramp only</option>
+            </select>
+        </div>
+        <div>
+            <div class="metric-label">Country</div>
+            <select name="koywe_country" style="padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; min-width: 180px;">
+                <option value="">All countries</option>
+                {% for code in koywe_country_options %}
+                <option value="{{ code }}" {% if koywe_country_filter == code %}selected{% endif %}>{{ code }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <button type="submit" class="button default">Apply</button>
+            <a href="{% url 'admin:dashboard' %}" class="button" style="margin-left: 8px;">Reset</a>
+        </div>
+    </form>
+</div>
+
+{% if show_koywe_onramp %}
+{% include "admin/_koywe_dashboard_section.html" with section=koywe_onramp %}
+{% endif %}
+
+{% if show_koywe_offramp %}
+{% include "admin/_koywe_dashboard_section.html" with section=koywe_offramp %}
+{% endif %}

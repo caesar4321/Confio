@@ -1,0 +1,66 @@
+{% load humanize %}
+<h2 class="section-title">Confío fee revenue — by source</h2>
+<p style="color:#6b7280; margin:-8px 0 12px;">
+    Every 0.9% fee is charged by the cUSD vault (one ledger row per on-chain fee event, recorded by the
+    finalized-log scanner). The legacy 0.30% stock-router fee paid by pre-v2 app builds is separate and
+    listed last; nothing is counted twice.
+</p>
+{% if fee_ledger.pending %}
+<div class="alert" style="background:#f3f4f6; color:#374151; padding:16px; border-radius:8px; margin-bottom:20px;">
+    Fee summary is being computed in the background; reload in a minute.
+</div>
+{% elif fee_ledger and fee_ledger.total.count %}
+<table class="data-table" style="width:100%; border-collapse:collapse; margin-bottom:24px;">
+    <thead>
+        <tr style="text-align:left; border-bottom:1px solid #e5e7eb;">
+            <th style="padding:8px;">Source</th>
+            <th style="padding:8px; text-align:right;">Fees, last 30 days</th>
+            <th style="padding:8px; text-align:right;">Fees, lifetime</th>
+            <th style="padding:8px; text-align:right;">Events</th>
+            <th style="padding:8px; text-align:right;">Gross through the fee</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in fee_ledger.rows %}
+        <tr style="border-bottom:1px solid #f3f4f6;{% if not row.count %} color:#9ca3af;{% endif %}">
+            <td style="padding:8px;">{{ row.label }}</td>
+            <td style="padding:8px; text-align:right;">${{ row.fee_usd_30d|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ row.fee_usd|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">{{ row.count|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ row.volume_usd|floatformat:0|intcomma }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="font-weight:600; border-top:2px solid #e5e7eb;">
+            <td style="padding:8px;">cUSD fee total</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.total.fee_usd_30d|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.total.fee_usd|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">{{ fee_ledger.total.count|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.total.volume_usd|floatformat:0|intcomma }}</td>
+        </tr>
+        <tr style="color:#6b7280;">
+            <td style="padding:8px;">Legacy stock router (0.30%, pre-v2 builds)</td>
+            <td style="padding:8px; text-align:right;">—</td>
+            <td style="padding:8px; text-align:right;">
+                {% if stock_router_metrics.accrued_usdt_fees is not None %}
+                ${{ stock_router_metrics.accrued_usdt_fees|floatformat:2|intcomma }} uncollected
+                {% else %}unavailable{% endif %}
+            </td>
+            <td style="padding:8px; text-align:right;">—</td>
+            <td style="padding:8px; text-align:right;">—</td>
+        </tr>
+    </tbody>
+</table>
+{% if cusd_bsc_metrics.accrued_fees_usd is not None and fee_ledger.total.count %}
+<p style="color:#6b7280; margin:-12px 0 24px;">
+    Still uncollected in the vault: ${{ cusd_bsc_metrics.accrued_fees_usd|floatformat:2|intcomma }}
+    &middot; the rest of the lifetime total has been collected to the Safe.
+</p>
+{% endif %}
+{% if fee_ledger.undated_events %}
+<p style="color:#92400e; margin:-12px 0 24px;">{{ fee_ledger.undated_events }} event(s) have no block time and are excluded from the 30-day column.</p>
+{% endif %}
+{% else %}
+<div class="alert" style="background:#f3f4f6; color:#374151; padding:16px; border-radius:8px; margin-bottom:20px;">
+    Fee ledger unavailable or empty. Run <code>manage.py backfill_cusd_fee_ledger --apply</code> once on the production host.
+</div>
+{% endif %}

@@ -1,0 +1,65 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    /* Confío emerald on Django's own admin variables, so every admin page
+       (changelists, forms, dark mode) shares the dashboard's palette. */
+    :root {
+        --primary: #10b981;
+        --secondary: #065f46;
+        --accent: #a7f3d0;
+        --header-color: #d1fae5;
+        --header-branding-color: #ffffff;
+        --breadcrumbs-fg: #a7f3d0;
+        --breadcrumbs-bg: #047857;
+        --link-fg: #047857;
+        --link-hover-color: #065f46;
+        --link-selected-fg: #065f46;
+        --selected-row: #ecfdf5;
+        --button-bg: #047857;
+        --button-hover-bg: #065f46;
+        --default-button-bg: #065f46;
+        --default-button-hover-bg: #047857;
+        --message-success-bg: #d1fae5;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+            --primary: #10b981;
+            --secondary: #064e3b;
+            --header-bg: #022c22;
+            --header-color: #a7f3d0;
+            --breadcrumbs-bg: #064e3b;
+            --link-fg: #34d399;
+            --link-hover-color: #6ee7b7;
+            --link-selected-fg: #6ee7b7;
+            --selected-row: #064e3b;
+            --message-success-bg: #065f46;
+        }
+    }
+    html[data-theme="dark"] {
+        --primary: #10b981;
+        --secondary: #064e3b;
+        --header-bg: #022c22;
+        --header-color: #a7f3d0;
+        --breadcrumbs-bg: #064e3b;
+        --link-fg: #34d399;
+        --link-hover-color: #6ee7b7;
+        --link-selected-fg: #6ee7b7;
+        --selected-row: #064e3b;
+        --message-success-bg: #065f46;
+    }
+    #site-name a { font-weight: 600; letter-spacing: -0.01em; }
+</style>
+{% endblock %}
+
+{% block branding %}
+<div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header|default:_('Django administration') }}</a></div>
+{% if user.is_anonymous %}
+  {% include "admin/color_theme_toggle.html" %}
+{% endif %}
+{% endblock %}
+
+{% block nav-global %}{% endblock %}

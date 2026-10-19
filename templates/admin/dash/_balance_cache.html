@@ -1,0 +1,29 @@
+{% load humanize %}
+<!-- Blockchain Integration -->
+<h2 class="section-title">Blockchain Integration</h2>
+<p style="color:#6b7280; font-size:13px; margin:0 0 12px;">
+    Balance caching is an Algorand-rail concept — BSC balances are read from
+    the chain per request, so cUSD+ has no cache to go stale. Its health lives
+    in the sponsorship counters above and on
+    <a href="{% url 'confio_admin:blockchain_analytics' %}">Blockchain Analytics</a>.
+</p>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Cached Balances (Algorand)</div>
+        <div class="metric-value">{{ cached_balances|intcomma }}</div>
+        <div class="metric-change">{{ balance_cache_health.stale_percentage|floatformat:1 }}% stale
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Last Blockchain Sync</div>
+        <div class="metric-value" style="font-size: 16px;">
+            {% if last_blockchain_sync %}
+            {{ last_blockchain_sync|timesince }} ago
+            {% else %}
+            Never
+            {% endif %}
+        </div>
+        <div class="metric-change">Balance reconciliation</div>
+    </div>
+</div>

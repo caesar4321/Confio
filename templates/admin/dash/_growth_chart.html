@@ -1,0 +1,60 @@
+{% load humanize %}
+<div class="split">
+    <div class="panel">
+        <h3>Daily, weekly and monthly actives (30 days)</h3>
+        <div style="height: 260px; position: relative;"><canvas id="growthChart" aria-label="Active users over the last 30 days" role="img"></canvas></div>
+    </div>
+    <div class="panel">
+        <h3>Top countries by MAU</h3>
+        {% if top_countries_metrics %}
+        <table class="mini-table">
+            <thead><tr><th>Country</th><th>MAU</th><th>DAU</th><th>Users</th></tr></thead>
+            <tbody>
+                {% for c in top_countries_metrics %}
+                <tr><td>{{ c.country_code|default:"—" }}</td><td>{{ c.mau|intcomma }}</td><td>{{ c.dau|intcomma }}</td><td>{{ c.total_users|intcomma }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="unknown">No country snapshot yet.</p>
+        {% endif %}
+    </div>
+</div>
+{{ metrics_trend_chart|json_script:"growth-chart-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
+<script>
+(function () {
+    var rows = JSON.parse(document.getElementById('growth-chart-data').textContent);
+    var el = document.getElementById('growthChart');
+    if (!el || !window.Chart) return;
+    var dark = document.documentElement.dataset.theme === 'dark' ||
+        (document.documentElement.dataset.theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var grid = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+    var ink = dark ? '#d0d0d0' : '#666';
+    function line(label, key, color, dash, fill) {
+        return { label: label, data: rows.map(function (r) { return r[key]; }), borderColor: color,
+                 backgroundColor: fill || 'transparent', borderDash: dash || [], borderWidth: 2,
+                 pointRadius: 0, pointHitRadius: 8, fill: !!fill, lineTension: 0.25 };
+    }
+    new Chart(el.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: rows.map(function (r) { return r.label; }),
+            datasets: [
+                line('MAU', 'mau', '#065f46', [5, 4]),
+                line('WAU', 'wau', '#10b981'),
+                line('DAU', 'dau', '#047857', null, 'rgba(16,185,129,0.12)'),
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            legend: { position: 'bottom', labels: { boxWidth: 12, fontColor: ink } },
+            tooltips: { mode: 'index', intersect: false },
+            scales: {
+                yAxes: [{ ticks: { beginAtZero: true, fontColor: ink }, gridLines: { color: grid } }],
+                xAxes: [{ ticks: { maxTicksLimit: 8, fontColor: ink }, gridLines: { display: false } }]
+            }
+        }
+    });
+})();
+</script>

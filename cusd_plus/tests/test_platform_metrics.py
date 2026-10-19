@@ -69,10 +69,8 @@ class CusdBscPlatformMetricsTests(SimpleTestCase):
         self.assertIsNone(result.fee_bps)
 
     def test_admin_dashboard_exposes_cusd_and_shared_conversion_fee(self):
-        template = (
-            Path(__file__).resolve().parents[2]
-            / 'templates/admin/dashboard.html'
-        ).read_text()
+        dash = Path(__file__).resolve().parents[2] / 'templates/admin/dash'
+        template = (dash / '_cusd_bsc.html').read_text() + (dash / '_cusd_plus.html').read_text()
 
         self.assertIn('cUSD — BNB Smart Chain payment rail', template)
         self.assertIn('Accrued Entry Fees', template)

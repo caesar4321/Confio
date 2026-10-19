@@ -1,0 +1,162 @@
+{% load humanize %}
+<!-- Ondo Stocks: product settlement + router fee accounting -->
+<h2 class="section-title">Ondo Stocks</h2>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Current Market Value</div>
+        <div class="metric-value">
+            {% if stock_portfolio %}
+            ${{ stock_portfolio.value_usd|floatformat:2|intcomma }}
+            {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+        </div>
+        <div class="metric-change">
+            Live token balances &times; current Ondo prices
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Current Holder Wallets</div>
+        <div class="metric-value">
+            {% if stock_portfolio %}{{ stock_portfolio.holder_wallets|intcomma }}
+            {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+        </div>
+        <div class="metric-change">
+            {% if stock_portfolio %}
+            {{ stock_portfolio.positions|intcomma }} open positions &middot;
+            {{ stock_portfolio.accounts_scanned|intcomma }} trader wallets scanned
+            {% else %}No current snapshot{% endif %}
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Trades (24h)</div>
+        <div class="metric-value">{{ stock_stats_24h.confirmed|intcomma }}</div>
+        <div class="metric-change">
+            {{ stock_stats_24h.confirmed_buys|intcomma }} buys &middot;
+            {{ stock_stats_24h.confirmed_sells|intcomma }} sells &middot;
+            {{ stock_stats_30d.confirmed|intcomma }} confirmed in 30d
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Settled Volume (30d)</div>
+        <div class="metric-value">${{ stock_stats_30d.total_volume|floatformat:2|intcomma }}</div>
+        <div class="metric-change">
+            Buy debits ${{ stock_stats_30d.buy_volume|floatformat:2|intcomma }} &middot;
+            sell proceeds ${{ stock_stats_30d.sell_volume|floatformat:2|intcomma }}
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Unique Traders (30d)</div>
+        <div class="metric-value">{{ stock_stats_30d.unique_traders|intcomma }}</div>
+        <div class="metric-change">
+            {{ stock_stats_30d.buy_attempts|intcomma }} buy attempts &middot;
+            {{ stock_stats_30d.sell_attempts|intcomma }} sell attempts
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Trading State</div>
+        <div class="metric-value" style="font-size: 18px;">
+            {% if not stock_router_metrics.wired %}
+            <span class="negative">Not configured</span>
+            {% elif stock_router_metrics.source == 'unavailable' %}
+            <span class="negative">Chain unreadable</span>
+            {% elif stock_router_metrics.paused %}
+            <span class="negative">Paused</span>
+            {% elif stock_router_metrics.stocks_enabled and stock_router_metrics.trading_enabled %}
+            Live
+            {% elif stock_router_metrics.stocks_enabled %}
+            Discovery only
+            {% else %}
+            Hidden
+            {% endif %}
+        </div>
+        <div class="metric-change">
+            Router's own fee {{ stock_router_metrics.fee_bps_onchain|default:"—" }} bps &middot;
+            signed by current app {{ stock_router_metrics.fee_bps_configured|default:"—" }} bps
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Legacy Router Fees (0.30%)</div>
+        <div class="metric-value">
+            {% if stock_router_metrics.accrued_usdt_fees is not None %}
+            ${{ stock_router_metrics.accrued_usdt_fees|floatformat:6|intcomma }}
+            {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+        </div>
+        <div class="metric-change">
+            {% if stock_router_metrics.router_usdt_balance is not None %}
+            Pre-v2 app builds only &middot; v2 trades pay cUSD's fee (see Confío fee revenue)
+            &middot; raw balance ${{ stock_router_metrics.router_usdt_balance|floatformat:2|intcomma }}
+            {% else %}Router balance unreadable{% endif %}
+        </div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Ops Attention</div>
+        <div class="metric-value {% if stock_stats_30d.unresolved_all_time or stock_stats_30d.failed_all_time or stock_stats_30d.history_missing %}negative{% endif %}">
+            {{ stock_stats_30d.unresolved_all_time|add:stock_stats_30d.failed_all_time|add:stock_stats_30d.history_missing|intcomma }}
+        </div>
+        <div class="metric-change">
+            {{ stock_stats_30d.unresolved_all_time }} unresolved &middot;
+            {{ stock_stats_30d.failed_all_time }} failed &middot;
+            {{ stock_stats_30d.history_missing }} missing history
+        </div>
+    </div>
+</div>
+<p style="color:#6b7280; font-size:13px; margin:0 0 12px;">
+    Current market value is marked to market from BSC balances and Ondo display prices;
+    it is not historical purchase cost. Volumes use exact event-backed settlements.
+    Router USDT can include accidental transfers; only accrued fees are withdrawable as revenue.
+    {% if stock_portfolio.updated_at_dt %}
+    Snapshot: {{ stock_portfolio.updated_at_dt|date:"Y-m-d H:i:s T" }}, BSC block
+    {{ stock_portfolio.as_of_block|default:"—" }}.
+    {% endif %}
+</p>
+
+{% if stock_portfolio.assets %}
+<h3 style="font-size: 18px; color: #1f2937; margin: 24px 0 12px;">Current Community Holdings</h3>
+<div class="data-table" style="border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom:20px;">
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead style="background: #f9fafb;">
+            <tr>
+                <th style="padding:12px; text-align:left;">Stock</th>
+                <th style="padding:12px; text-align:right;">Holders</th>
+                <th style="padding:12px; text-align:right;">Units</th>
+                <th style="padding:12px; text-align:right;">Price</th>
+                <th style="padding:12px; text-align:right;">Market value</th>
+                <th style="padding:12px; text-align:right;">Share</th>
+                <th style="padding:12px; text-align:right;">24h</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for asset in stock_portfolio.assets %}
+            <tr>
+                <td style="padding:12px;">
+                    <strong>{{ asset.ticker }}</strong>
+                    {% if asset.name %}<div style="font-size:12px;color:#6b7280;">{{ asset.name }}</div>{% endif %}
+                </td>
+                <td style="padding:12px; text-align:right;">{{ asset.holders|intcomma }}</td>
+                <td style="padding:12px; text-align:right;">{{ asset.units|floatformat:6|intcomma }}</td>
+                <td style="padding:12px; text-align:right;">${{ asset.price_usd|floatformat:2|intcomma }}</td>
+                <td style="padding:12px; text-align:right;"><strong>${{ asset.value_usd|floatformat:2|intcomma }}</strong></td>
+                <td style="padding:12px; text-align:right;">{{ asset.share_pct|floatformat:1 }}%</td>
+                <td style="padding:12px; text-align:right;" class="{% if asset.day_change_pct < 0 %}negative{% else %}positive{% endif %}">
+                    {{ asset.day_change_pct|floatformat:2 }}%
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+<div style="margin-bottom: 20px;">
+    <a href="{% url 'confio_admin:blockchain_ondostocktrade_changelist' %}"
+        class="action-button secondary" style="margin-right: 10px;">Ondo Stock Trades</a>
+    {% if stock_router_metrics.address %}
+    <a href="https://bscscan.com/address/{{ stock_router_metrics.address }}" target="_blank" rel="noopener"
+        class="action-button secondary">Router on BscScan</a>
+    {% endif %}
+</div>

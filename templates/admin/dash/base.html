@@ -1,0 +1,28 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+
+{% block extrastyle %}
+{{ block.super }}
+{% include "admin/dash/_styles.html" %}
+{% endblock %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<div class="dash">
+    <div class="dash-head">
+        <h1>{{ dash_heading }}</h1>
+        <div class="dash-asof">
+            {{ dash_as_of_label }} ART · built in {{ dash_build_ms|floatformat:0 }} ms{% if dash_has_chain %} · chain reads cached ≤5 min · <a href="?{{ dash_refresh_query }}">refresh</a>{% endif %}
+        </div>
+    </div>
+    <nav class="dash-tabs" aria-label="Dashboard pages">
+        {% for tab in dash_tabs %}
+        {% if tab.gap %}<span class="dash-tabs-gap"></span>{% endif %}
+        <a href="{{ tab.url }}" {% if tab.key == dash_active %}class="active" aria-current="page"{% endif %}>{{ tab.label }}</a>
+        {% endfor %}
+    </nav>
+    {% block dash %}{% endblock %}
+</div>
+{% block dash_scripts %}{% endblock %}
+{% endblock %}

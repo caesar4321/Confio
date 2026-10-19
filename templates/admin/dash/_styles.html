@@ -1,0 +1,146 @@
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<style>
+    /* One stylesheet for every dashboard page. Colors ride Django admin's
+       variables (themed in admin/base_site.html) so dark mode follows. */
+    .dash {
+        --dash-ink: var(--body-loud-color);
+        --dash-text: var(--body-fg);
+        --dash-muted: var(--body-quiet-color);
+        --dash-card: var(--body-bg);
+        --dash-sunken: var(--darkened-bg);
+        --dash-line: var(--hairline-color);
+        --dash-brand: #047857;
+        --dash-brand-deep: #065f46;
+        --dash-brand-soft: #ecfdf5;
+        --dash-critical: #b91c1c;
+        --dash-critical-soft: #fef2f2;
+        --dash-warning: #b45309;
+        --dash-warning-soft: #fffbeb;
+        --dash-ok: #047857;
+        font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color: var(--dash-text);
+        max-width: 1320px;
+        padding: 0 4px 48px;
+        font-size: 14px;
+        line-height: 1.45;
+    }
+    html[data-theme="dark"] .dash {
+        --dash-brand: #34d399;
+        --dash-brand-soft: #052e22;
+        --dash-critical: #fca5a5;
+        --dash-critical-soft: #2a0f0f;
+        --dash-warning: #fcd34d;
+        --dash-warning-soft: #2a2008;
+        --dash-ok: #34d399;
+    }
+    @media (prefers-color-scheme: dark) {
+        html:not([data-theme="light"]) .dash {
+            --dash-brand: #34d399;
+            --dash-brand-soft: #052e22;
+            --dash-critical: #fca5a5;
+            --dash-critical-soft: #2a0f0f;
+            --dash-warning: #fcd34d;
+            --dash-warning-soft: #2a2008;
+            --dash-ok: #34d399;
+        }
+    }
+    #content:has(.dash) > h1 { display: none; }
+
+    /* Header + tabs */
+    .dash-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 4px 0 14px; }
+    .dash-head h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: var(--dash-ink); margin: 0; padding: 0; }
+    .dash-asof { color: var(--dash-muted); font-size: 13px; }
+    .dash-asof a { color: var(--dash-brand); }
+    .dash-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--dash-line); margin: 0 0 24px; overflow-x: auto; scrollbar-width: none; }
+    .dash-tabs a { padding: 10px 14px; color: var(--dash-muted); text-decoration: none; font-weight: 500; white-space: nowrap; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .dash-tabs a:hover { color: var(--dash-ink); }
+    .dash-tabs a.active { color: var(--dash-brand); border-bottom-color: var(--dash-brand); }
+    .dash-tabs .dash-tabs-gap { flex: 1; }
+    .dash-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: -12px 0 24px; }
+    .dash-tools a { font-size: 12.5px; color: var(--dash-muted); text-decoration: none; padding: 4px 10px; border: 1px solid var(--dash-line); border-radius: 999px; }
+    .dash-tools a:hover { color: var(--dash-brand); border-color: var(--dash-brand); }
+
+    /* Bands (Today) */
+    .band { margin: 0 0 32px; }
+    .band-title { display: flex; align-items: baseline; gap: 10px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dash-muted); margin: 0 0 12px; }
+    .band-title a { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--dash-brand); margin-left: auto; text-decoration: none; }
+    .attention { border: 1px solid var(--dash-line); border-radius: 12px; overflow: hidden; background: var(--dash-card); }
+    .attention-row { display: grid; grid-template-columns: 10px 1fr auto auto; align-items: center; gap: 14px; padding: 12px 16px; border-top: 1px solid var(--dash-line); color: inherit; text-decoration: none; }
+    .attention-row:first-child { border-top: 0; }
+    a.attention-row:hover { background: var(--dash-sunken); }
+    .attention-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dash-warning); }
+    .attention-row.critical .attention-dot { background: var(--dash-critical); }
+    .attention-row.critical { background: var(--dash-critical-soft); }
+    .attention-title { font-weight: 600; color: var(--dash-ink); }
+    .attention-detail { color: var(--dash-muted); font-size: 13px; }
+    .attention-count { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 16px; color: var(--dash-ink); }
+    .attention-go { color: var(--dash-brand); font-size: 13px; }
+    .attention-clear { display: flex; align-items: center; gap: 12px; padding: 16px; color: var(--dash-ok); font-weight: 600; background: var(--dash-brand-soft); }
+
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+    .kpi { background: var(--dash-card); border: 1px solid var(--dash-line); border-radius: 12px; padding: 14px 16px; }
+    .kpi-label { font-size: 12.5px; color: var(--dash-muted); margin-bottom: 6px; }
+    .kpi-value { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--dash-ink); font-variant-numeric: tabular-nums; line-height: 1.15; }
+    .kpi-sub { font-size: 12.5px; color: var(--dash-muted); margin-top: 4px; }
+    .kpi-hero { background: linear-gradient(135deg, #047857, #065f46); border-color: transparent; }
+    .kpi-hero .kpi-label, .kpi-hero .kpi-sub { color: #a7f3d0; }
+    .kpi-hero .kpi-value { color: #fff; }
+    .unknown { color: var(--dash-muted); font-weight: 500; }
+
+    .split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+    .panel { background: var(--dash-card); border: 1px solid var(--dash-line); border-radius: 12px; padding: 16px; }
+    .panel h3 { font-size: 14px; font-weight: 600; color: var(--dash-ink); margin: 0 0 12px; }
+    .mini-table { width: 100%; border-collapse: collapse; }
+    .mini-table th, .mini-table td { padding: 7px 4px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--dash-line); background: none; }
+    .mini-table th { color: var(--dash-muted); font-weight: 500; font-size: 12px; text-transform: none; }
+    .mini-table th:first-child, .mini-table td:first-child { text-align: left; }
+    .mini-table tr:last-child td { border-bottom: 0; }
+
+    /* Section classes shared by every partial (kept from the old page so
+       the moved markup renders unchanged, restyled here once). */
+    .dash .section-title { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--dash-ink); margin: 36px 0 14px; padding: 0; background: none; text-transform: none; }
+    .dash .section-title:first-child, .dash > .section-title:first-of-type { margin-top: 0; }
+    .dash .metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .dash .metric-card { background: var(--dash-card); border: 1px solid var(--dash-line); border-radius: 12px; padding: 14px 16px; box-shadow: none; }
+    .dash .metric-card p { color: var(--dash-muted); font-size: 12.5px; margin: 8px 0 0; }
+    .dash .metric-label { font-size: 12.5px; color: var(--dash-muted); font-weight: 500; margin-bottom: 6px; text-transform: none; letter-spacing: 0; }
+    .dash .metric-value { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--dash-ink); font-variant-numeric: tabular-nums; line-height: 1.15; }
+    .dash .metric-change { font-size: 12.5px; color: var(--dash-muted); margin-top: 4px; }
+    .dash .metric-change.negative, .dash .negative { color: var(--dash-critical); }
+    .dash .positive { color: var(--dash-ok); }
+    .dash .data-table { background: var(--dash-card); border: 1px solid var(--dash-line); border-radius: 12px; overflow: auto; margin-bottom: 20px; box-shadow: none; }
+    .dash .data-table table, .dash table.data-table { width: 100%; border-collapse: collapse; }
+    .dash .data-table th { background: var(--dash-sunken); color: var(--dash-muted); font-weight: 500; font-size: 12px; text-transform: none; letter-spacing: 0; padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--dash-line); }
+    .dash .data-table td { padding: 9px 12px; border-bottom: 1px solid var(--dash-line); font-variant-numeric: tabular-nums; vertical-align: top; }
+    .dash .data-table tr:last-child td { border-bottom: 0; }
+    .dash .status-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--dash-sunken); color: var(--dash-muted); }
+    .dash .status-badge.active, .dash .status-badge.completed { background: var(--dash-brand-soft); color: var(--dash-ok); }
+    .dash .status-badge.pending { background: var(--dash-warning-soft); color: var(--dash-warning); }
+    .dash .status-badge.disputed { background: var(--dash-critical-soft); color: var(--dash-critical); }
+    .dash .quick-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .dash .action-button, .dash .action-button:link, .dash .action-button:visited { display: inline-block; padding: 7px 14px; border-radius: 8px; background: var(--dash-brand); color: #fff; text-decoration: none; font-weight: 500; font-size: 13px; border: 1px solid transparent; }
+    .dash .action-button:hover { background: var(--dash-brand-deep); color: #fff; }
+    .dash .action-button.secondary, .dash .action-button.secondary:link, .dash .action-button.secondary:visited { background: var(--dash-card); color: var(--dash-brand); border-color: var(--dash-line); }
+    .dash .action-button.secondary:hover { border-color: var(--dash-brand); }
+    .dash .alert, .dash .alert-box { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border-radius: 12px; margin-bottom: 16px; background: var(--dash-warning-soft) !important; color: var(--dash-text) !important; border: 1px solid var(--dash-line) !important; }
+    .dash .alert-box.critical { background: var(--dash-critical-soft) !important; }
+    .dash .alert a, .dash .alert-box a { color: var(--dash-brand); font-weight: 600; }
+    .dash .progress-bar { height: 6px; background: var(--dash-sunken); border-radius: 999px; overflow: hidden; }
+    .dash .progress-fill { height: 100%; background: var(--dash-brand); }
+    .dash .chart-container { background: var(--dash-card); border: 1px solid var(--dash-line); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+    .dash select, .dash input[type="text"] { padding: 7px 10px; border: 1px solid var(--dash-line); border-radius: 8px; background: var(--dash-card); color: var(--dash-text); }
+    .dash p { color: var(--dash-text); }
+
+    @media (max-width: 767px) {
+        .dash { padding: 0 0 32px; }
+        .dash-head h1 { font-size: 22px; }
+        .split { grid-template-columns: 1fr; }
+        .kpis, .dash .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .kpi-value, .dash .metric-value { font-size: 19px; }
+        .attention-row { grid-template-columns: 10px 1fr auto; }
+        .attention-go { display: none; }
+        .dash [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+        .dash .data-table td, .dash .data-table th { white-space: nowrap; }
+    }
+</style>

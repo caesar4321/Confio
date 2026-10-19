@@ -1,0 +1,33 @@
+{% load humanize %}
+{% if referral_stats %}
+<h2 class="section-title">👥 Referral Program</h2>
+<div class="metrics-grid" style="margin-top: 20px;">
+    <div class="metric-card">
+        <div class="metric-label">Referral Signups</div>
+        <div class="metric-value">{{ referral_stats.total|default:"0"|intcomma }}</div>
+        <div class="metric-change">Converted: {{ referral_stats.converted|default:"0"|intcomma }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Activation Rate</div>
+        <div class="metric-value">{{ referral_stats.conversion_rate|floatformat:1 }}%</div>
+        <div class="metric-change">Engaged referrers: {{ referral_stats.engaged|default:"0"|intcomma }}
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">New Referrals (7d)</div>
+        <div class="metric-value">{{ referral_stats.new_week|default:"0"|intcomma }}</div>
+        <div class="metric-change">Converted (7d): {{ referral_stats.converted_week|default:"0"|intcomma }}
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Avg Reward / Converted</div>
+        <div class="metric-value">{{ referral_stats.avg_rewards_per_converted|floatformat:2 }}</div>
+        <div class="metric-change">Eligible rewards: {{ referral_stats.eligible_events|default:"0"|intcomma }}
+        </div>
+    </div>
+</div>
+<p style="font-size: 13px; color: #4b5563; margin: -10px 0 30px;">
+    Referral metrics reflect balances earned via invites only. cUSD, USDC, and presale funds remain
+    unrestricted.
+</p>
+{% endif %}

@@ -1,0 +1,16 @@
+{% load humanize %}
+<!-- Platform messaging -->
+<h2 class="section-title">Messaging</h2>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Notifications Today</div>
+        <div class="metric-value">{{ notifications_sent_today|intcomma }}</div>
+        <div class="metric-change">{{ push_notifications_today }} push sent</div>
+    </div>
+
+    <div class="metric-card">
+        <div class="metric-label">Active Devices</div>
+        <div class="metric-value">{{ active_fcm_tokens|intcomma }}</div>
+        <div class="metric-change">{{ reachable_push_users|intcomma }} reachable users</div>
+    </div>
+</div>

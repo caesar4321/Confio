@@ -1,0 +1,11 @@
+{% extends "admin/dash/base.html" %}
+
+{% block dash %}
+{% if dash_intro %}<p class="dash-asof" style="margin:-8px 0 20px;">{{ dash_intro }}</p>{% endif %}
+{% if dash_tools %}
+<div class="dash-tools">{% for tool in dash_tools %}<a href="{{ tool.url }}">{{ tool.label }}</a>{% endfor %}</div>
+{% endif %}
+{% for partial in dash_partials %}
+{% include partial %}
+{% endfor %}
+{% endblock %}
