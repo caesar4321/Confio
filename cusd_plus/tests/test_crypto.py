@@ -428,3 +428,24 @@ class SharedNonceLockGuardTests(SimpleTestCase):
 
     def test_shared_redis_with_heartbeat_allowed(self):
         self._check(self.REDIS, True)
+
+
+class CryptoHoldingsResolverTests(SimpleTestCase):
+    def test_holdings_carry_sell_metadata_even_for_deferred_tokens(self):
+        from decimal import Decimal
+
+        from cusd_plus.crypto_schema import Query
+
+        eth = crypto_catalog.by_symbol('ETH', include_unlisted=True)
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=True), META={}))
+        with mock.patch('cusd_plus.schema._active_account', return_value=SimpleNamespace(bsc_address=USER)), \
+             mock.patch('cusd_plus.crypto_holdings.holdings_units', return_value={'BTCB': 10 ** 15, 'ETH': 10 ** 18}), \
+             mock.patch('cusd_plus.crypto_prices.market_rows', return_value=[]), \
+             mock.patch('cusd_plus.crypto_prices.price_usd', return_value=Decimal('2400')) as live:
+            rows = {r.symbol: r for r in Query().resolve_crypto_holdings(info)}
+        self.assertTrue(rows['BTCB'].listed)
+        self.assertIsNone(rows['BTCB'].value_usd, 'listed tokens never priced live: unknown stays unknown')
+        self.assertFalse(rows['ETH'].listed)
+        self.assertEqual(rows['ETH'].address, eth.address)
+        self.assertEqual(rows['ETH'].value_usd, 2400.0)
+        live.assert_called_once()

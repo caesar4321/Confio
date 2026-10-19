@@ -54,9 +54,15 @@ class CryptoQuoteType(graphene.ObjectType):
 
 
 class CryptoHoldingType(graphene.ObjectType):
+    """Everything a SELL needs, independent of cryptoMarket: a holder who
+    became country-blocked (market hidden) or holds a delisted token must
+    still be able to leave."""
     symbol = graphene.String(required=True)
     ticker = graphene.String(required=True)
     name = graphene.String(required=True)
+    address = graphene.String(required=True)
+    custody = graphene.String(required=True)
+    listed = graphene.Boolean(required=True, description='False = sell only (delisted or deferred)')
     category = graphene.String(required=True)
     units = graphene.String(required=True, description='Base units, exact')
     decimals = graphene.Int(required=True)
@@ -172,6 +178,7 @@ class Query(graphene.ObjectType):
         if units is None:
             return None
         rows = {r['token'].symbol: r for r in market_rows()}
+        listed = {t.symbol for t in crypto_catalog.tokens()}
         out = []
         for token in crypto_catalog.tokens(include_unlisted=True):
             raw = units.get(token.symbol)
@@ -179,11 +186,17 @@ class Query(graphene.ObjectType):
                 continue
             row = rows.get(token.symbol)
             price = row['price_usd'] if row else None
+            if price is None and token.symbol not in listed:
+                # Delisted/deferred tokens have no snapshot: price the few
+                # held ones live (one quote) so a sell shows its value.
+                from .crypto_prices import price_usd
+                price = price_usd(token)
             value = None
             if price is not None:
                 value = float(price) * raw / 10 ** token.decimals
             out.append(CryptoHoldingType(
                 symbol=token.symbol, ticker=token.ticker, name=token.name,
+                address=token.address, custody=token.custody, listed=token.symbol in listed,
                 category=token.category, units=str(raw), decimals=token.decimals,
                 value_usd=value, day_change_pct=row['day_change_pct'] if row else None,
             ))
