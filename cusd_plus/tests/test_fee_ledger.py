@@ -142,3 +142,34 @@ class ProviderAddressTests(TestCase):
                                            metadata={'payment_details': details})
         found = fee_ledger._provider_deposit_addresses()
         self.assertEqual(found, {'0x' + n * 20 for n in ('01', '02', '03', '05')})
+
+
+@override_settings(CUSD_VAULT_ADDRESS=CUSD)
+class BackfillFromConversionsTests(TestCase):
+    def test_replays_receipts_of_reconciled_conversions(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from conversion.models import Conversion, CusdFeeEvent
+
+        tx = '0x' + '0e' * 32
+        Conversion.objects.create(conversion_type='usdt_to_cusd', from_amount=100, to_amount=99,
+                                  to_transaction_hash=tx, contract_event_index=4, status='COMPLETED')
+        log = RecordAndSummaryTests._log(None, 'MintedWithFee(address,address,uint256,uint256,uint256,uint256)',
+                                         9 * 10 ** 17, 4)
+        log['address'] = CUSD
+        other = dict(log, address='0x' + '99' * 20, logIndex='0x5')  # not the vault: ignored
+
+        def rpc(method, params, timeout=15):
+            if method == 'eth_getTransactionReceipt':
+                return {'status': '0x1', 'blockNumber': hex(100), 'logs': [log, other]}
+            return {'timestamp': hex(1_760_000_000)}
+
+        with mock.patch('cusd_plus.tasks._rpc', side_effect=rpc), mock.patch('time.sleep'):
+            out = StringIO()
+            call_command('backfill_cusd_fee_ledger', '--from-conversions', '--apply', stdout=out)
+        self.assertIn('stored 1 new ledger rows', out.getvalue())
+        event = CusdFeeEvent.objects.get()
+        self.assertEqual((event.tx_hash, event.log_index, event.direction), (tx, 4, 'entry'))
+        self.assertIsNotNone(event.block_time)
