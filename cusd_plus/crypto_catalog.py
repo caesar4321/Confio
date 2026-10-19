@@ -35,6 +35,9 @@ class CryptoToken:
     category: str
     featured: bool
     custody: str
+    # Thin-liquidity tokens: buys above this many USD (gross, before the
+    # exit fee) are refused by the relay. None = no cap.
+    max_order_usd: int | None
     route_kind: int
     # Buy-direction hops: (token, fee, token, fee, ..., token) for v3,
     # (token, token, ...) for v2. Addresses lower-case.
@@ -91,6 +94,7 @@ def _parse(entry: dict) -> CryptoToken:
         category=entry['category'],
         featured=bool(entry.get('featured')),
         custody=entry.get('custody') or '',
+        max_order_usd=int(entry['max_order_usd']) if entry.get('max_order_usd') else None,
         route_kind=kind,
         route_path=path,
     )

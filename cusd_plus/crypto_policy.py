@@ -176,6 +176,9 @@ def decode_crypto_call(call: dict, *, historical: bool = False) -> dict | None:
         raise CryptoPolicyError('crypto_quote_unavailable') from exc
 
     if side == 'buy':
+        if token.max_order_usd is not None and gross > token.max_order_usd * 10 ** 18:
+            # Thin pool: a larger order would move the price against the user.
+            raise CryptoPolicyError('crypto_order_too_large')
         # The exit floor binds the NET after cUSD's fee: never above what the
         # exit yields (the trade would revert) nor weaker than the slippage cap.
         if min_usdt > net or min_usdt < _slip_floor(net):

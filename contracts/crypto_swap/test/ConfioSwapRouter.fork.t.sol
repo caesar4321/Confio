@@ -169,6 +169,25 @@ contract ConfioSwapRouterForkTest is Test {
         _roundTripPath(1, ADA, abi.encodePacked(USDT, uint24(2500), ADA), abi.encodePacked(ADA, uint24(2500), USDT));
     }
 
+    address constant INJ = 0xa2B726B1145A4773F68593CF171187d8EBe4d495;
+
+    /// A V2 (swapExactTokensForTokens) catalog route via WBNB.
+    function test_fork_v2RouteInj() public {
+        if (!_forked()) return;
+        address[] memory buyPath = new address[](3);
+        (buyPath[0], buyPath[1], buyPath[2]) = (USDT, WBNB, INJ);
+        address[] memory sellPath = new address[](3);
+        (sellPath[0], sellPath[1], sellPath[2]) = (INJ, WBNB, USDT);
+        vm.startPrank(user, KMS);
+        IERC20(INJ).approve(address(router), type(uint256).max);
+        uint256 got = router.buy(1, 10e18, 1, abi.encode(uint8(1), abi.encode(buyPath)), INJ, 1, 90);
+        assertGt(got, 0, "no INJ out");
+        router.sell(1, INJ, got, abi.encode(uint8(1), abi.encode(sellPath)), 1, 1, 90);
+        vm.stopPrank();
+        assertEq(IERC20(INJ).balanceOf(address(router)), 0, "router INJ");
+        assertEq(IERC20(USDT).balanceOf(address(router)), 0, "router usdt");
+    }
+
     function test_fork_unsponsoredOriginRejected() public {
         if (!_forked()) return;
         vm.prank(user, user);

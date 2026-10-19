@@ -48,12 +48,19 @@ class CatalogTests(SimpleTestCase):
     def test_featured_and_held_entries(self):
         listed = {t.symbol for t in crypto_catalog.tokens()}
         featured = {t.symbol for t in crypto_catalog.tokens() if t.featured}
-        self.assertEqual(featured, {'BTCB', 'ETH', 'WBNB', 'XAUT'})
-        self.assertIn('SOL', listed)
-        # Held for review (screen 2026-10-19): sellable, never buyable.
-        for symbol in ('ASTER', 'STABLE', 'FF', 'AKE', 'ZEC'):
+        # Final decision 2026-10-19: names a LATAM beginner recognises.
+        self.assertEqual(featured, {'BTCB', 'ETH', 'WBNB', 'XAUT', 'SOL', 'XRP'})
+        self.assertIn('DOGE', listed)
+        self.assertFalse(crypto_catalog.by_symbol('DOGE').featured, 'memecoin exception: never home')
+        # Held for review: sellable, never buyable.
+        for symbol in ('STABLE', 'AKE'):
             self.assertNotIn(symbol, listed)
             self.assertIsNotNone(crypto_catalog.by_symbol(symbol, include_unlisted=True))
+        # Excluded by policy: not in the catalog at all.
+        for symbol in ('TRX', 'ASTER', 'FF', 'ZEC'):
+            self.assertIsNone(crypto_catalog.by_symbol(symbol, include_unlisted=True))
+        self.assertEqual(
+            {t.symbol for t in crypto_catalog.tokens() if t.max_order_usd}, {'INJ', 'BEAM', 'GRAM'})
         self.assertEqual(crypto_catalog.by_symbol('WBNB').ticker, 'BNB')
         self.assertEqual(XAUT.category, 'metal')
 
@@ -98,6 +105,17 @@ class CryptoPolicyTests(SimpleTestCase):
         self.assertEqual(action['token'].symbol, 'BTCB')
         self.assertEqual(action['history_amount_wei'], 100 * WAD)
 
+    def test_thin_pool_tokens_are_capped_per_order(self):
+        inj = crypto_catalog.by_symbol('INJ')
+        data = dict(token=inj.address, route=inj.route_bytes('buy'), min_usdt=99 * WAD, min_token=99 * 10 ** 13)
+        # $100 gross (the mocked exit) is at the cap: allowed.
+        self._decode(_buy_data(**data))
+        with mock.patch.object(crypto_policy, 'expected_exit_usdt', return_value=(101 * WAD, 100 * WAD)):
+            with self.assertRaisesMessage(CryptoPolicyError, 'crypto_order_too_large'):
+                self._decode(_buy_data(**data))
+        # Selling is never capped.
+        self._decode(_sell_data(token=inj.address, route=inj.route_bytes('sell'), min_usdt=99 * WAD, min_out=98 * WAD))
+
     def test_other_destination_is_not_ours(self):
         self.assertIsNone(decode_crypto_call(_call(VAULT, _buy_data())))
 
@@ -113,7 +131,7 @@ class CryptoPolicyTests(SimpleTestCase):
             self._decode(_buy_data(route=bad, min_usdt=99 * WAD, min_token=99 * 10 ** 13))
 
     def test_unlisted_token_cannot_be_bought_but_can_be_sold(self):
-        held = crypto_catalog.by_symbol('ZEC', include_unlisted=True)
+        held = crypto_catalog.by_symbol('AKE', include_unlisted=True)
         with self.assertRaisesMessage(CryptoPolicyError, 'token_not_listed'):
             self._decode(_buy_data(token=held.address, route=held.route_bytes('buy')))
         action = self._decode(_sell_data(token=held.address, route=held.route_bytes('sell'),

@@ -29,7 +29,8 @@ class CryptoAssetType(graphene.ObjectType):
     decimals = graphene.Int(required=True)
     category = graphene.String(required=True, description="'crypto' or 'metal'")
     featured = graphene.Boolean(required=True)
-    custody = graphene.String(required=True, description='binance_peg | tether_gold | wrapped_native')
+    custody = graphene.String(required=True, description='binance_peg | tether_gold | wrapped_native | native')
+    max_order_usd = graphene.Int(description='Per-order buy cap in USD for thin pools; null = no cap')
     price_usd = graphene.Float(description='Null until priced: unknown is not zero')
     day_change_pct = graphene.Float()
     sparkline_24h = graphene.List(graphene.NonNull(graphene.Float))
@@ -116,6 +117,7 @@ class Query(graphene.ObjectType):
                     address=r['token'].address, decimals=r['token'].decimals,
                     category=r['token'].category, featured=r['token'].featured,
                     custody=r['token'].custody,
+                    max_order_usd=r['token'].max_order_usd,
                     price_usd=float(r['price_usd']) if r['price_usd'] is not None else None,
                     day_change_pct=r['day_change_pct'],
                     sparkline_24h=r['sparkline'],

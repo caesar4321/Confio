@@ -1,8 +1,24 @@
 # BSC token screen for PancakeSwap buy/sell (2026-10-19)
 
-Files: `token_screen.csv` (all 540 candidates, one row each, with tier and reason), `proposed_entries.json` (19 new entries in the `cusd_plus/crypto_tokens.json` shape, all `listed: false`).
+Files: `token_screen.csv` (all 540 candidates, one row each; `final_tier` + `final_reason` are the decision, `tier` + `reason` the raw screen), `proposed_entries.json` (19 new entries in the `cusd_plus/crypto_tokens.json` shape, all `listed: false`; BTCB, ETH, WBNB, XAUT are already in the catalog).
 
-## Result
+## Final decision (2026-10-19): 23 tokens
+
+| final_tier | Tokens | Count |
+|---|---|---|
+| home (`featured: true`) | BTCB, ETH, XAUt, SOL, XRP, WBNB (BNB) | 6 |
+| catalog | ADA, AVAX, DOT, NEAR, LTC, BCH, LINK, UNI, AAVE, CAKE, FIL, TWT, SFP, DOGE | 14 |
+| catalog_capped (`max_order_usd` = 100) | INJ, BEAM, GRAM (V2 routes) | 3 |
+| held (not verified against issuer) | STABLE, SOON, AKE | 3 |
+| excluded_policy | B (meme), Q (owner + mint, ~1,000 bps @ $1k), GOMINING (pausable + mint), APE (meme-like), ASTER, FF (no demand here; FF linked to DWF Labs), ZEC (privacy coin, Venezuela sanctions optics), TRX (Justin Sun risk; both contracts) | 9 rows / 8 tokens |
+
+Rules behind it: the home screen holds names a LATAM beginner recognises; the catalog holds tokens that are both tradeable (screen below) and in demand, with risk labels; tokens nobody here asks for are not listed just because they pass. An aggregator/solver route (to open ATOM, FET, ZRO, PENDLE, etc.) is deferred until users actually ask for missing coins.
+
+**Memecoin rule, open point:** DOGE is the single memecoin exception, catalog only, never home. The proposed wording "only memecoins in the top 10 by market cap" would exclude DOGE itself (CoinGecko rank 12 on 2026-10-19). Pick a wording that matches the intent, e.g. "only the largest memecoin by market cap" or "top 15". DOGE fork test: buy matched the same-block quote, transfers deliver 100%; RT 52.5 / 57.3 / 102.5 bps at $10 / $100 / $1,000 via USDT-0.01%-WBNB-0.25%-DOGE; Binance-Peg upgradeable proxy.
+
+**Cost shown before buying:** Confío's 0.9% applies on the way in and again on the way out, so a full round trip is about 1.8% plus the DEX cost in this CSV. DOGE at $100: ~1.8% + 0.57% ≈ 2.4%. The pre-trade screen should show that total, not the 0.9% alone.
+
+## Result (screen, before the final decision)
 
 | | count |
 |---|---|
@@ -10,14 +26,14 @@ Files: `token_screen.csv` (all 540 candidates, one row each, with tier and reaso
 | Quotable against USDT at $100 | 509 (31 have no PancakeSwap route) |
 | Pass the liquidity bar (RT < 100 bps at $100 AND < 200 bps at $1,000) | **61** |
 | ...of which excluded by category | 28 excluded by category: 15 stablecoins, 9 memecoins, 2 tokenized stocks, 1 political (USD1), 1 staking derivative (slisBNB) |
-| ...of which below the top-150 size cut (underlying CoinGecko rank > 150) | 10 (SOON, CGPT, DAO, TWT, AIOZ, SFP, XVS, FORM, PROM, TPT) |
-| **Pass everything: tiered** | **23** = **8 featured + 15 catalog** |
+| ...of which below the top-300 size cut or failing the contract screen | SOON, TWT, SFP re-admitted as `catalog_wide`; CGPT, DAO, XVS, PROM, TPT rank > 300; AIOZ (owner EOA + mint) and FORM (blacklist function) fail the contract screen |
+| **Tiered (revised rules)** | **33** = **8 featured + 15 catalog + 3 catalog_wide + 7 catalog_capped** |
 | Stablecoins (listed separately) | 33 (15 of them pass the liquidity bar) |
-| Rejected | 484 (417 failed liquidity, 17 no route, 17 memecoins, 12 wrapped duplicates, 10 size, 6 stocks, 3 political, 1 negative round-trip anomaly) |
+| Rejected | 474 |
 
 Round-trip = buy then sell, best route each leg, excluding Confío's 0.9% fee. Quotes: PancakeSwap V3 QuoterV2 (tiers 100/500/2500/10000, direct or via WBNB) and V2 router (direct or via WBNB), `latest` block on 2026-10-19, via Multicall3.
 
-## Featured tier (8)
+## Screen-stage featured tier (8; superseded by Final decision above)
 
 | Symbol | Address | RT bps $10 / $100 / $1,000 | Best buy route | Notes |
 |---|---|---|---|---|
@@ -32,7 +48,18 @@ Round-trip = buy then sell, best route each leg, excluding Confío's 0.9% fee. Q
 
 The featured bar was RT <= 30 bps at $100 and <= 100 bps at $1,000, underlying rank <= 100, clean fork test, plus a judgement call that the project is mainstream. Averaged order is about $9, so the $10 column is the one that matters most today.
 
-## Catalog tier (15)
+## Revised screen tiers (after loosening; superseded by Final decision above)
+
+| Tier | Rule | Count |
+|---|---|---|
+| featured | RT <= 30 bps @ $100 and <= 100 @ $1,000, underlying rank <= 100, hand-picked mainstream | 8 |
+| catalog | RT < 100 @ $100 and < 200 @ $1,000, rank <= 150 | 15 |
+| catalog_wide | same liquidity bar, rank 150-300 (SOON, TWT, SFP) | 3 |
+| catalog_capped | RT < 150 @ $10 and $100 but >= 100 @ $100 or >= 200 @ $1,000; list with `max_order_usd` (GOMINING, INJ, B, BEAM, GRAM, APE, Q) | 7 |
+
+Capped caps: $100 for GOMINING, INJ, BEAM, GRAM, APE, Q; $1,000 for B (101.6 bps @ $100, 118 @ $1,000). All 10 added tokens passed the same fork test (buy matches same-block quote, transfers deliver 100%); sells were not simulated. Flags to read before listing: GOMINING is pausable with a contract owner and mint function, Q has a contract owner and mint function, INJ is an upgradeable proxy, TWT's owner is an EOA, SOON is an upgradeable proxy. INJ, BEAM, B and GRAM use V2 routes (catalog supports `kind: v2`). The second TRX contract (`0x85EAC5Ac...`) is excluded as a duplicate. The `tier` and `max_order_usd` keys in `proposed_entries.json` are not in the current parser; strip them or add support before merging.
+
+## Screen-stage catalog tier (15; superseded by Final decision above)
 
 STABLE, FF, AKE (young or obscure projects, need review); ZEC (privacy coin, delisting risk); FIL, LTC, TRX, ADA, LINK, XRP, NEAR, AVAX, DOT, BCH, UNI (Binance-Peg majors, 28-68 bps at $100, mostly via 0.25% pools). Cost at $100 runs 15-68 bps, plus Confío's 0.9%. Details per row in the CSV.
 
