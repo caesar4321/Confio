@@ -92,6 +92,15 @@ class DashboardPagesTests(TestCase):
             self.assertEqual(read.call_count, 1)
             sections.cusd_bsc(sections.Window.current(), refresh=True)
             self.assertEqual(read.call_count, 2)
+        # Refresh must also skip the helper's own 30s cache.
+        self.assertEqual(read.call_args_list[-1], mock.call(use_cache=False))
+
+    def test_pages_carry_metrics_their_partials_borrow(self):
+        # cUSD+ shows the shared cUSD fee; Money's fee table shows the router fee.
+        with chain_reads():
+            w = sections.Window.current()
+            self.assertIn('cusd_bsc_metrics', sections.cusd_plus(w))
+            self.assertIn('stock_router_metrics', sections.cusd_bsc(w))
 
     def test_failed_chain_read_is_retried_not_cached(self):
         with mock.patch('cusd_plus.metrics.get_cusd_bsc_platform_metrics', return_value=UNAVAILABLE_BSC) as read:

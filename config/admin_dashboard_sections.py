@@ -78,13 +78,14 @@ def get_fcm_reachability_metrics(now=None):
 
 def _admin_cached(key, build, *, refresh=False):
     """Admin-only cache in front of a chain read. `refresh` (the page's
-    ?refresh=1) rebuilds it; a failed build is never cached."""
+    ?refresh=1) rebuilds it, bypassing the helper's own short cache too; a
+    failed build is never cached. `build` takes the helpers' `use_cache`."""
     key = f'admin_dash:{key}'
     if not refresh:
         hit = cache.get(key)
         if hit is not None:
             return hit
-    value = build()
+    value = build(use_cache=not refresh)
     source = value.get('source') if isinstance(value, dict) else getattr(value, 'source', None)
     if source != 'unavailable':
         cache.set(key, value, CHAIN_CACHE_SECONDS)
@@ -1255,11 +1256,17 @@ def cusd_bsc(w, *, refresh=False):
     Kept apart from cUSD+ (USDY-backed): one blended number would hide a
     collateral or fee-accounting failure in either contract.
     """
-    from cusd_plus.metrics import get_cusd_bsc_platform_metrics, get_fee_ledger_summary
+    from cusd_plus.metrics import (
+        get_cusd_bsc_platform_metrics,
+        get_fee_ledger_summary,
+        get_stock_router_metrics,
+    )
 
     return {
         'cusd_bsc_metrics': _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, refresh=refresh),
         'fee_ledger': get_fee_ledger_summary(),
+        # The fee table lists the legacy router fee still uncollected there.
+        'stock_router_metrics': _admin_cached('stock_router', get_stock_router_metrics, refresh=refresh),
     }
 
 
@@ -1272,11 +1279,17 @@ def infinia(request):
 
 def cusd_plus(w, *, refresh=False):
     """cUSD+ vault state and the savings sagas that feed it."""
-    from cusd_plus.metrics import get_cusd_plus_platform_metrics, get_savings_saga_stats
+    from cusd_plus.metrics import (
+        get_cusd_bsc_platform_metrics,
+        get_cusd_plus_platform_metrics,
+        get_savings_saga_stats,
+    )
 
     metrics = _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, refresh=refresh)
     return {
         'cusd_plus_metrics': metrics,
+        # cUSD+ conversions pay the shared cUSD perimeter fee.
+        'cusd_bsc_metrics': _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, refresh=refresh),
         'cusd_plus_circulating': metrics.circulating_cusd_plus,
         'cusd_plus_reserve': metrics.usdy_reserve_usd,
         'cusd_plus_source': metrics.source,
@@ -1441,13 +1454,10 @@ def needs_attention(w, *, refresh=False):
 
 
 def _infinia_stalled(w):
-    """Journeys still processing with no update for an hour (same rule as the
-    Money page's 'stalled' count)."""
-    from payment_accounts.models import InfiniaJourney
+    """Same end-to-end status rule as the Money page's 'stalled' count."""
+    from payment_accounts.monitoring import stalled_count
 
-    return InfiniaJourney.objects.exclude(
-        stage__in=['completed', 'failed', 'refunded', 'needs_review'],
-    ).filter(updated_at__lt=w.now - timedelta(hours=1)).count()
+    return stalled_count()
 
 
 def today_money(w, *, refresh=False):

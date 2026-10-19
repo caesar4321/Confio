@@ -31,6 +31,30 @@ def delivered_usd(journey):
     return max(amount or Decimal(0), Decimal(0))
 
 
+def reported_stage():
+    """End-to-end status: a completed incoming leg without a completed wallet
+    conversion is still awaiting delivery; a refunded bridge is refunded."""
+    return Case(
+        When(direction='to_bank', bridge__status='refunded', then=Value('refunded')),
+        When(Q(direction='to_wallet', stage='completed') &
+             (Q(wallet_conversion__isnull=True) | ~Q(wallet_conversion__status='COMPLETED')),
+             then=Value('awaiting_wallet_conversion')),
+        default=F('stage'), output_field=CharField())
+
+
+PROCESSING = ~Q(reported_stage__in=['completed', 'failed', 'refunded', 'needs_review'])
+
+
+def stalled_q():
+    """Still processing end to end, no update for an hour."""
+    return PROCESSING & Q(updated_at__lt=timezone.now() - timedelta(hours=1))
+
+
+def stalled_count():
+    """Stalled journeys across both directions (the admin Today page)."""
+    return InfiniaJourney.objects.annotate(reported_stage=reported_stage()).filter(stalled_q()).count()
+
+
 def dashboard_context(request):
     if not request.user.has_perm('payment_accounts.view_infiniajourney'):
         return {}
@@ -51,12 +75,7 @@ def dashboard_context(request):
         decimal = DecimalField(max_digits=40, decimal_places=18)
         zero = Value(Decimal(0), output_field=decimal)
         selected_qs = qs.filter(direction=selected).annotate(
-            reported_stage=Case(
-                When(direction='to_bank', bridge__status='refunded', then=Value('refunded')),
-                When(Q(direction='to_wallet', stage='completed') &
-                     (Q(wallet_conversion__isnull=True) | ~Q(wallet_conversion__status='COMPLETED')),
-                     then=Value('awaiting_wallet_conversion')),
-                default=F('stage'), output_field=CharField()),
+            reported_stage=reported_stage(),
             net_usd=Case(
                 When(direction='to_wallet', stage='completed', wallet_conversion__status='COMPLETED',
                      wallet_conversion__is_deleted=False, then=Greatest(Coalesce(
@@ -65,13 +84,13 @@ def dashboard_context(request):
                                    then=F('wallet_conversion__to_amount')), default=zero, output_field=decimal),
                          output_field=decimal), zero)),
                 default=zero, output_field=decimal))
-        processing = ~Q(reported_stage__in=['completed', 'failed', 'refunded', 'needs_review'])
+        processing = PROCESSING
         for row in selected_qs.order_by().values('reported_stage').annotate(count=Count('pk')):
             counts[row['reported_stage']] = row['count']
             counts['total'] += row['count']
         summary = selected_qs.aggregate(volume=Sum('net_usd'),
             processing=Count('pk', filter=processing),
-            stalled=Count('pk', filter=processing & Q(updated_at__lt=timezone.now()-timedelta(hours=1))))
+            stalled=Count('pk', filter=stalled_q()))
         counts.update({key: summary[key] for key in ('processing', 'stalled')})
         rail = F('local_account__payin_rail') if selected == 'to_wallet' else F('destination_snapshot__destination_account__type')
         breakdown = list(selected_qs.order_by().annotate(country=F('local_account__country'),

@@ -22,7 +22,7 @@
         {% for country in infinia_countries %}<option value="{{ country }}" {% if infinia_country == country %}selected{% endif %}>{{ country }}</option>{% endfor %}
     </select></label>
     <button type="submit" class="button default">Apply</button>
-    <a href="{% url 'admin:dashboard' %}">Reset</a>
+    <a href="{% url 'confio_admin:dash_money' %}">Reset</a>
 </form>
 {% for section in infinia_sections %}
 <h3 class="section-title">{{ section.title }}</h3>

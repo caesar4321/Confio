@@ -52,6 +52,19 @@ class MonitoringTests(TestCase):
         self.assertEqual(context['infinia_sections'][0]['counts']['awaiting_wallet_conversion'], 1)
         self.assertEqual(context['infinia_sections'][0]['rate'], 0)
 
+    def test_stalled_count_follows_end_to_end_status(self):
+        # Provider leg completed but no wallet conversion: still undelivered,
+        # so the admin Today page must count it once it stops moving.
+        from datetime import timedelta
+        from django.utils import timezone
+        from payment_accounts.monitoring import stalled_count
+
+        j, _ = self.incoming_arrived()
+        self.assertEqual(stalled_count(), 0)
+        InfiniaJourney.objects.filter(pk=j.pk).update(updated_at=timezone.now() - timedelta(hours=2))
+        self.assertEqual(stalled_count(), 1)
+        self.assertEqual(dashboard_context(self.request())['infinia_sections'][0]['counts']['stalled'], 1)
+
     def test_completed_net_wallet_credit_and_template(self):
         j = self.complete()
         self.assertEqual(delivered_usd(j), Decimal('1.982'))
