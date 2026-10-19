@@ -28,6 +28,12 @@ export const MASCOTS: { kind: MascotKind; label: string; color: string }[] = [
 export const MASCOT_COLORS = ['#10B981', '#047857', '#F59E0B', '#B07A4F', '#F5E6D3', '#8B5CF6', '#3B82F6', '#F472B6', '#374151'];
 
 const INK = '#1F2937';
+// Calm moods bob a few times, then rest. An endless repeat redraws the whole
+// window every frame (240 fps, ~85% CPU on a 120 Hz Android phone), which
+// made every tap wait behind the bubble. Active moods (talking, listening,
+// thinking) keep looping: they only last while that state does.
+const IDLE_BOBS = 2;
+const HAPPY_HOPS = 3;
 
 export function defaultMascotColor(kind: MascotKind) {
   return MASCOTS.find((m) => m.kind === kind)?.color ?? '#10B981';
@@ -232,12 +238,13 @@ function BuiltInMascot({ kind = 'CONFI', color, size = 56, mood = 'idle', animat
     }
     const lift = mood === 'thinking' || mood === 'listening' ? -4 : -2.5;
     const period = mood === 'thinking' ? 420 : 1400;
+    const active = mood === 'thinking' || mood === 'listening' || mood === 'talking';
     bob.value = withRepeat(
       withSequence(
         withTiming(lift, { duration: period, easing: Easing.inOut(Easing.quad) }),
         withTiming(0, { duration: period, easing: Easing.inOut(Easing.quad) }),
       ),
-      -1,
+      active ? -1 : IDLE_BOBS,
       false,
     );
     return () => cancelAnimation(bob);
@@ -332,8 +339,8 @@ function CustomPetMascot({ imageUrl, color, size, mood, animated }: {
       return undefined;
     }
     const ease = Easing.inOut(Easing.quad);
-    const loop = (v: typeof lift, to: number, ms: number) =>
-      (v.value = withRepeat(withSequence(withTiming(to, { duration: ms, easing: ease }), withTiming(0, { duration: ms, easing: ease })), -1, false));
+    const bobs = (v: typeof lift, to: number, ms: number, times: number) =>
+      (v.value = withRepeat(withSequence(withTiming(to, { duration: ms, easing: ease }), withTiming(0, { duration: ms, easing: ease })), times, false));
     if (mood === 'talking') {
       scale.value = withRepeat(withSequence(withTiming(1.06, { duration: 160 }), withTiming(0.98, { duration: 160 })), -1, true);
     } else if (mood === 'thinking') {
@@ -341,9 +348,9 @@ function CustomPetMascot({ imageUrl, color, size, mood, animated }: {
     } else if (mood === 'listening') {
       scale.value = withRepeat(withSequence(withTiming(1.04, { duration: 600, easing: ease }), withTiming(1, { duration: 600, easing: ease })), -1, false);
     } else if (mood === 'happy') {
-      lift.value = withRepeat(withSequence(withTiming(-5, { duration: 220 }), withTiming(0, { duration: 220 }), withTiming(0, { duration: 900 })), -1, false);
+      lift.value = withRepeat(withSequence(withTiming(-5, { duration: 220 }), withTiming(0, { duration: 220 }), withTiming(0, { duration: 900 })), HAPPY_HOPS, false);
     } else {
-      loop(lift, -2.5, 1400);
+      bobs(lift, -2.5, 1400, IDLE_BOBS);
     }
     return () => {
       cancelAnimation(lift);
