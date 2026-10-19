@@ -157,3 +157,31 @@ class DashboardPagesTests(TestCase):
         html = render_to_string('admin/dash/today.html', {'fee_ledger': None, 'dash_tabs': []})
         self.assertIn('unavailable', html)
         self.assertNotIn('none yet', html)
+
+    def _rollup_titles(self):
+        with chain_reads():
+            return [i['title'] for i in sections.needs_attention(sections.Window.current(), self.staff())
+                    if i['title'].startswith('Funnel rollup missing')]
+
+    def test_empty_day_is_not_a_missing_rollup(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from users.models_analytics import FunnelEvent
+
+        # Only an older event: the rollup's target day had nothing to roll up.
+        event = FunnelEvent.objects.create(event_name='signup_completed')
+        FunnelEvent.objects.filter(pk=event.pk).update(created_at=timezone.now() - timedelta(days=5))
+        self.assertEqual(self._rollup_titles(), [])
+
+    def test_day_with_events_and_no_rollup_is_flagged(self):
+        from datetime import timedelta, timezone as dt_timezone
+        from django.utils import timezone
+        from users.models_analytics import FunnelEvent
+
+        now = timezone.now()
+        target = (now - timedelta(days=1, hours=4, minutes=30)).astimezone(dt_timezone.utc).date()
+        event = FunnelEvent.objects.create(event_name='signup_completed')
+        FunnelEvent.objects.filter(pk=event.pk).update(
+            created_at=timezone.datetime.combine(target, timezone.datetime.min.time(), dt_timezone.utc)
+            + timedelta(hours=12))
+        self.assertEqual(self._rollup_titles(), [f'Funnel rollup missing for {target}'])

@@ -8,7 +8,7 @@ because the main cost of the old single page was sequential BSC RPC calls,
 not SQL.
 """
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 
 from django.core.cache import cache
@@ -1400,8 +1400,11 @@ def needs_attention(w, request, *, refresh=False):
     sagas = Conversion.objects.filter(conversion_type__in=Conversion.SAVINGS_TYPES, is_deleted=False)
     saga_counts = sagas.aggregate(
         stuck=Count('id', filter=Q(status='STUCK')),
+        # CREATED = an unsigned quote: no funds moved, abandon_stale_quotes()
+        # expires it after 24h. STUCK has its own critical item above.
         stale_in_flight=Count('id', filter=Q(status__in=Conversion.IN_FLIGHT_STATUSES,
-                                             updated_at__lt=w.now - timedelta(hours=1)) & ~Q(status='STUCK')),
+                                             updated_at__lt=w.now - timedelta(hours=1))
+                              & ~Q(status__in=['STUCK', 'CREATED'])),
     )
     if saga_counts['stuck']:
         items.append(_item(CRITICAL, 'Savings sagas stuck', 'Value sits at a user-owned address until resolved.',
@@ -1470,10 +1473,13 @@ def needs_attention(w, request, *, refresh=False):
     if latest_snapshot is None or latest_snapshot < yesterday:
         items.append(_item(WARNING, 'Nightly analytics snapshot missing',
                            f'Latest DailyMetrics: {latest_snapshot or "none"}.', _url('users_dailymetrics_changelist')))
-    if not FunnelDailyRollup.objects.filter(date=yesterday).exists() and \
-            FunnelEvent.objects.filter(created_at__gte=w.now - timedelta(days=2),
-                                       created_at__lt=w.today_start).exists():
-        items.append(_item(WARNING, "Yesterday's funnel rollup missing", 'Funnels fall back to raw events.',
+    # users.rollup_funnel_events runs 03:30 UTC and rolls up the UTC day
+    # before; check the day its latest run (plus an hour) should have built,
+    # with the task's own event filter, so an empty day is never "missing".
+    rollup_date = (w.now - timedelta(days=1, hours=4, minutes=30)).astimezone(dt_timezone.utc).date()
+    if not FunnelDailyRollup.objects.filter(date=rollup_date).exists() and FunnelEvent.objects.filter(
+            created_at__date=rollup_date).exclude(user__is_platform_test_account=True).exists():
+        items.append(_item(WARNING, f'Funnel rollup missing for {rollup_date}', 'Funnels fall back to raw events.',
                            _url('users_funneldailyrollup_changelist')))
 
     items.sort(key=lambda item: item['level'] != CRITICAL)
