@@ -198,6 +198,21 @@ describe('performMigration without a Drive token', () => {
       migrationService.performMigration(ISS, 'sub', 'web', 'google', 0),
     ).rejects.toBeInstanceOf(DriveAuthorizationRequiredError);
   });
+
+  it('never asks an Apple user for Drive: their secret lives in the iCloud Keychain', async () => {
+    // App Review 2026-10-19: an Apple reviewer was told to "accept Google
+    // Drive", which no Apple sign-in can do. The run may still fail later
+    // (this mock has no chain), but never for want of Drive.
+    const { getOrCreateMasterSecret } = jest.requireMock('../secureDeterministicWallet');
+    getOrCreateMasterSecret.mockClear();
+
+    const result = migrationService
+      .performMigration('https://appleid.apple.com', 'sub', 'com.confio.app', 'apple', 0)
+      .catch((e: unknown) => e);
+
+    expect(await result).not.toBeInstanceOf(DriveAuthorizationRequiredError);
+    expect(getOrCreateMasterSecret).toHaveBeenCalledWith('sub', undefined, { provider: 'apple' });
+  });
 });
 
 describe('post-migration balance inspection', () => {

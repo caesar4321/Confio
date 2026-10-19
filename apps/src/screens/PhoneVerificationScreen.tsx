@@ -31,6 +31,7 @@ import { PhoneRelinkModal } from '../components/PhoneRelinkModal';
 import { CountryFlag } from '../components/CountryFlag';
 import { usePhoneRelinkPrompt } from '../hooks/usePhoneRelinkPrompt';
 import { createPhoneRelinkFlow, PhoneVerificationResult } from '../utils/phoneRelinkFlow';
+import { applyCodeInput } from '../utils/verificationCodeInput';
 
 type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<AuthStackParamList, 'PhoneVerification'>,
@@ -417,7 +418,10 @@ const PhoneVerificationScreen = () => {
             keyboardType="phone-pad"
             value={phoneNumber}
             onChangeText={setPhoneNumber}
-            maxLength={15}
+            // Room for a pasted international number with spaces: 15 cut
+            // "+54 202 555 0123" (16 chars) to a different, invalid number
+            // and App Review was rejected for it (2026-10-18).
+            maxLength={24}
             placeholderTextColor={colors.grayText}
           />
         </View>
@@ -551,15 +555,18 @@ const PhoneVerificationScreen = () => {
               key={index}
               ref={codeInputRefs[index]}
               style={styles.codeInput}
-              maxLength={1}
+              // No native maxLength: iOS cuts pasted text before onChangeText
+              // sees it (1 kept only the first digit; 6 cut "834-271" before
+              // its last digit). applyCodeInput strips and caps instead.
               keyboardType="number-pad"
+              textContentType={index === 0 ? 'oneTimeCode' : 'none'}
+              autoComplete={index === 0 ? 'sms-otp' : 'off'}
               value={digit}
               onChangeText={(value) => {
-                const newCode = [...verificationCode];
-                newCode[index] = value;
-                setVerificationCode(newCode);
-                if (value && index < 5) {
-                  codeInputRefs[index + 1].current?.focus();
+                const { code, focusIndex } = applyCodeInput(verificationCode, index, value);
+                setVerificationCode(code);
+                if (focusIndex !== null) {
+                  codeInputRefs[focusIndex].current?.focus();
                 }
               }}
               onKeyPress={({ nativeEvent }) => {

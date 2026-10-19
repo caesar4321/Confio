@@ -417,40 +417,53 @@ class WalletMigrationService {
         try {
             console.log('[MigrationService] Starting atomic migration...');
 
-            // 1. Get or Create Master Secret and sync it to Google Drive before
-            // moving any V1 funds. The migration flow must not prompt for Drive;
-            // it can only use a token already obtained during login/backup.
-            const driveAccessToken = authService.getCachedDriveAccessToken();
-            if (!driveAccessToken) {
-                throw new DriveAuthorizationRequiredError();
-            }
+            // 1. Get or Create Master Secret and secure it before moving any
+            // V1 funds.
+            let v2Secret: Uint8Array;
+            if (provider === 'apple') {
+                // Apple wallets have no Drive copy: the secret lives in the
+                // iCloud-synced Keychain, the same rule Apple sign-in uses to
+                // create one. Demanding a Drive token here sent every Apple
+                // user to a "sign in again and accept Google Drive" prompt
+                // that no Apple sign-in can ever satisfy (App Review,
+                // 2026-10-19).
+                v2Secret = await getOrCreateMasterSecret(sub, undefined, { provider });
+                console.log('[MigrationService] V2 Secret ready in the iCloud Keychain');
+            } else {
+                // The migration flow must not prompt for Drive; it can only
+                // use a token already obtained during login/backup.
+                const driveAccessToken = authService.getCachedDriveAccessToken();
+                if (!driveAccessToken) {
+                    throw new DriveAuthorizationRequiredError();
+                }
 
-            // Whose failure this would be. Statically imported and started
-            // on this same tick on purpose: a dynamic import yields first,
-            // and a sign-in completing in that yield would hand this
-            // migration's failures to the user who just arrived.
-            // requireCloudSync is NOT optional here. Without it,
-            // getOrCreateMasterSecret reports sync failure through
-            // onCloudSyncResult and returns the secret anyway — so this line
-            // used to log "backed up to Drive" and then sweep the user's funds
-            // into a V2 secret that existed only on this device. That is the
-            // 10090 lockout shape, in the one path that moves money.
-            let cloudSynced = false;
-            // No recovery diagnostic here: migration runs long after
-            // sign-in, so the only identity available is whatever is in
-            // Keychain now, and that is not reliably the identity this
-            // migration belongs to. Sign-in reports; this does not.
-            const v2Secret = await getOrCreateMasterSecret(sub, driveAccessToken, {
-                provider,
-                requireCloudSync: true,
-                onCloudSyncResult: (synced) => { cloudSynced = synced; },
-            });
-            if (!cloudSynced) {
-                throw new Error(
-                    'No pudimos guardar el respaldo de tu billetera en Google Drive. No movimos tus fondos. Revisa tu conexión e inténtalo de nuevo.'
-                );
+                // Whose failure this would be. Statically imported and started
+                // on this same tick on purpose: a dynamic import yields first,
+                // and a sign-in completing in that yield would hand this
+                // migration's failures to the user who just arrived.
+                // requireCloudSync is NOT optional here. Without it,
+                // getOrCreateMasterSecret reports sync failure through
+                // onCloudSyncResult and returns the secret anyway — so this line
+                // used to log "backed up to Drive" and then sweep the user's funds
+                // into a V2 secret that existed only on this device. That is the
+                // 10090 lockout shape, in the one path that moves money.
+                let cloudSynced = false;
+                // No recovery diagnostic here: migration runs long after
+                // sign-in, so the only identity available is whatever is in
+                // Keychain now, and that is not reliably the identity this
+                // migration belongs to. Sign-in reports; this does not.
+                v2Secret = await getOrCreateMasterSecret(sub, driveAccessToken, {
+                    provider,
+                    requireCloudSync: true,
+                    onCloudSyncResult: (synced) => { cloudSynced = synced; },
+                });
+                if (!cloudSynced) {
+                    throw new Error(
+                        'No pudimos guardar el respaldo de tu billetera en Google Drive. No movimos tus fondos. Revisa tu conexión e inténtalo de nuevo.'
+                    );
+                }
+                console.log('[MigrationService] V2 Secret ready and backup to Drive confirmed');
             }
-            console.log('[MigrationService] V2 Secret ready and backup to Drive confirmed');
 
             const v2Wallet = deriveWalletV2(v2Secret, {
                 iss, sub, aud, accountType: 'personal', accountIndex, businessId

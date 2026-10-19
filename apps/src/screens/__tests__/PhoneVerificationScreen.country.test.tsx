@@ -46,4 +46,13 @@ describe('phone country draft', () => {
     expect(text()).toContain('México');
     expect(text()).toContain('+52');
   });
-});
+
+  it('fits a pasted international number with spaces', async () => {
+    // App Review pasted "+54 202 555 0123"; a 15-char limit dropped the last
+    // digit and the server rejected the number as invalid.
+    mockProfile = undefined;
+    await act(async () => { tree = create(<PhoneVerificationScreen />); });
+    const input = tree.root.findByProps({placeholder: '412 345 6789'});
+    expect(input.props.maxLength).toBeGreaterThanOrEqual('+54 (202) 555-0123'.length);
+    expect(input.props.maxLength).toBeGreaterThanOrEqual('+54 202 555 0123'.length);
+  });});
