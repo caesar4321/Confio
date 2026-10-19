@@ -1,5 +1,5 @@
 {
-  "_comment": "Confío crypto & metals catalog (BSC, PancakeSwap). Source of truth for the relay policy, quotes, holdings and the app mirror. Routes are the BUY direction from USDT; sells use the exact reverse. Final decision 2026-10-19 (docs/research/bsc-token-screen-2026-10/README.md): 6 home (featured), 14 catalog, 3 capped by max_order_usd, held entries listed:false; policy exclusions (TRX, ASTER, FF, ZEC, B, Q, GOMINING, APE) are not in the catalog. DOGE is the single memecoin exception (catalog only, never featured).",
+  "_comment": "Confío crypto & metals catalog (BSC, PancakeSwap). Source of truth for the relay policy, quotes, holdings and the app mirror. Routes are the BUY direction from USDT; sells use the exact reverse. LAUNCH SCOPE (Julian, 2026-10-19): Bitcoin (BTCB) and gold (XAUt) only, shown together as 'Oro y Bitcoin'. Every other entry passed the screen (docs/research/bsc-token-screen-2026-10/) and stays listed:false until demand appears; flipping one on needs no code or contract change. Policy exclusions are not in the catalog.",
   "tokens": [
     {
       "symbol": "BTCB",
@@ -35,7 +35,9 @@
           "0x2170Ed0880ac9A755fd29B2688956BD959F933F8"
         ]
       },
-      "featured": true
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "WBNB",
@@ -53,7 +55,9 @@
           "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
         ]
       },
-      "featured": true
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "SOL",
@@ -73,7 +77,9 @@
           "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF"
         ]
       },
-      "featured": true
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "XRP",
@@ -91,7 +97,9 @@
           "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE"
         ]
       },
-      "featured": true
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "XAUT",
@@ -128,7 +136,9 @@
           "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "AVAX",
@@ -146,7 +156,9 @@
           "0x1CE0c2827e2eF14D5C4f29a091d735A204794041"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "DOT",
@@ -166,7 +178,9 @@
           "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "NEAR",
@@ -184,7 +198,9 @@
           "0x1Fa4a73a3F0133f0025378af00236f3aBDEE5D63"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "LTC",
@@ -204,7 +220,9 @@
           "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "BCH",
@@ -224,7 +242,9 @@
           "0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "LINK",
@@ -242,7 +262,9 @@
           "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "UNI",
@@ -262,7 +284,9 @@
           "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "AAVE",
@@ -282,7 +306,9 @@
           "0xfb6115445Bff7b52FeB98650C87f44907E58f802"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "CAKE",
@@ -302,7 +328,9 @@
           "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "FIL",
@@ -322,7 +350,9 @@
           "0x0D8Ce2A99Bb6e3B7Db580eD848240e4a0F9aE153"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "TWT",
@@ -340,7 +370,9 @@
           "0x4B0F1812e5Df2A09796481Ff14017e6005508003"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "SFP",
@@ -360,7 +392,9 @@
           "0xD41FDb03Ba84762dD66a0af1a6C8540FF1ba5dfb"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "DOGE",
@@ -380,7 +414,9 @@
           "0xbA2aE424d960c26247Dd6c32edC70B295c744C43"
         ]
       },
-      "featured": false
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "INJ",
@@ -400,7 +436,9 @@
       },
       "featured": false,
       "max_order_usd": 100,
-      "_note": "Thin liquidity: buys capped per order (screen 2026-10-19, V2 route)."
+      "_note": "Thin liquidity: buys capped per order (screen 2026-10-19, V2 route).",
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "BEAM",
@@ -420,7 +458,9 @@
       },
       "featured": false,
       "max_order_usd": 100,
-      "_note": "Thin liquidity: buys capped per order (screen 2026-10-19, V2 route)."
+      "_note": "Thin liquidity: buys capped per order (screen 2026-10-19, V2 route).",
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "GRAM",
@@ -439,7 +479,9 @@
       },
       "featured": false,
       "max_order_usd": 100,
-      "_note": "Thin liquidity: buys capped per order (screen 2026-10-19, V2 route)."
+      "_note": "Thin liquidity: buys capped per order (screen 2026-10-19, V2 route).",
+      "listed": false,
+      "_listing_gate": "Deferred (2026-10-19): launch is Bitcoin + gold only. Passed the screen; list it when users ask for it."
     },
     {
       "symbol": "AKE",

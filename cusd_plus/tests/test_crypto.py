@@ -45,23 +45,18 @@ def _approve(spender):
 
 
 class CatalogTests(SimpleTestCase):
-    def test_featured_and_held_entries(self):
+    def test_launch_scope_is_bitcoin_and_gold(self):
+        # Julian, 2026-10-19: launch with BTC + gold; the rest of the screen
+        # stays in the catalog as listed:false (sellable, never buyable).
         listed = {t.symbol for t in crypto_catalog.tokens()}
-        featured = {t.symbol for t in crypto_catalog.tokens() if t.featured}
-        # Final decision 2026-10-19: names a LATAM beginner recognises.
-        self.assertEqual(featured, {'BTCB', 'ETH', 'WBNB', 'XAUT', 'SOL', 'XRP'})
-        self.assertIn('DOGE', listed)
-        self.assertFalse(crypto_catalog.by_symbol('DOGE').featured, 'memecoin exception: never home')
-        # Held for review: sellable, never buyable.
-        for symbol in ('STABLE', 'AKE'):
-            self.assertNotIn(symbol, listed)
+        self.assertEqual(listed, {'BTCB', 'XAUT'})
+        self.assertTrue(all(t.featured for t in crypto_catalog.tokens()))
+        for symbol in ('ETH', 'WBNB', 'SOL', 'DOGE', 'INJ', 'STABLE'):
             self.assertIsNotNone(crypto_catalog.by_symbol(symbol, include_unlisted=True))
-        # Excluded by policy: not in the catalog at all.
+            self.assertIsNone(crypto_catalog.by_symbol(symbol))
         for symbol in ('TRX', 'ASTER', 'FF', 'ZEC'):
             self.assertIsNone(crypto_catalog.by_symbol(symbol, include_unlisted=True))
-        self.assertEqual(
-            {t.symbol for t in crypto_catalog.tokens() if t.max_order_usd}, {'INJ', 'BEAM', 'GRAM'})
-        self.assertEqual(crypto_catalog.by_symbol('WBNB').ticker, 'BNB')
+        self.assertEqual(crypto_catalog.by_symbol('WBNB', include_unlisted=True).ticker, 'BNB')
         self.assertEqual(XAUT.category, 'metal')
 
     def test_route_bytes_match_router_encoding(self):
@@ -106,7 +101,14 @@ class CryptoPolicyTests(SimpleTestCase):
         self.assertEqual(action['history_amount_wei'], 100 * WAD)
 
     def test_thin_pool_tokens_are_capped_per_order(self):
-        inj = crypto_catalog.by_symbol('INJ')
+        inj = crypto_catalog.by_symbol('INJ', include_unlisted=True)
+        # INJ is deferred at launch; test the cap as if it were listed.
+        original = crypto_catalog.by_address
+        listed_inj = mock.patch.object(crypto_policy.crypto_catalog, 'by_address',
+                                       side_effect=lambda addr, include_unlisted=False:
+                                       original(addr, include_unlisted=True))
+        listed_inj.start()
+        self.addCleanup(listed_inj.stop)
         data = dict(token=inj.address, route=inj.route_bytes('buy'), min_usdt=99 * WAD, min_token=99 * 10 ** 13)
         # $100 gross (the mocked exit) is at the cap: allowed.
         self._decode(_buy_data(**data))
