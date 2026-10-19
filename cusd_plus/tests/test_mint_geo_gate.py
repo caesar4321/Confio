@@ -406,7 +406,6 @@ class SponsoredRailGateTests(SimpleTestCase):
         CUSD_PLUS_STOCKS_ENABLED=True,
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
         CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
     def test_colombia_stock_buy_batch_refused_when_server_sets_sell_only(self):
@@ -419,7 +418,6 @@ class SponsoredRailGateTests(SimpleTestCase):
         CUSD_PLUS_STOCKS_ENABLED=True,
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
         CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
     def test_colombia_stock_sell_batch_remains_an_exit_in_sell_only_mode(self):
@@ -434,7 +432,6 @@ class SponsoredRailGateTests(SimpleTestCase):
         CUSD_PLUS_STOCKS_ENABLED=True,
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
     )
     def test_stock_sell_batch_refused_by_ondo_issuer_country(self):
         approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)

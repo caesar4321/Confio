@@ -121,21 +121,26 @@ class GmApiTradingTests(SimpleTestCase):
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
         CUSD_PLUS_7702_ENABLED=True,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
     )
     def test_execution_gate_requires_all_settlement_rails(self):
         self.assertTrue(_stock_execution_ready())
         with override_settings(CUSD_PLUS_7702_ENABLED=False):
             self.assertFalse(_stock_execution_ready())
-        with override_settings(CUSD_PLUS_GM_TRADE_FEE_BPS=31):
+        # No sponsorable fee cap at all (legacy off, router v2 not live).
+        with override_settings(
+            CUSD_PLUS_STOCK_LEGACY_FEE_ENABLED=False, CUSD_PLUS_STOCK_CONVERSION_FEE_BPS=0,
+        ):
             self.assertFalse(_stock_execution_ready())
+        with override_settings(
+            CUSD_PLUS_STOCK_LEGACY_FEE_ENABLED=False, CUSD_PLUS_STOCK_CONVERSION_FEE_BPS=90,
+        ):
+            self.assertTrue(_stock_execution_ready())
 
     @override_settings(
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
         CUSD_PLUS_7702_ENABLED=False,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='',
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
     )
     def test_confio_binding_sell_quote_requires_sponsored_app_rail(self):
         user = SimpleNamespace(is_authenticated=True, id=38, phone_country='CO')
@@ -532,7 +537,6 @@ class GmApiTradingTests(SimpleTestCase):
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
         CUSD_PLUS_7702_ENABLED=True,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
         CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
     def test_colombia_summary_is_sell_only_when_server_overlay_is_configured(self):
@@ -555,7 +559,6 @@ class GmApiTradingTests(SimpleTestCase):
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
         CUSD_PLUS_7702_ENABLED=True,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
         CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
     )
     def test_colombia_summary_is_fully_enabled_when_overlay_is_empty(self):
@@ -671,7 +674,6 @@ class GmApiTradingTests(SimpleTestCase):
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
         CUSD_PLUS_7702_ENABLED=True,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
         CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
     def test_colombia_binding_buy_quote_is_blocked(self):
@@ -702,7 +704,6 @@ class GmApiTradingTests(SimpleTestCase):
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
         CUSD_PLUS_7702_ENABLED=True,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
     )
     def test_binding_sell_quote_is_blocked_by_ondo_issuer_country(self):
         user = SimpleNamespace(is_authenticated=True, id=37, phone_country='US')
@@ -740,7 +741,6 @@ class GmApiTradingTests(SimpleTestCase):
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
         CUSD_PLUS_7702_ENABLED=True,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
         CUSD_PLUS_GM_MAX_TRADE_USD=100_000,
     )
     def test_binding_quote_retry_does_not_issue_while_same_id_is_in_flight(self):

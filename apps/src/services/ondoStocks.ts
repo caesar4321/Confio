@@ -28,13 +28,19 @@ import {
 } from './cusdPlusVault';
 import { getActiveEvmWallet } from './secureDeterministicWallet';
 import {
+  buyRequirement,
+  buySpendForGross,
+  sellFee,
+  StockFeeMode,
+  StockFeePolicy,
+} from './stockFeeMath';
+import {
   createSponsoredRequestId,
   executeSponsoredBatch,
   fetchSponsored7702Params,
 } from './sponsored7702';
 
 const WAD = 10n ** 18n;
-const BPS = 10_000n;
 const MAX_UINT256 = (1n << 256n) - 1n;
 
 const STOCK_CONFIG = gql`
@@ -46,6 +52,17 @@ const STOCK_CONFIG = gql`
       vaultAddress
       stockRouterAddress
       gmTradeFeeBps
+    }
+  }
+`;
+
+// Isolated query: servers that predate it fail only this request, and the
+// client then falls back to the legacy field above.
+const STOCK_FEE_POLICY = gql`
+  query StockFeePolicy {
+    stockFeePolicy {
+      feeBps
+      mode
     }
   }
 `;
@@ -104,8 +121,86 @@ interface StockConfig {
   enabled: boolean;
   vaultAddress: string;
   routerAddress: string;
-  feeBps: bigint;
+  fee: StockFeePolicy;
 }
+
+const LEGACY_POLICY: StockFeePolicy = { feeBps: 30n, mode: 'router' };
+
+const LEGACY_FEE_FIELD = gql`
+  query StockLegacyFeeField {
+    cusdPlusConvertParams {
+      gmTradeFeeBps
+    }
+  }
+`;
+
+const readLegacyFeeField = async (): Promise<bigint | null> => {
+  const { apolloClient } = await import('../apollo/client');
+  try {
+    const { data } = await apolloClient.query({ query: LEGACY_FEE_FIELD, fetchPolicy: 'no-cache' });
+    const bps = data?.cusdPlusConvertParams?.gmTradeFeeBps;
+    return bps != null ? BigInt(bps) : null;
+  } catch {
+    return null;
+  }
+};
+
+const readFeePolicy = async (
+  legacyFieldBps: () => Promise<bigint | null>,
+): Promise<StockFeePolicy | null> => {
+  const { apolloClient } = await import('../apollo/client');
+  try {
+    const { data } = await apolloClient.query({ query: STOCK_FEE_POLICY, fetchPolicy: 'no-cache' });
+    const p = data?.stockFeePolicy;
+    if (p && (p.mode === 'perimeter' || p.mode === 'router') && Number(p.feeBps) > 0) {
+      return { feeBps: BigInt(p.feeBps), mode: p.mode as StockFeeMode };
+    }
+    return null;
+  } catch {
+    // A server without the field can only be running router v1, and only
+    // trades at all when it still reports exactly the legacy 30 bps.
+    return (await legacyFieldBps()) === 30n ? LEGACY_POLICY : null;
+  }
+};
+
+let cachedPolicy: { at: number; policy: StockFeePolicy } | null = null;
+const policyListeners = new Set<(policy: StockFeePolicy) => void>();
+
+const samePolicy = (a: StockFeePolicy | undefined, b: StockFeePolicy): boolean =>
+  a?.feeBps === b.feeBps && a?.mode === b.mode;
+
+const rememberPolicy = (policy: StockFeePolicy) => {
+  const changed = !samePolicy(cachedPolicy?.policy, policy);
+  cachedPolicy = { at: Date.now(), policy };
+  if (changed) policyListeners.forEach((listener) => listener(policy));
+};
+
+/** Screens re-render with the new fee when execution sees it changed. */
+export const subscribeStockFeePolicy = (listener: (policy: StockFeePolicy) => void): (() => void) => {
+  policyListeners.add(listener);
+  return () => { policyListeners.delete(listener); };
+};
+
+export const FEE_CHANGED_MESSAGE =
+  'La comisión de Confío cambió. Revisa el nuevo monto antes de confirmar.';
+
+/** Execution must sign the fee the person saw (Codex audit 2026-10-19 [P2]):
+ * at cutover a screen showing 0.30% must never silently sign 0.90%. */
+const requireDisplayedFee = (config: StockConfig, expectedFeeBps?: bigint) => {
+  if (expectedFeeBps !== undefined && config.fee.feeBps !== expectedFeeBps) {
+    throw Object.assign(new Error(FEE_CHANGED_MESSAGE), { code: 'FEE_CHANGED' });
+  }
+};
+
+/** The fee to display and sign. Short-lived cache for the screens' quotes;
+ * execution always re-reads it through fetchConfig. */
+export const getStockFeePolicy = async (): Promise<StockFeePolicy> => {
+  if (cachedPolicy && Date.now() - cachedPolicy.at < 60_000) return cachedPolicy.policy;
+  const policy = await readFeePolicy(readLegacyFeeField);
+  if (!policy) throw new Error('La compra y venta de acciones aún no está habilitada.');
+  rememberPolicy(policy);
+  return policy;
+};
 
 const formatWei = (value: bigint): string => {
   const whole = value / WAD;
@@ -152,16 +247,16 @@ const fetchConfig = async (): Promise<StockConfig> => {
   const { apolloClient } = await import('../apollo/client');
   const { data } = await apolloClient.query({ query: STOCK_CONFIG, fetchPolicy: 'no-cache' });
   const p = data?.cusdPlusConvertParams;
-  const config = {
-    enabled: Boolean(data?.cusdPlusSummary?.stocksTradingEnabled),
-    vaultAddress: p?.vaultAddress || '',
-    routerAddress: p?.stockRouterAddress || '',
-    feeBps: BigInt(p?.gmTradeFeeBps ?? 30),
-  };
-  if (!config.enabled || !config.vaultAddress || !config.routerAddress || config.feeBps !== 30n) {
+  const legacyBps = p?.gmTradeFeeBps != null ? BigInt(p.gmTradeFeeBps) : null;
+  const fee = await readFeePolicy(async () => legacyBps);
+  const enabled = Boolean(data?.cusdPlusSummary?.stocksTradingEnabled);
+  const vaultAddress = p?.vaultAddress || '';
+  const routerAddress = p?.stockRouterAddress || '';
+  if (!enabled || !vaultAddress || !routerAddress || !fee) {
     throw new Error('La compra y venta de acciones aún no está habilitada.');
   }
-  return config;
+  rememberPolicy(fee);
+  return { enabled, vaultAddress, routerAddress, fee };
 };
 
 const requestQuote = async (
@@ -189,10 +284,9 @@ export const getSoftStockQuote = async (
   symbol: string,
   side: 'buy' | 'sell',
   grossAmountUsd: number,
-  feeBps = 30,
 ): Promise<GmTradeQuote> => {
   const gross = usdToWei(grossAmountUsd);
-  const notional = side === 'buy' ? gross - (gross * BigInt(feeBps)) / BPS : gross;
+  const notional = side === 'buy' ? buySpendForGross(gross, await getStockFeePolicy()) : gross;
   return requestQuote(false, symbol, side, notional);
 };
 
@@ -217,22 +311,28 @@ export const buyStockWithSavings = async (params: {
   symbol: string;
   grossAmountUsd: number;
   minTokenAmountWei?: bigint;
+  /** The fee the screen displayed; execution refuses to sign another. */
+  expectedFeeBps?: bigint;
   requestId?: string;
 }): Promise<{ txHash: string; tokenAmountWei: bigint; feeWei: bigint }> => {
   installBscServerTransport();
   const [config, wallet, delegateAddress] = await Promise.all([
     fetchConfig(), getActiveEvmWallet(), requireSponsored(),
   ]);
+  requireDisplayedFee(config, params.expectedFeeBps);
   const grossTarget = usdToWei(params.grossAmountUsd);
   const requestId = params.requestId || createSponsoredRequestId();
-  const requestedSpend = grossTarget - (grossTarget * config.feeBps) / BPS;
+  const requestedSpend = buySpendForGross(grossTarget, config.fee);
   const quote = await requestQuote(true, params.symbol, 'buy', requestedSpend, 'short', `${requestId}_q0`);
   if (params.minTokenAmountWei && BigInt(quote.tokenAmount) < params.minTokenAmountWei) {
     throw new Error('El precio cambió más de 1%. Revisa la nueva cotización antes de continuar.');
   }
   const spend = BigInt(quote.notionalWei);
-  const fee = (spend * config.feeBps + (BPS - config.feeBps) - 1n) / (BPS - config.feeBps);
-  const requiredGross = spend + fee;
+  const {
+    requiredGrossWei: requiredGross,
+    feeWei: fee,
+    minUsdtOutWei,
+  } = buyRequirement(spend, config.fee);
 
   const [{ pPlusWad, oraclePriceWad }, ownedShares] = await Promise.all([
     getVaultPrices(config.vaultAddress),
@@ -255,7 +355,7 @@ export const buyStockWithSavings = async (params: {
     {
       to: config.routerAddress,
       valueWei: 0n,
-      data: encodeBuyStockCall(quote, shares, spend, requiredGross, config.feeBps),
+      data: encodeBuyStockCall(quote, shares, spend, minUsdtOutWei, config.fee.feeBps),
     },
   ];
   const result = await executeSponsoredBatch({ wallet, calls, delegateAddress, requestId });
@@ -296,12 +396,15 @@ export const sellStockToSavings = async (params: {
    * the exact on-chain token balance when the first quote rounds above it. */
   sellAll?: boolean;
   minExpectedNetWei?: bigint;
+  /** The fee the screen displayed; execution refuses to sign another. */
+  expectedFeeBps?: bigint;
   requestId?: string;
 }): Promise<{ txHash: string; tokenAmountWei: bigint; expectedNetWei: bigint }> => {
   installBscServerTransport();
   const [config, wallet, delegateAddress] = await Promise.all([
     fetchConfig(), getActiveEvmWallet(), requireSponsored(),
   ]);
+  requireDisplayedFee(config, params.expectedFeeBps);
   const requestId = params.requestId || createSponsoredRequestId();
   let quote = await requestQuote(
     true, params.symbol, 'sell', usdToWei(params.grossAmountUsd), 'short', `${requestId}_q0`);
@@ -329,7 +432,7 @@ export const sellStockToSavings = async (params: {
 
   const quoteCost = (quantity * BigInt(quote.price)) / WAD;
   const minUsdt = (quoteCost * 99n) / 100n;
-  const expectedFee = (quoteCost * config.feeBps) / BPS;
+  const expectedFee = sellFee(quoteCost, config.fee);
   const expectedNet = quoteCost - expectedFee;
   if (params.minExpectedNetWei && expectedNet < params.minExpectedNetWei) {
     throw new Error('El precio cambió más de 1%. Revisa la nueva cotización antes de continuar.');
@@ -347,7 +450,7 @@ export const sellStockToSavings = async (params: {
     {
       to: config.routerAddress,
       valueWei: 0n,
-      data: encodeSellStockCall(quote, minUsdt, minShares, config.feeBps),
+      data: encodeSellStockCall(quote, minUsdt, minShares, config.fee.feeBps),
     },
   ];
   const result = await executeSponsoredBatch({ wallet, calls, delegateAddress, requestId });

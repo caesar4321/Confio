@@ -391,6 +391,26 @@ def _word(data_hex: str, i: int) -> str:
     return data_hex[start:start + 64]
 
 
+def _stock_fee_mode(max_fee: int, historical: bool) -> str:
+    """Map the signed fee cap to its settlement math, or reject it.
+
+    Historical decoding (receipts/history of past batches) must keep working
+    after the legacy switch is off, so it accepts both known shapes.
+    """
+    from . import stock_fees
+
+    if historical:
+        if max_fee == stock_fees.LEGACY_STOCK_FEE_BPS:
+            return stock_fees.MODE_ROUTER
+        if 0 < max_fee < 10_000:
+            return stock_fees.MODE_PERIMETER
+        raise PolicyError('bad_stock_fee_cap')
+    mode = stock_fees.accepted_fee_caps().get(int(max_fee))
+    if mode is None:
+        raise PolicyError('bad_stock_fee_cap')
+    return mode
+
+
 def _decode_stock_call(call: dict, *, historical: bool = False) -> dict | None:
     """Decode the router call, optionally ignoring only current ops gates."""
     router = _stock_router_address()
@@ -398,8 +418,8 @@ def _decode_stock_call(call: dict, *, historical: bool = False) -> dict | None:
         return None
     if not historical and not getattr(settings, 'CUSD_PLUS_STOCK_TRADING_ENABLED', False):
         raise PolicyError('stock_trading_disabled')
-    if not historical and int(getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30)) != 30:
-        raise PolicyError('bad_stock_fee_cap')
+    from . import stock_fees
+
     try:
         data = call['data']
         if not data.startswith('0x') or len(data) > 4_096 or (len(data) - 2) % 2 != 0:
@@ -412,26 +432,46 @@ def _decode_stock_call(call: dict, *, historical: bool = False) -> dict | None:
             decoded = abi_decode(types, raw)
             quote, signature, shares, spend, min_usdt, max_fee = decoded
             action = 'stock_buy'
+            mode = _stock_fee_mode(max_fee, historical)
+            if historical and max_fee == stock_fees.LEGACY_STOCK_FEE_BPS and min_usdt == spend:
+                # Cap 30 is ambiguous in history if cUSD's fee was ever <= 30
+                # (the router then settles it on the perimeter). The floor
+                # shape is not: v2 floors the net at exactly the spend,
+                # legacy floors the gross at spend + fee.
+                mode = stock_fees.MODE_PERIMETER
             if shares <= 0 or spend <= 0 or min_usdt <= 0:
                 raise PolicyError('bad_stock_floor')
             quote_cost = quote[5] * quote[4] // 10 ** 18
             if spend < quote_cost or spend - quote_cost > 10 ** 12:
                 raise PolicyError('bad_stock_notional')
-            fee_bps = 30
-            required_debit = spend + (spend * fee_bps + (10_000 - fee_bps) - 1) // (10_000 - fee_bps)
-            if min_usdt != required_debit:
-                raise PolicyError('bad_stock_floor')
+            if mode == stock_fees.MODE_ROUTER:
+                # v1/legacy: the floor binds the GROSS redemption, which must
+                # cover spend plus the router's 30 bps.
+                fee_bps = stock_fees.LEGACY_STOCK_FEE_BPS
+                required_debit = spend + (spend * fee_bps + (10_000 - fee_bps) - 1) // (10_000 - fee_bps)
+                if min_usdt != required_debit:
+                    raise PolicyError('bad_stock_floor')
+            else:
+                # v2: redeemToUsdt's floor binds the NET after cUSD's exit
+                # fee, which must be exactly the attested spend.
+                if min_usdt != spend:
+                    raise PolicyError('bad_stock_floor')
+                required_debit = stock_fees.perimeter_gross_for_net(spend, max_fee)
         elif selector == SEL_STOCK_SELL:
             types = [GM_QUOTE_ABI, 'bytes', 'uint256', 'uint256', 'uint256']
             decoded = abi_decode(types, raw)
             quote, signature, min_usdt, min_shares, max_fee = decoded
             action = 'stock_sell'
+            mode = _stock_fee_mode(max_fee, historical)
             if min_usdt <= 0 or min_shares <= 0:
                 raise PolicyError('bad_stock_floor')
             quote_cost = quote[5] * quote[4] // 10 ** 18
             if min_usdt < quote_cost * 99 // 100:
                 raise PolicyError('bad_stock_floor')
-            required_debit = quote_cost - (quote_cost * 30 // 10_000)
+            if mode == stock_fees.MODE_ROUTER:
+                required_debit = quote_cost - (quote_cost * stock_fees.LEGACY_STOCK_FEE_BPS // 10_000)
+            else:
+                required_debit = quote_cost - stock_fees.perimeter_fee(quote_cost, max_fee)
         else:
             raise PolicyError('selector_not_allowed')
         # Reject trailing/non-canonical ABI bytes before interpreting fields.
@@ -453,8 +493,6 @@ def _decode_stock_call(call: dict, *, historical: bool = False) -> dict | None:
         raise PolicyError('bad_stock_expiration')
     if len(signature) != 65 or asset == '0x0000000000000000000000000000000000000000':
         raise PolicyError('bad_stock_quote')
-    if max_fee != 30:
-        raise PolicyError('bad_stock_fee_cap')
     return {
         'kind': action,
         'asset': asset.lower(),

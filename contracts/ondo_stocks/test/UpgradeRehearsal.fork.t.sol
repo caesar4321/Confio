@@ -47,7 +47,15 @@ contract StockRouterUpgradeRehearsalForkTest is Test {
         assertEq(address(router.USDT()), USDT, "USDT wiring changed");
         assertEq(address(router.USDON()), USDON, "USDon wiring changed");
         assertEq(address(router.GM()), GM, "GM wiring changed");
-        assertEq(router.stockFeeBps(), 30, "fee changed");
+        // v2: router fee 0; v2 stock trades pay cUSD's live perimeter fee,
+        // pre-v2 builds (cap 30) settle on the transitional legacy path.
+        assertEq(router.stockFeeBps(), 0, "router own fee not zero");
+        assertEq(router.LEGACY_STOCK_FEE_BPS(), 30, "legacy cap changed");
+        assertEq(router.conversionFeeBps(), 90, "live cUSD fee is not 0.9%");
+        // The v2 path relays through subscribeAndMint, which needs the router
+        // registered as a cUSD+ sponsor (already true for v1 settlement).
+        (bool ok, bytes memory ret) = CUSD_PLUS.staticcall(abi.encodeWithSignature("isSponsor(address)", PROXY));
+        assertTrue(ok && abi.decode(ret, (bool)), "router not a cUSD+ sponsor");
 
         GmQuote memory emptyQuote;
         address outsider = makeAddr("advancedDirectCaller");
@@ -56,7 +64,7 @@ contract StockRouterUpgradeRehearsalForkTest is Test {
         // quote fields. This remains a Confío app-only route.
         vm.prank(outsider, outsider);
         vm.expectRevert("not sponsored");
-        router.sellToSavings(emptyQuote, "", 0, 0, 30);
+        router.sellToSavings(emptyQuote, "", 0, 0, 90);
 
         // Raw redemption has no sponsor gate. Reaching its first input check
         // proves the selector is installed and callable by an arbitrary EOA.

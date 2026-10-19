@@ -26,18 +26,17 @@ import {bscscanTokenHoldingsUrl} from '../utils/bscscan';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { formatDecimal } from '../utils/numberLocale';
+import { useStockFeePolicy } from '../hooks/useStockFeePolicy';
 
 const ONDO_STOCKS_URL = 'https://ondo.finance/ondo-stocks';
 
-// The trade fee is an env-driven server setting (CUSD_PLUS_GM_TRADE_FEE_BPS),
-// and the router's on-chain stockFeeBps is authoritative above even that — so
-// this screen must never carry the number as a literal. This eligible-only
-// query also returns the privacy-safe community rollup from the same snapshot
-// as the Home market-value figure.
+// The fee comes from the server's stock fee policy (useStockFeePolicy), never
+// a literal. This eligible-only query returns the router address and the
+// privacy-safe community rollup from the same snapshot as the Home
+// market-value figure.
 const STOCK_INFO = gql`
   query OndoStocksInfoFee {
     cusdPlusConvertParams {
-      gmTradeFeeBps
       stockRouterAddress
     }
     gmCommunity {
@@ -66,7 +65,7 @@ const STOCK_WALLET_ADDRESS = gql`
   }
 `;
 
-// 30 bps -> "0,30" / "0.30" (the user's country decimal mark).
+// 90 bps -> "0,90" / "0.90" (the user's country decimal mark).
 const formatFeePercent = (bps: number) => formatDecimal(bps / 100);
 
 // Same shape as ProtectedSavingsScreen's, so the two hero pills that quote a
@@ -115,6 +114,7 @@ export const OndoStocksInfoScreen = () => {
   // here and simply skip themselves when the product is off.
   const {currency} = useCurrency();
   const {stocks: marketAssets} = useGmMarket(stocks.enabled);
+  const feePolicy = useStockFeePolicy();
   const {data: feeData} = useQuery(STOCK_INFO, {
     skip: !stocks.enabled,
     fetchPolicy: 'cache-and-network',
@@ -174,13 +174,12 @@ export const OndoStocksInfoScreen = () => {
   };
 
   // Same rule for the fee: assert a rate only once the server has told us one.
-  const feeBps: number | null | undefined =
-    feeData?.cusdPlusConvertParams?.gmTradeFeeBps;
+  const feeBps: number | null = feePolicy ? Number(feePolicy.feeBps) : null;
   const feeSentence =
     feeBps == null
       ? 'Confío cobra una comisión sobre cada compra y venta completada.'
-      : feeBps === 0
-        ? 'Por ahora Confío no cobra comisión por operar.'
+      : feePolicy?.mode === 'perimeter'
+        ? `Confío cobra su comisión de ${formatFeePercent(feeBps)}% al comprar y al vender: es la misma que en cualquier retiro o depósito de tu dólar Confío.`
         : `Confío cobra un ${formatFeePercent(feeBps)}% sobre cada compra y venta completada.`;
 
   const userBscAddress: string | null = isAuthReady

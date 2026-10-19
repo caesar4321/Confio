@@ -1390,6 +1390,13 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
     from users.models import Account
     from payment_accounts.activity import local_mint_journey_id
 
+    if getattr(batch, 'kind', None) in ('stock_buy', 'stock_sell'):
+        # Router v2 stock trades cross the cUSD perimeter (exit on buy, entry
+        # on sell), but the fee is already part of the trade's own history
+        # row (unified._stock_event_amount). Ingesting it here would add a
+        # second deposit/withdrawal activity, and an equal-sized pending
+        # deposit could be completed from a stock receipt (Codex 2026-10-19).
+        return []
     events = _cusd_fee_events(receipt)
     if not events:
         return []

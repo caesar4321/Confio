@@ -15,7 +15,7 @@ Confío is a fully open-source, non-custodial financial application for Latin Am
 - **Send simply:** transfer to contacts without asking users to copy blockchain addresses or hold BNB for gas.
 - **Accept payments:** support merchant invoices and QR-centered payment flows with transparent on-chain settlement.
 - **Run payroll:** let businesses fund and authorize dollar payouts while recipients remain in control of their wallets.
-- **Access Ondo Stocks (staged):** once live trading is activated, eligible users can buy from cUSD+ and return sale proceeds to cUSD+ through a dedicated router with an explicit fixed 0.30% Confío fee on every completed purchase and sale.
+- **Access Ondo Stocks (staged):** once live trading is activated, eligible users can buy from cUSD+ and return sale proceeds to cUSD+ through a dedicated router. Stock trades pay the same 0.9% Confío fee as any other exit from or entry into Confío Dollar, charged by cUSD on the cUSD+ exit (buy) and entry (sell); the router charges no fee of its own.
 - **Participate in the ecosystem:** use the fixed-supply $CONFIO token for presale allocations, rewards, and disclosed ecosystem functions. $CONFIO does not back cUSD, cUSD+, or user dollar balances.
 
 ## Why Confío is different
@@ -48,7 +48,7 @@ The mobile application, backend, smart contracts, and core documentation are ope
 | **cUSD** | Universal payment dollar backed 1:1 by USDT, used when USDY exposure is unavailable or unsuitable |
 | **cUSD+** | USDY-backed savings wrapper for Ondo-eligible users |
 | **Payment, payroll, invite, and presale contracts** | cUSD/cUSD+ settlement, merchant and payroll fees, invitation escrow, and cUSD-funded presale purchases |
-| **Ondo Stocks router** | Staged user-authorized purchases from cUSD+ and sales back into cUSD+, with a fixed 0.30% explicit fee |
+| **Ondo Stocks router** | Staged user-authorized purchases from cUSD+ and sales back into cUSD+; no router fee, the uniform 0.9% cUSD perimeter fee applies |
 | **$CONFIO** | Fixed-supply community and ecosystem token, separate from dollar backing |
 | **Sponsored transaction layer** | User-authorized EIP-7702 batches with network fees paid by Confío |
 

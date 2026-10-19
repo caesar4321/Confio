@@ -4,33 +4,37 @@ Standalone Foundry package for Confío's Ondo Global Markets stock router.
 It connects the existing cUSD+ vault to Ondo's BSC `GMTokenManager` without
 depending on the cUSD+ implementation source.
 
-## Fee custody
+## Fees (v2, 2026-10)
 
-Every completed buy and sell charges a fixed **30 bps (0.30%)** fee in USDT.
-The fee stays in the router and is counted in `accruedUsdtFees`. The owner Safe
-can withdraw at most that tracked amount through `withdrawFees`; generic
-`sweep` calls cannot withdraw accounted fees. Accidental USDT transfers remain
-separately sweepable.
+The router charges **no fee of its own** (`stockFeeBps() == 0`). Stock trades
+pay Confío's single 0.9% conversion fee exactly where every other exit from or
+entry into Confío Dollar pays it:
 
-GM converts BSC USDT through its live USDon converter. The router requires net
-USDT spend to match the signed quote cost within one micro-USDT and forwards
-every USDon conversion refund to the funding user, so it cannot become a hidden
-second fee.
+- `buyWithSavings` redeems the user's cUSD+ through the vault's public
+  `redeemToUsdt`, which routes through cUSD's `settleSavingsExit` (0.9% exit
+  fee), then spends the net USDT on the GM mint. Any USDT above the attested
+  spend (vault accrual between quote and execution) is returned to the user.
+- `sellToSavings` sends GM proceeds through the vault's sponsored
+  `subscribeAndMint`, which routes through cUSD's `settleSavingsEntry` (0.9%
+  entry fee), minting the net cUSD+ to the user.
+- `sellToUsdt` never touches cUSD, so it pays nothing.
 
-On buys, the client binds the exact attested USDT spend and sizes the cUSD+
-redemption to cover spend plus fee. If the vault accrues between quote and
-execution, every excess USDT wei is returned to the user. On sells, the router
-subtracts the fee from actual GM proceeds and calls the vault's
-router-restricted `subscribeForStock`, so the net amount returns directly to
-the user's savings without the separate 0.9% conversion fee. Stock buys use
-the matching `redeemForStock` route. The router's fixed 0.30% is the only
-Confío fee on either trade direction.
+Every trade signs `maxFeeBps`, which is checked against cUSD's live `feeBps`
+(`conversionFeeBps()`), so a Safe fee change can never apply to an intent
+signed at a lower fee.
 
-Every Confío app trade that spends or mints cUSD+ remains sponsor-originated.
-Advanced crypto-native holders have a separate contract-only escape hatch:
-`sellToUsdt` redeems stock directly to raw USDT, charges the same fixed 0.30%,
-and never calls the cUSD+ vault. Confío's client and server do not expose or
-invoke that permissionless function.
+**Transitional legacy path.** Pre-v2 app builds always sign `maxFeeBps = 30`
+and size their redemption and floors for the v1 0.30% router fee. A call
+signed at exactly `LEGACY_STOCK_FEE_BPS` (30) settles the v1 way: the
+router-only fee-free vault surfaces (`redeemForStock`/`subscribeForStock`)
+plus 30 bps accrued in `accruedUsdtFees`. Both entry points are
+sponsor-originated, so the relay's `CUSD_PLUS_STOCK_LEGACY_FEE_ENABLED`
+decides how long legacy intents are honored. Once the new build is on both
+stores: switch that off, force-update, and upgrade to a single-mode router that
+deletes this path.
+
+Accrued legacy fees remain withdrawable only through `withdrawFees`; `sweep`
+cannot touch them.
 
 ## End-to-end wiring
 
@@ -41,7 +45,8 @@ The production flow is deliberately split by custody boundary:
 2. The app reads the user's live cUSD+/stock balances and builds an optional
    approval plus the exact router calldata.
 3. Daphne validates the quote request, sponsored-rail configuration, issuer
-   eligibility, canonical calldata, and fixed 30 bps cap.
+   eligibility, canonical calldata, and the signed fee cap (90 bps v2, or
+   30 bps legacy while the transition switch is on).
 4. The app signs an EIP-712 intent and the KMS relay broadcasts the sponsored
    EIP-7702 batch.
 5. The router settles atomically and Daphne invalidates the vault and GM

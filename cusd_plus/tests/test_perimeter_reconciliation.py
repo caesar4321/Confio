@@ -48,6 +48,21 @@ class PerimeterReconciliationTests(TestCase):
         self.assertEqual(row.status, 'COMPLETED')
         self.assertEqual(row.error_message, '')
 
+    def test_stock_trade_perimeter_events_never_become_conversions(self):
+        # Router v2 sells emit SavingsEntrySettled; the fee already lives in
+        # the stock trade's history row. An equal-sized arrived deposit must
+        # not be completed from the stock receipt, and no row is created.
+        pending = Conversion.objects.create(actor_user=self.user, actor_type='user',
+            conversion_type='to_savings', from_amount=11, to_amount=10,
+            user_bsc_address=self.wallet, status='DEST_ARRIVED')
+        for kind in ('stock_sell', 'stock_buy'):
+            self.batch.kind = kind
+            with patch('cusd_plus.tasks._cusd_fee_events', return_value=[self.event]):
+                self.assertEqual(_reconcile_cusd_fee_event(batch=self.batch, receipt={}), [])
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, 'DEST_ARRIVED')
+        self.assertEqual(Conversion.objects.count(), 1)
+
     def test_finalized_entry_claims_arrived_saga(self):
         row = Conversion.objects.create(actor_user=self.user, actor_type='user',
             conversion_type='to_savings', from_amount=11, to_amount=10,

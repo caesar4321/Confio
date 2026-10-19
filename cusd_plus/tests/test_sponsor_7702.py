@@ -84,8 +84,11 @@ def _stock_data(side=0, *, max_fee=30, expiration=None, min_usdt=None):
     if side == 0:
         types = [sponsor_7702.GM_QUOTE_ABI, 'bytes', 'uint256', 'uint256', 'uint256', 'uint256']
         spend = 600 * 10**18
-        fee = (spend * 30 + 9969) // 9970
-        floor = min_usdt if min_usdt is not None else spend + fee
+        if max_fee == 30:  # legacy router math: floor = gross incl. 30 bps
+            default_floor = spend + (spend * 30 + 9969) // 9970
+        else:  # v2: redeemToUsdt floors the NET after cUSD's exit fee
+            default_floor = spend
+        floor = min_usdt if min_usdt is not None else default_floor
         values = [quote, signature, 602 * 10**18, spend, floor, max_fee]
         selector = sponsor_7702.SEL_STOCK_BUY
     else:
@@ -263,7 +266,6 @@ class PolicyTests(SimpleTestCase):
     @override_settings(
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
     )
     def test_stock_buy_and_sell_batches_accepted(self):
         buy_approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
@@ -274,7 +276,7 @@ class PolicyTests(SimpleTestCase):
     @override_settings(
         CUSD_PLUS_STOCK_TRADING_ENABLED=False,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=31,
+        CUSD_PLUS_STOCK_LEGACY_FEE_ENABLED=False,
     )
     def test_historical_stock_decode_survives_later_ops_switches(self):
         action = sponsor_7702._decode_stock_call(
@@ -287,22 +289,92 @@ class PolicyTests(SimpleTestCase):
     @override_settings(
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
     )
     def test_stock_batch_rejects_wrong_approval_token_and_fee(self):
         approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
         self._assert_rejected(
             [_call(USDT, approve), _call(ROUTER, _stock_data(0))], 'bad_stock_batch')
         self._assert_rejected([_call(ROUTER, _stock_data(0, max_fee=31))], 'bad_stock_fee_cap')
+        # Router v2 not live yet: a 90 bps intent has nothing to settle on.
+        self._assert_rejected([_call(ROUTER, _stock_data(0, max_fee=90))], 'bad_stock_fee_cap')
 
-        with override_settings(CUSD_PLUS_GM_TRADE_FEE_BPS=31):
-            self._assert_rejected(
-                [_call(ROUTER, _stock_data(0, max_fee=31))], 'bad_stock_fee_cap')
+    # ── Fee unification: router v2 (perimeter) + transitional legacy ────
 
     @override_settings(
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+        CUSD_PLUS_STOCK_CONVERSION_FEE_BPS=90,
+    )
+    def test_v2_and_legacy_caps_both_sponsored_during_transition(self):
+        approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        self._validate([_call(VAULT, approve), _call(ROUTER, _stock_data(0, max_fee=90))])
+        self._validate([_call(STOCK, approve), _call(ROUTER, _stock_data(1, max_fee=90))])
+        # Pre-v2 builds keep trading at 30 bps through the legacy path.
+        self._validate([_call(VAULT, approve), _call(ROUTER, _stock_data(0, max_fee=30))])
+        self._assert_rejected([_call(ROUTER, _stock_data(0, max_fee=60))], 'bad_stock_fee_cap')
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_STOCK_CONVERSION_FEE_BPS=90,
+        CUSD_PLUS_STOCK_LEGACY_FEE_ENABLED=False,
+    )
+    def test_cutover_stops_sponsoring_legacy_caps(self):
+        self._assert_rejected([_call(ROUTER, _stock_data(0, max_fee=30))], 'bad_stock_fee_cap')
+        approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        self._validate([_call(VAULT, approve), _call(ROUTER, _stock_data(0, max_fee=90))])
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_STOCK_CONVERSION_FEE_BPS=30,
+    )
+    def test_conversion_fee_at_legacy_cap_disables_legacy_everywhere(self):
+        from cusd_plus import stock_fees
+
+        # The router settles cap 30 on the perimeter when cUSD's fee is <= 30,
+        # so the relay must never read it as the legacy path.
+        self.assertFalse(stock_fees.legacy_fee_enabled())
+        self.assertEqual(stock_fees.accepted_fee_caps(), {30: stock_fees.MODE_PERIMETER})
+        self._assert_rejected(
+            [_call(ROUTER, _stock_data(0, max_fee=30))], 'bad_stock_floor')  # legacy gross floor
+        # Old builds must stop at their config check, never see exactly 30.
+        self.assertNotEqual(stock_fees.legacy_display_fee_bps(), 30)
+        # A perimeter buy signed at cap 30 must still decode for history.
+        spend = 600 * 10**18
+        action = sponsor_7702._decode_stock_call(
+            _call(ROUTER, _stock_data(0, max_fee=30, min_usdt=spend)), historical=True)
+        self.assertEqual(action['history_amount_wei'], stock_fees.perimeter_gross_for_net(spend, 30))
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_STOCK_CONVERSION_FEE_BPS=90,
+    )
+    def test_v2_buy_floor_must_equal_net_spend(self):
+        spend = 600 * 10**18
+        # A legacy-shaped gross floor on a v2 intent is rejected.
+        legacy_floor = spend + (spend * 30 + 9969) // 9970
+        self._assert_rejected(
+            [_call(ROUTER, _stock_data(0, max_fee=90, min_usdt=legacy_floor))], 'bad_stock_floor')
+        action = sponsor_7702._decode_stock_call(_call(ROUTER, _stock_data(0, max_fee=90)))
+        gross = action['history_amount_wei']
+        self.assertGreaterEqual(gross - (gross * 90 + 9999) // 10_000, spend)
+        self.assertLess(gross - 1 - ((gross - 1) * 90 + 9999) // 10_000, spend)
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_STOCK_CONVERSION_FEE_BPS=90,
+    )
+    def test_v2_sell_history_is_net_of_entry_fee(self):
+        action = sponsor_7702._decode_stock_call(_call(ROUTER, _stock_data(1, max_fee=90)))
+        cost = 600 * 10**18
+        self.assertEqual(action['history_amount_wei'], cost - (cost * 90 + 9999) // 10_000)
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
     )
     def test_stock_batch_rejects_weak_slippage_floors(self):
         self._assert_rejected(
@@ -1318,6 +1390,37 @@ class StockHistoryTests(SimpleTestCase):
             sync_unified_from_stock_batch(
                 batch, self._receipt(batch.kind, principal, fee))
         return rows, sends
+
+    def test_v2_amounts_include_cusd_perimeter_fee_from_receipt(self):
+        from cusd_plus.unified import _stock_event_amount
+
+        cusd = '0x' + '77' * 20
+
+        def receipt(kind, principal, perimeter_fee):
+            base = self._receipt(kind, principal, 0)
+            if kind == 'stock_buy':
+                sig = 'SavingsExitSettled(address,uint256,uint256,uint256,uint256)'
+                topics = ['0x' + keccak(text=sig).hex(), '0x' + ROUTER[2:].rjust(64, '0')]
+            else:
+                sig = 'SavingsEntrySettled(uint256,uint256,uint256,uint256)'
+                topics = ['0x' + keccak(text=sig).hex()]
+            base['logs'].append({
+                'address': cusd,
+                'topics': topics,
+                'data': '0x' + abi_encode(
+                    ['uint256'] * 4, [10**20, perimeter_fee, 10**20 - perimeter_fee, 90]).hex(),
+            })
+            return base
+
+        with override_settings(CUSD_VAULT_ADDRESS=cusd):
+            buy = _stock_event_amount(
+                receipt('stock_buy', 99_100_000_000_000_000_000, 9 * 10**17),
+                'stock_buy', USER, ROUTER, STOCK)
+            sell = _stock_event_amount(
+                receipt('stock_sell', 100 * 10**18, 9 * 10**17),
+                'stock_sell', USER, ROUTER, STOCK)
+        self.assertEqual(buy, 100 * 10**18)  # savings debited the full $100
+        self.assertEqual(sell, 99_100_000_000_000_000_000)  # $99.10 re-entered savings
 
     def test_buy_creates_outgoing_stock_receipt_with_exact_event_amount(self):
         rows, _ = self._sync(0, 600 * 10**18, 2 * 10**18)

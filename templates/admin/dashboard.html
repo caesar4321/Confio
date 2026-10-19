@@ -1880,8 +1880,8 @@
                 {% endif %}
             </div>
             <div class="metric-change">
-                On-chain fee {{ stock_router_metrics.fee_bps_onchain|default:"—" }} bps &middot;
-                configured {{ stock_router_metrics.fee_bps_configured }} bps
+                Router's own fee {{ stock_router_metrics.fee_bps_onchain|default:"—" }} bps &middot;
+                signed by current app {{ stock_router_metrics.fee_bps_configured|default:"—" }} bps
             </div>
         </div>
 

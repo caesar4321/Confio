@@ -38,7 +38,7 @@ jest.mock('../cusdPlusVault', () => ({
   sharesForUsdtOut: jest.fn(),
 }));
 
-import { friendlyTradeError, sellStockToSavings } from '../ondoStocks';
+import { buyStockWithSavings, friendlyTradeError, sellStockToSavings } from '../ondoStocks';
 
 const quote = (tokenAmount: bigint) => ({
   success: true,
@@ -68,6 +68,7 @@ describe('Ondo Stocks sell orchestration', () => {
           stockRouterAddress: ROUTER,
           gmTradeFeeBps: 30,
         },
+        stockFeePolicy: { feeBps: 30, mode: 'router' },
       },
     });
     mockGetErc20BalanceWei.mockResolvedValue(100n * WAD);
@@ -149,6 +150,7 @@ describe('Ondo Stocks sell minimum', () => {
       data: {
         cusdPlusSummary: { stocksTradingEnabled: true },
         cusdPlusConvertParams: { vaultAddress: VAULT, stockRouterAddress: ROUTER, gmTradeFeeBps: 30 },
+        stockFeePolicy: { feeBps: 30, mode: 'router' },
       },
     });
     mockGetErc20BalanceWei.mockResolvedValue(100n * WAD);
@@ -168,5 +170,87 @@ describe('Ondo Stocks sell minimum', () => {
       .toContain('no se cobró nada');
     expect(friendlyTradeError(new Error('execution reverted: 0x67627d07'), 'sell')).toContain('US$1.00');
     expect(friendlyTradeError(new Error('Tu ahorro disponible no alcanza'), 'buy')).toBe('Tu ahorro disponible no alcanza');
+  });
+});
+
+describe('Ondo Stocks fee policy (fee unification)', () => {
+  const abi = jest.requireMock('../ondoStocksAbi');
+  const vault = jest.requireMock('../cusdPlusVault');
+  const configData = (policy: unknown) => ({
+    data: {
+      cusdPlusSummary: { stocksTradingEnabled: true },
+      cusdPlusConvertParams: { vaultAddress: VAULT, stockRouterAddress: ROUTER, gmTradeFeeBps: 30 },
+      stockFeePolicy: policy,
+    },
+  });
+  const buyQuote = (notional: bigint) => ({ ...quote(1n * WAD), notionalWei: notional.toString() });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetVaultPrices.mockResolvedValue({ pPlusWad: WAD, oraclePriceWad: WAD });
+    vault.getVaultShares.mockResolvedValue(1_000n * WAD);
+    vault.sharesForUsdtOut.mockImplementation((usdt: bigint) => usdt);
+    vault.predictRedeemUsdtOut.mockImplementation((shares: bigint) => shares);
+    mockExecuteSponsoredBatch.mockResolvedValue({ txHash: `0x${'88'.repeat(32)}` });
+  });
+
+  it('v2 buy signs the live 0.9% cap with a net floor equal to the spend', async () => {
+    mockQuery.mockResolvedValue(configData({ feeBps: 90, mode: 'perimeter' }));
+    const spend = 99_100_000_000_000_000_000n;
+    mockMutate.mockResolvedValueOnce({ data: { prepareGmTrade: { quote: buyQuote(spend) } } });
+
+    const result = await buyStockWithSavings({ symbol: 'TSLAon', grossAmountUsd: 100 });
+
+    // The binding request is for $100 minus the 0.9% exit fee.
+    expect(mockMutate.mock.calls[0][0].variables.notionalValue).toBe('99.1');
+    const [, shares, signedSpend, minUsdt, maxFee] = abi.encodeBuyStockCall.mock.calls[0];
+    expect(maxFee).toBe(90n);
+    expect(signedSpend).toBe(spend);
+    expect(minUsdt).toBe(spend);
+    expect(shares).toBe(100n * WAD); // redeems the full $100 gross
+    expect(result.feeWei).toBe(9n * 10n ** 17n);
+  });
+
+  it('an older server without stockFeePolicy falls back to the legacy 30 bps router math', async () => {
+    mockQuery.mockImplementation(async ({ query }: { query: any }) => {
+      if (query.definitions[0].name.value === 'StockFeePolicy') throw new Error('Cannot query field');
+      return configData(undefined);
+    });
+    const spend = 600n * WAD;
+    mockMutate.mockResolvedValueOnce({ data: { prepareGmTrade: { quote: buyQuote(spend) } } });
+
+    await buyStockWithSavings({ symbol: 'TSLAon', grossAmountUsd: 601.8 });
+
+    const [, , , minUsdt, maxFee] = abi.encodeBuyStockCall.mock.calls[0];
+    expect(maxFee).toBe(30n);
+    expect(minUsdt).toBe(spend + (spend * 30n + 9969n) / 9970n);
+  });
+
+  it('screen fee lookup on an older server falls back to the legacy 30 bps field', async () => {
+    mockQuery.mockImplementation(async ({ query }: { query: any }) => {
+      if (query.definitions[0].name.value === 'StockFeePolicy') throw new Error('Cannot query field');
+      return { data: { cusdPlusConvertParams: { gmTradeFeeBps: 30 } } };
+    });
+    // Fresh module: earlier trades in this file primed the 60 s policy cache.
+    jest.resetModules();
+    const fresh = jest.requireActual('../ondoStocks');
+    await expect(fresh.getStockFeePolicy()).resolves.toEqual({ feeBps: 30n, mode: 'router' });
+  });
+
+  it('refuses to sign a fee other than the one the screen displayed', async () => {
+    mockQuery.mockResolvedValue(configData({ feeBps: 90, mode: 'perimeter' }));
+    await expect(buyStockWithSavings({ symbol: 'TSLAon', grossAmountUsd: 100, expectedFeeBps: 30n }))
+      .rejects.toMatchObject({ code: 'FEE_CHANGED' });
+    await expect(sellStockToSavings({ symbol: 'TSLAon', grossAmountUsd: 100, expectedFeeBps: 30n }))
+      .rejects.toMatchObject({ code: 'FEE_CHANGED' });
+    expect(mockMutate).not.toHaveBeenCalled();
+    expect(mockExecuteSponsoredBatch).not.toHaveBeenCalled();
+  });
+
+  it('refuses to trade when the server reports no usable fee policy', async () => {
+    mockQuery.mockResolvedValue(configData(null));
+    await expect(buyStockWithSavings({ symbol: 'TSLAon', grossAmountUsd: 100 }))
+      .rejects.toThrow('aún no está habilitada');
+    expect(mockExecuteSponsoredBatch).not.toHaveBeenCalled();
   });
 });

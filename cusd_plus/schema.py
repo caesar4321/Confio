@@ -43,8 +43,15 @@ def _stock_execution_ready():
         and getattr(settings, 'CUSD_PLUS_STOCK_ROUTER_ADDRESS', '')
         and getattr(settings, 'CUSD_PLUS_7702_ENABLED', False)
         and getattr(settings, 'CUSD_PLUS_BATCH_DELEGATE_ADDRESS', '')
-        and getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30) == 30
+        and _stock_fee_policy_ready()
     )
+
+
+def _stock_fee_policy_ready():
+    """At least one fee cap is sponsorable (legacy 30 bps and/or router v2)."""
+    from .stock_fees import accepted_fee_caps
+
+    return bool(accepted_fee_caps())
 
 
 def _stock_surfaces_enabled(user, request_meta) -> bool:
@@ -345,6 +352,23 @@ class GmHomeTileType(graphene.ObjectType):
     )
 
 
+def _legacy_display_fee_bps():
+    from .stock_fees import legacy_display_fee_bps
+
+    return legacy_display_fee_bps()
+
+
+class StockFeePolicyType(graphene.ObjectType):
+    """The single Confío fee a current build quotes and signs for stocks."""
+
+    fee_bps = graphene.Int(required=True, description='Value to sign as maxFeeBps')
+    mode = graphene.String(
+        required=True,
+        description="'perimeter' = cUSD's fee on the cUSD+ exit/entry (router v2); "
+        "'router' = legacy 30 bps accrued by the router (router v1)",
+    )
+
+
 class GmMarketType(graphene.ObjectType):
     session = graphene.String(description="core | extended | off-hours | closed")
     assets = graphene.List(graphene.NonNull(GmAssetType))
@@ -509,6 +533,9 @@ class Query(graphene.ObjectType):
         graphene.NonNull(lambda: CusdPlusConversionType),
     )
     gm_market = graphene.Field(GmMarketType)
+    # Isolated on purpose: queried alone by current builds so older servers
+    # that lack it never fail a shared query.
+    stock_fee_policy = graphene.Field(StockFeePolicyType)
     gm_community = graphene.Field(
         GmCommunityType,
         description="Marked-to-market aggregate holdings for eligible users; never settlement volume",
@@ -656,6 +683,18 @@ class Query(graphene.ObjectType):
             updated_at=updated_at,
             assets=assets,
         )
+
+    def resolve_stock_fee_policy(self, info):
+        from .stock_fees import client_fee_policy
+
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        policy = client_fee_policy()
+        if policy is None:
+            return None
+        fee_bps, mode = policy
+        return StockFeePolicyType(fee_bps=fee_bps, mode=mode)
 
     def resolve_gm_market(self, info):
         user = getattr(info.context, 'user', None)
@@ -1016,9 +1055,10 @@ class Query(graphene.ObjectType):
             confio_fee_bps=getattr(settings, 'CUSD_PLUS_CONVERT_FEE_BPS', 0),
             min_amount_usd=getattr(settings, 'CUSD_PLUS_MIN_CONVERT_USD', 1.0),
             paused=getattr(settings, 'CUSD_PLUS_CONVERSIONS_PAUSED', True),
-            # Display mirror only; the deployed router's fixed 30 bps is
-            # authoritative and the sponsor policy requires exact parity.
-            gm_trade_fee_bps=getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 0),
+            # Pre-v2 builds only: they trade solely when this is exactly 30
+            # (the transitional legacy router path). Current builds read
+            # stockFeePolicy instead. See cusd_plus/stock_fees.py.
+            gm_trade_fee_bps=_legacy_display_fee_bps(),
             stock_router_address=getattr(settings, 'CUSD_PLUS_STOCK_ROUTER_ADDRESS', None) or None,
             vault_address=getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', None),
             cusd_address=getattr(settings, 'CUSD_VAULT_ADDRESS', None) or None,
@@ -2206,7 +2246,7 @@ class PrepareGmTrade(graphene.Mutation):
             or not getattr(settings, 'CUSD_PLUS_BATCH_DELEGATE_ADDRESS', '')
         ):
             return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='SPONSOR_NOT_CONFIGURED'))
-        if getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30) != 30:
+        if not _stock_fee_policy_ready():
             return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='FEE_CONFIG_MISMATCH'))
         account = _active_account(info)
         if account is None or not account.bsc_address:

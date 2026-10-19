@@ -36,6 +36,8 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useAccount } from '../contexts/AccountContext';
 import { openTuMesNow } from '../hooks/useStockMonthNow';
+import { useStockFeePolicy } from '../hooks/useStockFeePolicy';
+import { feePercent, sellFee, StockFeePolicy } from '../services/stockFeeMath';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
@@ -57,14 +59,14 @@ type SellRoute = RouteProp<MainStackParamList, 'SellStock'>;
 
 const MIN_AMOUNT_USD = 1;
 
-const getSellQuote = (amountUsd: number, ready: boolean, receiveUsd?: number) => {
-  const costPct = 0.3;
+const getSellQuote = (amountUsd: number, ready: boolean, policy: StockFeePolicy | null, receiveUsd?: number) => {
+  const costPct = policy ? feePercent(policy) : 0;
   const costUsd = amountUsd * (costPct / 100);
   return {
     costPct,
     costUsd,
     receiveUsd: receiveUsd ?? amountUsd - costUsd,
-    paused: !ready,
+    paused: !ready || !policy,
   };
 };
 
@@ -105,9 +107,11 @@ export const SellStockScreen = () => {
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
+  const feePolicy = useStockFeePolicy();
   const quote = useMemo(
-    () => getSellQuote(amount, quoteReady && !quoteLoading, softNetWei > 0n ? Number(softNetWei) / 1e18 : undefined),
-    [amount, quoteReady, quoteLoading, softNetWei],
+    () => getSellQuote(
+      amount, quoteReady && !quoteLoading, feePolicy, softNetWei > 0n ? Number(softNetWei) / 1e18 : undefined),
+    [amount, feePolicy, quoteReady, quoteLoading, softNetWei],
   );
 
   useEffect(() => {
@@ -116,14 +120,18 @@ export const SellStockScreen = () => {
     setQuoteReady(false);
     setSoftNetWei(0n);
     setQuoteLoading(false);
-    if (!stock || !stocks.enabled || !stocks.tradingEnabled || amount < MIN_AMOUNT_USD || amount > available) return;
+    if (
+      !stock || !feePolicy || !stocks.enabled || !stocks.tradingEnabled
+      || amount < MIN_AMOUNT_USD || amount > available
+    ) return;
+    const policy = feePolicy;
     setQuoteLoading(true);
     const timer = setTimeout(() => {
       getSoftStockQuote(stock.symbol, 'sell', amount)
         .then((q) => {
           if (!cancelled) {
             const gross = (BigInt(q.tokenAmount) * BigInt(q.price)) / 10n ** 18n;
-            setSoftNetWei(gross - (gross * 30n) / 10_000n);
+            setSoftNetWei(gross - sellFee(gross, policy));
             setQuoteReady(true);
           }
         })
@@ -133,7 +141,7 @@ export const SellStockScreen = () => {
         .finally(() => { if (!cancelled) setQuoteLoading(false); });
     }, 350);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [amount, available, stock, stocks.enabled, stocks.tradingEnabled]);
+  }, [amount, available, feePolicy, stock, stocks.enabled, stocks.tradingEnabled]);
 
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
@@ -176,6 +184,7 @@ export const SellStockScreen = () => {
         grossAmountUsd: amount,
         sellAll,
         minExpectedNetWei: (softNetWei * 99n) / 100n,
+        expectedFeeBps: feePolicy?.feeBps,
         requestId,
       });
       setSettledReceiveUsd(Number(result.expectedNetWei) / 1e18);
@@ -207,7 +216,7 @@ export const SellStockScreen = () => {
             style={{ marginTop: 4 }}
             items={[
               { label: 'Vendiste', value: fmtUsd(amount) },
-              { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${formatDecimal(quote.costPct)}%)` },
+              { label: 'Comisión de Confío', value: `${fmtUsd(quote.costUsd)} (${formatDecimal(quote.costPct)}%)` },
               { label: 'Recibido en tu ahorro', value: fmtUsd(settledReceiveUsd), color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
               { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
@@ -315,7 +324,7 @@ export const SellStockScreen = () => {
                 <Text style={styles.quoteValue}>{fmtUsd(stock.priceUsd)}</Text>
               </View>
               <View style={styles.quoteRow}>
-                <Text style={styles.quoteLabel}>Costo de operación</Text>
+                <Text style={styles.quoteLabel}>Comisión de Confío</Text>
                 <Text style={styles.quoteValue}>
                   ~{formatNumber(quote.costPct, { maximumFractionDigits: 2 })}% ·{' '}
                   {fmtUsd(quote.costUsd)}

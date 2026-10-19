@@ -475,7 +475,8 @@ def get_stock_router_metrics(*, use_cache: bool = True) -> dict:
         'address': address or None,
         'stocks_enabled': bool(getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False)),
         'trading_enabled': bool(getattr(settings, 'CUSD_PLUS_STOCK_TRADING_ENABLED', False)),
-        'fee_bps_configured': int(getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30)),
+        # The fee current builds sign (router v2 = cUSD's perimeter fee).
+        'fee_bps_configured': (_stock_client_fee_policy() or (None,))[0],
     }
     if not address:
         return {
@@ -535,6 +536,12 @@ def get_stock_router_metrics(*, use_cache: bool = True) -> dict:
             'paused': None,
             'source': 'unavailable',
         }
+
+
+def _stock_client_fee_policy():
+    from .stock_fees import client_fee_policy
+
+    return client_fee_policy()
 
 
 def get_bsc_scanner_health() -> dict:

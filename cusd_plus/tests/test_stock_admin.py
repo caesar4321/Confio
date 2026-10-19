@@ -165,7 +165,6 @@ class StockRouterMetricsTests(SimpleTestCase):
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
         CUSD_PLUS_STOCKS_ENABLED=True,
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
-        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
     )
     @mock.patch('cusd_plus.tasks._rpc')
     def test_reads_accrued_fee_separately_from_raw_router_balance(self, rpc):

@@ -40,6 +40,8 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useAccount } from '../contexts/AccountContext';
 import { openTuMesNow } from '../hooks/useStockMonthNow';
+import { useStockFeePolicy } from '../hooks/useStockFeePolicy';
+import { feePercent } from '../services/stockFeeMath';
 import { CUSD_CONVERSION_UI_ENABLED, STOCKS_TRADING_UI_ENABLED } from '../config/features';
 import { useGmMarket, useGmComplexProducts } from '../hooks/useGmMarket';
 import { StockRiskSheet } from '../components/StockRiskSheet';
@@ -55,7 +57,7 @@ import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput } f
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type BuyRoute = RouteProp<MainStackParamList, 'BuyStock'>;
 
-const MIN_AMOUNT_USD = 1.01; // leaves at least $1 net after the fixed 30 bps
+const MIN_AMOUNT_USD = 1.01; // stays above Ondo's ~$0.98 deposit minimum after the 0.9% fee
 
 type Phase = 'input' | 'processing' | 'success';
 
@@ -124,12 +126,16 @@ export const BuyStockScreen = () => {
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
-  const quote = useMemo(() => ({
-    costPct: 0.3,
-    costUsd: amount * 0.003,
-    tokensOut: softTokens,
-    paused: quoteLoading || softTokens <= 0,
-  }), [amount, quoteLoading, softTokens]);
+  const feePolicy = useStockFeePolicy();
+  const quote = useMemo(() => {
+    const costPct = feePolicy ? feePercent(feePolicy) : 0;
+    return {
+      costPct,
+      costUsd: amount * (costPct / 100),
+      tokensOut: softTokens,
+      paused: quoteLoading || softTokens <= 0 || !feePolicy,
+    };
+  }, [amount, feePolicy, quoteLoading, softTokens]);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,7 +143,7 @@ export const BuyStockScreen = () => {
     setSoftTokens(0);
     setSoftTokenWei(0n);
     setQuoteLoading(false);
-    if (!stock || !stocks.buyEnabled || amount < MIN_AMOUNT_USD || amount > available) return;
+    if (!stock || !feePolicy || !stocks.buyEnabled || amount < MIN_AMOUNT_USD || amount > available) return;
     setQuoteLoading(true);
     const timer = setTimeout(() => {
       getSoftStockQuote(stock.symbol, 'buy', amount)
@@ -154,7 +160,9 @@ export const BuyStockScreen = () => {
         .finally(() => { if (!cancelled) setQuoteLoading(false); });
     }, 350);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [amount, available, stock, stocks.buyEnabled]);
+    // feePolicy: a fee change (e.g. after FEE_CHANGED at cutover) changes the
+    // notional, so the token quote and its slippage floor must be redone.
+  }, [amount, available, feePolicy, stock, stocks.buyEnabled]);
 
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
@@ -198,6 +206,7 @@ export const BuyStockScreen = () => {
         symbol: stock.symbol,
         grossAmountUsd: amount,
         minTokenAmountWei: (softTokenWei * 99n) / 100n,
+        expectedFeeBps: feePolicy?.feeBps,
         requestId,
       });
       setSettledTokens(Number(result.tokenAmountWei) / 1e18);
@@ -245,7 +254,7 @@ export const BuyStockScreen = () => {
             style={{ marginTop: 4 }}
             items={[
               { label: 'Invertiste desde tu ahorro', value: fmtUsd(amount) },
-              { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${formatDecimal(quote.costPct)}%)` },
+              { label: 'Comisión de Confío', value: `${fmtUsd(quote.costUsd)} (${formatDecimal(quote.costPct)}%)` },
               { label: 'Recibiste', value: `≈ ${formatNumber(settledTokens, { maximumFractionDigits: 4 })} ${stock.ticker}`, color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
               { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
@@ -352,7 +361,7 @@ export const BuyStockScreen = () => {
                 <Text style={styles.quoteValue}>{fmtUsd(stock.priceUsd)}</Text>
               </View>
               <View style={styles.quoteRow}>
-                <Text style={styles.quoteLabel}>Costo de operación</Text>
+                <Text style={styles.quoteLabel}>Comisión de Confío</Text>
                 <Text style={styles.quoteValue}>
                   ~{formatNumber(quote.costPct, { maximumFractionDigits: 2 })}% ·{' '}
                   {fmtUsd(quote.costUsd)}

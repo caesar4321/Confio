@@ -34,6 +34,10 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({navigate: jest.fn(), goBack: jest.fn()}),
 }));
 jest.mock('../../navigation/Header', () => ({Header: 'Header'}));
+let mockFeePolicy: any;
+jest.mock('../../hooks/useStockFeePolicy', () => ({
+  useStockFeePolicy: () => mockFeePolicy,
+}));
 jest.mock('../../hooks/useSavingsPortfolio', () => ({
   useSavingsPortfolio: () => ({stocks: {enabled: true, buyEnabled: true}}),
 }));
@@ -76,6 +80,7 @@ const render = (): string => {
 beforeEach(() => {
   mockUseQuery.mockClear();
   mockAuthReady = true;
+  mockFeePolicy = {feeBps: 30n, mode: 'router'};
   mockFeePayload = {
     cusdPlusConvertParams: {
       gmTradeFeeBps: 30,
@@ -159,15 +164,22 @@ describe('OndoStocksInfoScreen headline figures', () => {
     expect(render()).toContain('0,30%');
   });
 
-  it('states a fee exists without a number when the server has not answered', () => {
-    mockFeePayload = undefined;
+  it('explains the unified 0.9% as the same fee as any withdrawal or deposit', () => {
+    mockFeePolicy = {feeBps: 90n, mode: 'perimeter'};
     const text = render();
-    expect(text).toContain('una comisión');
-    expect(text).not.toContain('%');
+    expect(text).toContain('0,90%');
+    expect(text).toContain('retiro o depósito');
+  });
+
+  it('states a fee exists without a number when the server has not answered', () => {
+    mockFeePolicy = null;
+    const text = render();
+    expect(text).toContain('Confío cobra una comisión sobre cada compra y venta completada.');
+    expect(text).not.toMatch(/comisión de \d|cobra un \d/);
   });
 
   it('tracks a changed fee instead of the old hardcoded rate', () => {
-    mockFeePayload.cusdPlusConvertParams.gmTradeFeeBps = 45;
+    mockFeePolicy = {feeBps: 45n, mode: 'router'};
     expect(render()).toContain('0,45%');
   });
 

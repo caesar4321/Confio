@@ -51,6 +51,8 @@ jest.mock('../../services/ondoStocks', () => ({
   buyStockWithSavings: (...args: any[]) => mockBuy(...args),
   friendlyTradeError: () => 'error',
   isComplexProductAckRequired: () => false,
+  getStockFeePolicy: () => Promise.resolve({feeBps: 90n, mode: 'perimeter'}),
+  subscribeStockFeePolicy: () => () => undefined,
 }));
 jest.mock('../../services/sponsored7702', () => ({createSponsoredRequestId: () => 'req_1234567890abcdef'}));
 jest.mock('../../services/evmWallet', () => ({isOutcomeUnknown: () => false}));

@@ -149,9 +149,48 @@ def _stock_event_amount(
             continue
         # Both events encode (..., USDT principal/proceeds, fee, ...).
         principal, fee = int(values[2]), int(values[3])
+        if fee == 0:
+            # Router v2 charges nothing itself; cUSD takes the uniform fee on
+            # the cUSD+ exit (buy) / entry (sell) in this same transaction.
+            fee = _perimeter_fee_in_receipt(receipt, kind, router_addr) or 0
         if kind == 'stock_sell' and fee > principal:
             continue
         return principal + fee if kind == 'stock_buy' else principal - fee
+    return None
+
+
+def _perimeter_fee_in_receipt(receipt, kind: str, router_addr: str):
+    """cUSD's fee from SavingsExitSettled (buy) / SavingsEntrySettled (sell)."""
+    from django.conf import settings
+    from eth_abi import decode
+    from eth_utils import keccak
+
+    cusd = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+    if not cusd:
+        return None
+    if kind == 'stock_buy':
+        topic = '0x' + keccak(
+            text='SavingsExitSettled(address,uint256,uint256,uint256,uint256)').hex()
+        # The exit pays the router, which spends it on the stock.
+        recipient = (router_addr or '').lower().replace('0x', '').rjust(64, '0')
+    else:
+        topic = '0x' + keccak(text='SavingsEntrySettled(uint256,uint256,uint256,uint256)').hex()
+        recipient = None
+    for log in receipt.get('logs') or []:
+        topics = log.get('topics') or []
+        if (log.get('address') or '').lower() != cusd or not topics or topics[0].lower() != topic:
+            continue
+        if recipient is not None and (
+                len(topics) < 2 or topics[1].lower().replace('0x', '') != recipient):
+            continue
+        try:
+            raw = bytes.fromhex((log.get('data') or '0x')[2:])
+            if len(raw) != 32 * 4:
+                continue
+            _gross, fee, _net, _bps = decode(['uint256'] * 4, raw)
+        except (TypeError, ValueError):
+            continue
+        return int(fee)
     return None
 
 

@@ -30,7 +30,7 @@
 - Gratis dentro de Confío: enviar dinero a otro usuario de Confío o recibir un envío de otro usuario. Confío paga la comisión de la red. (Un negocio que cobra con Confío Pay sí paga su 0,9%: ver Pagos a comercios.)
 - Nunca digas que recibir en una cuenta local (Pix, Bre-B, CLABE) es gratis: ese dinero entra a Confío y lleva el 0,9%.
 - Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
-- Acciones: 0,30% de Confío en cada compra y venta.
+- Acciones: la misma comisión de 0,9% de Confío que un retiro o depósito: al comprar (el dinero sale de tu dólar Confío) y al vender (vuelve a él). Sin comisión aparte por operar.
 - Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti.
 - El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
 - Parte del costo del proveedor puede ser fijo por cada recarga o retiro, sin importar el monto: por eso en montos chicos pesa más y llega proporcionalmente menos. Hacer menos operaciones y de mayor monto suele costar menos. No des cifras de ese costo fijo; el costo final lo muestra la app antes de confirmar.

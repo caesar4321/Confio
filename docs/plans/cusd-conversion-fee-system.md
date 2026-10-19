@@ -1,6 +1,8 @@
 # cUSD conversion fee system
 
-Status: approved engineering design
+Status: approved engineering design. **Stock-router section superseded 2026-10:**
+router v2 removes the 0.3% stock exception; stock trades pay this same 0.9% fee on
+the cUSD+ exit/entry. See `contracts/ondo_stocks/README.md` (Fees v2).
 
 Date: 2026-08-29
 
