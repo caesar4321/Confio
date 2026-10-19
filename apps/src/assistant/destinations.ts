@@ -70,7 +70,8 @@ export const DESTINATION_LABELS: Record<string, string> = {
   month_summary: 'Ver Tu mes',
   emergency_exit: 'Salida de emergencia',
   tokenomics: 'Ver tokenomics',
-  ia_plus: 'Conoce Confío IA+',
+  // Opens Cuenta inteligente (Confío IA+ is one of its benefits).
+  ia_plus: 'Conoce Cuenta inteligente',
   cuenta_inteligente: 'Conoce Cuenta inteligente',
 };
 
@@ -81,7 +82,10 @@ export type NavigateAction = { destination?: string | null; target?: string | nu
 // the fallback every build knows. Null when neither is known.
 export function resolveNavigate(a: NavigateAction): { key: string; ticker?: string; label: string } | null {
   if (isKnownDestination(a.target) && (a.target !== 'stock' || a.ticker)) {
-    return { key: a.target, ticker: a.ticker ?? undefined, label: a.label || DESTINATION_LABELS[a.target] };
+    // Offer chips always carry the offer's current name: a reply stored
+    // before a rename ("Conoce Confío IA+") must not show the old one.
+    const label = PAID_OFFER_KEYS.has(a.target) ? DESTINATION_LABELS[a.target] : a.label || DESTINATION_LABELS[a.target];
+    return { key: a.target, ticker: a.ticker ?? undefined, label };
   }
   if (isKnownDestination(a.destination) && a.destination !== 'stock') {
     return { key: a.destination, label: DESTINATION_LABELS[a.destination] };
