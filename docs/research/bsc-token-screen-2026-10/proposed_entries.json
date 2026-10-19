@@ -1,0 +1,403 @@
+{
+  "_comment": "PROPOSED entries in cusd_plus/crypto_tokens.json shape (listed=false until issuer address verified). Excludes BTCB/ETH/WBNB/XAUT already in the catalog. Routes are BUY direction from USDT; sells use the exact reverse.",
+  "tokens": [
+    {
+      "symbol": "CAKE",
+      "ticker": "CAKE",
+      "name": "PancakeSwap",
+      "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": true,
+      "custody": "native",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 4.7/7.0/16.2 bps at $10/$100/$1000; flags: owner_contract;mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
+        ]
+      }
+    },
+    {
+      "symbol": "SOL",
+      "ticker": "SOL",
+      "name": "Binance-Peg SOL",
+      "address": "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": true,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 12.0/12.3/15.2 bps at $10/$100/$1000; flags: upgradeable_proxy. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF"
+        ]
+      }
+    },
+    {
+      "symbol": "ASTER",
+      "ticker": "ASTER",
+      "name": "Aster",
+      "address": "0x000Ae314E2A2172a039B26378814C252734f556A",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": true,
+      "custody": "native",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 9.6/12.5/29.3 bps at $10/$100/$1000; flags: . Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0x000Ae314E2A2172a039B26378814C252734f556A"
+        ]
+      }
+    },
+    {
+      "symbol": "AAVE",
+      "ticker": "AAVE",
+      "name": "Aave",
+      "address": "0xfb6115445Bff7b52FeB98650C87f44907E58f802",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": true,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 12.7/18.7/79.0 bps at $10/$100/$1000; flags: upgradeable_proxy. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0xfb6115445Bff7b52FeB98650C87f44907E58f802"
+        ]
+      }
+    },
+    {
+      "symbol": "STABLE",
+      "ticker": "STABLE",
+      "name": "\u200b\u200bStable",
+      "address": "0x011EBe7d75E2C9D1E0bD0be0bEf5C36f0A90075F",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "native",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 2.1/3.5/16.9 bps at $10/$100/$1000; flags: upgradeable_proxy;owner_contract. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0x011EBe7d75E2C9D1E0bD0be0bEf5C36f0A90075F"
+        ]
+      }
+    },
+    {
+      "symbol": "FF",
+      "ticker": "FF",
+      "name": "Falcon Finance",
+      "address": "0xAC23B90A79504865D52B49B327328411a23d4dB2",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "native",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 2.4/5.9/41.0 bps at $10/$100/$1000; flags: mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xAC23B90A79504865D52B49B327328411a23d4dB2"
+        ]
+      }
+    },
+    {
+      "symbol": "AKE",
+      "ticker": "AKE",
+      "name": "Akedo",
+      "address": "0x2c3a8Ee94dDD97244a93Bc48298f97d2C412F7Db",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "native",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 4.5/9.1/50.4 bps at $10/$100/$1000; flags: owner_contract. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          100,
+          "0x2c3a8Ee94dDD97244a93Bc48298f97d2C412F7Db"
+        ]
+      }
+    },
+    {
+      "symbol": "ZEC",
+      "ticker": "ZEC",
+      "name": "Binance-Peg ZEC",
+      "address": "0x1Ba42e5193dfA8B03D15dd1B86a3113bbBEF8Eeb",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 10.6/15.6/47.8 bps at $10/$100/$1000; flags: owner_EOA;mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0x1Ba42e5193dfA8B03D15dd1B86a3113bbBEF8Eeb"
+        ]
+      }
+    },
+    {
+      "symbol": "FIL",
+      "ticker": "FIL",
+      "name": "Binance-Peg Filecoin",
+      "address": "0x0D8Ce2A99Bb6e3B7Db580eD848240e4a0F9aE153",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 13.6/27.9/171.5 bps at $10/$100/$1000; flags: upgradeable_proxy. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0x0D8Ce2A99Bb6e3B7Db580eD848240e4a0F9aE153"
+        ]
+      }
+    },
+    {
+      "symbol": "LTC",
+      "ticker": "LTC",
+      "name": "Binance-Peg Litecoin",
+      "address": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 12.8/31.5/96.7 bps at $10/$100/$1000; flags: owner_EOA;mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94"
+        ]
+      }
+    },
+    {
+      "symbol": "TRX",
+      "ticker": "TRX",
+      "name": "TRON (BSC)",
+      "address": "0xCE7de646e7208a4Ef112cb6ed5038FA6cC6b12e3",
+      "decimals": 6,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 32.2/33.6/48.4 bps at $10/$100/$1000; flags: mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0xCE7de646e7208a4Ef112cb6ed5038FA6cC6b12e3"
+        ]
+      }
+    },
+    {
+      "symbol": "ADA",
+      "ticker": "ADA",
+      "name": "Binance-Peg Cardano",
+      "address": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 40.2/43.6/64.0 bps at $10/$100/$1000; flags: owner_EOA;mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47"
+        ]
+      }
+    },
+    {
+      "symbol": "LINK",
+      "ticker": "LINK",
+      "name": "Chainlink",
+      "address": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 37.0/45.7/57.3 bps at $10/$100/$1000; flags: owner_EOA;mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD"
+        ]
+      }
+    },
+    {
+      "symbol": "XRP",
+      "ticker": "XRP",
+      "name": "Binance-Peg XRP",
+      "address": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 49.9/50.4/55.3 bps at $10/$100/$1000; flags: owner_EOA;mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE"
+        ]
+      }
+    },
+    {
+      "symbol": "NEAR",
+      "ticker": "NEAR",
+      "name": "Binance-Peg NEAR Protocol",
+      "address": "0x1Fa4a73a3F0133f0025378af00236f3aBDEE5D63",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 48.7/52.9/78.5 bps at $10/$100/$1000; flags: upgradeable_proxy. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0x1Fa4a73a3F0133f0025378af00236f3aBDEE5D63"
+        ]
+      }
+    },
+    {
+      "symbol": "AVAX",
+      "ticker": "AVAX",
+      "name": "Binance-Peg Avalanche",
+      "address": "0x1CE0c2827e2eF14D5C4f29a091d735A204794041",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 42.0/53.0/113.7 bps at $10/$100/$1000; flags: upgradeable_proxy. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0x1CE0c2827e2eF14D5C4f29a091d735A204794041"
+        ]
+      }
+    },
+    {
+      "symbol": "DOT",
+      "ticker": "DOT",
+      "name": "Binance-Peg Polkadot",
+      "address": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 52.4/56.7/98.9 bps at $10/$100/$1000; flags: owner_EOA;mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          2500,
+          "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402"
+        ]
+      }
+    },
+    {
+      "symbol": "BCH",
+      "ticker": "BCH",
+      "name": "Binance-Peg Bitcoin Cash",
+      "address": "0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 53.4/66.4/199.0 bps at $10/$100/$1000; flags: owner_EOA;mint_fn. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          2500,
+          "0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf"
+        ]
+      }
+    },
+    {
+      "symbol": "UNI",
+      "ticker": "UNI",
+      "name": "Uniswap",
+      "address": "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1",
+      "decimals": 18,
+      "category": "crypto",
+      "featured": false,
+      "custody": "binance_peg",
+      "listed": false,
+      "_listing_gate": "Screen 2026-10-19: RT 18.6/68.3/193.3 bps at $10/$100/$1000; flags: upgradeable_proxy. Verify the address against the issuer before listing; flip listed=true only then.",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          2500,
+          "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1"
+        ]
+      }
+    }
+  ]
+}

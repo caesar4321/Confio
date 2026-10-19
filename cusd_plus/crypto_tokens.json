@@ -1,5 +1,5 @@
 {
-  "_comment": "Confío crypto & metals catalog (BSC, PancakeSwap). Source of truth for the relay policy, quotes, holdings and the app mirror. Routes are the BUY direction from USDT; sells use the exact reverse. Every entry must pass the screening (docs/research/bsc-token-screen-2026-10/) and have its address verified against the issuer before listing. Quote/route checks 2026-10-19: BTCB, ETH, WBNB on USDT V3 0.01%; XAUt on USDT V3 0.05%.",
+  "_comment": "Confío crypto & metals catalog (BSC, PancakeSwap). Source of truth for the relay policy, quotes, holdings and the app mirror. Routes are the BUY direction from USDT; sells use the exact reverse. Every entry must pass the screening (docs/research/bsc-token-screen-2026-10/) and have its address verified against the issuer before listing. Screened 2026-10-19 (docs/research/bsc-token-screen-2026-10/): 540 candidates -> 23 pass; 5 held unlisted pending review. Featured = the Invertir cards (BTC, ETH, BNB; XAUt for gold).",
   "tokens": [
     {
       "symbol": "BTCB",
@@ -10,7 +10,14 @@
       "category": "crypto",
       "featured": true,
       "custody": "binance_peg",
-      "route": {"kind": "v3", "path": ["0x55d398326f99059fF775485246999027B3197955", 100, "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c"]}
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c"
+        ]
+      }
     },
     {
       "symbol": "ETH",
@@ -21,7 +28,14 @@
       "category": "crypto",
       "featured": true,
       "custody": "binance_peg",
-      "route": {"kind": "v3", "path": ["0x55d398326f99059fF775485246999027B3197955", 100, "0x2170Ed0880ac9A755fd29B2688956BD959F933F8"]}
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0x2170Ed0880ac9A755fd29B2688956BD959F933F8"
+        ]
+      }
     },
     {
       "symbol": "WBNB",
@@ -32,7 +46,14 @@
       "category": "crypto",
       "featured": true,
       "custody": "wrapped_native",
-      "route": {"kind": "v3", "path": ["0x55d398326f99059fF775485246999027B3197955", 100, "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"]}
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+        ]
+      }
     },
     {
       "symbol": "XAUT",
@@ -43,9 +64,385 @@
       "category": "metal",
       "featured": true,
       "custody": "tether_gold",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0x21cAef8A43163Eea865baeE23b9C2E327696A3bf"
+        ]
+      },
+      "_verified": "2026-10-19: address equals tether.to supported-protocols BNB Smart Chain XAU₮ contract (docs/research/bsc-token-screen-2026-10/README.md)."
+    },
+    {
+      "symbol": "CAKE",
+      "ticker": "CAKE",
+      "name": "PancakeSwap",
+      "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "native",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "SOL",
+      "ticker": "SOL",
+      "name": "Solana",
+      "address": "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "ASTER",
+      "ticker": "ASTER",
+      "name": "Aster",
+      "address": "0x000Ae314E2A2172a039B26378814C252734f556A",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "native",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0x000Ae314E2A2172a039B26378814C252734f556A"
+        ]
+      },
+      "featured": false,
       "listed": false,
-      "_listing_gate": "Address verified on-chain (name 'Tether Gold', proxy, ~13.7k supply, deep USDT 0.05% pool) but NOT yet against tether.to's supported-protocols page. Flip listed=true only after that check.",
-      "route": {"kind": "v3", "path": ["0x55d398326f99059fF775485246999027B3197955", 500, "0x21cAef8A43163Eea865baeE23b9C2E327696A3bf"]}
+      "_listing_gate": "Young token (CoinGecko rank 52, launched 2025): review the project before listing."
+    },
+    {
+      "symbol": "AAVE",
+      "ticker": "AAVE",
+      "name": "Aave",
+      "address": "0xfb6115445Bff7b52FeB98650C87f44907E58f802",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0xfb6115445Bff7b52FeB98650C87f44907E58f802"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "STABLE",
+      "ticker": "STABLE",
+      "name": "Stable",
+      "address": "0x011EBe7d75E2C9D1E0bD0be0bEf5C36f0A90075F",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "native",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0x011EBe7d75E2C9D1E0bD0be0bEf5C36f0A90075F"
+        ]
+      },
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Token name contains zero-width characters and the project is young: review before listing."
+    },
+    {
+      "symbol": "FF",
+      "ticker": "FF",
+      "name": "Falcon Finance",
+      "address": "0xAC23B90A79504865D52B49B327328411a23d4dB2",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "native",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xAC23B90A79504865D52B49B327328411a23d4dB2"
+        ]
+      },
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Young/obscure project: review before listing."
+    },
+    {
+      "symbol": "AKE",
+      "ticker": "AKE",
+      "name": "Akedo",
+      "address": "0x2c3a8Ee94dDD97244a93Bc48298f97d2C412F7Db",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "native",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          100,
+          "0x2c3a8Ee94dDD97244a93Bc48298f97d2C412F7Db"
+        ]
+      },
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Young/obscure project: review before listing."
+    },
+    {
+      "symbol": "ZEC",
+      "ticker": "ZEC",
+      "name": "Zcash",
+      "address": "0x1Ba42e5193dfA8B03D15dd1B86a3113bbBEF8Eeb",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0x1Ba42e5193dfA8B03D15dd1B86a3113bbBEF8Eeb"
+        ]
+      },
+      "featured": false,
+      "listed": false,
+      "_listing_gate": "Privacy coin: delisting/regulatory risk; product decision needed before listing."
+    },
+    {
+      "symbol": "FIL",
+      "ticker": "FIL",
+      "name": "Filecoin",
+      "address": "0x0D8Ce2A99Bb6e3B7Db580eD848240e4a0F9aE153",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0x0D8Ce2A99Bb6e3B7Db580eD848240e4a0F9aE153"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "LTC",
+      "ticker": "LTC",
+      "name": "Litecoin",
+      "address": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          500,
+          "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "TRX",
+      "ticker": "TRX",
+      "name": "TRON",
+      "address": "0xCE7de646e7208a4Ef112cb6ed5038FA6cC6b12e3",
+      "decimals": 6,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0xCE7de646e7208a4Ef112cb6ed5038FA6cC6b12e3"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "ADA",
+      "ticker": "ADA",
+      "name": "Cardano",
+      "address": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "LINK",
+      "ticker": "LINK",
+      "name": "Chainlink",
+      "address": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "XRP",
+      "ticker": "XRP",
+      "name": "XRP",
+      "address": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "NEAR",
+      "ticker": "NEAR",
+      "name": "NEAR Protocol",
+      "address": "0x1Fa4a73a3F0133f0025378af00236f3aBDEE5D63",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0x1Fa4a73a3F0133f0025378af00236f3aBDEE5D63"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "AVAX",
+      "ticker": "AVAX",
+      "name": "Avalanche",
+      "address": "0x1CE0c2827e2eF14D5C4f29a091d735A204794041",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          2500,
+          "0x1CE0c2827e2eF14D5C4f29a091d735A204794041"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "DOT",
+      "ticker": "DOT",
+      "name": "Polkadot",
+      "address": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          2500,
+          "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "BCH",
+      "ticker": "BCH",
+      "name": "Bitcoin Cash",
+      "address": "0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          500,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          2500,
+          "0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf"
+        ]
+      },
+      "featured": false
+    },
+    {
+      "symbol": "UNI",
+      "ticker": "UNI",
+      "name": "Uniswap",
+      "address": "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1",
+      "decimals": 18,
+      "category": "crypto",
+      "custody": "binance_peg",
+      "route": {
+        "kind": "v3",
+        "path": [
+          "0x55d398326f99059fF775485246999027B3197955",
+          100,
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+          2500,
+          "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1"
+        ]
+      },
+      "featured": false
     }
   ]
 }

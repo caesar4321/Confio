@@ -138,6 +138,37 @@ contract ConfioSwapRouterForkTest is Test {
         _roundTrip(1, XAUT, 500, 10e18);
     }
 
+    address constant WBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
+    address constant SOL = 0x570A5D26f7765Ecb712C0924E4De545B89fD43dF;
+    address constant ADA = 0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47;
+
+    /// Catalog route shapes beyond a single 0.01%/0.05% hop: a two-hop V3
+    /// path through WBNB (SOL) and a 0.25% pool (ADA).
+    function _roundTripPath(uint8 dollar, address token, bytes memory buyPath, bytes memory sellPath) private {
+        vm.startPrank(user, KMS);
+        IERC20(token).approve(address(router), type(uint256).max);
+        uint256 got = router.buy(dollar, 10e18, 1, abi.encode(uint8(0), buyPath), token, 1, 90);
+        assertGt(got, 0, "no token out");
+        router.sell(dollar, token, got, abi.encode(uint8(0), sellPath), 1, 1, 90);
+        vm.stopPrank();
+        assertEq(IERC20(token).balanceOf(address(router)), 0, "router token");
+        assertEq(IERC20(USDT).balanceOf(address(router)), 0, "router usdt");
+        assertEq(IERC20(WBNB).balanceOf(address(router)), 0, "router hop token");
+    }
+
+    function test_fork_multiHopSol_bothDollars() public {
+        if (!_forked()) return;
+        bytes memory buyPath = abi.encodePacked(USDT, uint24(100), WBNB, uint24(500), SOL);
+        bytes memory sellPath = abi.encodePacked(SOL, uint24(500), WBNB, uint24(100), USDT);
+        _roundTripPath(0, SOL, buyPath, sellPath);
+        _roundTripPath(1, SOL, buyPath, sellPath);
+    }
+
+    function test_fork_quarterPercentPoolAda() public {
+        if (!_forked()) return;
+        _roundTripPath(1, ADA, abi.encodePacked(USDT, uint24(2500), ADA), abi.encodePacked(ADA, uint24(2500), USDT));
+    }
+
     function test_fork_unsponsoredOriginRejected() public {
         if (!_forked()) return;
         vm.prank(user, user);

@@ -45,12 +45,17 @@ def _approve(spender):
 
 
 class CatalogTests(SimpleTestCase):
-    def test_featured_assets_listed_and_xaut_gated(self):
-        symbols = {t.symbol for t in crypto_catalog.tokens()}
-        self.assertTrue({'BTCB', 'ETH', 'WBNB'} <= symbols)
-        self.assertNotIn('XAUT', symbols, 'XAUt stays unlisted until verified against tether.to')
-        self.assertIsNotNone(XAUT)
+    def test_featured_and_held_entries(self):
+        listed = {t.symbol for t in crypto_catalog.tokens()}
+        featured = {t.symbol for t in crypto_catalog.tokens() if t.featured}
+        self.assertEqual(featured, {'BTCB', 'ETH', 'WBNB', 'XAUT'})
+        self.assertIn('SOL', listed)
+        # Held for review (screen 2026-10-19): sellable, never buyable.
+        for symbol in ('ASTER', 'STABLE', 'FF', 'AKE', 'ZEC'):
+            self.assertNotIn(symbol, listed)
+            self.assertIsNotNone(crypto_catalog.by_symbol(symbol, include_unlisted=True))
         self.assertEqual(crypto_catalog.by_symbol('WBNB').ticker, 'BNB')
+        self.assertEqual(XAUT.category, 'metal')
 
     def test_route_bytes_match_router_encoding(self):
         packed = bytes.fromhex(USDT[2:]) + (100).to_bytes(3, 'big') + bytes.fromhex(BTCB.address[2:])
@@ -108,10 +113,11 @@ class CryptoPolicyTests(SimpleTestCase):
             self._decode(_buy_data(route=bad, min_usdt=99 * WAD, min_token=99 * 10 ** 13))
 
     def test_unlisted_token_cannot_be_bought_but_can_be_sold(self):
+        held = crypto_catalog.by_symbol('ZEC', include_unlisted=True)
         with self.assertRaisesMessage(CryptoPolicyError, 'token_not_listed'):
-            self._decode(_buy_data(token=XAUT.address, route=XAUT.route_bytes('buy')))
-        action = self._decode(_sell_data(token=XAUT.address, route=XAUT.route_bytes('sell'),
-                                         amount=2412, min_usdt=99 * WAD, min_out=98 * WAD))
+            self._decode(_buy_data(token=held.address, route=held.route_bytes('buy')))
+        action = self._decode(_sell_data(token=held.address, route=held.route_bytes('sell'),
+                                         amount=10 ** 16, min_usdt=99 * WAD, min_out=98 * WAD))
         self.assertEqual(action['kind'], 'crypto_sell')
 
     def test_unknown_token_refused(self):
