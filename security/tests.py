@@ -850,12 +850,12 @@ class DiditIntegrationTests(TestCase):
     def test_decline_shows_the_reviewers_latest_note(self, mock_request):
         payload = self._declined_payload('sess_reviewed', id_warnings=[('DOCUMENT_EXPIRED', 'error')])
         payload['reviews'] = [
-            {'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': 'Nota vieja',
+            {'user': 'reviewer@example.com', 'new_status': 'Declined', 'comment': 'Nota vieja',
              'created_at': '2026-10-14T10:00:00Z'},
-            {'user': 'a@confio.lat', 'new_status': 'Declined',
+            {'user': 'reviewer@example.com', 'new_status': 'Declined',
              'comment': '  Hola, necesitamos que tu selfie sea más clara.  ',
              'created_at': '2026-10-15T10:00:00Z'},
-            {'user': 'a@confio.lat', 'new_status': 'In Review', 'comment': 'Interno',
+            {'user': 'reviewer@example.com', 'new_status': 'In Review', 'comment': 'Interno',
              'created_at': '2026-10-16T10:00:00Z'},
         ]
         mock_request.return_value = self._mock_response(payload)
@@ -870,9 +870,9 @@ class DiditIntegrationTests(TestCase):
     def test_decline_without_a_reviewer_note_keeps_the_warning_hint(self, mock_request):
         payload = self._declined_payload('sess_silent', id_warnings=[('DOCUMENT_EXPIRED', 'error')])
         payload['reviews'] = [
-            {'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': 'Nota vieja',
+            {'user': 'reviewer@example.com', 'new_status': 'Declined', 'comment': 'Nota vieja',
              'created_at': '2026-10-14T10:00:00Z'},
-            {'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': None,
+            {'user': 'reviewer@example.com', 'new_status': 'Declined', 'comment': None,
              'created_at': '2026-10-15T10:00:00Z'},
         ]
         mock_request.return_value = self._mock_response(payload)
@@ -885,7 +885,7 @@ class DiditIntegrationTests(TestCase):
     def test_an_api_written_decline_note_stays_internal(self, mock_request):
         payload = self._declined_payload('sess_api_note')
         payload['reviews'] = [
-            {'user': 'susy@confio.lat', 'new_status': 'Declined', 'comment': 'Usa tu cédula vigente.',
+            {'user': 'reviewer@example.com', 'new_status': 'Declined', 'comment': 'Usa tu cédula vigente.',
              'created_at': '2026-10-14T10:00:00Z'},
             {'user': 'API Client', 'new_status': 'Declined',
              'comment': 'Cuenta suspendida de forma permanente: vinculada al caso X.',
@@ -902,14 +902,14 @@ class DiditIntegrationTests(TestCase):
     @patch('security.didit.requests.request')
     def test_a_later_silent_decline_clears_the_earlier_note(self, mock_request):
         first = self._declined_payload('sess_redeclined')
-        first['reviews'] = [{'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': 'Usa tu cédula vigente.',
+        first['reviews'] = [{'user': 'reviewer@example.com', 'new_status': 'Declined', 'comment': 'Usa tu cédula vigente.',
                              'created_at': '2026-10-14T10:00:00Z'}]
         mock_request.return_value = self._mock_response(first)
         verification, _ = sync_didit_session(session_id='sess_redeclined', expected_user=self.user)
         self.assertEqual(verification.rejected_reason, 'Usa tu cédula vigente.')
 
         second = self._declined_payload('sess_redeclined')
-        second['reviews'] = first['reviews'] + [{'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': None,
+        second['reviews'] = first['reviews'] + [{'user': 'reviewer@example.com', 'new_status': 'Declined', 'comment': None,
                                                  'created_at': '2026-10-15T10:00:00Z'}]
         mock_request.return_value = self._mock_response(second)
         verification, _ = sync_didit_session(session_id='sess_redeclined', expected_user=self.user)
