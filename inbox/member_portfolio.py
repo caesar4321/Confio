@@ -251,7 +251,7 @@ def crypto_part(wallet: str, now) -> _CryptoPart:
     swapped in Confío (nothing to show, and no RPC per profile view)."""
     from blockchain.models import CryptoHoldings
     from cusd_plus.crypto_catalog import by_symbol
-    from cusd_plus.crypto_holdings import holdings_units
+    from cusd_plus.crypto_holdings import holdings_snapshot
     from cusd_plus.crypto_month import _live_prices, confirmed_trades, display_name
     from cusd_plus.crypto_prices import market_rows
 
@@ -263,7 +263,10 @@ def crypto_part(wallet: str, now) -> _CryptoPart:
     if trades == [] and not CryptoHoldings.objects.filter(bsc_address=wallet).exists():
         return _CryptoPart(Decimal('0'), Decimal('0'), [], [], [], [], [])
     try:
-        raw = holdings_units(wallet)
+        # Fresh only, like stocks: a stale row could still list a coin sold
+        # or sent out since, beside its own closed position.
+        snapshot = holdings_snapshot(wallet, allow_last_known=False)
+        raw = snapshot[0] if snapshot is not None else None
     except Exception:  # noqa: BLE001
         logger.warning('portfolio: crypto holdings unreadable', exc_info=True)
         raw = None

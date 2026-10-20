@@ -155,7 +155,8 @@ class CryptoPortfolioTests(CommunityTestBase):
                 patch.object(member_portfolio, 'dollars_usd', return_value=Decimal('50')), \
                 patch.object(member_portfolio, 'presale_totals', return_value=(Decimal('0'), Decimal('0'))), \
                 patch('cusd_plus.crypto_month.confirmed_trades', return_value=crypto_trades), \
-                patch('cusd_plus.crypto_holdings.holdings_units', return_value=crypto_held), \
+                patch('cusd_plus.crypto_holdings.holdings_snapshot',
+                      return_value=None if crypto_held is None else (crypto_held, None)) as self.snap, \
                 patch('cusd_plus.crypto_month._live_prices', return_value=prices), \
                 patch('cusd_plus.crypto_prices.market_rows', return_value=rows):
             return member_portfolio.build_portfolio(make_user())
@@ -181,6 +182,13 @@ class CryptoPortfolioTests(CommunityTestBase):
         self.assertIsNone(p.total_usd)
         self.assertIsNone(p.open_positions[0].value_usd)
 
+    def test_only_a_fresh_holdings_read_is_trusted(self):
+        p = self.build([trade('crypto_buy', '0.001', '70', symbol='BTCB')], None)
+        self.assertEqual(self.snap.call_args.kwargs, {'allow_last_known': False})
+        self.assertIsNone(p.crypto_usd)
+        self.assertIsNone(p.total_usd)
+        self.assertIsNone(p.open_positions)
+
     def test_an_unreadable_swap_never_poisons_a_stock(self):
         stocks = [trade('stock_buy', '1', '100'), trade('stock_sell', '1', '130', hours=3)]
         p = self.build([trade('crypto_buy', '0', None, symbol='?9')], {}, stock_trades=stocks)
@@ -188,7 +196,7 @@ class CryptoPortfolioTests(CommunityTestBase):
         self.assertEqual((nvda.ticker, nvda.pnl_usd), ('NVDA', Decimal('30')))
 
     def test_a_member_who_never_swapped_costs_no_scan(self):
-        with patch('cusd_plus.crypto_holdings.holdings_units') as scan:
+        with patch('cusd_plus.crypto_holdings.holdings_snapshot') as scan:
             part = member_portfolio.crypto_part('0x' + '1' * 40, NOW)
         scan.assert_not_called()
         self.assertEqual((part.total, part.open_positions), (Decimal('0'), []))
