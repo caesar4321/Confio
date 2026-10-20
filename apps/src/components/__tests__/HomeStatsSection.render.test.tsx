@@ -169,26 +169,26 @@ describe('HomeStatsSection layout', () => {
     mockStockTile = {assetCount: 458, investedUsd: null};
   });
 
-  it('becomes Inversiones (stocks, gold and bitcoin) once the server has that volume', () => {
+  it('becomes Invertido (stocks, gold and bitcoin) once the server has that volume', () => {
     mockStockTile = {assetCount: 458, investedUsd: null, tradedUsd: 3424.6};
     mockInvestTraded = 3500.4;
     mockNavigate.mockClear();
     const root = render().root;
     const label = tileLabels(root)[3];
-    expect(label).toContain('Inversiones: 3.500');
+    expect(label).toContain('Invertido: 3.500');
     expect(label).toContain('Acciones, oro y bitcoin');
-    act(() => root.find((node: any) => node.props.accessibilityLabel?.startsWith?.('Inversiones:') && node.props.onPress).props.onPress());
+    act(() => root.find((node: any) => node.props.accessibilityLabel?.startsWith?.('Invertido:') && node.props.onPress).props.onPress());
     expect(mockNavigate).toHaveBeenCalledWith('StocksActivity');
     mockInvestTraded = null;
     mockStockTile = {assetCount: 458, investedUsd: null};
   });
 
-  it('shows Inversiones to a crypto-only member, and nothing stock-only', () => {
+  it('shows Invertido to a crypto-only member, and nothing stock-only', () => {
     mockStocksEnabled = false;
     mockCryptoEnabled = true;
     mockInvestTraded = 120;
     expect(tileLabels(render().root).map(l => l.split(':')[0])).toEqual(
-      ['Usuarios', 'Ahorros', 'Movido', 'Inversiones', 'Preventa']);
+      ['Usuarios', 'Ahorros', 'Movido', 'Invertido', 'Preventa']);
     mockInvestTraded = null;
     expect(tileLabels(render().root).map(l => l.split(':')[0])).toEqual(
       ['Usuarios', 'Ahorros', 'Movido', 'Preventa']);

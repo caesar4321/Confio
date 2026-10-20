@@ -246,7 +246,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       // older numbers stay as fallbacks for a server without it. Like
       // Movido opens Dinero en movimiento, it opens its breakdown (Acciones
       // en movimiento); buying and the Ondo explainer are one tap further.
-      // Inversiones (2026-10-19): stocks + Bitcoin & gold volume, opening
+      // Invertido (2026-10-19): stocks + Bitcoin & gold volume, opening
       // Inversiones en movimiento. Without that number (older server), the
       // stock-only Acciones fallbacks below, for stock-eligible users only.
       const stocks: Tile | null = investEnabled && investTradedUsd != null && investTradedUsd > 0
@@ -255,7 +255,9 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
           icon: 'trending-up',
           value: fmt(investTradedUsd),
           unit: 'USD',
-          label: 'Inversiones',
+          // One short word like its neighbours (Movido); the detail is for
+          // screen readers and the breakdown, never a visible subline.
+          label: 'Invertido',
           descriptor: 'Acciones, oro y bitcoin',
           onPress: () => navigation.navigate('StocksActivity'),
         }
