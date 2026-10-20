@@ -12,6 +12,9 @@ use, never a money path):
 - dollars: Confío Dollar (cUSD on BSC) + Confío Dollar+ (vault shares x
   share price) + landed USDT not yet minted.
 - stocks: units from the stored scan x Ondo's live price.
+- Bitcoin & gold (2026-10-19): units from the crypto holdings scan x the
+  latest PancakeSwap snapshot; their own ledger (CryptoTrade), walked apart
+  from stocks so an unreadable swap can't poison a stock's P&L.
 - $CONFIO presale: tokens bought in the presale (completed purchases).
 - positions: cost basis by average cost over the member's own Confío
   trades, so P&L, invested and average entry are exact for anything bought
@@ -75,6 +78,8 @@ class Portfolio:
     dollars_usd: Decimal | None
     stocks_usd: Decimal | None
     total_usd: Decimal | None
+    # Investments' 24h change (stocks, and Bitcoin & gold when held): the
+    # "hoy" beside the total. The name predates crypto.
     stocks_change_24h_usd: Decimal | None
     presale_confio: Decimal | None
     presale_invested_usd: Decimal | None
@@ -83,6 +88,7 @@ class Portfolio:
     member_since: str | None
     open_positions: list | None = field(default_factory=list)
     closed_positions: list | None = field(default_factory=list)
+    crypto_usd: Decimal | None = Decimal('0')
 
 
 def personal_wallet(user) -> str | None:
@@ -187,7 +193,7 @@ def walk_trades(trades, now):
         book = books.setdefault(t.symbol, _Book(explained=not poisoned))
         if t.usd is None:
             book.explained = False
-        if t.kind == 'stock_buy':
+        if t.kind.endswith('_buy'):
             if book.units <= 0:
                 book.opened_at = t.when
                 book.bought = Decimal('0')
@@ -227,6 +233,89 @@ def open_hold_seconds(books, held, now) -> list:
                 and abs(book.units - units) <= max(book.units, units) * UNITS_TOLERANCE):
             out.append((now - book.opened_at).total_seconds())
     return out
+
+
+@dataclass
+class _CryptoPart:
+    total: Decimal | None
+    change_24h: Decimal | None
+    open_positions: list | None
+    closed: list            # walk_trades episodes
+    holds: list
+    open_holds: list
+    trades: list | None
+
+
+def crypto_part(wallet: str, now) -> _CryptoPart:
+    """Bitcoin & gold for one wallet. Never scans a wallet that has never
+    swapped in Confío (nothing to show, and no RPC per profile view)."""
+    from blockchain.models import CryptoHoldings
+    from cusd_plus.crypto_catalog import by_symbol
+    from cusd_plus.crypto_holdings import holdings_units
+    from cusd_plus.crypto_month import _live_prices, confirmed_trades, display_name
+    from cusd_plus.crypto_prices import market_rows
+
+    try:
+        trades = confirmed_trades(wallet)
+    except Exception:  # noqa: BLE001
+        logger.warning('portfolio: crypto ledger unreadable', exc_info=True)
+        trades = None
+    if trades == [] and not CryptoHoldings.objects.filter(bsc_address=wallet).exists():
+        return _CryptoPart(Decimal('0'), Decimal('0'), [], [], [], [], [])
+    try:
+        raw = holdings_units(wallet)
+    except Exception:  # noqa: BLE001
+        logger.warning('portfolio: crypto holdings unreadable', exc_info=True)
+        raw = None
+    try:
+        prices = _live_prices(now)
+        day = {r['token'].symbol: r['day_change_pct'] for r in market_rows()}
+    except Exception:  # noqa: BLE001
+        logger.warning('portfolio: crypto prices unavailable', exc_info=True)
+        prices, day = None, {}
+    books, closed, holds = walk_trades(trades or [], now)
+
+    held_units = {}
+    total: Decimal | None = Decimal('0') if raw is not None and prices is not None else None
+    change: Decimal | None = total
+    positions = []
+    for symbol, base in sorted((raw or {}).items()):
+        token = by_symbol(symbol, include_unlisted=True)
+        if token is None or not base:
+            if base:
+                total = change = None  # off-catalog: unknown, never dropped
+            continue
+        units = Decimal(int(base)) / (Decimal(10) ** token.decimals)
+        held_units[symbol] = units
+        price = (prices or {}).get(symbol)
+        value = units * price if price is not None else None
+        pct = day.get(symbol)
+        if value is None:
+            total = change = None
+        else:
+            if total is not None:
+                total += value
+            if change is not None:
+                change = None if pct is None or pct <= -100 else change + value - value / (1 + Decimal(str(pct)) / 100)
+        position = OpenPosition(symbol=symbol, ticker=token.ticker, name=display_name(token), units=units,
+                                value_usd=value,
+                                day_change_pct=Decimal(str(pct)) if pct is not None else None)
+        book = books.get(symbol)
+        if (trades is not None and book is not None and book.explained and book.units > 0
+                and abs(book.units - units) <= max(book.units, units) * UNITS_TOLERANCE):
+            position.invested_usd = book.cost
+            position.avg_entry_usd = book.cost / book.units
+            if value is not None and book.cost > 0:
+                position.pnl_usd = value - book.cost
+                position.pnl_pct = (value - book.cost) / book.cost * 100
+        if value is None or value >= DUST_USD:
+            positions.append(position)
+    return _CryptoPart(
+        total=total, change_24h=change, open_positions=positions if raw is not None else None,
+        closed=closed, holds=holds,
+        open_holds=open_hold_seconds(books, held_units, now) if raw is not None else [],
+        trades=trades,
+    )
 
 
 def build_portfolio(user) -> Portfolio | None:
@@ -298,11 +387,20 @@ def build_portfolio(user) -> Portfolio | None:
                 position.pnl_pct = (value - book.cost) / book.cost * 100
         if value is None or value >= DUST_USD:
             open_positions.append(position)
+    crypto = crypto_part(wallet, now)
+    if crypto.open_positions is not None:
+        open_positions.extend(crypto.open_positions)
     open_positions.sort(key=lambda p: p.value_usd or Decimal('0'), reverse=True)
 
+    from cusd_plus.crypto_catalog import by_symbol as crypto_token
+    from cusd_plus.crypto_month import display_name as crypto_name
+
     closed_positions = []
-    for symbol, bought, sold, pnl, when in reversed(closed):
+    for symbol, bought, sold, pnl, when in sorted(closed + crypto.closed, key=lambda e: e[4], reverse=True):
         info = (market or {}).get(symbol) or {}
+        token = crypto_token(symbol, include_unlisted=True)
+        if token is not None:
+            info = {'ticker': token.ticker, 'name': crypto_name(token)}
         closed_positions.append(ClosedPosition(
             symbol=symbol, ticker=info.get('ticker') or symbol.removesuffix('on'),
             name=info.get('name') or symbol.removesuffix('on'), invested_usd=bought, proceeds_usd=sold,
@@ -312,7 +410,11 @@ def build_portfolio(user) -> Portfolio | None:
 
     dollars = dollars_usd(wallet)
     presale_confio, presale_usd = presale_totals(user)
-    total = dollars + stocks_total if dollars is not None and stocks_total is not None else None
+    parts = (dollars, stocks_total, crypto.total)
+    total = sum(parts, Decimal('0')) if all(p is not None for p in parts) else None
+    if change_24h is not None:
+        change_24h = change_24h + crypto.change_24h if crypto.change_24h is not None else None
+    ledgers_known = trades is not None and crypto.trades is not None
     joined = getattr(user, 'date_joined', None)
     return Portfolio(
         dollars_usd=dollars,
@@ -321,14 +423,15 @@ def build_portfolio(user) -> Portfolio | None:
         stocks_change_24h_usd=change_24h,
         presale_confio=presale_confio,
         presale_invested_usd=presale_usd,
-        trade_count=len(trades) if trades is not None else None,
+        trade_count=len(trades) + len(crypto.trades) if ledgers_known else None,
         avg_hold_seconds=(
-            _coarse_hold(holds + open_hold_seconds(books, held, now))
-            if trades is not None and held is not None else None
+            _coarse_hold(holds + open_hold_seconds(books, held, now) + crypto.holds + crypto.open_holds)
+            if ledgers_known and held is not None and crypto.open_positions is not None else None
         ),
         member_since=joined.strftime('%Y-%m') if joined else None,
-        open_positions=open_positions if held is not None else None,
-        closed_positions=closed_positions[:50] if trades is not None else None,
+        open_positions=open_positions if held is not None and crypto.open_positions is not None else None,
+        closed_positions=closed_positions[:50] if ledgers_known else None,
+        crypto_usd=crypto.total,
     )
 
 

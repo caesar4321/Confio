@@ -1122,11 +1122,19 @@ class CommunityMemberPortfolioType(graphene.ObjectType):
     closed_positions = graphene.List(graphene.NonNull(PortfolioClosedPositionType))
 
 
-def build_member_portfolio(viewer, user_id):
+def _portfolio_target(viewer, user_id):
+    """The member whose asset profile this viewer may see, or None."""
     target = community.followable_member(user_id, viewer=viewer)
     if target is None or community.is_blocked_between(viewer.id, target.id):
         return None
     if not community.portfolio_visible_to(target, viewer):
+        return None
+    return target
+
+
+def build_member_portfolio(viewer, user_id):
+    target = _portfolio_target(viewer, user_id)
+    if target is None:
         return None
     portfolio = member_portfolio.build_portfolio(target)
     if portfolio is None:
@@ -1927,6 +1935,10 @@ class Query(graphene.ObjectType):
     )
     community_member_profile = graphene.Field(CommunityMemberProfileType, user_id=graphene.ID(required=True))
     community_member_portfolio = graphene.Field(CommunityMemberPortfolioType, user_id=graphene.ID(required=True))
+    # The member's Bitcoin & gold value (the profile's "Oro y Bitcoin" row).
+    # Its own field: added to the portfolio type, a new app would break that
+    # whole query against older servers. Same visibility rules.
+    community_member_crypto_usd = graphene.String(user_id=graphene.ID(required=True))
     community_member_posts = graphene.Field(
         DiscoverFeedPageType,
         required=True,
@@ -2098,6 +2110,16 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_community_member_portfolio(self, info, user_id):
         return build_member_portfolio(info.context.user, user_id)
+
+    @login_required
+    def resolve_community_member_crypto_usd(self, info, user_id):
+        from django.utils import timezone as dj_tz
+
+        target = _portfolio_target(info.context.user, user_id)
+        wallet = member_portfolio.personal_wallet(target) if target is not None else None
+        if not wallet:
+            return None
+        return _money(member_portfolio.crypto_part(wallet, dj_tz.now()).total)
 
     @login_required
     def resolve_community_member_posts(self, info, user_id, offset=0, limit=10):

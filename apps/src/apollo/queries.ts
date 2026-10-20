@@ -5033,6 +5033,14 @@ export const GET_COMMUNITY_MEMBER_POSTS = gql`
   }
 `;
 
+// The profile's "Oro y Bitcoin" value. Its own root field and query: an
+// older server rejects it alone, and the profile simply has no such row.
+export const GET_COMMUNITY_MEMBER_CRYPTO_USD = gql`
+  query GetCommunityMemberCryptoUsd($userId: ID!) {
+    communityMemberCryptoUsd(userId: $userId)
+  }
+`;
+
 // Asset profile: its own query (an older server rejects the unknown field).
 export const GET_COMMUNITY_MEMBER_PORTFOLIO = gql`
   query GetCommunityMemberPortfolio($userId: ID!) {

@@ -83,3 +83,14 @@ test('own hidden profile shows the switch and the hidden note', () => {
   act(() => toggle.props.onValueChange(false));
   expect(onToggle).toHaveBeenCalledWith(false);
 });
+
+test('Bitcoin & gold get their own row; never a $0 row, never on an older server', () => {
+  let tree!: renderer.ReactTestRenderer;
+  act(() => { tree = renderer.create(<CommunityPortfolioSection portfolio={{ ...base, cryptoUsd: '0.99' }} />); });
+  expect(textOf(tree)).toContain('Oro y Bitcoin');
+  expect(textOf(tree)).toContain('$0.99');
+  for (const cryptoUsd of ['0.00', null, undefined]) {
+    act(() => { tree.update(<CommunityPortfolioSection portfolio={{ ...base, cryptoUsd }} />); });
+    expect(textOf(tree)).not.toContain('Oro y Bitcoin');
+  }
+});

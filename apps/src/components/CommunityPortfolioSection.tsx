@@ -48,6 +48,8 @@ export type CommunityMemberPortfolio = {
   totalUsd?: string | null;
   dollarsUsd?: string | null;
   stocksUsd?: string | null;
+  /** Bitcoin & gold (its own query; absent on older servers). */
+  cryptoUsd?: string | null;
   stocksChange24hUsd?: string | null;
   presaleConfio?: string | null;
   presaleInvestedUsd?: string | null;
@@ -94,6 +96,8 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
   const dayChange = formatUsd(portfolio.stocksChange24hUsd, { signed: true });
   const dollars = formatUsd(portfolio.dollarsUsd);
   const stocks = formatUsd(portfolio.stocksUsd);
+  // A zero row would read as "holds some": shown only when something is held.
+  const crypto = portfolio.cryptoUsd && !isZeroAmount(portfolio.cryptoUsd) ? formatUsd(portfolio.cryptoUsd) : null;
   const showConfio = Boolean(portfolio.presaleConfio) && !isZeroAmount(portfolio.presaleConfio);
   const confioAmount = showConfio ? formatAmount(portfolio.presaleConfio) : null;
   const confioInvested = formatUsd(portfolio.presaleInvestedUsd);
@@ -162,13 +166,16 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
           </Text>
         ) : null}
 
-        {dollars || stocks || showConfio ? (
+        {dollars || stocks || crypto || showConfio ? (
           <View style={styles.breakdown}>
             {dollars ? (
               <BreakdownRow icon="dollar-sign" tint={colors.primarySoft} iconColor={colors.successText} label="Dólares" value={dollars} />
             ) : null}
             {stocks ? (
               <BreakdownRow icon="trending-up" tint={colors.infoLight} iconColor={colors.accent} label="Acciones de EE.UU." value={stocks} />
+            ) : null}
+            {crypto ? (
+              <BreakdownRow icon="hexagon" tint={colors.warning.background} iconColor={colors.warning.icon} label="Oro y Bitcoin" value={crypto} />
             ) : null}
             {showConfio && confioAmount ? (
               <BreakdownRow

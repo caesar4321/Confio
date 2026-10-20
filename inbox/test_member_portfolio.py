@@ -136,3 +136,59 @@ class PortfolioVisibilityTests(CommunityTestBase):
         fan = make_user(verified=False)
         CommunityFollow.objects.create(follower=fan, followed=member)
         self.assertIsNone(self.portfolio(member, fan))
+
+
+class CryptoPortfolioTests(CommunityTestBase):
+    """Bitcoin & gold join the investor profile: value, P&L, closed trades,
+    total, today's change and trade count; their ledger never poisons stocks."""
+
+    def build(self, crypto_trades, crypto_held, prices=None, day=None, stock_trades=None, stock_held=None):
+        from types import SimpleNamespace
+
+        prices = {'BTCB': Decimal('80000'), 'XAUT': Decimal('4000')} if prices is None else prices
+        day = day or {'BTCB': 10.0, 'XAUT': 0.0}
+        rows = [{'token': SimpleNamespace(symbol=s), 'day_change_pct': d} for s, d in day.items()]
+        with patch.object(member_portfolio, 'personal_wallet', return_value='0xabc'), \
+                patch('cusd_plus.stock_month.confirmed_trades', return_value=stock_trades or []), \
+                patch('cusd_plus.gm_holdings.complete_holdings', return_value=(stock_held or {}, {})), \
+                patch.object(member_portfolio, '_market', return_value=MARKET), \
+                patch.object(member_portfolio, 'dollars_usd', return_value=Decimal('50')), \
+                patch.object(member_portfolio, 'presale_totals', return_value=(Decimal('0'), Decimal('0'))), \
+                patch('cusd_plus.crypto_month.confirmed_trades', return_value=crypto_trades), \
+                patch('cusd_plus.crypto_holdings.holdings_units', return_value=crypto_held), \
+                patch('cusd_plus.crypto_month._live_prices', return_value=prices), \
+                patch('cusd_plus.crypto_prices.market_rows', return_value=rows):
+            return member_portfolio.build_portfolio(make_user())
+
+    def test_bitcoin_and_gold_count_everywhere(self):
+        crypto = [trade('crypto_buy', '0.001', '70', symbol='BTCB'),
+                  trade('crypto_buy', '0.01', '41', symbol='XAUT', hours=1),
+                  trade('crypto_sell', '0.01', '39', symbol='XAUT', hours=2)]
+        p = self.build(crypto, {'BTCB': 10 ** 15})  # 0.001 BTC (18 decimals) still held
+        [btc] = p.open_positions
+        self.assertEqual((btc.ticker, btc.name, btc.value_usd), ('BTC', 'Bitcoin', Decimal('80')))
+        self.assertEqual((btc.invested_usd, btc.pnl_usd), (Decimal('70'), Decimal('10')))
+        [gold] = p.closed_positions
+        self.assertEqual((gold.ticker, gold.name, gold.pnl_usd), ('XAUT', 'Oro', Decimal('-2')))
+        self.assertEqual(p.crypto_usd, Decimal('80'))
+        self.assertEqual(p.total_usd, Decimal('130'))  # 50 dollars + 0 stocks + 80 bitcoin
+        self.assertEqual(p.stocks_change_24h_usd.quantize(Decimal('0.01')), Decimal('7.27'))  # 80 - 80/1.1
+        self.assertEqual(p.trade_count, 3)
+
+    def test_unpriced_crypto_makes_the_total_unknown_not_lower(self):
+        p = self.build([trade('crypto_buy', '0.001', '70', symbol='BTCB')], {'BTCB': 10 ** 15}, prices={})
+        self.assertIsNone(p.crypto_usd)
+        self.assertIsNone(p.total_usd)
+        self.assertIsNone(p.open_positions[0].value_usd)
+
+    def test_an_unreadable_swap_never_poisons_a_stock(self):
+        stocks = [trade('stock_buy', '1', '100'), trade('stock_sell', '1', '130', hours=3)]
+        p = self.build([trade('crypto_buy', '0', None, symbol='?9')], {}, stock_trades=stocks)
+        [nvda] = p.closed_positions
+        self.assertEqual((nvda.ticker, nvda.pnl_usd), ('NVDA', Decimal('30')))
+
+    def test_a_member_who_never_swapped_costs_no_scan(self):
+        with patch('cusd_plus.crypto_holdings.holdings_units') as scan:
+            part = member_portfolio.crypto_part('0x' + '1' * 40, NOW)
+        scan.assert_not_called()
+        self.assertEqual((part.total, part.open_positions), (Decimal('0'), []))

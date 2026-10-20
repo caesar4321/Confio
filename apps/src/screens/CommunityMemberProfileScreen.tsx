@@ -24,6 +24,7 @@ import {
 import {
   GET_COMMUNITY_COMMENT_COUNTS,
   GET_COMMUNITY_MEMBER_PORTFOLIO,
+  GET_COMMUNITY_MEMBER_CRYPTO_USD,
   GET_COMMUNITY_MEMBER_POSTS,
   GET_COMMUNITY_MEMBER_PROFILE,
 } from '../apollo/queries';
@@ -134,6 +135,18 @@ export const CommunityMemberProfileScreen = () => {
       if (!mounted.current || portfolioGeneration.current !== requested || currentUserId.current !== forUser) return;
       const next = data?.communityMemberPortfolio as CommunityMemberPortfolio | null | undefined;
       setPortfolio(next && String(next.userId) === forUser ? next : null);
+      if (next && String(next.userId) === forUser) {
+        // Bitcoin & gold: a separate read, merged in when (and if) it lands.
+        client.query({
+          query: GET_COMMUNITY_MEMBER_CRYPTO_USD,
+          variables: { userId: forUser },
+          fetchPolicy: 'network-only',
+        }).then(({ data: cryptoData }) => {
+          if (!mounted.current || portfolioGeneration.current !== requested || currentUserId.current !== forUser) return;
+          const cryptoUsd = cryptoData?.communityMemberCryptoUsd ?? null;
+          setPortfolio((current) => (current && String(current.userId) === forUser ? { ...current, cryptoUsd } : current));
+        }).catch(() => {});
+      }
     } catch {
       if (mounted.current && portfolioGeneration.current === requested && currentUserId.current === forUser) {
         setPortfolio(null);
