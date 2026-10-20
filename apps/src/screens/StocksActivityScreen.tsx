@@ -117,7 +117,13 @@ export const StocksActivityScreen = () => {
     skip: !(unsupported || withheld),
   });
   const investMode = !(unsupported || withheld);
-  const { data, loading, error, refetch } = investMode ? invest : legacy;
+  const { data, loading, error } = investMode ? invest : legacy;
+  // Always re-ask for the combined view too: a null may have been a cold or
+  // failed snapshot, not the privacy floor, and it can recover.
+  const retry = () => {
+    invest.refetch().catch(() => {});
+    if (!investMode) legacy.refetch().catch(() => {});
+  };
   const stats = (investMode ? data?.investTradingStats : data?.gmTradingStats) ?? null;
 
   const whole = (n: number | null | undefined) => (n == null ? '—' : formatDecimal(n, { decimals: 0 }));
@@ -154,7 +160,7 @@ export const StocksActivityScreen = () => {
           title="No pudimos cargar estos datos"
           subtitle={error ? 'Revisa tu conexión e inténtalo de nuevo.' : 'Inténtalo de nuevo en un momento.'}
           actionLabel="Reintentar"
-          onAction={() => refetch()}
+          onAction={retry}
         />
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>

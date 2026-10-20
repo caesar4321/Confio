@@ -11,18 +11,19 @@ let mockInvestError = true; // default: an older server, the stock-only screen
 let mockStocksEnabled = true;
 let mockInvestErrorMessage = 'Cannot query field "investTradingStats" on type "Query".';
 let mockInvestStats: any;
-const mockInvestRefetch = jest.fn();
+const mockLegacyRefetch = jest.fn(() => Promise.resolve());
+const mockInvestRefetch = jest.fn(() => Promise.resolve());
 const mockNavigate = jest.fn();
 jest.mock('@apollo/client', () => ({
   gql: (strings: TemplateStringsArray) => strings.join(''),
   useQuery: (query: string, options: any) => {
-    if (options?.skip) return { data: undefined, loading: false, refetch: jest.fn() };
+    if (options?.skip) return { data: undefined, loading: false, refetch: jest.fn(() => Promise.resolve()) };
     if (query.includes('investTradingStats')) {
       return mockInvestError
         ? { data: undefined, error: new Error(mockInvestErrorMessage), loading: false, refetch: mockInvestRefetch }
         : { data: { investTradingStats: mockInvestStats === undefined ? mockStats : mockInvestStats }, loading: false, refetch: mockInvestRefetch };
     }
-    return { data: mockStats === undefined ? undefined : { gmTradingStats: mockStats }, loading: false, refetch: jest.fn() };
+    return { data: mockStats === undefined ? undefined : { gmTradingStats: mockStats }, loading: false, refetch: mockLegacyRefetch };
   },
 }));
 jest.mock('../../hooks/useSavingsPortfolio', () => ({
@@ -150,6 +151,18 @@ describe('StocksActivityScreen as Inversiones en movimiento', () => {
     mockStats = STATS;
     const tree = render();
     expect(tree.root.findByType('Header' as any).props.title).toBe('Acciones en movimiento');
+    mockInvestStats = undefined;
+  });
+
+  it('after a null combined result, Reintentar asks for both views', () => {
+    mockInvestStats = null;
+    mockStats = null; // stocks below their floor too: the error state
+    const tree = render();
+    mockInvestRefetch.mockClear();
+    mockLegacyRefetch.mockClear();
+    act(() => tree.root.find((n) => n.props.onAction).props.onAction());
+    expect(mockInvestRefetch).toHaveBeenCalled();
+    expect(mockLegacyRefetch).toHaveBeenCalled();
     mockInvestStats = undefined;
   });
 
