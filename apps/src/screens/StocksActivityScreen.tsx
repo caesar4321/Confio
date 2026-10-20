@@ -1,6 +1,8 @@
-// "Acciones en movimiento": the community's U.S. stock trading, the stock
-// twin of Dinero en movimiento (same hero, cards and bars). Opened from
-// Home's Acciones proof tile.
+// "Inversiones en movimiento": the community's trading in U.S. stocks,
+// Bitcoin and gold, the twin of Dinero en movimiento (same hero, cards and
+// bars). Opened from Home's Inversiones proof tile. Against a server
+// without investTradingStats it falls back to the stock-only
+// "Acciones en movimiento" (gmTradingStats).
 //
 // Public aggregates only (gmTradingStats, cached 10 min server-side): the
 // buy/sale split in dollars and counts, how many people trade, a typical
@@ -20,6 +22,7 @@ import { MainStackParamList } from '../types/navigation';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { EmptyState } from '../components/EmptyState';
 import { formatDecimal } from '../utils/numberLocale';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 
 export const GM_TRADING_STATS = gql`
   query GmTradingStats {
@@ -43,7 +46,31 @@ export const GM_TRADING_STATS = gql`
   }
 `;
 
+export const INVEST_TRADING_STATS = gql`
+  query InvestTradingStats {
+    investTradingStats {
+      totalUsd
+      buyUsd
+      sellUsd
+      buyCount
+      sellCount
+      traderCount
+      medianBuyUsd
+      since
+      topAssets {
+        symbol
+        ticker
+        name
+        tradeCount
+        traderCount
+        assetKind
+      }
+    }
+  }
+`;
+
 type TopAsset = {
+  assetKind?: string | null;
   symbol: string;
   ticker: string;
   name: string;
@@ -68,12 +95,24 @@ export const typicalPurchaseLabel = (medianUsd: number): string => {
 
 export const StocksActivityScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-  const { data, loading, error, refetch } = useQuery(GM_TRADING_STATS, {
+  const { stocks: stockPortfolio } = useSavingsPortfolio();
+  const stocksEnabled = Boolean(stockPortfolio?.enabled);
+  const invest = useQuery(INVEST_TRADING_STATS, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
     notifyOnNetworkStatusChange: true,
   });
-  const stats = data?.gmTradingStats ?? null;
+  // An older server rejects the whole query (unknown field): only then ask
+  // for the stock-only breakdown.
+  const legacy = useQuery(GM_TRADING_STATS, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    notifyOnNetworkStatusChange: true,
+    skip: !invest.error,
+  });
+  const investMode = !invest.error;
+  const { data, loading, error, refetch } = investMode ? invest : legacy;
+  const stats = (investMode ? data?.investTradingStats : data?.gmTradingStats) ?? null;
 
   const whole = (n: number | null | undefined) => (n == null ? '—' : formatDecimal(n, { decimals: 0 }));
   const since = stats?.since ? new Date(stats.since) : null;
@@ -93,7 +132,7 @@ export const StocksActivityScreen = () => {
     <View style={styles.container}>
       <Header
         navigation={navigation as any}
-        title="Acciones en movimiento"
+        title={investMode ? 'Inversiones en movimiento' : 'Acciones en movimiento'}
         backgroundColor={colors.heroField}
         isLight
         showBackButton
@@ -116,7 +155,9 @@ export const StocksActivityScreen = () => {
           <View style={styles.field}>
             <BrandFieldBackground id="stocksActivityField" ringCy="25%" ringR={80} ringWidth={20} />
             <View style={styles.fieldInner}>
-              <Text style={styles.fieldEyebrow}>OPERADO EN ACCIONES DE EE.UU.</Text>
+              <Text style={styles.fieldEyebrow}>
+                {investMode ? 'OPERADO EN ACCIONES, ORO Y BITCOIN' : 'OPERADO EN ACCIONES DE EE.UU.'}
+              </Text>
               <Text style={styles.fieldStat}>
                 {whole(stats.totalUsd)}
                 <Text style={styles.fieldUnit}> USD</Text>
@@ -166,7 +207,7 @@ export const StocksActivityScreen = () => {
                   La mitad de las compras fue de {typicalPurchaseLabel(stats.medianBuyUsd)} o menos
                 </Text>
                 <Text style={styles.factSub}>
-                  {whole(stats.traderCount)} personas ya invierten en acciones de EE.UU. desde Confío, empezando con poco.
+                  {whole(stats.traderCount)} personas ya invierten {investMode ? 'en acciones, oro y bitcoin' : 'en acciones de EE.UU.'} desde Confío, empezando con poco.
                 </Text>
               </View>
             </View>
@@ -178,7 +219,12 @@ export const StocksActivityScreen = () => {
               {top.map((asset, index) => (
                 <Pressable
                   key={asset.symbol}
-                  onPress={() => navigation.navigate('StockDetail' as any, { ticker: asset.ticker } as any)}
+                  // A stock opens only for someone who may see stocks: the
+                  // detail would answer "no disponible" to anyone else.
+                  disabled={asset.assetKind !== 'crypto' && !stocksEnabled}
+                  onPress={() => (asset.assetKind === 'crypto'
+                    ? navigation.navigate('CryptoDetail' as any, { symbol: asset.symbol } as any)
+                    : navigation.navigate('StockDetail' as any, { ticker: asset.ticker } as any))}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   accessibilityRole="button"
                   accessibilityLabel={`${index + 1}. ${asset.ticker}, ${asset.name}: ${asset.tradeCount} operaciones de ${asset.traderCount} personas`}
@@ -207,12 +253,14 @@ export const StocksActivityScreen = () => {
                 </Pressable>
               ))}
               <Text style={styles.footnote}>
-                Solo acciones operadas por al menos 3 personas, para proteger la privacidad.
+                {investMode
+                  ? 'Solo lo operado por al menos 3 personas, para proteger la privacidad.'
+                  : 'Solo acciones operadas por al menos 3 personas, para proteger la privacidad.'}
               </Text>
             </>
           )}
 
-          <View style={styles.ctaGroup}>
+          {stocksEnabled && <View style={styles.ctaGroup}>
             <Pressable
               onPress={() => navigation.navigate('StocksList' as any)}
               style={({ pressed }) => [styles.ctaPrimary, pressed && styles.rowPressed]}
@@ -228,12 +276,12 @@ export const StocksActivityScreen = () => {
             >
               <Text style={styles.ctaSecondaryText}>¿Qué es Ondo Stocks?</Text>
             </Pressable>
-          </View>
+          </View>}
 
           <View style={styles.card}>
             <Text style={styles.howTitle}>Cómo lo contamos</Text>
             <Text style={styles.howText}>
-              Sumamos cada compra y venta de acciones de EE.UU. completada en Confío, por el monto
+              Sumamos cada compra y venta {investMode ? 'de acciones de EE.UU., oro y bitcoin' : 'de acciones de EE.UU.'} completada en Confío, por el monto
               exacto que se cobró o se pagó. No incluye depósitos ni retiros (esos están en Dinero en
               movimiento). El total es acumulado desde el inicio y no muestra a nadie en particular.
             </Text>

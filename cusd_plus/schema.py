@@ -54,6 +54,29 @@ def _stock_fee_policy_ready():
     return bool(accepted_fee_caps())
 
 
+def _trading_stats_type(stats):
+    if stats is None:
+        return None
+    return GmTradingStatsType(
+        total_usd=stats.total_usd, buy_usd=stats.buy_usd, sell_usd=stats.sell_usd,
+        buy_count=stats.buy_count, sell_count=stats.sell_count, trader_count=stats.trader_count,
+        median_buy_usd=stats.median_buy_usd, since=stats.since,
+        top_assets=[GmTradingTopAssetType(
+            symbol=a.symbol, ticker=a.ticker,
+            name=_display_name(a.name) if getattr(a, 'kind', 'stock') == 'stock' else a.name,
+            trade_count=a.trade_count, trader_count=a.trader_count,
+            asset_kind=getattr(a, 'kind', 'stock')) for a in stats.top_assets],
+    )
+
+
+def _invest_surfaces_enabled(user, info) -> bool:
+    """Stocks (Ondo eligibility) or Bitcoin & gold (crypto policy)."""
+    from . import crypto_risk
+
+    meta = getattr(info.context, 'META', {}) or {}
+    return _stock_surfaces_enabled(user, meta) or crypto_risk.surfaces_enabled(user, meta)
+
+
 def _stock_surfaces_enabled(user, request_meta) -> bool:
     """Issuer eligibility plus the global discovery kill switch."""
     from django.conf import settings
@@ -443,6 +466,7 @@ class GmTradingTopAssetType(graphene.ObjectType):
     name = graphene.String(required=True)
     trade_count = graphene.Int(required=True)
     trader_count = graphene.Int(required=True)
+    asset_kind = graphene.String(description="'stock' | 'crypto': which detail screen the row opens")
 
 
 class GmTradingStatsType(graphene.ObjectType):
@@ -544,6 +568,16 @@ class Query(graphene.ObjectType):
         GmTradingStatsType,
         description="Community stock trading (settled volume, buys/sales, most traded) for eligible users",
     )
+    # Stocks + Bitcoin & gold (Home's Inversiones tile and its breakdown).
+    # New top-level fields so store builds' gmHomeTile/gmTradingStats keep
+    # their stock-only meaning; the app queries each alone.
+    invest_traded_usd = graphene.Float(
+        description="All-time settled volume of stocks, Bitcoin and gold traded in Confío; null when unreadable",
+    )
+    invest_trading_stats = graphene.Field(
+        GmTradingStatsType,
+        description="Community investment trading (stocks, Bitcoin, gold) for users who can see either",
+    )
     gm_soft_quote = graphene.Field(
         GmTradeQuoteType,
         symbol=graphene.String(required=True),
@@ -630,17 +664,23 @@ class Query(graphene.ObjectType):
             return None
         from . import gm_trading_stats
 
-        stats = gm_trading_stats.trading_stats()
-        if stats is None:
+        return _trading_stats_type(gm_trading_stats.trading_stats())
+
+    def resolve_invest_trading_stats(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated or not _invest_surfaces_enabled(user, info):
             return None
-        return GmTradingStatsType(
-            total_usd=stats.total_usd, buy_usd=stats.buy_usd, sell_usd=stats.sell_usd,
-            buy_count=stats.buy_count, sell_count=stats.sell_count, trader_count=stats.trader_count,
-            median_buy_usd=stats.median_buy_usd, since=stats.since,
-            top_assets=[GmTradingTopAssetType(
-                symbol=a.symbol, ticker=a.ticker, name=_display_name(a.name), trade_count=a.trade_count,
-                trader_count=a.trader_count) for a in stats.top_assets],
-        )
+        from . import gm_trading_stats
+
+        return _trading_stats_type(gm_trading_stats.trading_stats('all'))
+
+    def resolve_invest_traded_usd(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated or not _invest_surfaces_enabled(user, info):
+            return None
+        from . import gm_volume
+
+        return gm_volume.traded_usd('all')
 
     def resolve_gm_community(self, info):
         user = getattr(info.context, 'user', None)

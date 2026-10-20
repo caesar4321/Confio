@@ -17,6 +17,17 @@ import { formatDecimal } from '../utils/numberLocale';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { useGmHomeTile } from '../hooks/useGmMarket';
+import { useCryptoCapabilities } from '../hooks/useCrypto';
+import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
+
+// Stocks + Bitcoin & gold volume, for the Inversiones tile. Own query: a
+// server without the field fails only this, and the tile falls back to the
+// stock-only Acciones numbers.
+const INVEST_TRADED_USD = gql`
+  query InvestTradedUsd {
+    investTradedUsd
+  }
+`;
 
 // All-time deposits + withdrawals, each counted once at the delivery
 // boundary (ramps/metrics.py). Own query per the new-field rule: an older
@@ -119,6 +130,18 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   const {
     assetCount: stockAssetCount, investedUsd: stockInvestedUsd, tradedUsd: stockTradedUsd, refetch: refetchStockTile,
   } = useGmHomeTile();
+  // Bitcoin & gold have their own country policy: someone outside Ondo's
+  // eligibility can still see (and open) the Inversiones tile.
+  const { capabilities: cryptoCaps } = useCryptoCapabilities();
+  const cryptoEnabled = CRYPTO_TRADING_UI_ENABLED && Boolean(cryptoCaps?.enabled);
+  const investEnabled = stocksEnabled || cryptoEnabled;
+  const { data: investData, refetch: refetchInvest } = useQuery(INVEST_TRADED_USD, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    skip: !investEnabled,
+    pollInterval: 300_000,
+  });
+  const investTradedUsd: number | null = investData?.investTradedUsd ?? null;
   const flowTotalUsd: number | null = flowData?.fundFlowStats?.totalUsd ?? null;
   const flowOperations: number | null = flowData?.fundFlowStats?.operationCount ?? null;
   const previousRefreshNonce = useRef(refreshNonce);
@@ -130,7 +153,8 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     refetch().catch(() => {});
     refetchFlow().catch(() => {});
     refetchStockTile().catch(() => {});
-  }, [refreshNonce, refetch, refetchFlow, refetchStockTile]);
+    if (investEnabled) refetchInvest().catch(() => {});
+  }, [refreshNonce, refetch, refetchFlow, refetchStockTile, investEnabled, refetchInvest]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
@@ -143,10 +167,11 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         refetch().catch(() => {});
         refetchFlow().catch(() => {});
         refetchStockTile().catch(() => {});
+        if (investEnabled) refetchInvest().catch(() => {});
       }
     });
     return () => subscription.remove();
-  }, [refetch, refetchFlow, refetchStockTile]);
+  }, [refetch, refetchFlow, refetchStockTile, investEnabled, refetchInvest]);
 
   const s: StatsSummary | undefined = data?.statsSummary;
   const thousandsSeparator = separators.group;
@@ -221,7 +246,20 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       // older numbers stay as fallbacks for a server without it. Like
       // Movido opens Dinero en movimiento, it opens its breakdown (Acciones
       // en movimiento); buying and the Ondo explainer are one tap further.
-      const stocks: Tile | null = !stocksEnabled
+      // Inversiones (2026-10-19): stocks + Bitcoin & gold volume, opening
+      // Inversiones en movimiento. Without that number (older server), the
+      // stock-only Acciones fallbacks below, for stock-eligible users only.
+      const stocks: Tile | null = investEnabled && investTradedUsd != null && investTradedUsd > 0
+        ? {
+          key: 'stocks',
+          icon: 'trending-up',
+          value: fmt(investTradedUsd),
+          unit: 'USD',
+          label: 'Inversiones',
+          descriptor: 'Acciones, oro y bitcoin',
+          onPress: () => navigation.navigate('StocksActivity'),
+        }
+        : !stocksEnabled
         ? null
         : stockTradedUsd != null && stockTradedUsd > 0
         ? {
@@ -282,7 +320,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         : [users, savings, flow, presale];
     },
     [s?.totalUsers, verified, tvl, backingDescriptor, flowTotalUsd, flowOperations,
-     stockAssetCount, stockInvestedUsd, stockTradedUsd, stocksEnabled,
+     stockAssetCount, stockInvestedUsd, stockTradedUsd, stocksEnabled, investEnabled, investTradedUsd,
      s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
   );
 

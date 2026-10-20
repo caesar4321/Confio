@@ -7,10 +7,23 @@ beforeAll(() => setNumberLocaleCountry('VE'));
 afterAll(() => setNumberLocaleCountry(null));
 
 let mockStats: any;
+let mockInvestError = true; // default: an older server, the stock-only screen
+let mockStocksEnabled = true;
 const mockNavigate = jest.fn();
 jest.mock('@apollo/client', () => ({
   gql: (strings: TemplateStringsArray) => strings.join(''),
-  useQuery: () => ({ data: mockStats === undefined ? undefined : { gmTradingStats: mockStats }, loading: false, refetch: jest.fn() }),
+  useQuery: (query: string, options: any) => {
+    if (options?.skip) return { data: undefined, loading: false, refetch: jest.fn() };
+    if (query.includes('investTradingStats')) {
+      return mockInvestError
+        ? { data: undefined, error: new Error('Cannot query field'), loading: false, refetch: jest.fn() }
+        : { data: mockStats === undefined ? undefined : { investTradingStats: mockStats }, loading: false, refetch: jest.fn() };
+    }
+    return { data: mockStats === undefined ? undefined : { gmTradingStats: mockStats }, loading: false, refetch: jest.fn() };
+  },
+}));
+jest.mock('../../hooks/useSavingsPortfolio', () => ({
+  useSavingsPortfolio: () => ({ stocks: { enabled: mockStocksEnabled } }),
 }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mockNavigate }) }));
 jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
@@ -44,7 +57,7 @@ const text = (tree: renderer.ReactTestRenderer) =>
     .join(' ');
 
 describe('StocksActivityScreen', () => {
-  beforeEach(() => { mockStats = STATS; mockNavigate.mockClear(); });
+  beforeEach(() => { mockStats = STATS; mockInvestError = true; mockStocksEnabled = true; mockNavigate.mockClear(); });
 
   it('tells the trading story: total, split, the typical purchase, the ranking', () => {
     const shown = text(render());
@@ -88,5 +101,39 @@ describe('StocksActivityScreen', () => {
     expect(typicalPurchaseLabel(2.01)).toBe('US$3');
     expect(typicalPurchaseLabel(3)).toBe('US$3');
     expect(typicalPurchaseLabel(0.4)).toBe('US$1');
+  });
+});
+
+describe('StocksActivityScreen as Inversiones en movimiento', () => {
+  const INVEST = {
+    ...STATS,
+    topAssets: [
+      { symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin', tradeCount: 30, traderCount: 9, assetKind: 'crypto' },
+      { symbol: 'NVDAon', ticker: 'NVDA', name: 'NVIDIA', tradeCount: 26, traderCount: 7, assetKind: 'stock' },
+    ],
+  };
+  beforeEach(() => { mockStats = INVEST; mockInvestError = false; mockStocksEnabled = true; mockNavigate.mockClear(); });
+
+  it('names stocks, gold and bitcoin and opens crypto rows on their own detail', () => {
+    const tree = render();
+    expect(tree.root.findByType('Header' as any).props.title).toBe('Inversiones en movimiento');
+    expect(text(tree)).toContain('OPERADO EN ACCIONES, ORO Y BITCOIN');
+    act(() => tree.root.find((n) => n.type === Pressable && n.props.accessibilityHint === 'Ver BTC').props.onPress());
+    expect(mockNavigate).toHaveBeenLastCalledWith('CryptoDetail', { symbol: 'BTCB' });
+  });
+
+  it('a crypto-only member cannot open a stock or the stock explorer', () => {
+    mockStocksEnabled = false;
+    const tree = render();
+    expect(tree.root.find((n) => n.type === Pressable && n.props.accessibilityHint === 'Ver NVDA').props.disabled).toBe(true);
+    expect(tree.root.find((n) => n.type === Pressable && n.props.accessibilityHint === 'Ver BTC').props.disabled).toBe(false);
+    expect(text(tree)).not.toContain('Explorar acciones');
+  });
+
+  it('an older server keeps the stock-only screen', () => {
+    mockInvestError = true;
+    mockStats = STATS;
+    const tree = render();
+    expect(tree.root.findByType('Header' as any).props.title).toBe('Acciones en movimiento');
   });
 });

@@ -90,3 +90,84 @@ class TradingStatsTests(TestCase):
             self.assertIsNone(gm_trading_stats.snapshot())
         rebuild.assert_not_called()
         self.assertTrue(cache.get(gm_trading_stats.LOCK_KEY))  # not released by a non-holder
+
+
+class InvestScopeTests(TestCase):
+    """Scope 'all' (Home's Inversiones): stocks + Bitcoin & gold; 'stocks'
+    keeps store builds' Acciones numbers exactly as before."""
+
+    def setUp(self):
+        for scope in gm_trading_stats.SCOPES:
+            for key in (gm_trading_stats.CACHE_KEY, gm_trading_stats.FRESH_KEY, gm_trading_stats.LOCK_KEY):
+                cache.delete(gm_trading_stats._key(key, scope))
+        self.user = User.objects.create_user(username='inv-1', email='inv1@example.com', firebase_uid='inv-1')
+        self.decoded = []
+        self.n = 0
+
+    def trade(self, kind, symbol, usd, wallet):
+        from blockchain.models import CryptoTrade
+
+        self.n += 1
+        batch = SponsoredBatch.objects.create(
+            user=self.user, user_bsc_address=wallet, kind=kind, status='confirmed', tx_hash=f'0x{self.n + 500:064x}',
+            calls_json='[]', num_calls=1, source_id=self.n + 500, gas_limit=1, max_fee_wei='1',
+            client_request_id=f'inv-{self.n}')
+        UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount=str(usd), token_type='CUSD_PLUS', status='CONFIRMED',
+            transaction_date=timezone.now(), sponsored_batch=batch)
+        if kind.startswith('crypto'):
+            CryptoTrade.objects.create(batch=batch, wallet=wallet, symbol=symbol, kind=kind,
+                                       units=Decimal('1'), usd=Decimal(str(usd)), traded_at=timezone.now())
+        else:
+            self.decoded.append(Trade(symbol=symbol, kind=kind, units=Decimal('1'), usd=Decimal(str(usd)),
+                                      when=timezone.now()))
+
+    def compute(self, scope):
+        with patch('cusd_plus.stock_month._decode_trades', side_effect=lambda batches: self.decoded[:len(batches)]), \
+                patch.object(gm_trading_stats, '_names', return_value={'NVDAon': ('NVDA', 'NVIDIA')}):
+            return gm_trading_stats.compute(scope)
+
+    def test_all_adds_bitcoin_and_gold_stocks_stays_stock_only(self):
+        for i in range(3):
+            self.trade('stock_buy', 'NVDAon', 10, f'0x{i:040x}')
+            self.trade('crypto_buy', 'BTCB', 5, f'0x{i:040x}')
+        self.trade('crypto_sell', 'XAUT', 2, '0x' + '9' * 40)
+
+        stocks = self.compute('stocks')
+        self.assertEqual(stocks.total_usd, 30.0)
+        self.assertEqual([a.ticker for a in stocks.top_assets], ['NVDA'])
+
+        both = self.compute('all')
+        self.assertEqual(both.total_usd, 47.0)
+        self.assertEqual((both.buy_count, both.sell_count, both.trader_count), (6, 1, 4))
+        by_ticker = {a.ticker: a for a in both.top_assets}
+        self.assertEqual(by_ticker['BTC'].kind, 'crypto')
+        self.assertEqual(by_ticker['BTC'].name, 'Bitcoin')
+        self.assertEqual(by_ticker['NVDA'].kind, 'stock')
+        self.assertNotIn('XAUT', by_ticker)  # one wallet: below the privacy floor
+
+    def test_scopes_cache_separately(self):
+        for i in range(3):
+            self.trade('crypto_buy', 'BTCB', 5, f'0x{i:040x}')
+        with patch('cusd_plus.stock_month._decode_trades', return_value=[]), \
+                patch.object(gm_trading_stats, '_names', return_value={}):
+            self.assertEqual(gm_trading_stats.snapshot('stocks').total_usd, 0.0)
+            self.assertEqual(gm_trading_stats.snapshot('all').total_usd, 15.0)
+        from . import gm_volume
+        self.assertEqual(gm_volume.traded_usd('all'), 15.0)
+        self.assertIsNone(gm_volume.traded_usd('stocks'))  # no traders: below the floor
+
+
+class InvestFieldsGateTests(TestCase):
+    def info(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=True), META={}))
+
+    def test_open_to_stock_or_crypto_users_only(self):
+        from .schema import Query
+
+        with patch('cusd_plus.gm_volume.traded_usd', return_value=12.5):
+            for stocks, crypto, expected in ((True, False, 12.5), (False, True, 12.5), (False, False, None)):
+                with patch('cusd_plus.schema._stock_surfaces_enabled', return_value=stocks), \
+                        patch('cusd_plus.crypto_risk.surfaces_enabled', return_value=crypto):
+                    self.assertEqual(Query().resolve_invest_traded_usd(self.info()), expected)

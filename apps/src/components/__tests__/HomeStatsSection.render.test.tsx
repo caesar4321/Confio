@@ -17,11 +17,17 @@ const mockRemoveAppStateListener = jest.fn();
 const mockFlow = {totalUsd: 176000, operationCount: 337};
 const mockFlowRefetch = jest.fn(() => Promise.resolve());
 let mockStocksEnabled = true;
+let mockCryptoEnabled = false;
+let mockInvestTraded: number | null = null;
+const mockInvestRefetch = jest.fn(() => Promise.resolve());
 let mockStockTile: {assetCount: number | null; investedUsd: number | null; tradedUsd?: number | null} | null = {assetCount: 458, investedUsd: null};
 const mockUseQuery = jest.fn(
   (query: any, _options: any): any => {
     if (String(query).includes('FundFlowStats')) return {data: {fundFlowStats: mockFlow}, refetch: mockFlowRefetch};
     if (String(query).includes('GmHomeTile')) return {data: {gmHomeTile: mockStockTile}, refetch: jest.fn(() => Promise.resolve())};
+    if (String(query).includes('InvestTradedUsd')) {
+      return _options?.skip ? {data: undefined, refetch: mockInvestRefetch} : {data: {investTradedUsd: mockInvestTraded}, refetch: mockInvestRefetch};
+    }
     return {data: {statsSummary}, refetch: mockRefetch};
   },
 );
@@ -43,6 +49,10 @@ jest.mock('../../contexts/NumberLocaleProvider', () => ({
 }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../../apollo/queries', () => ({ GET_STATS_SUMMARY: 'GET_STATS_SUMMARY' }));
+jest.mock('../../hooks/useCrypto', () => ({
+  useCryptoCapabilities: () => ({capabilities: {enabled: mockCryptoEnabled}, loading: false, refetch: jest.fn()}),
+}));
+jest.mock('../../config/features', () => ({CRYPTO_TRADING_UI_ENABLED: true}));
 
 import { HomeStatsSection } from '../HomeStatsSection';
 
@@ -157,6 +167,33 @@ describe('HomeStatsSection layout', () => {
     act(() => tile.props.onPress());
     expect(mockNavigate).toHaveBeenCalledWith('StocksActivity');
     mockStockTile = {assetCount: 458, investedUsd: null};
+  });
+
+  it('becomes Inversiones (stocks, gold and bitcoin) once the server has that volume', () => {
+    mockStockTile = {assetCount: 458, investedUsd: null, tradedUsd: 3424.6};
+    mockInvestTraded = 3500.4;
+    mockNavigate.mockClear();
+    const root = render().root;
+    const label = tileLabels(root)[3];
+    expect(label).toContain('Inversiones: 3.500');
+    expect(label).toContain('Acciones, oro y bitcoin');
+    act(() => root.find((node: any) => node.props.accessibilityLabel?.startsWith?.('Inversiones:') && node.props.onPress).props.onPress());
+    expect(mockNavigate).toHaveBeenCalledWith('StocksActivity');
+    mockInvestTraded = null;
+    mockStockTile = {assetCount: 458, investedUsd: null};
+  });
+
+  it('shows Inversiones to a crypto-only member, and nothing stock-only', () => {
+    mockStocksEnabled = false;
+    mockCryptoEnabled = true;
+    mockInvestTraded = 120;
+    expect(tileLabels(render().root).map(l => l.split(':')[0])).toEqual(
+      ['Usuarios', 'Ahorros', 'Movido', 'Inversiones', 'Preventa']);
+    mockInvestTraded = null;
+    expect(tileLabels(render().root).map(l => l.split(':')[0])).toEqual(
+      ['Usuarios', 'Ahorros', 'Movido', 'Preventa']);
+    mockStocksEnabled = true;
+    mockCryptoEnabled = false;
   });
 
   it('shows money moved both ways and opens its breakdown', () => {
