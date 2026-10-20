@@ -400,6 +400,71 @@ def is_tapped_text(message):
     return text in INFORMATIONAL_PROMPTS or text in {label.lower() for _, label in PROBE_ANSWERS}
 
 
+# While the team owns a thread, the assistant still answers a plain question
+# about how the app works (a person waited 4½ hours for "¿Cómo recargar?",
+# 2026-10-19). Never anything about their own case: that stays with people.
+# An allow-list: the whole message must be one of these shapes, and the turn
+# only has tools that read no personal data (WAITING_TOOLS), so a misread
+# message still can't surface their case.
+_WAIT_QUESTION = re.compile(
+    r'[¿¡\s]*(hola[,!.¿¡\s]*)?(d[oó]nde est[aá] el equipo( de confío| de confio)?|hay alguien( ah[ií])?|'
+    r'alguien me (va a )?(responder|atender)|me van a (responder|contestar|atender)|'
+    r'cu[aá]ndo me (responden|contestan|atienden)|(sigo|estoy) esperando)[?!.\s]*')
+_HOWTO_START = re.compile(r'[¿¡\s]*(c[oó]mo|d[oó]nde|qu[eé] (es|son|significa)|para qu[eé] (sirve|es)|'
+                          r'cu[aá]nto (cuesta|rinde)|cu[aá]les son|se puede|puedo)\b')
+_GENERAL_TOPIC = re.compile(
+    r'recarg|retir|env[ií]|recib|cobrar|pagar|invert|invier|ahorr|acci[oó]n|acciones|\betf\b|confío dollar|'
+    r'confio dollar|\bqr\b|comisi|cuesta|tipo de cambio|cuenta local|cuentas locales|\bpix\b|bre-?b|clabe|'
+    r'efectivo|agente|binance|usdt|bep20|preventa|diversific|rendimiento|confío|confio|la app|aplicaci')
+# "a mi cuenta Confío" is how people say "my account" in a how-to; anything
+# else first-person ("mis dólares", "lo que deposité", "me sale") is theirs.
+_MY_ACCOUNT = re.compile(r'\b(a|en|de|desde) mi (cuenta bancaria|cuenta( de)?( confío| confio)?|banco|billetera)\b')
+_FIRST_PERSON = re.compile(r'\b(mi|mis|m[ií]os?|m[ií]as?|me|nos|yo|tengo|tenemos|este|esta|ese|esa|esos|esas)\b|'
+                           r'\b\w{3,}[éí]\b|\d|'
+                           # irregular "I did" forms, and "la recarga que…": a specific item of theirs
+                           r'\b(hice|puse|pude|tuve|quise|dije|traje|vine|fui|hicimos|pusimos|tuvimos)\b|'
+                           r'\b(el|la|los|las|lo) (\w+ )?que\b|'
+                           # "el retiro", "la recarga": one specific transaction, theirs
+                           r'\b(el|la|los|las|un|una|del|lo de|lo del|lo de la)\s+(retiros?|recargas?|env[ií]os?|'
+                           r'pagos?|dep[oó]sitos?|transferencias?|orden|dinero|plata|saldo|cobros?|compras?|ventas?|'
+                           r'usdt|d[oó]lares|fondos|intereses)\b|'
+                           # "-me" on a verb: "devolverme", "ayudándome"
+                           r'\b\w+(arme|erme|irme|ndome|arnos|ernos|irnos|ndonos)\b')
+_ABOUT_THEIR_CASE = re.compile(
+    r'\b(va|van|sigue|siguen|anda|est[aá]n?|qued[oó]|pas[oó]|fue a parar)\b|\b(ayer|hoy|anoche|todav[ií]a|ya|ahora)\b|'
+    r'qu[eé] pas|algo con|as[ií] que|devol|\bno\b|tard|demor|tanto|apur|aceler|agiliz|revis|de vuelta|'
+    r'de nuevo|doble|duplicad|extra|quedaron|terminaron|se fue|se meti|\blleg[oóa]|llegaron|perd|estaf|\brob(o|aron|ado)\b|hacke|fraude|bloque|congel|suspend|restring|banead|'
+    r'cobraron|\bcargo\b|d[eé]bito|descont|devuelv|regres|reembols|devoluci|pendiente|rechaz|recuper|cancel|'
+    r'revert|reconozc|engañ|\btim[oa]|clon|cerraron|no puedo|no me deja|no funciona|no aparece|refleja|'
+    r'desaparec|atrapad|error|falla|problema|reclam|queja|denunci|urgente|verific|kyc|c[eé]dula|identidad')
+
+
+def general_while_waiting(message):
+    """A plain question about how the app works (or only about the wait),
+    which the assistant answers even while the team owns the thread."""
+    text = ' '.join((message or '').lower().split())
+    if not text:
+        return False
+    if is_tapped_text(text) or _WAIT_QUESTION.fullmatch(text):
+        return True
+    if len(text.split()) > 15 or re.search(r'[.?!]\s*\S', text.rstrip('.?!¿ ')):
+        return False  # one short sentence only
+    rest = _MY_ACCOUNT.sub(' ', text)
+    return bool(_HOWTO_START.match(text) and _GENERAL_TOPIC.search(text)
+                and not _FIRST_PERSON.search(rest) and not _ABOUT_THEIR_CASE.search(text))
+
+
+# What a turn may use while the team owns the thread: nothing personal.
+WAITING_TOOLS = {'navigate', 'read_public_document', 'get_exchange_rate', 'get_stock_quote'}
+WAITING_FOR_TEAM_NOTE = (
+    '\n# Esta conversación está con el equipo de Confío\n'
+    'El equipo ya tiene el caso de esta persona y le responderá en este chat. Responde solo esta pregunta general '
+    'sobre cómo funciona la app, en pocas palabras. No hables de su caso, no digas que está resuelto, no prometas '
+    'tiempos y no ofrezcas pasarlo al equipo: ya lo tiene. Si pregunta por el equipo o si alguien le va a '
+    'responder, dile que su caso ya está con el equipo y le responderán aquí, y que mientras tanto puede '
+    'preguntarte cómo funciona la app.\n')
+
+
 def handoff_not_needed(message, earlier=''):
     """True for questions the assistant answers itself: an informational
     suggestion tap, or "¿para cuándo habrá X en <país>?" about the product
@@ -691,6 +756,8 @@ class Toolbelt:
         # run_turn), for tool guards. Empty elsewhere (voice): guards fail open.
         self.last_user_message = ''
         self.earlier_user_messages = ''
+        # Answering a general question while the team owns the thread.
+        self.waiting_for_team = False
         # Paid tools run at most once per user message, whatever the model asks.
         self.paid_used = set()
         self.can_navigate = can_navigate
@@ -910,6 +977,9 @@ class Toolbelt:
                     'strict': True,
                 },
             ]
+        if self.waiting_for_team:
+            # The team owns the case: no handoff, and no tool that reads it.
+            specs = [s for s in specs if s.get('name') in WAITING_TOOLS]
         return specs
 
     def call(self, name, args):
@@ -928,6 +998,8 @@ class Toolbelt:
             'search_market_news': self.search_market_news,
         }.get(name)
         if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
+            handler = None
+        if self.waiting_for_team and name not in WAITING_TOOLS:
             handler = None
         if handler is None:
             return {'error': f'herramienta desconocida: {name}'}
@@ -1142,12 +1214,13 @@ def history_items(messages):
 
 
 def run_turn(viewer: Viewer, history, *, first_name, account_label, country, analyses_left, can_navigate=True,
-             reserve_analysis=None, reserve_news=None):
+             reserve_analysis=None, reserve_news=None, waiting_for_team=False):
     """Answer the last user message in `history`. Raises AssistantUnavailable,
     except after the model already escalated: the handoff is kept."""
     result = TurnResult(reply='')
     belt = Toolbelt(viewer, result, analyses_left=analyses_left, can_navigate=can_navigate,
                     reserve_analysis=reserve_analysis, reserve_news=reserve_news)
+    belt.waiting_for_team = waiting_for_team
     said = [item['content'] for item in history_items(history) if item['role'] == 'user']
     belt.last_user_message = said[-1] if said else ''
     # Tapped answers ("Que mi dinero no pierda valor") are not the person's
@@ -1186,6 +1259,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         ia_plus_bundled=('cuenta_inteligente' in belt.destinations and paid_offers.ia_plus_bundled(
             meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
     )
+    if belt.waiting_for_team:
+        system += WAITING_FOR_TEAM_NOTE
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     effort = conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')
     specs = belt.specs()

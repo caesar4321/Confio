@@ -21,7 +21,8 @@ from inbox.push_service import send_support_staff_push
 from inbox.schema import get_or_create_support_conversation
 
 from . import conf
-from .engine import AssistantUnavailable, Viewer, categorize_movements, human_mode_active, run_turn, third_party_text
+from .engine import (AssistantUnavailable, Viewer, categorize_movements, general_while_waiting, human_mode_active,
+                     run_turn, third_party_text)
 from .models import AssistantProfile, AssistantThreadState, AssistantTurn, TurnModality
 from .prompts import prompt_echo, transcribe_hint
 
@@ -279,15 +280,24 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         if turn is not None:
             turn.user_message = user_message
             turn.save(update_fields=['user_message'])
+        # The team owns the thread: the message always reaches them, and a plain
+        # question about how the app works still gets an answer meanwhile.
+        waiting = human and conf.get('CONFIO_ASSISTANT_ENABLED') and general_while_waiting(clean)
         if human:
             _route_to_team(user_message)
-            return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN', transcript=transcript)
-        if wants_human:
+            if not waiting:
+                return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
+                                  transcript=transcript)
+        elif wants_human:
             outcome = _handoff(conversation, state, user_message, 'El usuario pidió hablar con una persona')
             outcome.transcript = transcript
             return outcome
         if turn is None:
             remaining = remaining_turns(user)
+            if remaining <= 0 and waiting:
+                # Out of turns while waiting: the team answers, no limit notice.
+                return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
+                                  transcript=transcript)
             if remaining <= 0:
                 reply = _append(conversation, sender_type='AGENT', body=LIMIT_REPLY,
                                 metadata={'ai': True, 'limit': True})
@@ -308,9 +318,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         turn.error = ''
         turn.save(update_fields=['reply_message', 'tools', 'error'])
         return AskOutcome(user_message=user_message, reply_message=reply, remaining_turns=remaining - 1,
-                          transcript=transcript, data_changed=applied > 0)
-    history = list(conversation.messages.order_by('-created_at')[:conf.get('CONFIO_ASSISTANT_HISTORY_MESSAGES')])
-    history.reverse()
+                          mode='HUMAN' if waiting else 'AI', transcript=transcript, data_changed=applied > 0)
+    if waiting:
+        # Only this question: without the thread (their case, the team's
+        # replies) and without personal tools, the answer can't touch the case.
+        history = [user_message]
+    else:
+        history = list(conversation.messages.order_by('-created_at')[:conf.get('CONFIO_ASSISTANT_HISTORY_MESSAGES')])
+        history.reverse()
     started = time.monotonic()
     try:
         result = run_turn(
@@ -322,12 +337,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             reserve_analysis=_analysis_reserver(user, turn),
             reserve_news=_tool_reserver(user, turn, 'search_market_news', news_searches_left),
             can_navigate=can_navigate,
+            waiting_for_team=bool(waiting),
         )
     except AssistantUnavailable as exc:
         logger.warning('Confio Assistant unavailable: %s', exc)
         metered = _meter_partial(turn, getattr(exc, 'partial', None))
-        if _team_took_over(user, conversation, user_message):
-            turn.error = f'superseded by human handoff ({str(exc)[:200]})'
+        if waiting or _team_took_over(user, conversation, user_message):
+            turn.error = (f'unavailable while waiting for the team ({str(exc)[:200]})' if waiting
+                          else f'superseded by human handoff ({str(exc)[:200]})')
             turn.latency_ms = int((time.monotonic() - started) * 1000)
             turn.save(update_fields=['error', 'latency_ms', *metered])
             return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
@@ -346,7 +363,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     # for people. The turn is still metered.
     # Always re-check (an escalation intent from the model doesn't mean the
     # team hasn't already taken over meanwhile).
-    if _team_took_over(user, conversation, user_message):
+    if not waiting and _team_took_over(user, conversation, user_message):
         turn.models_used = result.models_used
         turn.input_tokens = result.input_tokens
         turn.cached_input_tokens = result.cached_input_tokens
@@ -362,10 +379,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     # At most one paid-offer chip, chosen and capped by the server.
     paid_chip = None
+    if waiting:
+        # No offers while a person is handling their case.
+        result.actions = [a for a in result.actions if a.get('target') not in ('ia_plus', 'cuenta_inteligente')]
     try:
         from . import paid_chips
         from .engine import allowed_destinations
-        paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)))
+        if not waiting:
+            paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)))
     except Exception:  # noqa: BLE001 - a probe must never break the answer
         logger.exception('Confio Assistant: paid chip selection failed')
         result.actions = [a for a in result.actions if a.get('target') not in ('ia_plus', 'cuenta_inteligente')]
@@ -404,6 +425,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         outcome.data_changed = bool(result.writes)
         return outcome
     return AskOutcome(user_message=user_message, reply_message=reply, actions=result.actions,
+                      mode='HUMAN' if waiting else 'AI',
                       remaining_turns=remaining - 1, transcript=transcript, data_changed=bool(result.writes))
 
 

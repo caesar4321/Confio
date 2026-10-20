@@ -125,6 +125,51 @@ class AskTests(TestCase):
         post.side_effect = [text_response('¡De nada!')]
         self.assertEqual(self.ask('¿cómo pago con QR?').mode, 'AI')
 
+    @patch('assistant.engine._openai_post')
+    def test_general_questions_are_answered_while_the_team_owns_the_thread(self, post):
+        with self.captureOnCommitCallbacks(execute=True):
+            self.ask('Quiero hablar con una persona')
+        post.side_effect = [text_response('Abre Recibir y toca Recargar ahora.')]
+        with self.captureOnCommitCallbacks(execute=True):
+            outcome = self.ask('Cómo recargar a mi cuenta Confío.')
+        self.assertEqual(outcome.mode, 'HUMAN')  # still the team's thread
+        self.assertEqual(outcome.reply_message.body, 'Abre Recibir y toca Recargar ahora.')
+        self.assertTrue(outcome.user_message.metadata.get('to_team'))  # the team still sees it
+        request = post.call_args_list[0].args[0]
+        self.assertIn('Esta conversación está con el equipo', request['instructions'])
+        names = {t.get('name') for t in request['tools']}
+        self.assertNotIn('escalate_to_human', names)
+        self.assertFalse(names & {'get_topup_status', 'get_transactions', 'get_portfolio', 'categorize_transactions'})
+        # Only the question itself reaches the model, never the thread.
+        user_turns = [i for i in request['input'] if i.get('role') == 'user']
+        self.assertEqual([i['content'] for i in user_turns], ['Cómo recargar a mi cuenta Confío.'])
+        # Their own case stays with people: no model call, no reply.
+        post.reset_mock()
+        outcome = self.ask('¿Dónde está mi recarga? No me llegó')
+        post.assert_not_called()
+        self.assertIsNone(outcome.reply_message)
+
+    def test_general_while_waiting(self):
+        from .engine import general_while_waiting
+        for text in ('¿Cómo pongo mis primeros dólares en Confío?', 'Cómo recargar.', '¿Dónde está el equipo de Confío?',
+                     'Cómo puedo cobrar', '¿Qué es Confío y para qué me sirve?', '¿Puedo retirar en Bolivia?',
+                     '¿Cómo recargo?', 'Cómo recargar a mi cuenta Confío.', '¿Hay alguien?', 'Hola, ¿me van a responder?',
+                     '¿Cómo envío dinero a Colombia?', '¿Cómo retiro a mi banco?'):
+            self.assertTrue(general_while_waiting(text), text)
+        # Audit 2026-10-19: anything about their own case stays with the team.
+        for text in ('¿Dónde está mi recarga?', 'Cómo hago si no me llegó', 'Mi retiro sigue pendiente',
+                     '¿Cómo recupero los 50 dólares?', 'Cómo denuncio un fraude', 'gracias', '',
+                     'Hay alguien usando mi cuenta sin permiso', '¿Hay alguien? me hackearon la cuenta',
+                     'Sigo esperando que me devuelvan mi plata', '¿Dónde están mis dólares?',
+                     '¿Dónde está la recarga que hice?', '¿Cómo cancelo el retiro?', '¿Qué es este movimiento?',
+                     '¿Cómo hago si alguien entró a mi cuenta?', '¿Dónde quedó lo que deposité?',
+                     '¿Cómo saco la plata que quedó atrapada?', '¿Dónde está el retiro?', '¿Cómo va la recarga?',
+                     '¿Cómo está lo del retiro?', '¿Se puede saber qué pasó con la recarga?',
+                     '¿Cómo hacen para devolverme la recarga?', '¿Puedo retirar ya?', '¿Cuánto cuesta el retiro de ayer?',
+                     '¿Dónde quedaron los USDT?', '¿Cómo puede tardar tanto un retiro?', '¿Cómo apuro un retiro?',
+                     '¿Qué es un cobro doble en Confío?', '¿Cómo recargo si Binance dice completado y Confío no?'):
+            self.assertFalse(general_while_waiting(text), text)
+
     def test_human_mode_lapses_on_its_own(self):
         now = timezone.now()
         state = SimpleNamespace(handoff_at=now - timedelta(hours=25), returned_to_ai_at=None)
