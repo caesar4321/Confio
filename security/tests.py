@@ -882,6 +882,23 @@ class DiditIntegrationTests(TestCase):
         self.assertIn('vencido', verification.rejected_reason)
 
     @patch('security.didit.requests.request')
+    def test_a_later_silent_decline_clears_the_earlier_note(self, mock_request):
+        first = self._declined_payload('sess_redeclined')
+        first['reviews'] = [{'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': 'Usa tu cédula vigente.',
+                             'created_at': '2026-10-14T10:00:00Z'}]
+        mock_request.return_value = self._mock_response(first)
+        verification, _ = sync_didit_session(session_id='sess_redeclined', expected_user=self.user)
+        self.assertEqual(verification.rejected_reason, 'Usa tu cédula vigente.')
+
+        second = self._declined_payload('sess_redeclined')
+        second['reviews'] = first['reviews'] + [{'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': None,
+                                                 'created_at': '2026-10-15T10:00:00Z'}]
+        mock_request.return_value = self._mock_response(second)
+        verification, _ = sync_didit_session(session_id='sess_redeclined', expected_user=self.user)
+
+        self.assertFalse(verification.rejected_reason)
+
+    @patch('security.didit.requests.request')
     def test_decline_with_only_unknown_warnings_stays_generic(self, mock_request):
         mock_request.return_value = self._mock_response(self._declined_payload(
             'sess_unknown', id_warnings=[('SCREEN_CAPTURE_DETECTED', 'error')]))

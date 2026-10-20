@@ -41,8 +41,17 @@ for v in rows:
     note = reviewer_decline_comment(decision)
     if not note:
         continue
-    newer = IdentityVerification.all_documents.filter(
-        user=v.user, is_additional_document=v.is_additional_document, created_at__gt=v.created_at).exists()
+    factors = v.risk_factors or {}
+    # Personal and each business keep separate histories: only a newer attempt
+    # of the same account supersedes this one.
+    later = IdentityVerification.all_documents.filter(
+        user=v.user, is_additional_document=v.is_additional_document, created_at__gt=v.created_at)
+    if factors.get('account_type') == 'business':
+        later = later.filter(risk_factors__account_type='business',
+                             risk_factors__business_id=str(factors.get('business_id')))
+    else:
+        later = later.filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+    newer = later.exists()
     print(f'  {v.pk} user={v.user_id} newer_attempt={newer} note={note[:80]!r}')
     if not APPLY:
         continue
@@ -50,7 +59,6 @@ for v in rows:
     v.save(update_fields=['rejected_reason', 'updated_at'])
     updated += 1
     if not newer and not v.is_additional_document:
-        factors = v.risk_factors or {}
         _notify_verification_status_change(
             verification=v,
             account_type=factors.get('account_type') or 'personal',

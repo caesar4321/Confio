@@ -437,8 +437,9 @@ def user_facing_decline_reason(response_payload: dict[str, Any]) -> str:
     return USER_FIXABLE_DECLINE_REASONS[fixable[0]['risk']] if fixable else ''
 
 
-def reviewer_decline_comment(response_payload: dict[str, Any]) -> str:
-    """The note on the latest Console decline, or '' when it has none.
+def reviewer_decline_comment(response_payload: dict[str, Any]) -> str | None:
+    """The note on the latest Console decline: '' when it has none, None when
+    no reviewer declined.
 
     Reviewers write it to the person ("Hola, necesitamos que tu selfie…"), in
     their language, so it is what the app shows. Only the latest decline
@@ -450,7 +451,7 @@ def reviewer_decline_comment(response_payload: dict[str, Any]) -> str:
         if isinstance(review, dict) and str(review.get('new_status') or '').strip().lower() == 'declined'
     ]
     if not declines:
-        return ''
+        return None
     latest = max(declines, key=lambda review: str(review.get('created_at') or ''))
     return str(latest.get('comment') or '').strip()
 
@@ -1766,7 +1767,7 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
     verification.risk_factors = risk_factors
     # Read before our own checks can turn an approval into a rejection: only a
     # decline Didit itself returned carries a reviewer's note.
-    reviewer_note = reviewer_decline_comment(response_payload) if status == 'rejected' else ''
+    reviewer_note = reviewer_decline_comment(response_payload) if status == 'rejected' else None
     status = _enforce_brazilian_cpf_database_validation(
         status=status,
         document_issuing_country=verification.document_issuing_country,
@@ -1818,6 +1819,9 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
             verification.rejected_reason = None
         elif review_reason:
             verification.rejected_reason = review_reason
+        elif reviewer_note is not None:
+            # The latest decline said nothing: an earlier note is out of date.
+            verification.rejected_reason = None
         verification.save()
         if (status == 'verified'
                 and (verification.risk_factors or {}).get('account_type') != 'business'):
