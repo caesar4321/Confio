@@ -1,156 +1,87 @@
 {% load humanize %}
-<!-- Presale Status -->
-<h2 class="section-title">🚀 CONFIO Token Presale</h2>
-<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
-    <span style="font-weight: 600;">Global Presale Switch:</span>
-    {% if presale_global_enabled %}
-    <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">✓
-        ENABLED</span>
-    {% else %}
-    <span style="background: #6b7280; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">○
-        DISABLED</span>
-    {% endif %}
-    <a href="{% url 'confio_admin:presale_presalesettings_changelist' %}"
-        style="margin-left: auto; color: #3b82f6; text-decoration: none; font-size: 14px;">⚙️
-        Settings</a>
+<!-- CONFIO presale: BSC ConfioPresaleVault, price on a linear on-chain curve -->
+<h2 class="section-title">CONFIO presale</h2>
+<div class="quick-actions">
+    <span class="status-badge {% if presale_global_enabled %}completed{% endif %}">
+        {% if presale_global_enabled %}Presale switch on{% else %}Presale switch off{% endif %}
+    </span>
+    <span class="status-badge {% if presale_vault_address %}completed{% else %}disputed{% endif %}">
+        {% if presale_vault_address %}Vault {{ presale_vault_address|truncatechars:14 }}{% else %}Vault not configured{% endif %}
+    </span>
 </div>
 
-{% if presale_active %}
-<!-- Active Presale Phase -->
-<h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{ presale_name }}</h3>
 <div class="metrics-grid">
     <div class="metric-card">
-        <div class="metric-label">Total Raised</div>
-        <div class="metric-value">${{ presale_raised|floatformat:2|intcomma }}</div>
-        <div class="metric-change">Goal: ${{ presale_goal|floatformat:0|intcomma }}</div>
-    </div>
-
-    <div class="metric-card">
-        <div class="metric-label">Progress</div>
-        <div class="metric-value">{{ presale_progress|floatformat:1 }}%</div>
-        <div class="metric-progress">
-            <div class="progress-bar">
-                <div class="progress-fill" style="width: {{ presale_progress }}%; background: #8b5cf6;">
-                </div>
-            </div>
+        <div class="metric-label">Current curve price</div>
+        <div class="metric-value">${{ presale_curve.current_price|floatformat:4 }}</div>
+        <div class="metric-change">
+            Linear ${{ presale_curve.start_price|floatformat:2 }} → ${{ presale_curve.final_price|floatformat:2 }}
+            · {{ presale_curve_position_pct|floatformat:1 }}% along the curve
         </div>
     </div>
-
     <div class="metric-card">
-        <div class="metric-label">Participants</div>
-        <div class="metric-value">{{ presale_participants|intcomma }}</div>
-        <div class="metric-change">Unique buyers</div>
+        <div class="metric-label">Raised, all time</div>
+        <div class="metric-value">${{ presale_curve.total_raised_usd|floatformat:0|intcomma }}</div>
+        <div class="metric-change">
+            {{ presale_curve.participants|intcomma }} buyers · next milestone ${{ presale_curve.next_milestone_usd|floatformat:0|intcomma }}
+        </div>
     </div>
-
+    {% for row in presale_windows %}
     <div class="metric-card">
-        <div class="metric-label">Price per Token</div>
-        <div class="metric-value">${{ presale_price }}</div>
-        <div class="metric-change">CONFIO/cUSD</div>
+        <div class="metric-label">Purchases, {{ row.label }}</div>
+        <div class="metric-value">${{ row.usd|floatformat:0|intcomma }}</div>
+        <div class="metric-change">{{ row.count|intcomma }} purchases · {{ row.buyers|intcomma }} buyers · {{ row.confio|floatformat:0|intcomma }} CONFIO</div>
+    </div>
+    {% endfor %}
+    <div class="metric-card">
+        <div class="metric-label">Purchase pipeline</div>
+        <div class="metric-value">{{ presale_pipeline.awaiting_reconciliation|intcomma }}</div>
+        <div class="metric-change">
+            awaiting reconciliation (live batch, &gt;1h) · {{ presale_pipeline.abandoned_checkouts|intcomma }} unsigned checkouts (reaped after 24h) · {{ presale_pipeline.failed_7d|intcomma }} failed in 7d
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Algorand → BSC migration credits</div>
+        <div class="metric-value">{{ presale_credits.credited|intcomma }} credited</div>
+        <div class="metric-change">
+            {{ presale_credits.pending|intcomma }} pending · {{ presale_credits.queued|intcomma }} queued in Safe · {{ presale_credits.failed|intcomma }} failed
+            · {{ presale_credits.uncredited_confio|floatformat:0|intcomma }} CONFIO not yet credited
+        </div>
     </div>
 </div>
-{% else %}
-<div class="alert"
-    style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
-    <strong>⚠️ No Active Presale</strong>
-    {% if not presale_global_enabled %}
-    - Global switch is disabled. Enable it in <a
-        href="{% url 'confio_admin:presale_presalesettings_changelist' %}">Settings</a> and
-    activate a
-    phase.
-    {% else %}
-    - <a href="{% url 'confio_admin:presale_presalephase_changelist' %}">Activate a presale phase</a>
-    {% endif %}
-</div>
-{% endif %}
 
-<!-- All Presale Phases Summary -->
-{% if all_presale_phases %}
-<h3 style="font-size: 18px; color: #1f2937; margin: 24px 0 12px;">All Presale Phases</h3>
-<div class="data-table" style="border-radius: 8px; border: 1px solid #e5e7eb;">
-    <table style="width: 100%; border-collapse: collapse;">
-        <thead style="background: #f9fafb;">
-            <tr>
-                <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
-                    Phase</th>
-                <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
-                    Name
-                </th>
-                <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
-                    Status</th>
-                <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
-                    Raised</th>
-                <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
-                    Participants</th>
-            </tr>
-        </thead>
+<h3 class="section-title" style="font-size: 16px;">Latest completed purchases</h3>
+<div class="data-table">
+    <table>
+        <thead><tr><th>When</th><th>User</th><th>Paid</th><th>CONFIO</th><th>Price</th><th>Source</th></tr></thead>
         <tbody>
-            {% for phase in all_presale_phases %}
-            <tr style="border-top: 1px solid #e5e7eb;">
-                <td style="padding: 12px;">Phase {{ phase.phase_number }}</td>
-                <td style="padding: 12px; font-weight: 500;">{{ phase.name }}</td>
-                <td style="padding: 12px;">
-                    {% if phase.status == 'active' %}
-                    <span
-                        style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">ACTIVE</span>
-                    {% elif phase.status == 'completed' %}
-                    <span
-                        style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">COMPLETED</span>
-                    {% elif phase.status == 'paused' %}
-                    <span
-                        style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">PAUSED</span>
-                    {% elif phase.status == 'upcoming' %}
-                    <span
-                        style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
-                    {% else %}
-                    <span
-                        style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
-                    {% endif %}
-                </td>
-                <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}
-                </td>
-                <td style="padding: 12px; text-align: right;">{{ phase.total_participants|intcomma }}
-                </td>
+            {% for p in presale_recent %}
+            <tr>
+                <td>{{ p.created_at|timesince }} ago</td>
+                <td>{{ p.user.username|default:"—" }}</td>
+                <td>${{ p.cusd_amount|floatformat:2|intcomma }}</td>
+                <td>{{ p.confio_amount|floatformat:2|intcomma }}</td>
+                <td>${{ p.price_per_token|floatformat:4 }}</td>
+                <td>{{ p.funding_source|default:"—" }}</td>
             </tr>
+            {% empty %}
+            <tr><td colspan="6">No completed purchases yet.</td></tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
-{% endif %}
 
-<div class="quick-actions" style="margin-top: 20px;">
-    <a href="{% url 'confio_admin:presale_presalephase_changelist' %}" class="action-button">
-        Manage Presale Phases
-    </a>
-    <a href="{% url 'confio_admin:presale_presalepurchase_changelist' %}" class="action-button secondary">
-        View All Purchases
-    </a>
-</div>
-
-<!-- Presale Waitlist Metrics -->
-<h3 class="section-title" style="font-size: 18px; margin-top: 30px;">📋 Presale Waitlist</h3>
+<h3 class="section-title" style="font-size: 16px;">Waitlist</h3>
 <div class="metrics-grid">
     <div class="metric-card">
-        <div class="metric-label">Total Waitlist</div>
+        <div class="metric-label">Waitlist</div>
         <div class="metric-value">{{ presale_waitlist_total|intcomma }}</div>
-        <div class="metric-change">Users interested in presale</div>
-    </div>
-
-    <div class="metric-card">
-        <div class="metric-label">Unnotified</div>
-        <div class="metric-value" style="color: #f59e0b;">{{ presale_waitlist_unnotified|intcomma }}
-        </div>
-        <div class="metric-change">Ready to notify</div>
-    </div>
-
-    <div class="metric-card">
-        <div class="metric-label">Notified</div>
-        <div class="metric-value" style="color: #10b981;">{{ presale_waitlist_notified|intcomma }}</div>
-        <div class="metric-change">Already informed</div>
+        <div class="metric-change">{{ presale_waitlist_unnotified|intcomma }} not yet notified · {{ presale_waitlist_notified|intcomma }} notified</div>
     </div>
 </div>
-
 <div class="quick-actions">
-    <a href="{% url 'confio_admin:presale_presalewaitlist_changelist' %}" class="action-button">
-        Manage Waitlist
-    </a>
+    <a href="{% url 'confio_admin:presale_presalepurchase_changelist' %}" class="action-button secondary">Purchases</a>
+    <a href="{% url 'confio_admin:presale_presalemigrationcredit_changelist' %}" class="action-button secondary">Migration credits</a>
+    <a href="{% url 'confio_admin:presale_presalewaitlist_changelist' %}" class="action-button secondary">Waitlist</a>
+    <a href="{% url 'confio_admin:presale_presalesettings_changelist' %}" class="action-button secondary">Settings</a>
 </div>

@@ -228,3 +228,26 @@ class DashboardPagesTests(TestCase):
                 sections.needs_attention(sections.Window.current(), self.staff())
         self.assertIn(mock.call(sections.DIDIT_IN_REVIEW), flt.call_args_list)
         self.assertNotIn(mock.call(status='pending'), flt.call_args_list)
+
+    def test_presale_is_live_and_only_phases_are_archived(self):
+        pages = {key: partials for key, _l, _b, partials, _o in confio_admin_site.DASH_PAGES}
+        self.assertIn('admin/dash/_presale.html', pages['presale'])
+        self.assertIn('admin/dash/_presale_phases.html', pages['archive'])
+        self.assertNotIn('admin/dash/_presale.html', pages['archive'])
+
+    def test_unsigned_presale_checkout_is_not_a_stuck_purchase(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from presale.models import PresalePhase, PresalePurchase
+
+        phase = PresalePhase.objects.create(phase_number=99, name='t', price_per_token=Decimal('0.2'),
+                                            goal_amount=Decimal('1'), max_per_user=Decimal('1000'),
+                                            min_purchase=Decimal('1'), status='active')
+        purchase = PresalePurchase.objects.create(
+            user=self.user, phase=phase, cusd_amount=Decimal('10'), confio_amount=Decimal('50'),
+            price_per_token=Decimal('0.2'), status='processing')
+        PresalePurchase.objects.filter(pk=purchase.pk).update(created_at=timezone.now() - timedelta(hours=3))
+        w = sections.Window.current()
+        self.assertEqual(sections.presale_awaiting_reconciliation(w), 0)
+        PresalePurchase.objects.filter(pk=purchase.pk).update(transaction_hash='0xabc')
+        self.assertEqual(sections.presale_awaiting_reconciliation(w), 1)

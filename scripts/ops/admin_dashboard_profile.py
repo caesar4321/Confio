@@ -23,7 +23,7 @@ from django.urls import reverse
 from config.admin_dashboard import confio_admin_site as site
 
 PAGES = [p for p in os.environ.get('PAGES', '').split(',') if p] or [
-    'dashboard', 'dash_money', 'dash_savings', 'dash_growth', 'dash_funnels',
+    'dashboard', 'dash_money', 'dash_savings', 'dash_presale', 'dash_growth', 'dash_funnels',
     'dash_risk', 'dash_platform', 'dash_archive',
 ]
 VIEW_FOR = {u.name: u.callback for u in site.get_urls() if getattr(u, 'name', None)}

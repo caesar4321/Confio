@@ -965,42 +965,75 @@ def verifications(w):
 
 
 def presale(w):
-    """CONFIO presale phases and waitlist."""
-    context = {}
-    # Presale metrics
-    from presale.models import PresalePhase, PresalePurchase, PresaleSettings, PresaleWaitlist
-    presale_settings = PresaleSettings.get_settings()
+    """The live CONFIO presale: BSC ConfioPresaleVault, priced on a linear
+    on-chain curve (presale.price_utils), plus migration credits and waitlist."""
+    from django.conf import settings
+    from presale.models import PresaleMigrationCredit, PresalePurchase, PresaleSettings, PresaleWaitlist
+    from presale.price_utils import get_presale_curve_stats
 
-    # Waitlist metrics (always show, even when presale is inactive)
-    context['presale_waitlist_total'] = PresaleWaitlist.objects.count()
-    context['presale_waitlist_unnotified'] = PresaleWaitlist.objects.filter(notified=False).count()
-    context['presale_waitlist_notified'] = PresaleWaitlist.objects.filter(notified=True).count()
+    curve = get_presale_curve_stats()
+    span = curve['final_price'] - curve['start_price']
+    completed = PresalePurchase.objects.filter(status='completed')
+    windows = []
+    for label, since in (('24h', w.last_24h), ('7 days', w.last_7_start), ('30 days', w.rolling_30_start)):
+        agg = completed.filter(created_at__gte=since).aggregate(
+            count=Count('id'), buyers=Count('user', distinct=True),
+            usd=Sum('cusd_amount'), confio=Sum('confio_amount'))
+        windows.append({'label': label, 'count': agg['count'], 'buyers': agg['buyers'],
+                        'usd': agg['usd'] or Decimal('0'), 'confio': agg['confio'] or Decimal('0')})
+    credits = PresaleMigrationCredit.objects.aggregate(
+        pending=Count('id', filter=Q(status='pending')),
+        queued=Count('id', filter=Q(status='queued')),
+        credited=Count('id', filter=Q(status='credited')),
+        failed=Count('id', filter=Q(status='failed')),
+        uncredited_confio=Sum('confio_amount', filter=~Q(status='credited')),
+    )
+    credits['uncredited_confio'] = credits['uncredited_confio'] or Decimal('0')
+    return {
+        'presale_global_enabled': PresaleSettings.get_settings().is_presale_active,
+        'presale_vault_address': getattr(settings, 'BSC_PRESALE_VAULT_ADDRESS', None),
+        'presale_curve': curve,
+        'presale_curve_position_pct': (
+            (curve['current_price'] - curve['start_price']) / span * 100 if span else 0),
+        'presale_windows': windows,
+        'presale_pipeline': {
+            'awaiting_reconciliation': presale_awaiting_reconciliation(w),
+            'abandoned_checkouts': _presale_processing(w).filter(_live_batch=False).count(),
+            'failed_7d': PresalePurchase.objects.filter(status='failed', created_at__gte=w.last_7_start).count(),
+        },
+        'presale_credits': credits,
+        'presale_recent': completed.select_related('user').order_by('-created_at')[:10],
+        'presale_waitlist_total': PresaleWaitlist.objects.count(),
+        'presale_waitlist_unnotified': PresaleWaitlist.objects.filter(notified=False).count(),
+        'presale_waitlist_notified': PresaleWaitlist.objects.filter(notified=True).count(),
+    }
 
-    # Get all presale phases to show their status
-    context['presale_global_enabled'] = presale_settings.is_presale_active
-    context['all_presale_phases'] = PresalePhase.objects.all().order_by('-phase_number')
 
-    # Active presale (only when global switch is on AND phase is active)
-    active_presale = PresalePhase.objects.filter(status='active').first() if presale_settings.is_presale_active else None
+def _presale_processing(w):
+    """Purchases still 'processing' after an hour, annotated with whether a
+    live presale batch exists (the reaper's own proof that money moved)."""
+    from django.db.models import Exists, OuterRef
+    from blockchain.models import SponsoredBatch
+    from presale.models import PresalePurchase
 
-    if active_presale:
-        context['presale_active'] = True
-        context['presale_phase'] = active_presale.phase_number
-        context['presale_name'] = active_presale.name
-        context['presale_raised'] = active_presale.total_raised
-        context['presale_goal'] = active_presale.goal_amount
-        context['presale_progress'] = active_presale.progress_percentage
-        context['presale_participants'] = active_presale.total_participants
-        context['presale_price'] = active_presale.price_per_token
+    live_batch = SponsoredBatch.objects.filter(
+        kind='presale_buy', source_id=OuterRef('pk'), status__in=('signed', 'sent', 'confirmed'))
+    return PresalePurchase.objects.filter(
+        status='processing', created_at__lt=w.now - timedelta(hours=1),
+    ).annotate(_live_batch=Exists(live_batch))
 
-        # Recent purchases
-        context['recent_presale_purchases'] = PresalePurchase.objects.filter(
-            phase=active_presale,
-            status='completed'
-        ).select_related('user').order_by('-created_at')[:5]
-    else:
-        context['presale_active'] = False
-    return context
+
+def presale_awaiting_reconciliation(w):
+    """Processing for over an hour WITH a live batch: the buyer paid and the
+    row never completed. Unsigned ones are abandoned checkouts, reaped at 24h."""
+    return _presale_processing(w).filter(Q(_live_batch=True) | Q(transaction_hash__isnull=False)).count()
+
+
+def presale_phases(w):
+    """Legacy fixed-price phases, kept for the records that point at them."""
+    from presale.models import PresalePhase
+
+    return {'all_presale_phases': PresalePhase.objects.all().order_by('-phase_number')}
 
 
 def guardarian(w):
@@ -1486,6 +1519,19 @@ def needs_attention(w, request, *, refresh=False):
     if in_review:
         items.append(_item(WARNING, 'ID documents in Didit manual review', 'Decide them in the Didit console.',
                            _url('security_identityverification_changelist', 'status__exact=pending'), in_review))
+
+    # Presale: a paid purchase that never completed, and credits that failed.
+    from presale.models import PresaleMigrationCredit
+
+    presale_stuck = presale_awaiting_reconciliation(w)
+    if presale_stuck:
+        items.append(_item(WARNING, 'Presale purchases paid but not completed (over 1h)',
+                           'A live presale batch exists; reconcile the purchase.',
+                           _url('presale_presalepurchase_changelist', 'status__exact=processing'), presale_stuck))
+    credits_failed = PresaleMigrationCredit.objects.filter(status='failed').count()
+    if credits_failed:
+        items.append(_item(WARNING, 'Presale migration credits failed verification', '',
+                           _url('presale_presalemigrationcredit_changelist', 'status__exact=failed'), credits_failed))
 
     # Legacy P2P: deprecated, but an escalated dispute is still someone's money.
     escalated = P2PDispute.objects.filter(status='ESCALATED').count()

@@ -731,6 +731,16 @@ ConfioAdminSite.DASH_PAGES = [
         ('Crypto swaps', 'blockchain_cryptoswaptrade_changelist', ''),
         ('Stock holdings', 'blockchain_stockholdings_changelist', ''),
     )}),
+    ('presale', 'Presale', [
+        _w(sections.presale),
+    ], [
+        'admin/dash/_presale.html',
+    ], {'intro': 'CONFIO on the BSC ConfioPresaleVault: one linear price curve, raised totals from completed purchases.',
+        'tools': (
+            ('Purchases', 'presale_presalepurchase_changelist', ''),
+            ('Migration credits', 'presale_presalemigrationcredit_changelist', ''),
+            ('Presale settings', 'presale_presalesettings_changelist', ''),
+        )}),
     ('growth', 'Growth', [
         _w(sections.users_core),
         _w(sections.os_stats),
@@ -789,19 +799,18 @@ ConfioAdminSite.DASH_PAGES = [
         _w(sections.disputes),
         _w(sections.legacy_cusd),
         _w(sections.legacy_conversions),
-        _w(sections.presale),
+        _w(sections.presale_phases),
         _w(sections.v2_security),
     ], [
         'admin/dash/_disputes.html',
         'admin/dash/_legacy_cusd.html',
-        'admin/dash/_presale.html',
+        'admin/dash/_presale_phases.html',
         'admin/dash/_v2_security.html',
     ], {'chain': True,
-        'intro': 'Retired or paused products: P2P, a-cUSD on Algorand, the v1 presale and the V2 keyless migration.',
+        'intro': 'Retired models: P2P, a-cUSD on Algorand, fixed-price presale phases and the V2 keyless migration.',
         'tools': (
             ('P2P analytics', 'p2p_analytics', ''),
             ('P2P disputes', 'p2p_exchange_p2pdispute_changelist', ''),
-            ('Presale settings', 'presale_presalesettings_changelist', ''),
         )}),
 ]
 

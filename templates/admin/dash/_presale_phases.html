@@ -1,0 +1,54 @@
+{% load humanize %}
+{% if all_presale_phases %}
+<h2 class="section-title">Presale phases (legacy fixed-price model)</h2>
+<p style="color:#6b7280; font-size:13px; margin:-6px 0 12px;">Before the BSC vault each phase had a fixed price and goal. The live presale prices on a linear on-chain curve instead; these rows remain only as the purchase records' phase container.</p>
+<div class="data-table">
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead style="background: #f9fafb;">
+            <tr>
+                <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                    Phase</th>
+                <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                    Name
+                </th>
+                <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                    Status</th>
+                <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
+                    Raised</th>
+                <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
+                    Participants</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for phase in all_presale_phases %}
+            <tr style="border-top: 1px solid #e5e7eb;">
+                <td style="padding: 12px;">Phase {{ phase.phase_number }}</td>
+                <td style="padding: 12px; font-weight: 500;">{{ phase.name }}</td>
+                <td style="padding: 12px;">
+                    {% if phase.status == 'active' %}
+                    <span
+                        style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">ACTIVE</span>
+                    {% elif phase.status == 'completed' %}
+                    <span
+                        style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">COMPLETED</span>
+                    {% elif phase.status == 'paused' %}
+                    <span
+                        style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">PAUSED</span>
+                    {% elif phase.status == 'upcoming' %}
+                    <span
+                        style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
+                    {% else %}
+                    <span
+                        style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
+                    {% endif %}
+                </td>
+                <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}
+                </td>
+                <td style="padding: 12px; text-align: right;">{{ phase.total_participants|intcomma }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
