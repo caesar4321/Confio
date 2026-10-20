@@ -2462,12 +2462,15 @@ export class AuthService {
       const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
       const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
+      // With the registered address, a V1 that reproduces it is the answer
+      // even when it looks empty on chain (see signInWithApple).
       const legacyInspection = await this.getLegacyAddressIfMigrationPending(
         iss,
         oauthSubject,
         aud,
         provider,
-        accountContext
+        accountContext,
+        serverAccount.algorandAddress,
       );
       if (!legacyInspection.inspectionSucceeded && !serverAccount.isKeylessMigrated) {
         // Same rule as the login flows: a V1-pending user must not get a V2
@@ -3274,12 +3277,17 @@ export class AuthService {
               const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
               const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
+              // This path can replace the stored address and register the
+              // replacement, so give the check the registered address: a V1
+              // that reproduces it must stay, even if it looks empty.
+              const serverAccountForSeed = await this.getServerAccountForContext(accountContext);
               const seedMigrationInspection = await this.getLegacyAddressIfMigrationPending(
                 iss,
                 oauthSubject,
                 aud,
                 provider,
-                accountContext
+                accountContext,
+                serverAccountForSeed === 'unknown' ? undefined : serverAccountForSeed.algorandAddress,
               );
               if (!seedMigrationInspection.inspectionSucceeded) {
                 // Opportunistic seed migration only: never overwrite the
@@ -3395,7 +3403,8 @@ export class AuthService {
         oauthSubject,
         aud,
         provider,
-        accountContext
+        accountContext,
+        serverAccountForSwitch.algorandAddress,
       );
       if (!switchInspection.inspectionSucceeded && !serverAccountForSwitch.isKeylessMigrated) {
         // Same rule as the login flows: a V1-pending user must not get a V2

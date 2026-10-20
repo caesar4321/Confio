@@ -22,17 +22,31 @@ jest.mock('@react-native-firebase/auth', () => ({
   signInWithCredential: jest.fn().mockResolvedValue({ user: {} }),
   getIdToken: jest.fn().mockResolvedValue('firebase-token'),
 }));
-jest.mock('react-native-keychain', () => ({ setGenericPassword: jest.fn().mockResolvedValue(true) }));
+jest.mock('react-native-keychain', () => ({
+  setGenericPassword: jest.fn().mockResolvedValue(true),
+  getGenericPassword: jest.fn().mockResolvedValue({ password: 'jwt' }),
+  getInternetCredentials: jest.fn().mockResolvedValue(null),
+}));
 jest.mock('../../apollo/client', () => ({
   apolloClient: { mutate: (...args: any[]) => mockMutate(...args) },
   AUTH_KEYCHAIN_SERVICE: 'auth', AUTH_KEYCHAIN_USERNAME: 'auth',
 }));
 jest.mock('../../apollo/mutations', () => ({ WEB3AUTH_LOGIN: {} }));
-jest.mock('../../utils/accountManager', () => ({ AccountManager: {} }));
+jest.mock('../../utils/accountManager', () => ({
+  AccountManager: { getInstance: () => ({ setActiveAccountContext: jest.fn() }) },
+}));
 jest.mock('../../utils/deviceFingerprint', () => ({ DeviceFingerprint: { generateFingerprint: jest.fn().mockResolvedValue(null) } }));
 jest.mock('../algorandService', () => ({}));
-jest.mock('../oauthStorageService', () => ({ oauthStorage: { storeOAuthSubject: jest.fn() } }));
+jest.mock('../oauthStorageService', () => ({
+  oauthStorage: {
+    storeOAuthSubject: jest.fn(),
+    getOAuthSubject: jest.fn().mockResolvedValue({ subject: 'google-sub', provider: 'google' }),
+  },
+}));
 jest.mock('../appCheckService', () => ({ appCheckService: { primeTokenForAuth: jest.fn() } }));
+jest.mock('../secureDeterministicWallet', () => ({
+  SecureDeterministicWalletService: { getInstance: () => ({}) },
+}));
 jest.mock('../signInWalletReconciliation', () => ({ reconcileSignInWallet: jest.fn() }));
 jest.mock('../signInSessionStorage', () => ({ persistSignInSession: jest.fn() }));
 jest.mock('../../config/env', () => ({
@@ -59,4 +73,43 @@ it('gives the legacy check the registered V1 address and the session token', asy
     'https://appleid.apple.com', 'apple-sub', 'com.confio.app', 'apple',
     { type: 'personal', index: 0 }, V1_ADDRESS, 'jwt',
   );
+  inspect.mockRestore();
+});
+
+describe('the other legacy checks get the registered address too (Google and Apple)', () => {
+  const personal = { type: 'personal', index: 0 };
+  const stop = new Error('stop after the legacy check');
+  let service: any;
+  let inspect: jest.SpyInstance;
+
+  beforeEach(() => {
+    service = AuthService.getInstance() as any;
+    service.auth = { currentUser: {} };
+    jest.spyOn(service, 'getServerAccountForContext')
+      .mockResolvedValue({ algorandAddress: V1_ADDRESS, isKeylessMigrated: false });
+    inspect = jest.spyOn(service, 'getLegacyAddressIfMigrationPending').mockRejectedValue(stop);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  const lastAnchor = () => inspect.mock.calls[inspect.mock.calls.length - 1][5];
+
+  it('when computing the account address', async () => {
+    await service.computeAndStoreAlgorandAddress(personal);
+    expect(inspect).toHaveBeenCalled();
+    expect(lastAnchor()).toBe(V1_ADDRESS);
+  });
+
+  it('when a switch re-derives a stored address (and could register a replacement)', async () => {
+    jest.spyOn(service, 'getStoredAlgorandAddress').mockResolvedValue(V1_ADDRESS);
+    await service.switchAccount('personal_0');
+    expect(inspect).toHaveBeenCalled();
+    expect(lastAnchor()).toBe(V1_ADDRESS);
+  });
+
+  it('when a switch derives an address that was never stored', async () => {
+    jest.spyOn(service, 'getStoredAlgorandAddress').mockResolvedValue(null);
+    await service.switchAccount('personal_0');
+    expect(inspect).toHaveBeenCalled();
+    expect(lastAnchor()).toBe(V1_ADDRESS);
+  });
 });
