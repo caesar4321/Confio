@@ -31,7 +31,7 @@
     <div class="metric-card">
         <div class="metric-label">Purchase limits (active phase)</div>
         <div class="metric-value">{% if presale_active_phase %}${{ presale_active_phase.min_purchase|floatformat:0|intcomma }}–${{ presale_active_phase.max_purchase|floatformat:0|intcomma }}{% else %}<span class="unknown">no phase</span>{% endif %}</div>
-        <div class="metric-change">{% if presale_active_phase %}per purchase · ${{ presale_active_phase.max_per_user|floatformat:0|intcomma }} per buyer{% else %}Purchases are refused{% endif %}</div>
+        <div class="metric-change">{% if presale_active_phase %}per purchase · {% if presale_active_phase.max_per_user %}${{ presale_active_phase.max_per_user|floatformat:0|intcomma }} per buyer{% else %}no per-buyer cap{% endif %}{% else %}Purchases are refused{% endif %}</div>
     </div>
     <div class="metric-card">
         <div class="metric-label">Raised, all time</div>
