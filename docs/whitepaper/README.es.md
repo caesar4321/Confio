@@ -235,8 +235,8 @@ Confío integra acceso elegible a Ondo Stocks mediante Ondo Global Markets en BN
 
 El router conecta las operaciones directamente con el saldo cUSD+:
 
-- **Compra:** redime la cantidad autorizada de cUSD+ a USDT, retiene la comisión explícita, liquida la compra certificada mediante Ondo Global Markets y entrega el token directamente a la billetera del usuario.
-- **Venta:** vende el token autorizado mediante Ondo Global Markets, descuenta la comisión explícita de los ingresos efectivos en USDT y vuelve a suscribir el neto en cUSD+ para el usuario.
+- **Compra:** redime la cantidad autorizada de cUSD+ a USDT por la salida ordinaria de cUSD+ (donde cUSD cobra la comisión del 0.9%), liquida la compra certificada mediante Ondo Global Markets con el USDT neto y entrega el token directamente a la billetera del usuario.
+- **Venta:** vende el token autorizado mediante Ondo Global Markets y vuelve a suscribir los ingresos efectivos en USDT en cUSD+ para el usuario por su entrada ordinaria, donde cUSD cobra la comisión del 0.9%.
 
 El router no cobra comisión propia. Una compra sale del ahorro por la salida ordinaria de cUSD+ a USDT y una venta vuelve por su entrada ordinaria, así que cada una paga la única comisión de conversión de cUSD del **0.9%**, la misma de cualquier retiro o depósito, sin tarifa por producto. Durante la transición de la app, las operaciones firmadas por versiones anteriores se liquidan con su 0.30% original hasta que esas versiones se retiren. La transacción autorizada incluye un límite máximo de comisión comparado con la comisión vigente de cUSD, y cualquier exceso de USDT debido a movimientos del precio cUSD+ o conversiones de liquidación se devuelve, en lugar de retenerse como segunda comisión oculta. El router contabiliza por separado las comisiones devengadas y no conserva principal ni tokens de acciones tras una liquidación exitosa.
 

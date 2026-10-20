@@ -235,8 +235,8 @@ Confío integrates eligible access to Ondo Stocks through Ondo Global Markets on
 
 The router connects stock trading directly to the user’s cUSD+ balance:
 
-- **Purchase:** the router redeems the authorized amount of cUSD+ into USDT, retains the explicit Confío fee, settles the attested purchase through Ondo Global Markets, and delivers the resulting stock token directly to the user’s wallet.
-- **Sale:** the router sells the user-authorized stock token through Ondo Global Markets, deducts the explicit Confío fee from actual USDT proceeds, and subscribes the net amount back into cUSD+ for the user.
+- **Purchase:** the router redeems the authorized amount of cUSD+ into USDT through cUSD+'s ordinary exit (where cUSD charges the 0.9% fee), settles the attested purchase through Ondo Global Markets with the net USDT, and delivers the resulting stock token directly to the user’s wallet.
+- **Sale:** the router sells the user-authorized stock token through Ondo Global Markets and subscribes the actual USDT proceeds back into cUSD+ for the user through its ordinary entry, where cUSD charges the 0.9% fee.
 
 The router charges no fee of its own. A purchase leaves savings through cUSD+'s ordinary USDT exit and a sale returns through its ordinary entry, so each pays cUSD's single **0.9%** conversion fee, the same fee as any withdrawal or deposit, with no product-specific rate. During the app transition, intents signed by pre-upgrade builds settle at their original 0.30% until those builds are retired. The user-authorized transaction carries a maximum-fee bound checked against cUSD's live fee, and any excess USDT created by cUSD+ price movement or settlement conversion is returned rather than retained as a second hidden fee. The router separately accounts for earned fees and does not retain trade principal or stock tokens after successful settlement.
 
