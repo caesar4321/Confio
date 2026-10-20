@@ -718,12 +718,14 @@ ConfioAdminSite.DASH_PAGES = [
         ('Conversions', 'conversion_conversion_changelist', ''),
         ('Transaction analytics', 'transaction_analytics', ''),
     )}),
-    ('savings', 'Savings & stocks', [
+    ('savings', 'Savings & investing', [
         _chain(sections.cusd_plus),
         _chain(sections.stocks),
+        _w(sections.crypto),
     ], [
         'admin/dash/_cusd_plus.html',
         'admin/dash/_stocks.html',
+        'admin/dash/_crypto.html',
     ], {'chain': True, 'tools': (
         ('Stock trades', 'blockchain_ondostocktrade_changelist', ''),
         ('Crypto swaps', 'blockchain_cryptoswaptrade_changelist', ''),
@@ -765,7 +767,7 @@ ConfioAdminSite.DASH_PAGES = [
         'admin/dash/_verifications.html',
         'admin/dash/_reward_security.html',
     ], {'tools': (
-        ('Pending documents', 'security_identityverification_changelist', 'status__exact=pending'),
+        ('Unfinished + in review', 'security_identityverification_changelist', 'status__exact=pending'),
         ('Suspicious activity', 'security_suspiciousactivity_changelist', ''),
         ('Bans', 'security_userban_changelist', ''),
     )}),

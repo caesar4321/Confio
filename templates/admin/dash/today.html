@@ -50,9 +50,9 @@
             <div class="kpi-sub">Marked to market</div>
         </div>
         <div class="kpi">
-            <div class="kpi-label">Stock trades, last 24h</div>
-            <div class="kpi-value">${{ stock_stats_24h.total_volume|floatformat:0|intcomma }}</div>
-            <div class="kpi-sub">{{ stock_stats_24h.confirmed|intcomma }} confirmed · {{ stock_stats_24h.unique_traders|intcomma }} traders</div>
+            <div class="kpi-label">Investment trades, last 24h</div>
+            <div class="kpi-value">${{ trades_24h_volume|floatformat:0|intcomma }}</div>
+            <div class="kpi-sub">Stocks ${{ stock_stats_24h.total_volume|floatformat:0|intcomma }} ({{ stock_stats_24h.confirmed|intcomma }}) · crypto &amp; gold ${{ crypto_stats_24h.total_volume|floatformat:0|intcomma }} ({{ crypto_stats_24h.confirmed|intcomma }})</div>
         </div>
     </div>
 </section>

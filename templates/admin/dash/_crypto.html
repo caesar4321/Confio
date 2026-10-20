@@ -1,0 +1,42 @@
+{% load humanize %}
+<!-- Crypto & metals (Bitcoin, gold, ...): same sponsorship ledger as stocks -->
+<h2 class="section-title">Crypto &amp; gold</h2>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Trades (24h)</div>
+        <div class="metric-value">{{ crypto_stats_24h.confirmed|intcomma }}</div>
+        <div class="metric-change">
+            {{ crypto_stats_24h.confirmed_buys|intcomma }} buys &middot;
+            {{ crypto_stats_24h.confirmed_sells|intcomma }} sells &middot;
+            {{ crypto_stats_24h.unique_traders|intcomma }} traders
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Settled volume (24h)</div>
+        <div class="metric-value">${{ crypto_stats_24h.total_volume|floatformat:2|intcomma }}</div>
+        <div class="metric-change">
+            Buys ${{ crypto_stats_24h.buy_volume|floatformat:2|intcomma }} &middot;
+            sells ${{ crypto_stats_24h.sell_volume|floatformat:2|intcomma }}
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Settled volume (30d)</div>
+        <div class="metric-value">${{ crypto_stats_30d.total_volume|floatformat:2|intcomma }}</div>
+        <div class="metric-change">
+            {{ crypto_stats_30d.confirmed|intcomma }} trades &middot;
+            {{ crypto_stats_30d.unique_traders|intcomma }} traders
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Failed / unresolved (30d)</div>
+        <div class="metric-value">{{ crypto_stats_30d.failed|intcomma }} / {{ crypto_stats_30d.unresolved|intcomma }}</div>
+        <div class="metric-change">
+            {% if crypto_stats_30d.history_missing %}{{ crypto_stats_30d.history_missing|intcomma }} confirmed without settlement history{% else %}Every confirmed trade has its history row{% endif %}
+        </div>
+    </div>
+</div>
+<p style="color:#6b7280; font-size:13px; margin:0 0 12px;">
+    Volumes are the settled USD value in account history. Current holdings value is not tracked yet
+    (stocks have a chain-scan snapshot; crypto does not).
+    <a href="{% url 'confio_admin:blockchain_cryptoswaptrade_changelist' %}">All crypto trades</a>
+</p>

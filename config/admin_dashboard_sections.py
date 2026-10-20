@@ -30,6 +30,10 @@ from users.models import Business, User
 from users.models_analytics import CountryMetrics, DailyMetrics, FunnelDailyRollup, FunnelEvent
 from users.rail_interest_metrics import build_rail_interest_metrics, merge_waitlist_counts
 
+# A pending row whose Didit session is waiting on a human. Every other
+# pending row is a session the person opened and has not finished.
+DIDIT_IN_REVIEW = Q(status='pending', risk_factors__didit__raw_status__iexact='in review')
+
 # Chain reads are cached by their own helpers for 30s; the admin keeps a
 # longer copy so moving between pages never waits on RPC twice.
 CHAIN_CACHE_SECONDS = 300
@@ -937,7 +941,7 @@ def verifications(w):
     """Latest identity documents."""
     context = {}
     # ID verifications (differentiate personal vs business)
-    context['pending_verifications_count'] = IdentityVerification.all_documents.filter(status='pending').count()
+    context['in_review_verifications_count'] = IdentityVerification.all_documents.filter(DIDIT_IN_REVIEW).count()
     recent_verifs_qs = IdentityVerification.all_documents.select_related('user').order_by('-created_at')[:10]
     recent_verifs = []
     for v in recent_verifs_qs:
@@ -1337,6 +1341,16 @@ def stocks(w, *, refresh=False):
     }
 
 
+def crypto(w):
+    """Crypto & metals trades (Bitcoin, gold, ...) on the sponsorship rail."""
+    from cusd_plus.metrics import get_crypto_trade_stats
+
+    return {
+        'crypto_stats_24h': get_crypto_trade_stats(since=w.last_24h),
+        'crypto_stats_30d': get_crypto_trade_stats(since=w.rolling_30_start),
+    }
+
+
 def sponsorship(w):
     """7702 sponsorship + BNB rescue health. Every user-facing BSC action
     rides the sponsor, so its failure counters are the BSC rail's health."""
@@ -1368,6 +1382,7 @@ def needs_attention(w, request, *, refresh=False):
         get_bnb_autoconvert_stats,
         get_cusd_bsc_platform_metrics,
         get_cusd_plus_platform_metrics,
+        get_crypto_trade_stats,
         get_sponsorship_stats,
         get_stock_trade_stats,
     )
@@ -1432,10 +1447,13 @@ def needs_attention(w, request, *, refresh=False):
     if autoconvert.get('pending'):
         items.append(_item(WARNING, 'BNB auto-converts pending', '',
                            _url('blockchain_pendingautoswap_changelist'), autoconvert['pending']))
-    stock_trades = get_stock_trade_stats(since=w.rolling_30_start)
-    if stock_trades['history_missing']:
-        items.append(_item(WARNING, 'Stock trades confirmed without settlement history (30d)', '',
-                           _url('dash_savings'), stock_trades['history_missing']))
+    for label, stats in (
+        ('Stock', get_stock_trade_stats(since=w.rolling_30_start)),
+        ('Crypto & gold', get_crypto_trade_stats(since=w.rolling_30_start)),
+    ):
+        if stats['history_missing']:
+            items.append(_item(WARNING, f'{label} trades confirmed without settlement history (30d)', '',
+                               _url('dash_savings'), stats['history_missing']))
 
     # Ramps.
     ramp_failed = RampTransaction.objects.filter(status='FAILED', updated_at__gte=w.last_24h).count()
@@ -1462,10 +1480,12 @@ def needs_attention(w, request, *, refresh=False):
                                infinia_review))
 
     # Identity.
-    pending_ids = IdentityVerification.all_documents.filter(status='pending').count()
-    if pending_ids:
-        items.append(_item(WARNING, 'ID documents waiting for review', '',
-                           _url('security_identityverification_changelist', 'status__exact=pending'), pending_ids))
+    # 'pending' is also every Didit session a person opened and never
+    # finished ("Not Started"/"In Progress"); only "In Review" needs us.
+    in_review = IdentityVerification.all_documents.filter(DIDIT_IN_REVIEW).count()
+    if in_review:
+        items.append(_item(WARNING, 'ID documents in Didit manual review', 'Decide them in the Didit console.',
+                           _url('security_identityverification_changelist', 'status__exact=pending'), in_review))
 
     # Legacy P2P: deprecated, but an escalated dispute is still someone's money.
     escalated = P2PDispute.objects.filter(status='ESCALATED').count()
@@ -1497,7 +1517,7 @@ def needs_attention(w, request, *, refresh=False):
 def today_money(w, *, refresh=False):
     """Headline money figures. Movido is the exact snapshot the website shows."""
     from cusd_plus import gm_tvl
-    from cusd_plus.metrics import get_fee_ledger_summary, get_stock_trade_stats
+    from cusd_plus.metrics import get_crypto_trade_stats, get_fee_ledger_summary, get_stock_trade_stats
     from cusd_plus.metrics import get_cusd_bsc_platform_metrics, get_cusd_plus_platform_metrics
     from ramps.metrics import public_fund_flow_snapshot
 
@@ -1506,6 +1526,8 @@ def today_money(w, *, refresh=False):
     except Exception:  # noqa: BLE001 — shown as unavailable, never as zero
         movido = None
     portfolio = gm_tvl.snapshot()
+    stock_24h = get_stock_trade_stats(since=w.last_24h)
+    crypto_24h = get_crypto_trade_stats(since=w.last_24h)
     cusd_bsc_metrics = _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, w, refresh=refresh)
     return {
         'movido': movido,
@@ -1516,7 +1538,9 @@ def today_money(w, *, refresh=False):
         ),
         'cusd_plus_metrics': _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, w, refresh=refresh),
         'stock_portfolio_value': (portfolio or {}).get('value_usd'),
-        'stock_stats_24h': get_stock_trade_stats(since=w.last_24h),
+        'stock_stats_24h': stock_24h,
+        'crypto_stats_24h': crypto_24h,
+        'trades_24h_volume': stock_24h['total_volume'] + crypto_24h['total_volume'],
     }
 
 

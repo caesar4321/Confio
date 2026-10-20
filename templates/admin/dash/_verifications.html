@@ -1,7 +1,7 @@
 {% load humanize %}
 <!-- New ID Verification Submissions -->
-<h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{ pending_verifications_count }}
-    pending){% endif %}</h2>
+<h2 class="section-title">New ID Verifications{% if in_review_verifications_count %} ({{ in_review_verifications_count }}
+    in Didit review){% endif %}</h2>
 <div class="data-table">
     <table>
         <thead>

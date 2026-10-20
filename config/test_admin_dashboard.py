@@ -1,4 +1,5 @@
 import dataclasses
+from decimal import Decimal
 from contextlib import ExitStack
 from unittest import mock
 
@@ -197,3 +198,33 @@ class DashboardPagesTests(TestCase):
         kwargs = [c.kwargs for c in flt.call_args_list if 'created_at__lt' in c.kwargs]
         self.assertEqual(len(kwargs), 1)
         self.assertLess(kwargs[0]['created_at__lt'], timezone.now() - timedelta(minutes=14))
+
+    def test_crypto_trades_are_counted_apart_from_stocks(self):
+        from blockchain.models import SponsoredBatch
+        from cusd_plus.metrics import get_crypto_trade_stats, get_stock_trade_stats
+
+        fields = {f.name for f in SponsoredBatch._meta.fields}
+        self.assertIn('kind', fields)
+        with mock.patch.object(SponsoredBatch.objects, 'filter', wraps=SponsoredBatch.objects.filter) as flt:
+            get_crypto_trade_stats()
+            get_stock_trade_stats()
+        kinds = [c.kwargs.get('kind__in') for c in flt.call_args_list if 'kind__in' in c.kwargs]
+        self.assertEqual(kinds, [('crypto_buy', 'crypto_sell'), ('stock_buy', 'stock_sell')])
+
+    def test_today_trades_tile_sums_stocks_and_crypto(self):
+        stats = lambda v: {'total_volume': Decimal(v), 'confirmed': 1}  # noqa: E731
+        with chain_reads(), \
+                mock.patch('cusd_plus.metrics.get_stock_trade_stats', return_value=stats('199')), \
+                mock.patch('cusd_plus.metrics.get_crypto_trade_stats', return_value=stats('50')):
+            money = sections.today_money(sections.Window.current())
+        self.assertEqual(money['trades_24h_volume'], Decimal('249'))
+
+    def test_only_didit_in_review_documents_need_attention(self):
+        from security.models import IdentityVerification
+
+        with mock.patch.object(IdentityVerification.all_documents, 'filter',
+                               wraps=IdentityVerification.all_documents.filter) as flt:
+            with chain_reads():
+                sections.needs_attention(sections.Window.current(), self.staff())
+        self.assertIn(mock.call(sections.DIDIT_IN_REVIEW), flt.call_args_list)
+        self.assertNotIn(mock.call(status='pending'), flt.call_args_list)

@@ -408,7 +408,18 @@ def get_sponsorship_stats(*, since=None) -> dict:
 
 
 def get_stock_trade_stats(*, since=None) -> dict:
-    """Database-backed Ondo Stocks activity and settlement metrics.
+    """Database-backed Ondo Stocks activity and settlement metrics."""
+    return _swap_trade_stats('stock_buy', 'stock_sell', since=since)
+
+
+def get_crypto_trade_stats(*, since=None) -> dict:
+    """Crypto & metals (Bitcoin, gold, ...) trades: same ledger and
+    settlement rows as stocks, its own kinds."""
+    return _swap_trade_stats('crypto_buy', 'crypto_sell', since=since)
+
+
+def _swap_trade_stats(buy_kind: str, sell_kind: str, *, since=None) -> dict:
+    """Activity and settlement metrics for one sponsored swap product.
 
     ``SponsoredBatch`` is the attempt/finality ledger. The linked unified row
     is the exact event-backed USD value shown in account history, so volumes
@@ -419,7 +430,7 @@ def get_stock_trade_stats(*, since=None) -> dict:
     from blockchain.models import SponsoredBatch
     from users.models_unified import UnifiedTransactionTable
 
-    rows = SponsoredBatch.objects.filter(kind__in=('stock_buy', 'stock_sell'))
+    rows = SponsoredBatch.objects.filter(kind__in=(buy_kind, sell_kind))
     windowed = rows if since is None else rows.filter(created_at__gte=since)
     by_status = {
         row['status']: row['count']
@@ -438,8 +449,8 @@ def get_stock_trade_stats(*, since=None) -> dict:
         output_field=DecimalField(max_digits=38, decimal_places=18),
     )
     volumes = settlements.aggregate(
-        buy=Sum(amount, filter=Q(sponsored_batch__kind='stock_buy')),
-        sell=Sum(amount, filter=Q(sponsored_batch__kind='stock_sell')),
+        buy=Sum(amount, filter=Q(sponsored_batch__kind=buy_kind)),
+        sell=Sum(amount, filter=Q(sponsored_batch__kind=sell_kind)),
     )
     buy_volume = volumes['buy'] or Decimal('0')
     sell_volume = volumes['sell'] or Decimal('0')
@@ -448,11 +459,11 @@ def get_stock_trade_stats(*, since=None) -> dict:
 
     return {
         'total': windowed.count(),
-        'buy_attempts': windowed.filter(kind='stock_buy').count(),
-        'sell_attempts': windowed.filter(kind='stock_sell').count(),
+        'buy_attempts': windowed.filter(kind=buy_kind).count(),
+        'sell_attempts': windowed.filter(kind=sell_kind).count(),
         'confirmed': confirmed_count,
-        'confirmed_buys': confirmed.filter(kind='stock_buy').count(),
-        'confirmed_sells': confirmed.filter(kind='stock_sell').count(),
+        'confirmed_buys': confirmed.filter(kind=buy_kind).count(),
+        'confirmed_sells': confirmed.filter(kind=sell_kind).count(),
         'unique_traders': confirmed.values('user_id').distinct().count(),
         'buy_volume': buy_volume,
         'sell_volume': sell_volume,
