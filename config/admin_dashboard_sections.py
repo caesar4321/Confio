@@ -1418,10 +1418,16 @@ def needs_attention(w, request, *, refresh=False):
     if sponsor['failed']:
         items.append(_item(WARNING, 'Sponsored transactions failed (24h)', 'Reverted, dropped, reorged or no-op.',
                            _url('blockchain_sponsoredbatch_changelist'), sponsor['failed']))
-    if sponsor['unresolved_all_time']:
-        items.append(_item(WARNING, 'Sponsored transactions never resolved', 'Signed or sent, no receipt.',
-                           _url('blockchain_sponsoredbatch_changelist', 'status__in=signed,sent'),
-                           sponsor['unresolved_all_time']))
+    # Signed/sent is the normal state until the receipt task runs (seconds
+    # after broadcast); only a batch still waiting after 15 minutes is stuck.
+    from blockchain.models import SponsoredBatch
+
+    unresolved = SponsoredBatch.objects.filter(
+        status__in=('signed', 'sent'), created_at__lt=w.now - timedelta(minutes=15),
+    ).count()
+    if unresolved:
+        items.append(_item(WARNING, 'Sponsored transactions unresolved after 15 minutes', 'Signed or sent, no receipt.',
+                           _url('blockchain_sponsoredbatch_changelist', 'status__in=signed,sent'), unresolved))
     autoconvert = get_bnb_autoconvert_stats()
     if autoconvert.get('pending'):
         items.append(_item(WARNING, 'BNB auto-converts pending', '',
@@ -1468,9 +1474,11 @@ def needs_attention(w, request, *, refresh=False):
                            _url('p2p_exchange_p2pdispute_changelist', 'status__exact=ESCALATED'), escalated))
 
     # Our own reporting pipeline: a missing nightly job makes every number stale.
-    yesterday = w.today_arg - timedelta(days=1)
+    # users.capture_daily_metrics runs 03:00 UTC for the UTC day before;
+    # require the day its latest run (plus an hour) should have written.
+    expected_snapshot = (w.now - timedelta(days=1, hours=4)).astimezone(dt_timezone.utc).date()
     latest_snapshot = DailyMetrics.objects.order_by('-date').values_list('date', flat=True).first()
-    if latest_snapshot is None or latest_snapshot < yesterday:
+    if latest_snapshot is None or latest_snapshot < expected_snapshot:
         items.append(_item(WARNING, 'Nightly analytics snapshot missing',
                            f'Latest DailyMetrics: {latest_snapshot or "none"}.', _url('users_dailymetrics_changelist')))
     # users.rollup_funnel_events runs 03:30 UTC and rolls up the UTC day

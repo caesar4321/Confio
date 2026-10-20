@@ -185,3 +185,15 @@ class DashboardPagesTests(TestCase):
             created_at=timezone.datetime.combine(target, timezone.datetime.min.time(), dt_timezone.utc)
             + timedelta(hours=12))
         self.assertEqual(self._rollup_titles(), [f'Funnel rollup missing for {target}'])
+
+    def test_fresh_sponsored_batch_is_not_unresolved(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from blockchain.models import SponsoredBatch
+
+        with mock.patch.object(SponsoredBatch.objects, 'filter', wraps=SponsoredBatch.objects.filter) as flt:
+            with chain_reads():
+                sections.needs_attention(sections.Window.current(), self.staff())
+        kwargs = [c.kwargs for c in flt.call_args_list if 'created_at__lt' in c.kwargs]
+        self.assertEqual(len(kwargs), 1)
+        self.assertLess(kwargs[0]['created_at__lt'], timezone.now() - timedelta(minutes=14))
