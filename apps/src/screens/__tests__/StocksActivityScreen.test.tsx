@@ -9,6 +9,9 @@ afterAll(() => setNumberLocaleCountry(null));
 let mockStats: any;
 let mockInvestError = true; // default: an older server, the stock-only screen
 let mockStocksEnabled = true;
+let mockInvestErrorMessage = 'Cannot query field "investTradingStats" on type "Query".';
+let mockInvestStats: any;
+const mockInvestRefetch = jest.fn();
 const mockNavigate = jest.fn();
 jest.mock('@apollo/client', () => ({
   gql: (strings: TemplateStringsArray) => strings.join(''),
@@ -16,8 +19,8 @@ jest.mock('@apollo/client', () => ({
     if (options?.skip) return { data: undefined, loading: false, refetch: jest.fn() };
     if (query.includes('investTradingStats')) {
       return mockInvestError
-        ? { data: undefined, error: new Error('Cannot query field'), loading: false, refetch: jest.fn() }
-        : { data: mockStats === undefined ? undefined : { investTradingStats: mockStats }, loading: false, refetch: jest.fn() };
+        ? { data: undefined, error: new Error(mockInvestErrorMessage), loading: false, refetch: mockInvestRefetch }
+        : { data: { investTradingStats: mockInvestStats === undefined ? mockStats : mockInvestStats }, loading: false, refetch: mockInvestRefetch };
     }
     return { data: mockStats === undefined ? undefined : { gmTradingStats: mockStats }, loading: false, refetch: jest.fn() };
   },
@@ -31,7 +34,7 @@ jest.mock('../../components/common/BrandFieldBackground', () => ({ BrandFieldBac
 jest.mock('../../components/EmptyState', () => {
   const ReactLocal = require('react');
   const { Text } = require('react-native');
-  return { EmptyState: (props: any) => ReactLocal.createElement(Text, null, props.title) };
+  return { EmptyState: (props: any) => ReactLocal.createElement(Text, { onAction: props.onAction }, props.title) };
 });
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 
@@ -128,6 +131,26 @@ describe('StocksActivityScreen as Inversiones en movimiento', () => {
     expect(tree.root.find((n) => n.type === Pressable && n.props.accessibilityHint === 'Ver NVDA').props.disabled).toBe(true);
     expect(tree.root.find((n) => n.type === Pressable && n.props.accessibilityHint === 'Ver BTC').props.disabled).toBe(false);
     expect(text(tree)).not.toContain('Explorar acciones');
+  });
+
+  it('a network failure retries the combined query, never the stock-only one', () => {
+    mockInvestError = true;
+    mockInvestErrorMessage = 'Network request failed';
+    mockStocksEnabled = false;
+    const tree = render();
+    expect(text(tree)).toContain('No pudimos cargar estos datos');
+    mockInvestRefetch.mockClear();
+    act(() => tree.root.find((n) => n.props.onAction).props.onAction());
+    expect(mockInvestRefetch).toHaveBeenCalled();
+    mockInvestErrorMessage = 'Cannot query field "investTradingStats" on type "Query".';
+  });
+
+  it('a withheld combined view falls back to stocks for stock members', () => {
+    mockInvestStats = null;
+    mockStats = STATS;
+    const tree = render();
+    expect(tree.root.findByType('Header' as any).props.title).toBe('Acciones en movimiento');
+    mockInvestStats = undefined;
   });
 
   it('an older server keeps the stock-only screen', () => {

@@ -73,6 +73,10 @@ class TradingStats:
     since: object | None
     top_assets: list = field(default_factory=list)
     computed_at: float = 0.0
+    # Distinct wallets behind the crypto part of scope 'all'. Its total
+    # minus the stock-only total IS the crypto volume, so 'all' is stated
+    # only when that part has MIN_TRADERS wallets too (or none at all).
+    crypto_trader_count: int = 0
 
 
 def _dec(value) -> Decimal | None:
@@ -143,6 +147,7 @@ def compute(scope: str = 'stocks') -> TradingStats:
     buy_wallets = set()
     sell_wallets = set()
     per_asset: dict[str, dict] = {}
+    crypto_wallets = set()
     since = None
     for batch, symbol in zip(batches, symbols):
         # Dollars from the settled history row itself, exactly what Home's
@@ -153,6 +158,8 @@ def compute(scope: str = 'stocks') -> TradingStats:
             continue  # hidden or missing: not volume
         wallet = batch.user_bsc_address.lower()
         wallets.add(wallet)
+        if batch.kind in CRYPTO_KINDS:
+            crypto_wallets.add(wallet)
         since = since or batch.created_at
         if batch.kind.endswith('_buy'):
             buy_usd += usd
@@ -196,7 +203,19 @@ def compute(scope: str = 'stocks') -> TradingStats:
         sell_usd=float(sell_usd) if split_ok else None,
         buy_count=buy_count, sell_count=sell_count, trader_count=len(wallets),
         median_buy_usd=median, since=since, top_assets=top, computed_at=time.time(),
+        crypto_trader_count=len(crypto_wallets),
     )
+
+
+def publishable(stats: TradingStats | None, scope: str = 'stocks') -> bool:
+    """May this snapshot's figures be stated at all? Never for one or two
+    people: neither the whole, nor (scope 'all') the crypto part that the
+    difference with the stock-only scope would reveal."""
+    if stats is None or stats.trader_count < MIN_TRADERS:
+        return False
+    if scope != 'stocks' and 0 < getattr(stats, 'crypto_trader_count', 0) < MIN_TRADERS:
+        return False
+    return True
 
 
 def _signature(scope: str = 'stocks'):
@@ -250,6 +269,4 @@ def trading_stats(scope: str = 'stocks') -> TradingStats | None:
     """The public breakdown: None until MIN_TRADERS distinct wallets have
     traded, so even the total never describes one or two people."""
     stats = snapshot(scope)
-    if stats is None or stats.trader_count < MIN_TRADERS:
-        return None
-    return stats
+    return stats if publishable(stats, scope) else None

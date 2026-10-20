@@ -146,6 +146,24 @@ class InvestScopeTests(TestCase):
         self.assertEqual(by_ticker['NVDA'].kind, 'stock')
         self.assertNotIn('XAUT', by_ticker)  # one wallet: below the privacy floor
 
+    def test_all_is_withheld_while_one_or_two_people_trade_crypto(self):
+        from . import gm_volume
+
+        for i in range(3):
+            self.trade('stock_buy', 'NVDAon', 10, f'0x{i:040x}')
+        self.trade('crypto_buy', 'BTCB', 7, '0x' + '8' * 40)  # one crypto trader
+        with patch('cusd_plus.stock_month._decode_trades', side_effect=lambda b: self.decoded[:len(b)]), \
+                patch.object(gm_trading_stats, '_names', return_value={}):
+            # all − stocks would be that one person's exact volume.
+            self.assertEqual(gm_volume.traded_usd('stocks'), 30.0)
+            self.assertIsNone(gm_volume.traded_usd('all'))
+            self.assertIsNone(gm_trading_stats.trading_stats('all'))
+            for i in range(1, 3):
+                self.trade('crypto_buy', 'BTCB', 1, f'0x{i:040x}')
+            for scope in gm_trading_stats.SCOPES:
+                cache.delete(gm_trading_stats._key(gm_trading_stats.FRESH_KEY, scope))
+            self.assertEqual(gm_volume.traded_usd('all'), 39.0)
+
     def test_scopes_cache_separately(self):
         for i in range(3):
             self.trade('crypto_buy', 'BTCB', 5, f'0x{i:040x}')

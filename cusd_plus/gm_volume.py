@@ -14,9 +14,7 @@ def traded_usd(scope: str = 'stocks') -> float | None:
     Only from the shared snapshot behind Acciones en movimiento: the tile
     never shows a total the screen it opens can't (still building, or below
     the privacy floor). Home then keeps its other numbers."""
-    from .gm_trading_stats import MIN_TRADERS, snapshot
+    from .gm_trading_stats import publishable, snapshot
 
     stats = snapshot(scope)
-    if stats is None or stats.trader_count < MIN_TRADERS:
-        return None
-    return stats.total_usd
+    return stats.total_usd if publishable(stats, scope) else None

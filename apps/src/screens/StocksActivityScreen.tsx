@@ -102,15 +102,21 @@ export const StocksActivityScreen = () => {
     errorPolicy: 'all',
     notifyOnNetworkStatusChange: true,
   });
-  // An older server rejects the whole query (unknown field): only then ask
-  // for the stock-only breakdown.
+  // The stock-only breakdown, only when the combined one can't exist here:
+  // an older server rejects the whole query (unknown field), or the server
+  // withholds it (privacy floor) for someone who may see stocks. Any other
+  // failure stays on the combined query, so Reintentar retries it.
+  const unsupported = (invest.error?.graphQLErrors ?? []).some(e => /Cannot query field/.test(e.message ?? ''))
+    || /Cannot query field/.test(invest.error?.message ?? '');
+  const withheld = !invest.loading && !invest.error && invest.data != null
+    && invest.data.investTradingStats == null && stocksEnabled;
   const legacy = useQuery(GM_TRADING_STATS, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
     notifyOnNetworkStatusChange: true,
-    skip: !invest.error,
+    skip: !(unsupported || withheld),
   });
-  const investMode = !invest.error;
+  const investMode = !(unsupported || withheld);
   const { data, loading, error, refetch } = investMode ? invest : legacy;
   const stats = (investMode ? data?.investTradingStats : data?.gmTradingStats) ?? null;
 
