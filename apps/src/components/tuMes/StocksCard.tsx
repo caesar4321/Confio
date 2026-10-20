@@ -138,14 +138,19 @@ export function StocksCard({ value, month, isCurrent, masked, settlingPhase = 'f
       )}
       {exact && (
         <HowSheet visible={sheet} onClose={() => setSheet(false)} value={value} month={month}
-          isCurrent={isCurrent} masked={masked} />
+          isCurrent={isCurrent} masked={masked} testID="tumes-stocks-how-sheet"
+          body={`${isCurrent ? 'Al valor de hoy' : `Al valor al cierre de ${monthName(month)}`} le restamos lo que valían el 1 y lo que compraste, y le sumamos lo que vendiste: así, poner dinero no cuenta como ganancia. Las compras incluyen el costo de operación. Usamos los precios de Ondo; los dividendos ya están en el precio.`} />
       )}
     </CardShell>
   );
 }
 
-function HowSheet({ visible, onClose, value, month, isCurrent, masked }: {
-  visible: boolean; onClose: () => void; value: StockMonth; month: number; isCurrent: boolean; masked: boolean;
+/** "¿Cómo lo calculamos?": the month's arithmetic, row by row (shared by the
+ *  investment cards; each says where its prices come from in `body`). */
+export function HowSheet({ visible, onClose, value, month, isCurrent, masked, body, testID }: {
+  visible: boolean; onClose: () => void; month: number; isCurrent: boolean; masked: boolean;
+  value: Pick<StockMonth, 'valueUsd' | 'valueStartUsd' | 'boughtUsd' | 'soldUsd' | 'gainUsd'>;
+  body: string; testID: string;
 }) {
   const usd = (v: string | null, sign = '') => (masked ? MASK : `${sign}${formatUsdAmount(Number(v ?? 0), { decimals: 2 })}`);
   const rows: [string, string][] = [
@@ -158,7 +163,7 @@ function HowSheet({ visible, onClose, value, month, isCurrent, masked }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Cerrar" />
-      <View style={styles.sheet} testID="tumes-stocks-how-sheet">
+      <View style={styles.sheet} testID={testID}>
         <View style={styles.handle} />
         <Text style={styles.sheetTitle} accessibilityRole="header">¿Cómo lo calculamos?</Text>
         {rows.map(([label, v], i) => (
@@ -168,11 +173,7 @@ function HowSheet({ visible, onClose, value, month, isCurrent, masked }: {
             <Text style={styles.sheetValue}>{v}</Text>
           </View>
         ))}
-        <Text style={styles.sheetBody}>
-          {isCurrent ? 'Al valor de hoy' : `Al valor al cierre de ${monthName(month)}`} le restamos lo que valían el 1 y lo que compraste, y le sumamos lo que vendiste: así, poner
-          dinero no cuenta como ganancia. Las compras incluyen el costo de operación. Usamos los precios de Ondo; los
-          dividendos ya están en el precio.
-        </Text>
+        <Text style={styles.sheetBody}>{body}</Text>
         <TouchableOpacity style={styles.cta} onPress={onClose} accessibilityRole="button">
           <Text style={styles.ctaText}>Entendido</Text>
         </TouchableOpacity>
@@ -181,7 +182,8 @@ function HowSheet({ visible, onClose, value, month, isCurrent, masked }: {
   );
 }
 
-const styles = StyleSheet.create({
+/** Shared with CryptoCard: the two investment cards look the same. */
+export const investCardStyles = StyleSheet.create({
   resultRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   result: { fontSize: 28, lineHeight: 34, fontWeight: '700', color: colors.flowIn.text, fontVariant: ['tabular-nums'], flexShrink: 1 },
   resultDown: { color: colors.textFlat },
@@ -207,3 +209,4 @@ const styles = StyleSheet.create({
   cta: { marginTop: 20, minHeight: 48, borderRadius: 14, backgroundColor: colors.primaryDark, alignItems: 'center', justifyContent: 'center' },
   ctaText: { fontSize: 16, fontWeight: '700', color: colors.white },
 });
+const styles = investCardStyles;

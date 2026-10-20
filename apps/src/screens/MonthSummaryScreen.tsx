@@ -34,6 +34,7 @@ import { RecurringCard } from '../components/tuMes/RecurringCard';
 import { Rise } from '../components/tuMes/motion';
 import { TuMesIntro } from '../components/tuMes/TuMesIntro';
 import { StocksCard } from '../components/tuMes/StocksCard';
+import { CryptoCard } from '../components/tuMes/CryptoCard';
 import {
   useMonthInsights, type InsightData,
 } from '../hooks/useMonthInsights';
@@ -56,6 +57,47 @@ export const SETTLING_FAST_TRIES = 15;
 export const SETTLING_SLOW_MS = 30000;
 export const SETTLING_MAX_TRIES = SETTLING_FAST_TRIES + 28;
 export type SettlingPhase = 'fast' | 'slow' | 'stalled';
+
+/** Polls one settling card: fast, then slow, then stalled (its own budget,
+ *  restarted each time the card enters settling). Unfocused ticks don't
+ *  count: the tick parks itself in `resumes` until the screen is back. */
+function useSettlingPoll(
+  active: boolean, refresh: () => void,
+  focused: React.MutableRefObject<boolean>, resumes: React.MutableRefObject<Set<() => void>>,
+): SettlingPhase {
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const [phase, setPhase] = useState<SettlingPhase>('fast');
+  useEffect(() => {
+    setPhase('fast');
+    if (!active) return undefined;
+    let tries = 0;
+    let id: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      id = setTimeout(tick, tries < SETTLING_FAST_TRIES ? SETTLING_POLL_MS : SETTLING_SLOW_MS);
+    };
+    const tick = () => {
+      if (!focused.current) {            // paused: unfocused ticks don't count
+        resumes.current.add(schedule);
+        return;
+      }
+      tries += 1;
+      refreshRef.current();
+      if (tries === SETTLING_FAST_TRIES) setPhase('slow');
+      if (tries >= SETTLING_MAX_TRIES) {
+        setPhase('stalled');
+        return;
+      }
+      schedule();
+    };
+    schedule();
+    return () => {
+      clearTimeout(id);
+      resumes.current.delete(schedule);
+    };
+  }, [active, focused, resumes]);
+  return phase;
+}
 
 function monthsBetween(a: { year: number; month: number }, b: { year: number; month: number }) {
   return (b.year - a.year) * 12 + (b.month - a.month);
@@ -110,52 +152,23 @@ export function MonthSummaryScreen() {
   refreshInsights.current = insights.refresh;
 
   // Arriving from a buy or sell: the trade may not be final yet ("settling").
-  // Re-ask the stocks card alone until it resolves in place (bounded).
+  // Re-ask that card alone until it resolves in place (bounded).
   // Also when a shown card (gain · value_only) got a 'settling' answer: it
   // keeps its last value meanwhile and updates once the trade is final.
-  const settling = insights.revealed && insights.stocksSettling;
-  const refreshStocks = useRef(insights.refreshStocks);
-  refreshStocks.current = insights.refreshStocks;
+  // "Tus acciones" and "Oro y Bitcoin" each have their own poll and budget.
   // Not while another screen is on top (the user moved on): no wasted asks
-  // and no timer left spinning; the poll pauses and resumes on refocus.
+  // and no timer left spinning; the polls pause and resume on refocus.
   const focused = useRef(true);
-  const resumePoll = useRef<(() => void) | null>(null);
+  const resumePolls = useRef(new Set<() => void>());
   useFocusEffect(useCallback(() => {
     focused.current = true;
-    const resume = resumePoll.current;
-    resumePoll.current = null;
-    resume?.();
+    const resume = [...resumePolls.current];
+    resumePolls.current.clear();
+    resume.forEach((fn) => fn());
     return () => { focused.current = false; };
   }, []));
-  const [settlingPhase, setSettlingPhase] = useState<SettlingPhase>('fast');
-  useEffect(() => {
-    setSettlingPhase('fast');
-    if (!settling) return undefined;
-    let tries = 0;
-    let id: ReturnType<typeof setTimeout>;
-    const schedule = () => {
-      id = setTimeout(tick, tries < SETTLING_FAST_TRIES ? SETTLING_POLL_MS : SETTLING_SLOW_MS);
-    };
-    const tick = () => {
-      if (!focused.current) {            // paused: unfocused ticks don't count
-        resumePoll.current = schedule;
-        return;
-      }
-      tries += 1;
-      refreshStocks.current();
-      if (tries === SETTLING_FAST_TRIES) setSettlingPhase('slow');
-      if (tries >= SETTLING_MAX_TRIES) {
-        setSettlingPhase('stalled');
-        return;
-      }
-      schedule();
-    };
-    schedule();
-    return () => {
-      clearTimeout(id);
-      resumePoll.current = null;
-    };
-  }, [settling]);
+  const stocksPhase = useSettlingPoll(insights.revealed && insights.stocksSettling, insights.refreshStocks, focused, resumePolls);
+  const cryptoPhase = useSettlingPoll(insights.revealed && insights.cryptoSettling, insights.refreshCrypto, focused, resumePolls);
 
   // Back from a movement list where categories may have changed: re-read.
   // (refetch via ref: the effect must run per focus, never per render.)
@@ -227,7 +240,8 @@ export function MonthSummaryScreen() {
         </View>
       ) : (
         <MonthBody
-          settlingPhase={settlingPhase}
+          stocksPhase={stocksPhase}
+          cryptoPhase={cryptoPhase}
           summary={summary}
           masked={masked}
           isCurrent={isCurrent}
@@ -243,6 +257,8 @@ export function MonthSummaryScreen() {
           // cross-link both ways) instead of stacking copies of each.
           onOpenStocks={() => navigation.navigate('StocksList', undefined, { pop: true })}
           onOpenStock={(ticker) => navigation.navigate('StockDetail', { ticker })}
+          onOpenCrypto={() => navigation.navigate('BottomTabs', { screen: 'Invest' })}
+          onOpenCryptoAsset={(symbol) => navigation.navigate('CryptoDetail', { symbol })}
         />
       )}
       {/* Joyful full-screen intro on every entry (founder 2026-10-05); tap to skip. */}
@@ -266,7 +282,8 @@ function SkeletonState() {
 }
 
 type BodyProps = {
-  settlingPhase: SettlingPhase;
+  stocksPhase: SettlingPhase;
+  cryptoPhase: SettlingPhase;
   summary: MonthSummary;
   masked: boolean;
   isCurrent: boolean;
@@ -281,6 +298,8 @@ type BodyProps = {
   onTopUp: () => void;
   onOpenStocks: () => void;
   onOpenStock: (ticker: string) => void;
+  onOpenCrypto: () => void;
+  onOpenCryptoAsset: (symbol: string) => void;
 };
 
 /** One precision on this screen: whole dollars (design C, 2026-10-04). */
@@ -318,7 +337,7 @@ const isUnknownWallet = (key: string, name: string) =>
 /** A single unknown wallet is a deposit only if no money went out to it. */
 const externalName = (sent: number) => (sent > 0 ? 'Billetera externa' : 'Depósito externo');
 
-function MonthBody({ summary, masked, isCurrent, business, insights, runKey, settlingPhase, onOpen, onSend, onReceive, onSave, onTopUp, onOpenStocks, onOpenStock }: BodyProps) {
+function MonthBody({ summary, masked, isCurrent, business, insights, runKey, stocksPhase, cryptoPhase, onOpen, onSend, onReceive, onSave, onTopUp, onOpenStocks, onOpenStock, onOpenCrypto, onOpenCryptoAsset }: BodyProps) {
   const cur = summary.current;
 
   const uncategorized = cur.spendingByCategory.find((c) => c.category === 'uncategorized');
@@ -381,9 +400,14 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, set
           {insights.stocks && insights.stocks.state !== 'none' && (
             // gain · value_only · settling (resolves in place)
             <StocksCard value={insights.stocks} month={summary.month} isCurrent={isCurrent} masked={masked}
-              settlingPhase={settlingPhase} onOpenStocks={onOpenStocks} onOpenStock={onOpenStock} />
+              settlingPhase={stocksPhase} onOpenStocks={onOpenStocks} onOpenStock={onOpenStock} />
           )}
           {insights.stocks?.state === 'none' && insights.stocks.canBuy && <StocksInvite onOpen={onOpenStocks} />}
+          {insights.crypto && insights.crypto.state !== 'none' && (
+            // Same states as stocks; 'none' draws nothing (no invitation).
+            <CryptoCard value={insights.crypto} month={summary.month} isCurrent={isCurrent} masked={masked}
+              settlingPhase={cryptoPhase} onOpenAll={onOpenCrypto} onOpenAsset={onOpenCryptoAsset} />
+          )}
           {insights.insights && (
             <Rise index={2}>
               <RecurringCard items={recurring} year={summary.year} month={summary.month} today={today} masked={masked}

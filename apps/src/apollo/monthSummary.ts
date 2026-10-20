@@ -240,3 +240,42 @@ export type StockMonth = {
   holdings: number;
   topMover: { ticker: string; name: string; changePct: string } | null;
 };
+
+// "Oro y Bitcoin" (crypto & gold) for the viewed month: the twin of
+// stockMonth, in its own query (an older server fails only this request).
+export const GET_CRYPTO_MONTH = gql`
+  query CryptoMonth($year: Int!, $month: Int!, $timezone: String) {
+    cryptoMonth(year: $year, month: $month, timezone: $timezone) {
+      state
+      valueUsd
+      valueStartUsd
+      boughtUsd
+      soldUsd
+      gainUsd
+      gainPct
+      holdings
+      assets {
+        symbol
+        ticker
+        name
+        category
+        changePct
+      }
+    }
+  }
+`;
+
+export type CryptoMonth = {
+  /** Same states as StockMonth; 'none' draws nothing (no invitation). */
+  state: 'gain' | 'value_only' | 'settling' | 'none';
+  valueUsd: string;
+  valueStartUsd: string | null;
+  boughtUsd: string | null;
+  soldUsd: string | null;
+  /** value − value on the 1st − bought + sold: deposits never read as gains */
+  gainUsd: string | null;
+  gainPct: string | null;
+  holdings: number;
+  /** Held at the end of the month, Bitcoin first; changePct null when unknown. */
+  assets: { symbol: string; ticker: string; name: string; category: string; changePct: string | null }[];
+};

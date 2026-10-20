@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH } from '../../apollo/monthSummary';
+import { GET_CRYPTO_MONTH, GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH } from '../../apollo/monthSummary';
 
 const mockQuery = jest.fn();
 const mockClient = { query: (...a: any[]) => mockQuery(...a) };
@@ -323,3 +323,48 @@ it('only a settling answer keeps the screen polling; whatever resolves it ends t
   expect(latest.stocksSettling).toBe(true);           // a later trade starts over
 });
 
+describe('"Oro y Bitcoin" slot', () => {
+  it('is its own query, revealed with the rest, and merges like stocks', () => {
+    const settling = { state: 'settling', valueUsd: '1.00' };
+    const gain = { state: 'gain', valueUsd: '2.00' };
+    const none = { state: 'none', valueUsd: '0.00' };
+    const shown = { insights: null, savings: null, protection: null, stocks: null };
+    expect(mergeValues({ ...shown, crypto: settling } as any, { ...shown, crypto: gain } as any).crypto).toBe(gain);
+    expect(mergeValues({ ...shown, crypto: gain } as any, { ...shown, crypto: settling } as any).crypto).toBe(gain);
+    expect(mergeValues({ ...shown, crypto: null } as any, { ...shown, crypto: gain } as any).crypto).toBeNull();
+    expect(mergeValues({ ...shown, crypto: settling } as any, { ...shown, crypto: none } as any).crypto).toBe(none);
+  });
+
+  it('a settling crypto card is polled on its own slot and resolves in place', async () => {
+    let crypto: any = { state: 'settling', valueUsd: '0.00', holdings: 0 };
+    mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+      query === GET_CRYPTO_MONTH ? { cryptoMonth: crypto } : query === GET_STOCK_MONTH ? { stockMonth: null } : {} }));
+    await act(async () => { renderer.create(<Probe {...base} />); });
+    expect(latest.crypto.state).toBe('settling');
+    expect(latest.cryptoSettling).toBe(true);
+    expect(latest.stocksSettling).toBe(false);
+    mockQuery.mockClear();
+    crypto = { state: 'gain', valueUsd: '140.00', holdings: 1 };
+    await act(async () => { latest.refreshCrypto(); });
+    expect(mockQuery.mock.calls.map(([o]: any) => o.query)).toEqual([GET_CRYPTO_MONTH]);
+    expect(latest.crypto.state).toBe('gain');
+    expect(latest.cryptoSettling).toBe(false);
+  });
+
+  it('a focus refresh asks crypto only when its card is drawn', async () => {
+    let crypto: any = { state: 'none', valueUsd: '0.00' };
+    mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+      query === GET_CRYPTO_MONTH ? { cryptoMonth: crypto } : {} }));
+    await act(async () => { renderer.create(<Probe {...base} />); });
+    mockQuery.mockClear();
+    await act(async () => { latest.refresh(); });
+    expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_CRYPTO_MONTH)).toHaveLength(0);
+    crypto = { state: 'gain', valueUsd: '5.00' };
+    await act(async () => { renderer.create(<Probe {...base} month={9} isCurrent={false} />); });
+    mockQuery.mockClear();
+    crypto = { state: 'gain', valueUsd: '6.00' };
+    await act(async () => { latest.refresh(); });
+    expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_CRYPTO_MONTH)).toHaveLength(1);
+    expect(latest.crypto.valueUsd).toBe('6.00');
+  });
+});

@@ -6,6 +6,8 @@ jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../../components/tuMes/TuMesIntro', () => ({ TuMesIntro: () => null }));
 // Entrance motion is covered in motion.test.tsx; here the cards render in place.
 jest.mock('../../components/tuMes/motion', () => ({ Rise: ({ children }: any) => children, Grow: ({ children }: any) => children }));
+// Asset marks are SVG art (covered elsewhere); here only the rows matter.
+jest.mock('../../components/CryptoAssetMark', () => ({ CryptoAssetMark: () => null }));
 jest.mock('react-native-svg', () => {
   const R = require('react');
   const C = (p: any) => R.createElement('Svg', p, p.children);
@@ -30,11 +32,13 @@ jest.mock('@apollo/client', () => ({
 }));
 let mockInsights: any;
 const mockRefreshStocks = jest.fn();
+const mockRefreshCrypto = jest.fn();
 jest.mock('../../hooks/useMonthInsights', () => ({
   // Like the hook: polling follows the latest stocks answer of a shown card.
   useMonthInsights: () => ({
     stocksSettling: Boolean(mockInsights?.stocks) && mockInsights.stocks.state === 'settling',
-    ...mockInsights, refresh: jest.fn(), refreshStocks: mockRefreshStocks,
+    cryptoSettling: Boolean(mockInsights?.crypto) && mockInsights.crypto.state === 'settling',
+    ...mockInsights, refresh: jest.fn(), refreshStocks: mockRefreshStocks, refreshCrypto: mockRefreshCrypto,
   }),
 }));
 
@@ -160,6 +164,59 @@ it('a settling trade (arriving from a buy) shows the card and re-asks stocks unt
   act(() => { jest.advanceTimersByTime(SETTLING_SLOW_MS * 100); });
   expect(mockRefreshStocks).toHaveBeenCalledTimes(SETTLING_MAX_TRIES);
   expect(note()).toMatch(/Vuelve más tarde/);
+  act(() => tree.unmount());
+  jest.useRealTimers();
+});
+
+const cryptoGain = {
+  state: 'gain', valueUsd: '140.00', valueStartUsd: '60.00', boughtUsd: '66.00', soldUsd: '0.00',
+  gainUsd: '14.00', gainPct: '11.11', holdings: 1,
+  assets: [{ symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin', category: 'crypto', changePct: '16.67' }],
+};
+
+it('"Oro y Bitcoin" sits under "Tus acciones"; none or unknown draws nothing', () => {
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: stockGain, crypto: cryptoGain };
+  expect(order(mount())).toEqual(['tumes-summary-card', 'tumes-savings-card', 'tumes-stocks-card',
+    'tumes-crypto-card', 'tumes-recurring-card']);
+  mockInsights = { ...mockInsights, crypto: { ...cryptoGain, state: 'none', assets: [] } };
+  expect(has(mount(), 'tumes-crypto-card')).toBe(false);
+  mockInsights = { ...mockInsights, crypto: null };
+  expect(has(mount(), 'tumes-crypto-card')).toBe(false);
+});
+
+it('a settling crypto card is polled alone (stocks resolved stays quiet)', () => {
+  jest.useFakeTimers();
+  mockRefreshStocks.mockClear();
+  mockRefreshCrypto.mockClear();
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: stockGain,
+    crypto: { ...cryptoGain, state: 'settling', gainUsd: null, gainPct: null, valueStartUsd: null } };
+  const tree = mount();
+  expect(has(tree, 'tumes-crypto-settling-note')).toBe(true);
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 2); });
+  expect(mockRefreshCrypto).toHaveBeenCalledTimes(2);
+  expect(mockRefreshStocks).not.toHaveBeenCalled();
+  act(() => tree.unmount());
+  jest.useRealTimers();
+});
+
+it('each card has its own poll budget: a stalled crypto poll never blocks a new stocks one', () => {
+  jest.useFakeTimers();
+  mockRefreshStocks.mockClear();
+  mockRefreshCrypto.mockClear();
+  mockSummary = summary(3);
+  const settlingCrypto = { ...cryptoGain, state: 'settling', gainUsd: null, gainPct: null, valueStartUsd: null };
+  mockInsights = { revealed: true, insights: recurring, savings, protection: null, stocks: stockGain, crypto: settlingCrypto };
+  let tree!: renderer.ReactTestRenderer;
+  act(() => { tree = renderer.create(<MonthSummaryScreen />); });
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * SETTLING_FAST_TRIES + SETTLING_SLOW_MS * 100); });
+  expect(mockRefreshCrypto).toHaveBeenCalledTimes(SETTLING_MAX_TRIES);      // crypto stalled
+  mockInsights = { ...mockInsights, stocks: { ...stockGain, state: 'settling', gainUsd: null, gainPct: null, valueStartUsd: null } };
+  act(() => { tree.update(<MonthSummaryScreen />); });
+  act(() => { jest.advanceTimersByTime(SETTLING_POLL_MS * 2); });
+  expect(mockRefreshStocks).toHaveBeenCalledTimes(2);
+  expect(mockRefreshCrypto).toHaveBeenCalledTimes(SETTLING_MAX_TRIES);      // still stalled, not restarted
   act(() => tree.unmount());
   jest.useRealTimers();
 });

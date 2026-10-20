@@ -44,11 +44,14 @@ def _fetch(instrument: str, bar: str, lookback_ms: int | None) -> list[dict]:
         if str(body.get('code')) != '0':
             raise RuntimeError(f"OKX {body.get('code')}: {body.get('msg')}")
         page = body.get('data') or []
-        for c in page:  # newest first: [ts, open, high, low, close, ...]
+        for c in page:  # newest first: [ts, open, high, low, close, ..., confirm]
             ts = int(c[0])
             if ts >= since:
                 rows[ts] = {'timestamp': ts, 'open': float(c[1]), 'high': float(c[2]),
-                            'low': float(c[3]), 'close': float(c[4])}
+                            'low': float(c[3]), 'close': float(c[4]),
+                            # '1' = the candle is closed; '0' = still forming
+                            # (its close is provisional: never a month boundary).
+                            'confirmed': len(c) > 8 and str(c[8]) == '1'}
         if len(page) < PAGE or int(page[-1][0]) < since:
             break
         after = page[-1][0]
@@ -62,7 +65,7 @@ def ohlc(token, range_key: str) -> list[dict]:
     if not instrument:
         return []
     bar, lookback, ttl = RANGES[range_key]
-    key = f'crypto_ohlc_v1_{instrument}_{range_key}'
+    key = f'crypto_ohlc_v2_{instrument}_{range_key}'
     data = cache.get(key)
     if data is None:
         data = _fetch(instrument, bar, lookback)

@@ -161,13 +161,18 @@ def pending_trades(bsc_address: str) -> list[Trade]:
                           .select_related('unified_transaction').order_by('created_at', 'id'))
 
 
+def is_buy(trade: Trade) -> bool:
+    """stock_buy / crypto_buy: the ledger helpers serve both cards."""
+    return trade.kind.endswith('_buy')
+
+
 def ledger_units(trades: list[Trade], before: datetime | None = None) -> dict:
     """{symbol: units} the ledger says the wallet held at `before` (all time when None)."""
     units: dict[str, Decimal] = {}
     for t in trades:
         if before is not None and t.when >= before:
             continue
-        sign = 1 if t.kind == 'stock_buy' else -1
+        sign = 1 if is_buy(t) else -1
         units[t.symbol] = units.get(t.symbol, Decimal('0')) + sign * t.units
     return {s: u for s, u in units.items() if u != 0}
 
@@ -200,7 +205,7 @@ def _apply(units: dict, trades: list[Trade]) -> dict | None:
     out = dict(units)
     moved: dict = {}
     for t in trades:
-        out[t.symbol] = out.get(t.symbol, Decimal('0')) + (t.units if t.kind == 'stock_buy' else -t.units)
+        out[t.symbol] = out.get(t.symbol, Decimal('0')) + (t.units if is_buy(t) else -t.units)
         moved[t.symbol] = moved.get(t.symbol, Decimal('0')) + t.units
     held = {}
     for s, u in out.items():

@@ -181,6 +181,41 @@ class StockMonthType(graphene.ObjectType):
     holdings = graphene.Int(required=True, description='Positions held at the end of the month')
 
 
+class CryptoAssetMoveType(graphene.ObjectType):
+    symbol = graphene.String(required=True)
+    ticker = graphene.String(required=True)
+    name = graphene.String(required=True, description="Spanish display name ('Bitcoin', 'Oro')")
+    category = graphene.String(required=True, description="'crypto' | 'metal'")
+    change_pct = graphene.String(description='Price change over the viewed month, 2 decimals; null when unknown')
+
+
+class CryptoMonthType(graphene.ObjectType):
+    state = graphene.String(required=True, description="Same states as stockMonth: 'gain' | 'value_only' | "
+                                                       "'settling' | 'none'")
+    value_usd = graphene.String(required=True, description='Value at the end of the month (today on the current month)')
+    value_start_usd = graphene.String(description='gain: value on the 1st')
+    bought_usd = graphene.String(description='gain: Confío purchases this month (exact settlements, fees included)')
+    sold_usd = graphene.String(description='gain: Confío sales this month (exact settlements, after fees)')
+    gain_usd = graphene.String(description='gain: value_usd − value_start_usd − bought_usd + sold_usd')
+    gain_pct = graphene.String(description='gain: over (value_start_usd + bought_usd), 2 decimals')
+    assets = graphene.List(graphene.NonNull(CryptoAssetMoveType), required=True,
+                           description='Assets held at the end of the month, Bitcoin first')
+    holdings = graphene.Int(required=True, description='Assets held at the end of the month')
+
+
+def _exact_gain(result):
+    """(gain, gain_pct) from the cents shown, so "¿Cómo lo calculamos?" adds
+    up to the cent and the percent never disagrees with the dollars beside it."""
+    gain, gain_pct = result.gain, result.gain_pct
+    if gain is not None and None not in (result.value_start, result.bought, result.sold):
+        cents = lambda v: v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)  # noqa: E731
+        gain = (cents(result.value_end) - cents(result.value_start)
+                - cents(result.bought) + cents(result.sold))
+        base = cents(result.value_start) + cents(result.bought)
+        gain_pct = gain / base * 100 if base > 0 else None
+    return gain, gain_pct
+
+
 class MonthSummaryQuery(graphene.ObjectType):
     month_summary = graphene.Field(
         MonthSummaryType,
@@ -237,6 +272,15 @@ class MonthSummaryQuery(graphene.ObjectType):
                     'anything is unknown (fail closed) or stocks are not offered. Own query.',
     )
 
+    crypto_month = graphene.Field(
+        CryptoMonthType,
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True),
+        timezone=graphene.String(),
+        description='"Oro y Bitcoin" in Tu mes: the month\'s gain net of Confío buys and sells. Null whenever '
+                    'anything is unknown (fail closed) or crypto is not offered. Own query.',
+    )
+
     def resolve_stock_month(self, info, year, month, timezone=None):
         from django.utils import timezone as dj_tz
         from cusd_plus.eligibility import stock_buy_overlay_allows
@@ -270,20 +314,40 @@ class MonthSummaryQuery(graphene.ObjectType):
         # Dollars and percents alike: 2 decimals, half up.
         opt = lambda v: None if v is None else _usd(v)  # noqa: E731
         top = result.top
-        gain, gain_pct = result.gain, result.gain_pct
-        if gain is not None and None not in (result.value_start, result.bought, result.sold):
-            # From the cents shown, so "¿Cómo lo calculamos?" adds up to the cent
-            # and the percent never disagrees with the dollars beside it.
-            cents = lambda v: v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)  # noqa: E731
-            gain = (cents(result.value_end) - cents(result.value_start)
-                    - cents(result.bought) + cents(result.sold))
-            base = cents(result.value_start) + cents(result.bought)
-            gain_pct = gain / base * 100 if base > 0 else None
+        gain, gain_pct = _exact_gain(result)
         return StockMonthType(
             state=result.state, can_buy=can_buy, value_usd=_usd(result.value_end),
             value_start_usd=opt(result.value_start), bought_usd=opt(result.bought), sold_usd=opt(result.sold),
             gain_usd=opt(gain), gain_pct=opt(gain_pct), holdings=result.holdings,
             top_mover=StockMoverType(ticker=top.ticker, name=top.name, change_pct=_usd(top.change_pct)) if top else None)
+
+    def resolve_crypto_month(self, info, year, month, timezone=None):
+        from django.utils import timezone as dj_tz
+        from cusd_plus import crypto_risk
+        from cusd_plus.crypto_month import crypto_month
+        from users.cashflow import month_window
+        context = _summary_context(info, year, month, timezone)
+        if context is None:
+            return None
+        user, account, _account_type, _business_id, tz = context
+        if not crypto_risk.surfaces_enabled(user, getattr(info.context, 'META', {})):
+            return None
+        start, end = month_window(int(year), int(month), tz)
+        try:
+            result = crypto_month(account.bsc_address or '', start, end, dj_tz.now())
+        except Exception:  # noqa: BLE001 — an unknown hides the card, never a guess
+            logger.warning('crypto month unavailable for account %s', account.id, exc_info=True)
+            return None
+        if result is None:
+            return None
+        opt = lambda v: None if v is None else _usd(v)  # noqa: E731
+        gain, gain_pct = _exact_gain(result)
+        return CryptoMonthType(
+            state=result.state, value_usd=_usd(result.value_end),
+            value_start_usd=opt(result.value_start), bought_usd=opt(result.bought), sold_usd=opt(result.sold),
+            gain_usd=opt(gain), gain_pct=opt(gain_pct), holdings=result.holdings,
+            assets=[CryptoAssetMoveType(symbol=a.symbol, ticker=a.ticker, name=a.name, category=a.category,
+                                        change_pct=opt(a.change_pct)) for a in result.assets])
 
     def resolve_protection_value(self, info, timezone=None, include_stable=False):
         from django.utils import timezone as dj_tz

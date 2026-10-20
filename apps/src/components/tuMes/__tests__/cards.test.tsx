@@ -5,6 +5,8 @@ import { Text, TouchableOpacity } from 'react-native';
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 // Entrance motion is covered in motion.test.tsx; here the cards render in place.
 jest.mock('../motion', () => ({ Rise: ({ children }: any) => children, Grow: ({ children }: any) => children }));
+// Asset marks are SVG art (covered elsewhere); here only the rows matter.
+jest.mock('../../CryptoAssetMark', () => ({ CryptoAssetMark: () => null }));
 jest.mock('react-native-svg', () => {
   const R = require('react');
   const C = (p: any) => R.createElement('Svg', p, p.children);
@@ -240,6 +242,70 @@ describe('StocksCard', () => {
     expect(moverVerb(0.01)).toBe('se mantuvo');
     expect(moverIcon(-0.03)).toBe('minus');          // flat is never a falling line
     expect(moverIcon(-3)).toBe('trending-down');
+  });
+});
+
+describe('CryptoCard', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { CryptoCard } = require('../CryptoCard');
+  const base = {
+    state: 'gain', valueUsd: '181.00', valueStartUsd: '100.00', boughtUsd: '66.00', soldUsd: '0.00',
+    gainUsd: '15.00', gainPct: '9.04', holdings: 2,
+    assets: [{ symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin', category: 'crypto', changePct: '16.67' },
+      { symbol: 'XAUT', ticker: 'XAUT', name: 'Oro', category: 'metal', changePct: '-2.00' }],
+  };
+  const card = (value: any, extra: any = {}) => mount(
+    <CryptoCard value={value} month={10} isCurrent masked={false} onOpenAsset={jest.fn()} onOpenAll={jest.fn()} {...extra} />);
+
+  it('shows the month result net of purchases and one row per asset, Bitcoin first', () => {
+    const all = texts(card(base)).join(' | ');
+    expect(all).toContain('Oro y Bitcoin');
+    expect(all).toContain('+US$15.00');
+    expect(all).toContain('+9%');
+    expect(all).toContain('Pusiste US$66');
+    expect(all).toMatch(/subió 16[.,]7% en octubre \| Bitcoin \| .*bajó 2% en octubre \| Oro/);
+  });
+
+  it('a down month is calm, never red', () => {
+    const gain = byId(card({ ...base, gainUsd: '-3.10', gainPct: '-1.50' }), 'tumes-crypto-gain')[0];
+    expect([].concat(gain.props.children).join('')).toBe('−US$3.10');
+    expect(StyleFlat(gain.props.style).color).toBe(colors.textFlat);
+  });
+
+  it('value only: no gain, and says why', () => {
+    const tree = card({ ...base, state: 'value_only', gainUsd: null, gainPct: null, valueStartUsd: null });
+    expect(byId(tree, 'tumes-crypto-gain')).toHaveLength(0);
+    expect(byId(tree, 'tumes-crypto-value-note')).toHaveLength(1);
+    expect(byId(tree, 'tumes-crypto-how')).toHaveLength(0);
+  });
+
+  it('a first purchase still settling shows no US$0, only that it is confirming', () => {
+    const tree = card({ ...base, state: 'settling', valueUsd: '0.00', holdings: 0, gainUsd: null, gainPct: null,
+      valueStartUsd: null, boughtUsd: null, soldUsd: null, assets: [] });
+    expect(texts(tree).join(' | ')).not.toContain('US$0');
+    expect(byId(tree, 'tumes-crypto-settling-note')).toHaveLength(1);
+  });
+
+  it('an asset whose month change is unknown shows its name only', () => {
+    const all = texts(card({ ...base, assets: [{ ...base.assets[1], changePct: null }] })).join(' | ');
+    expect(all).toContain('Oro');
+    expect(all).not.toMatch(/subió|bajó|se mantuvo/);
+  });
+
+  it('masked hides every amount', () => {
+    expect(texts(card(base, { masked: true })).join(' | ')).not.toMatch(/US\$\d/);
+  });
+
+  it('tapping an asset opens it; the sheet adds up', () => {
+    const onOpenAsset = jest.fn();
+    const tree = card(base, { onOpenAsset });
+    tree.root.findAll((n) => n.props.testID === 'tumes-crypto-asset-XAUT' && typeof n.props.onPress === 'function')[0]
+      .props.onPress();
+    expect(onOpenAsset).toHaveBeenCalledWith('XAUT');
+    act(() => { tree.root.findAll((n) => n.props.testID === 'tumes-crypto-how' && typeof n.props.onPress === 'function')[0].props.onPress(); });
+    const sheet = texts(tree).join(' | ');
+    expect(sheet).toContain('Resultado del mes');
+    expect(sheet).toContain('las ventas ya lo descuentan');
   });
 });
 

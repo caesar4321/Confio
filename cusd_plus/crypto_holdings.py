@@ -111,20 +111,37 @@ def _storable(key: str, generation, block: int | None) -> bool:
 def holdings_units(address: str) -> dict | None:
     """{symbol: base units (int)} the wallet holds; {} when nothing; None
     when UNKNOWN (scan failed and no stored row)."""
+    snapshot = holdings_snapshot(address)
+    return None if snapshot is None else snapshot[0]
+
+
+def _row_block(row) -> int | None:
+    blocks = [int(b) for b in (row.blocks or {}).values() if b is not None]
+    return max(blocks) if blocks else None
+
+
+def holdings_snapshot(address: str, *, allow_last_known: bool = True) -> tuple[dict, int | None] | None:
+    """(holdings_units, block the balances were read at — None when not
+    known), or None when UNKNOWN. The block lets a caller tell a node behind
+    a confirmed swap (the RPC pool rotates) from a wallet that moved.
+    `allow_last_known=False`: a failed scan is unknown, never the stored row
+    (a stale row can't vouch that no coins moved in or out since)."""
     from blockchain.models import CryptoHoldings
 
     if not address:
-        return {}
+        return {}, None
     key = _key(address)
     row = CryptoHoldings.objects.filter(bsc_address=key).first()
     if row is not None and not row.is_stale and timezone.now() - row.scanned_at <= STALE_AFTER:
-        return {s: int(u) for s, u in row.held.items()}
+        return {s: int(u) for s, u in row.held.items()}, _row_block(row)
     generation = _generation(key)
     try:
         held, block = _scan(key)
     except Exception:  # noqa: BLE001 — degrade to last-known, never to vanished
         logger.warning('crypto holdings scan failed for %s', key, exc_info=True)
-        return {s: int(u) for s, u in row.held.items()} if row is not None else None
+        if row is None or not allow_last_known:
+            return None
+        return {s: int(u) for s, u in row.held.items()}, _row_block(row)
     if _storable(key, generation, block):
         blocks = {symbol: block for symbol in held}
         CryptoHoldings.objects.update_or_create(
@@ -135,4 +152,4 @@ def holdings_units(address: str) -> dict | None:
         # generation moved meanwhile, this pre-trade read is stale.
         if _generation(key) != generation:
             CryptoHoldings.objects.filter(bsc_address=key).update(is_stale=True)
-    return {s: int(u) for s, u in held.items()}
+    return {s: int(u) for s, u in held.items()}, block
