@@ -444,6 +444,9 @@ def reviewer_decline_comment(response_payload: dict[str, Any]) -> str | None:
     Reviewers write it to the person ("Hola, necesitamos que tu selfie…"), in
     their language, so it is what the app shows. Only the latest decline
     counts: an older one's note belongs to an attempt already redone.
+    Declines our own API wrote ("API Client": compliance, the ban blocklist)
+    carry internal notes that name fraud checks and cases; only a Console
+    reviewer, signed in with an email, ever speaks to the person.
     """
     reviews = response_payload.get('reviews')
     declines = [
@@ -453,6 +456,8 @@ def reviewer_decline_comment(response_payload: dict[str, Any]) -> str | None:
     if not declines:
         return None
     latest = max(declines, key=lambda review: str(review.get('created_at') or ''))
+    if '@' not in str(latest.get('user') or ''):
+        return ''
     return str(latest.get('comment') or '').strip()
 
 

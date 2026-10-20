@@ -882,6 +882,24 @@ class DiditIntegrationTests(TestCase):
         self.assertIn('vencido', verification.rejected_reason)
 
     @patch('security.didit.requests.request')
+    def test_an_api_written_decline_note_stays_internal(self, mock_request):
+        payload = self._declined_payload('sess_api_note')
+        payload['reviews'] = [
+            {'user': 'susy@confio.lat', 'new_status': 'Declined', 'comment': 'Usa tu cédula vigente.',
+             'created_at': '2026-10-14T10:00:00Z'},
+            {'user': 'API Client', 'new_status': 'Declined',
+             'comment': 'Cuenta suspendida de forma permanente: vinculada al caso X.',
+             'created_at': '2026-10-15T10:00:00Z'},
+        ]
+        mock_request.return_value = self._mock_response(payload)
+
+        verification, _ = sync_didit_session(session_id='sess_api_note', expected_user=self.user)
+
+        self.assertEqual(verification.status, 'rejected')
+        # Neither the internal note nor the superseded reviewer note.
+        self.assertFalse(verification.rejected_reason)
+
+    @patch('security.didit.requests.request')
     def test_a_later_silent_decline_clears_the_earlier_note(self, mock_request):
         first = self._declined_payload('sess_redeclined')
         first['reviews'] = [{'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': 'Usa tu cédula vigente.',
