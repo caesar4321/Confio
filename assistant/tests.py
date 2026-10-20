@@ -960,6 +960,66 @@ MARKET = [
 CANDLES = [{'timestamp': 2, 'close': '170'}, {'timestamp': 1, 'close': '200'}]
 
 
+class ClaimedScreenTests(TestCase):
+    def _belt(self):
+        user, _ = User.objects.get_or_create(username='cs', defaults={'phone_country': 'BO'})
+        viewer = Viewer(user=user, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        return Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)
+
+    def test_a_claimed_screen_is_opened(self):
+        from .engine import _open_claimed_screen
+        belt = self._belt()
+        belt.result.reply = 'Puedes explorar acciones. Abriré la pantalla de Invertir para que veas las opciones.'
+        _open_claimed_screen(belt, belt.result)
+        self.assertEqual([a['destination'] for a in belt.result.actions], ['invest'])
+        self.assertEqual(belt.result.tools[-1]['name'], 'navigate:auto')
+        for reply in ('Te abro Recargar: elige el monto.', 'Te llevo a "Efectivo con un agente".'):
+            belt = self._belt()
+            belt.result.reply = reply
+            _open_claimed_screen(belt, belt.result)
+            self.assertEqual(len(belt.result.actions), 1, reply)
+
+    def test_no_claim_two_screens_or_a_refusal_open_nothing(self):
+        from .engine import _open_claimed_screen
+        # Audit 2026-10-20: questions, offers, negations, past turns and a screen word later on never open.
+        for reply in ('En Invertir puedes ver las acciones.', 'No puedo abrir Invertir desde aquí.',
+                      '¿Te abro la pantalla de Invertir?', '¿Te explico cómo funciona o te abro Invertir?',
+                      'Si quieres, te llevo a Invertir.', 'No abrí Invertir porque las acciones no están disponibles.',
+                      'No te llevo a Retirar porque en Bolivia no se puede retirar.',
+                      'Como te abrí antes, en Invertir puedes ver las acciones.',
+                      'Ya te abrí Invertir arriba; ahí eliges la acción.',
+                      'Te abrí la página de Apple para que puedas invertir.',
+                      'Te abro Cuenta inteligente, donde podrás pagar tus cuentas solo.',
+                      'Te abrí Recibir. Te llevo a Enviar después.', 'Te abro Invertir cuando quieras.',
+                      'Te llevo a Invertir una vez que verifiques tu identidad.', 'Ya te abrí Invertir hace un momento.',
+                      'Te abro Invertir o Recibir, como prefieras.', 'Te llevo a pagar tu deuda: no puedo hacer eso.',
+                      'Te abro Invertir. No, mejor no: primero verifica tu identidad.',
+                      'Te abro Invertir apenas verifiques tu identidad.', 'Te abro Invertir y Recibir.',
+                      'Te abro Invertir. Si prefieres, te llevo a Recibir.'):
+            belt = self._belt()
+            belt.result.reply = reply
+            _open_claimed_screen(belt, belt.result)
+            self.assertEqual(belt.result.actions, [], reply)
+
+
+class HoldingsGainTests(TestCase):
+    @patch('cusd_plus.gm_api.all_market', return_value=MARKET)
+    @patch('cusd_plus.gm_holdings.known_holdings_units', return_value={'AAPLon': '0.01', 'APPon': '1'})
+    def test_holdings_carry_invested_and_gain_when_trades_explain_them(self, *_):
+        from inbox.member_portfolio import _Book
+        from .engine import _holdings
+        books = {'AAPLon': _Book(units=Decimal('0.01'), cost=Decimal('1.50'))}
+        with patch('assistant.engine._trade_books', return_value=books):
+            rows = {r['ticker']: r for r in _holdings('0xabc')}
+        self.assertEqual(rows['AAPL']['valor_usd'], '1.81')  # 0.01 * 180.5
+        self.assertEqual((rows['AAPL']['invertido_usd'], rows['AAPL']['ganancia_usd'], rows['AAPL']['ganancia_pct']),
+                         ('1.50', '0.31', '20.3'))
+        self.assertNotIn('ganancia_usd', rows['APP'])  # no trades explain it: never guessed
+        with patch('assistant.engine._trade_books', return_value=None):
+            self.assertNotIn('ganancia_usd', _holdings('0xabc')[0])
+
+
 class MarketToolTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='mkt', password='x', phone_country='BO')

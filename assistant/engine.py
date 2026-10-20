@@ -328,6 +328,10 @@ def portfolio_data(viewer: Viewer):
     if result['acciones_y_confio_dollar_plus_disponibles'] is not False:
         result['confio_dollar_plus_rendimiento_anual_hoy'] = _plus_net_apy()
     result['nota'] = 'El rendimiento ganado este mes en Confío Dollar+ aún no está disponible: no lo menciones.'
+    if isinstance(result.get('acciones'), list) and any('ganancia_usd' in r for r in result['acciones']):
+        result['nota'] += (' En acciones, invertido_usd es lo que pagó por las que tiene y ganancia_usd/ganancia_pct '
+                           'es la ganancia o pérdida si vendiera hoy (no realizada). Si una acción no trae ganancia, '
+                           'no la calcules.')
     if not spent:
         # New accounts: saying "no tengo datos de tus gastos" on every answer
         # was the most repeated filler in real replies (2026-10-08 review).
@@ -646,8 +650,23 @@ def _plus_usd(shares):
     return _usd(Decimal(shares) * Decimal(price) / Decimal(10 ** 36))
 
 
+def _trade_books(address):
+    """Average-cost books per symbol from the stored trade ledger (no chain
+    read), or None when it can't be read."""
+    try:
+        from cusd_plus.stock_month import confirmed_trades
+        from inbox.member_portfolio import walk_trades
+
+        books, _, _ = walk_trades(confirmed_trades(address), timezone.now())
+        return books
+    except Exception:  # noqa: BLE001 - no cost data, values still shown
+        logger.warning('Confio Assistant: trade ledger unavailable', exc_info=True)
+        return None
+
+
 def _holdings(address):
     from cusd_plus import gm_api
+    from inbox.member_portfolio import UNITS_TOLERANCE
     from cusd_plus.gm_holdings import known_holdings_units
     from cusd_plus.schema import _gm_listing
 
@@ -663,6 +682,7 @@ def _holdings(address):
     except Exception:  # noqa: BLE001 - unknown, not empty
         logger.warning('Confio Assistant: market unavailable for holdings', exc_info=True)
         return 'desconocido'
+    books = _trade_books(address)
     rows = []
     for symbol, amount in units.items():
         pm = (market.get(symbol) or {}).get('primaryMarket') or {}
@@ -670,8 +690,19 @@ def _holdings(address):
             continue
         listing = _gm_listing(market.get(symbol) or {}) or (symbol, symbol.removesuffix('on'), '')
         ticker, name = listing[1], third_party_text(listing[2], 40)
-        rows.append({'ticker': ticker, 'nombre': name or ticker,
-                     'valor_usd': _usd(Decimal(str(amount)) * Decimal(str(pm['price'])))})
+        held = Decimal(str(amount))
+        value = held * Decimal(str(pm['price']))
+        row = {'ticker': ticker, 'nombre': name or ticker, 'valor_usd': _usd(value)}
+        # What they paid, from their own confirmed trades (the same books as
+        # their Comunidad profile), only when those trades explain every unit.
+        book = (books or {}).get(symbol)
+        if (book is not None and book.explained and book.units > 0 and book.cost > 0
+                and abs(book.units - held) <= max(book.units, held) * UNITS_TOLERANCE):
+            row['invertido_usd'] = _usd(book.cost)
+            row['ganancia_usd'] = _usd((value - book.cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) + 0)
+            pct = ((value - book.cost) / book.cost * 100).quantize(Decimal('0.1'))
+            row['ganancia_pct'] = f'{pct + 0:f}'  # never "-0.0"
+        rows.append(row)
     rows.sort(key=lambda r: Decimal(r['valor_usd'].replace(',', '')), reverse=True)
     return rows[:15]
 
@@ -1213,6 +1244,51 @@ def history_items(messages):
     return items
 
 
+# "Abriré la pantalla de Invertir" with no navigate call left the person on the
+# same screen (2026-10-20). When a reply claims to open exactly one screen
+# and none opened, open it: the words and the app then agree.
+# Only a sentence that STARTS with the claim and names the screen right after
+# it: "¿Te abro…?", "Si quieres, te llevo…", "No abrí…", "Como te abrí antes…"
+# never match, and neither does a screen word later in the sentence.
+_SCREEN_WORDS = {
+    'Invertir': 'invest', 'Recargar': 'top_up', 'Recibir': 'receive', 'Retirar': 'withdraw', 'Enviar': 'send',
+    'Pagar': 'pay_qr', 'Perfil': 'profile', 'Descubrir': 'discover', 'Inicio': 'home',
+    'Efectivo con un agente': 'cash_directory', 'Tu mes': 'month_summary', 'la lista de acciones': 'stocks',
+}
+# Present or future only ("abriré", "te abro", "te llevo"): a past "abrí" in a
+# turn that opened nothing is about an earlier turn, or simply false. The
+# screen is matched case-sensitively, so a verb ("te llevo a pagar") isn't one.
+_CLAIMED_SCREEN = re.compile(
+    r'(?i:(te )?(abro|abrir[eé]|llevo) (a |la pantalla( de)? |la secci[oó]n( de)? |la pestaña( de)? )?)["“]?'
+    r'(?P<screen>' + '|'.join(re.escape(k) for k in _SCREEN_WORDS) + r')\b')
+_NOT_NOW = re.compile(r'\?|\b(si|cuando|cuanto|una vez que|despu[eé]s|luego|mañana|antes|arriba|anterior|o|'
+                      r'apenas|en un rato|m[aá]s tarde|siempre que|a menos que|en caso de|tambi[eé]n)\b|mejor no',
+                      re.I)
+_ANY_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _SCREEN_WORDS))
+
+
+def _open_claimed_screen(belt, result):
+    if not belt.can_navigate or any(a.get('type') == 'navigate' for a in result.actions):
+        return
+    reply = result.reply or ''
+    if re.search(r'mejor no', reply, re.I):
+        return
+    named = set()
+    for sentence in re.split(r'(?<=[.!?:;])\s+', reply):
+        sentence = sentence.strip()
+        if not re.search(r'(?i)\b(abro|abrir[eé]|llevo)\b', sentence):
+            continue
+        screens = set(_ANY_SCREEN.findall(sentence))
+        if _NOT_NOW.search(sentence) or len(screens) != 1 or not _CLAIMED_SCREEN.match(sentence):
+            return  # any doubtful claim in the reply: open nothing
+        named.add(_SCREEN_WORDS[screens.pop()])
+    if len(named) == 1:
+        (key,) = named
+        if key in belt.destinations and belt.navigate(key).get('ok'):
+            # Countable apart from the model's own navigate calls.
+            result.tools.append({'name': 'navigate:auto', 'ok': True, 'args': {'destination': key}})
+
+
 def run_turn(viewer: Viewer, history, *, first_name, account_label, country, analyses_left, can_navigate=True,
              reserve_analysis=None, reserve_news=None, waiting_for_team=False):
     """Answer the last user message in `history`. Raises AssistantUnavailable,
@@ -1227,8 +1303,10 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
     # own words about a problem, so they never count as context.
     belt.earlier_user_messages = ' '.join(m for m in said[-4:-1] if not is_tapped_text(m))
     try:
-        return _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
+        done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                          country=country)
+        _open_claimed_screen(belt, done)
+        return done
     except AssistantUnavailable as exc:
         # Usage already spent (a search, an analysis) is still billed: the
         # caller meters it from here even though the turn failed.
