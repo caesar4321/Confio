@@ -437,6 +437,24 @@ def user_facing_decline_reason(response_payload: dict[str, Any]) -> str:
     return USER_FIXABLE_DECLINE_REASONS[fixable[0]['risk']] if fixable else ''
 
 
+def reviewer_decline_comment(response_payload: dict[str, Any]) -> str:
+    """The note on the latest Console decline, or '' when it has none.
+
+    Reviewers write it to the person ("Hola, necesitamos que tu selfie…"), in
+    their language, so it is what the app shows. Only the latest decline
+    counts: an older one's note belongs to an attempt already redone.
+    """
+    reviews = response_payload.get('reviews')
+    declines = [
+        review for review in (reviews if isinstance(reviews, list) else [])
+        if isinstance(review, dict) and str(review.get('new_status') or '').strip().lower() == 'declined'
+    ]
+    if not declines:
+        return ''
+    latest = max(declines, key=lambda review: str(review.get('created_at') or ''))
+    return str(latest.get('comment') or '').strip()
+
+
 def _safe_json_loads(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -1273,7 +1291,10 @@ def _notify_verification_status_change(
         business=business,
         notification_type=NotificationTypeChoices.SECURITY_ALERT,
         title='Verificacion rechazada',
-        message='Tu verificacion de identidad no pudo ser aprobada. Revisa los requisitos e intentalo de nuevo.',
+        # The reason itself stays off the lock screen: it can describe the ID.
+        message=('Tu verificacion de identidad no pudo ser aprobada. Toca para ver el motivo.'
+                 if verification.rejected_reason else
+                 'Tu verificacion de identidad no pudo ser aprobada. Revisa los requisitos e intentalo de nuevo.'),
         data={
             'verification_id': str(verification.id),
             'reason': verification.rejected_reason or '',
@@ -1743,6 +1764,9 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
     verification.document_issuing_country = extracted['document_issuing_country']
     verification.document_expiry_date = extracted['document_expiry_date']
     verification.risk_factors = risk_factors
+    # Read before our own checks can turn an approval into a rejection: only a
+    # decline Didit itself returned carries a reviewer's note.
+    reviewer_note = reviewer_decline_comment(response_payload) if status == 'rejected' else ''
     status = _enforce_brazilian_cpf_database_validation(
         status=status,
         document_issuing_country=verification.document_issuing_country,
@@ -1754,7 +1778,9 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         response_payload=response_payload,
         risk_factors=risk_factors,
     )
-    if status == 'rejected' and not review_reason and 'document_capture_holder' not in risk_factors:
+    if status == 'rejected' and not review_reason and reviewer_note:
+        review_reason = reviewer_note
+    elif status == 'rejected' and not review_reason and 'document_capture_holder' not in risk_factors:
         review_reason = user_facing_decline_reason(response_payload)
     precomputed_face = None
     if status == 'verified' and account_type != 'business':

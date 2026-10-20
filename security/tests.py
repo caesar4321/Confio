@@ -847,6 +847,41 @@ class DiditIntegrationTests(TestCase):
         self.assertFalse(verification.rejected_reason)
 
     @patch('security.didit.requests.request')
+    def test_decline_shows_the_reviewers_latest_note(self, mock_request):
+        payload = self._declined_payload('sess_reviewed', id_warnings=[('DOCUMENT_EXPIRED', 'error')])
+        payload['reviews'] = [
+            {'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': 'Nota vieja',
+             'created_at': '2026-10-14T10:00:00Z'},
+            {'user': 'a@confio.lat', 'new_status': 'Declined',
+             'comment': '  Hola, necesitamos que tu selfie sea más clara.  ',
+             'created_at': '2026-10-15T10:00:00Z'},
+            {'user': 'a@confio.lat', 'new_status': 'In Review', 'comment': 'Interno',
+             'created_at': '2026-10-16T10:00:00Z'},
+        ]
+        mock_request.return_value = self._mock_response(payload)
+
+        verification, _ = sync_didit_session(session_id='sess_reviewed', expected_user=self.user)
+
+        self.assertEqual(verification.status, 'rejected')
+        # The reviewer's note beats the warning-based hint.
+        self.assertEqual(verification.rejected_reason, 'Hola, necesitamos que tu selfie sea más clara.')
+
+    @patch('security.didit.requests.request')
+    def test_decline_without_a_reviewer_note_keeps_the_warning_hint(self, mock_request):
+        payload = self._declined_payload('sess_silent', id_warnings=[('DOCUMENT_EXPIRED', 'error')])
+        payload['reviews'] = [
+            {'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': 'Nota vieja',
+             'created_at': '2026-10-14T10:00:00Z'},
+            {'user': 'a@confio.lat', 'new_status': 'Declined', 'comment': None,
+             'created_at': '2026-10-15T10:00:00Z'},
+        ]
+        mock_request.return_value = self._mock_response(payload)
+
+        verification, _ = sync_didit_session(session_id='sess_silent', expected_user=self.user)
+
+        self.assertIn('vencido', verification.rejected_reason)
+
+    @patch('security.didit.requests.request')
     def test_decline_with_only_unknown_warnings_stays_generic(self, mock_request):
         mock_request.return_value = self._mock_response(self._declined_payload(
             'sess_unknown', id_warnings=[('SCREEN_CAPTURE_DETECTED', 'error')]))
