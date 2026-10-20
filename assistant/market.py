@@ -50,16 +50,28 @@ def _find_asset(market, query):
     return by_name
 
 
+# Brands people say instead of the listed company name (normalized keys).
+BRAND_TICKERS = {'google': 'GOOGL', 'alphabet': 'GOOGL', 'youtube': 'GOOGL', 'facebook': 'META',
+                 'instagram': 'META', 'whatsapp': 'META'}
+
+
 def listed_asset(query):
     """(ticker, name) of a stock or ETF listed in Confío, or None. Forgiving
-    about how the model writes it: "SPY", "Apple (AAPL)", "S&P 500"."""
+    about how the model writes it: "SPY", "Apple (AAPL)", "Coca-Cola KO",
+    "S&P 500", "Google"."""
     from cusd_plus import gm_api
     from cusd_plus.schema import _gm_listing
 
     market = gm_api.all_market()
     listings = [listing for listing in map(_gm_listing, market) if listing]
     query = (query or '').strip()
-    tries = [query, *re.findall(r'\(([^)]+)\)', query), re.sub(r'\([^)]*\)', '', query)]
+    tries = [query, *re.findall(r'\(([^)]+)\)', query), re.sub(r'\([^)]*\)', '', query),
+             # An all-caps word next to the name ("Coca-Cola KO") is a ticker;
+             # never one letter ("S&P 500" must not become ticker S).
+             *re.findall(r'\b[A-Z]{2,5}\b', query)]
+    brand = BRAND_TICKERS.get(_norm(query))
+    if brand:
+        tries.insert(0, brand)
     # An exact ticker anywhere in what the model wrote wins.
     for attempt in tries:
         wanted = _norm(attempt)
@@ -97,7 +109,9 @@ def stock_quote(query, user=None):
     from cusd_plus import gm_api
 
     market = gm_api.all_market()
-    found = _find_asset(market, query)
+    # The same forgiving match as opening a stock's page, then that ticker.
+    listed = listed_asset(query)
+    found = _find_asset(market, listed[0] if listed else query)
     if found is None:
         return {'encontrado': False, 'motivo': 'No encontré esa acción entre las que muestra Confío.'}
     item, (symbol, ticker, name) = found

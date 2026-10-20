@@ -907,6 +907,10 @@ MARKET = [
      'underlyingMarket': {'ticker': 'AAPL', 'name': 'Apple Inc.', 'marketCap': 3e12}},
     {'primaryMarket': {'symbol': 'APPon', 'price': '50', 'priceChangePct24h': '1'},
      'underlyingMarket': {'ticker': 'APP', 'name': 'AppLovin', 'marketCap': 1e11}},
+    {'primaryMarket': {'symbol': 'GOOGLon', 'price': '160', 'priceChangePct24h': '0'},
+     'underlyingMarket': {'ticker': 'GOOGL', 'name': 'Alphabet', 'marketCap': 2e12}},
+    {'primaryMarket': {'symbol': 'Son', 'price': '20', 'priceChangePct24h': '0'},
+     'underlyingMarket': {'ticker': 'S', 'name': 'SentinelOne', 'marketCap': 6e9}},
 ]
 CANDLES = [{'timestamp': 2, 'close': '170'}, {'timestamp': 1, 'close': '200'}]
 
@@ -926,6 +930,11 @@ class MarketToolTests(TestCase):
         self.assertEqual(by_name['sesion_mercado'], 'core')
         self.assertEqual(market.stock_quote('app')['ticker'], 'APP')  # exact ticker beats name prefix
         self.assertFalse(market.stock_quote('Nonexistent Corp')['encontrado'])
+        # How people and the model write it (2026-10-19: "Google", "Coca-Cola KO" missed).
+        self.assertEqual(market.stock_quote('Google')['ticker'], 'GOOGL')
+        self.assertEqual(market.stock_quote('Apple AAPL')['ticker'], 'AAPL')
+        self.assertEqual(market.stock_quote('Alphabet')['ticker'], 'GOOGL')
+        self.assertIsNone(market.listed_asset('S&P 500'))  # one letter is never a ticker
 
     @patch('cusd_plus.gm_api.all_market', return_value=MARKET)
     def test_news_requires_cited_completed_search(self, _market):
