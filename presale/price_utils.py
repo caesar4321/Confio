@@ -36,6 +36,10 @@ _CURRENT_PRICE_SELECTOR = '0x9d1b464a'
 
 def _phase_fallback_price() -> Decimal:
     """Pre-vault behavior: the active (else latest usable) phase price."""
+    return _phase_fallback()[0]
+
+
+def _phase_fallback() -> tuple[Decimal, str]:
     try:
         from presale.models import PresalePhase
         phase = (
@@ -45,10 +49,10 @@ def _phase_fallback_price() -> Decimal:
             ).order_by('-phase_number').first()
         )
         if phase and phase.price_per_token and phase.price_per_token > 0:
-            return Decimal(phase.price_per_token)
+            return Decimal(phase.price_per_token), 'phase'
     except Exception:
         pass
-    return FLOOR_PRICE
+    return FLOOR_PRICE, 'floor'
 
 
 def _cache_get(key):
@@ -121,9 +125,16 @@ def get_presale_curve_stats() -> dict:
 
 def get_confio_current_price() -> Decimal:
     """Current CONFIO price in dollars (USDT/cUSD ≈ $1), cached."""
+    return get_confio_price_with_source()[0]
+
+
+def get_confio_price_with_source() -> tuple[Decimal, str]:
+    """The same price plus where it came from: 'live' (on-chain, ≤60s old),
+    'last_known' (RPC failing; up to 7 days old), 'phase' (no vault price:
+    the legacy phase price) or 'floor'. Ops views must say when it is not live."""
     cached = _cache_get(CACHE_KEY)
     if cached is not None:
-        return Decimal(cached)
+        return Decimal(cached), 'live'
 
     vault = getattr(settings, 'BSC_PRESALE_VAULT_ADDRESS', None)
     if vault:
@@ -135,12 +146,12 @@ def get_confio_current_price() -> Decimal:
                 price = (Decimal(wei) / Decimal(10) ** 18).quantize(Decimal('0.000001'))
                 _cache_set(CACHE_KEY, str(price), CACHE_TTL_SEC)
                 _cache_set(LAST_KNOWN_KEY, str(price), LAST_KNOWN_TTL_SEC)
-                return price
+                return price, 'live'
         except Exception as e:
             logger.warning(f"[PRESALE][PRICE] currentPrice() read failed: {e}")
 
         last_known = _cache_get(LAST_KNOWN_KEY)
         if last_known is not None:
-            return Decimal(last_known)
+            return Decimal(last_known), 'last_known'
 
-    return _phase_fallback_price()
+    return _phase_fallback()

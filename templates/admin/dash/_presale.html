@@ -8,16 +8,30 @@
     <span class="status-badge {% if presale_vault_address %}completed{% else %}disputed{% endif %}">
         {% if presale_vault_address %}Vault {{ presale_vault_address|truncatechars:14 }}{% else %}Vault not configured{% endif %}
     </span>
+    <span class="status-badge {% if presale_active_phase %}completed{% else %}disputed{% endif %}">
+        {% if presale_active_phase %}Active phase {{ presale_active_phase.phase_number }}: {{ presale_active_phase.name }}{% else %}No active phase{% endif %}
+    </span>
 </div>
+{% if presale_global_enabled and not presale_active_phase %}
+<div class="alert-box critical">The presale switch is on but no phase is active, so every purchase is refused. Activate a phase in <a href="{% url 'confio_admin:presale_presalephase_changelist' %}">Presale phases</a>.</div>
+{% endif %}
+{% if presale_price_source != 'live' %}
+<div class="alert-box">The CONFIO price below is not the live curve (source: {{ presale_price_source }}); the vault <code>currentPrice()</code> read is failing.</div>
+{% endif %}
 
 <div class="metrics-grid">
     <div class="metric-card">
-        <div class="metric-label">Current curve price</div>
-        <div class="metric-value">${{ presale_curve.current_price|floatformat:4 }}</div>
+        <div class="metric-label">{% if presale_price_source == 'live' %}Current curve price (live){% else %}CONFIO price ({{ presale_price_source }}, not live){% endif %}</div>
+        <div class="metric-value">${{ presale_price|floatformat:4 }}</div>
         <div class="metric-change">
             Linear ${{ presale_curve.start_price|floatformat:2 }} → ${{ presale_curve.final_price|floatformat:2 }}
             · {{ presale_curve_position_pct|floatformat:1 }}% along the curve
         </div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Purchase limits (active phase)</div>
+        <div class="metric-value">{% if presale_active_phase %}${{ presale_active_phase.min_purchase|floatformat:0|intcomma }}–${{ presale_active_phase.max_purchase|floatformat:0|intcomma }}{% else %}<span class="unknown">no phase</span>{% endif %}</div>
+        <div class="metric-change">{% if presale_active_phase %}per purchase · ${{ presale_active_phase.max_per_user|floatformat:0|intcomma }} per buyer{% else %}Purchases are refused{% endif %}</div>
     </div>
     <div class="metric-card">
         <div class="metric-label">Raised, all time</div>

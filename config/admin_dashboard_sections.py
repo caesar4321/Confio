@@ -968,10 +968,13 @@ def presale(w):
     """The live CONFIO presale: BSC ConfioPresaleVault, priced on a linear
     on-chain curve (presale.price_utils), plus migration credits and waitlist."""
     from django.conf import settings
-    from presale.models import PresaleMigrationCredit, PresalePurchase, PresaleSettings, PresaleWaitlist
-    from presale.price_utils import get_presale_curve_stats
+    from presale.models import PresaleMigrationCredit, PresalePhase, PresalePurchase, PresaleSettings, PresaleWaitlist
+    from presale.price_utils import get_confio_price_with_source, get_presale_curve_stats
 
     curve = get_presale_curve_stats()
+    # Show the price with its source: a fallback (7-day last-known, legacy
+    # phase price, floor) must never read as the live on-chain curve.
+    price, price_source = get_confio_price_with_source()
     span = curve['final_price'] - curve['start_price']
     completed = PresalePurchase.objects.filter(status='completed')
     windows = []
@@ -993,8 +996,11 @@ def presale(w):
         'presale_global_enabled': PresaleSettings.get_settings().is_presale_active,
         'presale_vault_address': getattr(settings, 'BSC_PRESALE_VAULT_ADDRESS', None),
         'presale_curve': curve,
-        'presale_curve_position_pct': (
-            (curve['current_price'] - curve['start_price']) / span * 100 if span else 0),
+        'presale_price': price,
+        'presale_price_source': price_source,
+        'presale_curve_position_pct': (price - curve['start_price']) / span * 100 if span else 0,
+        # The BSC flow still requires an active phase and enforces its limits.
+        'presale_active_phase': PresalePhase.objects.filter(status='active').first(),
         'presale_windows': windows,
         'presale_pipeline': {
             'awaiting_reconciliation': presale_awaiting_reconciliation(w),
@@ -1534,9 +1540,22 @@ def needs_attention(w, request, *, refresh=False):
 
     presale_stuck = presale_awaiting_reconciliation(w)
     if presale_stuck:
-        items.append(_item(WARNING, 'Presale purchases paid but not completed (over 1h)',
-                           'A live presale batch exists; reconcile the purchase.',
+        items.append(_item(WARNING, 'Presale purchases awaiting reconciliation (over 1h)',
+                           'Not unsigned checkouts the 24h reaper clears; verify settlement on chain.',
                            _url('presale_presalepurchase_changelist', 'status__exact=processing'), presale_stuck))
+    from presale.models import PresalePhase, PresaleSettings
+    from presale.price_utils import get_confio_price_with_source
+
+    if PresaleSettings.get_settings().is_presale_active:
+        if not PresalePhase.objects.filter(status='active').exists():
+            items.append(_item(CRITICAL, 'Presale is on but no phase is active',
+                               'Every purchase is refused until a phase is active.',
+                               _url('presale_presalephase_changelist')))
+        _price, price_source = get_confio_price_with_source()
+        if price_source != 'live':
+            items.append(_item(WARNING, 'CONFIO price is not the live curve',
+                               f'Source: {price_source.replace("_", " ")}; the vault price read is failing.',
+                               _url('dash_presale')))
     credits_failed = PresaleMigrationCredit.objects.filter(status='failed').count()
     if credits_failed:
         items.append(_item(WARNING, 'Presale migration credits failed verification', '',

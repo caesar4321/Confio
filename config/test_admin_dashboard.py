@@ -256,3 +256,31 @@ class DashboardPagesTests(TestCase):
         self.assertEqual(sections.presale_awaiting_reconciliation(w), 1)
         # Never both: a submitted purchase is not an abandoned checkout.
         self.assertEqual(sections.presale(w)['presale_pipeline']['abandoned_checkouts'], 0)
+
+    def test_confio_price_reports_its_source(self):
+        from presale import price_utils
+
+        cache.clear()
+        with self.settings(BSC_PRESALE_VAULT_ADDRESS='0xvault'), \
+                mock.patch('cusd_plus.tasks._rpc', side_effect=RuntimeError('rpc down')):
+            price, source = price_utils.get_confio_price_with_source()
+            self.assertIn(source, ('phase', 'floor'))
+            cache.set(price_utils.LAST_KNOWN_KEY, '0.31', 60)
+            self.assertEqual(price_utils.get_confio_price_with_source(), (Decimal('0.31'), 'last_known'))
+            self.assertEqual(price_utils.get_confio_current_price(), Decimal('0.31'))
+        cache.set(price_utils.CACHE_KEY, '0.32', 60)
+        self.assertEqual(price_utils.get_confio_price_with_source(), (Decimal('0.32'), 'live'))
+
+    def test_presale_on_without_active_phase_is_critical(self):
+        from presale.models import PresalePhase, PresaleSettings
+
+        settings_row = PresaleSettings.get_settings()
+        settings_row.is_presale_active = True
+        settings_row.save()
+        PresalePhase.objects.filter(status='active').update(status='paused')
+        with chain_reads(), mock.patch('presale.price_utils.get_confio_price_with_source',
+                                       return_value=(Decimal('0.2'), 'floor')):
+            items = sections.needs_attention(sections.Window.current(), self.staff())
+        titles = {i['title']: i['level'] for i in items}
+        self.assertEqual(titles.get('Presale is on but no phase is active'), sections.CRITICAL)
+        self.assertEqual(titles.get('CONFIO price is not the live curve'), sections.WARNING)

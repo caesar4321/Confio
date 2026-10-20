@@ -739,6 +739,7 @@ ConfioAdminSite.DASH_PAGES = [
         'tools': (
             ('Purchases', 'presale_presalepurchase_changelist', ''),
             ('Migration credits', 'presale_presalemigrationcredit_changelist', ''),
+            ('Phases (purchase gate)', 'presale_presalephase_changelist', ''),
             ('Presale settings', 'presale_presalesettings_changelist', ''),
         )}),
     ('growth', 'Growth', [
