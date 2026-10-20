@@ -998,7 +998,7 @@ def presale(w):
         'presale_windows': windows,
         'presale_pipeline': {
             'awaiting_reconciliation': presale_awaiting_reconciliation(w),
-            'abandoned_checkouts': _presale_processing(w).filter(_live_batch=False).count(),
+            'abandoned_checkouts': _presale_processing(w).filter(_reapable()).count(),
             'failed_7d': PresalePurchase.objects.filter(status='failed', created_at__gte=w.last_7_start).count(),
         },
         'presale_credits': credits,
@@ -1023,10 +1023,19 @@ def _presale_processing(w):
     ).annotate(_live_batch=Exists(live_batch))
 
 
+def _reapable():
+    """Exactly what presale.abandon_stale_bsc_purchases fails after 24h: BSC
+    funding, no tx hash, no live batch — an unsigned checkout."""
+    from presale.bsc_flow import BSC_FUNDING_SOURCES
+
+    return Q(funding_source__in=BSC_FUNDING_SOURCES, transaction_hash__isnull=True, _live_batch=False)
+
+
 def presale_awaiting_reconciliation(w):
-    """Processing for over an hour WITH a live batch: the buyer paid and the
-    row never completed. Unsigned ones are abandoned checkouts, reaped at 24h."""
-    return _presale_processing(w).filter(Q(_live_batch=True) | Q(transaction_hash__isnull=False)).count()
+    """Processing for over an hour and NOT an unsigned checkout the reaper
+    will clean up (a live batch, a tx hash, or a non-BSC purchase): nothing
+    will resolve it on its own."""
+    return _presale_processing(w).exclude(_reapable()).count()
 
 
 def presale_phases(w):

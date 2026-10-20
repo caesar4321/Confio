@@ -37,7 +37,7 @@
         <div class="metric-label">Purchase pipeline</div>
         <div class="metric-value">{{ presale_pipeline.awaiting_reconciliation|intcomma }}</div>
         <div class="metric-change">
-            awaiting reconciliation (live batch, &gt;1h) · {{ presale_pipeline.abandoned_checkouts|intcomma }} unsigned checkouts (reaped after 24h) · {{ presale_pipeline.failed_7d|intcomma }} failed in 7d
+            awaiting reconciliation (&gt;1h, not an unsigned checkout) · {{ presale_pipeline.abandoned_checkouts|intcomma }} unsigned checkouts (reaped after 24h) · {{ presale_pipeline.failed_7d|intcomma }} failed in 7d
         </div>
     </div>
     <div class="metric-card">

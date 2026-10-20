@@ -243,11 +243,16 @@ class DashboardPagesTests(TestCase):
         phase = PresalePhase.objects.create(phase_number=99, name='t', price_per_token=Decimal('0.2'),
                                             goal_amount=Decimal('1'), max_per_user=Decimal('1000'),
                                             min_purchase=Decimal('1'), status='active')
+        from presale.bsc_flow import BSC_FUNDING_SOURCES
+
         purchase = PresalePurchase.objects.create(
             user=self.user, phase=phase, cusd_amount=Decimal('10'), confio_amount=Decimal('50'),
-            price_per_token=Decimal('0.2'), status='processing')
+            price_per_token=Decimal('0.2'), status='processing', funding_source=sorted(BSC_FUNDING_SOURCES)[0])
         PresalePurchase.objects.filter(pk=purchase.pk).update(created_at=timezone.now() - timedelta(hours=3))
         w = sections.Window.current()
         self.assertEqual(sections.presale_awaiting_reconciliation(w), 0)
+        self.assertEqual(sections.presale(w)['presale_pipeline']['abandoned_checkouts'], 1)
         PresalePurchase.objects.filter(pk=purchase.pk).update(transaction_hash='0xabc')
         self.assertEqual(sections.presale_awaiting_reconciliation(w), 1)
+        # Never both: a submitted purchase is not an abandoned checkout.
+        self.assertEqual(sections.presale(w)['presale_pipeline']['abandoned_checkouts'], 0)
