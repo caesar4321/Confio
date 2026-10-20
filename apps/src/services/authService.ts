@@ -2069,12 +2069,19 @@ export class AuthService {
       const appleContext: AccountContext = { type: 'personal', index: 0 };
       const appleIss = 'https://appleid.apple.com';
       const appleAud = 'com.confio.app';
+      // Pass the registered address, as the Google path does. Without it an
+      // unmigrated account whose V1 holds only empty opt-ins got no legacy
+      // address back, so sign-in demanded a V2 secret that derives to that
+      // V1 address — which none can — and always ended in
+      // RECOVERY-APPLE-KEYCHAIN (App Review, user 2176, 2026-10-20).
       const legacyInspection = await this.getLegacyAddressIfMigrationPending(
         appleIss,
         appleSub,
         appleAud,
         'apple',
-        appleContext
+        appleContext,
+        serverAlgorandAddressEarly,
+        authData.accessToken,
       );
       const legacyAddress = legacyInspection.legacyAddress;
 
