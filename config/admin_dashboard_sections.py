@@ -172,14 +172,22 @@ def users_core(w):
         .values('date', 'dau', 'wau', 'mau', 'new_users_today')
     )
 
-    # Country breakdown (top 5 by MAU from latest snapshot)
-    if latest_snapshot:
-        context['top_countries_metrics'] = list(
-            CountryMetrics.objects.filter(date=latest_snapshot.date)
-            .order_by('-mau')[:10]
-            .values('country_code', 'dau', 'wau', 'mau', 'total_users')
-        )
+    context['top_countries_metrics'] = top_countries(10)
     return context
+
+
+def top_countries(limit):
+    """Top countries by MAU from the latest COUNTRY snapshot. Its job runs
+    15 minutes after the daily one, so the newest DailyMetrics date has no
+    country rows for that window; never key one snapshot off the other."""
+    latest = CountryMetrics.objects.order_by('-date').values_list('date', flat=True).first()
+    if latest is None:
+        return []
+    return list(
+        CountryMetrics.objects.filter(date=latest)
+        .order_by('-mau')[:limit]
+        .values('country_code', 'dau', 'wau', 'mau', 'total_users')
+    )
 
 
 def v2_security(w):
@@ -1625,7 +1633,6 @@ def today_growth(w):
     real_users = get_real_users_queryset()
 
     thirty_days_ago = w.now.date() - timedelta(days=30)
-    latest_snapshot = DailyMetrics.objects.order_by('-date').first()
     return {
         'total_users': real_users.count(),
         'new_users_last_7_days': real_users.filter(created_at__gte=w.last_7_start).count(),
@@ -1638,10 +1645,7 @@ def today_growth(w):
             DailyMetrics.objects.filter(date__gte=thirty_days_ago)
             .order_by('date').values('date', 'dau', 'wau', 'mau', 'new_users_today')
         ),
-        'top_countries_metrics': list(
-            CountryMetrics.objects.filter(date=latest_snapshot.date)
-            .order_by('-mau')[:8].values('country_code', 'dau', 'mau', 'total_users')
-        ) if latest_snapshot else [],
+        'top_countries_metrics': top_countries(8),
     }
 
 

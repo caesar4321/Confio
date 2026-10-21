@@ -284,3 +284,16 @@ class DashboardPagesTests(TestCase):
         titles = {i['title']: i['level'] for i in items}
         self.assertEqual(titles.get('Presale is on but no phase is active'), sections.CRITICAL)
         self.assertEqual(titles.get('CONFIO price is not the live curve'), sections.WARNING)
+
+    def test_top_countries_survive_the_gap_between_snapshot_jobs(self):
+        # 03:00 UTC writes DailyMetrics, 03:15 CountryMetrics: in between the
+        # newest daily date has no country rows yet.
+        from datetime import date
+        from users.models_analytics import CountryMetrics
+
+        # Only yesterday's country rows exist; no date is taken from DailyMetrics.
+        CountryMetrics.objects.create(date=date(2026, 10, 19), country_code='VE', mau=5, wau=3, dau=1,
+                                      total_users=9, new_users_today=0)
+        rows = sections.top_countries(8)
+        self.assertEqual([r['country_code'] for r in rows], ['VE'])
+        self.assertEqual(sections.today_growth(sections.Window.current())['top_countries_metrics'], rows)
