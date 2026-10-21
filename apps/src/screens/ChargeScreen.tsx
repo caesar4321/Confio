@@ -485,6 +485,28 @@ const ChargeScreen = () => {
             <View style={styles.cobrarContent}>
               {!showQRCode ? (
                 <>
+                  {/* People made a charge QR to put in their own money and
+                      their bank rejected it (Bolivia, 2026-10-21): say what
+                      this QR is, and where their own top-up lives. */}
+                  {!isBusiness ? (
+                    <View style={styles.confioOnlyNote}>
+                      <Icon name="info" size={16} color={colors.primaryDark} style={{ marginTop: 2 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.confioOnlyText}>
+                          Este QR solo se paga desde la app Confío: un banco no lo puede leer. Para poner tu
+                          propio dinero desde tu banco, usa Recargar.
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => (navigation as any).navigate('Receive')}
+                          accessibilityRole="button"
+                          accessibilityLabel="Ir a Recargar"
+                          hitSlop={8}
+                        >
+                          <Text style={styles.confioOnlyLink}>Ir a Recargar</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : null}
                   {/* Currency Selector */}
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>Moneda para cobrar</Text>
@@ -837,6 +859,16 @@ const styles = StyleSheet.create({
   pagarContent: {
     gap: 24,
   },
+  confioOnlyNote: {
+    flexDirection: 'row',
+    gap: 10,
+    backgroundColor: colors.primaryLight,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  confioOnlyText: { fontSize: 14, lineHeight: 20, color: colors.text.primary },
+  confioOnlyLink: { fontSize: 14, fontWeight: '700', color: colors.primaryDark, marginTop: 6 },
   card: {
     backgroundColor: colors.white,
     borderRadius: 16,

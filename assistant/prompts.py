@@ -76,7 +76,7 @@ DESTINATIONS_SECTION = """
 USER_SECTION = """
 # Esta conversación
 Nombre del usuario: {first_name}. Cuenta activa: {account_label}. País del teléfono: {country}. Pantalla actual: {screen}. Fecha y hora local: {local_now}.
-{rails_note}Idioma: contesta en el mismo idioma en que está escrito el último mensaje del usuario (inglés → inglés, portugués → portugués), no en el idioma de este texto.
+{identity_line}{identity_note}{rails_note}Idioma: contesta en el mismo idioma en que está escrito el último mensaje del usuario (inglés → inglés, portugués → portugués), no en el idioma de este texto.
 """
 
 
@@ -157,8 +157,25 @@ NO_RAMP_NOTE = ('En su país hoy no hay Recargar ni Retirar en la app: no le dig
                 'medios locales.\n')
 
 
+# Recargar needs a verified identity: 90% of new Bolivian users were
+# unverified and kept hearing "Recibir → Recargar ahora" (2026-10-21).
+IDENTITY_ES = {'verified': 'verificada', 'other_country': 'verificada con un documento de otro país',
+               'pending': 'iniciada, sin aprobar todavía', 'rejected': 'rechazada', 'unverified': 'sin verificar'}
+IDENTITY_NOTES = {
+    'unverified': ('Para recargar necesita verificar su identidad. Si pregunta cómo recargar o poner sus primeros '
+                   'dólares, dile primero que verifique su identidad en Perfil → Verificación y que después '
+                   'recargue.\n'),
+    'other_country': ('Para recargar necesita el documento de identidad del país de su número de teléfono. Si '
+                      'pregunta cómo recargar, dile que lo agregue en Perfil → Verificación.\n'),
+    'pending': ('Su verificación de identidad todavía no está aprobada: si pregunta cómo recargar, dile que podrá '
+                'cuando se apruebe y que, si no la terminó, la complete en Perfil → Verificación.\n'),
+    'rejected': ('Su verificación de identidad fue rechazada: si pregunta cómo recargar, dile que primero debe '
+                 'volver a verificarse en Perfil → Verificación.\n'),
+}
+
+
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
-                        ia_plus_bundled=False):
+                        ia_plus_bundled=False, identity=None):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
     prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text())
               + _paid_offer_sections(destinations, ia_plus_bundled)
@@ -171,6 +188,11 @@ def build_system_prompt(*, first_name, account_label, country, screen, local_now
         country=country or 'desconocido',
         screen=screen or 'desconocida',
         local_now=local_now,
+        # No line for employees (None): the owner's identity is not theirs.
+        identity_line=f'Identidad: {IDENTITY_ES.get(identity, "desconocida")}.\n' if identity else '',
+        # Where there is no Recargar (Venezuela…), "verify, then top up" would
+        # contradict the rails note.
+        identity_note=('' if (country or '').upper() in NO_RAMP_COUNTRIES else IDENTITY_NOTES.get(identity, '')),
         rails_note=(VE_RAMP_NOTE if (country or '').upper() == 'VE'
                     else BO_RAILS_NOTE if (country or '').upper() == 'BO'
                     else NO_RAMP_NOTE if (country or '').upper() in NO_RAMP_COUNTRIES else ''),

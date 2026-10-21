@@ -960,6 +960,25 @@ MARKET = [
 CANDLES = [{'timestamp': 2, 'close': '170'}, {'timestamp': 1, 'close': '200'}]
 
 
+class IdentityInPromptTests(TestCase):
+    def test_unverified_people_are_told_to_verify_before_topping_up(self):
+        from .prompts import build_system_prompt
+        common = dict(first_name='Ana', account_label='Personal', country='BO', screen='', local_now='now',
+                      destinations=['home'])
+        unverified = build_system_prompt(identity='unverified', **common)
+        self.assertIn('Identidad: sin verificar.', unverified)
+        self.assertIn('Perfil → Verificación', unverified)
+        verified = build_system_prompt(identity='verified', **common)
+        self.assertIn('Identidad: verificada.', verified)
+        self.assertNotIn('necesita verificar su identidad', verified)
+        self.assertNotIn('Identidad:', build_system_prompt(**common))  # employees: no line
+        venezuela = build_system_prompt(identity='unverified', **{**common, 'country': 'VE'})
+        self.assertIn('Identidad: sin verificar.', venezuela)
+        self.assertNotIn('y que después recargue', venezuela)  # no Recargar there: no contradiction
+        self.assertIn('documento de identidad del país de su número',
+                      build_system_prompt(identity='other_country', **common))
+
+
 class ClaimedScreenTests(TestCase):
     def _belt(self):
         user, _ = User.objects.get_or_create(username='cs', defaults={'phone_country': 'BO'})

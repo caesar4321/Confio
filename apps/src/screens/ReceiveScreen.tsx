@@ -157,25 +157,6 @@ export default function ReceiveScreen() {
             </RouteCard>
           ) : null}
 
-          {/* A person charges like a shop: much of LATAM's commerce runs
-              under someone's own name. Same invoice QR and 0.9% as a
-              business; the stack Charge screen, since the tab is business-only. */}
-          {!isBusiness ? (
-            <RouteCard label="DE TUS CLIENTES">
-              <RouteOptionRow
-                first
-                option={{
-                  id: 'charge',
-                  icon: 'dollar-sign',
-                  iconNode: <QrShowIcon size={20} color={colors.primaryDark} />,
-                  title: 'Cobrar con QR',
-                  subtitle: 'Crea un cobro y muéstrale el QR a quien te paga',
-                  onPress: () => navigation.navigate('Charge'),
-                }}
-              />
-            </RouteCard>
-          ) : null}
-
           {/* Same card as Enviar's, mirrored: the own-money row (the old
               Recargar) always leads, as "A mi propia cuenta" does there.
               Other countries sit behind "Más países". */}
@@ -186,6 +167,28 @@ export default function ReceiveScreen() {
             more={receiveMore}
             moreTitle="¿Dónde quieres recibir?"
           />
+
+          {/* A person charges like a shop: much of LATAM's commerce runs
+              under someone's own name. Same invoice QR and 0.9% as a
+              business; the stack Charge screen, since the tab is business-only.
+              Below the bank row and named for what it is: placed first, 37
+              people in Bolivia made a charge QR in one week thinking it was
+              the top-up, and their banks rejected it (2026-10-21). */}
+          {!isBusiness ? (
+            <RouteCard label="DE OTRO USUARIO DE CONFÍO">
+              <RouteOptionRow
+                first
+                option={{
+                  id: 'charge',
+                  icon: 'dollar-sign',
+                  iconNode: <QrShowIcon size={20} color={colors.primaryDark} />,
+                  title: 'Cobrar con QR de Confío',
+                  subtitle: 'Se paga desde la app Confío, no desde un banco',
+                  onPress: () => navigation.navigate('Charge'),
+                }}
+              />
+            </RouteCard>
+          ) : null}
 
           <RouteCard label="EN EFECTIVO">
             <RouteOptionRow option={cashRow} first />

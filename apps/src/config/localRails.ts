@@ -70,9 +70,10 @@ const SEND_RAILS: LocalRail[] = [
     subtitle: 'Teléfono, cédula y banco · en bolívares',
     status: 'probe',
   },
-  // Ids keep their historical `_qr` suffix (funnel history hangs off them),
-  // but the copy promises only what a payout can do: Infinia's Create Payout
-  // schema has Peru bank accounts and Bolivia ACH only — no Yape/QR payout.
+  // Ids keep their historical `_qr` suffix (funnel history hangs off them).
+  // Peru's copy promises only a bank payout (Infinia's schema has no Yape/QR
+  // payout there). Bolivia's is the interoperable QR people actually pay with
+  // (Julian 2026-10-21): the BO QR payment on the roadmap, not an ACH form.
   {
     id: 'send_pe_qr',
     country: 'PE',
@@ -83,8 +84,8 @@ const SEND_RAILS: LocalRail[] = [
   {
     id: 'send_bo_qr',
     country: 'BO',
-    title: 'Cuenta bancaria',
-    subtitle: 'Transferencia ACH a bancos en Bolivia',
+    title: 'QR interoperable',
+    subtitle: 'Paga cualquier QR de bancos y billeteras en Bolivia',
     status: 'probe',
   },
   // Ecuador is dollarized: no FX leg, just a bank transfer in dollars —

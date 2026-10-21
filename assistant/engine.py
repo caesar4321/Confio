@@ -1267,6 +1267,23 @@ _NOT_NOW = re.compile(r'\?|\b(si|cuando|cuanto|una vez que|despu[e√©]s|luego|ma√
 _ANY_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _SCREEN_WORDS))
 
 
+def _identity_status(viewer):
+    """verified / pending / rejected / unverified for this person, or None
+    (employees: the owner's identity is not theirs to act on)."""
+    if viewer.user is None or viewer.is_employee:
+        return None
+    try:
+        from security.identity_status import has_phone_country_identity, identity_status
+        status = identity_status(viewer.user)
+        if status == 'verified' and not has_phone_country_identity(viewer.user):
+            # Recargar needs the phone-country document (ramps/schema.py).
+            return 'other_country'
+        return status
+    except Exception:  # noqa: BLE001 - unknown, never a guess
+        logger.warning('Confio Assistant: identity status unavailable', exc_info=True)
+        return None
+
+
 def _open_claimed_screen(belt, result):
     if not belt.can_navigate or any(a.get('type') == 'navigate' for a in result.actions):
         return
@@ -1336,6 +1353,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         can_navigate=belt.can_navigate,
         ia_plus_bundled=('cuenta_inteligente' in belt.destinations and paid_offers.ia_plus_bundled(
             meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
+        identity=_identity_status(viewer),
     )
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
