@@ -2,6 +2,7 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import { Alert, Platform } from 'react-native';
 import { useBackupEnforcement } from '../useBackupEnforcement';
+import { presaleEnforcementAction } from '../enforcementActions';
 import { BackupConsentModal } from '../../components/BackupConsentModal';
 
 const mockQuery = jest.fn();
@@ -152,6 +153,8 @@ it('does not allow a deposit when backup fails', async () => {
   expect(mockEvmWallet).not.toHaveBeenCalled();
 });
 
+// The legacy Algorand rail still has to verify the Algorand wallet. The
+// presale moved to BSC, so 'presale' means the legacy rail only.
 it.each(['deposit', 'presale'] as const)('preserves Algorand wallet verification for %s', async action => {
   mockQuery.mockResolvedValue({ data: { userAccounts: [{ accountType: 'personal', accountIndex: 0, algorandAddress: 'ALGO' }] } });
   mockAlgoWallet.mockResolvedValue({ address: 'ALGO' });
@@ -162,6 +165,43 @@ it.each(['deposit', 'presale'] as const)('preserves Algorand wallet verification
   expect(mockMigration).toHaveBeenCalled();
   expect(mockAlgoWallet).toHaveBeenCalled();
   expect(mockEvmWallet).not.toHaveBeenCalled();
+});
+
+// A BSC presale purchase settles with the registered EVM wallet. Routing it
+// through the Algorand check refused every migrated account (no Algorand
+// address at all) with "Depósito no disponible" - Julian's own account, and
+// 1941 of 12727 personal/0 accounts on 2026-10-20.
+it('verifies the BSC wallet for a BSC presale instead of demanding an Algorand address', async () => {
+  const api = mount();
+  await expect(api().checkBackupEnforcement('presale_bsc')).resolves.toBe(true);
+  expect(mockEvmWallet).toHaveBeenCalledWith(PERSONAL);
+  expect(mockAlgoWallet).not.toHaveBeenCalled();
+  // The V1->V2 Algorand migration has nothing to do with a BSC purchase.
+  expect(mockMigration).not.toHaveBeenCalled();
+  expect(Alert.alert).not.toHaveBeenCalled();
+});
+
+it('refuses a BSC presale when the device key is not the registered wallet', async () => {
+  mockEvmWallet.mockResolvedValue({ address: '0x' + 'cd'.repeat(20) });
+  const api = mount();
+  await expect(api().checkBackupEnforcement('presale_bsc')).resolves.toBe(false);
+  expect(Alert.alert).toHaveBeenCalled();
+});
+
+it('blocks a migrated account from the legacy Algorand presale rail', async () => {
+  // Unchanged refusal: with no Algorand address there is nothing to verify,
+  // so the legacy rail must still refuse rather than fall through.
+  mockQuery.mockResolvedValue({ data: { userAccounts: [{ accountType: 'personal', accountIndex: 0, algorandAddress: null }] } });
+  const api = mount();
+  await expect(api().checkBackupEnforcement('presale')).resolves.toBe(false);
+  expect(mockEvmWallet).not.toHaveBeenCalled();
+});
+
+// The presale screen's own wiring: passing 'presale' on the BSC rail is the
+// bug this pair exists to stop coming back.
+it('routes a BSC presale to the EVM check and the legacy rail to Algorand', () => {
+  expect(presaleEnforcementAction(true)).toBe('presale_bsc');
+  expect(presaleEnforcementAction(false)).toBe('presale');
 });
 
 // Both users have personal/0: account shape alone cannot identify a session.

@@ -12,8 +12,8 @@ import { migrationService } from '../services/migrationService';
 import { oauthStorage } from '../services/oauthStorageService';
 import authService from '../services/authService';
 import { GOOGLE_CLIENT_IDS } from '../config/env';
+import { EnforcementAction, isBscSigningAction } from './enforcementActions';
 
-type EnforcementAction = 'presale' | 'transaction' | 'app_launch' | 'deposit' | 'bsc_deposit';
 
 // This existing field resolves the JWT's active account, including business
 // address permissions. myWalletAnchors resolves personal/0 only.
@@ -34,7 +34,6 @@ export const useBackupEnforcement = () => {
     const apolloClient = useApolloClient();
     const [modalVisible, setModalVisible] = useState(false);
     const [storageFullVisible, setStorageFullVisible] = useState(false);
-    const [, setStrictMode] = useState(false);
     const [migrationVisible, setMigrationVisible] = useState(false);
     const [migrationStatus, setMigrationStatus] = useState('Verificando estado de la billetera...');
 
@@ -160,13 +159,13 @@ export const useBackupEnforcement = () => {
     }, []);
 
     const verifyInboundSigningWallet = useCallback(async (action: EnforcementAction): Promise<boolean> => {
-        if (action !== 'deposit' && action !== 'bsc_deposit' && action !== 'presale') {
+        if (action !== 'deposit' && action !== 'presale' && !isBscSigningAction(action)) {
             return true;
         }
 
         try {
             const activeContext = await authService.getActiveAccountContext();
-            if (action === 'bsc_deposit') {
+            if (isBscSigningAction(action)) {
                 const identity = await oauthStorage.getOAuthSubject();
                 if (!mountedRef.current) return false;
                 if (!identity?.subject || !identity?.provider) {
@@ -282,7 +281,7 @@ export const useBackupEnforcement = () => {
             );
             return false;
         } catch (error) {
-            if (action === 'bsc_deposit' && !mountedRef.current) return false;
+            if (isBscSigningAction(action) && !mountedRef.current) return false;
             console.error('Inbound wallet verification error:', error);
             Alert.alert(
                 'No pudimos verificar tu billetera',
@@ -294,8 +293,10 @@ export const useBackupEnforcement = () => {
 
     const checkBackupEnforcement = useCallback(async (action: EnforcementAction, totalBalanceUSD?: number): Promise<boolean> => {
         // BSC recovery already establishes its signing secret. Retired Algorand
-        // registrations and legacy chain outages must not gate BSC deposits.
-        if (action !== 'bsc_deposit') {
+        // registrations and legacy chain outages must not gate BSC deposits,
+        // nor a BSC presale purchase: the V1->V2 Algorand migration has
+        // nothing to do with either.
+        if (!isBscSigningAction(action)) {
             const migrationReady = await ensureV2Migration();
             if (!migrationReady) return false;
         }
@@ -331,14 +332,10 @@ export const useBackupEnforcement = () => {
             if (checkBalance <= 50) return true;
         }
 
-        // If we get here, enforcement is needed.
-        // Configure strictness based on action
-        // Presale: Block participation ("참여를 못 하도록")
-        // Deposit: Block viewing the deposit address
-        // Transaction: "매번 송금/페이 시" (Prompt every time)
-        // App Launch: "앱 킬때마다 팝업" (Prompt)
-
-        setStrictMode(action === 'presale' || action === 'deposit' || action === 'bsc_deposit');
+        // If we get here, enforcement is needed. Strictness is not a flag:
+        // the consent modal cannot be dismissed (onCancel is a no-op) and
+        // declining resolves the gated action as refused, so presale,
+        // deposit and transaction all block until there is a backup.
         setModalVisible(true);
 
         // Return a promise that resolves when user makes a choice

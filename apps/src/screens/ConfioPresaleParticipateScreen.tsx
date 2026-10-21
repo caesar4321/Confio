@@ -20,6 +20,7 @@ import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
+import { presaleEnforcementAction } from '../hooks/enforcementActions';
 import { formatAmountString, formatDecimal, formatPercent, getNumberLocaleCountry, normalizeAmountInput, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
@@ -50,10 +51,20 @@ export const ConfioPresaleParticipateScreen = () => {
   // Until the server answers we do NOT know which chain settles a purchase.
   // Acting on the default (Algorand) here would fire the whole opt-in
   // ceremony on a BSC user for nothing, so the init effect waits for this.
-  const chainKnown = !!data || !!error;
+  //
+  // An ERROR is not an answer. Counting one as "chain known" fell back to
+  // Algorand, which ran that ceremony - and its Algorand wallet gate, which
+  // a migrated account can never pass - behind the retry screen below. With
+  // no active phase there is nothing to prepare either.
   // Purchase-flow chain: 'bsc' = sponsored 7702 buys against the curve
   // vault (no Algorand session/opt-in at all); 'algorand' = legacy WS flow.
   const isBscFlow = data?.presaleChain === 'bsc';
+  const canPrepare = !!data?.activePresalePhase;
+  // Which wallet the backup gate must verify. A BSC purchase settles against
+  // the curve vault with the registered EVM wallet; an account migrated to
+  // BSC has no Algorand address, and asking for one refused the purchase
+  // outright ("Depósito no disponible") for every migrated user.
+  const presaleAction = presaleEnforcementAction(isBscFlow);
   // Expensive vault reads — only the BSC rail spends them.
   const {
     data: bscBalanceData,
@@ -183,9 +194,9 @@ export const ConfioPresaleParticipateScreen = () => {
       // Outside the try on purpose: the `finally` must NOT clear the spinner
       // while the chain is still unknown, or we'd flash the form and then
       // start an opt-in behind it. The effect re-runs when the answer lands.
-      if (!chainKnown) return;
+      if (!canPrepare) return;
       try {
-        const allowed = await checkBackupEnforcement('presale');
+        const allowed = await checkBackupEnforcement(presaleAction);
         if (!allowed) {
           navigation.goBack();
           return;
@@ -212,11 +223,11 @@ export const ConfioPresaleParticipateScreen = () => {
         setLoadingMessage('');
       }
     })();
-  }, [checkBackupEnforcement, navigation, isBscFlow, chainKnown]);
+  }, [checkBackupEnforcement, navigation, isBscFlow, canPrepare, presaleAction]);
 
   const executeSwap = async () => {
     try {
-      const walletSafe = await checkBackupEnforcement('presale');
+      const walletSafe = await checkBackupEnforcement(presaleAction);
       if (!walletSafe) {
         return;
       }
@@ -334,7 +345,7 @@ export const ConfioPresaleParticipateScreen = () => {
   };
 
   const handleSwap = async () => {
-    const allowed = await checkBackupEnforcement('presale');
+    const allowed = await checkBackupEnforcement(presaleAction);
     if (!allowed) {
       return;
     }
