@@ -865,7 +865,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryLight,
     borderRadius: 12,
     padding: 12,
-    marginBottom: 12,
+    // First under the header: its own space above; the 24 gap below.
+    marginTop: 16,
   },
   confioOnlyText: { fontSize: 14, lineHeight: 20, color: colors.text.primary },
   confioOnlyLink: { fontSize: 14, fontWeight: '700', color: colors.primaryDark, marginTop: 6 },
