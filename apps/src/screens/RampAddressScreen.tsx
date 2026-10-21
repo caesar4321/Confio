@@ -62,6 +62,10 @@ export const RampAddressScreen: React.FC = () => {
   const accountEmail = String(userProfile?.email || '').trim().toLowerCase();
   const isAppleRelayEmail = /@privaterelay\.appleid\.com$/i.test(accountEmail);
   const shouldShowAuthEmailField = phoneCountryIso === 'CO' && isAppleRelayEmail;
+  // Bolivia has no postal codes in everyday use, but the provider needs the
+  // field: 19 of 36 Bolivians already typed "0000", others a phone number
+  // (2026-10-21). Prefill it and say why.
+  const noPostalCodes = phoneCountryIso === 'BO';
   const economicActivities: EconomicActivityOption[] = data?.economicActivities || [];
   const shouldShowEconomicActivityField = economicActivities.length > 0;
   const addressRequirements = data?.rampAddressRequirements;
@@ -95,6 +99,11 @@ export const RampAddressScreen: React.FC = () => {
     rampAddress?.economicActivity,
     rampAddress?.authEmail,
   ]);
+  useEffect(() => {
+    if (noPostalCodes && data && !rampAddress?.addressZipCode) {
+      setAddressZipCode(current => current.trim() ? current : '0000');
+    }
+  }, [noPostalCodes, data, rampAddress?.addressZipCode]);
 
   const hasChanges = useMemo(() => {
     return (
@@ -313,6 +322,9 @@ export const RampAddressScreen: React.FC = () => {
               autoCapitalize="characters"
             />
           </View>
+          {noPostalCodes ? (
+            <Text style={styles.fieldHint}>En Bolivia no se usa código postal: deja 0000.</Text>
+          ) : null}
 
           {shouldShowEconomicActivityField ? (
             <>
@@ -512,6 +524,11 @@ const styles = StyleSheet.create({
   },
   labelFirst: {
     marginTop: 0,
+  },
+  fieldHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 6,
   },
   label: {
     fontSize: 13,
