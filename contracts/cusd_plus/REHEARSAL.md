@@ -41,3 +41,22 @@ receipt latency) stays optional afterwards via the deterministic
 deployer: fund 0.002 BNB as a LOAN, claim the faucet, then sweep the
 0.002 back to the sponsor — net cost ≈ gas. Sponsor outflows only with
 Julian's explicit go.
+
+## ConfioMarketEscrow (Comprar) — BSC mainnet fork — 2026-10-22 — **PASS**
+
+`forge test --match-path test/ConfioMarketEscrow.fork.t.sol --fork-url https://bsc-dataseed.bnbchain.org -vv`
+drives `script/DeployConfioMarketEscrow.s.sol` on chain 56 against the LIVE
+universal cUSD proxy `0x6101cC37…543F` and the LIVE Safe `0xF29A…b623` (pranked).
+
+| Check | Result |
+| --- | --- |
+| Deploy shape | owner forced to the Safe; signer/arbiter/windows (3d/4d/30d) as set; impl slot = fresh impl; **no token enabled** (deposit → `TokenNotAccepted`) |
+| Lifecycle on real cUSD | ship+confirm (92/8), dispute→arbiter refund, reclaim after ship window, keeper auto-release; Safe `collectFees` 12.8 cUSD; escrow ends at 0 |
+| cUSD global pause | exits revert while cUSD is paused, then succeed on unpause (cUSD has no per-address freeze) |
+| Safe UUPS upgrade | open order survives, owner unchanged, merchant refund works on v2 |
+
+Public BSC testnet broadcast NOT run: no funded testnet key (deterministic
+deployer `0xAE3f…B750` holds 0 tBNB; `.env.testnet` has no BSC signer).
+Mainnet deploy path: `manage.py deploy_confio_market_escrow` (dry-run on prod
+first, then `--broadcast --yes-mainnet`), followed by a Safe
+`setTokenLimits(cUSD, 300e18, 10_000e18)`.
