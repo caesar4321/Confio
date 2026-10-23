@@ -10,6 +10,13 @@ export const formatLocalPrice = (amount: string | number, currency: string): str
   return currency === 'BOB' || currency === 'VES' ? `${text} ${symbol}` : `${symbol} ${text}`;
 };
 
+/** "8%" / "7,5%" from basis points (server-provided; never hardcoded). */
+export const formatFeeBps = (bps?: number | null): string | null => {
+  if (bps === null || bps === undefined || !Number.isFinite(bps)) return null;
+  const pct = bps / 100;
+  return `${pct.toLocaleString('es-BO', { maximumFractionDigits: 2 })}%`;
+};
+
 export const formatUsd = (amount: string | number): string => {
   const n = Number(amount);
   return `US$ ${Number.isFinite(n) ? n.toFixed(2) : amount}`;

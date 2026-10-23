@@ -14,7 +14,7 @@ import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal
 import { GET_MARKETPLACE_HOME, GET_MARKETPLACE_PRODUCTS, SUBMIT_MARKETPLACE_INTEREST } from '../services/comprar';
 import { ComprarInterestSheet } from '../components/comprar/ComprarInterestSheet';
 import { AnalyticsService } from '../services/analyticsService';
-import { formatLocalPrice } from '../utils/comprarFormat';
+import { formatFeeBps, formatLocalPrice } from '../utils/comprarFormat';
 import { explainLocateOutcome } from '../utils/comprarLocate';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -217,7 +217,8 @@ export const ComprarScreen = () => {
                 <Icon name="home" size={36} color={colors.primaryDark} />
                 <Text style={styles.fakeTitle}>Comprar ya está en {city}</Text>
                 <Text style={styles.fakeBody}>
-                  Abre tu tienda y sé de los primeros en vender a compradores verificados. Sin mensualidades: pagas 8% solo cuando vendes.
+                  Abre tu tienda y sé de los primeros en vender a compradores verificados. Sin mensualidades
+                  {formatFeeBps(home?.marketplaceFeeBps) ? `: pagas ${formatFeeBps(home?.marketplaceFeeBps)} solo cuando vendes.` : '.'}
                 </Text>
                 <Pressable style={styles.primaryButton} onPress={() => navigation.navigate('MyMarketStore')}>
                   <Text style={styles.primaryButtonText}>Abrir mi tienda</Text>

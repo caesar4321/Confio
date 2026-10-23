@@ -282,6 +282,8 @@ def _orders_for(account):
 
 
 class Query(graphene.ObjectType):
+    marketplace_fee_bps = graphene.Int(description='Merchant fee in basis points (800 = 8%). '
+                                                   'Never hardcode it in copy.')
     marketplace_categories = graphene.List(MarketplaceCategoryType)
     marketplace_countries = graphene.List(MarketplaceCountryType)
     marketplace_cities = graphene.List(MarketplaceCityType, country_code=graphene.String(required=True))
@@ -305,6 +307,10 @@ class Query(graphene.ObjectType):
     market_checkout_quote = graphene.Field(
         CheckoutQuoteType, product_id=graphene.ID(required=True), quantity=graphene.Int(required=True),
         delivery_country=graphene.String(required=True), delivery_city=graphene.String(required=True))
+
+    def resolve_marketplace_fee_bps(self, info):
+        from .pricing import fee_bps
+        return fee_bps()
 
     def resolve_marketplace_categories(self, info):
         return [MarketplaceCategoryType(key=k, label=v) for k, v in CATEGORY_CHOICES]

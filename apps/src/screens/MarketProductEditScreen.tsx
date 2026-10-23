@@ -9,6 +9,7 @@ import { Text, TextInput } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { GET_MY_MARKET_STORE, SAVE_MARKET_PRODUCT, comprarError, uploadMarketPhoto } from '../services/comprar';
+import { formatFeeBps } from '../utils/comprarFormat';
 
 const MAX_PHOTOS = 4;
 
@@ -142,8 +143,11 @@ export const MarketProductEditScreen = () => {
               <TextInput style={styles.input} keyboardType="number-pad" value={stock} onChangeText={setStock} />
             </View>
           </View>
-          {Number(price) >= 1 ? (
-            <Text style={styles.hint}>Recibes {(Number(price) * 0.92).toFixed(2)} por unidad (comisión 8%).</Text>
+          {Number(price) >= 1 && typeof data?.marketplaceFeeBps === 'number' ? (
+            <Text style={styles.hint}>
+              Recibes {(Number(price) * (1 - data.marketplaceFeeBps / 10_000)).toFixed(2)} por unidad
+              (comisión {formatFeeBps(data.marketplaceFeeBps)}).
+            </Text>
           ) : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </ScrollView>

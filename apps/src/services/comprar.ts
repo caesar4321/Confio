@@ -47,6 +47,7 @@ export const ORDER_FIELDS = `
 
 export const GET_MARKETPLACE_HOME = gql`
   query MarketplaceHome($countryCode: String!, $city: String!) {
+    marketplaceFeeBps
     marketplaceCategories { key label }
     marketplaceCity(countryCode: $countryCode, city: $city) {
       countryCode city currencyCode isLive deliveryEstimate deliveryPartner storeCount
@@ -118,6 +119,7 @@ export const GET_MY_MARKET_STORE = gql`
     myMarketStore { ${STORE_FIELDS} }
     myMarketStoreProducts { ${PRODUCT_FIELDS} stockRevision }
     marketplaceCategories { key label }
+    marketplaceFeeBps
   }
 `;
 

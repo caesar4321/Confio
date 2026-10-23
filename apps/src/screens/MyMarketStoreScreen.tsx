@@ -4,7 +4,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, TextInput } from '../components/common/AppText';
+import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import {
@@ -15,6 +15,8 @@ import { useComprarLocation } from '../hooks/useComprarLocation';
 import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal';
 import { formatLocalPrice } from '../utils/comprarFormat';
 import { explainLocateOutcome } from '../utils/comprarLocate';
+import { OpenStoreForm } from '../components/comprar/OpenStoreForm';
+import { useAccount } from '../contexts/AccountContext';
 
 const PRODUCT_STATUS: Record<string, string> = {
   pending_review: 'En revisión', active: 'Publicado', rejected: 'Rechazado', paused: 'Pausado',
@@ -22,8 +24,8 @@ const PRODUCT_STATUS: Record<string, string> = {
 
 /**
  * Mi tienda for the active account, personal or business (a business needs
- * the edit-business-info permission). No KYB. Fee: 8% of each sale, only
- * when you sell.
+ * the edit-business-info permission). No KYB. The fee comes from the server
+ * (marketplaceFeeBps), never from copy.
  */
 export const MyMarketStoreScreen = () => {
   const navigation = useNavigation<any>();
@@ -37,10 +39,14 @@ export const MyMarketStoreScreen = () => {
   const [deleteProduct] = useMutation(DELETE_MARKET_PRODUCT);
   const { location, home, choose, relocate } = useComprarLocation();
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [shipsOutside, setShipsOutside] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Locked from the tap until the new store has loaded (the mutation alone
+  // finishes before the refetch, which would briefly re-enable the button).
+  const [submitting, setSubmitting] = useState(false);
+  const { activeAccount } = useAccount();
+  const accountLabel = (activeAccount?.type || 'personal').toLowerCase() === 'business'
+    ? `la cuenta de ${activeAccount?.business?.name || 'tu negocio'}`
+    : 'tu cuenta personal';
 
   const header = (title: string) => (
     <Header navigation={navigation} isHomeScreen={false} title={title} backgroundColor="#fff"
@@ -52,14 +58,23 @@ export const MyMarketStoreScreen = () => {
   }
 
   if (!store) {
-    const submit = async () => {
+    const submit = async (values: { name: string; description: string; shipsOutsideCity: boolean }) => {
+      if (submitting) return;
       setError(null);
-      const res = await openStore({ variables: {
-        name: name.trim(), description: description.trim(), countryCode: location?.countryCode,
-        city: location?.city, shipsOutsideCity: shipsOutside,
-      } });
+      setSubmitting(true);
+      let res;
+      try {
+        res = await openStore({ variables: {
+          ...values, countryCode: location?.countryCode, city: location?.city,
+        } });
+      } catch {
+        setSubmitting(false);
+        setError(comprarError());
+        return;
+      }
       const r = res.data?.openMarketStore;
       if (!r?.success) {
+        setSubmitting(false);
         if (r?.error === 'identity_required') {
           Alert.alert('Verifica tu identidad', 'Para vender en Comprar necesitas verificar tu identidad.', [
             { text: 'Ahora no', style: 'cancel' },
@@ -70,37 +85,29 @@ export const MyMarketStoreScreen = () => {
         setError(comprarError(r?.error));
         return;
       }
-      await refetch();
+      try {
+        await refetch();
+      } finally {
+        setSubmitting(false);
+      }
     };
     return (
-      <SafeAreaView style={styles.screen} edges={['top']}>
-        {header('Abrir mi tienda')}
-        <View style={styles.content}>
-          <Text style={styles.lead}>Vende tus productos a compradores verificados. Sin mensualidades: pagas 8% solo cuando vendes.</Text>
-          <TextInput style={styles.input} placeholder="Nombre de tu tienda" placeholderTextColor={colors.text.light}
-            value={name} onChangeText={setName} />
-          <TextInput style={[styles.input, { minHeight: 80 }]} multiline placeholder="¿Qué vendes? (opcional)"
-            placeholderTextColor={colors.text.light} value={description} onChangeText={setDescription} />
-          <Pressable style={styles.input} onPress={() => setPickerOpen(true)}>
-            <Text style={{ color: location?.city ? colors.text.primary : colors.text.light }}>
-              {location?.city ? `Ciudad: ${location.city}` : 'Elige tu ciudad'}
-            </Text>
-          </Pressable>
-          <View style={styles.switchRow}>
-            <Text style={styles.switchText}>También envío a otras ciudades (el comprador paga más)</Text>
-            <Switch value={shipsOutside} onValueChange={setShipsOutside} />
-          </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Pressable style={[styles.primary, (!name.trim() || !location?.city || opening) && styles.disabled]}
-            disabled={!name.trim() || !location?.city || opening} onPress={() => { void submit(); }}>
-            {opening ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>Abrir tienda</Text>}
-          </Pressable>
-        </View>
+      <View style={styles.screen}>
+        <OpenStoreForm
+          feeBps={data?.marketplaceFeeBps}
+          city={location?.city || ''}
+          accountLabel={accountLabel}
+          submitting={submitting || opening}
+          error={error}
+          onBack={() => navigation.goBack()}
+          onPickCity={() => setPickerOpen(true)}
+          onSubmit={(values) => { void submit(values); }}
+        />
         <ComprarLocationModal visible={pickerOpen} countryCode={location?.countryCode || 'BO'} city={location?.city || ''}
           homeCountryCode={home?.countryCode} homeCity={home?.city}
           onClose={() => setPickerOpen(false)} onSelect={choose}
           onUseGps={async () => { explainLocateOutcome(await relocate(), () => setPickerOpen(true)); }} />
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -184,14 +191,8 @@ export default MyMarketStoreScreen;
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.neutral },
-  content: { padding: 16, gap: 12 },
-  lead: { fontSize: 15, color: colors.text.primary, lineHeight: 21 },
-  input: { backgroundColor: colors.white, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: colors.text.primary },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   switchText: { flex: 1, fontSize: 14, color: colors.text.primary },
-  primary: { backgroundColor: colors.primaryDark, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
-  primaryText: { color: colors.white, fontWeight: '700', fontSize: 16 },
-  disabled: { backgroundColor: '#D1D5DB' },
   error: { color: colors.error.text, fontSize: 14 },
   storeCard: { backgroundColor: colors.white, borderRadius: 14, padding: 14, gap: 6 },
   storeName: { fontSize: 18, fontWeight: '700', color: colors.textFlat },

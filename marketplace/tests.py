@@ -626,6 +626,21 @@ class ModerationTests(MarketTestBase):
 
 
 class NearestCityTests(TestCase):
+    def setUp(self):
+        # Own fixtures (the same centres migration 0002 seeds): a test must not
+        # depend on seed rows another suite's flush may have wiped.
+        for cc, cur, name, lat, lng, r in [
+            ('BO', 'BOB', 'La Paz', '-16.500000', '-68.150000', 30),
+            ('BO', 'BOB', 'El Alto', '-16.504700', '-68.163300', 15),
+            ('BO', 'BOB', 'Cochabamba', '-17.393500', '-66.157000', 30),
+            ('VE', 'VES', 'Caracas', '10.480600', '-66.903600', 35),
+            ('AR', 'ARS', 'Buenos Aires', '-34.603700', '-58.381600', 40),
+            ('AR', 'ARS', 'Córdoba', '-31.420100', '-64.188800', 30),
+        ]:
+            MarketplaceCity.objects.update_or_create(
+                country_code=cc, city=name,
+                defaults={'currency_code': cur, 'latitude': Decimal(lat), 'longitude': Decimal(lng), 'radius_km': r})
+
     def test_gps_matches_the_city_whose_radius_contains_it(self):
         from .schema import nearest_city
         # Seeded by migration 0002 (La Paz, El Alto, Santa Cruz, Cochabamba).
