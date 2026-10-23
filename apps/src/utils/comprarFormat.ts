@@ -17,6 +17,10 @@ export const formatFeeBps = (bps?: number | null): string | null => {
   return `${pct.toLocaleString('es-BO', { maximumFractionDigits: 2 })}%`;
 };
 
+/** "≈ 208,80 Bs" — the display-only local reference, or null without one. */
+export const formatReference = (ref?: { amount?: string | null; currency?: string | null } | null): string | null =>
+  ref?.amount && ref.currency ? `≈ ${formatLocalPrice(ref.amount, ref.currency)}` : null;
+
 export const formatUsd = (amount: string | number): string => {
   const n = Number(amount);
   return `US$ ${Number.isFinite(n) ? n.toFixed(2) : amount}`;

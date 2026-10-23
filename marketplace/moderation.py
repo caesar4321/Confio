@@ -56,7 +56,7 @@ def _decide(body: str, image) -> dict:
 def _listing_text(product) -> str:
     from .models import category_label
     return (f'Title: {product.title}\nCategory: {category_label(product.category)}\n'
-            f'Price: {product.price_local} {product.currency_code}\n'
+            f'Price: US${product.price_usd}\n'
             f'Description: {product.description}')
 
 

@@ -13,7 +13,7 @@ import {
 } from '../services/comprar';
 import { useComprarLocation } from '../hooks/useComprarLocation';
 import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal';
-import { formatLocalPrice } from '../utils/comprarFormat';
+import { formatUsd } from '../utils/comprarFormat';
 import { explainLocateOutcome } from '../utils/comprarLocate';
 import { OpenStoreForm } from '../components/comprar/OpenStoreForm';
 import { useAccount } from '../contexts/AccountContext';
@@ -153,7 +153,7 @@ export const MyMarketStoreScreen = () => {
               : <View style={[styles.thumb, styles.thumbEmpty]}><Icon name="image" size={18} color={colors.text.light} /></View>}
             <View style={{ flex: 1 }}>
               <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-              <Text style={styles.muted}>{formatLocalPrice(item.priceLocal, item.currencyCode)} · stock {item.stock}</Text>
+              <Text style={styles.muted}>{formatUsd(item.priceUsd)} · stock {item.stock}</Text>
               <Text style={[styles.muted, item.status === 'rejected' && styles.rejected]}>
                 {PRODUCT_STATUS[item.status] || item.status}
                 {item.status === 'rejected' && item.rejectionReason ? ` — ${item.rejectionReason}` : ''}

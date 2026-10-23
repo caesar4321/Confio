@@ -14,7 +14,7 @@ import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal
 import { GET_MARKETPLACE_HOME, GET_MARKETPLACE_PRODUCTS, SUBMIT_MARKETPLACE_INTEREST } from '../services/comprar';
 import { ComprarInterestSheet } from '../components/comprar/ComprarInterestSheet';
 import { AnalyticsService } from '../services/analyticsService';
-import { formatFeeBps, formatLocalPrice } from '../utils/comprarFormat';
+import { formatFeeBps, formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFormat';
 import { explainLocateOutcome } from '../utils/comprarLocate';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -251,7 +251,10 @@ export const ComprarScreen = () => {
               )}
               <View style={styles.cardBody}>
                 <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
-                <Text style={styles.cardPrice}>{formatLocalPrice(item.priceLocal, item.currencyCode)}</Text>
+                <Text style={styles.cardPrice}>{formatUsd(item.priceUsd)}</Text>
+                {formatReference(item.referenceLocal) ? (
+                  <Text style={styles.cardReference}>{formatReference(item.referenceLocal)}</Text>
+                ) : null}
                 <Text style={styles.cardStore} numberOfLines={1}>{item.store?.name}</Text>
               </View>
             </Pressable>
@@ -308,6 +311,7 @@ const styles = StyleSheet.create({
   cardBody: { padding: 10, gap: 2 },
   cardTitle: { fontSize: 14, color: colors.text.primary },
   cardPrice: { fontSize: 16, fontWeight: '700', color: colors.textFlat },
+  cardReference: { fontSize: 12, color: colors.text.secondary },
   cardStore: { fontSize: 12, color: colors.text.secondary },
   empty: { textAlign: 'center', color: colors.text.secondary, marginTop: 48 },
   fakeDoor: { alignItems: 'center', padding: 24, margin: 16, backgroundColor: colors.white, borderRadius: 16, gap: 10 },

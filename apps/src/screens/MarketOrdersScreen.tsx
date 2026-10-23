@@ -8,7 +8,7 @@ import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { GET_MY_MARKET_ORDERS, orderStatusLabel } from '../services/comprar';
-import { formatLocalPrice } from '../utils/comprarFormat';
+import { formatUsd } from '../utils/comprarFormat';
 
 const PAGE_SIZE = 20;
 
@@ -76,7 +76,7 @@ export const MarketOrdersScreen = () => {
             <View style={{ flex: 1 }}>
               <Text style={styles.title} numberOfLines={1}>{item.quantity} × {item.productTitle}</Text>
               <Text style={styles.meta} numberOfLines={1}>
-                {role === 'buyer' ? item.store?.name : item.buyerDisplayName} · {formatLocalPrice(item.subtotalLocal, item.currencyCode)}
+                {role === 'buyer' ? item.store?.name : item.buyerDisplayName} · {formatUsd(item.amountUsd)}
               </Text>
               <Text style={[styles.status, item.availableActions?.length && styles.statusAction]}>
                 {orderStatusLabel(item.status, item.role)}

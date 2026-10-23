@@ -32,13 +32,13 @@ const STORE_FIELDS = `
 `;
 
 const PRODUCT_FIELDS = `
-  id title description category categoryLabel priceLocal currencyCode stock photoUrls status
+  id title description category categoryLabel priceUsd referenceLocal { amount currency } stock photoUrls status
   rejectionReason isBuyable
 `;
 
 export const ORDER_FIELDS = `
   id role status pendingAction productId productTitle productPhotoUrl quantity
-  unitPriceLocal subtotalLocal currencyCode amountUsd feeUsd merchantNetUsd
+  unitPriceUsd amountUsd referenceLocal { amount currency } deliveryCurrency feeUsd merchantNetUsd
   deliveryCity deliveryCountry deliveryOutsideCity deliveryEstimateLocal
   deliveryAddress deliveryPhone deliveryNote buyerDisplayName trackingReference
   shipBy releaseAt disputedAt createdAt settledAt availableActions rating lastTxHash
@@ -96,9 +96,15 @@ export const GET_CHECKOUT_QUOTE = gql`
   query MarketCheckoutQuote($productId: ID!, $quantity: Int!, $deliveryCountry: String!, $deliveryCity: String!) {
     marketCheckoutQuote(productId: $productId, quantity: $quantity,
                         deliveryCountry: $deliveryCountry, deliveryCity: $deliveryCity) {
-      subtotalLocal currencyCode fxRate amountUsd outsideCity shipsOutsideCity
+      unitPriceUsd amountUsd referenceLocal { amount currency } deliveryCurrency outsideCity shipsOutsideCity
       deliveryEstimateLocal deliveryPartner
     }
+  }
+`;
+
+export const GET_REFERENCE_RATE = gql`
+  query MarketplaceReferenceRate($countryCode: String!) {
+    marketplaceReferenceRate(countryCode: $countryCode) { currency localPerUsd }
   }
 `;
 
@@ -163,10 +169,10 @@ export const REQUEST_MARKET_PHOTO_UPLOAD = gql`
 
 export const SAVE_MARKET_PRODUCT = gql`
   mutation SaveMarketProduct($productId: ID, $title: String!, $description: String,
-                             $category: String!, $priceLocal: String!, $stock: Int!,
+                             $category: String!, $priceUsd: String!, $stock: Int!,
                              $expectedStock: Int, $expectedStockRevision: Int, $photoKeys: [String]) {
     saveMarketProduct(productId: $productId, title: $title, description: $description,
-                      category: $category, priceLocal: $priceLocal, stock: $stock,
+                      category: $category, priceUsd: $priceUsd, stock: $stock,
                       expectedStock: $expectedStock, expectedStockRevision: $expectedStockRevision,
                       photoKeys: $photoKeys) {
       success error product { ${PRODUCT_FIELDS} }

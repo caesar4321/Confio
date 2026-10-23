@@ -19,7 +19,7 @@ from django.db import transaction
 from . import escrow
 from .models import MarketplaceCity, Order, Product
 from .permissions import AccountError, account_for
-from .pricing import QuoteUnavailable, quote
+from .pricing import quote
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ def delivery_terms(store, delivery_country: str, delivery_city: str) -> dict:
         'outside_city': outside,
         # None = no estimate for this city (outside it, or none set): "a coordinar".
         'estimate_local': None if outside or city is None else city.delivery_estimate,
+        'currency': city.currency_code if city else '',
         'partner': city.delivery_partner if city else '',
         'ships_outside_city': store.ships_outside_city,
     }
@@ -67,10 +68,8 @@ def delivery_terms(store, delivery_country: str, delivery_city: str) -> dict:
 def checkout_quote(product, quantity: int, delivery_country: str, delivery_city: str) -> dict:
     if not (1 <= quantity <= MAX_QUANTITY):
         raise CheckoutError('bad_quantity')
-    try:
-        q = quote(product.price_local, quantity, product.currency_code)
-    except QuoteUnavailable as exc:
-        raise CheckoutError(str(exc)) from exc
+    # Priced in dollars: the quote is price × quantity, no exchange rate.
+    q = quote(product.price_usd, quantity)
     return {'quote': q, **delivery_terms(product.store, delivery_country, delivery_city)}
 
 
@@ -146,6 +145,7 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
     delivery = dict(
         delivery_country=delivery_country.upper(), delivery_city=delivery_city.strip(),
         delivery_outside_city=terms['outside_city'], delivery_estimate_local=terms['estimate_local'],
+        delivery_currency=terms['currency'],
         delivery_address=delivery_address[:300], delivery_phone=delivery_phone[:20],
         delivery_note=(delivery_note or '').strip()[:300])
 
@@ -155,7 +155,7 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
     # balances right now.
     reusable = Order.objects.filter(
         buyer=user, buyer_account=account, product=product, status='draft', quantity=quantity,
-        unit_price_local=product.price_local, buyer_address=buyer_addr,
+        unit_price_usd=product.price_usd, buyer_address=buyer_addr,
         merchant_address=merchant_addr, stock_reserved=True,
         deposit_deadline__gte=int(time.time()) + REUSE_MIN_REMAINING_S,
     ).order_by('-created_at').first()
@@ -210,9 +210,8 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
         order = Order.objects.create(
             public_id=public_id, order_id32=order_id32, buyer=user, buyer_account=account,
             buyer_address=buyer_addr, store=store, merchant_address=merchant_addr,
-            product=product, product_title=product.title, unit_price_local=product.price_local,
-            quantity=quantity, subtotal_local=q.subtotal_local, currency_code=product.currency_code,
-            fx_rate=q.fx_rate, amount_usd=q.amount_usd, amount_wei=q.amount_wei,
+            product=product, product_title=product.title, unit_price_usd=q.unit_price_usd,
+            quantity=quantity, amount_usd=q.amount_usd, amount_wei=q.amount_wei,
             token_address=token, fee_bps=q.fee_bps, **delivery,
             deposit_deadline=deadline, deposit_signature=signature, deposit_signer=signer,
             stock_reserved=True,

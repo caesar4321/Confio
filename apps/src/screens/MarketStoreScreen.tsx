@@ -8,7 +8,7 @@ import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { GET_MARKETPLACE_PRODUCTS } from '../services/comprar';
-import { formatLocalPrice } from '../utils/comprarFormat';
+import { formatReference, formatUsd } from '../utils/comprarFormat';
 
 const GET_STORE = gql`
   query MarketplaceStore($id: ID!) {
@@ -89,7 +89,10 @@ export const MarketStoreScreen = () => {
               : <View style={[styles.image, styles.imageEmpty]}><Icon name="image" size={22} color={colors.text.light} /></View>}
             <View style={{ padding: 10 }}>
               <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
-              <Text style={styles.price}>{formatLocalPrice(item.priceLocal, item.currencyCode)}</Text>
+              <Text style={styles.price}>{formatUsd(item.priceUsd)}</Text>
+              {formatReference(item.referenceLocal) ? (
+                <Text style={styles.reference}>{formatReference(item.referenceLocal)}</Text>
+              ) : null}
             </View>
           </Pressable>
         )}
@@ -113,5 +116,6 @@ const styles = StyleSheet.create({
   imageEmpty: { alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 14, color: colors.text.primary },
   price: { fontSize: 15, fontWeight: '700', color: colors.textFlat, marginTop: 2 },
+  reference: { fontSize: 12, color: colors.text.secondary },
   empty: { textAlign: 'center', color: colors.text.secondary, marginTop: 32 },
 });

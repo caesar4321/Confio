@@ -119,7 +119,7 @@ class MarketplaceInterestAdmin(admin.ModelAdmin):
 class ProductInline(admin.TabularInline):
     model = Product
     extra = 0
-    fields = ('title', 'category', 'price_local', 'currency_code', 'stock', 'status')
+    fields = ('title', 'category', 'price_usd', 'stock', 'status')
     readonly_fields = fields
     show_change_link = True
     can_delete = False
@@ -153,7 +153,7 @@ class StoreAdmin(admin.ModelAdmin):
 
 
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('title', 'store', 'category', 'price_local', 'currency_code', 'stock',
+    list_display = ('title', 'store', 'category', 'price_usd', 'stock',
                     'status', 'reviewed_at')
     list_filter = ('status', 'category', 'store__country_code')
     search_fields = ('title', 'description', 'store__name')
@@ -184,7 +184,7 @@ class ProductAdmin(admin.ModelAdmin):
 
 class OrderAdmin(admin.ModelAdmin):
     list_display = ('public_id', 'status', 'pending_action', 'store', 'buyer', 'product_title',
-                    'quantity', 'subtotal_local', 'currency_code', 'amount_usd', 'created_at')
+                    'quantity', 'unit_price_usd', 'amount_usd', 'created_at')
     list_filter = ('status', 'store__country_code', 'delivery_outside_city')
     search_fields = ('public_id', 'order_id32', 'product_title', 'store__name', 'buyer__username',
                      'last_tx_hash')

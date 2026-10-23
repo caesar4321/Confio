@@ -1,23 +1,20 @@
-"""Comprar pricing: local price → dollars, and the merchant fee.
+"""Comprar pricing: products are priced in US dollars — the escrow's unit
+and what the merchant receives — so a sale involves no exchange rate.
 
-The seller prices in local currency (Bs in Bolivia). At checkout the local
-subtotal is converted at the current parallel-market rate and the USD amount
-is what the escrow holds; that quote is frozen into the order and signed.
-A stale or missing rate refuses checkout — never a guessed price.
+Local currency is a display convenience only ("≈ 1.470 Bs"): computed from a
+fresh parallel-market rate when one exists, and simply absent otherwise. It
+never blocks, quotes or changes a payment.
 """
 
 from dataclasses import dataclass
 from datetime import timedelta
-from decimal import ROUND_DOWN, ROUND_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.conf import settings
 from django.utils import timezone
 
 WAD = 10**18
-
-
-class QuoteUnavailable(Exception):
-    pass
+CENT = Decimal('0.01')
 
 
 def fee_bps() -> int:
@@ -29,24 +26,63 @@ def fee_wei(amount_wei: int, bps: int) -> int:
     return -(-int(amount_wei) * int(bps) // 10_000)
 
 
-def local_per_usd(currency_code: str) -> Decimal:
-    """Local currency units per 1 USD, from a fresh parallel-market row."""
-    from exchange_rates.services import exchange_rate_service
+def local_per_usd(currency_code: str) -> Decimal | None:
+    """Local units per 1 USD from a fresh parallel-market row, or None.
+    Display only: a missing or stale rate just hides the reference line."""
+    if not currency_code or currency_code == 'USD':
+        return None
+    from django.core.cache import cache
 
-    row = exchange_rate_service.get_current_rate_row(currency_code, 'USD', 'parallel')
-    max_age = timedelta(hours=int(getattr(settings, 'MARKETPLACE_RATE_MAX_AGE_HOURS', 6)))
-    if row is None or not row.rate or row.rate <= 0:
-        raise QuoteUnavailable('rate_unavailable')
-    fetched_at = getattr(row, 'fetched_at', None)
-    if fetched_at is None or timezone.now() - fetched_at > max_age:
-        raise QuoteUnavailable('rate_stale')
-    return Decimal(row.rate)
+    # 60s cache: a page of products costs one rate read, not one per card. The
+    # cache is an optimization: if it is down, read the rate directly.
+    key = f'comprar:ref-rate:{currency_code}'
+    try:
+        cached = cache.get(key)
+        if cached is not None:
+            return Decimal(cached) if cached else None
+    except Exception:  # noqa: BLE001
+        pass
+    rate = None
+    try:
+        from exchange_rates.services import exchange_rate_service
+
+        row = exchange_rate_service.get_current_rate_row(currency_code, 'USD', 'parallel')
+        max_age = timedelta(hours=int(getattr(settings, 'MARKETPLACE_RATE_MAX_AGE_HOURS', 6)))
+        fetched_at = getattr(row, 'fetched_at', None) if row else None
+        if (row is not None and row.rate and row.rate > 0 and fetched_at is not None
+                and timezone.now() - fetched_at <= max_age):
+            rate = Decimal(row.rate)
+    except Exception:  # noqa: BLE001 — a reference line is never worth an error
+        rate = None
+    try:
+        cache.set(key, str(rate) if rate else '', 60)
+    except Exception:  # noqa: BLE001
+        pass
+    return rate
+
+
+def currency_for_country(country_code: str) -> str:
+    from exchange_rates.currency_mapping import COUNTRY_TO_CURRENCY
+    return COUNTRY_TO_CURRENCY.get((country_code or '').upper(), 'USD')
+
+
+def reference_local(amount_usd, country_code: str) -> tuple[Decimal, str] | None:
+    """(≈ amount in the country's currency, currency code), or None. Any
+    failure on the way (cache outage, bad row) hides the line — it is computed
+    while building products, quotes and orders, and must never break them."""
+    try:
+        currency = currency_for_country(country_code)
+        rate = local_per_usd(currency)
+        if rate is None:
+            return None
+        return (Decimal(amount_usd) * rate).quantize(CENT, rounding=ROUND_HALF_UP), currency
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @dataclass(frozen=True)
 class Quote:
-    subtotal_local: Decimal
-    fx_rate: Decimal
+    unit_price_usd: Decimal
     amount_usd: Decimal
     amount_wei: int
     fee_bps: int
@@ -54,21 +90,11 @@ class Quote:
     merchant_net_usd: Decimal
 
 
-def quote(unit_price_local: Decimal, quantity: int, currency_code: str) -> Quote:
-    subtotal = (Decimal(unit_price_local) * quantity).quantize(Decimal('0.01'))
-    rate = local_per_usd(currency_code)
-    # Round the buyer's dollars UP to the cent so the merchant never receives
-    # less than the price they set at today's rate.
-    amount_usd = (subtotal / rate).quantize(Decimal('0.01'), rounding=ROUND_UP)
+def quote(unit_price_usd: Decimal, quantity: int) -> Quote:
+    unit = Decimal(unit_price_usd).quantize(CENT)
+    amount_usd = (unit * quantity).quantize(CENT)
     amount_wei = int(amount_usd * WAD)
     bps = fee_bps()
     fee = Decimal(fee_wei(amount_wei, bps)) / WAD
-    return Quote(
-        subtotal_local=subtotal,
-        fx_rate=rate.quantize(Decimal('0.000001'), rounding=ROUND_DOWN),
-        amount_usd=amount_usd,
-        amount_wei=amount_wei,
-        fee_bps=bps,
-        fee_usd=fee,
-        merchant_net_usd=amount_usd - fee,
-    )
+    return Quote(unit_price_usd=unit, amount_usd=amount_usd, amount_wei=amount_wei, fee_bps=bps,
+                 fee_usd=fee, merchant_net_usd=amount_usd - fee)

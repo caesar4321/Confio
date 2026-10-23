@@ -8,7 +8,7 @@ import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { GET_MARKETPLACE_PRODUCT } from '../services/comprar';
-import { formatLocalPrice } from '../utils/comprarFormat';
+import { formatReference, formatUsd } from '../utils/comprarFormat';
 
 const WIDTH = Dimensions.get('window').width;
 
@@ -49,7 +49,10 @@ export const MarketProductScreen = () => {
             )}
             <View style={styles.body}>
               <Text style={styles.title}>{product.title}</Text>
-              <Text style={styles.price}>{formatLocalPrice(product.priceLocal, product.currencyCode)}</Text>
+              <Text style={styles.price}>{formatUsd(product.priceUsd)}</Text>
+              {formatReference(product.referenceLocal) ? (
+                <Text style={styles.reference}>{formatReference(product.referenceLocal)}</Text>
+              ) : null}
               <Text style={styles.stock}>
                 {product.stock > 0 ? `${product.stock} disponible${product.stock === 1 ? '' : 's'}` : 'Agotado'}
               </Text>
@@ -107,6 +110,7 @@ const styles = StyleSheet.create({
   body: { padding: 16, gap: 8 },
   title: { fontSize: 20, fontWeight: '600', color: colors.textFlat },
   price: { fontSize: 24, fontWeight: '700', color: colors.textFlat },
+  reference: { fontSize: 14, color: colors.text.secondary, marginTop: -4 },
   stock: { fontSize: 13, color: colors.text.secondary },
   description: { fontSize: 15, color: colors.text.primary, lineHeight: 22, marginTop: 4 },
   storeCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB', marginTop: 12 },

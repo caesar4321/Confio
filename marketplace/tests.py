@@ -73,19 +73,29 @@ class PricingTests(SimpleTestCase):
         self.assertEqual(pricing.fee_wei(1, 800), 1)  # ceil, like feeFor
         self.assertEqual(pricing.fee_wei(12_345, 800), 988)  # 987.6 → 988
 
-    def test_quote_rounds_buyer_dollars_up_to_the_cent(self):
-        with mock.patch.object(pricing, 'local_per_usd', return_value=Decimal('6.96')):
-            q = pricing.quote(Decimal('100'), 1, 'BOB')
-        self.assertEqual(q.amount_usd, Decimal('14.37'))  # 14.367… → 14.37
-        self.assertEqual(q.amount_wei, 1437 * 10**16)
-        self.assertEqual(q.fee_bps, 800)
+    def test_quote_is_price_times_quantity_in_dollars(self):
+        q = pricing.quote(Decimal('14.50'), 3)
+        self.assertEqual(q.amount_usd, Decimal('43.50'))      # no exchange rate involved
+        self.assertEqual(q.amount_wei, 4350 * 10**16)
+        self.assertEqual(q.fee_usd, Decimal('3.48'))           # 8%
+        self.assertEqual(q.merchant_net_usd, Decimal('40.02'))
 
-    def test_stale_rate_refuses(self):
-        row = SimpleNamespace(rate=Decimal('6.96'), fetched_at=timezone.now() - timedelta(hours=7))
+    def test_local_reference_is_display_only_and_absent_without_a_fresh_rate(self):
+        from django.core.cache import cache
+        cache.clear()
+        fresh = SimpleNamespace(rate=Decimal('6.96'), fetched_at=timezone.now())
         with mock.patch('exchange_rates.services.exchange_rate_service.get_current_rate_row',
-                        return_value=row):
-            with self.assertRaises(pricing.QuoteUnavailable):
-                pricing.local_per_usd('BOB')
+                        return_value=fresh):
+            self.assertEqual(pricing.reference_local(Decimal('10'), 'BO'), (Decimal('69.60'), 'BOB'))
+        cache.clear()
+        stale = SimpleNamespace(rate=Decimal('6.96'), fetched_at=timezone.now() - timedelta(hours=7))
+        with mock.patch('exchange_rates.services.exchange_rate_service.get_current_rate_row',
+                        return_value=stale):
+            self.assertIsNone(pricing.reference_local(Decimal('10'), 'BO'))  # hidden, never raises
+        cache.clear()
+        with mock.patch('exchange_rates.services.exchange_rate_service.get_current_rate_row',
+                        side_effect=RuntimeError('db down')):
+            self.assertIsNone(pricing.reference_local(Decimal('10'), 'BO'))
 
 
 @override_settings(**ENABLED)
@@ -158,10 +168,9 @@ class MarketTestBase(TestCase):
             country_code='BO', city='La Paz')
         self.product = Product.objects.create(
             store=self.store, title='Chompa de alpaca', category='textiles',
-            price_local=Decimal('210.00'), currency_code='BOB', stock=3, status='active',
+            price_usd=Decimal('30.00'), stock=3, status='active',
             photo_urls=['https://example.com/a.jpg'])
         patches = [
-            mock.patch.object(pricing, 'local_per_usd', return_value=Decimal('7.00')),
             mock.patch.object(escrow, 'sign_deposit', side_effect=local_sign),
             mock.patch.object(escrow, 'funding_leg', return_value=None),
             mock.patch.object(escrow, 'token_limits', return_value=LIMITS),
@@ -184,7 +193,7 @@ class CheckoutTests(MarketTestBase):
     def test_prepare_builds_signed_pinned_batch(self):
         order, calls, intent_id = self.prepare()
         self.assertEqual(order.status, 'draft')
-        self.assertEqual(order.amount_usd, Decimal('30.00'))  # 210 Bs / 7
+        self.assertEqual(order.amount_usd, Decimal('30.00'))  # priced in dollars
         self.assertEqual(order.fee_bps, 800)
         self.assertEqual(order.delivery_estimate_local, Decimal('15.00'))
         self.assertEqual(len(calls), 2)
@@ -295,7 +304,7 @@ class CheckoutTests(MarketTestBase):
         self.assertIsNone(order.delivery_estimate_local)
 
     def test_order_cap(self):
-        Product.objects.filter(pk=self.product.pk).update(price_local=Decimal('2200'))  # $314 > 300
+        Product.objects.filter(pk=self.product.pk).update(price_usd=Decimal('314'))  # > $300 on-chain cap
         with self.assertRaisesMessage(checkout.CheckoutError, 'order_too_large'):
             self.prepare()
 
@@ -698,7 +707,7 @@ class StoreUpdateTests(MarketTestBase):
         with mock.patch('marketplace.schema._jwt', return_value=PERSONAL), \
                 mock.patch('marketplace.moderation.transaction.on_commit'):
             SaveMarketProduct.mutate.__wrapped__(
-                None, info, title='Chompa de alpaca', category='textiles', price_local='210',
+                None, info, title='Chompa de alpaca', category='textiles', price_usd='30',
                 stock=3, product_id=self.product.pk, description='Más abrigada', expected_stock=3,
                 expected_stock_revision=0)
         self.product.refresh_from_db()
@@ -707,7 +716,7 @@ class StoreUpdateTests(MarketTestBase):
     def test_retried_stock_edit_applies_once(self):
         from .schema import SaveMarketProduct
         info = SimpleNamespace(context=SimpleNamespace(user=self.seller))
-        args = dict(title='Chompa de alpaca', category='textiles', price_local='210', stock=5,
+        args = dict(title='Chompa de alpaca', category='textiles', price_usd='30', stock=5,
                     product_id=self.product.pk, expected_stock=3, expected_stock_revision=0)
         with mock.patch('marketplace.schema._jwt', return_value=PERSONAL), \
                 mock.patch('marketplace.moderation.transaction.on_commit'):
@@ -871,7 +880,7 @@ class CategoryTests(MarketTestBase):
         info = SimpleNamespace(context=SimpleNamespace(user=self.seller))
         with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
             result = SaveMarketProduct.mutate.__wrapped__(
-                None, info, title='Retablo', category='artesanias', price_local='50', stock=1,
+                None, info, title='Retablo', category='artesanias', price_usd='7', stock=1,
                 photo_keys=[f'marketplace/pending/{self.seller.id}/upload.jpg'])
         self.assertEqual(result.error, 'bad_category')
 
@@ -883,6 +892,43 @@ class CategoryTests(MarketTestBase):
         with mock.patch('marketplace.schema._jwt', return_value=PERSONAL), \
                 mock.patch('marketplace.moderation.transaction.on_commit'):
             result = SaveMarketProduct.mutate.__wrapped__(
-                None, info, title='Chompa de alpaca', category='textiles', price_local='230', stock=3,
+                None, info, title='Chompa de alpaca', category='textiles', price_usd='33', stock=3,
                 product_id=self.product.pk, expected_stock=3, expected_stock_revision=0)
         self.assertTrue(result.success, result.error)
+
+
+@override_settings(**ENABLED)
+class UsdPricingTests(MarketTestBase):
+    def test_checkout_never_depends_on_an_exchange_rate(self):
+        from django.core.cache import cache
+        cache.clear()
+        with mock.patch('exchange_rates.services.exchange_rate_service.get_current_rate_row',
+                        side_effect=RuntimeError('rates down')):
+            order, _, _ = self.prepare(quantity=2)
+        self.assertEqual(order.unit_price_usd, Decimal('30.00'))
+        self.assertEqual(order.amount_usd, Decimal('60.00'))
+        self.assertEqual(order.delivery_currency, 'BOB')       # the courier is paid locally
+
+    def test_product_shows_a_local_reference_only_with_a_rate(self):
+        from django.core.cache import cache
+        from .schema import MarketplaceProductType
+        cache.clear()
+        fresh = SimpleNamespace(rate=Decimal('6.96'), fetched_at=timezone.now())
+        with mock.patch('exchange_rates.services.exchange_rate_service.get_current_rate_row', return_value=fresh):
+            p = MarketplaceProductType.from_model(self.product)
+        self.assertEqual(p.price_usd, '30.00')
+        self.assertEqual((p.reference_local.amount, p.reference_local.currency), ('208.80', 'BOB'))
+        cache.clear()
+        with mock.patch('exchange_rates.services.exchange_rate_service.get_current_rate_row', return_value=None):
+            self.assertIsNone(MarketplaceProductType.from_model(self.product).reference_local)
+
+
+class ReferenceResilienceTests(SimpleTestCase):
+    def test_a_cache_outage_never_breaks_the_reference_path(self):
+        fresh = SimpleNamespace(rate=Decimal('6.96'), fetched_at=timezone.now())
+        with mock.patch('django.core.cache.cache.get', side_effect=ConnectionError('redis down')), \
+                mock.patch('django.core.cache.cache.set', side_effect=ConnectionError('redis down')), \
+                mock.patch('exchange_rates.services.exchange_rate_service.get_current_rate_row', return_value=fresh):
+            self.assertEqual(pricing.reference_local(Decimal('10'), 'BO'), (Decimal('69.60'), 'BOB'))
+        with mock.patch.object(pricing, 'local_per_usd', side_effect=RuntimeError('anything')):
+            self.assertIsNone(pricing.reference_local(Decimal('10'), 'BO'))

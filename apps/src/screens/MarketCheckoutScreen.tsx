@@ -13,7 +13,7 @@ import {
   GET_CHECKOUT_QUOTE, GET_MARKETPLACE_PRODUCT, GET_MARKET_ORDER, MarketOutcomeUnknownError, comprarError,
   placeMarketOrder,
 } from '../services/comprar';
-import { formatLocalPrice, formatUsd } from '../utils/comprarFormat';
+import { formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFormat';
 
 /**
  * Checkout: the product is paid into the escrow in Confío dollars; delivery
@@ -183,18 +183,20 @@ export const MarketCheckoutScreen = () => {
             {quoting && !quote ? <ActivityIndicator color={colors.primaryDark} /> : quote ? (
               <>
                 <View style={styles.line}>
-                  <Text style={styles.label}>Producto</Text>
-                  <Text style={styles.value}>{formatLocalPrice(quote.subtotalLocal, quote.currencyCode)}</Text>
+                  <Text style={styles.label}>Producto{quantity > 1 ? ` (${quantity} × ${formatUsd(quote.unitPriceUsd)})` : ''}</Text>
+                  <Text style={styles.value}>{formatUsd(quote.amountUsd)}</Text>
                 </View>
-                <View style={styles.line}>
-                  <Text style={styles.muted}>Pagas con Confío</Text>
-                  <Text style={styles.muted}>{formatUsd(quote.amountUsd)}</Text>
-                </View>
+                {formatReference(quote.referenceLocal) ? (
+                  <View style={styles.line}>
+                    <Text style={styles.muted}>En moneda local, aprox.</Text>
+                    <Text style={styles.muted}>{formatReference(quote.referenceLocal)}</Text>
+                  </View>
+                ) : null}
                 <View style={styles.line}>
                   <Text style={styles.label}>Envío</Text>
                   <Text style={styles.value}>
                     {quote.deliveryEstimateLocal
-                      ? `~${formatLocalPrice(quote.deliveryEstimateLocal, quote.currencyCode)}`
+                      ? `~${formatLocalPrice(quote.deliveryEstimateLocal, quote.deliveryCurrency || '')}`
                       : 'A coordinar'}
                   </Text>
                 </View>

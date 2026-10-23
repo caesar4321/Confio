@@ -8,8 +8,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, TextInput } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
-import { GET_MY_MARKET_STORE, SAVE_MARKET_PRODUCT, comprarError, uploadMarketPhoto } from '../services/comprar';
-import { formatFeeBps } from '../utils/comprarFormat';
+import { GET_MY_MARKET_STORE, GET_REFERENCE_RATE, SAVE_MARKET_PRODUCT, comprarError, uploadMarketPhoto } from '../services/comprar';
+import { formatFeeBps, formatLocalPrice } from '../utils/comprarFormat';
 import { CategoryPicker } from '../components/comprar/CategoryPicker';
 
 const MAX_PHOTOS = 4;
@@ -26,6 +26,12 @@ export const MarketProductEditScreen = () => {
   const productId = route.params?.productId as string | undefined;
   const { data } = useQuery(GET_MY_MARKET_STORE);
   const existing = (data?.myMarketStoreProducts || []).find((p: any) => String(p.id) === productId);
+  // Display-only "≈ Bs" while typing; the price itself is in dollars.
+  const storeCountry = data?.myMarketStore?.countryCode;
+  const { data: rateData } = useQuery(GET_REFERENCE_RATE, {
+    variables: { countryCode: storeCountry || '' }, skip: !storeCountry,
+  });
+  const rate = rateData?.marketplaceReferenceRate;
   const categories = data?.marketplaceCategories || [];
   const [save, { loading: saving }] = useMutation(SAVE_MARKET_PRODUCT);
 
@@ -47,7 +53,7 @@ export const MarketProductEditScreen = () => {
       setTitle(existing.title);
       setDescription(existing.description || '');
       setCategory(existing.category);
-      setPrice(String(existing.priceLocal));
+      setPrice(String(existing.priceUsd));
       setStock(String(existing.stock));
       setLoadedStock(existing.stock);
       setLoadedRevision(existing.stockRevision ?? 0);
@@ -74,14 +80,14 @@ export const MarketProductEditScreen = () => {
 
   const uploading = photos.some((p) => p.uploading);
   const newKeys = photos.filter((p) => p.key).map((p) => p.key as string);
-  const valid = title.trim().length >= 3 && category && Number(price) >= 1 && Number.isInteger(Number(stock))
+  const valid = title.trim().length >= 3 && category && Number(price) >= 0.5 && Number.isInteger(Number(stock))
     && (productId ? true : newKeys.length > 0);
 
   const submit = async () => {
     setError(null);
     const res = await save({ variables: {
       productId: productId || null, title: title.trim(), description: description.trim(), category,
-      priceLocal: price, stock: Number(stock), photoKeys: newKeys.length ? newKeys : null,
+      priceUsd: price, stock: Number(stock), photoKeys: newKeys.length ? newKeys : null,
       expectedStock: productId ? loadedStock : null,
       expectedStockRevision: productId ? loadedRevision : null,
     } });
@@ -138,18 +144,23 @@ export const MarketProductEditScreen = () => {
           />
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Precio (moneda local)</Text>
-              <TextInput style={styles.input} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.text.light}
+              <Text style={styles.label}>Precio (US$)</Text>
+              <TextInput style={styles.input} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.text.light}
                 value={price} onChangeText={(t) => setPrice(t.replace(',', '.'))} />
+              {rate && Number(price) > 0 ? (
+                <Text style={styles.hint}>
+                  ≈ {formatLocalPrice((Number(price) * Number(rate.localPerUsd)).toFixed(2), rate.currency)} al cambio de hoy
+                </Text>
+              ) : null}
             </View>
             <View style={{ width: 110 }}>
               <Text style={styles.label}>Stock</Text>
               <TextInput style={styles.input} keyboardType="number-pad" value={stock} onChangeText={setStock} />
             </View>
           </View>
-          {Number(price) >= 1 && typeof data?.marketplaceFeeBps === 'number' ? (
+          {Number(price) >= 0.5 && typeof data?.marketplaceFeeBps === 'number' ? (
             <Text style={styles.hint}>
-              Recibes {(Number(price) * (1 - data.marketplaceFeeBps / 10_000)).toFixed(2)} por unidad
+              Recibes US$ {(Number(price) * (1 - data.marketplaceFeeBps / 10_000)).toFixed(2)} por unidad
               (comisión {formatFeeBps(data.marketplaceFeeBps)}).
             </Text>
           ) : null}

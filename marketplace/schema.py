@@ -67,6 +67,24 @@ class MarketplaceCityType(graphene.ObjectType):
     store_count = graphene.Int()
 
 
+class LocalReferenceType(graphene.ObjectType):
+    """A display-only "≈" amount in local currency. Prices are in US dollars;
+    this never quotes or changes a payment, and is null without a fresh rate."""
+    amount = graphene.String()
+    currency = graphene.String()
+
+
+def _reference(amount_usd, country_code):
+    from .pricing import reference_local
+    ref = reference_local(amount_usd, country_code)
+    return LocalReferenceType(amount=str(ref[0]), currency=ref[1]) if ref else None
+
+
+class ReferenceRateType(graphene.ObjectType):
+    currency = graphene.String()
+    local_per_usd = graphene.String()
+
+
 class MarketplaceCountryType(graphene.ObjectType):
     country_code = graphene.String()
     store_count = graphene.Int()
@@ -114,8 +132,8 @@ class MarketplaceProductType(graphene.ObjectType):
     description = graphene.String()
     category = graphene.String()
     category_label = graphene.String()
-    price_local = graphene.String()
-    currency_code = graphene.String()
+    price_usd = graphene.String(description='The price, in US dollars')
+    reference_local = graphene.Field(LocalReferenceType, description='≈ in the store country currency')
     stock = graphene.Int()
     stock_revision = graphene.Int(description='Seller only')
     photo_urls = graphene.List(graphene.String)
@@ -129,8 +147,9 @@ class MarketplaceProductType(graphene.ObjectType):
         return MarketplaceProductType(
             id=product.pk, title=product.title, description=product.description,
             category=product.category, category_label=category_label(product.category),
-            price_local=str(product.price_local),
-            currency_code=product.currency_code, stock=product.stock,
+            price_usd=str(product.price_usd),
+            reference_local=_reference(product.price_usd, product.store.country_code),
+            stock=product.stock,
             photo_urls=list(product.photo_urls or []), status=product.status,
             rejection_reason=product.rejection_reason if for_owner else None,
             stock_revision=product.stock_revision if for_owner else None,
@@ -149,10 +168,10 @@ class MarketplaceOrderType(graphene.ObjectType):
     product_photo_url = graphene.String()
     store = graphene.Field(MarketplaceStoreType)
     quantity = graphene.Int()
-    unit_price_local = graphene.String()
-    subtotal_local = graphene.String()
-    currency_code = graphene.String()
+    unit_price_usd = graphene.String()
     amount_usd = graphene.String()
+    reference_local = graphene.Field(LocalReferenceType, description='≈ of amountUsd, current rate')
+    delivery_currency = graphene.String()
     fee_usd = graphene.String(description='Merchant only')
     merchant_net_usd = graphene.String(description='Merchant only')
     delivery_city = graphene.String()
@@ -206,8 +225,9 @@ class MarketplaceOrderType(graphene.ObjectType):
             product_title=order.product_title,
             product_photo_url=(order.product.photo_urls or [None])[0],
             store=MarketplaceStoreType.from_model(order.store), quantity=order.quantity,
-            unit_price_local=str(order.unit_price_local), subtotal_local=str(order.subtotal_local),
-            currency_code=order.currency_code, amount_usd=str(order.amount_usd),
+            unit_price_usd=str(order.unit_price_usd), amount_usd=str(order.amount_usd),
+            reference_local=_reference(order.amount_usd, order.store.country_code),
+            delivery_currency=order.delivery_currency or None,
             fee_usd=f'{fee:.2f}' if merchant else None,
             merchant_net_usd=f'{order.amount_usd - fee:.2f}' if merchant else None,
             delivery_city=order.delivery_city, delivery_country=order.delivery_country,
@@ -226,10 +246,10 @@ class MarketplaceOrderType(graphene.ObjectType):
 
 
 class CheckoutQuoteType(graphene.ObjectType):
-    subtotal_local = graphene.String()
-    currency_code = graphene.String()
-    fx_rate = graphene.String()
-    amount_usd = graphene.String()
+    unit_price_usd = graphene.String()
+    amount_usd = graphene.String(description='What the buyer pays, in US dollars')
+    reference_local = graphene.Field(LocalReferenceType, description='≈ of amountUsd')
+    delivery_currency = graphene.String()
     outside_city = graphene.Boolean()
     ships_outside_city = graphene.Boolean()
     delivery_estimate_local = graphene.String(description='Null when outside the store city')
@@ -287,6 +307,9 @@ def _orders_for(account):
 
 
 class Query(graphene.ObjectType):
+    marketplace_reference_rate = graphene.Field(
+        ReferenceRateType, country_code=graphene.String(required=True),
+        description='Display-only local units per USD (for "≈ Bs" while typing a price); null without a fresh rate')
     marketplace_fee_bps = graphene.Int(description='Merchant fee in basis points (800 = 8%). '
                                                    'Never hardcode it in copy.')
     marketplace_categories = graphene.List(
@@ -315,6 +338,14 @@ class Query(graphene.ObjectType):
     market_checkout_quote = graphene.Field(
         CheckoutQuoteType, product_id=graphene.ID(required=True), quantity=graphene.Int(required=True),
         delivery_country=graphene.String(required=True), delivery_city=graphene.String(required=True))
+
+    def resolve_marketplace_reference_rate(self, info, country_code):
+        from .pricing import currency_for_country, local_per_usd
+        if not _user(info):
+            return None
+        currency = currency_for_country(country_code)
+        rate = local_per_usd(currency)
+        return ReferenceRateType(currency=currency, local_per_usd=str(rate)) if rate else None
 
     def resolve_marketplace_fee_bps(self, info):
         from .pricing import fee_bps
@@ -478,8 +509,9 @@ class Query(graphene.ObjectType):
             return None
         q = terms['quote']
         return CheckoutQuoteType(
-            subtotal_local=str(q.subtotal_local), currency_code=product.currency_code,
-            fx_rate=str(q.fx_rate), amount_usd=str(q.amount_usd),
+            unit_price_usd=str(q.unit_price_usd), amount_usd=str(q.amount_usd),
+            reference_local=_reference(q.amount_usd, product.store.country_code),
+            delivery_currency=terms['currency'] or None,
             outside_city=terms['outside_city'], ships_outside_city=terms['ships_outside_city'],
             delivery_estimate_local=(str(terms['estimate_local'])
                                      if terms['estimate_local'] is not None else None),
@@ -749,7 +781,7 @@ class SaveMarketProduct(graphene.Mutation):
         title = graphene.String(required=True)
         description = graphene.String()
         category = graphene.String(required=True)
-        price_local = graphene.String(required=True)
+        price_usd = graphene.String(required=True, description='US dollars, 2 decimals')
         stock = graphene.Int(required=True)
         expected_stock = graphene.Int(description='Edits: the stock the form loaded; the change is '
                                                   'applied as a delta from it')
@@ -761,11 +793,10 @@ class SaveMarketProduct(graphene.Mutation):
     product = graphene.Field(MarketplaceProductType)
 
     @login_required
-    def mutate(self, info, title, category, price_local, stock, product_id=None,
+    def mutate(self, info, title, category, price_usd, stock, product_id=None,
                description='', photo_keys=None, expected_stock=None, expected_stock_revision=None):
         from decimal import Decimal, InvalidOperation
 
-        from exchange_rates.currency_mapping import COUNTRY_TO_CURRENCY
 
         try:
             user, _account, store = _seller_store(info)
@@ -779,10 +810,10 @@ class SaveMarketProduct(graphene.Mutation):
         if not (3 <= len(title) <= 100):
             return SaveMarketProduct(success=False, error='bad_title')
         try:
-            price = Decimal(price_local).quantize(Decimal('0.01'))
+            price = Decimal(price_usd).quantize(Decimal('0.01'))
         except (InvalidOperation, TypeError):
             return SaveMarketProduct(success=False, error='bad_price')
-        if price < 1 or price > Decimal('100000'):
+        if price < Decimal('0.50') or price > Decimal('100000'):
             return SaveMarketProduct(success=False, error='bad_price')
         if not (0 <= stock <= 10_000):
             return SaveMarketProduct(success=False, error='bad_stock')
@@ -809,8 +840,7 @@ class SaveMarketProduct(graphene.Mutation):
         from django.db.models.functions import Greatest
 
         content = {'title': title, 'description': (description or '').strip()[:2000],
-                   'category': category, 'price_local': price,
-                   'currency_code': COUNTRY_TO_CURRENCY.get(store.country_code, 'USD')}
+                   'category': category, 'price_usd': price}
         if keys:
             content['pending_photo_keys'] = keys
         with transaction.atomic():

@@ -184,10 +184,11 @@ class Product(SoftDeleteModel):
     # A MarketplaceCategory.key (kept as a plain key so retiring a category
     # never cascades into listings).
     category = models.CharField(max_length=40, db_index=True)
-    price_local = models.DecimalField(
-        max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('1'))],
-        help_text="Price in the store's local currency (Bs in Bolivia)")
-    currency_code = models.CharField(max_length=3)
+    # US dollars: the escrow's unit and what the seller receives. Local
+    # currency is only ever a display reference (pricing.reference_local).
+    price_usd = models.DecimalField(
+        max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.50'))],
+        help_text='Price in US dollars')
     stock = models.PositiveIntegerField(default=1)
     # Bumped by every seller stock edit (never by reservations). An edit must
     # name the revision its form loaded, so a retried save cannot apply twice.
@@ -248,12 +249,8 @@ class Order(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='orders')
     # What the buyer agreed to, frozen at checkout.
     product_title = models.CharField(max_length=100)
-    unit_price_local = models.DecimalField(max_digits=12, decimal_places=2)
+    unit_price_usd = models.DecimalField(max_digits=12, decimal_places=2)
     quantity = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(20)])
-    subtotal_local = models.DecimalField(max_digits=14, decimal_places=2)
-    currency_code = models.CharField(max_length=3)
-    fx_rate = models.DecimalField(
-        max_digits=18, decimal_places=6, help_text='Local currency units per 1 USD at checkout')
     amount_usd = models.DecimalField(max_digits=14, decimal_places=6)
     amount_wei = models.DecimalField(max_digits=40, decimal_places=0)
     token_address = models.CharField(max_length=42)
@@ -263,9 +260,11 @@ class Order(models.Model):
     delivery_country = models.CharField(max_length=2)
     delivery_city = models.CharField(max_length=100)
     delivery_outside_city = models.BooleanField(default=False)
+    # The one local-currency amount: the courier is paid in cash/QR locally.
     delivery_estimate_local = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True,
         help_text='Same-city estimate shown at checkout; null when outside the city')
+    delivery_currency = models.CharField(max_length=3, blank=True, default='')
     delivery_address = models.CharField(max_length=300)
     delivery_phone = models.CharField(max_length=20)
     delivery_note = models.CharField(max_length=300, blank=True, default='')

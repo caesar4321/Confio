@@ -11,7 +11,7 @@ import {
   GET_MARKET_ORDER, RATE_MARKET_ORDER, SET_MARKET_ORDER_TRACKING, comprarError, orderStatusLabel,
   runMarketAction,
 } from '../services/comprar';
-import { formatLocalPrice, formatUsd } from '../utils/comprarFormat';
+import { formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFormat';
 
 const ACTION_COPY: Record<string, { label: string; confirm: string; primary?: boolean; danger?: boolean }> = {
   ship: { label: 'Marcar como enviado', confirm: '¿Ya entregaste el pedido a Yango (o al repartidor)?', primary: true },
@@ -125,8 +125,11 @@ export const MarketOrderScreen = () => {
           <Text style={styles.muted}>{merchant ? `Cliente: ${order.buyerDisplayName}` : order.store?.name}</Text>
           <View style={styles.line}>
             <Text style={styles.label}>Total</Text>
-            <Text style={styles.value}>{formatLocalPrice(order.subtotalLocal, order.currencyCode)} · {formatUsd(order.amountUsd)}</Text>
+            <Text style={styles.value}>{formatUsd(order.amountUsd)}</Text>
           </View>
+          {formatReference(order.referenceLocal) ? (
+            <Text style={styles.muted}>{formatReference(order.referenceLocal)} al cambio de hoy</Text>
+          ) : null}
           {merchant && order.feeUsd ? (
             <>
               <View style={styles.line}>
@@ -152,7 +155,7 @@ export const MarketOrderScreen = () => {
             {order.deliveryOutsideCity
               ? 'Envío a otra ciudad: lo coordina la tienda.'
               : order.deliveryEstimateLocal
-                ? `Envío ~${formatLocalPrice(order.deliveryEstimateLocal, order.currencyCode)}, se paga al repartidor.`
+                ? `Envío ~${formatLocalPrice(order.deliveryEstimateLocal, order.deliveryCurrency || '')}, se paga al repartidor.`
                 : 'Envío a coordinar con la tienda; se paga al repartidor.'}
           </Text>
           {merchant && ['funded', 'shipped', 'disputed'].includes(order.status) ? (
