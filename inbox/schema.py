@@ -38,7 +38,7 @@ from .models import (
     SupportMessage,
     VisibilityPolicy,
 )
-from . import activity_share, community, member_portfolio, profile_pictures
+from . import activity_share, community, member_portfolio, profile_pictures, tips
 from .dm_schema import DirectMessagesMutation, DirectMessagesQuery
 from .community import author_display_name
 from .official import all_official_channel_ids, official_channel_ids
@@ -1912,6 +1912,12 @@ class InvestorProfileType(graphene.ObjectType):
     # Direct messages and tips: false until each one launches.
     can_message = graphene.Boolean(required=True)
     can_tip = graphene.Boolean(required=True)
+    # Your own profile only: what you received in tips (never public).
+    tips_received_usd = graphene.String()
+
+
+def _can_tip(viewer, target) -> bool:
+    return target.id != viewer.id and tips.tip_block(viewer, target) is None
 
 
 def _can_message(viewer, target) -> bool:
@@ -1936,7 +1942,8 @@ def build_investor_profile(viewer, user_id):
         mutuals=[InvestorProfileMutualType(user_id=str(m.id), username=community.author_display_name(m),
                                            avatar_url=avatars.get(m.id)) for m in mutuals],
         can_message=_can_message(viewer, target),
-        can_tip=False,
+        can_tip=_can_tip(viewer, target),
+        tips_received_usd=_money(tips.received_total(target)) if target.id == viewer.id else None,
     )
 
 

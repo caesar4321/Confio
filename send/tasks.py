@@ -49,6 +49,9 @@ def _notify_send_parties(s) -> None:
     sender_phone = to_international(s.sender_phone, s.sender_user if s.sender_user_id else None)
     recipient_phone = to_international(
         s.recipient_phone, s.recipient_user if s.recipient_user_id else None)
+    if str(getattr(s, 'idempotency_key', '') or '').startswith('tip-'):
+        # A Propina is between Comunidad pseudonyms: never a phone number.
+        sender_phone = recipient_phone = ''
     sender_name = s.sender_display_name or 'Contacto'
     recipient_name = (
         s.recipient_display_name
@@ -195,11 +198,25 @@ def confirm_bsc_send(self, send_id: int, batch_id: int):
         # unified row updates via the post_save signal
         token = token_label(s.token_type)
         _notify_send_parties(s)
+        _resolve_tip(s)
         logger.info('[SEND][BSC] %s confirmed (%s %s): %s',
                     s.internal_id, s.amount, token, s.transaction_hash)
     else:  # reverted / noop_failed
         s.status = 'FAILED'
         s.error_message = f'batch_{batch.status}'
         s.save(update_fields=['status', 'error_message', 'updated_at'])
+        _resolve_tip(s)
         logger.warning('[SEND][BSC] %s failed: batch %s %s',
                        s.internal_id, batch.id, batch.status)
+
+
+def _resolve_tip(send_tx):
+    """A Propina rides this send: show (or fail) it. Never raises. Only
+    sends whose key marks them as a tip ever reach the tips module."""
+    if not str(getattr(send_tx, 'idempotency_key', '') or '').startswith('tip-'):
+        return
+    try:
+        from inbox.tips import on_send_resolved
+        on_send_resolved(send_tx)
+    except Exception:  # noqa: BLE001 — a gift bubble never blocks money
+        logger.exception('[SEND][BSC] tip resolution failed for %s', getattr(send_tx, 'internal_id', ''))

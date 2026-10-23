@@ -20,6 +20,8 @@ export type InvestorProfile = {
   mutuals: { userId: string; username: string; avatarUrl?: string | null }[];
   canMessage: boolean;
   canTip: boolean;
+  // Your own profile only (never public).
+  tipsReceivedUsd?: string | null;
 };
 
 type Member = {
@@ -182,6 +184,9 @@ export function InvestorProfileHeader({
         ) : investor.bio ? (
           <Text style={styles.bio}>{investor.bio}</Text>
         ) : null
+      ) : null}
+      {self && investor?.tipsReceivedUsd && Number(investor.tipsReceivedUsd) > 0 ? (
+        <Text style={styles.status}>{`🎁 Propinas recibidas: $${investor.tipsReceivedUsd}`}</Text>
       ) : null}
       {reviewing ? <Text style={styles.status}>Revisando tu imagen… suele tardar unos segundos.</Text> : null}
       {message ? <Text style={styles.refused}>{message}</Text> : null}

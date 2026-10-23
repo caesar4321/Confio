@@ -23,6 +23,7 @@ from .models import (
     DirectConversation,
     DirectMessage,
     DirectMessageReport,
+    Tip,
     AvatarType,
     Channel,
     ChannelMembership,
@@ -1270,6 +1271,15 @@ class DirectMessageReportAdmin(ReadOnlyAdmin):
     list_display = ('id', 'message', 'reporter', 'reason', 'created_at')
     search_fields = ('reporter__username', 'message__sender__username')
     list_select_related = ('message', 'reporter')
+
+
+@admin.register(Tip)
+class TipAdmin(ReadOnlyAdmin):
+    """Propinas: 0% commission gifts riding an internal BSC send."""
+    list_display = ('id', 'sender', 'recipient', 'amount', 'status', 'send_transaction', 'created_at')
+    list_filter = ('status',)
+    search_fields = ('sender__username', 'recipient__username', 'send_key')
+    list_select_related = ('sender', 'recipient', 'send_transaction')
 
 
 @admin.register(PortfolioDailySnapshot)

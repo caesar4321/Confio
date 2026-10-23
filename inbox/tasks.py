@@ -141,6 +141,11 @@ def sweep_stuck_community_reviews_task():
         mark_dm_failed(message_id, 'Out of review attempts', stale_before=dm_cutoff)
     for message_id in dm_retry:
         review_direct_message_task.delay(message_id)
+    # Propinas whose send settled while the confirm hook couldn't finish.
+    from .tips import resolve as resolve_tip, unresolved_sent_ids
+
+    for tip_id in unresolved_sent_ids():
+        resolve_tip(tip_id)
     # Durable image cleanup: whatever the database says should no longer be
     # public is retried here until the delete lands, even if a fast-path task
     # was never queued or ran out of retries.

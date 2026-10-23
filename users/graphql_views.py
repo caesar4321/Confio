@@ -440,6 +440,15 @@ class UnifiedTransactionType(DjangoObjectType):
             return str(net or self.amount)
         return self.amount_for_direction('received')
 
+    def resolve_sender_user(self, info):
+        from send.schema import tip_safe_user
+        return tip_safe_user(self.send_transaction, self.sender_user, info) if self.send_transaction_id else self.sender_user
+
+    def resolve_counterparty_user(self, info):
+        from send.schema import tip_safe_user
+        return (tip_safe_user(self.send_transaction, self.counterparty_user, info)
+                if self.send_transaction_id else self.counterparty_user)
+
     def resolve_display_counterparty(self, info):
         """Resolve counterparty name based on direction"""
         try:

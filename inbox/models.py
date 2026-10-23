@@ -1046,6 +1046,51 @@ class DirectMessageReport(models.Model):
         ]
 
 
+class TipStatus(models.TextChoices):
+    # Note reviewed, waiting for the app to sign the send.
+    PREPARED = 'prepared', 'Prepared'
+    # The BSC send exists (send_transaction set).
+    SENT = 'sent', 'Sent'
+    CONFIRMED = 'confirmed', 'Confirmed'
+    FAILED = 'failed', 'Failed'
+
+
+class Tip(models.Model):
+    """Propina: an optional gift from one member to another, 0% commission
+    (App Store 3.2.1(vii)): the recipient gets exactly `amount`. The money
+    moves as an ordinary internal BSC send whose idempotency key is
+    `send_key`; prepare_bsc_send refuses that key unless the recipient,
+    amount and a zero fee match this row. A tip never unlocks anything."""
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='tips_sent')
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='tips_received')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    # Reviewed (dm_gate) before any money moves; may be empty.
+    note = models.CharField(max_length=140, blank=True, default='')
+    status = models.CharField(max_length=10, choices=TipStatus.choices, default=TipStatus.PREPARED)
+    client_key = models.CharField(max_length=64)
+    send_key = models.CharField(max_length=64, unique=True)
+    # The sender confirmed sending again right after a tip to the same person.
+    repeat_confirmed = models.BooleanField(default=False)
+    send_transaction = models.OneToOneField('send.SendTransaction', on_delete=models.SET_NULL, null=True,
+                                            blank=True, related_name='tip')
+    message = models.OneToOneField(DirectMessage, on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='tip')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['sender', 'client_key'], name='inbox_tip_client_key_uniq'),
+        ]
+        indexes = [
+            models.Index(fields=['sender', 'created_at'], name='inbox_tip_sender_idx'),
+            models.Index(fields=['recipient', 'status'], name='inbox_tip_recipient_idx'),
+        ]
+
+    def __str__(self):
+        return f'Tip {self.id} {self.sender_id}->{self.recipient_id} ${self.amount} {self.status}'
+
+
 class ActivityShareIntentStatus(models.TextChoices):
     PENDING = 'pending', 'Pending'
     PUBLISHED = 'published', 'Published'

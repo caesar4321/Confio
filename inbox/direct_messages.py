@@ -236,7 +236,8 @@ def send_message(sender, business, body: str, *, recipient_id=None, conversation
             # Declined behaves exactly like unanswered for the sender: the
             # cap can't reveal that the recipient deleted the request.
             if conversation.requested_by_id == sender.id:
-                sent = conversation.messages.filter(sender=sender).exclude(
+                # Tips don't count: a gift never opens or uses up a request.
+                sent = conversation.messages.filter(sender=sender, kind=DirectMessage.KIND_TEXT).exclude(
                     review_status__in=[Review.REJECTED, Review.FAILED]).count()
                 if sent >= REQUEST_CAP:
                     raise _error(REQUEST_LIMIT)

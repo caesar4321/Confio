@@ -1487,7 +1487,13 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				sender_name = f"Externo ({addr[:4]}...{addr[-4:]})" if len(addr) > 8 else "Billetera Externa"
 
 			recipient_name = format_name(transfer.recipient_user) if transfer.recipient_user else "Externo"
-			
+			recipient_phone_masked = f"******{transfer.recipient_user.phone_number[-4:]}" if transfer.recipient_user and transfer.recipient_user.phone_number else ""
+			if str(transfer.idempotency_key or '').startswith('tip-'):
+				# A Propina: Comunidad names as stored, never a real name or phone.
+				sender_name = transfer.sender_display_name or "Miembro de Comunidad"
+				recipient_name = transfer.recipient_display_name or "Miembro de Comunidad"
+				recipient_phone_masked = ""
+
 			return VerifiedTransactionType(
 				is_valid=True,
 				status=transfer.status,
@@ -1497,7 +1503,7 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				timestamp=transfer.created_at,
 				sender_name=sender_name,
 				recipient_name_masked=recipient_name,
-				recipient_phone_masked=f"******{transfer.recipient_user.phone_number[-4:]}" if transfer.recipient_user and transfer.recipient_user.phone_number else "",
+				recipient_phone_masked=recipient_phone_masked,
 				verification_message="Transferencia confirmada.",
 				transaction_type="TRANSFER",
 				metadata=json.dumps({"memo": transfer.memo or "Transferencia", "sender_address": transfer.sender_address})

@@ -868,6 +868,7 @@ from inbox.models import (
     DirectConversation,
     DirectMessage,
     DirectMessageReport,
+    Tip,
     CommunityCommentReaction,
     CommunityCommentReport,
     CommunityPostReport,
@@ -899,6 +900,7 @@ from inbox.admin import (
     DirectConversationAdmin,
     DirectMessageAdmin,
     DirectMessageReportAdmin,
+    TipAdmin,
     CommunityCommentAdmin,
     CommunityCommentReactionAdmin,
     CommunityCommentReportAdmin,
@@ -1191,6 +1193,7 @@ confio_admin_site.register(PortfolioDailySnapshot, PortfolioDailySnapshotAdmin)
 confio_admin_site.register(DirectConversation, DirectConversationAdmin)
 confio_admin_site.register(DirectMessage, DirectMessageAdmin)
 confio_admin_site.register(DirectMessageReport, DirectMessageReportAdmin)
+confio_admin_site.register(Tip, TipAdmin)
 confio_admin_site.register(ActivityShareIntent, ActivityShareIntentAdmin)
 confio_admin_site.register(ActivityShareImpression, ActivityShareImpressionAdmin)
 confio_admin_site.register(CommunityRulesAcceptance, CommunityRulesAcceptanceAdmin)

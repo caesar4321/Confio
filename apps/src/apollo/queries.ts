@@ -5059,6 +5059,7 @@ export const GET_INVESTOR_PROFILE = gql`
       }
       canMessage
       canTip
+      tipsReceivedUsd
     }
   }
 `;

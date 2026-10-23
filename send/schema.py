@@ -45,6 +45,19 @@ def _send_prepared_receipt(send):
     return getattr(send, cache_name)
 
 
+def is_tip_send(send) -> bool:
+    return str(getattr(send, 'idempotency_key', '') or '').startswith('tip-')
+
+
+def tip_safe_user(send, user, info):
+    """A Propina is between Comunidad pseudonyms: the other party's account
+    (real name, email, phone) is never exposed through it; only your own."""
+    if user is None or not is_tip_send(send):
+        return user
+    viewer = getattr(getattr(info, 'context', None), 'user', None)
+    return user if viewer is not None and getattr(viewer, 'id', None) == user.id else None
+
+
 class SendTransactionType(DjangoObjectType):
     """GraphQL type for SendTransaction model"""
     fee_amount = graphene.String()
@@ -83,6 +96,12 @@ class SendTransactionType(DjangoObjectType):
             'invitation_reverted',
             'invitation_expires_at'
         )
+
+    def resolve_sender_user(self, info):
+        return tip_safe_user(self, self.sender_user, info)
+
+    def resolve_recipient_user(self, info):
+        return tip_safe_user(self, self.recipient_user, info)
 
     def resolve_fee_amount(self, info):
         # net_amount is populated by final event reconciliation. Once present,

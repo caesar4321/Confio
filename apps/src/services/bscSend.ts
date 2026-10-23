@@ -111,6 +111,15 @@ export const BSC_SEND_ERRORS: Record<string, string> = {
     'El mínimo para enviar a este destinatario es $1.00.',
   bsc_send_disabled: 'Los envíos están en preparación. Inténtalo más tarde.',
   sponsor_busy: 'La red está ocupada. Inténtalo de nuevo en unos segundos.',
+  // Propinas: the send must match the prepared tip exactly, fee-free.
+  tip_not_found: 'Esta propina ya no está disponible. Prepárala de nuevo.',
+  tip_mismatch: 'Esta propina ya no está disponible. Prepárala de nuevo.',
+  tip_not_available: 'No puedes enviarle una propina a esta persona.',
+  tip_fee_not_allowed: 'Esta propina no se puede enviar sin comisión ahora. Inténtalo más tarde.',
+  tip_expired: 'Esta propina venció. Prepárala de nuevo.',
+  tip_in_flight: 'Tu propina anterior a esta persona aún se está confirmando. Espera un momento.',
+  tip_daily_limit: 'Puedes enviar hasta $500 en propinas por día.',
+  tip_recent: 'Ya le enviaste una propina hace unos minutos. Revisa tu historial y vuelve a preparar la propina si quieres enviar otra.',
 };
 
 export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResult> => {

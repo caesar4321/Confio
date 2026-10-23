@@ -844,3 +844,87 @@ class ConfirmTaskTests(SimpleTestCase):
         condition = str(constraint.condition)
         for kind in bsc_flow.BSC_SEND_KINDS:
             self.assertIn(kind, condition)
+
+
+@override_settings(
+    CUSD_PLUS_VAULT_ADDRESS=VAULT,
+    CUSD_VAULT_ADDRESS=CUSD,
+    BSC_SEND_ENABLED=True,
+    CUSD_CONVERSION_FEE_ENABLED=True,
+)
+class TipSendTests(SimpleTestCase):
+    """Propinas ride prepare_bsc_send with a 'tip-' key: refused unless the
+    tip matches, and refused whenever the recipient would get less than the
+    amount (0% commission is what App Store 3.2.1(vii) requires)."""
+
+    def _prepare(self, tip_result, recipient_user, recipient_addr=RECIPIENT, fee=False, link_error=None):
+        captured = {}
+
+        def _create(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(id=7, internal_id='sid123', **kwargs)
+
+        pps = 11 * WAD // 10
+        fee_preview = mock.patch(
+            'cusd_plus.cusd_vault.preview_redeem_wei',
+            side_effect=lambda gross: SimpleNamespace(
+                gross_wei=gross, fee_wei=gross - (gross * 9_910 // 10_000),
+                net_wei=gross * 9_910 // 10_000, fee_bps=90))
+        with _recipient_resolution(recipient_user, None, recipient_addr), \
+             mock.patch.object(bsc_flow, '_lock_internal_recipient_account',
+                               return_value=SimpleNamespace(bsc_address=recipient_addr)), \
+             mock.patch.object(bsc_flow, '_send_step_up', return_value=''), \
+             mock.patch('cusd_plus.vault.p_plus_wad', return_value=pps), \
+             mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=105 * WAD // 100), \
+             mock.patch('cusd_plus.vault.current_oracle_price_wad', return_value=106 * WAD // 100), \
+             mock.patch('cusd_plus.vault.erc20_balance_raw',
+                        side_effect=lambda token, _holder: 0 if token.lower() == CUSD.lower()
+                        else (100 * WAD * WAD) // pps), \
+             mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=0), \
+             mock.patch('send.bsc_flow.transaction.atomic'), \
+             mock.patch('inbox.tips.tip_for_send', return_value=tip_result) as check, \
+             mock.patch('inbox.tips.link_send', return_value=link_error) as link, \
+             mock.patch('send.bsc_flow.transaction.set_rollback') as rollback, \
+             mock.patch('send.models.SendTransaction.objects') as objs:
+            if fee:
+                fee_preview.start()
+            try:
+                objs.filter.return_value.first.return_value = None
+                objs.create.side_effect = _create
+                result = bsc_flow.prepare_bsc_send(
+                    _sender_user(), _jwt_ctx(), '10', recipient_user_id='2', idempotency_key='tip-abc',
+                    memo='escríbeme al wasap')
+            finally:
+                if fee:
+                    fee_preview.stop()
+        self.rollback = rollback
+        self.created = captured
+        return result, check, link
+
+    def test_a_matching_tip_prepares_a_fee_free_send_and_binds_to_it(self):
+        tip = SimpleNamespace(id=5, note='Gracias')
+        result, check, link = self._prepare((tip, None), _recipient_user('VE'))
+        self.assertTrue(result['success'], result)
+        self.assertEqual((result['fee_amount'], result['gross_amount'], result['net_amount']), ('0', '10', '10'))
+        link.assert_called_once()
+        self.assertIs(link.call_args.args[0], tip)
+        # No memo on a tip payment (the note lives in the chat bubble only).
+        self.assertEqual(self.created['memo'], '')
+        # Pseudonymous on both sides: no phones, Comunidad names.
+        self.assertEqual((self.created['sender_phone'], self.created['recipient_phone']), ('', ''))
+
+    def test_a_tip_over_the_daily_limit_at_bind_time_rolls_the_send_back(self):
+        result, _, _ = self._prepare((SimpleNamespace(id=5, note=''), None), _recipient_user('VE'),
+                                     link_error='tip_daily_limit')
+        self.assertEqual(result, {'success': False, 'error': 'tip_daily_limit'})
+        self.rollback.assert_called_once_with(True)
+
+    def test_a_mismatched_tip_key_moves_nothing(self):
+        result, _, link = self._prepare((None, 'tip_mismatch'), _recipient_user('VE'))
+        self.assertEqual(result, {'success': False, 'error': 'tip_mismatch'})
+        link.assert_not_called()
+
+    def test_any_fee_refuses_the_tip(self):
+        result, _, link = self._prepare((SimpleNamespace(id=5, note=''), None), None, fee=True)
+        self.assertEqual(result, {'success': False, 'error': 'tip_fee_not_allowed'})
+        link.assert_not_called()

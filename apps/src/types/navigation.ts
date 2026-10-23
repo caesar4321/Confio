@@ -76,6 +76,7 @@ export type MainStackParamList = {
   CommunityMemberProfile: { userId: string };
   DirectInbox: { folder?: 'inbox' | 'requests' } | undefined;
   DirectChat: { conversationId?: string; userId?: string; username?: string };
+  SendTip: { userId: string; username: string };
   BlockedMembers: undefined;
   CreateBusiness: undefined;
   EditBusiness: undefined;

@@ -129,6 +129,7 @@ import MyCommunityPostsScreen from '../screens/MyCommunityPostsScreen';
 import CommunityMemberProfileScreen from '../screens/CommunityMemberProfileScreen';
 import DirectInboxScreen from '../screens/DirectInboxScreen';
 import DirectChatScreen from '../screens/DirectChatScreen';
+import SendTipScreen from '../screens/SendTipScreen';
 import BlockedMembersScreen from '../screens/BlockedMembersScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 
@@ -253,6 +254,13 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="CommunityMemberProfile"
           component={CommunityMemberProfileScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="SendTip"
+          component={SendTipScreen}
           options={{
             headerShown: false,
           }}

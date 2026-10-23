@@ -419,6 +419,19 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
     # Returning the exact stored preparation above is read-only. Requiring
     # an unspent approval there would strand retries of an already claimed
     # send; submission still validates/claims that operation's approval.
+    # A Propina (inbox/tips.py): the key must match a prepared tip for this
+    # exact recipient and amount, as a plain dollar send — never a way to
+    # smuggle another payment through a tip's reviewed note.
+    tip = None
+    if (idempotency_key or '').startswith('tip-'):
+        from inbox.tips import tip_for_send
+        tip, tip_error = tip_for_send(user, idempotency_key, recipient_user, recipient_business,
+                                      amount_usd, requested, sender_business)
+        if tip_error:
+            return {'success': False, 'error': tip_error}
+        # No memo on a tip payment: the note lives only in the chat bubble,
+        # where blocks, bans and report suspensions all apply.
+        memo = ''
     # Every non-CONFIO shape moves `amount_usd` dollars.
     step_up = _send_step_up(user, activation_id, **_send_face_terms(
         user, amount_usd, 'CONFIO' if requested == 'CONFIO' else 'USDT',
@@ -787,6 +800,14 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         else:
             return {'success': False, 'error': 'insufficient_balance'}
 
+    # 0% commission is the condition tips ride on (App Store 3.2.1(vii)):
+    # no fee, the full amount. (On the cUSD+ unwrap route the share price
+    # can tick up between prepare and execution, so the recipient may get
+    # a hair MORE than the amount, never less.)
+    if tip is not None and (receipt_fee_wei != 0 or receipt_net_wei != receipt_gross_wei
+                            or receipt_gross_wei != amount_wei):
+        return {'success': False, 'error': 'tip_fee_not_allowed'}
+
     recipient_display = 'Confío · Apertura de cuenta' if activation_payment is not None else ''
     recipient_phone_val = ''
     if recipient_business is not None:
@@ -794,6 +815,14 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
     elif recipient_user is not None:
         recipient_display = _display_name(recipient_user)
         recipient_phone_val = recipient_user.phone_number or ''
+    sender_display = sender_business.name if sender_business else _display_name(user)
+    sender_phone_val = user.phone_number or ''
+    if tip is not None:
+        # Comunidad is pseudonymous: a tip carries Comunidad names and no
+        # phone numbers on either side (send rows, history, notifications).
+        from inbox.community import author_display_name
+        sender_display, sender_phone_val = author_display_name(user), ''
+        recipient_display, recipient_phone_val = author_display_name(recipient_user), ''
 
     with transaction.atomic():
         if recipient_user is not None or recipient_business is not None:
@@ -811,9 +840,8 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             sender_user=user,
             sender_business=sender_business,
             sender_type='business' if sender_business else 'user',
-            sender_display_name=(
-                sender_business.name if sender_business else _display_name(user)),
-            sender_phone=user.phone_number or '',
+            sender_display_name=sender_display,
+            sender_phone=sender_phone_val,
             recipient_user=recipient_user,
             recipient_business=recipient_business,
             recipient_type=(
@@ -845,6 +873,14 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 },
             }),
         )
+        if tip is not None:
+            # Same transaction: a tip key binds to exactly one send, and the
+            # daily limit is re-checked under the sender's lock.
+            from inbox.tips import link_send
+            tip_error = link_send(tip, send_tx)
+            if tip_error:
+                transaction.set_rollback(True)
+                return {'success': False, 'error': tip_error}
     # Unified row arrives via the existing post_save signal
     # (users/signals.py create_unified_transaction_from_send).
 
@@ -1020,6 +1056,13 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
         return {'success': False, 'error': 'sender_not_authorized'}
     if send_tx.status != 'PENDING' or not send_tx.bsc_calls_json:
         return {'success': False, 'error': 'send_not_pending'}
+    if (send_tx.idempotency_key or '').startswith('tip-'):
+        # A Propina must be signed within its window: a bound send left
+        # unsigned can't outlive the daily limit it was counted against.
+        from inbox.tips import tip_submit_error
+        tip_error = tip_submit_error(send_tx)
+        if tip_error:
+            return {'success': False, 'error': tip_error}
 
     sender_addr = (send_tx.sender_address or '').lower()
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))

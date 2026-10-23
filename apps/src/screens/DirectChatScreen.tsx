@@ -469,6 +469,17 @@ export const DirectChatScreen = () => {
           <Text style={styles.blocked}>{blockReason}</Text>
         ) : !unavailable ? (
           <View style={styles.composer}>
+            {otherId ? (
+              <Pressable
+                onPress={() => navigation.navigate('SendTip', { userId: otherId, username: otherName })}
+                style={styles.giftButton}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="Enviar propina"
+              >
+                <Icon name="gift" size={20} color={colors.primaryDeep} />
+              </Pressable>
+            ) : null}
             <TextInput
               value={draft}
               onChangeText={(text) => setDraft(text.slice(0, MAX_CHARS))}
@@ -559,6 +570,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.dark,
   },
+  giftButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   sendButton: {
     width: 40,
     height: 40,

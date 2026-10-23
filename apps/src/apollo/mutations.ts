@@ -1449,6 +1449,21 @@ export const SET_DIRECT_MESSAGES_ENABLED = gql`
   }
 `;
 
+// Propina, step 1 (no money): rules + the note's review. The send runs
+// through the normal BSC flow with idempotencyKey = sendKey.
+export const PREPARE_TIP = gql`
+  mutation PrepareTip($recipientUserId: ID!, $amount: String!, $note: String, $clientKey: String, $allowRepeat: Boolean) {
+    prepareTip(recipientUserId: $recipientUserId, amount: $amount, note: $note, clientKey: $clientKey, allowRepeat: $allowRepeat) {
+      success
+      error
+      code
+      tipId
+      sendKey
+      amount
+    }
+  }
+`;
+
 export const UPDATE_INVESTOR_BIO = gql`
   mutation UpdateInvestorBio($bio: String!) {
     updateInvestorBio(bio: $bio) {

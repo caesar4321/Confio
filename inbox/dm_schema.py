@@ -302,7 +302,40 @@ class SetDirectMessagesEnabled(graphene.Mutation):
         return SetDirectMessagesEnabled(success=True, enabled=dm.set_dms_enabled(info.context.user, enabled))
 
 
+class PrepareTip(graphene.Mutation):
+    """Propina, step 1: rules and the note's review, no money. Then the app
+    runs the normal BSC send with idempotencyKey = sendKey."""
+    class Arguments:
+        recipient_user_id = graphene.ID(required=True)
+        amount = graphene.String(required=True)
+        note = graphene.String(required=False)
+        client_key = graphene.String(required=False)
+        # After the person confirmed sending another tip right after one.
+        allow_repeat = graphene.Boolean(required=False)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    code = graphene.String()
+    tip_id = graphene.ID()
+    send_key = graphene.String()
+    amount = graphene.String()
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, recipient_user_id, amount, note='', client_key='', allow_repeat=False):
+        from . import tips
+
+        user, account, business, _ = _context(info)
+        try:
+            tip = tips.prepare_tip(user, business, recipient_user_id, amount, note or '', client_key or '',
+                                   allow_repeat=bool(allow_repeat))
+        except community.CommunityPostError as error:
+            return PrepareTip(success=False, error=error.message, code=error.code)
+        return PrepareTip(success=True, tip_id=str(tip.id), send_key=tip.send_key, amount=format(tip.amount, 'f'))
+
+
 class DirectMessagesMutation(graphene.ObjectType):
+    prepare_tip = PrepareTip.Field()
     send_direct_message = SendDirectMessage.Field()
     accept_direct_request = AcceptDirectRequest.Field()
     delete_direct_conversation = DeleteDirectConversation.Field()
