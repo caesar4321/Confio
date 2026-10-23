@@ -19,6 +19,7 @@ test('a hidden viewer is offered to publish', () => {
   let tree!: renderer.ReactTestRenderer;
   act(() => { tree = renderer.create(<InvestorLockCard access="viewer_hidden" onPublish={onPublish} onVerify={jest.fn()} />); });
   expect(textOf(tree)).toContain('Hacer público');
+  expect(textOf(tree)).toContain('Ocultaste tu perfil de inversor');
   act(() => { tree.root.findByType(Pressable).props.onPress(); });
   expect(onPublish).toHaveBeenCalled();
 });
@@ -27,7 +28,8 @@ test('an unverified viewer is sent to verify', () => {
   const onVerify = jest.fn();
   let tree!: renderer.ReactTestRenderer;
   act(() => { tree = renderer.create(<InvestorLockCard access="viewer_unverified" onPublish={jest.fn()} onVerify={onVerify} />); });
-  expect(textOf(tree)).toContain('Verificar identidad');
+  expect(textOf(tree)).toContain('Verificar mi identidad');
+  expect(textOf(tree)).toContain('solo las personas verificadas');
   act(() => { tree.root.findByType(Pressable).props.onPress(); });
   expect(onVerify).toHaveBeenCalled();
 });

@@ -35,7 +35,8 @@ export function LeagueStrips() {
   const isFocused = useIsFocused();
   const [teams, setTeams] = useState<TeamCard[] | null>(null);
   const [investors, setInvestors] = useState<LeagueRow[] | null>(null);
-  const [locked, setLocked] = useState(false);
+  // Why the rows are a teaser: 'viewer_unverified' or 'viewer_hidden' (null when open).
+  const [lockedBy, setLockedBy] = useState<string | null>(null);
   const generation = useRef(0);
 
   const load = useCallback(async () => {
@@ -57,7 +58,7 @@ export function LeagueStrips() {
       return;
     }
     const open = teamTable.access === 'open';
-    setLocked(!open);
+    setLockedBy(open ? null : String(teamTable.access));
     const ranked: TeamCard[] = (teamTable.rows ?? []).map((row: LeagueRow) => ({ kind: 'ranked', key: `r${row.rank}`, row }));
     const rankedIds = new Set((teamTable.rows ?? []).map((row: LeagueRow) => row.team?.id));
     // Still forming: not in the ranking yet (fewer than 5 members with history).
@@ -165,10 +166,19 @@ export function LeagueStrips() {
           windowSize={5}
         />
       )) : null}
-      {locked ? (
-        <Pressable style={styles.lockNote} onPress={() => openLeague('teams')} accessibilityRole="button">
-          <Icon name="lock" size={14} color={colors.textSecondary} />
-          <Text style={styles.lockText}>Haz público tu portafolio para ver toda la Liga y unirte a un equipo.</Text>
+      {lockedBy ? (
+        <Pressable
+          style={styles.lockNote}
+          onPress={() => (lockedBy === 'viewer_unverified' ? navigation.navigate('Verification' as never) : openLeague('teams'))}
+          accessibilityRole="button"
+        >
+          <Icon name="lock" size={14} color={colors.primaryDark} />
+          <Text style={styles.lockText}>
+            {lockedBy === 'viewer_unverified'
+              ? 'Verifica tu identidad para ver la rentabilidad de otros inversores, toda la Liga y unirte a un equipo.'
+              : 'Ocultaste tu perfil de inversor: hazlo público para ver toda la Liga y unirte a un equipo.'}
+          </Text>
+          <Text style={styles.lockAction}>{lockedBy === 'viewer_unverified' ? 'Verificar' : 'Ver'}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -194,5 +204,6 @@ const styles = StyleSheet.create({
   up: { color: colors.flowIn.textSmall },
   down: { color: colors.error.icon },
   lockNote: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12, backgroundColor: colors.neutralDark },
-  lockText: { flex: 1, fontSize: 12, color: colors.textSecondary },
+  lockText: { flex: 1, fontSize: 12, color: colors.dark },
+  lockAction: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
 });

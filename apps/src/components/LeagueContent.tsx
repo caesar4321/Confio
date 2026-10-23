@@ -201,6 +201,13 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
 
   const header = (
     <View>
+      {/* First thing a locked viewer sees: why, and the one step that opens it. */}
+      {locked && access ? (
+        <View style={styles.lock}>
+          <InvestorLockCard access={access} busy={publishing} onPublish={() => { void publishOwn(); }}
+            onVerify={() => navigation.navigate('Verification' as never)} />
+        </View>
+      ) : null}
       <View style={styles.tabs} accessibilityRole="tablist">
         {(['teams', 'investors'] as Kind[]).map((key) => {
           const selected = key === kind;
@@ -307,12 +314,6 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
                   <Icon name="plus" size={18} color={colors.white} />
                   <Text style={styles.createText}>Crear equipo</Text>
                 </Pressable>
-              </View>
-            ) : null}
-            {locked && access ? (
-              <View style={styles.lock}>
-                <InvestorLockCard access={access} busy={publishing} onPublish={() => { void publishOwn(); }}
-                  onVerify={() => navigation.navigate('Verification' as never)} />
               </View>
             ) : null}
           </>
