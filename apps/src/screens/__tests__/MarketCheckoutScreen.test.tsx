@@ -128,3 +128,17 @@ it('after paying, records the address in the book (used), without waiting on it'
     address: 'Av. Arce 2345, Sopocachi', city: 'La Paz', countryCode: 'BO', phone: '+59170000000', markUsed: true,
   }) });
 });
+
+it("shows the store's delivery inside the total, and another city as coordinated", () => {
+  mockQuote.current = { ...QUOTE, productUsd: '508.00', deliveryUsd: '1.30', amountUsd: '509.30' };
+  let tree = render();
+  let text = JSON.stringify(tree.toJSON());
+  expect(text).toContain('Envío en ');
+  expect(text).toContain('US$1.30');
+  expect(text).toContain('US$509.30');
+  expect(text).not.toContain('con tu QR');
+  mockQuote.current = { ...QUOTE, outsideCity: true, productUsd: '508.00', deliveryUsd: '0.00', amountUsd: '508.00' };
+  tree = render();
+  text = JSON.stringify(tree.toJSON());
+  expect(text).toContain('A coordinar con la tienda');
+});

@@ -28,7 +28,7 @@ export type MarketAction = 'deposit' | 'ship' | 'confirm' | 'dispute' | 'refund'
 
 const STORE_FIELDS = `
   id name description countryCode city shipsOutsideCity status isOpen
-  avgRating ratingCount completedOrders ownerDisplayName
+  avgRating ratingCount completedOrders ownerDisplayName deliveryPriceUsd
 `;
 
 const PRODUCT_FIELDS = `
@@ -38,7 +38,7 @@ const PRODUCT_FIELDS = `
 
 export const ORDER_FIELDS = `
   id role status pendingAction productId productTitle productPhotoUrl quantity
-  unitPriceUsd amountUsd referenceLocal { amount currency } deliveryCurrency feeUsd merchantNetUsd
+  unitPriceUsd deliveryUsd amountUsd referenceLocal { amount currency } deliveryCurrency feeUsd merchantNetUsd
   deliveryCity deliveryCountry deliveryOutsideCity deliveryEstimateLocal
   deliveryAddress deliveryPhone deliveryNote buyerDisplayName trackingReference
   shipBy releaseAt disputedAt createdAt settledAt availableActions rating lastTxHash
@@ -50,7 +50,7 @@ export const GET_MARKETPLACE_HOME = gql`
     marketplaceFeeBps
     marketplaceCategories(countryCode: $countryCode, city: $city) { key label group icon productCount }
     marketplaceCity(countryCode: $countryCode, city: $city) {
-      countryCode city currencyCode isLive deliveryEstimate deliveryPartner storeCount
+      countryCode city currencyCode isLive deliveryEstimate deliveryPartner storeCount suggestedDeliveryUsd
     }
   }
 `;
@@ -96,7 +96,7 @@ export const GET_CHECKOUT_QUOTE = gql`
   query MarketCheckoutQuote($productId: ID!, $quantity: Int!, $deliveryCountry: String!, $deliveryCity: String!) {
     marketCheckoutQuote(productId: $productId, quantity: $quantity,
                         deliveryCountry: $deliveryCountry, deliveryCity: $deliveryCity) {
-      unitPriceUsd amountUsd referenceLocal { amount currency } deliveryCurrency outsideCity shipsOutsideCity
+      unitPriceUsd productUsd deliveryUsd amountUsd referenceLocal { amount currency } deliveryCurrency outsideCity shipsOutsideCity
       deliveryEstimateLocal deliveryPartner
     }
   }
@@ -185,17 +185,19 @@ export const SUBMIT_MARKETPLACE_INTEREST = gql`
 
 export const OPEN_MARKET_STORE = gql`
   mutation OpenMarketStore($name: String!, $description: String, $countryCode: String!,
-                           $city: String!, $shipsOutsideCity: Boolean) {
+                           $city: String!, $shipsOutsideCity: Boolean, $deliveryPriceUsd: String) {
     openMarketStore(name: $name, description: $description, countryCode: $countryCode,
-                    city: $city, shipsOutsideCity: $shipsOutsideCity) {
+                    city: $city, shipsOutsideCity: $shipsOutsideCity, deliveryPriceUsd: $deliveryPriceUsd) {
       success error store { ${STORE_FIELDS} }
     }
   }
 `;
 
 export const UPDATE_MARKET_STORE = gql`
-  mutation UpdateMarketStore($name: String, $description: String, $shipsOutsideCity: Boolean, $paused: Boolean) {
-    updateMarketStore(name: $name, description: $description, shipsOutsideCity: $shipsOutsideCity, paused: $paused) {
+  mutation UpdateMarketStore($name: String, $description: String, $shipsOutsideCity: Boolean, $paused: Boolean,
+                             $deliveryPriceUsd: String) {
+    updateMarketStore(name: $name, description: $description, shipsOutsideCity: $shipsOutsideCity, paused: $paused,
+                      deliveryPriceUsd: $deliveryPriceUsd) {
       success error store { ${STORE_FIELDS} }
     }
   }
@@ -341,6 +343,7 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   upload_unavailable: 'No pudimos subir la foto ahora. Inténtalo en un momento.',
   network: 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
   bad_city: 'Escribe la ciudad.',
+  bad_delivery_price: 'El precio de envío debe estar entre US$0 y US$100.',
   bad_country: 'Elige el país.',
   address_book_full: 'Ya tienes 20 direcciones guardadas. Borra una para agregar otra.',
   address_not_found: 'Esa dirección ya no existe.',

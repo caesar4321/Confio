@@ -31,7 +31,7 @@ const actionCopy = (action: Action, status: string): Copy => {
   switch (action) {
     case 'ship':
       return { label: 'Marcar como enviado', icon: 'truck', variant: 'primary', busy: 'Marcando como enviado…',
-        confirm: '¿Ya entregaste el pedido a Yango (o al repartidor)?' };
+        confirm: '¿Ya entregaste el pedido al repartidor? Si usas Yango Envíos, pon el teléfono del comprador como destinatario: así recibe el aviso de entrega.' };
     case 'confirm':
       return waiting
         ? { label: 'Ya lo recibí', variant: 'ghost', busy: 'Confirmando…',
@@ -149,6 +149,10 @@ export const MarketOrderScreen = () => {
   const showHero = justPaid && !merchant && (status === 'depositing' || status === 'funded');
   const blocking = busy !== null && stage === 'paying' ? actionCopy(busy, status).busy : null;
   const waitingForStore = !merchant && status === 'funded';
+  // Orders from before delivery joined the total carry the courier estimate
+  // instead (paid to the courier on arrival); new ones never do.
+  const legacyCourierPay = !order.deliveryOutsideCity && Number(order.deliveryUsd ?? 0) === 0
+    && Boolean(order.deliveryEstimateLocal);
 
   return (
     <ComprarFrame title="Pedido" background={showHero ? colors.white : colors.neutral} blocking={blocking}>
@@ -175,10 +179,12 @@ export const MarketOrderScreen = () => {
         {waitingForStore ? (
           <KitCard icon="list" title="Qué sigue">
             <Step n={1} text={`${order.store?.name ?? 'La tienda'} prepara tu pedido.`} />
-            <Step n={2} text="Te avisamos cuando salga, con el seguimiento del envío." />
+            <Step n={2} text="Te avisamos cuando lo envíe. El repartidor te contactará al teléfono de la entrega." />
             <Step n={3} text={order.deliveryOutsideCity
               ? 'Recibes el pedido y confirmas en la app que llegó bien.'
-              : 'Pagas el envío al repartidor al recibir y confirmas en la app que llegó bien.'} />
+              : legacyCourierPay
+                ? 'Pagas el envío al repartidor al recibir y confirmas en la app que llegó bien.'
+                : 'Recibes el pedido (el envío ya está pagado) y confirmas en la app que llegó bien.'} />
           </KitCard>
         ) : null}
 
@@ -193,6 +199,12 @@ export const MarketOrderScreen = () => {
             </View>
           </View>
           <View style={styles.divider} />
+          {Number(order.deliveryUsd ?? 0) > 0 ? (
+            <>
+              <KitRow label="Producto" muted value={formatUsd(Number(order.amountUsd) - Number(order.deliveryUsd))} />
+              <KitRow label="Envío" muted value={formatUsd(order.deliveryUsd)} />
+            </>
+          ) : null}
           <KitRow label={merchant ? 'Venta' : 'Pagaste'} value={formatUsd(order.amountUsd)} strong={!merchant} />
           {formatReference(order.referenceLocal) ? (
             <Text style={[kitText.muted, styles.right]}>{formatReference(order.referenceLocal)} al cambio de hoy</Text>
@@ -213,12 +225,14 @@ export const MarketOrderScreen = () => {
           </Pressable>
           <InfoLine icon="dollar-sign" text={order.deliveryOutsideCity
             ? 'Envío a otra ciudad: lo coordina la tienda.'
-            : order.deliveryEstimateLocal
-              ? `Envío ~${formatLocalPrice(order.deliveryEstimateLocal, order.deliveryCurrency || '')}, se paga al repartidor.`
-              : 'Envío a coordinar con la tienda; se paga al repartidor.'} />
+            : Number(order.deliveryUsd ?? 0) > 0
+              ? `Envío ${formatUsd(order.deliveryUsd)} incluido en el pago${merchant ? ': lo pagas tú al repartidor y te llega con el pago.' : '.'}`
+              : legacyCourierPay
+                ? `Envío ~${formatLocalPrice(order.deliveryEstimateLocal, order.deliveryCurrency || '')}, se paga al repartidor.`
+                : 'Envío gratis.'} />
           {merchant && ['funded', 'shipped', 'disputed'].includes(status) ? (
             <View style={styles.trackingRow}>
-              <TextInput style={styles.input} placeholder="N.º o link de seguimiento de Yango"
+              <TextInput style={styles.input} placeholder="Enlace o datos del envío (opcional)"
                 placeholderTextColor={colors.text.light} value={tracking} onChangeText={setTracking} />
               <Pressable style={styles.smallButton} onPress={async () => {
                 await setTrackingRef({ variables: { orderId, trackingReference: tracking } });

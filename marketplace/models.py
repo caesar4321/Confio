@@ -154,6 +154,10 @@ class Store(SoftDeleteModel):
         default=False, help_text='Seller coordinates delivery to other cities (buyer pays more)')
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='active', db_index=True)
     suspended_reason = models.CharField(max_length=300, blank=True, default='')
+    # What the buyer pays for same-city delivery, in US dollars, added to the
+    # order total. The store books and pays the courier itself (Yango Envíos,
+    # its own moto…) and gets it back in the payout.
+    delivery_price_usd = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('0'))
 
     class Meta:
         constraints = [
@@ -250,6 +254,8 @@ class Order(models.Model):
     # What the buyer agreed to, frozen at checkout.
     product_title = models.CharField(max_length=100)
     unit_price_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    # Included in amount_usd (product + delivery), so in the escrow deposit.
+    delivery_usd = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('0'))
     quantity = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(20)])
     amount_usd = models.DecimalField(max_digits=14, decimal_places=6)
     amount_wei = models.DecimalField(max_digits=40, decimal_places=0)

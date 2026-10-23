@@ -41,7 +41,7 @@ it('shows the fee from the server, never a hardcoded number', () => {
 
 it('enables the button only with a name and a city, and submits trimmed values', () => {
   const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
-  const { tree, onSubmit } = render();
+  const { tree, onSubmit } = render({ suggestedDeliveryUsd: '1.30' });
   expect(button(tree).props.disabled).toBe(true);
   const [name, description] = fields(tree);
   act(() => { name.props.onChangeText('  Tejidos Ana  '); });
@@ -49,8 +49,23 @@ it('enables the button only with a name and a city, and submits trimmed values',
   expect(button(tree).props.disabled).toBe(false);
   act(() => { button(tree).props.onPress(); });
   expect(dismiss).toHaveBeenCalled();
-  expect(onSubmit).toHaveBeenCalledWith({ name: 'Tejidos Ana', description: 'Chompas de alpaca', shipsOutsideCity: false });
+  // The delivery price starts at the city suggestion and is sent canonical.
+  expect(onSubmit).toHaveBeenCalledWith({
+    name: 'Tejidos Ana', description: 'Chompas de alpaca', shipsOutsideCity: false, deliveryPriceUsd: '1.3',
+  });
   dismiss.mockRestore();
+});
+
+it('needs a delivery price (0 = free) before opening', () => {
+  const { tree, onSubmit } = render({ suggestedDeliveryUsd: null });
+  const [name] = fields(tree);
+  act(() => { name.props.onChangeText('Tejidos Ana'); });
+  expect(button(tree).props.disabled).toBe(true);
+  const delivery = tree.root.findAll((n) => n.props.testID === 'open-store-delivery' && n.props.onChangeText)[0];
+  act(() => { delivery.props.onChangeText('0'); });
+  expect(button(tree).props.disabled).toBe(false);
+  act(() => { button(tree).props.onPress(); });
+  expect(onSubmit.mock.calls[0][0].deliveryPriceUsd).toBe('0');
 });
 
 it('cannot submit without a city', () => {

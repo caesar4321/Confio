@@ -9,7 +9,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, TextInput } from '../common/AppText';
 import { BrandFieldBackground } from '../common/BrandFieldBackground';
 import { colors } from '../../config/theme';
-import { formatFeeBps } from '../../utils/comprarFormat';
+import { formatFeeBps, formatLocalPrice } from '../../utils/comprarFormat';
+import { normalizeAmountInput } from '../../utils/numberLocale';
 
 const NAME_MAX = 80;
 const DESCRIPTION_MAX = 1000;
@@ -22,7 +23,11 @@ type Props = {
   error: string | null;
   onBack: () => void;
   onPickCity: () => void;
-  onSubmit: (values: { name: string; description: string; shipsOutsideCity: boolean }) => void;
+  onSubmit: (values: { name: string; description: string; shipsOutsideCity: boolean; deliveryPriceUsd: string }) => void;
+  /** The city's suggested delivery price (US$), pre-filled until edited. */
+  suggestedDeliveryUsd?: string | null;
+  /** Display-only "≈ Bs" for the delivery price. */
+  localRate?: { currency: string; localPerUsd: string } | null;
 };
 
 /**
@@ -32,20 +37,33 @@ type Props = {
  * and the button stays pinned above the keyboard so it can always be reached.
  */
 export const OpenStoreForm = ({
-  feeBps, city, accountLabel, submitting, error, onBack, onPickCity, onSubmit,
+  feeBps, city, accountLabel, submitting, error, onBack, onPickCity, onSubmit, suggestedDeliveryUsd, localRate,
 }: Props) => {
-  useNumberLocale(); // amounts follow the user's number format, live
+  const { separators, parseAmount, sanitizeAmount, toAmountInput } = useNumberLocale();
   const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [shipsOutside, setShipsOutside] = useState(false);
+  // The delivery price follows the city's suggestion until the seller edits it.
+  const [delivery, setDelivery] = useState('');
+  const [deliveryEdited, setDeliveryEdited] = useState(false);
+  React.useEffect(() => {
+    if (!deliveryEdited && suggestedDeliveryUsd) setDelivery(toAmountInput(Number(suggestedDeliveryUsd), 2));
+  }, [suggestedDeliveryUsd, deliveryEdited, toAmountInput]);
+  const deliveryValue = parseAmount(delivery);
+  const deliveryOk = delivery.trim() !== '' && deliveryValue >= 0 && deliveryValue <= 100;
   const descriptionRef = useRef<RNTextInput>(null);
   const fee = formatFeeBps(feeBps);
-  const valid = name.trim().length >= 2 && Boolean(city) && !submitting;
+  const valid = name.trim().length >= 2 && Boolean(city) && deliveryOk && !submitting;
 
   const submit = () => {
     Keyboard.dismiss();
-    if (valid) onSubmit({ name: name.trim(), description: description.trim(), shipsOutsideCity: shipsOutside });
+    if (valid) {
+      onSubmit({
+        name: name.trim(), description: description.trim(), shipsOutsideCity: shipsOutside,
+        deliveryPriceUsd: normalizeAmountInput(delivery) ?? '',
+      });
+    }
   };
 
   const benefits = [
@@ -152,6 +170,25 @@ export const OpenStoreForm = ({
             </Pressable>
 
             <View style={styles.row}>
+              <View style={styles.rowIcon}><Icon name="send" size={16} color={colors.primaryDark} /></View>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={styles.label}>Envío en {city || 'tu ciudad'}</Text>
+                <View style={styles.deliveryRow}>
+                  <Text style={styles.deliveryPrefix}>US$</Text>
+                  <TextInput testID="open-store-delivery" style={[styles.input, styles.deliveryInput]}
+                    keyboardType="decimal-pad" placeholder={`0${separators.decimal}00`} placeholderTextColor={colors.text.light}
+                    value={delivery} onChangeText={(t) => { setDeliveryEdited(true); setDelivery((prev) => sanitizeAmount(t, 2, undefined, prev)); }} />
+                  {localRate && deliveryOk && deliveryValue > 0 ? (
+                    <Text style={styles.hint}>≈ {formatLocalPrice(deliveryValue * Number(localRate.localPerUsd), localRate.currency)}</Text>
+                  ) : null}
+                </View>
+                <Text style={styles.hint}>
+                  Lo paga el comprador junto con el producto. Tú envías el pedido (con Yango Envíos o tu propio repartidor) y te llega con el pago. 0 = envío gratis.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.row}>
               <View style={styles.rowIcon}><Icon name="truck" size={16} color={colors.primaryDark} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.label}>Envíos a otras ciudades</Text>
@@ -186,6 +223,9 @@ export const OpenStoreForm = ({
 };
 
 const styles = StyleSheet.create({
+  deliveryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  deliveryPrefix: { fontSize: 15, fontWeight: '700', color: colors.textFlat },
+  deliveryInput: { width: 96, paddingVertical: 8 },
   screen: { flex: 1, backgroundColor: colors.neutral },
   statusStrip: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: colors.heroField, zIndex: 10 },
   hero: { backgroundColor: colors.heroField, overflow: 'hidden' },

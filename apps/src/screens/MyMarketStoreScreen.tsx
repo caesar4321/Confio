@@ -4,15 +4,16 @@ import { ActivityIndicator, Alert, FlatList, Image, Pressable, StyleSheet, Switc
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
-import { Text } from '../components/common/AppText';
+import { Text, TextInput } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import {
-  DELETE_MARKET_PRODUCT, GET_MY_MARKET_STORE, OPEN_MARKET_STORE, SET_MARKET_PRODUCT_PAUSED,
-  UPDATE_MARKET_STORE, comprarError,
+  DELETE_MARKET_PRODUCT, GET_MARKETPLACE_HOME, GET_MY_MARKET_STORE, GET_REFERENCE_RATE, OPEN_MARKET_STORE,
+  SET_MARKET_PRODUCT_PAUSED, UPDATE_MARKET_STORE, comprarError,
 } from '../services/comprar';
+import { normalizeAmountInput } from '../utils/numberLocale';
 import { useComprarLocation } from '../hooks/useComprarLocation';
 import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal';
-import { formatRating, formatUsd } from '../utils/comprarFormat';
+import { formatLocalPrice, formatRating, formatUsd } from '../utils/comprarFormat';
 import { formatDecimal } from '../utils/numberLocale';
 import { explainLocateOutcome } from '../utils/comprarLocate';
 import { OpenStoreForm } from '../components/comprar/OpenStoreForm';
@@ -35,7 +36,6 @@ const STATUS_STYLE: Record<string, { backgroundColor: string; color: string }> =
  * (marketplaceFeeBps), never from copy.
  */
 export const MyMarketStoreScreen = () => {
-  useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<any>();
   const { data, loading, refetch } = useQuery(GET_MY_MARKET_STORE, { fetchPolicy: 'cache-and-network' });
   useFocusEffect(React.useCallback(() => { void refetch(); }, [refetch]));
@@ -46,6 +46,20 @@ export const MyMarketStoreScreen = () => {
   const [setPaused] = useMutation(SET_MARKET_PRODUCT_PAUSED);
   const [deleteProduct] = useMutation(DELETE_MARKET_PRODUCT);
   const { location, home, choose, relocate } = useComprarLocation();
+  const { parseAmount, sanitizeAmount, toAmountInput } = useNumberLocale();
+  // The store's city (or, before opening, the chosen one) for the delivery
+  // suggestion and the display-only "≈ Bs".
+  const storeCountry = data?.myMarketStore?.countryCode || location?.countryCode || '';
+  const storeCity = data?.myMarketStore?.city || location?.city || '';
+  const { data: cityData } = useQuery(GET_MARKETPLACE_HOME, {
+    variables: { countryCode: storeCountry, city: storeCity }, skip: !storeCountry || !storeCity,
+  });
+  const { data: rateData } = useQuery(GET_REFERENCE_RATE, {
+    variables: { countryCode: storeCountry }, skip: !storeCountry,
+  });
+  const localRate = rateData?.marketplaceReferenceRate || null;
+  const [deliveryDraft, setDeliveryDraft] = useState<string | null>(null);
+  const [savingDelivery, setSavingDelivery] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Locked from the tap until the new store has loaded (the mutation alone
@@ -61,7 +75,7 @@ export const MyMarketStoreScreen = () => {
   }
 
   if (!store) {
-    const submit = async (values: { name: string; description: string; shipsOutsideCity: boolean }) => {
+    const submit = async (values: { name: string; description: string; shipsOutsideCity: boolean; deliveryPriceUsd: string }) => {
       if (submitting) return;
       setError(null);
       setSubmitting(true);
@@ -105,6 +119,8 @@ export const MyMarketStoreScreen = () => {
           onBack={() => navigation.goBack()}
           onPickCity={() => setPickerOpen(true)}
           onSubmit={(values) => { void submit(values); }}
+          suggestedDeliveryUsd={cityData?.marketplaceCity?.suggestedDeliveryUsd}
+          localRate={localRate}
         />
         <ComprarLocationModal visible={pickerOpen} countryCode={location?.countryCode || 'BO'} city={location?.city || ''}
           homeCountryCode={home?.countryCode} homeCity={home?.city}
@@ -146,6 +162,49 @@ export const MyMarketStoreScreen = () => {
                   }} />
                 </View>
               )}
+              <View style={styles.deliveryRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.switchText}>Envío en {store.city}</Text>
+                  <Text style={styles.muted}>Lo paga el comprador con el producto; tú envías el pedido y te llega con el pago.</Text>
+                </View>
+                {deliveryDraft === null ? (
+                  <Pressable testID="store-delivery-edit" hitSlop={8}
+                    onPress={() => setDeliveryDraft(toAmountInput(Number(store.deliveryPriceUsd ?? 0), 2))}>
+                    <Text style={styles.deliveryValue}>
+                      {Number(store.deliveryPriceUsd) > 0 ? formatUsd(store.deliveryPriceUsd) : 'Gratis'} <Icon name="edit-2" size={13} color={colors.text.secondary} />
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.deliveryEdit}>
+                    <TextInput testID="store-delivery-input" style={styles.deliveryInput} keyboardType="decimal-pad" autoFocus
+                      value={deliveryDraft} onChangeText={(t) => setDeliveryDraft((prev) => sanitizeAmount(t, 2, undefined, prev ?? ''))} />
+                    <Pressable testID="store-delivery-save" hitSlop={8} disabled={savingDelivery || !(parseAmount(deliveryDraft) >= 0)}
+                      onPress={async () => {
+                        setSavingDelivery(true);
+                        setError(null);
+                        try {
+                          const res = await updateStore({ variables: { deliveryPriceUsd: normalizeAmountInput(deliveryDraft) ?? '' } });
+                          if (!res.data?.updateMarketStore?.success) {
+                            setError(comprarError(res.data?.updateMarketStore?.error));
+                          } else {
+                            setDeliveryDraft(null);
+                            await refetch();
+                          }
+                        } catch {
+                          setError(comprarError('network'));
+                        } finally {
+                          setSavingDelivery(false);
+                        }
+                      }}>
+                      {savingDelivery ? <ActivityIndicator color={colors.primaryDark} /> : <Text style={styles.deliverySave}>Guardar</Text>}
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+              {deliveryDraft !== null && localRate && parseAmount(deliveryDraft) > 0 ? (
+                <Text style={styles.muted}>≈ {formatLocalPrice(parseAmount(deliveryDraft) * Number(localRate.localPerUsd), localRate.currency)}</Text>
+              ) : null}
+              {error ? <Text style={styles.error}>{error}</Text> : null}
             </KitCard>
             <Pressable style={styles.salesLink} onPress={() => navigation.navigate('MarketOrders', { role: 'merchant' })}>
               <Icon name="inbox" size={18} color={colors.primaryDark} />
@@ -205,6 +264,11 @@ export default MyMarketStoreScreen;
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.neutral },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  deliveryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, borderTopColor: colors.borderLight, paddingTop: 10 },
+  deliveryValue: { fontSize: 15, fontWeight: '700', color: colors.textFlat },
+  deliveryEdit: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  deliveryInput: { width: 80, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, fontSize: 15, color: colors.text.primary },
+  deliverySave: { fontSize: 14, fontWeight: '700', color: colors.primaryDeep },
   switchText: { flex: 1, fontSize: 14, color: colors.text.primary },
   error: { color: colors.error.text, fontSize: 14 },
   storeHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },

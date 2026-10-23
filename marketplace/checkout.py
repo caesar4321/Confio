@@ -47,9 +47,18 @@ def city_for(country_code: str, city: str):
     return MarketplaceCity.objects.filter(country_code=country_code, city__iexact=city.strip()).first()
 
 
+def _city_key(name: str) -> str:
+    """A city name as compared: case, accents and spacing never make another
+    city ("La  Paz", "la paz", "Córdoba"/"Cordoba"). Same-city delivery is
+    charged, so a spelling must not turn it into "another city"."""
+    import unicodedata
+    folded = unicodedata.normalize('NFKD', name or '').encode('ascii', 'ignore').decode()
+    return ' '.join(folded.casefold().split())
+
+
 def is_outside_city(store, delivery_country: str, delivery_city: str) -> bool:
-    return (delivery_country.upper() != store.country_code
-            or delivery_city.strip().lower() != store.city.strip().lower())
+    return ((delivery_country or '').strip().upper() != store.country_code
+            or _city_key(delivery_city) != _city_key(store.city))
 
 
 def delivery_terms(store, delivery_country: str, delivery_city: str) -> dict:
@@ -68,9 +77,12 @@ def delivery_terms(store, delivery_country: str, delivery_city: str) -> dict:
 def checkout_quote(product, quantity: int, delivery_country: str, delivery_city: str) -> dict:
     if not (1 <= quantity <= MAX_QUANTITY):
         raise CheckoutError('bad_quantity')
-    # Priced in dollars: the quote is price × quantity, no exchange rate.
-    q = quote(product.price_usd, quantity)
-    return {'quote': q, **delivery_terms(product.store, delivery_country, delivery_city)}
+    # Priced in dollars: price × quantity plus the store's delivery price, no
+    # exchange rate. Another city is coordinated with the store (not included).
+    terms = delivery_terms(product.store, delivery_country, delivery_city)
+    delivery = Decimal('0') if terms['outside_city'] else product.store.delivery_price_usd
+    q = quote(product.price_usd, quantity, delivery)
+    return {'quote': q, **terms}
 
 
 def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country: str,
@@ -144,7 +156,10 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
 
     delivery = dict(
         delivery_country=delivery_country.upper(), delivery_city=delivery_city.strip(),
-        delivery_outside_city=terms['outside_city'], delivery_estimate_local=terms['estimate_local'],
+        # The courier estimate described the old "pay the courier on arrival"
+        # orders; delivery is now the store's price inside the total, so a new
+        # order records none (0 + none = free; 0 + an estimate = an old order).
+        delivery_outside_city=terms['outside_city'], delivery_estimate_local=None,
         delivery_currency=terms['currency'],
         delivery_address=delivery_address[:300], delivery_phone=delivery_phone[:20],
         delivery_note=(delivery_note or '').strip()[:300])
@@ -155,7 +170,7 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
     # balances right now.
     reusable = Order.objects.filter(
         buyer=user, buyer_account=account, product=product, status='draft', quantity=quantity,
-        unit_price_usd=product.price_usd, buyer_address=buyer_addr,
+        unit_price_usd=product.price_usd, delivery_usd=q.delivery_usd, buyer_address=buyer_addr,
         merchant_address=merchant_addr, stock_reserved=True,
         deposit_deadline__gte=int(time.time()) + REUSE_MIN_REMAINING_S,
     ).order_by('-created_at').first()
@@ -211,6 +226,7 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
             public_id=public_id, order_id32=order_id32, buyer=user, buyer_account=account,
             buyer_address=buyer_addr, store=store, merchant_address=merchant_addr,
             product=product, product_title=product.title, unit_price_usd=q.unit_price_usd,
+            delivery_usd=q.delivery_usd,
             quantity=quantity, amount_usd=q.amount_usd, amount_wei=q.amount_wei,
             token_address=token, fee_bps=q.fee_bps, **delivery,
             deposit_deadline=deadline, deposit_signature=signature, deposit_signer=signer,

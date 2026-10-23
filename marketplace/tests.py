@@ -195,7 +195,8 @@ class CheckoutTests(MarketTestBase):
         self.assertEqual(order.status, 'draft')
         self.assertEqual(order.amount_usd, Decimal('30.00'))  # priced in dollars
         self.assertEqual(order.fee_bps, 800)
-        self.assertEqual(order.delivery_estimate_local, Decimal('15.00'))
+        # Delivery is the store's price inside the total, not a courier estimate.
+        self.assertIsNone(order.delivery_estimate_local)
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0]['to'], CUSD)
         self.assertEqual(calls[1]['to'], ESCROW)
@@ -1205,3 +1206,68 @@ class AdminEarningsTests(MarketTestBase):
         self.assertEqual((row['accrued'], row['paid'], row['unpaid'], row['unpaid_orders']),
                          (Decimal('5.00'), Decimal('1.00'), Decimal('4.00'), 1))
         self.assertIsNotNone(row['last_paid'])
+
+
+@override_settings(**ENABLED)
+class StoreDeliveryPriceTests(MarketTestBase):
+    def test_the_order_total_is_product_plus_the_stores_delivery_and_the_fee_is_on_the_total(self):
+        Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('2.20'))
+        self.product.refresh_from_db()
+        terms = checkout.checkout_quote(self.product, 2, 'BO', 'La Paz')
+        q = terms['quote']
+        self.assertEqual((q.product_usd, q.delivery_usd, q.amount_usd), (Decimal('60.00'), Decimal('2.20'), Decimal('62.20')))
+        self.assertEqual(q.fee_usd, Decimal('4.976'))  # 8% of the whole order, like the contract
+        self.assertEqual(q.merchant_net_usd, Decimal('62.20') - Decimal('4.976'))
+
+    def test_another_city_is_coordinated_with_the_store_not_charged(self):
+        Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('2.20'), ships_outside_city=True)
+        self.product.refresh_from_db()
+        q = checkout.checkout_quote(self.product, 1, 'BO', 'El Alto')['quote']
+        self.assertEqual((q.delivery_usd, q.amount_usd), (Decimal('0.00'), Decimal('30.00')))
+
+    def test_the_order_records_its_delivery_and_a_new_delivery_price_never_reuses_an_old_draft(self):
+        Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('2.20'))
+        first, _calls, _ = self.prepare()
+        self.assertEqual((first.delivery_usd, first.amount_usd), (Decimal('2.20'), Decimal('32.20')))
+        Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('3.00'))
+        second, _calls, _ = self.prepare()
+        self.assertNotEqual(second.pk, first.pk)
+        self.assertEqual(second.amount_usd, Decimal('33.00'))
+
+    def test_a_store_sets_its_delivery_price_within_bounds(self):
+        from .schema import UpdateMarketStore
+        info = SimpleNamespace(context=SimpleNamespace(user=self.seller))
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
+            ok = UpdateMarketStore.mutate.__wrapped__(None, info, delivery_price_usd='1.5')
+            bad = UpdateMarketStore.mutate.__wrapped__(None, info, delivery_price_usd='-1')
+            free = UpdateMarketStore.mutate.__wrapped__(None, info, delivery_price_usd='0')
+        self.assertTrue(ok.success)
+        self.assertEqual(bad.error, 'bad_delivery_price')
+        self.assertEqual(free.store.delivery_price_usd, '0.00')
+
+    def test_the_suggestion_converts_the_city_estimate_and_rounds_up(self):
+        from .pricing import suggested_delivery_usd
+        with mock.patch('marketplace.pricing.local_per_usd', return_value=Decimal('11.925')):
+            self.assertEqual(suggested_delivery_usd('BO', 'La Paz'), Decimal('1.30'))  # 15 Bs ≈ 1.258 → 1.30
+        with mock.patch('marketplace.pricing.local_per_usd', return_value=None):
+            self.assertEqual(suggested_delivery_usd('BO', 'La Paz'), Decimal('2.00'))
+
+
+@override_settings(**ENABLED)
+class DeliveryCityMatchTests(MarketTestBase):
+    def test_spelling_never_turns_the_same_city_into_another_one(self):
+        Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('1.30'), ships_outside_city=True)
+        self.product.refresh_from_db()
+        for spelling in ('La  Paz', 'la paz', ' LA PAZ ', 'Lá Paz'):
+            q = checkout.checkout_quote(self.product, 1, 'bo', spelling)['quote']
+            self.assertEqual(q.delivery_usd, Decimal('1.30'), spelling)
+
+    def test_a_new_order_records_no_courier_estimate(self):
+        order, _calls, _ = self.prepare()
+        self.assertIsNone(order.delivery_estimate_local)
+
+    def test_non_finite_delivery_prices_are_refused(self):
+        from .schema import _delivery_price
+        for value in ('NaN', 'Infinity', '-0.01', '100.01', 'abc'):
+            self.assertIsNone(_delivery_price(value), value)
+        self.assertEqual(_delivery_price('0'), Decimal('0.00'))

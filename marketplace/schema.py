@@ -24,6 +24,7 @@ from .permissions import (ACTION_PERMISSIONS, BUY, SHIP, STORE_ADMIN, VIEW_ORDER
 from .models import (COUNTRY_CHOICES, MarketplaceCity, active_categories, active_category_keys, category_label,
                      Order, OrderRating, Product, Store)
 from .moderation import MAX_PHOTOS, pending_prefix, start_review
+from .pricing import suggested_delivery_usd
 from .address_book import DeleteDeliveryAddress, SaveDeliveryAddress  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class MarketplaceCityType(graphene.ObjectType):
     delivery_estimate = graphene.String(description='Same-city estimate, local currency')
     delivery_partner = graphene.String()
     store_count = graphene.Int()
+    suggested_delivery_usd = graphene.String(description="Pre-fills a new store's delivery price")
 
 
 class LocalReferenceType(graphene.ObjectType):
@@ -112,6 +114,7 @@ class MarketplaceStoreType(graphene.ObjectType):
     rating_count = graphene.Int()
     completed_orders = graphene.Int()
     owner_display_name = graphene.String()
+    delivery_price_usd = graphene.String(description='Same-city delivery the buyer pays, added to the order')
 
     @staticmethod
     def from_model(store):
@@ -124,6 +127,7 @@ class MarketplaceStoreType(graphene.ObjectType):
             is_open=store.is_open, avg_rating=stats['avg'], rating_count=stats['count'],
             completed_orders=store.orders.filter(status='released').count(),
             owner_display_name=(owner.first_name or owner.username or '').strip(),
+            delivery_price_usd=str(store.delivery_price_usd),
         )
 
 
@@ -170,6 +174,7 @@ class MarketplaceOrderType(graphene.ObjectType):
     store = graphene.Field(MarketplaceStoreType)
     quantity = graphene.Int()
     unit_price_usd = graphene.String()
+    delivery_usd = graphene.String(description='Included in amountUsd')
     amount_usd = graphene.String()
     reference_local = graphene.Field(LocalReferenceType, description='≈ of amountUsd, current rate')
     delivery_currency = graphene.String()
@@ -226,7 +231,8 @@ class MarketplaceOrderType(graphene.ObjectType):
             product_title=order.product_title,
             product_photo_url=(order.product.photo_urls or [None])[0],
             store=MarketplaceStoreType.from_model(order.store), quantity=order.quantity,
-            unit_price_usd=str(order.unit_price_usd), amount_usd=str(order.amount_usd),
+            unit_price_usd=str(order.unit_price_usd), delivery_usd=str(order.delivery_usd),
+            amount_usd=str(order.amount_usd),
             reference_local=_reference(order.amount_usd, order.store.country_code),
             delivery_currency=order.delivery_currency or None,
             fee_usd=f'{fee:.2f}' if merchant else None,
@@ -248,7 +254,9 @@ class MarketplaceOrderType(graphene.ObjectType):
 
 class CheckoutQuoteType(graphene.ObjectType):
     unit_price_usd = graphene.String()
-    amount_usd = graphene.String(description='What the buyer pays, in US dollars')
+    product_usd = graphene.String(description='Unit price × quantity')
+    delivery_usd = graphene.String(description="The store's delivery price; 0 outside its city (coordinated)")
+    amount_usd = graphene.String(description='What the buyer pays, in US dollars: product + delivery')
     reference_local = graphene.Field(LocalReferenceType, description='≈ of amountUsd')
     delivery_currency = graphene.String()
     outside_city = graphene.Boolean()
@@ -418,7 +426,8 @@ class Query(graphene.ObjectType):
             country_code=city.country_code, city=city.city, currency_code=city.currency_code,
             is_live=city.is_live,
             delivery_estimate=str(city.delivery_estimate) if city.delivery_estimate is not None else None,
-            delivery_partner=city.delivery_partner, store_count=count)
+            delivery_partner=city.delivery_partner, store_count=count,
+            suggested_delivery_usd=str(suggested_delivery_usd(city.country_code, city.city)))
 
     def resolve_marketplace_cities(self, info, country_code):
         if not _user(info):
@@ -549,7 +558,8 @@ class Query(graphene.ObjectType):
             return None
         q = terms['quote']
         return CheckoutQuoteType(
-            unit_price_usd=str(q.unit_price_usd), amount_usd=str(q.amount_usd),
+            unit_price_usd=str(q.unit_price_usd), product_usd=str(q.product_usd),
+            delivery_usd=str(q.delivery_usd), amount_usd=str(q.amount_usd),
             reference_local=_reference(q.amount_usd, product.store.country_code),
             delivery_currency=terms['currency'] or None,
             outside_city=terms['outside_city'], ships_outside_city=terms['ships_outside_city'],
@@ -704,13 +714,15 @@ class OpenMarketStore(graphene.Mutation):
         country_code = graphene.String(required=True)
         city = graphene.String(required=True)
         ships_outside_city = graphene.Boolean()
+        delivery_price_usd = graphene.String(description='US dollars; omitted = the city suggestion')
 
     success = graphene.Boolean()
     error = graphene.String()
     store = graphene.Field(MarketplaceStoreType)
 
     @login_required
-    def mutate(self, info, name, country_code, city, description='', ships_outside_city=False):
+    def mutate(self, info, name, country_code, city, description='', ships_outside_city=False,
+               delivery_price_usd=None):
         try:
             user, account, store = _seller_store(info)
         except CheckoutError as exc:
@@ -726,12 +738,33 @@ class OpenMarketStore(graphene.Mutation):
         if not (2 <= len(name) <= 80):
             return OpenMarketStore(success=False, error='bad_name')
         known = MarketplaceCity.objects.filter(country_code=country, city__iexact=city.strip()).first()
-        store = Store.objects.create(
+        if delivery_price_usd in (None, ''):
+            delivery = suggested_delivery_usd(country, city)
+        else:
+            delivery = _delivery_price(delivery_price_usd)
+            if delivery is None:
+                return OpenMarketStore(success=False, error='bad_delivery_price')
+        store = Store.objects.create(delivery_price_usd=delivery,
             owner=account.user, owner_account=account, name=name,
             description=(description or '').strip()[:1000], country_code=country,
             city=known.city if known else city.strip()[:100],
             ships_outside_city=bool(ships_outside_city))
         return OpenMarketStore(success=True, store=MarketplaceStoreType.from_model(store))
+
+
+def _delivery_price(value):
+    """A store's delivery price from the form (US$, 0 = free), or None."""
+    from decimal import Decimal, InvalidOperation
+
+    from .pricing import MAX_DELIVERY_USD
+    try:
+        price = Decimal(str(value))
+        if not price.is_finite():
+            return None
+        price = price.quantize(Decimal('0.01'))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return price if Decimal('0') <= price <= MAX_DELIVERY_USD else None
 
 
 class UpdateMarketStore(graphene.Mutation):
@@ -740,13 +773,15 @@ class UpdateMarketStore(graphene.Mutation):
         description = graphene.String()
         ships_outside_city = graphene.Boolean()
         paused = graphene.Boolean()
+        delivery_price_usd = graphene.String()
 
     success = graphene.Boolean()
     error = graphene.String()
     store = graphene.Field(MarketplaceStoreType)
 
     @login_required
-    def mutate(self, info, name=None, description=None, ships_outside_city=None, paused=None):
+    def mutate(self, info, name=None, description=None, ships_outside_city=None, paused=None,
+               delivery_price_usd=None):
         try:
             _user_, _account, store = _seller_store(info)
         except CheckoutError as exc:
@@ -763,6 +798,11 @@ class UpdateMarketStore(graphene.Mutation):
             fields['description'] = description.strip()[:1000]
         if ships_outside_city is not None:
             fields['ships_outside_city'] = ships_outside_city
+        if delivery_price_usd is not None:
+            delivery = _delivery_price(delivery_price_usd)
+            if delivery is None:
+                return UpdateMarketStore(success=False, error='bad_delivery_price')
+            fields['delivery_price_usd'] = delivery
         if fields:
             Store.objects.filter(pk=store.pk).update(**fields)
         if paused is not None:

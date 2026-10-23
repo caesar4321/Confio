@@ -14,7 +14,7 @@ import {
 } from '../services/comprar';
 import { AddressBookSheet } from '../components/comprar/AddressBookSheet';
 import { ComprarFrame, KitButton, KitCard, KitFooter, KitRow, ProductThumb, TrustNote, kitText } from '../components/comprar/kit';
-import { formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFormat';
+import { formatReference, formatUsd } from '../utils/comprarFormat';
 
 /**
  * Checkout: the product is paid into the escrow in Confío dollars; delivery
@@ -279,17 +279,21 @@ export const MarketCheckoutScreen = () => {
             {quoting && !quote ? <ActivityIndicator color={colors.primaryDark} /> : quote ? (
               <>
                 <KitRow label={quantity > 1 ? `Producto (${quantity} × ${formatUsd(quote.unitPriceUsd)})` : 'Producto'}
-                  value={formatUsd(quote.amountUsd)} />
-                <KitRow label="Envío (pagas al recibir)" muted value={quote.deliveryEstimateLocal
-                  ? `~${formatLocalPrice(quote.deliveryEstimateLocal, quote.deliveryCurrency || '')}`
-                  : 'A coordinar'} />
+                  value={formatUsd(quote.productUsd ?? quote.amountUsd)} />
+                {/* Same-city delivery is the store's price, inside the total;
+                    another city is coordinated with the store. */}
+                <KitRow label={`Envío en ${city}`} muted value={quote.outsideCity
+                  ? 'A coordinar con la tienda'
+                  : Number(quote.deliveryUsd ?? 0) > 0 ? formatUsd(quote.deliveryUsd) : 'Gratis'} />
                 <View style={styles.divider} />
-                <KitRow label="Pagas ahora" strong value={formatUsd(quote.amountUsd)} />
+                <KitRow label="Total" strong value={formatUsd(quote.amountUsd)} />
                 {formatReference(quote.referenceLocal) ? (
                   <Text style={[kitText.muted, styles.right]}>{formatReference(quote.referenceLocal)} en moneda local</Text>
                 ) : null}
                 <Text style={kitText.muted}>
-                  El envío se paga al repartidor{quote.deliveryPartner ? ` (${quote.deliveryPartner})` : ''} al recibir, con tu QR.
+                  {quote.outsideCity
+                    ? 'La tienda coordina contigo el envío a otra ciudad y su costo.'
+                    : 'La tienda envía tu pedido a tu dirección. El repartidor te escribirá o llamará al teléfono que pusiste.'}
                 </Text>
               </>
             ) : (

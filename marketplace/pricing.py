@@ -88,13 +88,43 @@ class Quote:
     fee_bps: int
     fee_usd: Decimal
     merchant_net_usd: Decimal
+    product_usd: Decimal = Decimal('0')
+    delivery_usd: Decimal = Decimal('0')
 
 
-def quote(unit_price_usd: Decimal, quantity: int) -> Quote:
+def quote(unit_price_usd: Decimal, quantity: int, delivery_usd=Decimal('0')) -> Quote:
+    """Product × quantity plus the store's delivery price: ONE amount the
+    buyer pays into the escrow. The seller books and pays the courier, and the
+    delivery comes back to them in the payout. The fee is on the whole order
+    (the contract takes it on the deposited amount), like Etsy or eBay."""
     unit = Decimal(unit_price_usd).quantize(CENT)
-    amount_usd = (unit * quantity).quantize(CENT)
+    product_usd = (unit * quantity).quantize(CENT)
+    delivery = Decimal(delivery_usd or 0).quantize(CENT)
+    amount_usd = product_usd + delivery
     amount_wei = int(amount_usd * WAD)
     bps = fee_bps()
     fee = Decimal(fee_wei(amount_wei, bps)) / WAD
     return Quote(unit_price_usd=unit, amount_usd=amount_usd, amount_wei=amount_wei, fee_bps=bps,
-                 fee_usd=fee, merchant_net_usd=amount_usd - fee)
+                 fee_usd=fee, merchant_net_usd=amount_usd - fee, product_usd=product_usd,
+                 delivery_usd=delivery)
+
+
+MAX_DELIVERY_USD = Decimal('100')
+DELIVERY_FALLBACK_USD = Decimal('2.00')
+
+
+def suggested_delivery_usd(country_code: str, city: str) -> Decimal:
+    """A starting delivery price for a store: the city's same-city courier
+    estimate (local currency) at today's reference rate, rounded UP to 10
+    cents. The store owns the price after that; this only pre-fills it."""
+    import math
+
+    from .models import MarketplaceCity
+
+    known = MarketplaceCity.objects.filter(country_code=(country_code or '').upper(),
+                                           city__iexact=(city or '').strip()).first()
+    rate = local_per_usd(known.currency_code) if known and known.delivery_estimate else None
+    if not rate:
+        return DELIVERY_FALLBACK_USD
+    usd = Decimal(known.delivery_estimate) / rate
+    return (Decimal(math.ceil(usd * 10)) / 10).quantize(CENT)

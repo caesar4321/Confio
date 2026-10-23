@@ -110,7 +110,9 @@ export const MarketProductScreen = () => {
         <View style={styles.footerRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.footerPrice}>{formatUsd(product.priceUsd)}</Text>
-            <Text style={kitText.muted} numberOfLines={1}>+ envío al recibir</Text>
+            <Text style={kitText.muted} numberOfLines={1}>
+              {Number(store.deliveryPriceUsd ?? 0) > 0 ? `+ envío ${formatUsd(store.deliveryPriceUsd)} en ${store.city}` : `Envío gratis en ${store.city}`}
+            </Text>
           </View>
           <View style={{ flex: 1.3 }}>
             <KitButton label={product.isBuyable ? 'Comprar' : 'No disponible'} disabled={!product.isBuyable}

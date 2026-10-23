@@ -15,7 +15,7 @@ import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal
 import { GET_MARKETPLACE_HOME, GET_MARKETPLACE_PRODUCTS, SUBMIT_MARKETPLACE_INTEREST } from '../services/comprar';
 import { ComprarInterestSheet } from '../components/comprar/ComprarInterestSheet';
 import { AnalyticsService } from '../services/analyticsService';
-import { formatFeeBps, formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFormat';
+import { formatFeeBps, formatReference, formatUsd } from '../utils/comprarFormat';
 import { explainLocateOutcome } from '../utils/comprarLocate';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -149,12 +149,8 @@ export const ComprarScreen = () => {
               );
             })}
           </ScrollView>
-          {cityInfo?.deliveryEstimate ? (
-            <Text style={styles.deliveryLine}>
-              Envío en {city} ~{formatLocalPrice(cityInfo.deliveryEstimate, cityInfo.currencyCode)}
-              {cityInfo.deliveryPartner ? ` con ${cityInfo.deliveryPartner}` : ''}{' · '}se paga al repartidor
-            </Text>
-          ) : null}
+          {/* Each store sets its delivery price; it is paid with the order. */}
+          <Text style={styles.deliveryLine}>Envío a domicilio en {city}: cada tienda fija su precio y lo pagas con tu compra.</Text>
         </>
       )}
     </View>
