@@ -63,7 +63,7 @@ export const MarketCheckoutScreen = () => {
 
   const city = (mode === 'same' ? store?.city : otherCity.trim()) ?? '';
   const country = store?.countryCode ?? '';
-  const { data: quoteData, loading: quoting } = useQuery(GET_CHECKOUT_QUOTE, {
+  const { data: quoteData, loading: quoting, refetch: requote } = useQuery(GET_CHECKOUT_QUOTE, {
     variables: { productId, quantity, deliveryCountry: country, deliveryCity: city },
     skip: !store || !city,
     fetchPolicy: 'network-only',
@@ -79,10 +79,18 @@ export const MarketCheckoutScreen = () => {
   const resuming = resume?.status === 'draft';
   const maxQty = Math.min(Math.max(product?.stock ?? 1, 1), 20);
 
-  const canPay = useMemo(() => (
-    Boolean(quote) && address.trim().length >= 8 && phone.replace(/\D/g, '').length >= 7
-      && (!outside || (store?.shipsOutsideCity && ack && city.length > 1)) && !paying
-  ), [quote, address, phone, outside, store, ack, city, paying]);
+  // What still stands between the buyer and Pagar, said on the button's
+  // doorstep: the rules match the server's (checkout.prepare_order).
+  const blocker = useMemo((): string | null => {
+    if (outside && !store?.shipsOutsideCity) return `Esta tienda solo entrega en ${store?.city ?? 'su ciudad'}.`;
+    if (outside && city.length < 2) return 'Escribe la ciudad de entrega.';
+    if (!quote) return quoting ? 'Calculando el total…' : 'No pudimos calcular el total.';
+    if (address.trim().length < 8) return 'Escribe la dirección completa (calle, número y zona).';
+    if (phone.replace(/\D/g, '').length < 7) return 'Escribe un teléfono para el repartidor.';
+    if (outside && !ack) return 'Confirma que entiendes el costo del envío a otra ciudad.';
+    return null;
+  }, [quote, quoting, address, phone, outside, store, ack, city]);
+  const canPay = !blocker && !paying;
 
   const pay = async () => {
     setError(null);
@@ -205,7 +213,9 @@ export const MarketCheckoutScreen = () => {
                 </Text>
               </>
             ) : (
-              <Text style={styles.warn}>No pudimos calcular el precio en dólares. Inténtalo en un momento.</Text>
+              <Pressable onPress={() => { void requote().catch(() => {}); }} testID="checkout-requote">
+                <Text style={styles.warn}>No pudimos calcular el total. Toca para reintentar.</Text>
+              </Pressable>
             )}
           </View>
 
@@ -218,7 +228,8 @@ export const MarketCheckoutScreen = () => {
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </ScrollView>
         <View style={styles.footer}>
-          <Pressable style={[styles.payButton, !canPay && styles.payDisabled]} disabled={!canPay} onPress={() => { void pay(); }}>
+          {blocker && !paying ? <Text style={styles.blocker} testID="checkout-blocker">{blocker}</Text> : null}
+          <Pressable testID="checkout-pay" style={[styles.payButton, !canPay && styles.payDisabled]} disabled={!canPay} onPress={() => { void pay(); }}>
             {paying ? <ActivityIndicator color={colors.white} /> : (
               <Text style={styles.payText}>{quote ? `Pagar ${formatUsd(quote.amountUsd)}` : 'Pagar'}</Text>
             )}
@@ -258,6 +269,7 @@ const styles = StyleSheet.create({
   trustText: { flex: 1, fontSize: 13, color: colors.onHeroField, lineHeight: 19 },
   error: { color: colors.error.text, fontSize: 14, textAlign: 'center' },
   footer: { padding: 16, paddingBottom: 28, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  blocker: { fontSize: 13, color: colors.text.secondary, textAlign: 'center', marginBottom: 8 },
   payButton: { backgroundColor: colors.primaryDark, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
   payDisabled: { backgroundColor: '#D1D5DB' },
   payText: { color: colors.white, fontSize: 16, fontWeight: '700' },
