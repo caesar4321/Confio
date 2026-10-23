@@ -102,6 +102,39 @@ export const GET_CHECKOUT_QUOTE = gql`
   }
 `;
 
+// Address book: its own query and mutations (never folded into a shared
+// query, so an older server can only fail this, not checkout).
+const ADDRESS_FIELDS = 'id label countryCode city address phone note isDefault source editable';
+
+export type DeliveryAddress = {
+  id: string; label: string; countryCode: string; city: string; address: string; phone: string;
+  note: string; isDefault: boolean; source: 'saved' | 'recarga'; editable: boolean;
+};
+
+export const GET_DELIVERY_ADDRESSES = gql`
+  query MyDeliveryAddresses {
+    myDeliveryAddresses { ${ADDRESS_FIELDS} }
+  }
+`;
+
+export const SAVE_DELIVERY_ADDRESS = gql`
+  mutation SaveDeliveryAddress($addressId: ID, $label: String, $countryCode: String!, $city: String!,
+                               $address: String!, $phone: String!, $note: String, $makeDefault: Boolean,
+                               $markUsed: Boolean) {
+    saveDeliveryAddress(addressId: $addressId, label: $label, countryCode: $countryCode, city: $city,
+                        address: $address, phone: $phone, note: $note, makeDefault: $makeDefault,
+                        markUsed: $markUsed) {
+      success error address { ${ADDRESS_FIELDS} }
+    }
+  }
+`;
+
+export const DELETE_DELIVERY_ADDRESS = gql`
+  mutation DeleteDeliveryAddress($addressId: ID!) {
+    deleteDeliveryAddress(addressId: $addressId) { success error }
+  }
+`;
+
 export const GET_REFERENCE_RATE = gql`
   query MarketplaceReferenceRate($countryCode: String!) {
     marketplaceReferenceRate(countryCode: $countryCode) { currency localPerUsd }
@@ -298,6 +331,11 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   upload_failed: 'No pudimos subir la foto. Revisa tu conexión e inténtalo de nuevo.',
   upload_unavailable: 'No pudimos subir la foto ahora. Inténtalo en un momento.',
   network: 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
+  bad_city: 'Escribe la ciudad.',
+  bad_country: 'Elige el país.',
+  address_book_full: 'Ya tienes 20 direcciones guardadas. Borra una para agregar otra.',
+  address_not_found: 'Esa dirección ya no existe.',
+  address_not_editable: 'Tu dirección de Recarga se cambia desde Recarga.',
   already_rated: 'Ya calificaste este pedido.',
   payment_in_progress: 'Ya tienes un pago en curso para este producto. Revisa Mis compras.',
   stale_form: 'El producto cambió. Vuelve a abrirlo para editarlo.',

@@ -175,3 +175,27 @@ it('does not imply a direction for an unknown transfer', () => {
     expect(transactionVisual('unknown', incoming)).toMatchObject({ glyph: 'help-circle', color: TONES.neutral.color });
   }
 });
+
+describe('Comprar order notices', () => {
+  const { notificationVisual } = require('../vocabulary');
+  it('show the step, not a bell', () => {
+    expect(notificationVisual('MARKETPLACE_ORDER_UPDATED', { status: 'funded', role: 'merchant' }).glyph).toBe('shopping-cart');
+    expect(notificationVisual('MARKETPLACE_ORDER_UPDATED', { status: 'funded', role: 'buyer' }).glyph).toBe('shopping-bag');
+    expect(notificationVisual('MARKETPLACE_ORDER_UPDATED', { status: 'shipped', role: 'buyer' }).glyph).toBe('truck');
+    expect(notificationVisual('MARKETPLACE_ORDER_UPDATED', { status: 'disputed', role: 'buyer' }).badge).toBe('review');
+  });
+  it('color the money: the payout arrives for the merchant, a refund for the buyer', () => {
+    const payout = notificationVisual('MARKETPLACE_ORDER_UPDATED', { status: 'released', role: 'merchant' });
+    expect(payout.badge).toBe('incoming');
+    const refund = notificationVisual('MARKETPLACE_ORDER_UPDATED', { status: 'refunded', role: 'buyer' });
+    expect(refund.badge).toBe('returned');
+    expect(payout.color).toBe(refund.color);
+  });
+  it('fall back to a Comprar glyph for an unknown state', () => {
+    expect(notificationVisual('MARKETPLACE_ORDER_UPDATED', { status: 'whatever' }).glyph).toBe('shopping-bag');
+    expect(notificationVisual('MARKETPLACE_ORDER_UPDATED').glyph).toBe('shopping-bag');
+    for (const status of ['constructor', '__proto__', 'toString', { evil: true }, 7]) {
+      expect(notificationVisual('MARKETPLACE_ORDER_UPDATED', { status, role: 'buyer' }).bg).toBeTruthy();
+    }
+  });
+});

@@ -65,6 +65,28 @@ export const localTransferVisual = (stage?: string | null, incoming?: boolean): 
   return terminal.badge === 'done' && incoming ? { ...terminal, badge: 'incoming' } : terminal;
 };
 
+// Comprar orders, by the state the notice reports and whose side it is on.
+// Glyph = the step (cart: a new order, bag: paid, truck: on its way, package:
+// delivered); color = the money, as everywhere: the merchant's payout is
+// money in, the buyer's purchase is money out, escrow states are waiting.
+const COMPRAR_VISUALS: Record<string, { buyer: IconVisual; merchant: IconVisual }> = {
+  depositing: { buyer: visual('shopping-bag', 'pending', 'pending'), merchant: visual('shopping-cart', 'pending', 'pending') },
+  funded: { buyer: visual('shopping-bag', 'info', 'done'), merchant: visual('shopping-cart', 'pending', 'pending') },
+  shipped: { buyer: visual('truck', 'info', 'pending'), merchant: visual('truck', 'neutral', 'done') },
+  released: { buyer: visual('package', 'info', 'done'), merchant: visual('shopping-bag', 'moneyIn', 'incoming') },
+  disputed: { buyer: visual('package', 'pending', 'review'), merchant: visual('package', 'pending', 'review') },
+  refunded: { buyer: visual('shopping-bag', 'moneyIn', 'returned'), merchant: visual('package', 'neutral', 'returned') },
+  cancelled: { buyer: visual('package', 'neutral', 'failed'), merchant: visual('package', 'neutral', 'failed') },
+};
+
+export const comprarOrderVisual = (status?: unknown, role?: unknown): IconVisual => {
+  // Own keys only: a status like "constructor" must not find Object's.
+  const entry = typeof status === 'string' && Object.prototype.hasOwnProperty.call(COMPRAR_VISUALS, status)
+    ? COMPRAR_VISUALS[status] : undefined;
+  if (!entry) return visual('shopping-bag', 'info');
+  return role === 'merchant' ? entry.merchant : entry.buyer;
+};
+
 const NOTIFICATIONS: Record<string, IconVisual> = {
   // Sends between people
   SEND_RECEIVED: visual('arrow-down', 'moneyIn'),
@@ -156,8 +178,12 @@ const NOTIFICATIONS: Record<string, IconVisual> = {
   P2P_DISPUTE_RESOLVED: visual('users', 'info', 'done'),
 };
 
-export const notificationVisual = (type: string, data?: { stage?: string | null; incoming?: boolean }): IconVisual => {
+export const notificationVisual = (
+  type: string,
+  data?: { stage?: string | null; incoming?: boolean; status?: unknown; role?: unknown },
+): IconVisual => {
   if (type === 'LOCAL_TRANSFER_UPDATED') return localTransferVisual(data?.stage, data?.incoming);
+  if (type === 'MARKETPLACE_ORDER_UPDATED') return comprarOrderVisual(data?.status, data?.role);
   return NOTIFICATIONS[type] || visual('bell', 'neutral');
 };
 

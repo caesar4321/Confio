@@ -11,6 +11,8 @@ jest.mock('@react-navigation/native', () => ({
 }));
 const mockQuote = { current: null as any };
 const mockRequote = jest.fn(() => Promise.resolve());
+const mockBook = { current: [] as any[] };
+const mockSaveAddress = jest.fn(() => Promise.resolve({ data: { saveDeliveryAddress: { success: true } } }));
 jest.mock('@apollo/client', () => {
   const product = { data: { marketplaceProduct: {
     id: '7', title: 'Samsung Teléfono', stock: 1,
@@ -23,8 +25,13 @@ jest.mock('@apollo/client', () => {
         return { data: mockQuote.current ? { marketCheckoutQuote: mockQuote.current } : undefined, loading: false, refetch: mockRequote };
       }
       if (opts?.skip) return { data: undefined };
+      // The address book query: no variables, cache-and-network.
+      if (!opts?.variables && opts?.fetchPolicy === 'cache-and-network') {
+        return { data: { myDeliveryAddresses: mockBook.current }, loading: false, refetch: jest.fn(() => Promise.resolve()) };
+      }
       return product;
     },
+    useMutation: () => [mockSaveAddress, { loading: false }],
   };
 });
 jest.mock('../../services/comprar', () => {
@@ -50,7 +57,7 @@ const blocker = (tree: renderer.ReactTestRenderer) => {
   return node ? String(node.props.children) : null;
 };
 
-beforeEach(() => { mockQuote.current = QUOTE; mockRequote.mockClear(); });
+beforeEach(() => { mockQuote.current = QUOTE; mockRequote.mockClear(); mockBook.current = []; mockSaveAddress.mockClear(); });
 
 it('says what is missing until the form can pay, then enables Pagar', () => {
   const tree = render();
@@ -87,4 +94,37 @@ it('blocks the screen while paying, but steps aside for Confío Face', async () 
   act(() => { stageCb('paying'); });
   expect(blocking().length).toBeGreaterThan(0);
   expect(JSON.stringify(tree.toJSON())).toContain('Pagando US$');
+});
+
+
+const saved = (over: any = {}) => ({
+  id: '3', label: 'Casa', countryCode: 'BO', city: 'La Paz', address: 'Av. Arce 2345, Sopocachi',
+  phone: '+59170000000', note: 'Portón verde', isDefault: true, source: 'saved', editable: true, ...over,
+});
+
+it('preselects the default address from the book, ready to pay', () => {
+  mockBook.current = [saved()];
+  const tree = render();
+  expect(byId(tree, 'checkout-picked-address')).toBeTruthy();
+  expect(input(tree, 'Dirección (calle, número, zona)')).toBeUndefined(); // no typing needed
+  expect(blocker(tree)).toBeNull();
+  expect(byId(tree, 'checkout-pay').props.disabled).toBe(false);
+});
+
+it('never preselects an address in another country', () => {
+  mockBook.current = [saved({ countryCode: 'VE', city: 'Caracas' })];
+  const tree = render();
+  expect(byId(tree, 'checkout-picked-address')).toBeUndefined();
+  expect(input(tree, 'Dirección (calle, número, zona)')).toBeTruthy();
+});
+
+it('after paying, records the address in the book (used), without waiting on it', async () => {
+  const { placeMarketOrder } = require('../../services/comprar');
+  placeMarketOrder.mockResolvedValue({ orderId: '9', txHash: '0x1' });
+  mockBook.current = [saved()];
+  const tree = render();
+  await act(async () => { byId(tree, 'checkout-pay').props.onPress(); });
+  expect(mockSaveAddress).toHaveBeenCalledWith({ variables: expect.objectContaining({
+    address: 'Av. Arce 2345, Sopocachi', city: 'La Paz', countryCode: 'BO', phone: '+59170000000', markUsed: true,
+  }) });
 });

@@ -24,6 +24,7 @@ from .permissions import (ACTION_PERMISSIONS, BUY, SHIP, STORE_ADMIN, VIEW_ORDER
 from .models import (COUNTRY_CHOICES, MarketplaceCity, active_categories, active_category_keys, category_label,
                      Order, OrderRating, Product, Store)
 from .moderation import MAX_PHOTOS, pending_prefix, start_review
+from .address_book import DeleteDeliveryAddress, SaveDeliveryAddress  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -307,6 +308,14 @@ def _orders_for(account):
 
 
 class Query(graphene.ObjectType):
+    my_delivery_addresses = graphene.List(
+        'marketplace.address_book.DeliveryAddressType',
+        description="The buyer's saved delivery addresses for the JWT account, plus the Recarga address (read-only)")
+
+    def resolve_my_delivery_addresses(self, info):
+        from .address_book import resolve_my_delivery_addresses
+        return resolve_my_delivery_addresses(info)
+
     marketplace_reference_rate = graphene.Field(
         ReferenceRateType, country_code=graphene.String(required=True),
         description='Display-only local units per USD (for "≈ Bs" while typing a price); null without a fresh rate')
@@ -1102,6 +1111,8 @@ class RateMarketOrder(graphene.Mutation):
 
 
 class Mutation(graphene.ObjectType):
+    save_delivery_address = SaveDeliveryAddress.Field()
+    delete_delivery_address = DeleteDeliveryAddress.Field()
     locate_marketplace_city = LocateMarketplaceCity.Field()
     submit_marketplace_interest = SubmitMarketplaceInterest.Field()
     open_market_store = OpenMarketStore.Field()

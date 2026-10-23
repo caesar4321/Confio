@@ -15,7 +15,7 @@ from django.db.models.functions import TruncMonth
 from django.http import HttpResponse
 from django.utils import timezone
 
-from .models import (MarketplaceCategory, MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
+from .models import (DeliveryAddress, MarketplaceCategory, MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
                      MarketplaceLocationCheck, MarketplacePartnerAgreement, Order, OrderRating,
                      Product, Store)
 
@@ -225,6 +225,24 @@ class OrderAdmin(admin.ModelAdmin):
     @admin.action(description='Arbiter: RELEASE to the merchant (disputed only)')
     def resolve_release_merchant(self, request, queryset):
         self._resolve(request, queryset, to_merchant=True)
+
+
+class DeliveryAddressAdmin(admin.ModelAdmin):
+    """Read-only: buyers manage their own book in the app (support can look,
+    not edit someone's address)."""
+    list_display = ('id', 'user', 'account', 'label', 'city', 'country_code', 'is_default', 'last_used_at', 'deleted_at')
+    list_filter = ('country_code', 'is_default')
+    search_fields = ('user__username', 'city', 'label')
+    raw_id_fields = ('user', 'account')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # buyers delete (soft) in the app; a hard delete would skip that
 
 
 class OrderRatingAdmin(admin.ModelAdmin):

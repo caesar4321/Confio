@@ -5,13 +5,14 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useQuery } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { Text, TextInput } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import {
-  CheckoutStage, GET_CHECKOUT_QUOTE, GET_MARKETPLACE_PRODUCT, GET_MARKET_ORDER, MarketOutcomeUnknownError, comprarError,
-  placeMarketOrder,
+  CheckoutStage, DeliveryAddress, GET_CHECKOUT_QUOTE, GET_DELIVERY_ADDRESSES, GET_MARKETPLACE_PRODUCT, GET_MARKET_ORDER,
+  MarketOutcomeUnknownError, SAVE_DELIVERY_ADDRESS, comprarError, placeMarketOrder,
 } from '../services/comprar';
+import { AddressBookSheet } from '../components/comprar/AddressBookSheet';
 import { ComprarFrame, KitButton, KitCard, KitFooter, KitRow, ProductThumb, TrustNote, kitText } from '../components/comprar/kit';
 import { formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFormat';
 
@@ -43,6 +44,15 @@ export const MarketCheckoutScreen = () => {
   const [stage, setStage] = useState<CheckoutStage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Address book: a picked entry fills the delivery fields; null = typed for
+  // this order (offered to the book after paying).
+  const [picked, setPicked] = useState<DeliveryAddress | null>(null);
+  const [bookOpen, setBookOpen] = useState(false);
+  const [saveToBook, setSaveToBook] = useState(true);
+  const [autoPicked, setAutoPicked] = useState(false);
+  const { data: bookData } = useQuery(GET_DELIVERY_ADDRESSES, { fetchPolicy: 'cache-and-network' });
+  const [saveAddress] = useMutation(SAVE_DELIVERY_ADDRESS);
+
   // Resuming an unpaid draft: same quantity and delivery details, so the
   // server reuses its authorization and the units it already holds.
   const resumeOrderId = route.params?.resumeOrderId as string | undefined;
@@ -64,6 +74,36 @@ export const MarketCheckoutScreen = () => {
     }
     setSeeded(true);
   }, [resume, seeded]);
+
+  const sameCity = (a: string, b?: string) =>
+    a.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+      === (b || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  const pickAddress = (a: DeliveryAddress | null) => {
+    setBookOpen(false);
+    setPicked(a);
+    if (!a) return; // typing one for this order: keep what is in the fields
+    setAddress(a.address);
+    setPhone(a.phone);
+    setNote(a.note || '');
+    if (sameCity(a.city, store?.city)) {
+      setMode('same');
+    } else {
+      setMode('other');
+      setOtherCity(a.city);
+    }
+    setAck(false);
+  };
+  // Preselect the default (else most recent, else the Recarga address) once,
+  // only in the store's country, and never over a resumed draft's address.
+  useEffect(() => {
+    if (autoPicked || resumeOrderId || !store || !bookData?.myDeliveryAddresses) return;
+    setAutoPicked(true);
+    if (address || phone) return;
+    const first = (bookData.myDeliveryAddresses as DeliveryAddress[])
+      .find((a) => (a.countryCode || '').toUpperCase() === (store.countryCode || '').toUpperCase());
+    if (first) pickAddress(first);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPicked, resumeOrderId, store, bookData]);
 
   const city = (mode === 'same' ? store?.city : otherCity.trim()) ?? '';
   const country = store?.countryCode ?? '';
@@ -96,6 +136,18 @@ export const MarketCheckoutScreen = () => {
   }, [quote, quoting, address, phone, outside, store, ack, city]);
   const canPay = !blocker && !paying;
 
+  // After a payment (or one whose outcome is unknown: the order opens either
+  // way), remember the address: a book entry moves up as recently used, the
+  // Recarga address or a typed one (if the switch is on) joins the book.
+  // Fire and forget: the book never holds up or fails a purchase.
+  const rememberAddress = () => {
+    if (!picked && !saveToBook) return;
+    void saveAddress({ variables: {
+      label: picked?.source === 'saved' ? '' : (picked?.label || ''),
+      countryCode: country, city, address: address.trim(), phone: phone.trim(), note: note.trim(), markUsed: true,
+    } }).catch(() => {});
+  };
+
   const pay = async () => {
     setError(null);
     setPaying(true);
@@ -111,10 +163,12 @@ export const MarketCheckoutScreen = () => {
           { text: 'Pagar', onPress: () => resolve(true) },
         ]);
       }), setStage);
+      rememberAddress();
       navigation.replace('MarketOrder', { orderId, justPaid: true });
     } catch (e: any) {
       if (e instanceof MarketOutcomeUnknownError) {
         // The payment may already be on its way: show the order, never retry.
+        rememberAddress();
         navigation.replace('MarketOrder', { orderId: e.orderId, justPaid: true });
         return;
       }
@@ -170,7 +224,22 @@ export const MarketCheckoutScreen = () => {
             </View>
           </KitCard>
 
-          <KitCard icon="truck" title="Entrega">
+          <KitCard icon="truck" title="Entrega"
+            right={picked || bookData?.myDeliveryAddresses?.length ? (
+              <Pressable onPress={() => setBookOpen(true)} hitSlop={8} testID="checkout-change-address">
+                <Text style={kitText.link}>{picked ? 'Cambiar' : 'Mis direcciones'}</Text>
+              </Pressable>
+            ) : null}>
+            {picked ? (
+              <Pressable style={styles.pickedCard} onPress={() => setBookOpen(true)} testID="checkout-picked-address">
+                <Icon name={picked.source === 'recarga' ? 'credit-card' : 'map-pin'} size={18} color={colors.primaryDeep} />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.pickedLabel}>{picked.label || 'Dirección'}</Text>
+                  <Text style={kitText.body}>{picked.address}</Text>
+                  <Text style={kitText.muted}>{picked.city} · {picked.phone}{picked.note ? ` · ${picked.note}` : ''}</Text>
+                </View>
+              </Pressable>
+            ) : (<>
             <View style={styles.cityRow}>
               {([['same', `En ${store.city}`, 'map-pin'], ['other', 'Otra ciudad', 'navigation']] as const).map(([m, label, icon]) => {
                 const on = mode === m;
@@ -189,6 +258,11 @@ export const MarketCheckoutScreen = () => {
             <Field icon="home" placeholder="Dirección (calle, número, zona)" value={address} onChangeText={setAddress} />
             <Field icon="phone" placeholder="Teléfono para el repartidor" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
             <Field icon="message-square" placeholder="Referencia (opcional)" value={note} onChangeText={setNote} />
+            <View style={styles.ackRow}>
+              <Switch value={saveToBook} onValueChange={setSaveToBook} testID="checkout-save-address" />
+              <Text style={styles.ackText}>Guardar en mis direcciones</Text>
+            </View>
+            </>)}
             {outside && !store.shipsOutsideCity ? (
               <Text style={styles.warn}>Esta tienda solo entrega en {store.city}.</Text>
             ) : outside ? (
@@ -226,6 +300,9 @@ export const MarketCheckoutScreen = () => {
             )}
           </KitCard>
 
+          <AddressBookSheet visible={bookOpen} selectedId={picked?.id ?? null}
+            countryCode={store.countryCode} city={store.city}
+            onClose={() => setBookOpen(false)} onSelect={pickAddress} />
           <TrustNote>
             Tu pago queda guardado hasta que confirmes que recibiste el pedido. Si la tienda no lo envía, puedes recuperarlo.
           </TrustNote>
@@ -269,6 +346,8 @@ const styles = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, backgroundColor: colors.white },
   fieldInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: colors.text.primary },
   ackRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  pickedCard: { flexDirection: 'row', gap: 12, padding: 12, borderRadius: 12, backgroundColor: colors.neutral, alignItems: 'flex-start' },
+  pickedLabel: { fontSize: 14, fontWeight: '700', color: colors.textFlat },
   ackText: { flex: 1, fontSize: 13, color: colors.text.primary, lineHeight: 18 },
   warn: { fontSize: 13, color: colors.warning.text, flexShrink: 1 },
   retry: { flexDirection: 'row', alignItems: 'center', gap: 8 },

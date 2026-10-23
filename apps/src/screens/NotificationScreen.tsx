@@ -1118,6 +1118,10 @@ export const NotificationScreen = () => {
       const localData = item.notificationType === 'LOCAL_TRANSFER_UPDATED'
         ? parseNotificationData(item.data)
         : null;
+      // Comprar notices carry the order's new state and the reader's side.
+      const orderData = item.notificationType === 'MARKETPLACE_ORDER_UPDATED'
+        ? parseNotificationData(item.data)
+        : null;
       const visual = notificationVisual(item.notificationType, localData ? {
         stage: localData.stage,
         // Notices stored before the payload carried a direction still have the
@@ -1125,7 +1129,7 @@ export const NotificationScreen = () => {
         incoming: localData.direction
           ? localData.direction === 'to_wallet'
           : item.title === 'Ingreso por cuenta local',
-      } : undefined);
+      } : orderData ? { status: orderData.status, role: orderData.role } : undefined);
 
       // Process title and message to replace with contact names
       const processedTitle = replaceWithContactNames(item.title, item.data);

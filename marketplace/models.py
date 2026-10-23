@@ -437,3 +437,37 @@ class MarketplaceInterest(models.Model):
 
     def __str__(self):
         return f'{self.get_role_display()} — {self.city}, {self.country_code}'
+
+
+class DeliveryAddress(models.Model):
+    """A buyer's saved delivery address (Comprar's address book).
+
+    Scoped to the user AND the JWT account they buy from: employees of one
+    business never see each other's addresses, and a personal book stays
+    personal. The Recarga (KYC) address is not copied here; the book offers
+    it live, read-only (schema.recarga_address)."""
+
+    MAX_PER_BOOK = 20
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='delivery_addresses')
+    account = models.ForeignKey('users.Account', on_delete=models.CASCADE, related_name='+')
+    label = models.CharField(max_length=40, blank=True, default='', help_text='"Casa", "Trabajo"…')
+    country_code = models.CharField(max_length=2)
+    city = models.CharField(max_length=100)
+    address = models.CharField(max_length=300)
+    # Same limits as the order's delivery fields, so a saved address pays as is.
+    phone = models.CharField(max_length=20)
+    note = models.CharField(max_length=300, blank=True, default='', help_text='Referencia para el repartidor')
+    is_default = models.BooleanField(default=False)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ['-is_default', '-last_used_at', '-updated_at']
+        indexes = [models.Index(fields=['user', 'account', 'deleted_at'])]
+
+    def __str__(self):
+        return f'{self.label or "Dirección"} — {self.city}'

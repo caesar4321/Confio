@@ -15,7 +15,7 @@ from security.models import IdentityVerification
 from users.models import Account, User
 
 from . import checkout, escrow, pricing
-from .models import (MarketplaceCity, MarketplaceFeeLedger, MarketplacePartnerAgreement, Order,
+from .models import (DeliveryAddress, MarketplaceCity, MarketplaceFeeLedger, MarketplacePartnerAgreement, Order,
                      Product, Store)
 
 WAD = 10**18
@@ -956,3 +956,113 @@ class PhotoUploadTypeTests(MarketTestBase):
         result, presign = self.request('image/gif')
         self.assertEqual(result.error, 'bad_image_type')
         presign.assert_not_called()
+
+
+@override_settings(**ENABLED)
+class AddressBookTests(TestCase):
+    def setUp(self):
+        self.user = make_user()
+        self.info = SimpleNamespace(context=SimpleNamespace(user=self.user))
+        patcher = mock.patch('marketplace.schema._jwt', return_value=PERSONAL)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def save(self, **overrides):
+        from .address_book import SaveDeliveryAddress
+        args = dict(country_code='BO', city='La Paz', address='Av. Arce 2345, Sopocachi', phone='+591 70000000')
+        args.update(overrides)
+        return SaveDeliveryAddress.mutate.__wrapped__(None, self.info, **args)
+
+    def book(self):
+        from .address_book import resolve_my_delivery_addresses
+        return resolve_my_delivery_addresses(self.info)
+
+    def test_first_address_is_the_default_and_resaving_it_does_not_duplicate(self):
+        first = self.save(label='Casa')
+        self.assertTrue(first.success, first.error)
+        self.assertTrue(first.address.is_default)
+        again = self.save(address='av. arce  2345, SOPOCACHI', phone='59170000000', mark_used=True)
+        self.assertTrue(again.success, again.error)
+        self.assertEqual(again.address.id, first.address.id)
+        self.assertEqual(again.address.label, 'Casa')  # a nameless re-save keeps the name
+        self.assertEqual(DeliveryAddress.objects.filter(user=self.user).count(), 1)
+        self.assertIsNotNone(DeliveryAddress.objects.get(user=self.user).last_used_at)
+
+    def test_the_same_rules_as_checkout(self):
+        self.assertEqual(self.save(address='Corta').error, 'delivery_address_required')
+        self.assertEqual(self.save(phone='123').error, 'delivery_phone_required')
+        self.assertEqual(self.save(city='').error, 'bad_city')
+
+    def test_the_book_is_capped(self):
+        for i in range(DeliveryAddress.MAX_PER_BOOK):
+            self.assertTrue(self.save(address=f'Calle {i} número 100').success)
+        self.assertEqual(self.save(address='Una más, número 200').error, 'address_book_full')
+
+    def test_other_users_cannot_see_or_delete_an_address(self):
+        from .address_book import DeleteDeliveryAddress
+        mine = self.save()
+        other = make_user()
+        other_info = SimpleNamespace(context=SimpleNamespace(user=other))
+        from .address_book import resolve_my_delivery_addresses
+        self.assertEqual(resolve_my_delivery_addresses(other_info), [])
+        res = DeleteDeliveryAddress.mutate.__wrapped__(None, other_info, address_id=mine.address.id)
+        self.assertEqual(res.error, 'address_not_found')
+        self.assertTrue(DeliveryAddress.objects.filter(pk=mine.address.id, deleted_at__isnull=True).exists())
+
+    def test_the_recarga_address_is_offered_read_only_until_saved(self):
+        from ramps.models import RampUserAddress
+        from .address_book import DeleteDeliveryAddress
+        User.objects.filter(pk=self.user.pk).update(phone_country='BO', phone_key='591:71234567')
+        self.user.refresh_from_db()
+        RampUserAddress.objects.create(user=self.user, address_street='Calle Jaén 711', address_neighborhood='Casco Viejo',
+                                       address_city='La Paz', address_state='La Paz', address_zip_code='0000')
+        [recarga] = self.book()
+        self.assertEqual((recarga.source, recarga.editable), ('recarga', False))
+        self.assertEqual(recarga.address, 'Calle Jaén 711, Casco Viejo')
+        self.assertEqual(recarga.phone, '+59171234567')
+        self.assertEqual(DeleteDeliveryAddress.mutate.__wrapped__(None, self.info, address_id='recarga').error,
+                         'address_not_editable')
+        # Paid to once (saved from checkout), it is a book entry, not offered twice.
+        self.save(address=recarga.address, phone=recarga.phone, mark_used=True)
+        self.assertEqual([a.source for a in self.book()], ['saved'])
+
+    def test_deleting_the_default_hands_it_to_the_next_address(self):
+        from .address_book import DeleteDeliveryAddress
+        first = self.save()
+        second = self.save(address='Calle Sagárnaga 300, Centro', mark_used=True)
+        self.assertTrue(DeleteDeliveryAddress.mutate.__wrapped__(None, self.info, address_id=first.address.id).success)
+        [left] = self.book()
+        self.assertEqual(left.id, second.address.id)
+        self.assertTrue(left.is_default)
+
+
+@override_settings(**ENABLED)
+class AddressBookPrivacyTests(TestCase):
+    def test_the_recarga_address_is_never_offered_in_a_business_account(self):
+        from ramps.models import RampUserAddress
+        from users.models import Business
+        from .address_book import resolve_my_delivery_addresses
+        user = make_user()
+        User.objects.filter(pk=user.pk).update(phone_country='BO', phone_key='591:71234567')
+        RampUserAddress.objects.create(user=user, address_street='Calle Jaén 711', address_city='La Paz',
+                                       address_state='La Paz', address_zip_code='0000')
+        business = Business.objects.create(name='Tejidos SRL')
+        Account.objects.create(user=user, account_type='business', account_index=0, business=business,
+                               bsc_address='0x' + 'b' * 40)
+        info = SimpleNamespace(context=SimpleNamespace(user=User.objects.get(pk=user.pk)))
+        with mock.patch('marketplace.schema._jwt', return_value={'account_type': 'personal', 'account_index': 0, 'business_id': None}):
+            self.assertEqual([a.source for a in resolve_my_delivery_addresses(info)], ['recarga'])
+        with mock.patch('marketplace.schema._jwt', return_value={'account_type': 'business', 'account_index': 0,
+                                                                 'business_id': str(business.id)}):
+            self.assertEqual(resolve_my_delivery_addresses(info), [])
+
+    def test_same_street_in_another_country_is_another_address(self):
+        user = make_user()
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        from .address_book import SaveDeliveryAddress
+        args = dict(city='Centro', address='Calle Bolívar 100, Centro', phone='+591 70000000')
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
+            a = SaveDeliveryAddress.mutate.__wrapped__(None, info, country_code='BO', **args)
+            b = SaveDeliveryAddress.mutate.__wrapped__(None, info, country_code='VE', **args)
+        self.assertNotEqual(a.address.id, b.address.id)
+        self.assertEqual(sorted(DeliveryAddress.objects.filter(user=user).values_list('country_code', flat=True)), ['BO', 'VE'])
