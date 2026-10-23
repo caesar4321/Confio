@@ -141,7 +141,7 @@ export const SendTipScreen = () => {
             ))}
           </View>
           <Text style={styles.limits}>
-            {`De $${formatDecimal(TIP_MIN)} a $${formatDecimal(TIP_MAX, { decimals: 0 })}. Se envía de tu saldo en dólares.`}
+            {`De $${formatDecimal(TIP_MIN, { decimals: 0 })} a $${formatDecimal(TIP_MAX, { decimals: 0 })}. Se envía de tu saldo en dólares.`}
           </Text>
           <TextInput
             value={note}

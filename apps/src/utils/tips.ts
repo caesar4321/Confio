@@ -1,13 +1,14 @@
 // Tips (inbox/tips.py on the server, which enforces all of this).
 import { normalizeAmountInput } from './numberLocale';
 
-export const TIP_MIN = '0.50';
+// The same $1 floor as any dollar send (server: inbox/tips.MIN_USD).
+export const TIP_MIN = '1';
 export const TIP_MAX = '200';
 export const TIP_CHIPS = [1, 2, 5, 10] as const;
 
 /** What was typed, in the user's country format ("5", "2,50" in VE, "2.50"
  * in MX) → the canonical "2.50"; null when not a valid tip amount
- * (0.50–200, at most 2 decimals). */
+ * (1–200, at most 2 decimals). */
 export const parseTipAmount = (text: string): string | null => {
   const clean = normalizeAmountInput(text);
   if (clean === null || !/^\d{1,3}(\.\d{0,2})?$/.test(clean)) return null;

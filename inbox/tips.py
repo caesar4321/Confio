@@ -41,7 +41,9 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 KEY_PREFIX = 'tip-'
-MIN_USD = Decimal('0.50')
+# The same floor as any dollar send: the money leg can't move under $1
+# (send/bsc_flow: a redemption yielding under 1.00 USDT is rejected).
+MIN_USD = Decimal('1.00')
 MAX_USD = Decimal('200')
 DAILY_USD = Decimal('500')
 NOTE_MAX = 140
@@ -53,7 +55,7 @@ MESSAGES = {
     NOT_AVAILABLE: 'No puedes enviarle una propina a esta persona.',
     'tip_recipient_unverified': 'Esta persona aún no puede recibir propinas.',
     'tip_recipient_no_wallet': 'Esta persona aún no puede recibir propinas. Le avisaremos.',
-    'tip_amount': f'La propina va de ${MIN_USD} a ${MAX_USD:.0f}.',
+    'tip_amount': f'La propina va de ${MIN_USD:.0f} a ${MAX_USD:.0f}.',
     'tip_daily_limit': f'Puedes enviar hasta ${DAILY_USD:.0f} en propinas por día.',
     'tip_note_too_long': f'La nota supera los {NOTE_MAX} caracteres.',
     'tip_note_unavailable': 'No pudimos revisar tu nota. Inténtalo de nuevo.',

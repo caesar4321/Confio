@@ -2,17 +2,17 @@ import { parseTipAmount } from '../tips';
 
 test('valid tip amounts', () => {
   expect(parseTipAmount('5')).toBe('5.00');
-  expect(parseTipAmount('0.5')).toBe('0.50');
+  expect(parseTipAmount('1')).toBe('1.00');
   expect(parseTipAmount('200')).toBe('200.00');
   expect(parseTipAmount('12.3')).toBe('12.30');
 });
 
 test('invalid tip amounts', () => {
-  for (const text of ['', '0.49', '200.01', '1.234', 'abc', '1000', '-1']) {
+  for (const text of ['', '0.5', '0.99', '200.01', '1.234', 'abc', '1000', '-1']) {
     expect(parseTipAmount(text)).toBeNull();
   }
-  // Like every amount field: a leading mark reads as 0.
-  expect(parseTipAmount('.5')).toBe('0.50');
+  // Like every amount field a leading mark reads as 0: under the $1 floor.
+  expect(parseTipAmount('.5')).toBeNull();
 });
 
 describe('isTipTransaction', () => {

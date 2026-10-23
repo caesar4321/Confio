@@ -31,10 +31,10 @@ class PrepareTipTests(TestCase):
         self.assertFalse(Tip.objects.exists())
 
     def test_amount_limits(self):
-        for amount in ('0.49', '200.01', 'abc', '-1'):
+        for amount in ('0.50', '0.99', '200.01', 'abc', '-1'):
             with self.assertRaises(community.CommunityPostError, msg=amount):
                 self.prepare(amount)
-        self.assertEqual(self.prepare('0.50').amount, Decimal('0.50'))
+        self.assertEqual(self.prepare('1').amount, Decimal('1.00'))
 
     def test_daily_limit(self):
         self.prepare('200', key='a')
