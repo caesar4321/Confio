@@ -1,16 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, Share, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Linking, Platform, Pressable, Share, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMutation } from '@apollo/client';
+import { useApolloClient, useMutation } from '@apollo/client';
 
 import { Text } from '../components/common/AppText';
+import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { CREATE_TEAM_INVITE, INVITE_CONTACTS_TO_TEAM } from '../apollo/mutations';
 import { useAuth } from '../contexts/AuthContext';
-import { contactService } from '../services/contactService';
+import { ContactSyncProgress, contactService, hasDefaultPhoneRegion } from '../services/contactService';
 import { MainStackParamList } from '../types/navigation';
 import { buildTeamInviteLink, buildTeamInviteMessage } from '../utils/teams';
 
@@ -34,6 +35,12 @@ export const TeamInviteScreen = () => {
   const { userProfile } = useAuth() as any;
   const [token, setToken] = useState<string | null>(null);
   const [friends, setFriends] = useState<Friend[] | null>(null);
+  // Contacts were never synced on this phone (Enviar is where that used to happen): offer it here.
+  const [neverSynced, setNeverSynced] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [progress, setProgress] = useState<ContactSyncProgress | null>(null);
+  const [askPermission, setAskPermission] = useState(false);
+  const apolloClient = useApolloClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [createInvite] = useMutation(CREATE_TEAM_INVITE);
   const [inviteContacts, { loading: sending }] = useMutation(INVITE_CONTACTS_TO_TEAM);
@@ -56,33 +63,84 @@ export const TeamInviteScreen = () => {
         Alert.alert('No pudimos crear tu invitación', 'Revisa tu conexión e inténtalo de nuevo.');
         navigation.goBack();
       });
-    // A cold contact cache answers [] while it loads from the keychain: ask again for a few seconds.
-    const loadContacts = async () => {
-      let all = await contactService.getAllContacts();
-      for (let attempt = 0; attempt < 8 && all.length === 0 && live.current; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        all = await contactService.getAllContacts();
-      }
-      return all;
-    };
-    loadContacts()
-      .then((all) => {
-        if (!live.current) return;
-        const seen = new Set<string>();
-        const onConfio: Friend[] = [];
-        for (const c of all) {
-          const id = c.confioUserId;
-          const phone = c.confioMatchedPhone || c.normalizedPhones?.[0];
-          if (!c.isOnConfio || !id || !phone || seen.has(id) || String(id) === String(userProfile?.id)) continue;
-          seen.add(id);
-          onConfio.push({ userId: String(id), name: c.name, phone });
-        }
-        onConfio.sort((a, b) => a.name.localeCompare(b.name));
-        setFriends(onConfio);
-      })
-      .catch(() => { if (live.current) setFriends([]); });
+    void loadFriends();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId]);
+
+  const loadFriends = useCallback(async () => {
+    // A cold contact cache answers [] while it loads from the keychain: ask again for a few seconds.
+    let all = await contactService.getAllContacts().catch(() => []);
+    for (let attempt = 0; attempt < 8 && all.length === 0 && live.current; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      all = await contactService.getAllContacts().catch(() => []);
+    }
+    if (!live.current) return;
+    const seen = new Set<string>();
+    const onConfio: Friend[] = [];
+    for (const c of all) {
+      const id = c.confioUserId;
+      const phone = c.confioMatchedPhone || c.normalizedPhones?.[0];
+      if (!c.isOnConfio || !id || !phone || seen.has(id) || String(id) === String(userProfile?.id)) continue;
+      seen.add(id);
+      onConfio.push({ userId: String(id), name: c.name, phone });
+    }
+    onConfio.sort((a, b) => a.name.localeCompare(b.name));
+    setNeverSynced(all.length === 0);
+    setFriends(onConfio);
+  }, [userProfile?.id]);
+
+  /** The same sync Enviar runs: device contacts matched against Confío by phone. */
+  const sync = async () => {
+    if (!hasDefaultPhoneRegion()) {
+      Alert.alert('País del teléfono no disponible', 'Espera a que termine de cargar tu perfil e inténtalo de nuevo.');
+      return;
+    }
+    setSyncing(true);
+    setProgress(null);
+    let ok = false;
+    try {
+      ok = await contactService.syncContacts(apolloClient, (p) => { if (live.current) setProgress(p); });
+    } catch {
+      ok = false;
+    } finally {
+      if (live.current) {
+        setSyncing(false);
+        setProgress(null);
+      }
+    }
+    await loadFriends();
+    // A failed search is not "none of your contacts use Confío": say so.
+    if (!ok && live.current) {
+      Alert.alert('No pudimos revisar tus contactos', 'Revisa tu conexión e inténtalo de nuevo, o comparte el enlace por WhatsApp.');
+    }
+  };
+
+  const findFriends = async () => {
+    if (syncing) return;
+    const granted = await contactService.hasContactPermission();
+    // iOS also needs the explicit consent to check the numbers with Confío.
+    if (!granted || (Platform.OS === 'ios' && !(await contactService.hasUploadConsent()))) {
+      setAskPermission(true);
+      return;
+    }
+    await sync();
+  };
+
+  const allowContacts = async () => {
+    setAskPermission(false);
+    if (Platform.OS === 'ios') await contactService.setUploadConsent(true);
+    const granted = await contactService.requestContactPermission();
+    if (!granted) {
+      await contactService.storePermissionStatus('denied');
+      Alert.alert('Sin acceso a tus contactos', 'Puedes activarlo en Ajustes o compartir el enlace por WhatsApp.', [
+        { text: 'Ahora no', style: 'cancel' },
+        { text: 'Abrir Ajustes', onPress: () => { Linking.openSettings().catch(() => {}); } },
+      ]);
+      return;
+    }
+    await contactService.storePermissionStatus('granted');
+    await sync();
+  };
 
   const link = useMemo(
     () => (token ? buildTeamInviteLink(token) : null),
@@ -167,11 +225,42 @@ export const TeamInviteScreen = () => {
             </Pressable>
           );
         }}
-        ListEmptyComponent={friends === null ? (
-          <ActivityIndicator style={styles.loading} color={colors.primary} />
+        ListEmptyComponent={friends === null || syncing ? (
+          <View style={styles.syncing}>
+            <ActivityIndicator color={colors.primary} />
+            {syncing ? (
+              <Text style={styles.hint}>
+                {progress?.phase === 'matching' && progress.total > 0
+                  ? `Buscando a tus amigos en Confío… ${Math.round((progress.processed / progress.total) * 100)}%`
+                  : 'Leyendo tus contactos…'}
+              </Text>
+            ) : null}
+          </View>
+        ) : neverSynced ? (
+          <View style={styles.findCard}>
+            <Text style={styles.title}>¿Quiénes de tus contactos ya usan Confío?</Text>
+            <Text style={styles.body}>
+              Revisamos los números de tu agenda para mostrarte a tus amigos en Confío. No le avisamos a nadie hasta que tú lo elijas.
+            </Text>
+            <Pressable style={styles.primary} onPress={() => { void findFriends(); }} accessibilityRole="button">
+              <Icon name="users" size={18} color={colors.white} />
+              <Text style={styles.primaryText}>Buscar en mis contactos</Text>
+            </Pressable>
+          </View>
         ) : (
-          <Text style={styles.empty}>Ninguno de tus contactos usa Confío todavía. Comparte el enlace.</Text>
+          <View style={styles.syncing}>
+            <Text style={styles.empty}>Ninguno de tus contactos usa Confío todavía. Comparte el enlace.</Text>
+            <Pressable onPress={() => { void findFriends(); }} hitSlop={8} accessibilityRole="button">
+              <Text style={styles.link}>Volver a buscar</Text>
+            </Pressable>
+          </View>
         )}
+      />
+      <ContactPermissionModal
+        visible={askPermission}
+        onAllow={() => { void allowContacts(); }}
+        onDeny={() => setAskPermission(false)}
+        onClose={() => setAskPermission(false)}
       />
       {selected.size > 0 ? (
         <View style={styles.footer}>
@@ -211,6 +300,10 @@ const styles = StyleSheet.create({
   initial: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryLight },
   initialText: { fontSize: 15, fontWeight: '700', color: colors.primaryDark },
   name: { flex: 1, fontSize: 15, color: colors.dark },
+  syncing: { alignItems: 'center', gap: 10, padding: 24 },
+  hint: { fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
+  link: { fontSize: 14, fontWeight: '600', color: colors.primaryDark },
+  findCard: { marginHorizontal: 16, padding: 16, gap: 10, borderRadius: 14, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
   empty: { padding: 24, fontSize: 14, color: colors.textSecondary, textAlign: 'center' },
   footer: { position: 'absolute', left: 16, right: 16, bottom: 24 },
 });
