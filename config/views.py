@@ -565,6 +565,7 @@ _PRIVACY_GROUP_LABELS = {
 	'payments_and_ramps': 'Pagos, recargas y retiros',
 	'support_and_content': 'Soporte y contenido',
 	'business_and_payroll': 'Negocios y nómina',
+	'comprar': 'Comprar (compras entre usuarios)',
 }
 _MONTHS_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
 	'septiembre', 'octubre', 'noviembre', 'diciembre']
