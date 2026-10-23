@@ -1708,12 +1708,59 @@ def comprar(w):
     orders = Order.objects.exclude(status__in=('draft', 'cancelled'))
     by_status = dict(orders.values_list('status').annotate(n=Count('id')))
     ledger = MarketplaceFeeLedger.objects.all()
-    money = []
-    for label, since in (('30 days', w.rolling_30_start), ('All time', None)):
-        rows = ledger.filter(released_at__gte=since) if since else ledger
+
+    def ledger_totals(rows):
         agg = rows.aggregate(orders=Count('id'), gmv=Sum('gross_usd'), fee=Sum('fee_usd'),
                              partner=Sum('partner_share_usd'), confio=Sum('confio_share_usd'))
-        money.append({'label': label, **{k: (v or (0 if k == 'orders' else Decimal('0'))) for k, v in agg.items()}})
+        return {k: (v or (0 if k == 'orders' else Decimal('0'))) for k, v in agg.items()}
+
+    money = []
+    for label, since in (('30 days', w.rolling_30_start), ('All time', None)):
+        money.append({'label': label, **ledger_totals(ledger.filter(released_at__gte=since) if since else ledger)})
+
+    # Fee earnings by calendar month (Argentina days, like the rest of the
+    # dashboard). A fee is EARNED when its order releases; that is when the
+    # ledger row is written.
+    month_start_local = w.now.astimezone(ARG_TZ).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    prev_month_local = (month_start_local - timedelta(days=1)).replace(day=1)
+    month_start, prev_month_start = month_start_local, prev_month_local
+    earnings = [
+        {'label': f'This month ({month_start_local:%b %Y})',
+         **ledger_totals(ledger.filter(released_at__gte=month_start))},
+        {'label': f'Last month ({prev_month_local:%b %Y})',
+         **ledger_totals(ledger.filter(released_at__gte=prev_month_start, released_at__lt=month_start))},
+        {'label': 'Last 30 days', **ledger_totals(ledger.filter(released_at__gte=w.rolling_30_start))},
+        {'label': 'All time', **ledger_totals(ledger)},
+    ]
+    # Not earned yet: the fee on paid orders still in escrow (it is earned on
+    # release, or never, if the order is refunded).
+    from django.db.models import DecimalField, ExpressionWrapper, F, Max, Min
+    open_orders = Order.objects.filter(status__in=('funded', 'shipped', 'disputed'))
+    pending_agg = open_orders.aggregate(
+        orders=Count('id'), gmv=Sum('amount_usd'),
+        fee=Sum(ExpressionWrapper(F('amount_usd') * F('fee_bps') / 10_000,
+                                  output_field=DecimalField(max_digits=20, decimal_places=6))))
+    pending = {'orders': pending_agg['orders'], 'gmv': pending_agg['gmv'] or Decimal('0'),
+               'fee': pending_agg['fee'] or Decimal('0')}
+
+    # What each partner has accrued, been paid, and is owed: one grouped query.
+    unpaid_q, paid_q = Q(partner_paid_at__isnull=True), Q(partner_paid_at__isnull=False)
+    per_partner = {
+        r['partner_agreement']: r for r in ledger.filter(partner_agreement__isnull=False)
+        .values('partner_agreement').annotate(
+            accrued=Sum('partner_share_usd'), paid=Sum('partner_share_usd', filter=paid_q),
+            unpaid=Sum('partner_share_usd', filter=unpaid_q), unpaid_orders=Count('id', filter=unpaid_q),
+            oldest_unpaid=Min('released_at', filter=unpaid_q), last_paid=Max('partner_paid_at'))
+    }
+    partner_rows = []
+    for agreement in MarketplacePartnerAgreement.objects.order_by('-active', 'country_code', 'partner_name'):
+        r = per_partner.get(agreement.pk, {})
+        partner_rows.append({
+            'agreement': agreement,
+            'accrued': r.get('accrued') or Decimal('0'), 'paid': r.get('paid') or Decimal('0'),
+            'unpaid': r.get('unpaid') or Decimal('0'), 'unpaid_orders': r.get('unpaid_orders') or 0,
+            'oldest_unpaid': r.get('oldest_unpaid'), 'last_paid': r.get('last_paid'),
+        })
 
     interests = (MarketplaceInterest.objects.values('country_code', 'city')
                  .annotate(total=Count('id'),
@@ -1751,6 +1798,9 @@ def comprar(w):
             'depositing': by_status.get('depositing', 0),
         },
         'comprar_money': money,
+        'comprar_earnings': earnings,
+        'comprar_pending_fees': pending,
+        'comprar_partner_rows': partner_rows,
         'comprar_interests': interests,
         'comprar_interest_total': MarketplaceInterest.objects.count(),
     }

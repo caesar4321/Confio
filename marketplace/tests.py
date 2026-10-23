@@ -1165,3 +1165,43 @@ class StoreReviewTests(MarketTestBase):
         with mock.patch('inbox.community.author_display_name', return_value='miembro_x1') as name:
             self.assertEqual(self.reviews()[0].author, 'miembro_x1')
         name.assert_called()
+
+
+@override_settings(**ENABLED)
+class AdminEarningsTests(MarketTestBase):
+    def ledger_row(self, order, fee, partner, released_at, paid_at=None, agreement=None):
+        return MarketplaceFeeLedger.objects.create(
+            order=order, country_code='BO', gross_usd=Decimal(fee) * 12, fee_usd=Decimal(fee),
+            partner_agreement=agreement, partner_share_usd=Decimal(partner),
+            confio_share_usd=Decimal(fee) - Decimal(partner), released_at=released_at, partner_paid_at=paid_at)
+
+    def test_earnings_by_month_pending_fees_and_what_the_partner_is_owed(self):
+        import dataclasses
+        from datetime import timedelta
+        from config.admin_dashboard_sections import Window, comprar
+        from users.analytics import ARG_TZ
+        # A fixed mid-month clock: "this month" must not depend on when the test runs.
+        now = timezone.now().astimezone(ARG_TZ).replace(day=15, hour=12, minute=0, second=0, microsecond=0)
+        window = dataclasses.replace(Window.current(), now=now, rolling_30_start=now - timedelta(days=30))
+        jason = MarketplacePartnerAgreement.objects.create(
+            partner_name='Jason', country_code='BO', share_bps=5000, started_at=now - timedelta(days=90))
+        orders = []
+        for _ in range(3):
+            self.buyer = make_user()
+            self.prepare()
+            orders.append(Order.objects.filter(buyer=self.buyer).get())
+        self.ledger_row(orders[0], '8.00', '4.00', now - timedelta(minutes=5), agreement=jason)              # unpaid
+        self.ledger_row(orders[1], '2.00', '1.00', now - timedelta(days=70), paid_at=now - timedelta(days=40),
+                        agreement=jason)                                                                      # paid
+        Order.objects.filter(pk=orders[2].pk).update(status='funded', amount_usd=Decimal('50.00'), fee_bps=800)
+
+        ctx = comprar(window)
+        all_time = ctx['comprar_earnings'][-1]
+        self.assertEqual((all_time['orders'], all_time['fee'], all_time['confio'], all_time['partner']),
+                         (2, Decimal('10.00'), Decimal('5.00'), Decimal('5.00')))
+        self.assertEqual(ctx['comprar_earnings'][0]['fee'], Decimal('8.00'))  # this month: only the recent one
+        self.assertEqual(ctx['comprar_pending_fees']['fee'], Decimal('4.00'))  # 8% of 50 in escrow, not earned
+        [row] = ctx['comprar_partner_rows']
+        self.assertEqual((row['accrued'], row['paid'], row['unpaid'], row['unpaid_orders']),
+                         (Decimal('5.00'), Decimal('1.00'), Decimal('4.00'), 1))
+        self.assertIsNotNone(row['last_paid'])
