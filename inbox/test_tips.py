@@ -362,3 +362,45 @@ class ParallelRepeatTests(TestCase):
         other.delete()
         with patch('inbox.tips._wallet', return_value='0xabc'):
             self.assertIsNone(tips.tip_submit_error(first_send))
+
+
+class UnbroadcastFailureTests(TestCase):
+    """A tip whose send was rejected before anything left (e.g. under the
+    $1 floor) must fail with it, not block the next tip for 70 minutes."""
+
+    def test_a_reverted_tip_send_fails_the_tip_and_frees_the_next(self):
+        from send.bsc_flow import fail_unbroadcast_send
+        from send.models import SendTransaction
+
+        alice, bob = make_user(), make_user()
+        with patch('inbox.tips._wallet', return_value='0xabc'):
+            tip = tips.prepare_tip(alice, None, bob.id, '5', '', 'k1')
+        send = SendTransaction.objects.create(
+            sender_user=alice, recipient_user=bob, sender_type='user', recipient_type='user',
+            sender_address='0x1', recipient_address='0x2', amount=Decimal('5'), token_type='CUSD_PLUS',
+            status='PENDING', idempotency_key=tip.send_key)
+        SendTransaction.objects.filter(id=send.id).update(transaction_hash=None)
+        send.refresh_from_db()
+        self.assertIsNone(tips.link_send(tip, send))
+        self.assertTrue(fail_unbroadcast_send(send, 'simulation_reverted'))
+        send.refresh_from_db()
+        tip.refresh_from_db()
+        self.assertEqual((send.status, tip.status), ('FAILED', 'failed'))
+        with patch('inbox.tips._wallet', return_value='0xabc'):
+            again = tips.prepare_tip(alice, None, bob.id, '5', '', 'k2')
+        self.assertNotEqual(again.id, tip.id)
+
+    def test_a_send_with_a_batch_is_left_to_the_receipt_task(self):
+        from send.bsc_flow import fail_unbroadcast_send
+        from send.models import SendTransaction
+
+        alice, bob = make_user(), make_user()
+        send = SendTransaction.objects.create(
+            sender_user=alice, recipient_user=bob, sender_type='user', recipient_type='user',
+            sender_address='0x1', recipient_address='0x2', amount=Decimal('5'), token_type='CUSD_PLUS',
+            status='PENDING', idempotency_key='send-x')
+        with patch('blockchain.models.SponsoredBatch.objects') as batches:
+            batches.filter.return_value.exists.return_value = True
+            self.assertFalse(fail_unbroadcast_send(send, 'simulation_reverted'))
+        send.refresh_from_db()
+        self.assertEqual(send.status, 'PENDING')

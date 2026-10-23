@@ -1044,6 +1044,55 @@ def _validate_send_batch(calls: list, send_tx, meta: dict) -> None:
         raise PolicyError('bad_calldata')
 
 
+def _claim_for_broadcast(send_tx) -> None:
+    """Inside the sponsor's batch transaction, before anything is broadcast:
+    the send row is locked and must still be PENDING. A concurrent failure
+    (fail_unbroadcast_send) takes the same lock, so a send is never both
+    FAILED and broadcast."""
+    from cusd_plus import sponsor_7702
+
+    from .models import SendTransaction
+
+    status = SendTransaction.objects.select_for_update().filter(pk=send_tx.pk).values_list('status', flat=True).first()
+    if status != 'PENDING':
+        raise sponsor_7702.PolicyError('send_not_pending')
+
+
+def fail_unbroadcast_send(send_tx, reason: str) -> bool:
+    """Mark a send FAILED when nothing of it left (no hash, no batch), and
+    fail the tip it carried. False when it advanced meanwhile or a batch
+    exists (the receipt task owns it then). Serialized with the broadcast
+    claim (_claim_for_broadcast) on the send row's lock."""
+    from django.db.models import Q
+
+    from blockchain.models import SponsoredBatch
+
+    from .models import SendTransaction
+
+    with transaction.atomic():
+        SendTransaction.objects.select_for_update().filter(pk=send_tx.pk).values_list('id', flat=True).first()
+        if SponsoredBatch.objects.filter(source_id=send_tx.id).exists():
+            logger.error('[SEND][BSC] %s simulation reverted but a batch exists — '
+                         'NOT failing the row; the receipt task owns it', send_tx.internal_id)
+            return False
+        # No hash yet is '' on some rows and NULL on others (a fresh row):
+        # both mean nothing left. Matching only '' left NULL rows PENDING
+        # forever, and a tip on one blocked the next tip to the same person.
+        claimed = SendTransaction.objects.filter(
+            Q(transaction_hash='') | Q(transaction_hash__isnull=True),
+            pk=send_tx.pk, status='PENDING',
+        ).update(status='FAILED', error_message=reason, updated_at=timezone.now())
+    if not claimed:
+        logger.warning('[SEND][BSC] %s advanced while simulating — left alone', send_tx.internal_id)
+        return False
+    if (send_tx.idempotency_key or '').startswith('tip-'):
+        # The tip it carried failed too: it stops counting as in flight.
+        from inbox.tips import on_send_resolved
+        send_tx.refresh_from_db(fields=['status'])
+        on_send_resolved(send_tx)
+    return True
+
+
 def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
                     authorization=None) -> dict:
     from cusd_plus import sponsor_7702
@@ -1110,7 +1159,8 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
             return {'success': False, 'error': step_up}
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, sender_addr, calls, int(nonce), int(deadline),
-            intent_signature, auth_dict, kind, source_id=send_tx.id)
+            intent_signature, auth_dict, kind, source_id=send_tx.id,
+            persist_signed=lambda batch, raw: _claim_for_broadcast(send_tx))
     except sponsor_7702.ExistingSponsoredBatch as exc:
         existing = exc.batch
         if (exc.reason != 'source_id'
@@ -1138,22 +1188,7 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
             # client would send again (audit 2026-08-01). The conditional
             # UPDATE is the claim: it only fires while the row is still
             # PENDING with no hash, and a batch row is the other witness.
-            from blockchain.models import SponsoredBatch  # noqa: PLC0415
-            broadcast = SponsoredBatch.objects.filter(source_id=send_tx.id).exists()
-            if not broadcast:
-                claimed = SendTransaction.objects.filter(
-                    pk=send_tx.pk, status='PENDING', transaction_hash='',
-                ).update(status='FAILED', error_message='simulation_reverted',
-                         updated_at=timezone.now())
-                if not claimed:
-                    logger.warning(
-                        '[SEND][BSC] %s advanced while simulating — left alone',
-                        send_tx.internal_id)
-            else:
-                logger.error(
-                    '[SEND][BSC] %s simulation reverted but a batch exists — '
-                    'NOT failing the row; the receipt task owns it',
-                    send_tx.internal_id)
+            fail_unbroadcast_send(send_tx, 'simulation_reverted')
         return {'success': False, 'error': exc.code}
     except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
         logger.exception('[SEND][BSC] sponsored send failed for %s', send_tx.internal_id)
