@@ -46,7 +46,7 @@ export const MyMarketStoreScreen = () => {
   const [setPaused] = useMutation(SET_MARKET_PRODUCT_PAUSED);
   const [deleteProduct] = useMutation(DELETE_MARKET_PRODUCT);
   const { location, home, choose, relocate } = useComprarLocation();
-  const { parseAmount, sanitizeAmount, toAmountInput } = useNumberLocale();
+  useNumberLocale(); // amounts follow the user's number format, live
   // The store's city (or, before opening, the chosen one) for the delivery
   // suggestion and the display-only "≈ Bs".
   const storeCountry = data?.myMarketStore?.countryCode || location?.countryCode || '';
@@ -58,8 +58,22 @@ export const MyMarketStoreScreen = () => {
     variables: { countryCode: storeCountry }, skip: !storeCountry,
   });
   const localRate = rateData?.marketplaceReferenceRate || null;
-  const [deliveryDraft, setDeliveryDraft] = useState<string | null>(null);
-  const [savingDelivery, setSavingDelivery] = useState(false);
+  // Saves one store setting; true when it took (the row then closes).
+  const saveStore = async (variables: Record<string, string>): Promise<boolean> => {
+    setError(null);
+    try {
+      const res = await updateStore({ variables });
+      if (!res.data?.updateMarketStore?.success) {
+        setError(comprarError(res.data?.updateMarketStore?.error));
+        return false;
+      }
+      await refetch();
+      return true;
+    } catch {
+      setError(comprarError('network'));
+      return false;
+    }
+  };
   const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Locked from the tap until the new store has loaded (the mutation alone
@@ -162,48 +176,14 @@ export const MyMarketStoreScreen = () => {
                   }} />
                 </View>
               )}
-              <View style={styles.deliveryRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.switchText}>Envío en {store.city}</Text>
-                  <Text style={styles.muted}>Lo paga el comprador con el producto; tú envías el pedido y te llega con el pago.</Text>
-                </View>
-                {deliveryDraft === null ? (
-                  <Pressable testID="store-delivery-edit" hitSlop={8}
-                    onPress={() => setDeliveryDraft(toAmountInput(Number(store.deliveryPriceUsd ?? 0), 2))}>
-                    <Text style={styles.deliveryValue}>
-                      {Number(store.deliveryPriceUsd) > 0 ? formatUsd(store.deliveryPriceUsd) : 'Gratis'} <Icon name="edit-2" size={13} color={colors.text.secondary} />
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <View style={styles.deliveryEdit}>
-                    <TextInput testID="store-delivery-input" style={styles.deliveryInput} keyboardType="decimal-pad" autoFocus
-                      value={deliveryDraft} onChangeText={(t) => setDeliveryDraft((prev) => sanitizeAmount(t, 2, undefined, prev ?? ''))} />
-                    <Pressable testID="store-delivery-save" hitSlop={8} disabled={savingDelivery || !(parseAmount(deliveryDraft) >= 0)}
-                      onPress={async () => {
-                        setSavingDelivery(true);
-                        setError(null);
-                        try {
-                          const res = await updateStore({ variables: { deliveryPriceUsd: normalizeAmountInput(deliveryDraft) ?? '' } });
-                          if (!res.data?.updateMarketStore?.success) {
-                            setError(comprarError(res.data?.updateMarketStore?.error));
-                          } else {
-                            setDeliveryDraft(null);
-                            await refetch();
-                          }
-                        } catch {
-                          setError(comprarError('network'));
-                        } finally {
-                          setSavingDelivery(false);
-                        }
-                      }}>
-                      {savingDelivery ? <ActivityIndicator color={colors.primaryDark} /> : <Text style={styles.deliverySave}>Guardar</Text>}
-                    </Pressable>
-                  </View>
-                )}
-              </View>
-              {deliveryDraft !== null && localRate && parseAmount(deliveryDraft) > 0 ? (
-                <Text style={styles.muted}>≈ {formatLocalPrice(parseAmount(deliveryDraft) * Number(localRate.localPerUsd), localRate.currency)}</Text>
-              ) : null}
+              <PriceRow testID="store-delivery" label={`Envío en ${store.city}`}
+                hint="Lo paga el comprador con el producto; tú envías el pedido y te llega con el pago."
+                value={store.deliveryPriceUsd} emptyLabel="Gratis" localRate={localRate}
+                onSave={async (canonical) => saveStore({ deliveryPriceUsd: canonical ?? '0' })} />
+              <PriceRow testID="store-outside-delivery" label="Envío a otras ciudades"
+                hint="Un precio fijo para cualquier otra ciudad del país (encomienda o courier). Déjalo vacío si solo entregas en tu zona."
+                value={store.outsideDeliveryPriceUsd} emptyLabel="No ofrecido" allowEmpty localRate={localRate}
+                onSave={async (canonical) => saveStore({ outsideDeliveryPriceUsd: canonical ?? '' })} />
               {error ? <Text style={styles.error}>{error}</Text> : null}
             </KitCard>
             <Pressable style={styles.salesLink} onPress={() => navigation.navigate('MarketOrders', { role: 'merchant' })}>
@@ -256,6 +236,60 @@ export const MyMarketStoreScreen = () => {
         <Text style={styles.fabText}>Agregar producto</Text>
       </Pressable>
     </ComprarFrame>
+  );
+};
+
+/**
+ * A store price shown as a value; tapping edits it in place. `allowEmpty`:
+ * an empty value is a choice ("No ofrecido"), saved as null.
+ */
+const PriceRow = ({ testID, label, hint, value, emptyLabel, allowEmpty, localRate, onSave }: {
+  testID: string; label: string; hint: string; value?: string | null; emptyLabel: string; allowEmpty?: boolean;
+  localRate?: { currency: string; localPerUsd: string } | null;
+  onSave: (canonical: string | null) => Promise<boolean>;
+}) => {
+  const { parseAmount, sanitizeAmount, toAmountInput } = useNumberLocale();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const parsed = draft === null ? NaN : parseAmount(draft);
+  const empty = draft !== null && draft.trim() === '';
+  const ok = draft !== null && ((allowEmpty && empty) || (parsed >= 0 && parsed <= 100));
+  const shown = value === null || value === undefined ? emptyLabel
+    : Number(value) > 0 ? formatUsd(value) : (allowEmpty ? formatUsd(0) : emptyLabel);
+  return (
+    <>
+      <View style={styles.deliveryRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.switchText}>{label}</Text>
+          <Text style={styles.muted}>{hint}</Text>
+        </View>
+        {draft === null ? (
+          <Pressable testID={`${testID}-edit`} hitSlop={8}
+            onPress={() => setDraft(value === null || value === undefined ? '' : toAmountInput(Number(value), 2))}>
+            <Text style={styles.deliveryValue}>{shown} <Icon name="edit-2" size={13} color={colors.text.secondary} /></Text>
+          </Pressable>
+        ) : (
+          <View style={styles.deliveryEdit}>
+            <TextInput testID={`${testID}-input`} style={styles.deliveryInput} keyboardType="decimal-pad" autoFocus
+              placeholder={allowEmpty ? '—' : '0'} value={draft}
+              onChangeText={(t) => setDraft((prev) => sanitizeAmount(t, 2, undefined, prev ?? ''))} />
+            <Pressable testID={`${testID}-save`} hitSlop={8} disabled={saving || !ok} onPress={async () => {
+              setSaving(true);
+              try {
+                if (await onSave(empty ? null : normalizeAmountInput(draft))) setDraft(null);
+              } finally {
+                setSaving(false);
+              }
+            }}>
+              {saving ? <ActivityIndicator color={colors.primaryDark} /> : <Text style={styles.deliverySave}>Guardar</Text>}
+            </Pressable>
+          </View>
+        )}
+      </View>
+      {draft !== null && localRate && parsed > 0 ? (
+        <Text style={styles.muted}>≈ {formatLocalPrice(parsed * Number(localRate.localPerUsd), localRate.currency)}</Text>
+      ) : null}
+    </>
   );
 };
 

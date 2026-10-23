@@ -56,9 +56,48 @@ def _city_key(name: str) -> str:
     return ' '.join(folded.casefold().split())
 
 
+def area_city_keys(country_code: str, city: str) -> set:
+    """The (normalized) cities that share `city`'s delivery area, itself
+    included: La Paz and El Alto are one area."""
+    key = _city_key(city)
+    rows = list(MarketplaceCity.objects.filter(country_code=(country_code or '').strip().upper())
+                .values_list('city', 'delivery_area'))
+    area = next((a for c, a in rows if _city_key(c) == key and a), '')
+    if not area:
+        return {key}
+    return {_city_key(c) for c, a in rows if a == area} | {key}
+
+
+def area_cities(country_code: str, city: str) -> list:
+    """The MarketplaceCity rows sharing `city`'s delivery area (itself first)."""
+    country = (country_code or '').strip().upper()
+    me = next((c for c in MarketplaceCity.objects.filter(country_code=country)
+               if _city_key(c.city) == _city_key(city)), None)
+    if me is None:
+        return []
+    if not me.delivery_area:
+        return [me]
+    return [me] + list(MarketplaceCity.objects.filter(country_code=country, delivery_area=me.delivery_area)
+                       .exclude(pk=me.pk))
+
+
+def area_is_live(country_code: str, city: str) -> bool:
+    """Sells when this city, or any city of its delivery area, is live: an El
+    Alto store sells with La Paz."""
+    return any(c.is_live for c in area_cities(country_code, city))
+
+
+def live_city_names(country_code: str) -> list:
+    """Cities whose stores sell: live ones and every city sharing an area with one."""
+    rows = list(MarketplaceCity.objects.filter(country_code=(country_code or '').strip().upper()))
+    live_areas = {c.delivery_area for c in rows if c.is_live and c.delivery_area}
+    return [c.city for c in rows if c.is_live or (c.delivery_area and c.delivery_area in live_areas)]
+
+
 def is_outside_city(store, delivery_country: str, delivery_city: str) -> bool:
+    """Outside the store's delivery AREA (not just its city name)."""
     return ((delivery_country or '').strip().upper() != store.country_code
-            or _city_key(delivery_city) != _city_key(store.city))
+            or _city_key(delivery_city) not in area_city_keys(store.country_code, store.city))
 
 
 def delivery_terms(store, delivery_country: str, delivery_city: str) -> dict:
@@ -70,7 +109,7 @@ def delivery_terms(store, delivery_country: str, delivery_city: str) -> dict:
         'estimate_local': None if outside or city is None else city.delivery_estimate,
         'currency': city.currency_code if city else '',
         'partner': city.delivery_partner if city else '',
-        'ships_outside_city': store.ships_outside_city,
+        'ships_outside_city': store.outside_delivery_price_usd is not None,
     }
 
 
@@ -80,7 +119,17 @@ def checkout_quote(product, quantity: int, delivery_country: str, delivery_city:
     # Priced in dollars: price × quantity plus the store's delivery price, no
     # exchange rate. Another city is coordinated with the store (not included).
     terms = delivery_terms(product.store, delivery_country, delivery_city)
-    delivery = Decimal('0') if terms['outside_city'] else product.store.delivery_price_usd
+    store = product.store
+    if (delivery_country or '').strip().upper() != store.country_code:
+        # The flat "other cities" price is domestic: another country is never quoted.
+        raise CheckoutError('store_country_only')
+    if not terms['outside_city']:
+        delivery = store.delivery_price_usd
+    elif store.outside_delivery_price_usd is not None:
+        # Anywhere else in the country: the store's one flat price, in the total.
+        delivery = store.outside_delivery_price_usd
+    else:
+        raise CheckoutError('store_city_only')
     q = quote(product.price_usd, quantity, delivery)
     return {'quote': q, **terms}
 
@@ -118,7 +167,7 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
             or store.owner_account.user_id == account.user_id):
         raise CheckoutError('own_store')
     city = city_for(store.country_code, store.city)
-    if city is None or not city.is_live:
+    if city is None or not area_is_live(store.country_code, store.city):
         raise CheckoutError('city_not_live')
     delivery_address = (delivery_address or '').strip()
     delivery_phone = ''.join(ch for ch in (delivery_phone or '') if ch.isdigit() or ch == '+')
@@ -126,12 +175,10 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
         raise CheckoutError('delivery_address_required')
     if len(delivery_phone) < 7:
         raise CheckoutError('delivery_phone_required')
+    # Another city is priced (the store's flat price, in the total) or refused
+    # (store_city_only) by checkout_quote; nothing is left to acknowledge.
+    # `outside_city_ack` stays accepted for older builds and is ignored.
     terms = checkout_quote(product, quantity, delivery_country, delivery_city)
-    if terms['outside_city']:
-        if not store.ships_outside_city:
-            raise CheckoutError('store_city_only')
-        if not outside_city_ack:
-            raise CheckoutError('outside_city_ack_required')
     q = terms['quote']
     # The limits live in ONE place: the escrow contract (the Safe sets them).
     try:

@@ -99,6 +99,10 @@ class MarketplaceCity(models.Model):
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     radius_km = models.PositiveIntegerField(default=40)
+    # Cities with the same area (same country) are ONE delivery area: a buyer
+    # in El Alto shops the La Paz stores at the city delivery price, the way a
+    # courier actually covers the metro. Blank = the city alone.
+    delivery_area = models.CharField(max_length=40, blank=True, default='', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -151,13 +155,16 @@ class Store(SoftDeleteModel):
     country_code = models.CharField(max_length=2, choices=COUNTRY_CHOICES, db_index=True)
     city = models.CharField(max_length=100, db_index=True)
     ships_outside_city = models.BooleanField(
-        default=False, help_text='Seller coordinates delivery to other cities (buyer pays more)')
+        default=False, help_text='Kept in sync: true when outside_delivery_price_usd is set')
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='active', db_index=True)
     suspended_reason = models.CharField(max_length=300, blank=True, default='')
     # What the buyer pays for same-city delivery, in US dollars, added to the
     # order total. The store books and pays the courier itself (Yango Envíos,
     # its own moto…) and gets it back in the payout.
     delivery_price_usd = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('0'))
+    # One flat price for anywhere else in the country (bus parcel, courier);
+    # null = the store delivers in its own delivery area only.
+    outside_delivery_price_usd = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
 
     class Meta:
         constraints = [

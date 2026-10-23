@@ -223,9 +223,7 @@ export const MarketOrderScreen = () => {
           <Pressable onPress={() => { void Linking.openURL(`tel:${order.deliveryPhone}`); }}>
             <InfoLine icon="phone" text={order.deliveryPhone} link />
           </Pressable>
-          <InfoLine icon="dollar-sign" text={order.deliveryOutsideCity
-            ? 'Envío a otra ciudad: lo coordina la tienda.'
-            : Number(order.deliveryUsd ?? 0) > 0
+          <InfoLine icon="dollar-sign" text={Number(order.deliveryUsd ?? 0) > 0
               ? `Envío ${formatUsd(order.deliveryUsd)} incluido en el pago${merchant ? ': lo pagas tú al repartidor y te llega con el pago.' : '.'}`
               : legacyCourierPay
                 ? `Envío ~${formatLocalPrice(order.deliveryEstimateLocal, order.deliveryCurrency || '')}, se paga al repartidor.`

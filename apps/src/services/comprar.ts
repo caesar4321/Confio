@@ -28,7 +28,7 @@ export type MarketAction = 'deposit' | 'ship' | 'confirm' | 'dispute' | 'refund'
 
 const STORE_FIELDS = `
   id name description countryCode city shipsOutsideCity status isOpen
-  avgRating ratingCount completedOrders ownerDisplayName deliveryPriceUsd
+  avgRating ratingCount completedOrders ownerDisplayName deliveryPriceUsd outsideDeliveryPriceUsd
 `;
 
 const PRODUCT_FIELDS = `
@@ -185,9 +185,11 @@ export const SUBMIT_MARKETPLACE_INTEREST = gql`
 
 export const OPEN_MARKET_STORE = gql`
   mutation OpenMarketStore($name: String!, $description: String, $countryCode: String!,
-                           $city: String!, $shipsOutsideCity: Boolean, $deliveryPriceUsd: String) {
+                           $city: String!, $shipsOutsideCity: Boolean, $deliveryPriceUsd: String,
+                           $outsideDeliveryPriceUsd: String) {
     openMarketStore(name: $name, description: $description, countryCode: $countryCode,
-                    city: $city, shipsOutsideCity: $shipsOutsideCity, deliveryPriceUsd: $deliveryPriceUsd) {
+                    city: $city, shipsOutsideCity: $shipsOutsideCity, deliveryPriceUsd: $deliveryPriceUsd,
+                    outsideDeliveryPriceUsd: $outsideDeliveryPriceUsd) {
       success error store { ${STORE_FIELDS} }
     }
   }
@@ -195,9 +197,9 @@ export const OPEN_MARKET_STORE = gql`
 
 export const UPDATE_MARKET_STORE = gql`
   mutation UpdateMarketStore($name: String, $description: String, $shipsOutsideCity: Boolean, $paused: Boolean,
-                             $deliveryPriceUsd: String) {
+                             $deliveryPriceUsd: String, $outsideDeliveryPriceUsd: String) {
     updateMarketStore(name: $name, description: $description, shipsOutsideCity: $shipsOutsideCity, paused: $paused,
-                      deliveryPriceUsd: $deliveryPriceUsd) {
+                      deliveryPriceUsd: $deliveryPriceUsd, outsideDeliveryPriceUsd: $outsideDeliveryPriceUsd) {
       success error store { ${STORE_FIELDS} }
     }
   }
@@ -344,6 +346,8 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   network: 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
   bad_city: 'Escribe la ciudad.',
   bad_delivery_price: 'El precio de envío debe estar entre US$0 y US$100.',
+  outside_delivery_price_required: 'Pon un precio de envío para otras ciudades.',
+  store_country_only: 'Esta tienda solo entrega dentro de su país.',
   bad_country: 'Elige el país.',
   address_book_full: 'Ya tienes 20 direcciones guardadas. Borra una para agregar otra.',
   address_not_found: 'Esa dirección ya no existe.',

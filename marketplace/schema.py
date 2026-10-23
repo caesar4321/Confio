@@ -25,6 +25,7 @@ from .models import (COUNTRY_CHOICES, MarketplaceCity, active_categories, active
                      Order, OrderRating, Product, Store)
 from .moderation import MAX_PHOTOS, pending_prefix, start_review
 from .pricing import suggested_delivery_usd
+from .checkout import area_is_live
 from .address_book import DeleteDeliveryAddress, SaveDeliveryAddress  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ class MarketplaceStoreType(graphene.ObjectType):
     completed_orders = graphene.Int()
     owner_display_name = graphene.String()
     delivery_price_usd = graphene.String(description='Same-city delivery the buyer pays, added to the order')
+    outside_delivery_price_usd = graphene.String(description='Delivery to anywhere else in the country; null = not offered')
 
     @staticmethod
     def from_model(store):
@@ -128,6 +130,8 @@ class MarketplaceStoreType(graphene.ObjectType):
             completed_orders=store.orders.filter(status='released').count(),
             owner_display_name=(owner.first_name or owner.username or '').strip(),
             delivery_price_usd=str(store.delivery_price_usd),
+            outside_delivery_price_usd=(str(store.outside_delivery_price_usd)
+                                        if store.outside_delivery_price_usd is not None else None),
         )
 
 
@@ -300,6 +304,17 @@ def _visible_products():
     ).select_related('store', 'store__owner')
 
 
+def _area_city_q(country_code: str, city: str, field: str = 'store__city') -> Q:
+    """Matches any city of `city`'s delivery area (La Paz + El Alto), so
+    listings, category counts and store counts follow where couriers go."""
+    from .checkout import area_cities
+    names = [c.city for c in area_cities(country_code, city)] or [(city or '').strip()]
+    q = Q()
+    for name in names:
+        q |= Q(**{f'{field}__iexact': name})
+    return q
+
+
 def _selling_stores():
     """Open stores with at least one live listing — what the pickers count
     and rank by (a store with nothing to buy is not "a place to shop")."""
@@ -403,8 +418,8 @@ class Query(graphene.ObjectType):
         counts = {}
         if country_code and city:
             counts = dict(
-                _visible_products().filter(store__country_code=country_code.upper().strip(),
-                                           store__city__iexact=city.strip())
+                _visible_products().filter(_area_city_q(country_code, city),
+                                           store__country_code=country_code.upper().strip())
                 .values_list('category').annotate(n=Count('id')))
         return [MarketplaceCategoryType(key=c.key, label=c.label, group=c.group, icon=c.icon,
                                         product_count=counts.get(c.key, 0) if counts or (country_code and city)
@@ -421,10 +436,13 @@ class Query(graphene.ObjectType):
     @staticmethod
     def _city_type(city):
         count = _selling_stores().filter(
-            country_code=city.country_code, city__iexact=city.city).distinct().count()
+            _area_city_q(city.country_code, city.city, field='city'),
+            country_code=city.country_code).distinct().count()
         return MarketplaceCityType(
             country_code=city.country_code, city=city.city, currency_code=city.currency_code,
-            is_live=city.is_live,
+            # Live when this city or any city of its delivery area sells:
+            # El Alto shops the La Paz stores.
+            is_live=area_is_live(city.country_code, city.city),
             delivery_estimate=str(city.delivery_estimate) if city.delivery_estimate is not None else None,
             delivery_partner=city.delivery_partner, store_count=count,
             suggested_delivery_usd=str(suggested_delivery_usd(city.country_code, city.city)))
@@ -450,10 +468,16 @@ class Query(graphene.ObjectType):
         if country not in VALID_COUNTRY_CODES:
             return []
         qs = _visible_products().filter(store__country_code=country)
-        live = MarketplaceCity.objects.filter(country_code=country, is_live=True)
-        qs = qs.filter(store__city__in=[c.city for c in live])
+        # Stores in a live city or in its delivery area (an El Alto store sells
+        # with La Paz), the same rule checkout applies.
+        from .checkout import live_city_names
+        live_q = Q()
+        for name in live_city_names(country):
+            live_q |= Q(store__city__iexact=name)
+        qs = qs.filter(live_q) if live_q else qs.none()
         if city:
-            qs = qs.filter(store__city__iexact=city.strip())
+            # The whole delivery area: an El Alto buyer sees the La Paz stores.
+            qs = qs.filter(_area_city_q(country, city))
         if category:
             qs = qs.filter(category=category)
         if store_id:
@@ -715,6 +739,7 @@ class OpenMarketStore(graphene.Mutation):
         city = graphene.String(required=True)
         ships_outside_city = graphene.Boolean()
         delivery_price_usd = graphene.String(description='US dollars; omitted = the city suggestion')
+        outside_delivery_price_usd = graphene.String(description='US dollars; omitted or empty = this area only')
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -722,7 +747,7 @@ class OpenMarketStore(graphene.Mutation):
 
     @login_required
     def mutate(self, info, name, country_code, city, description='', ships_outside_city=False,
-               delivery_price_usd=None):
+               delivery_price_usd=None, outside_delivery_price_usd=None):
         try:
             user, account, store = _seller_store(info)
         except CheckoutError as exc:
@@ -744,11 +769,20 @@ class OpenMarketStore(graphene.Mutation):
             delivery = _delivery_price(delivery_price_usd)
             if delivery is None:
                 return OpenMarketStore(success=False, error='bad_delivery_price')
-        store = Store.objects.create(delivery_price_usd=delivery,
+        outside = None
+        if ships_outside_city and outside_delivery_price_usd in (None, ''):
+            return OpenMarketStore(success=False, error='outside_delivery_price_required')
+        if outside_delivery_price_usd not in (None, ''):
+            outside = _delivery_price(outside_delivery_price_usd)
+            if outside is None:
+                return OpenMarketStore(success=False, error='bad_delivery_price')
+        # Other cities are offered only with a price (an older build's bare
+        # "ships outside" switch no longer means "coordinate it").
+        store = Store.objects.create(delivery_price_usd=delivery, outside_delivery_price_usd=outside,
             owner=account.user, owner_account=account, name=name,
             description=(description or '').strip()[:1000], country_code=country,
             city=known.city if known else city.strip()[:100],
-            ships_outside_city=bool(ships_outside_city))
+            ships_outside_city=outside is not None)
         return OpenMarketStore(success=True, store=MarketplaceStoreType.from_model(store))
 
 
@@ -774,6 +808,7 @@ class UpdateMarketStore(graphene.Mutation):
         ships_outside_city = graphene.Boolean()
         paused = graphene.Boolean()
         delivery_price_usd = graphene.String()
+        outside_delivery_price_usd = graphene.String(description='Empty string = stop offering other cities')
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -781,7 +816,7 @@ class UpdateMarketStore(graphene.Mutation):
 
     @login_required
     def mutate(self, info, name=None, description=None, ships_outside_city=None, paused=None,
-               delivery_price_usd=None):
+               delivery_price_usd=None, outside_delivery_price_usd=None):
         try:
             _user_, _account, store = _seller_store(info)
         except CheckoutError as exc:
@@ -796,8 +831,22 @@ class UpdateMarketStore(graphene.Mutation):
             fields['name'] = name
         if description is not None:
             fields['description'] = description.strip()[:1000]
-        if ships_outside_city is not None:
-            fields['ships_outside_city'] = ships_outside_city
+        if ships_outside_city is True and outside_delivery_price_usd in (None, ''):
+            # An older build's bare switch: other cities need their own price now.
+            return UpdateMarketStore(success=False, error='outside_delivery_price_required')
+        if ships_outside_city is False:
+            # An older build turning other cities off.
+            fields['ships_outside_city'] = False
+            fields['outside_delivery_price_usd'] = None
+        if outside_delivery_price_usd is not None:
+            if outside_delivery_price_usd == '':
+                fields['outside_delivery_price_usd'] = None
+            else:
+                outside = _delivery_price(outside_delivery_price_usd)
+                if outside is None:
+                    return UpdateMarketStore(success=False, error='bad_delivery_price')
+                fields['outside_delivery_price_usd'] = outside
+            fields['ships_outside_city'] = fields['outside_delivery_price_usd'] is not None
         if delivery_price_usd is not None:
             delivery = _delivery_price(delivery_price_usd)
             if delivery is None:

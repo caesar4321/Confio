@@ -49,10 +49,11 @@ class MarketplaceCategoryAdmin(admin.ModelAdmin):
 
 
 class MarketplaceCityAdmin(admin.ModelAdmin):
-    list_display = ('city', 'country_code', 'is_live', 'delivery_estimate', 'currency_code',
+    list_display = ('city', 'country_code', 'is_live', 'delivery_area', 'delivery_estimate', 'currency_code',
                     'delivery_partner', 'latitude', 'longitude', 'radius_km', 'updated_at')
-    list_filter = ('country_code', 'is_live')
-    list_editable = ('is_live', 'delivery_estimate')
+    list_filter = ('country_code', 'is_live', 'delivery_area')
+    # Same delivery_area = one metro for delivery and browsing (La Paz + El Alto).
+    list_editable = ('is_live', 'delivery_area', 'delivery_estimate')
     search_fields = ('city',)
 
 
@@ -131,6 +132,13 @@ class StoreAdmin(admin.ModelAdmin):
     list_filter = ('country_code', 'status', 'ships_outside_city')
     search_fields = ('name', 'city', 'owner__username', 'owner__phone_number')
     raw_id_fields = ('owner', 'owner_account')
+    # Derived from the price on every save, so older clients that still read
+    # it never disagree with what checkout does.
+    readonly_fields = ('ships_outside_city',)
+
+    def save_model(self, request, obj, form, change):
+        obj.ships_outside_city = obj.outside_delivery_price_usd is not None
+        super().save_model(request, obj, form, change)
     inlines = [ProductInline]
     actions = ['suspend', 'reinstate']
 

@@ -37,7 +37,6 @@ export const MarketCheckoutScreen = () => {
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [note, setNote] = useState('');
-  const [ack, setAck] = useState(false);
   const [paying, setPaying] = useState(false);
   // Blocks the screen while the order is prepared and paid; steps aside for
   // Confío Face and the changed-price question, which need the buyer.
@@ -67,10 +66,13 @@ export const MarketCheckoutScreen = () => {
     setAddress(resume.deliveryAddress || '');
     setPhone(resume.deliveryPhone || '');
     setNote(resume.deliveryNote || '');
-    if (resume.deliveryOutsideCity) {
+    // The order's own city, whether or not it was "another city": an El Alto
+    // draft (the La Paz area) must not come back as La Paz.
+    const resumedCity = resume.deliveryCity || '';
+    const fold = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+    if (resume.deliveryOutsideCity || (resumedCity && fold(resumedCity) !== fold(resume.store?.city || ''))) {
       setMode('other');
-      setOtherCity(resume.deliveryCity || '');
-      setAck(true);
+      setOtherCity(resumedCity);
     }
     setSeeded(true);
   }, [resume, seeded]);
@@ -91,7 +93,6 @@ export const MarketCheckoutScreen = () => {
       setMode('other');
       setOtherCity(a.city);
     }
-    setAck(false);
   };
   // Preselect the default (else most recent, else the Recarga address) once,
   // only in the store's country, and never over a resumed draft's address.
@@ -113,9 +114,14 @@ export const MarketCheckoutScreen = () => {
     fetchPolicy: 'network-only',
   });
   const quote = quoteData?.marketCheckoutQuote;
-  // From the buyer's choice, not the quote: while the city is still being
-  // typed there is no quote, and that must not read as "same city".
-  const outside = mode === 'other';
+  // The server's word once there is a quote: it knows delivery AREAS (an El
+  // Alto address is the La Paz area, not "another city"). Before that, the
+  // buyer's choice: a city still being typed must not read as "same city".
+  const outside = quote ? Boolean(quote.outsideCity) : mode === 'other';
+  // Another city with no "other cities" price: the store doesn't deliver there
+  // (the server refuses the quote), said plainly instead of "couldn't price it".
+  const notDelivered = mode === 'other' && !quote && !quoting && city.length > 1
+    && (store?.outsideDeliveryPriceUsd === null || store?.outsideDeliveryPriceUsd === undefined);
   // A buyer re-opening their own reserved draft may see stock 0; the server
   // enforces the real limit at reservation.
   // A resumed draft keeps the quantity it reserved (that is what makes it
@@ -126,14 +132,13 @@ export const MarketCheckoutScreen = () => {
   // What still stands between the buyer and Pagar, said on the button's
   // doorstep: the rules match the server's (checkout.prepare_order).
   const blocker = useMemo((): string | null => {
-    if (outside && !store?.shipsOutsideCity) return `Esta tienda solo entrega en ${store?.city ?? 'su ciudad'}.`;
-    if (outside && city.length < 2) return 'Escribe la ciudad de entrega.';
+    if (mode === 'other' && city.length < 2) return 'Escribe la ciudad de entrega.';
+    if (notDelivered) return `Esta tienda solo entrega en ${store?.city ?? 'su ciudad'} y alrededores.`;
     if (!quote) return quoting ? 'Calculando el total…' : 'No pudimos calcular el total.';
     if (address.trim().length < 8) return 'Escribe la dirección completa (calle, número y zona).';
     if (phone.replace(/\D/g, '').length < 7) return 'Escribe un teléfono para el repartidor.';
-    if (outside && !ack) return 'Confirma que entiendes el costo del envío a otra ciudad.';
     return null;
-  }, [quote, quoting, address, phone, outside, store, ack, city]);
+  }, [quote, quoting, address, phone, notDelivered, mode, store, city]);
   const canPay = !blocker && !paying;
 
   // After a payment (or one whose outcome is unknown: the order opens either
@@ -156,7 +161,9 @@ export const MarketCheckoutScreen = () => {
         expectedAmountUsd: quote?.amountUsd,
         productId, quantity, deliveryCountry: country, deliveryCity: city,
         deliveryAddress: address.trim(), deliveryPhone: phone.trim(), deliveryNote: note.trim(),
-        outsideCityAck: outside ? ack : false,
+        // Nothing to acknowledge any more (the price is in the total); kept
+        // for a server that still asks for it.
+        outsideCityAck: outside,
       }, (amountUsd) => new Promise((resolve) => {
         Alert.alert('El precio cambió', `El total ahora es ${formatUsd(amountUsd)}. ¿Pagar este monto?`, [
           { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
@@ -252,7 +259,9 @@ export const MarketCheckoutScreen = () => {
                 );
               })}
             </View>
-            {outside && (
+            {/* The buyer's choice, not the quote: typing "El Alto" (the La Paz
+                area) must not make the field disappear mid-word. */}
+            {mode === 'other' && (
               <Field icon="map" placeholder="Ciudad de entrega" value={otherCity} onChangeText={setOtherCity} />
             )}
             <Field icon="home" placeholder="Dirección (calle, número, zona)" value={address} onChangeText={setAddress} />
@@ -263,15 +272,8 @@ export const MarketCheckoutScreen = () => {
               <Text style={styles.ackText}>Guardar en mis direcciones</Text>
             </View>
             </>)}
-            {outside && !store.shipsOutsideCity ? (
-              <Text style={styles.warn}>Esta tienda solo entrega en {store.city}.</Text>
-            ) : outside ? (
-              <View style={styles.ackRow}>
-                <Switch value={ack} onValueChange={setAck} />
-                <Text style={styles.ackText}>
-                  Entiendo que el envío a otra ciudad lo coordina la tienda y cuesta más que un envío en {store.city}.
-                </Text>
-              </View>
+            {notDelivered ? (
+              <Text style={styles.warn}>Esta tienda solo entrega en {store.city} y alrededores.</Text>
             ) : null}
           </KitCard>
 
@@ -282,9 +284,8 @@ export const MarketCheckoutScreen = () => {
                   value={formatUsd(quote.productUsd ?? quote.amountUsd)} />
                 {/* Same-city delivery is the store's price, inside the total;
                     another city is coordinated with the store. */}
-                <KitRow label={`Envío en ${city}`} muted value={quote.outsideCity
-                  ? 'A coordinar con la tienda'
-                  : Number(quote.deliveryUsd ?? 0) > 0 ? formatUsd(quote.deliveryUsd) : 'Gratis'} />
+                <KitRow label={quote.outsideCity ? `Envío a ${city}` : `Envío en ${city}`} muted
+                  value={Number(quote.deliveryUsd ?? 0) > 0 ? formatUsd(quote.deliveryUsd) : 'Gratis'} />
                 <View style={styles.divider} />
                 <KitRow label="Total" strong value={formatUsd(quote.amountUsd)} />
                 {formatReference(quote.referenceLocal) ? (
@@ -292,7 +293,7 @@ export const MarketCheckoutScreen = () => {
                 ) : null}
                 <Text style={kitText.muted}>
                   {quote.outsideCity
-                    ? 'La tienda coordina contigo el envío a otra ciudad y su costo.'
+                    ? 'La tienda envía tu pedido a otra ciudad (por encomienda o courier). Te contactarán al teléfono que pusiste.'
                     : 'La tienda envía tu pedido a tu dirección. El repartidor te escribirá o llamará al teléfono que pusiste.'}
                 </Text>
               </>

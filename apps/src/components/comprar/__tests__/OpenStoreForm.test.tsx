@@ -52,6 +52,7 @@ it('enables the button only with a name and a city, and submits trimmed values',
   // The delivery price starts at the city suggestion and is sent canonical.
   expect(onSubmit).toHaveBeenCalledWith({
     name: 'Tejidos Ana', description: 'Chompas de alpaca', shipsOutsideCity: false, deliveryPriceUsd: '1.3',
+    outsideDeliveryPriceUsd: null,
   });
   dismiss.mockRestore();
 });
@@ -82,4 +83,19 @@ it('the keyboard has a way out: Siguiente moves on, the scroll view dismisses it
   expect(description.props.blurOnSubmit).toBe(true);
   const scroll = tree.root.find((n) => n.props.keyboardShouldPersistTaps === 'handled');
   expect(['interactive', 'on-drag']).toContain(scroll.props.keyboardDismissMode);
+});
+
+
+it('offering other cities needs their own price, sent with the store', () => {
+  const { tree, onSubmit } = render({ suggestedDeliveryUsd: '1.30' });
+  const [name] = fields(tree);
+  act(() => { name.props.onChangeText('Tejidos Ana'); });
+  const toggle = tree.root.findAll((n) => n.props.onValueChange && n.props.value === false)[0];
+  act(() => { toggle.props.onValueChange(true); });
+  expect(button(tree).props.disabled).toBe(true); // no price yet
+  const outside = tree.root.findAll((n) => n.props.testID === 'open-store-outside-delivery' && n.props.onChangeText)[0];
+  act(() => { outside.props.onChangeText('4'); });
+  expect(button(tree).props.disabled).toBe(false);
+  act(() => { button(tree).props.onPress(); });
+  expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({ shipsOutsideCity: true, outsideDeliveryPriceUsd: '4' }));
 });

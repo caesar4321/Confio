@@ -23,7 +23,10 @@ type Props = {
   error: string | null;
   onBack: () => void;
   onPickCity: () => void;
-  onSubmit: (values: { name: string; description: string; shipsOutsideCity: boolean; deliveryPriceUsd: string }) => void;
+  onSubmit: (values: {
+    name: string; description: string; shipsOutsideCity: boolean; deliveryPriceUsd: string;
+    outsideDeliveryPriceUsd: string | null;
+  }) => void;
   /** The city's suggested delivery price (US$), pre-filled until edited. */
   suggestedDeliveryUsd?: string | null;
   /** Display-only "≈ Bs" for the delivery price. */
@@ -52,9 +55,13 @@ export const OpenStoreForm = ({
   }, [suggestedDeliveryUsd, deliveryEdited, toAmountInput]);
   const deliveryValue = parseAmount(delivery);
   const deliveryOk = delivery.trim() !== '' && deliveryValue >= 0 && deliveryValue <= 100;
+  // Other cities are offered only with their own flat price.
+  const [outsideDelivery, setOutsideDelivery] = useState('');
+  const outsideValue = parseAmount(outsideDelivery);
+  const outsideOk = !shipsOutside || (outsideDelivery.trim() !== '' && outsideValue >= 0 && outsideValue <= 100);
   const descriptionRef = useRef<RNTextInput>(null);
   const fee = formatFeeBps(feeBps);
-  const valid = name.trim().length >= 2 && Boolean(city) && deliveryOk && !submitting;
+  const valid = name.trim().length >= 2 && Boolean(city) && deliveryOk && outsideOk && !submitting;
 
   const submit = () => {
     Keyboard.dismiss();
@@ -62,6 +69,7 @@ export const OpenStoreForm = ({
       onSubmit({
         name: name.trim(), description: description.trim(), shipsOutsideCity: shipsOutside,
         deliveryPriceUsd: normalizeAmountInput(delivery) ?? '',
+        outsideDeliveryPriceUsd: shipsOutside ? (normalizeAmountInput(outsideDelivery) ?? '') : null,
       });
     }
   };
@@ -194,9 +202,20 @@ export const OpenStoreForm = ({
                 <Text style={styles.label}>Envíos a otras ciudades</Text>
                 <Text style={styles.hint}>
                   {shipsOutside
-                    ? 'Los compradores de otras ciudades podrán pedirte; tú coordinas el envío y cuesta más.'
-                    : city ? `Solo entregas en ${city}.` : 'Solo entregas en tu ciudad.'}
+                    ? 'Un precio fijo para cualquier otra ciudad del país (encomienda o courier), incluido en el pago.'
+                    : city ? `Solo entregas en ${city} y alrededores.` : 'Solo entregas en tu ciudad.'}
                 </Text>
+                {shipsOutside ? (
+                  <View style={styles.deliveryRow}>
+                    <Text style={styles.deliveryPrefix}>US$</Text>
+                    <TextInput testID="open-store-outside-delivery" style={[styles.input, styles.deliveryInput]}
+                      keyboardType="decimal-pad" placeholder={`0${separators.decimal}00`} placeholderTextColor={colors.text.light}
+                      value={outsideDelivery} onChangeText={(t) => setOutsideDelivery((prev) => sanitizeAmount(t, 2, undefined, prev))} />
+                    {localRate && outsideOk && outsideValue > 0 ? (
+                      <Text style={styles.hint}>≈ {formatLocalPrice(outsideValue * Number(localRate.localPerUsd), localRate.currency)}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
               </View>
               <Switch value={shipsOutside} onValueChange={(v) => { Keyboard.dismiss(); setShipsOutside(v); }} />
             </View>

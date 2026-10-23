@@ -137,8 +137,36 @@ it("shows the store's delivery inside the total, and another city as coordinated
   expect(text).toContain('US$1.30');
   expect(text).toContain('US$509.30');
   expect(text).not.toContain('con tu QR');
-  mockQuote.current = { ...QUOTE, outsideCity: true, productUsd: '508.00', deliveryUsd: '0.00', amountUsd: '508.00' };
+  // Another city: the store's other-cities price, inside the total like any delivery.
+  mockQuote.current = { ...QUOTE, outsideCity: true, productUsd: '508.00', deliveryUsd: '4.00', amountUsd: '512.00' };
   tree = render();
   text = JSON.stringify(tree.toJSON());
-  expect(text).toContain('A coordinar con la tienda');
+  expect(text).toContain('Envío a ');
+  expect(text).toContain('US$512.00');
+  expect(text).not.toContain('A coordinar');
+});
+
+
+it('another city with no "other cities" price says the store only delivers in its area', () => {
+  mockQuote.current = null; // the server refuses the quote (store_city_only)
+  const tree = render();
+  const other = tree.root.findAll((n) => n.props.accessibilityRole === 'radio' && n.props.onPress
+    && n.props.accessibilityState?.checked === false)[0];
+  act(() => { other.props.onPress(); });
+  act(() => { input(tree, 'Ciudad de entrega').props.onChangeText('Cochabamba'); });
+  expect(blocker(tree)).toContain('solo entrega en La Paz');
+  expect(JSON.stringify(tree.toJSON())).not.toContain('Entiendo que el envío');
+});
+
+it('an El Alto address priced as the La Paz area is not "another city"', () => {
+  mockQuote.current = { ...QUOTE, outsideCity: false, productUsd: '508.00', deliveryUsd: '1.30', amountUsd: '509.30' };
+  const tree = render();
+  const other = tree.root.findAll((n) => n.props.accessibilityRole === 'radio' && n.props.onPress
+    && n.props.accessibilityState?.checked === false)[0];
+  act(() => { other.props.onPress(); });
+  act(() => { input(tree, 'Ciudad de entrega').props.onChangeText('El Alto'); });
+  act(() => { input(tree, 'Dirección (calle, número, zona)').props.onChangeText('Av. 6 de Marzo 100, Ciudad Satélite'); });
+  act(() => { input(tree, 'Teléfono para el repartidor').props.onChangeText('70000000'); });
+  expect(blocker(tree)).toBeNull(); // the store has no other-cities price, and needs none here
+  expect(JSON.stringify(tree.toJSON())).toContain('US$509.30');
 });

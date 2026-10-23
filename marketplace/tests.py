@@ -294,15 +294,14 @@ class CheckoutTests(MarketTestBase):
         with self.assertRaisesMessage(checkout.CheckoutError, 'city_not_live'):
             self.prepare()
 
-    def test_other_city_needs_store_opt_in_and_buyer_ack(self):
+    def test_other_city_needs_the_stores_other_cities_price_and_pays_it_in_the_total(self):
         with self.assertRaisesMessage(checkout.CheckoutError, 'store_city_only'):
             self.prepare(delivery_city='Santa Cruz')
-        Store.objects.filter(pk=self.store.pk).update(ships_outside_city=True)
-        with self.assertRaisesMessage(checkout.CheckoutError, 'outside_city_ack_required'):
-            self.prepare(delivery_city='Santa Cruz')
-        order, _, _ = self.prepare(delivery_city='Santa Cruz', outside_city_ack=True)
+        Store.objects.filter(pk=self.store.pk).update(outside_delivery_price_usd=Decimal('4.00'),
+                                                      ships_outside_city=True)
+        order, _, _ = self.prepare(delivery_city='Santa Cruz')  # nothing to acknowledge any more
         self.assertTrue(order.delivery_outside_city)
-        self.assertIsNone(order.delivery_estimate_local)
+        self.assertEqual((order.delivery_usd, order.amount_usd), (Decimal('4.00'), Decimal('34.00')))
 
     def test_order_cap(self):
         Product.objects.filter(pk=self.product.pk).update(price_usd=Decimal('314'))  # > $300 on-chain cap
@@ -1219,11 +1218,12 @@ class StoreDeliveryPriceTests(MarketTestBase):
         self.assertEqual(q.fee_usd, Decimal('4.976'))  # 8% of the whole order, like the contract
         self.assertEqual(q.merchant_net_usd, Decimal('62.20') - Decimal('4.976'))
 
-    def test_another_city_is_coordinated_with_the_store_not_charged(self):
-        Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('2.20'), ships_outside_city=True)
+    def test_another_city_pays_the_stores_other_cities_price(self):
+        Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('2.20'),
+                                                      outside_delivery_price_usd=Decimal('5.00'))
         self.product.refresh_from_db()
-        q = checkout.checkout_quote(self.product, 1, 'BO', 'El Alto')['quote']
-        self.assertEqual((q.delivery_usd, q.amount_usd), (Decimal('0.00'), Decimal('30.00')))
+        q = checkout.checkout_quote(self.product, 1, 'BO', 'Cochabamba')['quote']
+        self.assertEqual((q.delivery_usd, q.amount_usd), (Decimal('5.00'), Decimal('35.00')))
 
     def test_the_order_records_its_delivery_and_a_new_delivery_price_never_reuses_an_old_draft(self):
         Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('2.20'))
@@ -1271,3 +1271,79 @@ class DeliveryCityMatchTests(MarketTestBase):
         for value in ('NaN', 'Infinity', '-0.01', '100.01', 'abc'):
             self.assertIsNone(_delivery_price(value), value)
         self.assertEqual(_delivery_price('0'), Decimal('0.00'))
+
+
+
+@override_settings(**ENABLED)
+class DeliveryAreaTests(MarketTestBase):
+    def setUp(self):
+        super().setUp()
+        MarketplaceCity.objects.filter(pk=self.city.pk).update(delivery_area='BO-LA-PAZ')
+        self.el_alto, _ = MarketplaceCity.objects.update_or_create(
+            country_code='BO', city='El Alto',
+            defaults={'currency_code': 'BOB', 'is_live': False, 'delivery_area': 'BO-LA-PAZ'})
+        Store.objects.filter(pk=self.store.pk).update(delivery_price_usd=Decimal('1.30'))
+        self.product.refresh_from_db()
+
+    def test_el_alto_is_the_la_paz_area_at_the_city_price(self):
+        terms = checkout.checkout_quote(self.product, 1, 'BO', 'El Alto')
+        self.assertFalse(terms['outside_city'])
+        self.assertEqual(terms['quote'].delivery_usd, Decimal('1.30'))
+        order, _, _ = self.prepare(delivery_city='El Alto')  # a store with no other-cities price
+        self.assertFalse(order.delivery_outside_city)
+
+    def test_el_alto_buyers_see_the_la_paz_stores_and_el_alto_reads_as_live(self):
+        from .schema import Query
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        products = Query.resolve_marketplace_products(None, info, country_code='BO', city='El Alto')
+        self.assertIn(self.product.pk, [int(p.id) for p in products])
+        self.assertTrue(Query._city_type(self.el_alto).is_live)
+
+    def test_a_city_outside_the_area_is_still_another_city(self):
+        MarketplaceCity.objects.update_or_create(country_code='BO', city='Cochabamba',
+                                                 defaults={'currency_code': 'BOB', 'is_live': False})
+        self.assertTrue(checkout.is_outside_city(self.store, 'BO', 'Cochabamba'))
+
+    def test_a_store_offers_other_cities_with_a_price_and_withdraws_with_an_empty_one(self):
+        from .schema import UpdateMarketStore
+        info = SimpleNamespace(context=SimpleNamespace(user=self.seller))
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
+            on = UpdateMarketStore.mutate.__wrapped__(None, info, outside_delivery_price_usd='4')
+            self.assertEqual(on.store.outside_delivery_price_usd, '4.00')
+            self.assertTrue(Store.objects.get(pk=self.store.pk).ships_outside_city)
+            off = UpdateMarketStore.mutate.__wrapped__(None, info, outside_delivery_price_usd='')
+        self.assertIsNone(off.store.outside_delivery_price_usd)
+        self.assertFalse(Store.objects.get(pk=self.store.pk).ships_outside_city)
+
+
+@override_settings(**ENABLED)
+class DeliveryAreaEdgeTests(MarketTestBase):
+    def setUp(self):
+        super().setUp()
+        MarketplaceCity.objects.filter(pk=self.city.pk).update(delivery_area='BO-LA-PAZ')
+        MarketplaceCity.objects.update_or_create(
+            country_code='BO', city='El Alto',
+            defaults={'currency_code': 'BOB', 'is_live': False, 'delivery_area': 'BO-LA-PAZ'})
+
+    def test_an_el_alto_store_sells_with_the_la_paz_area(self):
+        Store.objects.filter(pk=self.store.pk).update(city='El Alto')
+        self.product.refresh_from_db()
+        from .schema import Query
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        listed = [int(p.id) for p in Query.resolve_marketplace_products(None, info, country_code='BO', city='La Paz')]
+        self.assertIn(self.product.pk, listed)
+        order, _, _ = self.prepare(delivery_city='La Paz')  # not city_not_live
+        self.assertFalse(order.delivery_outside_city)
+
+    def test_another_country_is_never_quoted_at_the_domestic_price(self):
+        Store.objects.filter(pk=self.store.pk).update(outside_delivery_price_usd=Decimal('4.00'))
+        self.product.refresh_from_db()
+        with self.assertRaisesMessage(checkout.CheckoutError, 'store_country_only'):
+            checkout.checkout_quote(self.product, 1, 'AR', 'Buenos Aires')
+
+    def test_an_older_builds_bare_other_cities_switch_asks_for_a_price(self):
+        from .schema import UpdateMarketStore
+        info = SimpleNamespace(context=SimpleNamespace(user=self.seller))
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
+            res = UpdateMarketStore.mutate.__wrapped__(None, info, ships_outside_city=True)
+        self.assertEqual(res.error, 'outside_delivery_price_required')
