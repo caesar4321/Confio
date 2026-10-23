@@ -928,3 +928,76 @@ class TipSendTests(SimpleTestCase):
         result, _, link = self._prepare((SimpleNamespace(id=5, note=''), None), None, fee=True)
         self.assertEqual(result, {'success': False, 'error': 'tip_fee_not_allowed'})
         link.assert_not_called()
+
+
+class TipPrivacyTests(SimpleTestCase):
+    """A Propina reads as one everywhere: pseudonyms only, no wallet
+    address or phone for either side, never an external wallet."""
+
+    def _tip_send(self):
+        return SimpleNamespace(
+            internal_id='tip-send-id', transaction_hash='0xabc', idempotency_key='tip-abc',
+            amount=Decimal('5'), fee_amount=Decimal('0'), net_amount=Decimal('5'), token_type='USDT',
+            bsc_calls_json='{}',
+            sender_user_id=1, sender_user=SimpleNamespace(id=1), sender_business=None, sender_type='user',
+            sender_display_name='ana_inv', sender_phone='', sender_address=SENDER,
+            recipient_user_id=2, recipient_user=SimpleNamespace(id=2), recipient_business=None,
+            recipient_type='user', recipient_display_name='leo_inv', recipient_phone='', recipient_address=RECIPIENT,
+            memo='', is_invitation=False,
+        )
+
+    @mock.patch('notifications.utils.create_notification')
+    def test_tip_notifications_say_propina_and_carry_no_address(self, notify):
+        from send.tasks import _notify_send_parties
+
+        _notify_send_parties(self._tip_send())
+        self.assertEqual(notify.call_count, 2)
+        titles = sorted(call.kwargs['title'] for call in notify.call_args_list)
+        self.assertEqual(titles, ['Propina enviada', 'Recibiste una propina'])
+        for call in notify.call_args_list:
+            data = call.kwargs['data']
+            self.assertTrue(data['is_tip'])
+            self.assertFalse(data['is_external_address'])
+            self.assertNotIn('sender_address', data)
+            self.assertNotIn('recipient_address', data)
+            self.assertNotIn('sender_phone', data)
+            self.assertNotIn(SENDER, str(data))
+            self.assertNotIn(RECIPIENT, str(data))
+
+    def test_tip_send_hides_both_addresses(self):
+        from send.schema import SendTransactionType
+
+        tip = self._tip_send()
+        self.assertEqual(SendTransactionType.resolve_sender_address(tip, None), '')
+        self.assertEqual(SendTransactionType.resolve_recipient_address(tip, None), '')
+        self.assertEqual(SendTransactionType.resolve_transaction_hash(tip, None), '')
+        self.assertEqual(SendTransactionType.resolve_recipient_type(tip, None), 'user')
+        normal = SimpleNamespace(**{**vars(tip), 'idempotency_key': 'send-abc'})
+        self.assertEqual(SendTransactionType.resolve_recipient_address(normal, None), RECIPIENT)
+
+    def test_tu_mes_groups_tips_as_propinas(self):
+        from users.cashflow import TIP_COUNTERPARTY_KEY, _is_tip_row
+
+        row = SimpleNamespace(send_transaction_id=3, send_transaction=SimpleNamespace(idempotency_key='tip-abc'))
+        self.assertTrue(_is_tip_row(row))
+        self.assertFalse(_is_tip_row(SimpleNamespace(send_transaction_id=None)))
+        self.assertEqual(TIP_COUNTERPARTY_KEY, 'tip')
+
+
+class TipUnifiedRowTests(SimpleTestCase):
+    def test_unified_rows_hide_tip_addresses_and_hash_only(self):
+        from users.graphql_views import UnifiedTransactionType
+
+        tip = SimpleNamespace(transaction_type='send', send_transaction_id=3,
+                              send_transaction=SimpleNamespace(idempotency_key='tip-x'),
+                              sender_address=SENDER, counterparty_address=RECIPIENT, transaction_hash='0xabc',
+                              sender_type='user', counterparty_type='external')
+        self.assertEqual(UnifiedTransactionType.resolve_sender_address(tip, None), '')
+        self.assertEqual(UnifiedTransactionType.resolve_counterparty_address(tip, None), '')
+        self.assertEqual(UnifiedTransactionType.resolve_transaction_hash(tip, None), '')
+        self.assertEqual(UnifiedTransactionType.resolve_counterparty_type(tip, None), 'user')
+        plain = SimpleNamespace(**{**vars(tip), 'send_transaction': SimpleNamespace(idempotency_key='send-x')})
+        self.assertEqual(UnifiedTransactionType.resolve_counterparty_address(plain, None), RECIPIENT)
+        self.assertEqual(UnifiedTransactionType.resolve_transaction_hash(plain, None), '0xabc')
+        other = SimpleNamespace(transaction_type='payment', send_transaction_id=None, counterparty_address=RECIPIENT)
+        self.assertEqual(UnifiedTransactionType.resolve_counterparty_address(other, None), RECIPIENT)

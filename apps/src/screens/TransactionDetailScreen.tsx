@@ -52,6 +52,7 @@ import { phoneKeyToE164, parsePhoneKey } from '../utils/phoneKey';
 import { transactionFriendRoute } from '../utils/transactionFriend';
 import { formatDecimal, formatPercent } from '../utils/numberLocale';
 import { isInvestmentMovement } from '../utils/investmentMovement';
+import { isTipTransaction } from '../utils/tips';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -1268,8 +1269,11 @@ export const TransactionDetailScreen = () => {
   // phone" is only a guess, and it guesses wrong on business notifications,
   // which carry no phones by design — so an explicit false has to be able to
   // say "this is a real Confío counterparty" and stop the guess.
-  const statedExternal: boolean | undefined =
-    readStatedFlag(currentTx?.is_external_address) ?? readStatedFlag(currentTx?.isExternalDeposit);
+  // A Propina is between two Comunidad members: never an external wallet,
+  // and no addresses or explorer link (one side could trace the other).
+  const isTip = isTipTransaction(currentTx) || isTipTransaction(transactionData);
+  const statedExternal: boolean | undefined = isTip ? false
+    : readStatedFlag(currentTx?.is_external_address) ?? readStatedFlag(currentTx?.isExternalDeposit);
   const isExternalSender = ((currentTx?.type === 'received' || currentTx?.type === 'deposit') && (
     statedExternal !== undefined
       ? statedExternal
@@ -1284,7 +1288,7 @@ export const TransactionDetailScreen = () => {
   // The counterparty address of an inbound external transfer lands in a
   // different field depending on where the row came from (list, push payload,
   // server refetch), so read all three rather than one.
-  const senderExternalAddress = currentTx?.fromAddress || currentTx?.senderAddress || currentTx?.sourceAddress;
+  const senderExternalAddress = isTip ? undefined : currentTx?.fromAddress || currentTx?.senderAddress || currentTx?.sourceAddress;
 
   // Don't use truncated addresses as fallback names
   const senderFallbackName = isExternalSender
@@ -1577,6 +1581,11 @@ export const TransactionDetailScreen = () => {
   };
 
   const getTransactionTitle = (tx: any) => {
+    if (isTip) {
+      return tx.type === 'received'
+        ? `Propina de ${displayFromName || 'un inversor'}`
+        : `Propina a ${displayToName || 'un inversor'}`;
+    }
 
     switch (tx.type) {
       case 'received':
@@ -2286,7 +2295,7 @@ export const TransactionDetailScreen = () => {
                       {(() => {
                         const phoneVal = resolvedRecipientPhone || currentTx.recipient_phone || derivedRecipientPhoneFromName;
                         const forcePhone = !!phoneVal || !!preferredTo.fromContacts;
-                        const addressVal = currentTx.toAddress || currentTx.recipient_address;
+                        const addressVal = isTip ? undefined : currentTx.toAddress || currentTx.recipient_address;
                         // Stated flag first, heuristic only when nothing was stated.
                         const isExternalHeuristic = statedExternal !== undefined
                           ? statedExternal
@@ -2706,6 +2715,7 @@ export const TransactionDetailScreen = () => {
               <View style={styles.rowDivider} />
             </>
           )}
+            {isTip ? null : (
             <TouchableOpacity
               onPress={() => setShowBlockchainDetails(true)}
               style={styles.actionRow}
@@ -2718,13 +2728,14 @@ export const TransactionDetailScreen = () => {
               <Text style={styles.actionRowLabel}>Ver detalles técnicos</Text>
               <Icon name="chevron-right" size={18} color={colors.text.light} />
             </TouchableOpacity>
+            )}
           </View>
         </View>
       </ScrollView>
 
       {/* Technical Details Modal */}
       <Modal
-        visible={showBlockchainDetails}
+        visible={showBlockchainDetails && !isTip}
         transparent
         animationType="fade"
         onRequestClose={() => setShowBlockchainDetails(false)}

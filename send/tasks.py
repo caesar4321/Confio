@@ -50,8 +50,8 @@ def _notify_send_parties(s) -> None:
     recipient_phone = to_international(
         s.recipient_phone, s.recipient_user if s.recipient_user_id else None)
     if str(getattr(s, 'idempotency_key', '') or '').startswith('tip-'):
-        # A Propina is between Comunidad pseudonyms: never a phone number.
-        sender_phone = recipient_phone = ''
+        _notify_tip_parties(s, amount_str)
+        return
     sender_name = s.sender_display_name or 'Contacto'
     recipient_name = (
         s.recipient_display_name
@@ -143,6 +143,52 @@ def _notify_send_parties(s) -> None:
             )
     except Exception:  # noqa: BLE001
         logger.exception('send notifications failed for %s', s.internal_id)
+
+
+def _notify_tip_parties(s, amount_str: str) -> None:
+    """A Propina reads as one: "@ana te envió una propina", never a send to
+    an external wallet. Comunidad pseudonyms only: no phone, no address, on
+    either side."""
+    from notifications import utils as notif_utils
+    from notifications.models import NotificationType as NotifType
+
+    sender_name = s.sender_display_name or 'Un inversor'
+    recipient_name = s.recipient_display_name or 'un inversor'
+    common = {
+        'transaction_id': str(s.internal_id),
+        'internal_id': str(s.internal_id),
+        'amount': amount_str,
+        'token_type': s.token_type,
+        'net_amount': str(s.net_amount if s.net_amount is not None else s.amount),
+        'sender_name': sender_name,
+        'recipient_name': recipient_name,
+        'is_external_address': False,
+        'is_tip': True,
+        'idempotency_key': s.idempotency_key or '',
+        'memo': '',
+        'transaction_type': 'send',
+    }
+    try:
+        if s.recipient_user_id:
+            notif_utils.create_notification(
+                user=s.recipient_user, account=None, business=None,
+                notification_type=NotifType.SEND_RECEIVED,
+                title='Recibiste una propina',
+                message=f'{sender_name} te envió una propina de ${amount_str}',
+                data=common, related_object_type='SendTransaction', related_object_id=str(s.internal_id),
+                action_url=f'confio://send/{s.internal_id}',
+            )
+        if s.sender_user_id:
+            notif_utils.create_notification(
+                user=s.sender_user, account=None, business=None,
+                notification_type=NotifType.SEND_SENT,
+                title='Propina enviada',
+                message=f'Le enviaste una propina de ${amount_str} a {recipient_name}',
+                data=common, related_object_type='SendTransaction', related_object_id=str(s.internal_id),
+                action_url=f'confio://send/{s.internal_id}',
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception('tip notifications failed for %s', s.internal_id)
 
 
 @shared_task(name='send.confirm_bsc_send', bind=True, max_retries=25)

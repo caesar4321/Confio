@@ -1,4 +1,5 @@
 import { formatAmountString } from './numberLocale';
+import { isTipTransaction } from './tips';
 // Display names for the tokens that appear on receipts, success screens and
 // transaction details.
 //
@@ -253,6 +254,19 @@ export const resolveTransferReceiptParticipants = (
   ) || '';
   const amount = String(transaction?.amount || '').trim();
   const directionIsOutgoing = outgoingDirections.has(direction);
+  if (isTipTransaction(transaction)) {
+    // A Propina's receipt names both sides by their Comunidad names only:
+    // never the account's real name, username, phone or wallet.
+    const outgoing = directionIsOutgoing || (!incomingDirections.has(direction) && amount.startsWith('-'));
+    return {
+      senderName: pickReceiptText(transaction?.senderDisplayName, transaction?.sender_name, transaction?.senderName,
+        transaction?.from) || 'Miembro de Comunidad',
+      recipientName: pickReceiptText(transaction?.recipientDisplayName, transaction?.recipient_name,
+        transaction?.recipientName, transaction?.to) || 'Miembro de Comunidad',
+      isOutgoing: outgoing,
+      isIncoming: !outgoing,
+    };
+  }
   const directionIsIncoming = incomingDirections.has(direction);
   const hasKnownDirection = directionIsOutgoing || directionIsIncoming;
   const isOutgoing = directionIsOutgoing || (!hasKnownDirection && amount.startsWith('-'));

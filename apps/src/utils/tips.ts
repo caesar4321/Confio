@@ -11,3 +11,12 @@ export const parseTipAmount = (text: string): string | null => {
   if (!Number.isFinite(value) || value < Number(TIP_MIN) || value > Number(TIP_MAX)) return null;
   return value.toFixed(2);
 };
+
+/** A Propina, from a list row, a refetch or a push payload. Tips are keyed
+ * "tip-…" and pushes say is_tip; either is enough. */
+export const isTipTransaction = (tx: any): boolean => {
+  if (!tx) return false;
+  const flag = tx.is_tip ?? tx.isTip;
+  if (flag === true || (typeof flag === 'string' && flag.trim().toLowerCase() === 'true')) return true;
+  return String(tx.idempotencyKey || tx.idempotency_key || '').startsWith('tip-');
+};

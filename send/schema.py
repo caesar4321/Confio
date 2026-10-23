@@ -103,6 +103,26 @@ class SendTransactionType(DjangoObjectType):
     def resolve_recipient_user(self, info):
         return tip_safe_user(self, self.recipient_user, info)
 
+    # A Propina names people by their Comunidad pseudonyms only: no wallet
+    # address for either side (one can be traced to the other), and both
+    # sides are Confío members, never "external".
+    # Non-null in the schema: an empty string, never None. The hash goes too
+    # (on-chain it names both wallets).
+    def resolve_sender_address(self, info):
+        return '' if is_tip_send(self) else self.sender_address
+
+    def resolve_recipient_address(self, info):
+        return '' if is_tip_send(self) else self.recipient_address
+
+    def resolve_transaction_hash(self, info):
+        return '' if is_tip_send(self) else self.transaction_hash
+
+    def resolve_sender_type(self, info):
+        return 'user' if is_tip_send(self) else self.sender_type
+
+    def resolve_recipient_type(self, info):
+        return 'user' if is_tip_send(self) else self.recipient_type
+
     def resolve_fee_amount(self, info):
         # net_amount is populated by final event reconciliation. Once present,
         # the finalized fee is authoritative even when it is exactly zero; a

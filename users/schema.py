@@ -1493,11 +1493,13 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				sender_name = transfer.sender_display_name or "Miembro de Comunidad"
 				recipient_name = transfer.recipient_display_name or "Miembro de Comunidad"
 				recipient_phone_masked = ""
+			is_tip = str(transfer.idempotency_key or '').startswith('tip-')
 
 			return VerifiedTransactionType(
 				is_valid=True,
 				status=transfer.status,
-				transaction_hash=transfer.transaction_hash,
+				# A Propina: no hash and no wallet (on-chain they name both sides).
+				transaction_hash='' if is_tip else transfer.transaction_hash,
 				amount=f"{transfer.amount:.2f}",
 				currency=transfer.token_type,
 				timestamp=transfer.created_at,
@@ -1506,7 +1508,8 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				recipient_phone_masked=recipient_phone_masked,
 				verification_message="Transferencia confirmada.",
 				transaction_type="TRANSFER",
-				metadata=json.dumps({"memo": transfer.memo or "Transferencia", "sender_address": transfer.sender_address})
+				metadata=json.dumps({"memo": transfer.memo or "Transferencia",
+				                     **({} if is_tip else {"sender_address": transfer.sender_address})})
 			)
 
 		# Not found

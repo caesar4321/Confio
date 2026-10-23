@@ -225,6 +225,14 @@ def _payout_is_own(row, ctx: ViewerContext) -> bool:
     return holder == ctx.kyc_document
 
 
+TIP_COUNTERPARTY_KEY = 'tip'
+
+
+def _is_tip_row(row) -> bool:
+    send = getattr(row, 'send_transaction', None) if getattr(row, 'send_transaction_id', None) else None
+    return send is not None and str(send.idempotency_key or '').startswith('tip-')
+
+
 def _counterparty(row, direction: str) -> tuple[str | None, str]:
     """R5 key precedence: business > Confío user > address; the viewer's side
     is excluded so the key names the OTHER party."""
@@ -316,7 +324,10 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
         kind = 'donation' if direction == 'sent' else 'income_person'
     elif ttype in ('send', 'exchange'):
         batch_kind = getattr(getattr(row, 'sponsored_batch', None), 'kind', '') or ''
-        if batch_kind in ('stock_buy', 'crypto_buy'):
+        if _is_tip_row(row):
+            # A Propina: one "Propinas" line, never a person's name or wallet.
+            kind = 'p2p_send' if direction == 'sent' else 'income_person'
+        elif batch_kind in ('stock_buy', 'crypto_buy'):
             kind = 'investment_in'
         elif batch_kind in ('stock_sell', 'crypto_sell'):
             kind = 'investment_out'
@@ -332,7 +343,9 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
         return None
 
     key, name = (None, '')
-    if kind in COUNTERPARTY_KINDS:
+    if kind in COUNTERPARTY_KINDS and _is_tip_row(row):
+        key, name = TIP_COUNTERPARTY_KEY, 'Propinas'
+    elif kind in COUNTERPARTY_KINDS:
         if ttype == 'local_transfer' and direction == 'received':
             key, name = _payin_counterparty(row), row.sender_display_name or ''
         elif ttype == 'local_transfer':
@@ -471,7 +484,7 @@ def _ramp_arrival_hashes(scope) -> set:
     return hashes
 
 
-ROW_RELATIONS = ('ramp_transaction', 'conversion', 'sponsored_batch',
+ROW_RELATIONS = ('ramp_transaction', 'conversion', 'sponsored_batch', 'send_transaction',
                  'sender_user', 'counterparty_user', 'sender_business', 'counterparty_business',
                  'local_money_flow__infinia_journey__funding_credit__payin_admission')
 

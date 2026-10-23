@@ -64,6 +64,7 @@ import { getTierMeta } from '../components/StatusTierBadge';
 import { formatTokenLabel, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
 import { formatDecimal, formatPercent, parseAmountInput } from '../utils/numberLocale';
 import { investmentTitle, isInvestmentMovement } from '../utils/investmentMovement';
+import { isTipTransaction } from '../utils/tips';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
 // Color palette
@@ -1321,7 +1322,9 @@ export const AccountDetailScreen = () => {
 
     // Determine if counterparty is an external wallet (no phone + address present + no user)
     const isStockMovement = isInvestmentMovement(transaction.description);
-    const isExternalSent = !isStockMovement && transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
+    // A Propina is between Comunidad members: never an external wallet.
+    const isTip = isTipTransaction(transaction);
+    const isExternalSent = !isStockMovement && !isTip && transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
     // senderType is the server's own answer about the SENDER, so it settles a
     // received row on its own. The fallback below cannot: hasCounterpartyUser
     // is derived from counterpartyUser, which on a send row is the RECIPIENT —
@@ -1329,7 +1332,7 @@ export const AccountDetailScreen = () => {
     // phone, no user" and call a known Confío sender an external wallet.
     const senderTypeKnown = typeof (transaction as any).senderType === 'string'
       && !!(transaction as any).senderType;
-    const isExternalReceived = !isStockMovement && transaction.type === 'received' && (
+    const isExternalReceived = !isStockMovement && !isTip && transaction.type === 'received' && (
       senderTypeKnown
         ? (transaction as any).senderType.toLowerCase() === 'external'
         : (!transaction.fromPhone && transaction.senderAddress && !(transaction as any).hasCounterpartyUser)
@@ -1353,10 +1356,10 @@ export const AccountDetailScreen = () => {
       const stockTitle = investmentTitle(transaction.description);
       switch (transaction.type) {
         case 'received':
-          baseTitle = stockTitle || `Recibido de ${contactInfo.displayName}`;
+          baseTitle = isTip ? `Propina de ${contactInfo.displayName}` : stockTitle || `Recibido de ${contactInfo.displayName}`;
           break;
         case 'sent':
-          baseTitle = stockTitle || `Enviado a ${contactInfo.displayName}`;
+          baseTitle = isTip ? `Propina a ${contactInfo.displayName}` : stockTitle || `Enviado a ${contactInfo.displayName}`;
           break;
         case 'exchange':
           baseTitle = `Conversión ${transaction.from} → ${transaction.to}`;

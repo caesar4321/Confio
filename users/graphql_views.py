@@ -224,6 +224,13 @@ def _send_fee_bps(send):
         receipt.get('fee_bps') if isinstance(receipt, dict) else None)
 
 
+def _is_tip_row(row) -> bool:
+    """A Propina row of the unified ledger (a send keyed tip-…)."""
+    from send.schema import is_tip_send
+    return (getattr(row, 'transaction_type', '') == 'send' and bool(getattr(row, 'send_transaction_id', None))
+            and is_tip_send(row.send_transaction))
+
+
 class UnifiedTransactionType(DjangoObjectType):
     """GraphQL type for unified transaction view"""
     
@@ -439,6 +446,23 @@ class UnifiedTransactionType(DjangoObjectType):
             )
             return str(net or self.amount)
         return self.amount_for_direction('received')
+
+    # A Propina: pseudonyms only, no wallet address for either side (nor the
+    # hash, which names both on-chain), never "external". `self` is the row.
+    def resolve_sender_address(self, info):
+        return '' if _is_tip_row(self) else self.sender_address
+
+    def resolve_counterparty_address(self, info):
+        return '' if _is_tip_row(self) else self.counterparty_address
+
+    def resolve_sender_type(self, info):
+        return 'user' if _is_tip_row(self) else self.sender_type
+
+    def resolve_counterparty_type(self, info):
+        return 'user' if _is_tip_row(self) else self.counterparty_type
+
+    def resolve_transaction_hash(self, info):
+        return '' if _is_tip_row(self) else self.transaction_hash
 
     def resolve_sender_user(self, info):
         from send.schema import tip_safe_user
