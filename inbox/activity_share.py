@@ -834,8 +834,12 @@ def activity_headline(activity: dict) -> str:
     that only render a post's text: "Compró NVDA · US$5.00"."""
     kind = activity.get('kind')
     verb = KIND_VERBS.get(kind, 'Compartió una actividad')
+    from users.number_format import format_amount
+
+    # In the reader's country format (users/number_format: the request's
+    # reader, or the notification's recipient via reading_as).
     amount = activity.get('amount_usd') if activity.get('show_amount', True) else None
-    money = f'US${amount}' if amount else None
+    money = f'US${format_amount(amount, trim=False)}' if amount else None
     if kind in BUY_KINDS + SELL_KINDS:
         parts = [f"{verb} {activity.get('ticker') or ''}".strip()]
         if money:
@@ -843,7 +847,7 @@ def activity_headline(activity: dict) -> str:
         if kind in SELL_KINDS and activity.get('pnl_pct') is not None:
             pct = _dec(activity['pnl_pct'])
             if pct is not None:
-                parts.append(f"{'+' if pct >= 0 else ''}{pct}%")
+                parts.append(f"{'+' if pct >= 0 else ''}{format_amount(pct, trim=False)}%")
         return ' · '.join(parts)
     if kind in (TOP_UP, WITHDRAW):
         parts = [f'{verb} {money}' if money else verb]

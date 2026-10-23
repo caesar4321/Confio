@@ -79,3 +79,18 @@ def track_activity(mutation_class):
 
     mutation_class.mutate = mutate_with_tracking
     return mutation_class
+
+
+class ReaderCountryMiddleware:
+    """Text the server writes for this request (Comunidad snippets, post
+    bodies) uses the signed-in reader's number format (users/number_format).
+    Set on every top-level field so a reused worker never keeps the previous
+    request's reader."""
+
+    def resolve(self, next, root, info: GraphQLResolveInfo, **args):
+        if root is None:
+            from users.number_format import set_reader
+
+            user = getattr(info.context, 'user', None)
+            set_reader(user if user is not None and getattr(user, 'is_authenticated', False) else None)
+        return next(root, info, **args)

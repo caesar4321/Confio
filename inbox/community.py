@@ -2184,7 +2184,6 @@ def notify_followers(content_item_id: int) -> int:
     author = item.owner_user
     blocked = block_relation_ids(author)
     title = f'{author_handle(author)} publicó'
-    message = post_notification_text(item)
     data = {'content_item_id': item.id, 'author_id': author.id}
     sent = 0
     follows = (
@@ -2203,7 +2202,12 @@ def notify_followers(content_item_id: int) -> int:
         still_following = CommunityFollow.objects.filter(id=follow.id, notify=True).exists()
         if not still_following or is_blocked_between(author.id, follow.follower_id):
             continue
-        _notify(follow.follower, NotificationType.COMMUNITY_FOLLOWED_POST, title, message,
+        from users.number_format import reading_as
+
+        # Each follower reads the amounts in their own country's format.
+        with reading_as(follow.follower):
+            text = post_notification_text(item)
+        _notify(follow.follower, NotificationType.COMMUNITY_FOLLOWED_POST, title, text,
                 action_url=_post_link(item.id), data=data)
         sent += 1
     # Taken down while these went out: its takedown erased nothing yet.

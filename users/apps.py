@@ -7,6 +7,14 @@ class UsersConfig(AppConfig):
     def ready(self):
         import users.signals
         import users.payroll_sync
+
+        # Every request starts with no reader country (users/number_format):
+        # a worker thread never carries the previous request's into this one.
+        from django.core.signals import request_started
+
+        from .number_format import set_reader
+        request_started.connect(lambda **kwargs: set_reader(None), weak=False,
+                                dispatch_uid='users.number_format.reset_reader')
         
         # Eagerly load the encryption master key on startup
         # Initialize encryption key manager early to fail fast if keys are missing

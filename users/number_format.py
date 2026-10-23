@@ -9,6 +9,8 @@ The country is the user's phone country. One notification can go to two
 people in different countries, so format per recipient, never once."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 COMMA_DECIMAL_COUNTRIES = frozenset({
@@ -17,8 +19,30 @@ COMMA_DECIMAL_COUNTRIES = frozenset({
 })
 
 
+# Who is reading text the server writes for a request (a feed snippet, a
+# post body): set per GraphQL request (users.graphql_middleware) and per
+# recipient while writing notifications (reading_as).
+_reader_country: ContextVar[str | None] = ContextVar('reader_country', default=None)
+
+
+def set_reader(user) -> None:
+    _reader_country.set((getattr(user, 'phone_country', None) or None) if user is not None else None)
+
+
+@contextmanager
+def reading_as(user):
+    token = _reader_country.set(getattr(user, 'phone_country', None) or None)
+    try:
+        yield
+    finally:
+        _reader_country.reset(token)
+
+
 def separators_for(user=None, country: str | None = None) -> tuple[str, str]:
-    """(group, decimal) for this user's (or this country's) format."""
+    """(group, decimal) for this user's (or this country's) format; with
+    neither, the current reader's."""
+    if user is None and country is None:
+        country = _reader_country.get()
     iso = (country or getattr(user, 'phone_country', None) or '').upper()
     return ('.', ',') if iso in COMMA_DECIMAL_COUNTRIES else (',', '.')
 
