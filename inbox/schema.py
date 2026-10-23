@@ -39,6 +39,7 @@ from .models import (
     VisibilityPolicy,
 )
 from . import activity_share, community, member_portfolio, profile_pictures
+from .dm_schema import DirectMessagesMutation, DirectMessagesQuery
 from .community import author_display_name
 from .official import all_official_channel_ids, official_channel_ids
 from .push_service import send_support_reply_push, send_support_staff_push
@@ -1913,6 +1914,12 @@ class InvestorProfileType(graphene.ObjectType):
     can_tip = graphene.Boolean(required=True)
 
 
+def _can_message(viewer, target) -> bool:
+    from . import direct_messages
+
+    return direct_messages.send_block(viewer, target) is None
+
+
 def build_investor_profile(viewer, user_id):
     target = community.followable_member(user_id, viewer=viewer)
     if target is None or community.is_blocked_between(viewer.id, target.id):
@@ -1928,7 +1935,7 @@ def build_investor_profile(viewer, user_id):
         mutual_count=count,
         mutuals=[InvestorProfileMutualType(user_id=str(m.id), username=community.author_display_name(m),
                                            avatar_url=avatars.get(m.id)) for m in mutuals],
-        can_message=False,
+        can_message=_can_message(viewer, target),
         can_tip=False,
     )
 
@@ -1978,7 +1985,7 @@ def build_member_profile(viewer, user_id):
     )
 
 
-class Query(graphene.ObjectType):
+class Query(DirectMessagesQuery, graphene.ObjectType):
     message_inbox = graphene.Field(MessageInboxType, context_key=graphene.String(required=False))
     message_inbox_unread_count = graphene.Int(context_key=graphene.String(required=False))
     message_channel_thread = graphene.Field(
@@ -3112,7 +3119,7 @@ class RequestPublicationImageUpload(graphene.Mutation):
         )
 
 
-class Mutation(graphene.ObjectType):
+class Mutation(DirectMessagesMutation, graphene.ObjectType):
     vote_on_content_poll = VoteOnContentPoll.Field()
     mark_message_channel_seen = MarkMessageChannelSeen.Field()
     react_to_message_content = ReactToMessageContent.Field()

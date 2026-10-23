@@ -134,6 +134,13 @@ def sweep_stuck_community_reviews_task():
         mark_picture_failed(submission_id, 'Out of review attempts', stale_before=picture_cutoff)
     for submission_id in picture_retry:
         review_profile_picture_task.delay(submission_id)
+    from .direct_messages import mark_failed as mark_dm_failed, stuck_ids as stuck_dm_ids
+
+    dm_retry, dm_exhausted, dm_cutoff = stuck_dm_ids()
+    for message_id in dm_exhausted:
+        mark_dm_failed(message_id, 'Out of review attempts', stale_before=dm_cutoff)
+    for message_id in dm_retry:
+        review_direct_message_task.delay(message_id)
     # Durable image cleanup: whatever the database says should no longer be
     # public is retried here until the delete lands, even if a fast-path task
     # was never queued or ran out of retries.
@@ -222,3 +229,19 @@ def snapshot_portfolio_returns_task(self):
     from .portfolio_returns import sync_all
 
     return sync_all(budget_seconds=40 * 60)
+
+
+@shared_task(bind=True, max_retries=COMMUNITY_REVIEW_MAX_RETRIES)
+def review_direct_message_task(self, message_id: int):
+    """Mensajes: a message reaches the other person only once approved."""
+    from .community import ReviewUnavailable
+    from .direct_messages import mark_failed, run_review
+
+    try:
+        return run_review(message_id)
+    except ReviewUnavailable as exc:
+        if self.request.retries >= COMMUNITY_REVIEW_MAX_RETRIES:
+            mark_failed(message_id, str(exc), claim=getattr(exc, 'claim', None))
+            return 'failed'
+        # Short backoff: someone is waiting in the chat.
+        raise self.retry(exc=exc, countdown=2 * (2 ** self.request.retries))

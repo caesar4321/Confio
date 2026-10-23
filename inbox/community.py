@@ -206,6 +206,13 @@ def author_display_name(user) -> str:
         return ANONYMOUS_MEMBER
     if username_is_generated(user):
         return pseudonym(user)
+    from . import dm_gate
+
+    # A username can't carry what a message can't: a phone number or a
+    # handle chosen as a username would otherwise reach every byline, chat
+    # header and push unreviewed.
+    if dm_gate.username_unsafe(user.username):
+        return pseudonym(user)
     return user.username
 
 
@@ -1796,7 +1803,11 @@ def block_member(user, target_id) -> None:
     # Anyone whose content you can see, or who follows you (a follower with
     # no posts still reaches you through notifications).
     follows_you = CommunityFollow.objects.filter(follower_id=target_id, followed_id=user.id).exists()
-    if not has_visible_content(target_id) and not follows_you:
+    from .direct_messages import conversation_between
+
+    # Someone who wrote to you (Mensajes) is reachable too, posts or not.
+    in_chat = conversation_between(user.id, target_id) is not None
+    if not has_visible_content(target_id) and not follows_you and not in_chat:
         raise CommunityPostError('not_found', 'No encontramos a esa persona.')
     CommunityBlock.objects.get_or_create(blocker=user, blocked_id=target_id)
     drop_follows_between(user.id, target_id)

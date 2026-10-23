@@ -5079,6 +5079,83 @@ export const GET_INVESTOR_RETURNS = gql`
   }
 `;
 
+// ── Mensajes (direct messages): own operations, so an older server only loses the chat.
+const DIRECT_MESSAGE_FIELDS = `
+  id
+  body
+  kind
+  tipAmount
+  fromMe
+  status
+  reason
+  clientKey
+  createdAt
+`;
+
+const DIRECT_CONVERSATION_FIELDS = `
+  id
+  status
+  isIncomingRequest
+  unreadCount
+  clearedAt
+  sendBlock
+  sendBlockMessage
+  other {
+    userId
+    username
+    avatarUrl
+  }
+  lastMessage {
+    ${DIRECT_MESSAGE_FIELDS}
+  }
+`;
+
+export const GET_DIRECT_CONVERSATIONS = gql`
+  query GetDirectConversations($folder: String, $offset: Int, $limit: Int) {
+    directConversations(folder: $folder, offset: $offset, limit: $limit) {
+      ${DIRECT_CONVERSATION_FIELDS}
+    }
+  }
+`;
+
+export const GET_DIRECT_CONVERSATION = gql`
+  query GetDirectConversation($conversationId: ID!) {
+    directConversation(conversationId: $conversationId) {
+      ${DIRECT_CONVERSATION_FIELDS}
+    }
+  }
+`;
+
+export const GET_DIRECT_CONVERSATION_WITH = gql`
+  query GetDirectConversationWith($userId: ID!) {
+    directConversationWith(userId: $userId) {
+      ${DIRECT_CONVERSATION_FIELDS}
+    }
+  }
+`;
+
+export const GET_DIRECT_MESSAGES = gql`
+  query GetDirectMessages($conversationId: ID!, $beforeId: ID, $limit: Int, $changedSince: DateTime) {
+    directMessages(conversationId: $conversationId, beforeId: $beforeId, limit: $limit, changedSince: $changedSince) {
+      hasMore
+      serverTime
+      messages {
+        ${DIRECT_MESSAGE_FIELDS}
+      }
+    }
+  }
+`;
+
+export const GET_DIRECT_UNREAD_SUMMARY = gql`
+  query GetDirectUnreadSummary {
+    directUnreadSummary {
+      unreadMessages
+      requests
+      dmsEnabled
+    }
+  }
+`;
+
 // The member's own cover image and its review state (myProfilePicture, kind cover).
 export const GET_MY_COVER_PICTURE = gql`
   query GetMyCoverPicture {

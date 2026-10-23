@@ -20,6 +20,9 @@ from .models import (
     CommunityFollow,
     CommunityProfileSettings,
     PortfolioDailySnapshot,
+    DirectConversation,
+    DirectMessage,
+    DirectMessageReport,
     AvatarType,
     Channel,
     ChannelMembership,
@@ -1233,6 +1236,40 @@ class CommunityActivityShareAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class ReadOnlyAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(DirectConversation)
+class DirectConversationAdmin(ReadOnlyAdmin):
+    """Mensajes conversations. Staff open them only to handle reports."""
+    list_display = ('id', 'user_a', 'user_b', 'status', 'requested_by', 'last_message_at', 'created_at')
+    list_filter = ('status',)
+    search_fields = ('user_a__username', 'user_b__username')
+    list_select_related = ('user_a', 'user_b', 'requested_by')
+
+
+@admin.register(DirectMessage)
+class DirectMessageAdmin(ReadOnlyAdmin):
+    list_display = ('id', 'conversation', 'sender', 'kind', 'review_status', 'category', 'decided_by_model',
+                    'escalated', 'created_at')
+    list_filter = ('review_status', 'category', 'kind', 'escalated', 'decided_by_model')
+    search_fields = ('sender__username', 'body')
+    list_select_related = ('sender', 'conversation')
+    readonly_fields = [f.name for f in DirectMessage._meta.fields]
+
+
+@admin.register(DirectMessageReport)
+class DirectMessageReportAdmin(ReadOnlyAdmin):
+    list_display = ('id', 'message', 'reporter', 'reason', 'created_at')
+    search_fields = ('reporter__username', 'message__sender__username')
+    list_select_related = ('message', 'reporter')
 
 
 @admin.register(PortfolioDailySnapshot)

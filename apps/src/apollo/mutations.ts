@@ -1385,6 +1385,70 @@ export const SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR = gql`
   }
 `;
 
+export const SEND_DIRECT_MESSAGE = gql`
+  mutation SendDirectMessage($body: String!, $conversationId: ID, $recipientUserId: ID, $clientKey: String) {
+    sendDirectMessage(body: $body, conversationId: $conversationId, recipientUserId: $recipientUserId, clientKey: $clientKey) {
+      success
+      error
+      code
+      conversationId
+      message {
+        id
+        body
+        kind
+        tipAmount
+        fromMe
+        status
+        reason
+        clientKey
+        createdAt
+      }
+    }
+  }
+`;
+
+export const ACCEPT_DIRECT_REQUEST = gql`
+  mutation AcceptDirectRequest($conversationId: ID!) {
+    acceptDirectRequest(conversationId: $conversationId) {
+      success
+    }
+  }
+`;
+
+export const DELETE_DIRECT_CONVERSATION = gql`
+  mutation DeleteDirectConversation($conversationId: ID!) {
+    deleteDirectConversation(conversationId: $conversationId) {
+      success
+    }
+  }
+`;
+
+export const MARK_DIRECT_CONVERSATION_READ = gql`
+  mutation MarkDirectConversationRead($conversationId: ID!, $upTo: DateTime) {
+    markDirectConversationRead(conversationId: $conversationId, upTo: $upTo) {
+      success
+    }
+  }
+`;
+
+export const REPORT_DIRECT_MESSAGE = gql`
+  mutation ReportDirectMessage($messageId: ID!, $reason: String) {
+    reportDirectMessage(messageId: $messageId, reason: $reason) {
+      success
+      error
+    }
+  }
+`;
+
+export const SET_DIRECT_MESSAGES_ENABLED = gql`
+  mutation SetDirectMessagesEnabled($enabled: Boolean!) {
+    setDirectMessagesEnabled(enabled: $enabled) {
+      success
+      enabled
+    }
+  }
+`;
+
 export const UPDATE_INVESTOR_BIO = gql`
   mutation UpdateInvestorBio($bio: String!) {
     updateInvestorBio(bio: $bio) {

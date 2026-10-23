@@ -230,7 +230,8 @@ class MutualFollowersTests(ProfileTestBase):
         profile = Query().resolve_investor_profile(MockInfo(viewer), str(target.id))
         self.assertEqual(profile.mutual_count, 1)
         self.assertEqual([m.user_id for m in profile.mutuals], [str(both.id)])
-        self.assertFalse(profile.can_message or profile.can_tip)
+        self.assertTrue(profile.can_message)     # Mensajes is live
+        self.assertFalse(profile.can_tip)        # Propinas not yet
 
     def test_a_blocked_member_has_no_profile(self):
         target, viewer = make_user(), make_user()

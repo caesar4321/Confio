@@ -875,6 +875,9 @@ class CommunityProfileSettings(models.Model):
     # The investor profile bio, AI-screened before it is saved.
     bio = models.CharField(max_length=140, blank=True, default='')
     bio_updated_at = models.DateTimeField(null=True, blank=True)
+    # Direct messages from people without a conversation yet. Off: no new
+    # conversations; existing ones stay readable and repliable.
+    dms_enabled = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -918,6 +921,129 @@ class PortfolioDailySnapshot(models.Model):
 
     def __str__(self):
         return f'{self.wallet} {self.day} {self.daily_return if self.ledger_trusted else self.untrusted_reason}'
+
+
+class DirectConversationStatus(models.TextChoices):
+    # First contact from someone the recipient doesn't follow: in their
+    # Solicitudes until they accept it (or reply).
+    REQUEST = 'request', 'Request'
+    ACTIVE = 'active', 'Active'
+    # The recipient deleted the request: the sender's messages go nowhere.
+    DECLINED = 'declined', 'Declined'
+
+
+class DirectConversation(models.Model):
+    """One private conversation between two members (Mensajes). Every
+    message is AI-reviewed before the other person can see it."""
+    # user_a.id < user_b.id: one conversation per pair.
+    user_a = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    user_b = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    status = models.CharField(max_length=10, choices=DirectConversationStatus.choices,
+                              default=DirectConversationStatus.REQUEST)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    # The last APPROVED message: what both lists sort by. Null until one is.
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user_a', 'user_b'], name='inbox_dm_one_per_pair'),
+            models.CheckConstraint(check=Q(user_a__lt=models.F('user_b')), name='inbox_dm_ordered_pair'),
+        ]
+        indexes = [
+            models.Index(fields=['requested_by', 'created_at'], name='inbox_dm_requested_idx'),
+        ]
+
+    def other(self, user_id):
+        return self.user_b if user_id == self.user_a_id else self.user_a
+
+    def other_id(self, user_id):
+        return self.user_b_id if user_id == self.user_a_id else self.user_a_id
+
+    def __str__(self):
+        return f'DM {self.id} {self.user_a_id}<->{self.user_b_id} {self.status}'
+
+
+class DirectConversationMember(models.Model):
+    """Each side's own view: what they read up to, and whether they
+    deleted (hid) the conversation from their list."""
+    conversation = models.ForeignKey(DirectConversation, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='dm_memberships')
+    last_read_at = models.DateTimeField(null=True, blank=True)
+    hidden = models.BooleanField(default=False)
+    # Messages before this are gone for this member (they deleted the chat).
+    cleared_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['conversation', 'user'], name='inbox_dm_member_uniq'),
+        ]
+        indexes = [models.Index(fields=['user', 'hidden'], name='inbox_dm_member_user_idx')]
+
+
+class DirectMessageReview(models.TextChoices):
+    PENDING = 'pending', 'Pending'
+    APPROVED = 'approved', 'Approved'
+    REJECTED = 'rejected', 'Rejected'
+    FAILED = 'failed', 'Failed'
+
+
+class DirectMessage(models.Model):
+    """A message. Only APPROVED ones ever reach the other person; the
+    sender sees their own in every state (with the reason when refused)."""
+    KIND_TEXT = 'text'
+    KIND_TIP = 'tip'
+    KINDS = [(KIND_TEXT, 'Text'), (KIND_TIP, 'Tip')]
+
+    conversation = models.ForeignKey(DirectConversation, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='dm_sent')
+    body = models.TextField(max_length=1000, blank=True, default='')
+    kind = models.CharField(max_length=8, choices=KINDS, default=KIND_TEXT)
+    # A tip's money movement (Propinas); null for text.
+    unified_transaction = models.ForeignKey('users.UnifiedTransactionTable', on_delete=models.SET_NULL,
+                                            null=True, blank=True, related_name='+')
+    tip_amount = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    # The app's idempotency key: a retried send returns the same message.
+    client_key = models.CharField(max_length=64, blank=True, default='')
+    review_status = models.CharField(max_length=10, choices=DirectMessageReview.choices,
+                                     default=DirectMessageReview.PENDING)
+    category = models.CharField(max_length=32, blank=True, default='')
+    reason = models.CharField(max_length=280, blank=True, default='')
+    decided_by_model = models.CharField(max_length=64, blank=True, default='')
+    escalated = models.BooleanField(default=False)
+    verdicts = models.JSONField(default=list, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    claim_token = models.CharField(max_length=32, blank=True, default='')
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['sender', 'client_key'], condition=~Q(client_key=''),
+                                    name='inbox_dm_client_key_uniq'),
+        ]
+        indexes = [
+            models.Index(fields=['conversation', 'id'], name='inbox_dm_msg_conv_idx'),
+            models.Index(fields=['sender', 'created_at'], name='inbox_dm_msg_sender_idx'),
+            models.Index(fields=['review_status', 'updated_at'], name='inbox_dm_msg_status_idx'),
+        ]
+
+    def __str__(self):
+        return f'DM message {self.id} in {self.conversation_id}: {self.review_status}'
+
+
+class DirectMessageReport(models.Model):
+    message = models.ForeignKey(DirectMessage, on_delete=models.CASCADE, related_name='reports')
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    reason = models.CharField(max_length=280, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['message', 'reporter'], name='inbox_dm_report_uniq'),
+        ]
 
 
 class ActivityShareIntentStatus(models.TextChoices):

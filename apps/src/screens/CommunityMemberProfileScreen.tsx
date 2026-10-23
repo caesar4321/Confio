@@ -562,6 +562,7 @@ export const CommunityMemberProfileScreen = () => {
         onMore={openMore}
         onEditBio={() => setBioOpen(true)}
         onOpenMutual={(id) => navigation.push('CommunityMemberProfile', { userId: id })}
+        onMessage={() => navigation.navigate('DirectChat', { userId, username: profile.username })}
         refreshKey={returnsRefresh}
       />
       {locked && access ? (

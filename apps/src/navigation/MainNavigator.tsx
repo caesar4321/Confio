@@ -127,6 +127,8 @@ import MyMarketStoreScreen from '../screens/MyMarketStoreScreen';
 import MarketProductEditScreen from '../screens/MarketProductEditScreen';
 import MyCommunityPostsScreen from '../screens/MyCommunityPostsScreen';
 import CommunityMemberProfileScreen from '../screens/CommunityMemberProfileScreen';
+import DirectInboxScreen from '../screens/DirectInboxScreen';
+import DirectChatScreen from '../screens/DirectChatScreen';
 import BlockedMembersScreen from '../screens/BlockedMembersScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 
@@ -251,6 +253,23 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="CommunityMemberProfile"
           component={CommunityMemberProfileScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="DirectInbox"
+          component={DirectInboxScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="DirectChat"
+          component={DirectChatScreen}
+          // One screen per conversation: opening another chat (a push, a
+          // profile) never reuses this one's state or sends to its recipient.
+          getId={({ params }) => params?.conversationId ?? (params?.userId ? `user-${params.userId}` : undefined)}
           options={{
             headerShown: false,
           }}
