@@ -744,6 +744,10 @@ def _notify_ramp_status(ramp_tx: RampTransaction, *, created: bool, previous_sta
     wallet_amount_display = str(wallet_amount) if wallet_amount is not None else ''
     wallet_currency_display = (ramp_tx.final_currency or 'CUSD').strip()
     amount_display = fiat_amount_display if is_on_ramp and fiat_amount_display else wallet_amount_display
+    # The data keeps machine numbers (the app parses them); the sentence is
+    # written in the actor's country format (users/number_format).
+    from users.number_format import format_amount
+    amount_words = format_amount(amount_display, ramp_tx.actor_user, decimals=6) if amount_display else ''
     token_display = fiat_currency_display if is_on_ramp and fiat_currency_display else wallet_currency_display
 
     notification_type = None
@@ -772,11 +776,11 @@ def _notify_ramp_status(ramp_tx: RampTransaction, *, created: bool, previous_sta
     elif previous_status != ramp_tx.status and ramp_tx.status == 'PROCESSING' and previous_status == 'PENDING':
         notification_type = NotificationTypeChoices.RAMP_PROCESSING
         title = 'Pago recibido'
-        message = f'Recibimos tu pago de {amount_display} {token_display}. Tu {label} se acreditará en breve.' if is_on_ramp else f'Recibimos tu solicitud de {label}. Se acreditará en breve.'
+        message = f'Recibimos tu pago de {amount_words} {token_display}. Tu {label} se acreditará en breve.' if is_on_ramp else f'Recibimos tu solicitud de {label}. Se acreditará en breve.'
     elif previous_status != ramp_tx.status and ramp_tx.status == 'COMPLETED':
         notification_type = NotificationTypeChoices.RAMP_COMPLETED
         title = 'Operación completada'
-        message = f'Tu {label} de {amount_display} {token_display} se completó.'.strip()
+        message = f'Tu {label} de {amount_words} {token_display} se completó.'.strip()
     elif previous_status != ramp_tx.status and ramp_tx.status in {'FAILED', 'AML_REVIEW'}:
         notification_type = NotificationTypeChoices.RAMP_FAILED
         title = 'Operación con problema'

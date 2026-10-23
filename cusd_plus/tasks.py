@@ -528,6 +528,7 @@ def monitor_bridge_arrivals():
 
 def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: int,
                              min_deposit) -> None:
+    from users.number_format import format_usd
     from decimal import ROUND_DOWN as _RD
 
     from . import vault as cp_vault
@@ -674,7 +675,7 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
                     business=account.business if account.account_type == 'business' else None,
                     notification_type=NotifType.SEND_RECEIVED,
                     title='Depósito recibido',
-                    message=f'Recibiste ${amount_usd:.2f} en tu Confío Dollar+.',
+                    message=f'Recibiste {format_usd(amount_usd, account.user)} en tu Confío Dollar+.',
                     data={
                         'transaction_type': 'deposit',
                         'currency': 'CUSD_PLUS',
@@ -1212,12 +1213,14 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
         # still the best signal available and right for the large majority. A
         # phone-eligible holder behind a blocked IP gets a slightly optimistic
         # message rather than a stuck row, which is the milder failure.
+        from users.number_format import format_usd
+
         from .eligibility import is_ondo_eligible
         eligible = (not is_business) and is_ondo_eligible(account.user)
         if eligible:
-            message = f'Recibiste ${amount_usd:.2f} (USDT). Se sumará automáticamente a tu ahorro.'
+            message = f'Recibiste {format_usd(amount_usd, account.user)} (USDT). Se sumará automáticamente a tu ahorro.'
         else:
-            message = f'Recibiste ${amount_usd:.2f} (USDT). Se convertirá automáticamente a Confío Dollar.'
+            message = f'Recibiste {format_usd(amount_usd, account.user)} (USDT). Se convertirá automáticamente a Confío Dollar.'
         from payment_accounts.models import PaymentBridgeTransfer
         pending_bridges = list(PaymentBridgeTransfer.objects.filter(
             quote__confio_account=account, quote__source_address__iexact=to_addr,

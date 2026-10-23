@@ -8,6 +8,7 @@ from .models import Notification, NotificationType as NotificationTypeChoices
 from users.models import User, Account, Business
 from .fcm_service import send_push_notification
 from .token_display import token_label
+from users.number_format import format_amount
 import logging
 
 logger = logging.getLogger(__name__)
@@ -133,10 +134,10 @@ def create_transaction_notification(
     # Send notifications based on transaction type
     if transaction_type == 'send' and recipient_user:
         title = f"Payment Received"
-        message = f"You received {amount} {token_label(token_type)}"
+        message = f"You received {format_amount(amount, recipient_user, decimals=6)} {token_label(token_type)}"
         if sender_user:
             sender_name = sender_user.get_display_name()
-            message = f"You received {amount} {token_label(token_type)} from {sender_name}"
+            message = f"You received {format_amount(amount, recipient_user, decimals=6)} {token_label(token_type)} from {sender_name}"
         
         return create_notification(
             user=recipient_user,
@@ -155,7 +156,7 @@ def create_transaction_notification(
             user=sender_user,
             notification_type=NotificationTypeChoices.SEND_SENT,
             title="Payment Sent",
-            message=f"You sent {amount} {token_label(token_type)} to {recipient_name}",
+            message=f"You sent {format_amount(amount, sender_user, decimals=6)} {token_label(token_type)} to {recipient_name}",
             data=data,
             related_object_type=transaction_model,
             related_object_id=transaction_id,
@@ -167,7 +168,7 @@ def create_transaction_notification(
             user=sender_user,
             notification_type=NotificationTypeChoices.PAYMENT_SENT,
             title="Payment Completed",
-            message=f"Your payment of {amount} {token_label(token_type)} was successful",
+            message=f"Your payment of {format_amount(amount, sender_user, decimals=6)} {token_label(token_type)} was successful",
             data=data,
             related_object_type=transaction_model,
             related_object_id=transaction_id,
@@ -185,7 +186,7 @@ def create_transaction_notification(
             business=business,  # Pass business context if provided
             notification_type=NotificationTypeChoices.CONVERSION_COMPLETED,
             title="Conversión completada",
-            message=f"Convertiste {from_amount} {from_token} a {to_amount} {to_token}",
+            message=f"Convertiste {format_amount(from_amount, sender_user, decimals=6)} {from_token} a {format_amount(to_amount, sender_user, decimals=6)} {to_token}",
             data=data,
             related_object_type=transaction_model,
             related_object_id=transaction_id,
@@ -206,7 +207,7 @@ def create_transaction_notification(
             business=business,
             notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
             title="Retiro USDC completado",
-            message=f"Retiraste {amount} USDC{dest_mask}",
+            message=f"Retiraste {format_amount(amount, sender_user, decimals=6)} USDC{dest_mask}",
             data=data,
             related_object_type=transaction_model or 'USDCWithdrawal',
             related_object_id=transaction_id,

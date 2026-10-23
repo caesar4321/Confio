@@ -339,13 +339,15 @@ def notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None
 def _notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None:
     """Create the earned notification only after reward state commits."""
 
+    from users.number_format import format_amount
+
     amount_str = f"{referee_confio:.2f}"
     friend_name = _user_label(referral.referrer_user) if referral.referrer_user else ""
     create_notification(
         user=referral.referred_user,
         notification_type=NotificationTypeChoices.REFERRAL_REWARD_READY,
         title="¡Ganaste tus $CONFIO!",
-        message=f"Ganaste {amount_str} $CONFIO de tu bono por referidos. Ya están guardados en tu cuenta.",
+        message=f"Ganaste {format_amount(referee_confio, referral.referred_user)} $CONFIO de tu bono por referidos. Ya están guardados en tu cuenta.",
         data={
             "referral_id": referral.id,
             "amount": amount_str,

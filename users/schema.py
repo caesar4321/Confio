@@ -5296,12 +5296,13 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 
 		cache.delete(cache_key)
 
+		from users.number_format import format_amount
 		try:
 			create_notification(
 				user=user,
 				notification_type=NotificationType.REFERRAL_REWARD_CLAIMED,
 				title="¡Recompensa reclamada!",
-				message=f"Depositamos {claim_amount:.2f} $CONFIO en tu billetera.",
+				message=f"Depositamos {format_amount(claim_amount, user, trim=False)} $CONFIO en tu billetera.",
 				data={
 					"amount": f"{claim_amount:.2f}",
 					"token_type": "CONFIO",

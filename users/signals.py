@@ -755,7 +755,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                         business=None,
                         notification_type=NotificationTypeChoices.PAYROLL_RECEIVED,
                         title="Pago de nómina recibido",
-                        message=f"Recibiste {_amt(_received)} {display_token} de {business.name}",
+                        message=f"Recibiste {_amt(_received, recipient_user)} {display_token} de {business.name}",
                         data={
                             'transaction_id': instance.internal_id,
                             'transaction_hash': instance.transaction_hash,
@@ -786,7 +786,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                             business=business,
                             notification_type=NotificationTypeChoices.PAYROLL_SENT,
                             title="Nómina enviada",
-                            message=f"Enviaste {_amt(_gross)} {display_token} a {recipient_name}",
+                            message=f"Enviaste {_amt(_gross, business_account.user)} {display_token} a {recipient_name}",
                             data={
                                 'transaction_id': instance.internal_id,
                                 'transaction_hash': instance.transaction_hash,

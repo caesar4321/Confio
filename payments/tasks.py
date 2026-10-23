@@ -93,6 +93,8 @@ def _send_bsc_payment_notifications(payment_id: int):
     # were built from `amount_str`, the gross. `net` was computed above and
     # then discarded, so every merchant was told they had received 0.9% more
     # than the contract actually transferred to them.
+    from users.number_format import format_amount
+
     net_str = f'{net:.2f}'.rstrip('0').rstrip('.')
     merchant_data = dict(common, amount=net_str, gross_amount=amount_str,
                          fee_amount=f'{(gross - net):.6f}')
@@ -104,7 +106,7 @@ def _send_bsc_payment_notifications(payment_id: int):
                 business=p.merchant_business,
                 notification_type=NotifType.PAYMENT_RECEIVED,
                 title='Pago recibido',
-                message=f'Recibiste {net_str} {token} de {payer_name}',
+                message=f'Recibiste {format_amount(net, p.merchant_account_user)} {token} de {payer_name}',
                 data=merchant_data,
                 related_object_type='PaymentTransaction',
                 related_object_id=str(p.internal_id),
@@ -116,7 +118,7 @@ def _send_bsc_payment_notifications(payment_id: int):
                 business=p.payer_business,
                 notification_type=NotifType.PAYMENT_SENT,
                 title='Pago enviado',
-                message=f'Pagaste {amount_str} {token} a {merchant_name}',
+                message=f'Pagaste {format_amount(gross, p.payer_user)} {token} a {merchant_name}',
                 data=dict(common),
                 related_object_type='PaymentTransaction',
                 related_object_id=str(p.internal_id),

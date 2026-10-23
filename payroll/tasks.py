@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def _notify_parties(item) -> None:
+    from users.number_format import format_amount
     from notifications import utils as notif_utils
     from notifications.models import NotificationType as NotifType
 
@@ -45,7 +46,7 @@ def _notify_parties(item) -> None:
             business=None,
             notification_type=NotifType.PAYROLL_RECEIVED,
             title='Pago de nómina recibido',
-            message=f'{business.name} te pagó {amount_str} dólares',
+            message=f'{business.name} te pagó {format_amount(amount_str, item.recipient_user)} dólares',
             data=dict(common),
             related_object_type='PayrollItem',
             related_object_id=str(item.internal_id),

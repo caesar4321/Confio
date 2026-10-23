@@ -24,6 +24,7 @@ from conversion.models import Conversion
 from p2p_exchange.models import P2PEscrow, P2PTrade
 from send.models import SendTransaction
 from notifications.models import NotificationType as NotifType
+from users.number_format import format_amount
 
 logger = logging.getLogger(__name__)
 
@@ -773,7 +774,7 @@ def scan_inbound_deposits():
                             business=account.business if account.account_type == 'business' else None,
                             notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
                             title="Depósito USDC recibido",
-                            message=f"Recibiste {human_amt} USDC. Abre la app para convertirlo a cUSD." if pending_auto_swap else f"Recibiste {human_amt} USDC",
+                            message=f"Recibiste {format_amount(human_amt, account.user, decimals=6)} USDC. Abre la app para convertirlo a cUSD." if pending_auto_swap else f"Recibiste {format_amount(human_amt, account.user, decimals=6)} USDC",
                             data=notif_data,
                             related_object_type='SendTransaction' if internal_id else 'USDCDeposit',
                             related_object_id=internal_id or str(deposit.internal_id),
@@ -835,7 +836,7 @@ def scan_inbound_deposits():
                         business=account.business if account.account_type == 'business' else None,
                         notification_type=NotificationTypeChoices.SEND_FROM_EXTERNAL,
                         title=f"Depósito {token_name} recibido",
-                        message=f"Recibiste {human_amt} {token_name}",
+                        message=f"Recibiste {format_amount(human_amt, account.user, decimals=6)} {token_name}",
                         data=notif_data,
                         related_object_type='SendTransaction',
                         related_object_id=internal_id, 
@@ -1034,7 +1035,7 @@ def scan_inbound_deposits():
                             business=account.business if account.account_type == 'business' else None,
                             notification_type=NotificationTypeChoices.SEND_FROM_EXTERNAL,
                             title='Depósito ALGO recibido',
-                            message=f"Recibiste {human_amt} ALGO. Abre la app para revisar la conversión automática." if pending_auto_swap else f"Recibiste {human_amt} ALGO",
+                            message=f"Recibiste {format_amount(human_amt, account.user, decimals=6)} ALGO. Abre la app para revisar la conversión automática." if pending_auto_swap else f"Recibiste {format_amount(human_amt, account.user, decimals=6)} ALGO",
                             data=notif_data,
                             related_object_type='SendTransaction',
                             related_object_id=internal_id,
@@ -1175,7 +1176,7 @@ def confirm_payment_transaction(self, internal_id: str, txid: str):
                     business=payment_tx.merchant_business,
                     notification_type=NotificationTypeChoices.PAYMENT_RECEIVED,
                     title="Pago recibido",
-                    message=f"Recibiste {amount_str} {display_token} de {payer_name}",
+                    message=f"Recibiste {format_amount(amount_str, payment_tx.merchant_account_user, decimals=6)} {display_token} de {payer_name}",
                     data={
                         'transaction_id': str(payment_tx.internal_id),
                         'internal_id': str(payment_tx.internal_id),
@@ -1200,7 +1201,7 @@ def confirm_payment_transaction(self, internal_id: str, txid: str):
                     business=payment_tx.payer_business,
                     notification_type=NotificationTypeChoices.PAYMENT_SENT,
                     title="Pago enviado",
-                    message=f"Pagaste {amount_str} {display_token} a {merchant_name}",
+                    message=f"Pagaste {format_amount(amount_str, payment_tx.payer_user, decimals=6)} {display_token} a {merchant_name}",
                     data={
                         'transaction_id': str(payment_tx.internal_id),
                         'internal_id': str(payment_tx.internal_id),
@@ -1566,7 +1567,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             business=s.recipient_business,
                             notification_type=NotifType.SEND_RECEIVED,
                             title="Dinero recibido",
-                            message=f"Recibiste {amount_str} {display_token} de {sender_name}",
+                            message=f"Recibiste {format_amount(amount_str, s.recipient_user, decimals=6)} {display_token} de {sender_name}",
                             data={
                                 'transaction_id': str(s.internal_id),
                                 'internal_id': str(s.internal_id),
@@ -1599,7 +1600,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             business=s.sender_business,
                             notification_type=NotifType.SEND_SENT,
                             title="Dinero enviado",
-                            message=f"Enviaste {amount_str} {display_token} a {recipient_name}",
+                            message=f"Enviaste {format_amount(amount_str, s.sender_user, decimals=6)} {display_token} a {recipient_name}",
                             data={
                                 'transaction_id': str(s.internal_id),
                                 'internal_id': str(s.internal_id),
@@ -1731,7 +1732,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             business=None,
                             notification_type=NotifType.PRESALE_PURCHASE_CONFIRMED,
                             title="Preventa completada",
-                            message=f"Tu compra de Preventa ({amount_str} CONFIO) fue confirmada",
+                            message=f"Tu compra de Preventa ({format_amount(amount_str, p.user, decimals=6)} CONFIO) fue confirmada",
                             data={
                                 'transaction_hash': p.transaction_hash,
                                 'confio_amount': str(p.confio_amount),
@@ -2058,7 +2059,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     if not notif:
                         # Fallback to direct notification (should rarely happen)
                         title = "Conversión completada"
-                        msg = f"Convertiste {amount_from} {from_token} a {amount_to} {to_token}"
+                        msg = (f"Convertiste {format_amount(amount_from, target_user, decimals=6)} {from_token} "
+                               f"a {format_amount(amount_to, target_user, decimals=6)} {to_token}")
                         notif_utils.create_notification(
                             user=target_user,
                             business=c.actor_business,
@@ -2132,7 +2134,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             business=u.actor_business,
                             notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_FAILED,
                             title="Retiro USDC fallido",
-                            message=f"Tu retiro de {u.amount} USDC falló",
+                            message=f"Tu retiro de {format_amount(u.amount, target_user, decimals=6)} USDC falló",
                             data={
                                 'transaction_id': str(u.transaction_id),
                                 'transaction_type': 'withdrawal',
@@ -2209,7 +2211,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                 business=u.actor_business,
                                 notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
                                 title="Retiro USDC completado",
-                                message=f"Tu retiro de {u.amount} USDC se ha completado",
+                                message=f"Tu retiro de {format_amount(u.amount, target_user, decimals=6)} USDC se ha completado",
                                 data={
                                     'transaction_id': str(u.transaction_id),
                                     'transaction_type': 'withdrawal',

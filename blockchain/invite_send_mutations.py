@@ -33,6 +33,7 @@ from django.utils import timezone
 from decimal import Decimal
 from users.jwt_context import get_jwt_business_context_with_validation
 from users.models import Account
+from users.number_format import format_amount
 
 logger = logging.getLogger(__name__)
 SPONSOR_SIGNER = get_kms_signer_from_settings()
@@ -233,7 +234,7 @@ class PrepareInviteForPhone(graphene.Mutation):
                 user=user,
                 notification_type=NotificationTypeChoices.SEND_INVITATION_SENT,
                 title='Invitación enviada',
-                message=f"Tu invitación para {phone} está activa por {display_amount}",
+                message=f"Tu invitación para {phone} está activa por {format_amount(amount, user, decimals=6)} {asset_type}",
                 data={
                     'transaction_type': 'send',
                     'amount': f'-{amount}',
@@ -1360,7 +1361,7 @@ class ClaimInviteForPhone(graphene.Mutation):
                                     user=inviter,
                                     notification_type=NotificationTypeChoices.SEND_INVITATION_CLAIMED,
                                     title='Invitación reclamada',
-                                    message=f"Tu invitación a {inv.phone_number} fue reclamada. Se enviaron {display_amount}.",
+                                    message=f"Tu invitación a {inv.phone_number} fue reclamada. Se enviaron {format_amount(inv.amount, inviter, decimals=6)} {inv.token_type}.",
                                     data={
                                         'transaction_type': 'send',
                                         'amount': f'-{inv.amount}',
@@ -1386,7 +1387,7 @@ class ClaimInviteForPhone(graphene.Mutation):
                                 user=user,
                                 notification_type=NotificationTypeChoices.INVITE_RECEIVED,
                                 title='Invitación recibida',
-                                message=f"Recibiste {display_amount} de {sender_name}",
+                                message=f"Recibiste {format_amount(inv.amount, user, decimals=6)} {inv.token_type} de {sender_name}",
                                 data={
                                     'transaction_type': 'send',
                                     'amount': f'+{inv.amount}',

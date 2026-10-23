@@ -38,6 +38,7 @@ def _account_for_bsc_address(addr: str):
 
 
 def _notify_send_parties(s) -> None:
+    from users.number_format import format_amount
     from notifications import utils as notif_utils
     from notifications.models import NotificationType as NotifType
     from users.phone_utils import to_international
@@ -122,7 +123,7 @@ def _notify_send_parties(s) -> None:
                 business=s.recipient_business,
                 notification_type=NotifType.SEND_RECEIVED,
                 title='Dinero recibido',
-                message=f'Recibiste {amount_str} {token} de {sender_name}',
+                message=f'Recibiste {format_amount(s.amount, s.recipient_user)} {token} de {sender_name}',
                 data=payload(s.recipient_business),
                 related_object_type='SendTransaction',
                 related_object_id=str(s.internal_id),
@@ -135,7 +136,7 @@ def _notify_send_parties(s) -> None:
                 business=s.sender_business,
                 notification_type=NotifType.SEND_SENT,
                 title='Dinero enviado',
-                message=f'Enviaste {amount_str} {token} a {recipient_name}',
+                message=f'Enviaste {format_amount(s.amount, s.sender_user)} {token} a {recipient_name}',
                 data=payload(s.sender_business),
                 related_object_type='SendTransaction',
                 related_object_id=str(s.internal_id),
@@ -151,6 +152,7 @@ def _notify_tip_parties(s, amount_str: str) -> None:
     either side."""
     from notifications import utils as notif_utils
     from notifications.models import NotificationType as NotifType
+    from users.number_format import format_usd
 
     sender_name = s.sender_display_name or 'Un inversor'
     recipient_name = s.recipient_display_name or 'un inversor'
@@ -174,7 +176,7 @@ def _notify_tip_parties(s, amount_str: str) -> None:
                 user=s.recipient_user, account=None, business=None,
                 notification_type=NotifType.SEND_RECEIVED,
                 title='Recibiste una propina',
-                message=f'{sender_name} te envió una propina de ${amount_str}',
+                message=f'{sender_name} te envió una propina de {format_usd(s.amount, s.recipient_user, trim=True)}',
                 data=common, related_object_type='SendTransaction', related_object_id=str(s.internal_id),
                 action_url=f'confio://send/{s.internal_id}',
             )
@@ -183,7 +185,7 @@ def _notify_tip_parties(s, amount_str: str) -> None:
                 user=s.sender_user, account=None, business=None,
                 notification_type=NotifType.SEND_SENT,
                 title='Propina enviada',
-                message=f'Le enviaste una propina de ${amount_str} a {recipient_name}',
+                message=f'Le enviaste una propina de {format_usd(s.amount, s.sender_user, trim=True)} a {recipient_name}',
                 data=common, related_object_type='SendTransaction', related_object_id=str(s.internal_id),
                 action_url=f'confio://send/{s.internal_id}',
             )

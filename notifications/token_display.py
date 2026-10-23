@@ -39,8 +39,9 @@ def token_label(token) -> str:
     return TOKEN_LABELS.get(raw.upper().replace('-', '_').replace(' ', '_'), raw)
 
 
-def amount_str(value) -> str:
-    """Money as a person writes it: two decimals, trailing zeros trimmed.
+def amount_str(value, user=None) -> str:
+    """Money as a person writes it: two decimals, trailing zeros trimmed,
+    with the separators of `user`'s country when given (users/number_format).
 
     Notification copy was interpolating raw Decimals straight out of the ORM,
     so a DecimalField(decimal_places=6) rendered a wage as '1.089000' or
@@ -52,5 +53,8 @@ def amount_str(value) -> str:
         d = Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     except Exception:  # noqa: BLE001 — copy must never raise
         return str(value)
+    if user is not None:
+        from users.number_format import format_amount
+        return format_amount(d, user)
     out = f'{d:.2f}'
     return out.rstrip('0').rstrip('.') if '.' in out else out
