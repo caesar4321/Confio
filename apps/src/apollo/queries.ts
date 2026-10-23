@@ -5041,6 +5041,57 @@ export const GET_COMMUNITY_MEMBER_CRYPTO_USD = gql`
   }
 `;
 
+// Perfil inversor header (bio, cover, who can see what): its own query, so an
+// older server only loses the new header, never the profile.
+export const GET_INVESTOR_PROFILE = gql`
+  query GetInvestorProfile($userId: ID!) {
+    investorProfile(userId: $userId) {
+      userId
+      isSelf
+      bio
+      coverUrl
+      access
+      mutualCount
+      mutuals {
+        userId
+        username
+        avatarUrl
+      }
+      canMessage
+      canTip
+    }
+  }
+`;
+
+// Investment-sleeve return for one range ('24h' | '7d' | '30d').
+export const GET_INVESTOR_RETURNS = gql`
+  query GetInvestorReturns($userId: ID!, $range: String!) {
+    investorReturns(userId: $userId, range: $range) {
+      range
+      pct
+      gainUsd
+      asOf
+      points {
+        at
+        pct
+      }
+    }
+  }
+`;
+
+// The member's own cover image and its review state (myProfilePicture, kind cover).
+export const GET_MY_COVER_PICTURE = gql`
+  query GetMyCoverPicture {
+    myProfilePicture(kind: "cover") {
+      url
+      latestStatus
+      latestReason
+      blockMessage
+      rulesRequired
+    }
+  }
+`;
+
 // Asset profile: its own query (an older server rejects the unknown field).
 export const GET_COMMUNITY_MEMBER_PORTFOLIO = gql`
   query GetCommunityMemberPortfolio($userId: ID!) {

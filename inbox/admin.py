@@ -1129,11 +1129,12 @@ class CommunityCommentReactionAdmin(admin.ModelAdmin):
 @admin.register(ProfilePictureSubmission)
 class ProfilePictureSubmissionAdmin(admin.ModelAdmin):
     """AI-screened profile pictures. Staff act after the fact: take one down."""
-    list_display = ('id', 'thumbnail', 'user', 'status', 'category', 'decided_by_model', 'escalated', 'created_at')
-    list_filter = ('status', 'category', 'escalated', 'decided_by_model')
+    list_display = ('id', 'thumbnail', 'user', 'kind', 'status', 'category', 'decided_by_model', 'escalated',
+                    'created_at')
+    list_filter = ('kind', 'status', 'category', 'escalated', 'decided_by_model')
     search_fields = ('user__username', 'user__email')
     list_select_related = ('user',)
-    readonly_fields = ('user', 'status', 'pending_key', 'public_url', 'preview', 'decided_by_model', 'escalated',
+    readonly_fields = ('user', 'kind', 'status', 'pending_key', 'public_url', 'preview', 'decided_by_model', 'escalated',
                        'category', 'reason', 'verdicts', 'attempts', 'reviewed_at', 'removed_by',
                        'created_at', 'updated_at')
     actions = ('take_down_pictures',)
@@ -1253,11 +1254,11 @@ class PortfolioDailySnapshotAdmin(admin.ModelAdmin):
 
 @admin.register(CommunityProfileSettings)
 class CommunityProfileSettingsAdmin(admin.ModelAdmin):
-    list_display = ('user', 'portfolio_hidden', 'updated_at')
+    list_display = ('user', 'portfolio_hidden', 'bio', 'updated_at')
     list_filter = ('portfolio_hidden',)
-    search_fields = ('user__username',)
+    search_fields = ('user__username', 'bio')
     list_select_related = ('user',)
-    readonly_fields = ('user', 'portfolio_hidden', 'updated_at')
+    readonly_fields = ('user', 'portfolio_hidden', 'portfolio_published_at', 'bio', 'bio_updated_at', 'updated_at')
 
     def has_add_permission(self, request):
         return False

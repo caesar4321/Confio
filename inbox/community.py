@@ -430,7 +430,7 @@ class ReviewImage:
 
 
 def load_pending_image(key: str, *, bucket: str | None = None, max_bytes: int | None = None,
-                       square: int | None = None) -> ReviewImage:
+                       square: int | None = None, size: tuple[int, int] | None = None) -> ReviewImage:
     """Download the private upload and re-encode it.
 
     Re-encoding strips EXIF (GPS location in phone photos) and anything that is
@@ -453,10 +453,10 @@ def load_pending_image(key: str, *, bucket: str | None = None, max_bytes: int | 
             if source.width * source.height > 40_000_000:
                 raise ValueError('Image too large')
             image = ImageOps.exif_transpose(source).convert('RGB')
-            if square:
-                # Avatars: centre-cropped square, so what was reviewed is
-                # exactly what every byline shows.
-                image = ImageOps.fit(image, (square, square))
+            if square or size:
+                # Avatars (square) and covers (wide): centre-cropped to the
+                # exact shape shown, so what was reviewed is what people see.
+                image = ImageOps.fit(image, size or (square, square))
             else:
                 image.thumbnail((1600, 1600))
             out = io.BytesIO()
@@ -1861,6 +1861,16 @@ def remove_member_content(user_id: int, *, category: str, reason: str) -> dict:
 
     user = User.all_objects.filter(id=user_id).first()
     pictures = profile_pictures.remove_picture(user) if user else False
+    from django.db import transaction
+
+    from .models import CommunityProfileSettings
+
+    # Under the member's lock, the same one set_bio writes under: a bio
+    # approved mid-removal can't land after it.
+    with transaction.atomic():
+        profile_pictures._lock_user(user_id)
+        CommunityProfileSettings.objects.filter(user_id=user_id).exclude(bio='').update(
+            bio='', bio_updated_at=timezone.now())
     return {'posts': len(posts), 'comments': len(comments), 'picture': pictures}
 
 
@@ -1872,7 +1882,7 @@ def members_owed_content_removal(limit: int = 100) -> list:
     (deleted accounts, active bans), in a stable order, then checks content."""
     from security.models import UserBan
 
-    from .models import ProfilePictureStatus, ProfilePictureSubmission
+    from .models import CommunityProfileSettings, ProfilePictureStatus, ProfilePictureSubmission
 
     now = timezone.now()
     banned_ids = set(
@@ -1886,11 +1896,13 @@ def members_owed_content_removal(limit: int = 100) -> list:
     pictures = ProfilePictureSubmission.objects.filter(
         status__in=[ProfilePictureStatus.ACTIVE, ProfilePictureStatus.PENDING],
     )
+    bios = CommunityProfileSettings.objects.exclude(bio='')
     deleted = (
         set(posts.filter(content_item__owner_user__deleted_at__isnull=False)
             .values_list('content_item__owner_user_id', flat=True))
         | set(comments.filter(author__deleted_at__isnull=False).values_list('author_id', flat=True))
         | set(pictures.filter(user__deleted_at__isnull=False).values_list('user_id', flat=True))
+        | set(bios.filter(user__deleted_at__isnull=False).values_list('user_id', flat=True))
     )
     banned = set()
     if banned_ids:
@@ -1899,6 +1911,7 @@ def members_owed_content_removal(limit: int = 100) -> list:
                 .values_list('content_item__owner_user_id', flat=True))
             | set(comments.filter(author_id__in=banned_ids).values_list('author_id', flat=True))
             | set(pictures.filter(user_id__in=banned_ids).values_list('user_id', flat=True))
+            | set(bios.filter(user_id__in=banned_ids).values_list('user_id', flat=True))
         )
     deleted.discard(None)
     banned.discard(None)
@@ -2166,16 +2179,150 @@ def portfolio_hidden(user) -> bool:
     return CommunityProfileSettings.objects.filter(user=user, portfolio_hidden=True).exists()
 
 
+# Portfolios are reciprocal: after making yours public you can't hide it
+# again for this long, so nobody publishes, looks at everyone else's, and
+# hides again.
+REPUBLISH_LOCK = timedelta(hours=24)
+REPUBLISH_LOCK_MESSAGE = (
+    'Hiciste público tu perfil hace poco. Podrás ocultarlo de nuevo 24 horas después de publicarlo.'
+)
+
+
 def set_portfolio_hidden(user, hidden: bool) -> bool:
+    """The member's own switch. Showing is always allowed; hiding within
+    REPUBLISH_LOCK of the last time they showed it raises CommunityPostError."""
+    from django.db import transaction
+
     from .models import CommunityProfileSettings
 
-    CommunityProfileSettings.objects.update_or_create(user=user, defaults={'portfolio_hidden': bool(hidden)})
-    return bool(hidden)
+    hidden = bool(hidden)
+    with transaction.atomic():
+        settings_row, _ = CommunityProfileSettings.objects.select_for_update().get_or_create(user=user)
+        if settings_row.portfolio_hidden == hidden:
+            return hidden
+        now = timezone.now()
+        if hidden and settings_row.portfolio_published_at and now - settings_row.portfolio_published_at < REPUBLISH_LOCK:
+            raise CommunityPostError('rate_limited', REPUBLISH_LOCK_MESSAGE)
+        settings_row.portfolio_hidden = hidden
+        if not hidden:
+            settings_row.portfolio_published_at = now
+        settings_row.save(update_fields=['portfolio_hidden', 'portfolio_published_at', 'updated_at'])
+    return hidden
+
+
+# Why a viewer can (or can't) see someone's investments.
+ACCESS_SELF = 'self'
+ACCESS_OPEN = 'open'
+ACCESS_TARGET_HIDDEN = 'target_hidden'
+ACCESS_VIEWER_HIDDEN = 'viewer_hidden'
+ACCESS_VIEWER_UNVERIFIED = 'viewer_unverified'
+
+
+def portfolio_access(target, viewer) -> str:
+    """Every Didit-verified member's asset profile is public unless they hid
+    it, and it is reciprocal: only a viewer whose own profile is public (so
+    verified, and not hidden) sees anyone else's. The member always sees
+    their own. Enforced here, server-side; the app only mirrors it."""
+    if viewer is not None and viewer.id == target.id:
+        return ACCESS_SELF
+    if not is_verified_member(target) or portfolio_hidden(target):
+        return ACCESS_TARGET_HIDDEN
+    if viewer is None or not is_verified_member(viewer):
+        return ACCESS_VIEWER_UNVERIFIED
+    if portfolio_hidden(viewer):
+        return ACCESS_VIEWER_HIDDEN
+    return ACCESS_OPEN
 
 
 def portfolio_visible_to(target, viewer) -> bool:
-    """Every Didit-verified member's asset profile is public unless they
-    hid it; the member always sees their own."""
-    if viewer is not None and viewer.id == target.id:
-        return True
-    return is_verified_member(target) and not portfolio_hidden(target)
+    return portfolio_access(target, viewer) in (ACCESS_SELF, ACCESS_OPEN)
+
+
+def mutual_followers(target_id, viewer, limit: int = 3) -> tuple[int, list]:
+    """(count, first few) of the people the viewer follows who also follow
+    the target: "N en común"."""
+    from .models import CommunityFollow
+
+    viewer_id = getattr(viewer, 'id', None)
+    if not viewer_id or viewer_id == target_id:
+        return 0, []
+    blocked = block_relation_ids(viewer)
+    qs = (CommunityFollow.objects
+          .filter(followed_id=target_id, follower__deleted_at__isnull=True,
+                  follower_id__in=CommunityFollow.objects.filter(follower_id=viewer_id).values('followed_id'))
+          .exclude(follower_id__in=blocked)
+          .select_related('follower').order_by('-created_at'))
+    return qs.count(), [row.follower for row in qs[:limit]]
+
+
+# ── Investor profile bio ─────────────────────────────────────────────────────
+
+BIO_MAX_CHARS = 140
+BIO_CHANGES_PER_DAY = 10
+BIO_FAILED_MESSAGE = 'No pudimos revisar tu descripción ahora. Inténtalo de nuevo en un momento.'
+
+
+def set_bio(user, business, bio: str) -> str:
+    """Save the member's bio after the same AI review as posts, synchronously
+    (a sentence reviews in seconds). Empty clears it without review. Fails
+    closed: no verdict, no change."""
+    from django.core.cache import cache
+
+    from .models import CommunityProfileSettings
+
+    bio = ' '.join((bio or '').split())
+    if business is not None:
+        raise CommunityPostError('blocked', 'Tu descripción se cambia desde tu cuenta personal.')
+    if bio:
+        block = author_block(user)
+        if block:
+            raise CommunityPostError('blocked', block)
+        if not has_accepted_rules(user):
+            raise CommunityPostError('rules_required', 'Acepta las normas de la comunidad para escribir tu descripción.')
+        if len(bio) > BIO_MAX_CHARS:
+            raise CommunityPostError('too_long', f'Tu descripción supera los {BIO_MAX_CHARS} caracteres.')
+        if URL_RE.search(bio):
+            raise CommunityPostError('links', LINK_REASON)
+        key = f'community-bio:{user.id}:{timezone.now():%Y%m%d}'
+        try:
+            cache.add(key, 0, timeout=86400)
+            if cache.incr(key) > BIO_CHANGES_PER_DAY:
+                raise CommunityPostError('rate_limited', 'Llegaste al límite de cambios de hoy. Vuelve mañana.')
+        except CommunityPostError:
+            raise
+        except Exception:
+            logger.exception('Bio counter unavailable', extra={'user_id': user.id})
+            raise CommunityPostError('unavailable', BIO_FAILED_MESSAGE)
+        context = ('This is a member\'s short public PROFILE BIO (one line under their name on their investor '
+                   'profile), not a post. Apply the same policy.\n')
+        try:
+            verdict = _first_pass(bio, None, context)
+            if _needs_escalation(verdict):
+                verdict = _escalation(bio, None, context)
+        except ReviewUnavailable:
+            raise CommunityPostError('unavailable', BIO_FAILED_MESSAGE)
+        if verdict['decision'] != 'approve':
+            reason = str(verdict.get('reason') or '').strip()
+            raise CommunityPostError('rejected', reason or 'Tu descripción no cumple las normas de la comunidad.')
+    from django.db import transaction
+
+    from . import profile_pictures
+
+    with transaction.atomic():
+        # A ban (and its content removal) during the review wins: re-checked
+        # under the member's lock, which removal takes too.
+        profile_pictures._lock_user(user.pk)
+        if bio:
+            user.refresh_from_db()
+            block = author_block(user)
+            if block:
+                raise CommunityPostError('blocked', block)
+        CommunityProfileSettings.objects.update_or_create(
+            user=user, defaults={'bio': bio, 'bio_updated_at': timezone.now()})
+    return bio
+
+
+def bio_of(user) -> str:
+    from .models import CommunityProfileSettings
+
+    return CommunityProfileSettings.objects.filter(user=user).values_list('bio', flat=True).first() or ''

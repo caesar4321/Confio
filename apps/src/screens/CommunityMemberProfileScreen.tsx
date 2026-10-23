@@ -1,16 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { memberBlockVersion, notifyMemberBlocked } from '../services/communityEvents';
 import { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useApolloClient, useMutation, useQuery } from '@apollo/client';
-import Icon from 'react-native-vector-icons/Feather';
 
 import { Text } from '../components/common/AppText';
 import { EmptyState } from '../components/EmptyState';
-import { BylineAvatar } from '../components/PostByline';
 import { DiscoverItem, DiscoverPostCard } from '../components/DiscoverFeed';
 import { CommunityMemberPortfolio, CommunityPortfolioSection } from '../components/CommunityPortfolioSection';
+import { InvestorProfile, InvestorProfileHeader } from '../components/InvestorProfileHeader';
+import { InvestorReturnsCard } from '../components/InvestorReturnsCard';
+import { InvestorLockCard, isLocked } from '../components/InvestorLockCard';
+import { InvestorBioEditor } from '../components/InvestorBioEditor';
+import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import {
@@ -19,6 +22,7 @@ import {
   REACT_TO_MESSAGE_CONTENT,
   SET_COMMUNITY_FOLLOW_NOTIFY,
   SET_COMMUNITY_PORTFOLIO_HIDDEN,
+  SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR,
   UNFOLLOW_COMMUNITY_MEMBER,
 } from '../apollo/mutations';
 import {
@@ -27,6 +31,7 @@ import {
   GET_COMMUNITY_MEMBER_CRYPTO_USD,
   GET_COMMUNITY_MEMBER_POSTS,
   GET_COMMUNITY_MEMBER_PROFILE,
+  GET_INVESTOR_PROFILE,
 } from '../apollo/queries';
 import { useCommunityPostExtras } from '../hooks/useCommunityPostExtras';
 import { DiscoverFeedDto, toDiscoverItem } from '../utils/discoverItem';
@@ -55,7 +60,12 @@ const PAGE_SIZE = 20;
 export const followCountsLabel = (followers: number, following: number) =>
   `${followers} ${followers === 1 ? 'seguidor' : 'seguidores'} · ${following} siguiendo`;
 
-/** A Comunidad member: who they are, follow (and get notified), and what they posted. */
+/**
+ * Perfil inversor: who the member is (cover, photo, bio, people in common),
+ * follow them, how their investments did (Rentabilidad) and what they hold,
+ * and what they posted. Portfolios are reciprocal: a viewer whose own
+ * profile is hidden or unverified sees a lock instead (server-enforced).
+ */
 export const CommunityMemberProfileScreen = () => {
   const navigation = useNavigation<Navigation>();
   const route = useRoute<RouteProps>();
@@ -114,10 +124,57 @@ export const CommunityMemberProfileScreen = () => {
     setHasMore(false);
     setPostsLoading(true);
     setPortfolio(null);
+    setInvestor(null);
   }, [userId]);
 
   const [setPortfolioHidden] = useMutation(SET_COMMUNITY_PORTFOLIO_HIDDEN);
+  const [setPortfolioHiddenWithError] = useMutation(SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR);
   const [hiddenBusy, setHiddenBusy] = useState(false);
+
+  // The investor header (bio, cover, access): its own query too.
+  const [investor, setInvestor] = useState<InvestorProfile | null>(null);
+  const [bioOpen, setBioOpen] = useState(false);
+  const [returnsRefresh, setReturnsRefresh] = useState(0);
+  const [publishBusy, setPublishBusy] = useState(false);
+  const investorGeneration = useRef(0);
+  const loadInvestor = useCallback(async () => {
+    investorGeneration.current += 1;
+    const requested = investorGeneration.current;
+    const forUser = userId;
+    try {
+      const { data } = await client.query({
+        query: GET_INVESTOR_PROFILE,
+        variables: { userId: forUser },
+        fetchPolicy: 'network-only',
+        // Never share an in-flight read: one started before publishing
+        // would hand back the old "locked" access.
+        context: { queryDeduplication: false },
+      });
+      if (!mounted.current || investorGeneration.current !== requested || currentUserId.current !== forUser) return;
+      const next = data?.investorProfile as InvestorProfile | null | undefined;
+      setInvestor(next && String(next.userId) === forUser ? next : null);
+    } catch {
+      if (mounted.current && investorGeneration.current === requested && currentUserId.current === forUser) {
+        setInvestor(null);
+      }
+    }
+  }, [client, userId]);
+
+  useEffect(() => {
+    void loadInvestor();
+  }, [loadInvestor]);
+
+  /** The hide switch, with the server's reason when it refuses (an older server: no reason). */
+  const writeHidden = async (hidden: boolean): Promise<{ success: boolean; hidden: boolean; error?: string | null } | null> => {
+    try {
+      const { data } = await setPortfolioHiddenWithError({ variables: { hidden } });
+      return data?.setCommunityPortfolioHidden ?? null;
+    } catch (e: any) {
+      if (!isSchemaMismatch(e)) throw e;
+      const { data } = await setPortfolioHidden({ variables: { hidden } });
+      return data?.setCommunityPortfolioHidden ?? null;
+    }
+  };
   const portfolioGeneration = useRef(0);
   const loadPortfolio = useCallback(async () => {
     portfolioGeneration.current += 1;
@@ -171,11 +228,10 @@ export const CommunityMemberProfileScreen = () => {
       setPortfolio((current) => (current && String(current.userId) === forUser ? { ...current, hidden: previous } : current));
     };
     try {
-      const { data } = await setPortfolioHidden({ variables: { hidden: nextHidden } });
-      const result = data?.setCommunityPortfolioHidden;
+      const result = await writeHidden(nextHidden);
       if (!result?.success) {
         rollback();
-        Alert.alert('No pudimos guardar el cambio', 'Inténtalo de nuevo en un momento.');
+        Alert.alert('No pudimos guardar el cambio', result?.error || 'Inténtalo de nuevo en un momento.');
         return;
       }
       // A refresh started before the server confirmed may have read the old
@@ -185,6 +241,7 @@ export const CommunityMemberProfileScreen = () => {
         setPortfolio((current) =>
           current && String(current.userId) === forUser ? { ...current, hidden: Boolean(result.hidden) } : current,
         );
+        void loadInvestor();
       }
     } catch {
       rollback();
@@ -268,14 +325,35 @@ export const CommunityMemberProfileScreen = () => {
       refetchProfile().catch(() => {});
       void loadFirstPage();
       void loadPortfolio();
-    }, [refetchProfile, loadFirstPage, loadPortfolio]),
+      void loadInvestor();
+      setReturnsRefresh((value) => value + 1);
+    }, [refetchProfile, loadFirstPage, loadPortfolio, loadInvestor]),
+  );
+
+  // Back from verifying (or publishing elsewhere) while locked out: ask again,
+  // the viewer's own state is what the lock depends on.
+  const viewerLocked = useRef(false);
+  viewerLocked.current = investor?.access === 'viewer_hidden' || investor?.access === 'viewer_unverified';
+  const firstFocus = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocus.current) {
+        firstFocus.current = false;
+        return;
+      }
+      if (!viewerLocked.current) return;
+      setReturnsRefresh((value) => value + 1);
+      void loadInvestor();
+      void loadPortfolio();
+    }, [loadInvestor, loadPortfolio]),
   );
 
   const handleRefresh = async () => {
     setRefreshing(true);
     setUpdated(null);
     setExtrasRefresh((value) => value + 1);
-    await Promise.all([refetchProfile().catch(() => {}), loadFirstPage(), loadPortfolio()]);
+    setReturnsRefresh((value) => value + 1);
+    await Promise.all([refetchProfile().catch(() => {}), loadFirstPage(), loadPortfolio(), loadInvestor()]);
     if (mounted.current) setRefreshing(false);
   };
 
@@ -333,6 +411,36 @@ export const CommunityMemberProfileScreen = () => {
         },
       ],
     );
+  };
+
+  // The viewer's own profile is hidden: publish it right from the lock.
+  const publishOwn = async () => {
+    if (publishBusy) return;
+    const forUser = userId;
+    setPublishBusy(true);
+    try {
+      const result = await writeHidden(false);
+      if (!result?.success) {
+        Alert.alert('No pudimos hacer público tu perfil', result?.error || 'Inténtalo de nuevo en un momento.');
+        return;
+      }
+      // Moved on to another member meanwhile: their loads are not ours to restart.
+      if (!mounted.current || currentUserId.current !== forUser) return;
+      setReturnsRefresh((value) => value + 1);
+      await Promise.all([loadInvestor(), loadPortfolio()]);
+    } catch {
+      Alert.alert('No pudimos hacer público tu perfil', 'Revisa tu conexión e inténtalo de nuevo.');
+    } finally {
+      if (mounted.current) setPublishBusy(false);
+    }
+  };
+
+  const openMore = () => {
+    if (!profile || profile.isSelf) return;
+    Alert.alert(profile.username, undefined, [
+      { text: `Bloquear a ${profile.username}`, style: 'destructive', onPress: confirmBlock },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
   };
 
   const toggleFollow = async () => {
@@ -439,76 +547,34 @@ export const CommunityMemberProfileScreen = () => {
 
   const visiblePortfolio = portfolio && String(portfolio.userId) === userId ? portfolio : null;
 
+  const access = investor?.access ?? null;
+  const locked = isLocked(access);
+
   const profileHeader = (
     <View>
-      <View style={styles.profileCard}>
-        <BylineAvatar name={profile.username} avatarUrl={profile.avatarUrl} size={72} />
-        <Text style={styles.username} numberOfLines={1}>
-          {profile.username}
-        </Text>
-        <Text style={styles.counts}>{followCountsLabel(profile.followerCount, profile.followingCount)}</Text>
-        {profile.isSelf ? null : (
-          <View style={styles.actions}>
-            <Pressable
-              onPress={() => {
-                void toggleFollow();
-              }}
-              disabled={followBusy}
-              style={({ pressed }) => [
-                styles.followButton,
-                profile.isFollowing ? styles.followingButton : styles.followPrimary,
-                (pressed || followBusy) && styles.pressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: profile.isFollowing, busy: followBusy }}
-              accessibilityLabel={profile.isFollowing ? 'Siguiendo. Toca para dejar de seguir.' : 'Seguir'}
-            >
-              {followBusy ? (
-                <ActivityIndicator size="small" color={profile.isFollowing ? colors.dark : colors.white} />
-              ) : (
-                <>
-                  {profile.isFollowing ? <Icon name="check" size={16} color={colors.dark} /> : null}
-                  <Text style={[styles.followText, profile.isFollowing && styles.followingText]}>
-                    {profile.isFollowing ? 'Siguiendo' : 'Seguir'}
-                  </Text>
-                </>
-              )}
-            </Pressable>
-            {profile.isFollowing ? (
-              <Pressable
-                onPress={() => {
-                  void toggleNotify();
-                }}
-                disabled={notifyBusy}
-                style={({ pressed }) => [styles.bellButton, (pressed || notifyBusy) && styles.pressed]}
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityState={{ busy: notifyBusy }}
-                accessibilityLabel={profile.notify ? 'Silenciar sus publicaciones' : 'Avisarme de sus publicaciones'}
-              >
-                <Icon
-                  name={profile.notify ? 'bell' : 'bell-off'}
-                  size={18}
-                  color={profile.notify ? colors.primaryDeep : colors.textSecondary}
-                />
-              </Pressable>
-            ) : null}
-          </View>
-        )}
-        {profile.isSelf ? null : (
-          <Pressable
-            onPress={confirmBlock}
-            disabled={blocking}
-            hitSlop={8}
-            style={({ pressed }) => [styles.blockLink, (pressed || blocking) && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel={`Bloquear a ${profile.username}`}
-          >
-            <Text style={styles.blockText}>Bloquear</Text>
-          </Pressable>
-        )}
-      </View>
-      {visiblePortfolio ? (
+      <InvestorProfileHeader
+        member={profile}
+        investor={investor}
+        followBusy={followBusy || blocking}
+        notifyBusy={notifyBusy}
+        onToggleFollow={() => { void toggleFollow(); }}
+        onToggleNotify={() => { void toggleNotify(); }}
+        onMore={openMore}
+        onEditBio={() => setBioOpen(true)}
+        onOpenMutual={(id) => navigation.push('CommunityMemberProfile', { userId: id })}
+        refreshKey={returnsRefresh}
+      />
+      {locked && access ? (
+        <InvestorLockCard
+          access={access}
+          busy={publishBusy}
+          onPublish={() => { void publishOwn(); }}
+          onVerify={() => navigation.navigate('Verification' as never)}
+        />
+      ) : investor ? (
+        <InvestorReturnsCard key={userId} userId={userId} refreshKey={returnsRefresh} />
+      ) : null}
+      {visiblePortfolio && !locked ? (
         <CommunityPortfolioSection
           key={visiblePortfolio.userId}
           portfolio={visiblePortfolio}
@@ -523,6 +589,20 @@ export const CommunityMemberProfileScreen = () => {
   return (
     <View style={styles.container}>
       {header}
+      {investor?.isSelf ? (
+        <InvestorBioEditor
+          visible={bioOpen}
+          initial={investor.bio}
+          onClose={() => setBioOpen(false)}
+          onSaved={(bio) => {
+            const editedFor = investor.userId;
+            if (!mounted.current) return;
+            setBioOpen(false);
+            // Only onto the profile that was edited, never another member shown since.
+            setInvestor((current) => (current && current.userId === editedFor ? { ...current, bio } : current));
+          }}
+        />
+      ) : null}
       <FlatList
         data={items}
         keyExtractor={(item) => String(item.id)}
@@ -582,8 +662,6 @@ export const CommunityMemberProfileScreen = () => {
 export default CommunityMemberProfileScreen;
 
 const styles = StyleSheet.create({
-  blockLink: { marginTop: 12, paddingVertical: 4, paddingHorizontal: 8 },
-  blockText: { fontSize: 13, color: colors.textSecondary, textDecorationLine: 'underline' },
   container: {
     flex: 1,
     backgroundColor: colors.neutral,
@@ -596,68 +674,6 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 28,
     flexGrow: 1,
-  },
-  profileCard: {
-    alignItems: 'center',
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  username: {
-    marginTop: 12,
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.dark,
-    maxWidth: '100%',
-  },
-  counts: {
-    marginTop: 4,
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  actions: {
-    marginTop: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  followButton: {
-    minWidth: 132,
-    height: 40,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  followPrimary: {
-    backgroundColor: colors.dark,
-  },
-  followingButton: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.borderMedium,
-  },
-  followText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.white,
-  },
-  followingText: {
-    color: colors.dark,
-  },
-  bellButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.borderMedium,
-  },
-  pressed: {
-    opacity: 0.7,
   },
   sectionTitle: {
     alignSelf: 'flex-start',

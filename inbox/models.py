@@ -698,13 +698,21 @@ class ProfilePictureStatus(models.TextChoices):
     REMOVED = 'REMOVED', 'Removed'
 
 
+class ProfilePictureKind(models.TextChoices):
+    AVATAR = 'avatar', 'Avatar'
+    # The wide image behind the investor profile header (3:1).
+    COVER = 'cover', 'Cover'
+
+
 class ProfilePictureSubmission(models.Model):
-    """A member's profile picture, AI-screened before anyone else sees it.
+    """A member's profile picture or cover image, AI-screened before anyone
+    else sees it.
 
     Uploads wait in the private ``pending/`` prefix of the profile-pictures
     bucket; only an approved, re-encoded copy is written to ``public/``.
     """
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile_pictures')
+    kind = models.CharField(max_length=8, choices=ProfilePictureKind.choices, default=ProfilePictureKind.AVATAR)
     status = models.CharField(max_length=16, choices=ProfilePictureStatus.choices, default=ProfilePictureStatus.PENDING)
     pending_key = models.CharField(max_length=512, unique=True)
     public_url = models.CharField(max_length=512, blank=True, default='')
@@ -739,14 +747,14 @@ class ProfilePictureSubmission(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=['user'],
+                fields=['user', 'kind'],
                 condition=Q(status='ACTIVE'),
-                name='inbox_pp_one_active_per_user',
+                name='inbox_pp_one_active_per_user_kind',
             ),
         ]
 
     def __str__(self):
-        return f'Profile picture {self.id} of {self.user_id}: {self.status}'
+        return f'Profile {self.kind} {self.id} of {self.user_id}: {self.status}'
 
 
 class PublicObjectState(models.TextChoices):
@@ -860,6 +868,13 @@ class CommunityProfileSettings(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                                 related_name='community_profile_settings')
     portfolio_hidden = models.BooleanField(default=False)
+    # When the member last made their profile public again: hiding is refused
+    # for a day after that, so nobody can publish, look at everyone else's
+    # portfolio (reciprocity) and hide again.
+    portfolio_published_at = models.DateTimeField(null=True, blank=True)
+    # The investor profile bio, AI-screened before it is saved.
+    bio = models.CharField(max_length=140, blank=True, default='')
+    bio_updated_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

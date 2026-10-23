@@ -1373,6 +1373,61 @@ export const SET_COMMUNITY_PORTFOLIO_HIDDEN = gql`
   }
 `;
 
+// Same switch, with the reason it was refused (hiding within 24h of making
+// the profile public). Own operation: an older server rejects only this one.
+export const SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR = gql`
+  mutation SetCommunityPortfolioHiddenWithError($hidden: Boolean!) {
+    setCommunityPortfolioHidden(hidden: $hidden) {
+      success
+      hidden
+      error
+    }
+  }
+`;
+
+export const UPDATE_INVESTOR_BIO = gql`
+  mutation UpdateInvestorBio($bio: String!) {
+    updateInvestorBio(bio: $bio) {
+      success
+      error
+      bio
+      rulesRequired
+    }
+  }
+`;
+
+// The investor profile cover: the profile-picture pipeline with kind "cover".
+export const REQUEST_COVER_PICTURE_UPLOAD = gql`
+  mutation RequestCoverPictureUpload($contentType: String) {
+    requestProfilePictureUpload(contentType: $contentType, kind: "cover") {
+      success
+      error
+      upload {
+        url
+        key
+        fields
+      }
+    }
+  }
+`;
+
+export const SUBMIT_COVER_PICTURE = gql`
+  mutation SubmitCoverPicture($imageKey: String!) {
+    submitProfilePicture(imageKey: $imageKey, kind: "cover") {
+      success
+      error
+    }
+  }
+`;
+
+export const REMOVE_COVER_PICTURE = gql`
+  mutation RemoveCoverPicture {
+    removeProfilePicture(kind: "cover") {
+      success
+    }
+  }
+`;
+
 // The share sheet closed without sharing. Own operation: an older server
 // without it rejects only this call, which the sheet ignores.
 export const RECORD_ACTIVITY_SHARE_DISMISSAL = gql`

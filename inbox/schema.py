@@ -1217,11 +1217,18 @@ class SetCommunityPortfolioHidden(graphene.Mutation):
 
     success = graphene.Boolean(required=True)
     hidden = graphene.Boolean(required=True)
+    # Why it wasn't changed (e.g. hiding within 24h of publishing).
+    error = graphene.String()
 
     @classmethod
     @login_required
     def mutate(cls, root, info, hidden):
-        return SetCommunityPortfolioHidden(success=True, hidden=community.set_portfolio_hidden(info.context.user, hidden))
+        user = info.context.user
+        try:
+            return SetCommunityPortfolioHidden(success=True, hidden=community.set_portfolio_hidden(user, hidden))
+        except community.CommunityPostError as error:
+            return SetCommunityPortfolioHidden(success=False, hidden=community.portfolio_hidden(user),
+                                               error=error.message)
 
 
 class CommunityRulesType(graphene.ObjectType):
@@ -1615,10 +1622,10 @@ class MyProfilePictureType(graphene.ObjectType):
     rules_required = graphene.Boolean(required=True)
 
 
-def build_my_profile_picture(user, business):
-    current = profile_pictures.picture_urls([user.id]).get(user.id)
-    latest = profile_pictures.latest_submission(user)
-    block_message = profile_pictures.upload_block(user, business)
+def build_my_profile_picture(user, business, kind=profile_pictures.AVATAR):
+    current = profile_pictures.picture_urls([user.id], kind=kind).get(user.id)
+    latest = profile_pictures.latest_submission(user, kind)
+    block_message = profile_pictures.upload_block(user, business, kind)
     return MyProfilePictureType(
         url=current or None,
         latest_status=latest.status if latest else None,
@@ -1631,6 +1638,8 @@ def build_my_profile_picture(user, business):
 class RequestProfilePictureUpload(graphene.Mutation):
     class Arguments:
         content_type = graphene.String(required=False)
+        # 'avatar' (default) or 'cover' (the investor profile banner).
+        kind = graphene.String(required=False)
 
     success = graphene.Boolean(required=True)
     error = graphene.String()
@@ -1638,10 +1647,11 @@ class RequestProfilePictureUpload(graphene.Mutation):
 
     @classmethod
     @login_required
-    def mutate(cls, root, info, content_type='image/jpeg'):
+    def mutate(cls, root, info, content_type='image/jpeg', kind=None):
         user, account, business, _ = get_context_models(info)
         try:
-            presigned = profile_pictures.request_upload(user, business, content_type)
+            presigned = profile_pictures.request_upload(
+                user, business, content_type, profile_pictures.parse_kind(kind))
         except community.CommunityPostError as error:
             return RequestProfilePictureUpload(success=False, error=error.message, upload=None)
         except Exception:
@@ -1666,6 +1676,7 @@ class RequestProfilePictureUpload(graphene.Mutation):
 class SubmitProfilePicture(graphene.Mutation):
     class Arguments:
         image_key = graphene.String(required=True)
+        kind = graphene.String(required=False)
 
     success = graphene.Boolean(required=True)
     error = graphene.String()
@@ -1673,27 +1684,35 @@ class SubmitProfilePicture(graphene.Mutation):
 
     @classmethod
     @login_required
-    def mutate(cls, root, info, image_key):
+    def mutate(cls, root, info, image_key, kind=None):
         user, account, business, _ = get_context_models(info)
         try:
-            profile_pictures.submit_picture(user, business, image_key)
+            kind = profile_pictures.parse_kind(kind)
+            profile_pictures.submit_picture(user, business, image_key, kind)
         except community.CommunityPostError as error:
             return SubmitProfilePicture(success=False, error=error.message, picture=None)
-        return SubmitProfilePicture(success=True, error=None, picture=build_my_profile_picture(user, business))
+        return SubmitProfilePicture(success=True, error=None, picture=build_my_profile_picture(user, business, kind))
 
 
 class RemoveProfilePicture(graphene.Mutation):
+    class Arguments:
+        kind = graphene.String(required=False)
+
     success = graphene.Boolean(required=True)
     picture = graphene.Field(MyProfilePictureType)
 
     @classmethod
     @login_required
-    def mutate(cls, root, info):
+    def mutate(cls, root, info, kind=None):
         user, account, business, _ = get_context_models(info)
+        try:
+            kind = profile_pictures.parse_kind(kind)
+        except community.CommunityPostError:
+            return RemoveProfilePicture(success=False, picture=None)
         if business is not None:
-            return RemoveProfilePicture(success=False, picture=build_my_profile_picture(user, business))
-        removed = profile_pictures.remove_picture(user, removed_by=user)
-        return RemoveProfilePicture(success=removed, picture=build_my_profile_picture(user, business))
+            return RemoveProfilePicture(success=False, picture=build_my_profile_picture(user, business, kind))
+        removed = profile_pictures.remove_picture(user, removed_by=user, kind=kind)
+        return RemoveProfilePicture(success=removed, picture=build_my_profile_picture(user, business, kind))
 
 
 class AcceptCommunityRules(graphene.Mutation):
@@ -1870,6 +1889,73 @@ class SetCommunityFollowNotify(graphene.Mutation):
         return SetCommunityFollowNotify(success=True, error=None, profile=build_member_profile(info.context.user, user_id))
 
 
+class InvestorProfileMutualType(graphene.ObjectType):
+    user_id = graphene.ID(required=True)
+    username = graphene.String(required=True)
+    avatar_url = graphene.String()
+
+
+class InvestorProfileType(graphene.ObjectType):
+    """The investor profile's header, apart from the member profile so a new
+    field never breaks that query against older servers."""
+    user_id = graphene.ID(required=True)
+    is_self = graphene.Boolean(required=True)
+    bio = graphene.String(required=True)
+    cover_url = graphene.String()
+    # Can the viewer see this member's investments, and if not, why:
+    # self | open | target_hidden | viewer_hidden | viewer_unverified.
+    access = graphene.String(required=True)
+    # People the viewer follows who also follow this member.
+    mutual_count = graphene.Int(required=True)
+    mutuals = graphene.List(graphene.NonNull(InvestorProfileMutualType), required=True)
+    # Direct messages and tips: false until each one launches.
+    can_message = graphene.Boolean(required=True)
+    can_tip = graphene.Boolean(required=True)
+
+
+def build_investor_profile(viewer, user_id):
+    target = community.followable_member(user_id, viewer=viewer)
+    if target is None or community.is_blocked_between(viewer.id, target.id):
+        return None
+    count, mutuals = community.mutual_followers(target.id, viewer)
+    avatars = profile_pictures.picture_urls([m.id for m in mutuals])
+    return InvestorProfileType(
+        user_id=str(target.id),
+        is_self=target.id == viewer.id,
+        bio=community.bio_of(target),
+        cover_url=profile_pictures.cover_url(target),
+        access=community.portfolio_access(target, viewer),
+        mutual_count=count,
+        mutuals=[InvestorProfileMutualType(user_id=str(m.id), username=community.author_display_name(m),
+                                           avatar_url=avatars.get(m.id)) for m in mutuals],
+        can_message=False,
+        can_tip=False,
+    )
+
+
+class UpdateInvestorBio(graphene.Mutation):
+    """The member's own one-line bio, AI-reviewed before it is saved."""
+    class Arguments:
+        bio = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    bio = graphene.String()
+    # True when the only thing missing is accepting the community rules.
+    rules_required = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, bio):
+        user, account, business, _ = get_context_models(info)
+        try:
+            saved = community.set_bio(user, business, bio)
+        except community.CommunityPostError as error:
+            return UpdateInvestorBio(success=False, error=error.message, bio=None,
+                                     rules_required=error.code == 'rules_required')
+        return UpdateInvestorBio(success=True, error=None, bio=saved, rules_required=False)
+
+
 def build_member_profile(viewer, user_id):
     from .models import CommunityFollow
 
@@ -1948,7 +2034,8 @@ class Query(graphene.ObjectType):
         required=True,
         content_item_id=graphene.ID(required=True),
     )
-    my_profile_picture = graphene.Field(MyProfilePictureType, required=True)
+    # kind: 'avatar' (default) or 'cover'.
+    my_profile_picture = graphene.Field(MyProfilePictureType, required=True, kind=graphene.String(required=False))
     community_rules = graphene.Field(CommunityRulesType, required=True)
     my_blocked_members = graphene.List(graphene.NonNull(CommunityParticipantType), required=True)
     community_comment_counts = graphene.List(
@@ -1977,6 +2064,7 @@ class Query(graphene.ObjectType):
     # Its own field: added to the portfolio type, a new app would break that
     # whole query against older servers. Same visibility rules.
     community_member_crypto_usd = graphene.String(user_id=graphene.ID(required=True))
+    investor_profile = graphene.Field(InvestorProfileType, user_id=graphene.ID(required=True))
     # Its own field for the same reason. range: '24h' | '7d' | '30d'.
     investor_returns = graphene.Field(InvestorReturnsType, user_id=graphene.ID(required=True),
                                       range=graphene.String(required=True))
@@ -2151,6 +2239,10 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_community_member_portfolio(self, info, user_id):
         return build_member_portfolio(info.context.user, user_id)
+
+    @login_required
+    def resolve_investor_profile(self, info, user_id):
+        return build_investor_profile(info.context.user, user_id)
 
     @login_required
     def resolve_investor_returns(self, info, user_id, range):  # noqa: A002 — GraphQL argument name
@@ -2383,9 +2475,13 @@ class Query(graphene.ObjectType):
         ]
 
     @login_required
-    def resolve_my_profile_picture(self, info):
+    def resolve_my_profile_picture(self, info, kind=None):
         user, account, business, _ = get_context_models(info)
-        return build_my_profile_picture(user, business)
+        try:
+            kind = profile_pictures.parse_kind(kind)
+        except community.CommunityPostError as error:
+            raise GraphQLError(error.message)
+        return build_my_profile_picture(user, business, kind)
 
     @login_required
     def resolve_community_comment_counts(self, info, content_item_ids):
@@ -3049,3 +3145,4 @@ class Mutation(graphene.ObjectType):
     unfollow_community_member = UnfollowCommunityMember.Field()
     set_community_follow_notify = SetCommunityFollowNotify.Field()
     set_community_portfolio_hidden = SetCommunityPortfolioHidden.Field()
+    update_investor_bio = UpdateInvestorBio.Field()
