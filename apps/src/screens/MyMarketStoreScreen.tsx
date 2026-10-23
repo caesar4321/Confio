@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, StyleSheet, Switch, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -11,7 +12,8 @@ import {
 } from '../services/comprar';
 import { useComprarLocation } from '../hooks/useComprarLocation';
 import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal';
-import { formatUsd } from '../utils/comprarFormat';
+import { formatRating, formatUsd } from '../utils/comprarFormat';
+import { formatDecimal } from '../utils/numberLocale';
 import { explainLocateOutcome } from '../utils/comprarLocate';
 import { OpenStoreForm } from '../components/comprar/OpenStoreForm';
 import { useAccount } from '../contexts/AccountContext';
@@ -33,6 +35,7 @@ const STATUS_STYLE: Record<string, { backgroundColor: string; color: string }> =
  * (marketplaceFeeBps), never from copy.
  */
 export const MyMarketStoreScreen = () => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<any>();
   const { data, loading, refetch } = useQuery(GET_MY_MARKET_STORE, { fetchPolicy: 'cache-and-network' });
   useFocusEffect(React.useCallback(() => { void refetch(); }, [refetch]));
@@ -129,7 +132,7 @@ export const MyMarketStoreScreen = () => {
                 </View>
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={styles.storeName} numberOfLines={1}>{store.name}</Text>
-                  <Text style={styles.muted}>{store.city} · {store.completedOrders} ventas{store.ratingCount ? ` · ★ ${Number(store.avgRating).toFixed(1)}` : ''}</Text>
+                  <Text style={styles.muted}>{store.city} · {formatDecimal(store.completedOrders ?? 0, { decimals: 0 })} ventas{store.ratingCount ? ` · ★ ${formatRating(store.avgRating)}` : ''}</Text>
                 </View>
               </View>
               {store.status === 'suspended' ? (
@@ -159,7 +162,7 @@ export const MyMarketStoreScreen = () => {
               : <View style={[styles.thumb, styles.thumbEmpty]}><Icon name="image" size={18} color={colors.text.light} /></View>}
             <View style={{ flex: 1 }}>
               <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-              <Text style={styles.muted}>{formatUsd(item.priceUsd)} · stock {item.stock}</Text>
+              <Text style={styles.muted}>{formatUsd(item.priceUsd)} · stock {formatDecimal(item.stock ?? 0, { decimals: 0 })}</Text>
               <View style={[styles.statusPill, STATUS_STYLE[item.status] || STATUS_STYLE.paused]}>
                 <Text style={[styles.statusText, { color: (STATUS_STYLE[item.status] || STATUS_STYLE.paused).color }]}>
                   {PRODUCT_STATUS[item.status] || item.status}

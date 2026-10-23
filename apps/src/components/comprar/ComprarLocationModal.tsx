@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNumberLocale } from '../../contexts/NumberLocaleProvider';
+import { formatDecimal } from '../../utils/numberLocale';
 import { FlatList, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
@@ -28,6 +30,7 @@ type Props = {
 export const ComprarLocationModal = ({
   visible, countryCode, city, homeCountryCode, homeCity, onClose, onSelect, onUseGps,
 }: Props) => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const [step, setStep] = useState<'country' | 'city'>('city');
   const [pickedCountry, setPickedCountry] = useState(countryCode);
   const [q, setQ] = useState('');
@@ -121,7 +124,7 @@ export const ComprarLocationModal = ({
                     {String(item[2]) === homeCountryCode ? (
                       <Text style={styles.rowMeta}>Tu país</Text>
                     ) : storeCounts[String(item[2])] ? (
-                      <Text style={styles.rowMeta}>{storeCounts[String(item[2])]} tiendas</Text>
+                      <Text style={styles.rowMeta}>{formatDecimal(storeCounts[String(item[2])] ?? 0, { decimals: 0 })} tiendas</Text>
                     ) : null}
                   </TouchableOpacity>
                 )}
@@ -153,7 +156,7 @@ export const ComprarLocationModal = ({
                         {item.city}{item.city === homeCity && item.countryCode === homeCountryCode ? ' · Tu ciudad' : ''}
                       </Text>
                       <Text style={styles.rowMeta}>
-                        {item.isLive ? `${item.storeCount} tiendas` : 'Próximamente'}
+                        {item.isLive ? `${formatDecimal(item.storeCount ?? 0, { decimals: 0 })} tiendas` : 'Próximamente'}
                       </Text>
                     </TouchableOpacity>
                   );

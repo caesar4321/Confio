@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import { ActivityIndicator, Dimensions, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -6,12 +7,14 @@ import { useQuery } from '@apollo/client';
 import { Text } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import { GET_MARKETPLACE_PRODUCT } from '../services/comprar';
-import { formatReference, formatUsd } from '../utils/comprarFormat';
+import { formatRating, formatReference, formatUsd } from '../utils/comprarFormat';
+import { formatDecimal } from '../utils/numberLocale';
 import { ComprarFrame, KitButton, KitFooter, TrustNote, kitText } from '../components/comprar/kit';
 
 const WIDTH = Dimensions.get('window').width;
 
 export const MarketProductScreen = () => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const productId = route.params?.productId as string;
@@ -64,7 +67,7 @@ export const MarketProductScreen = () => {
           </View>
           <View style={[styles.stockPill, product.stock > 0 ? styles.stockOk : styles.stockOut]}>
             <Text style={[styles.stockText, product.stock > 0 ? styles.stockTextOk : styles.stockTextOut]}>
-              {product.stock > 0 ? `${product.stock} disponible${product.stock === 1 ? '' : 's'}` : 'Agotado'}
+              {product.stock > 0 ? `${formatDecimal(product.stock, { decimals: 0 })} disponible${product.stock === 1 ? '' : 's'}` : 'Agotado'}
             </Text>
           </View>
 
@@ -83,8 +86,8 @@ export const MarketProductScreen = () => {
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={styles.storeName} numberOfLines={1}>{store.name}</Text>
               <Text style={kitText.muted} numberOfLines={1}>
-                {store.city} · {store.completedOrders} {store.completedOrders === 1 ? 'venta' : 'ventas'}
-                {store.ratingCount ? ` · ★ ${Number(store.avgRating).toFixed(1)}` : ''}
+                {store.city} · {formatDecimal(store.completedOrders ?? 0, { decimals: 0 })} {store.completedOrders === 1 ? 'venta' : 'ventas'}
+                {store.ratingCount ? ` · ★ ${formatRating(store.avgRating)}` : ''}
               </Text>
               <View style={styles.verified}>
                 <Icon name="check-circle" size={13} color={colors.primaryDark} />

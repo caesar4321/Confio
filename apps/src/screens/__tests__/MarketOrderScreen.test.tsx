@@ -3,6 +3,7 @@ import renderer, { act } from 'react-test-renderer';
 
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+jest.mock('../../contexts/CountryContext', () => ({ useCountry: () => ({ userCountry: null }) }));
 jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
 jest.mock('../../components/common/SuccessHero', () => ({ SuccessHero: 'SuccessHero' }));
 jest.mock('../../components/common/ProcessingHero', () => ({ ProcessingHero: 'ProcessingHero' }));

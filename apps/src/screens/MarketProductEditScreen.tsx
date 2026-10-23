@@ -6,7 +6,9 @@ import { useMutation, useQuery } from '@apollo/client';
 import { Text, TextInput } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import { GET_MY_MARKET_STORE, GET_REFERENCE_RATE, SAVE_MARKET_PRODUCT, comprarError, uploadMarketPhoto } from '../services/comprar';
-import { formatFeeBps, formatLocalPrice } from '../utils/comprarFormat';
+import { formatFeeBps, formatLocalPrice, formatUsd } from '../utils/comprarFormat';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
+import { normalizeAmountInput } from '../utils/numberLocale';
 import { CategoryPicker } from '../components/comprar/CategoryPicker';
 import { pickFromLibrary } from '../services/systemPicker';
 import { ComprarFrame, KitButton, KitCard, KitFooter } from '../components/comprar/kit';
@@ -40,6 +42,9 @@ export const MarketProductEditScreen = () => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<string | null>(null);
+  // Typed and shown with the user's decimal mark (1.234,56 vs 1,234.56); sent
+  // to the server as the canonical "1234.56".
+  const { separators, parseAmount, sanitizeAmount, toAmountInput } = useNumberLocale();
   const [price, setPrice] = useState('');
   const [stock, setStock] = useState('1');
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -56,7 +61,7 @@ export const MarketProductEditScreen = () => {
       setTitle(existing.title);
       setDescription(existing.description || '');
       setCategory(existing.category);
-      setPrice(String(existing.priceUsd));
+      setPrice(toAmountInput(Number(existing.priceUsd), 2));
       setStock(String(existing.stock));
       setLoadedStock(existing.stock);
       setLoadedRevision(existing.stockRevision ?? 0);
@@ -95,7 +100,8 @@ export const MarketProductEditScreen = () => {
 
   const uploading = photos.some((p) => p.uploading);
   const newKeys = photos.filter((p) => p.key).map((p) => p.key as string);
-  const valid = title.trim().length >= 3 && category && Number(price) >= 0.5 && Number.isInteger(Number(stock))
+  const priceValue = parseAmount(price);
+  const valid = title.trim().length >= 3 && category && priceValue >= 0.5 && Number.isInteger(Number(stock))
     && (productId ? true : newKeys.length > 0);
 
   const submit = async () => {
@@ -104,7 +110,7 @@ export const MarketProductEditScreen = () => {
     try {
       const res = await save({ variables: {
         productId: productId || null, title: title.trim(), description: description.trim(), category,
-        priceUsd: price, stock: Number(stock), photoKeys: newKeys.length ? newKeys : null,
+        priceUsd: normalizeAmountInput(price) ?? '', stock: Number(stock), photoKeys: newKeys.length ? newKeys : null,
         expectedStock: productId ? loadedStock : null,
         expectedStockRevision: productId ? loadedRevision : null,
       } });
@@ -170,11 +176,12 @@ export const MarketProductEditScreen = () => {
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Precio (US$)</Text>
-              <TextInput style={styles.input} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.text.light}
-                value={price} onChangeText={(t) => setPrice(t.replace(',', '.'))} />
-              {rate && Number(price) > 0 ? (
+              <TextInput style={styles.input} keyboardType="decimal-pad" placeholder={`0${separators.decimal}00`}
+                placeholderTextColor={colors.text.light}
+                value={price} onChangeText={(t) => setPrice((prev) => sanitizeAmount(t, 2, undefined, prev))} />
+              {rate && priceValue > 0 ? (
                 <Text style={styles.hint}>
-                  ≈ {formatLocalPrice((Number(price) * Number(rate.localPerUsd)).toFixed(2), rate.currency)} al cambio de hoy
+                  ≈ {formatLocalPrice(priceValue * Number(rate.localPerUsd), rate.currency)} al cambio de hoy
                 </Text>
               ) : null}
             </View>
@@ -183,9 +190,9 @@ export const MarketProductEditScreen = () => {
               <TextInput style={styles.input} keyboardType="number-pad" value={stock} onChangeText={setStock} />
             </View>
           </View>
-          {Number(price) >= 0.5 && typeof data?.marketplaceFeeBps === 'number' ? (
+          {priceValue >= 0.5 && typeof data?.marketplaceFeeBps === 'number' ? (
             <Text style={styles.hint}>
-              Recibes US$ {(Number(price) * (1 - data.marketplaceFeeBps / 10_000)).toFixed(2)} por unidad
+              Recibes {formatUsd(priceValue * (1 - data.marketplaceFeeBps / 10_000))} por unidad
               (comisión {formatFeeBps(data.marketplaceFeeBps)}).
             </Text>
           ) : null}

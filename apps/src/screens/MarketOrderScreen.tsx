@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -54,6 +55,7 @@ const fmtDate = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('es-BO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
 
 export const MarketOrderScreen = () => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const orderId = route.params?.orderId as string;

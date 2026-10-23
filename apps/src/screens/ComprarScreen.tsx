@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import {
   ActivityIndicator, FlatList, Image, Pressable, RefreshControl, ScrollView, StyleSheet, View,
 } from 'react-native';
@@ -26,6 +27,7 @@ const PAGE_SIZE = 20;
  * door: an intent probe, never a deposit or a list of nothing.
  */
 export const ComprarScreen = () => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<Nav>();
   const { location, home: homeLocation, resolving, choose, relocate } = useComprarLocation();
   const [pickerOpen, setPickerOpen] = useState(false);

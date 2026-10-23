@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { useNumberLocale } from '../../contexts/NumberLocaleProvider';
 import {
   ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StatusBar,
   StyleSheet, Switch, TextInput as RNTextInput, View,
@@ -33,6 +34,7 @@ type Props = {
 export const OpenStoreForm = ({
   feeBps, city, accountLabel, submitting, error, onBack, onPickCity, onSubmit,
 }: Props) => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');

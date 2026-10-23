@@ -4,6 +4,7 @@ import renderer, { act } from 'react-test-renderer';
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
+jest.mock('../../contexts/CountryContext', () => ({ useCountry: () => ({ userCountry: null }) }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ goBack: jest.fn() }),
   useRoute: () => ({ params: {} }),
@@ -78,4 +79,22 @@ it('labels picker JPEGs the way the upload allowlist spells them', () => {
   expect(normalizeImageType('image/heic')).toBe('image/jpeg');  // Android, re-encoded on resize
   expect(normalizeImageType('image/png')).toBe('image/png');
   expect(normalizeImageType('image/webp')).toBe('image/webp');
+});
+
+it('takes the price with the user\'s decimal mark and sends the server a canonical dollar amount', async () => {
+  const { setNumberLocaleCountry } = require('../../utils/numberLocale');
+  setNumberLocaleCountry('BO');
+  try {
+    mockSave.mockResolvedValue({ data: { saveMarketProduct: { success: false, error: 'bad_category' } } });
+    const tree = render();
+    const priceInput = tree.root.findAll((n) => n.props.keyboardType === 'decimal-pad' && typeof n.props.onChangeText === 'function')[0];
+    expect(priceInput.props.placeholder).toBe('0,00');
+    act(() => { priceInput.props.onChangeText('12.5'); });   // either key types the decimal mark
+    const shown = tree.root.findAll((n) => n.props.keyboardType === 'decimal-pad' && typeof n.props.onChangeText === 'function')[0];
+    expect(shown.props.value).toBe('12,5');
+    await act(async () => { byTestId(tree, 'product-submit').props.onPress(); });
+    expect(mockSave.mock.calls[0][0].variables.priceUsd).toBe('12.5');
+  } finally {
+    setNumberLocaleCountry(null);
+  }
 });

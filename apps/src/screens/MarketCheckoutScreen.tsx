@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, View,
 } from 'react-native';
@@ -21,6 +22,7 @@ import { formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFo
  * the larger fee.
  */
 export const MarketCheckoutScreen = () => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const productId = route.params?.productId as string;

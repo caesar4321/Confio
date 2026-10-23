@@ -1,4 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -6,7 +7,8 @@ import { gql, useQuery } from '@apollo/client';
 import { Text } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import { GET_MARKETPLACE_PRODUCTS } from '../services/comprar';
-import { formatReference, formatUsd } from '../utils/comprarFormat';
+import { formatRating, formatReference, formatUsd } from '../utils/comprarFormat';
+import { formatDecimal } from '../utils/numberLocale';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ComprarFrame, kitText } from '../components/comprar/kit';
 
@@ -21,6 +23,7 @@ const GET_STORE = gql`
 const PAGE_SIZE = 20;
 
 export const MarketStoreScreen = () => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const storeId = route.params?.storeId as string;
@@ -79,10 +82,10 @@ export const MarketStoreScreen = () => {
               </View>
             </View>
             <View style={styles.stats}>
-              <Stat value={String(store.completedOrders ?? 0)} label={store.completedOrders === 1 ? 'venta' : 'ventas'} />
+              <Stat value={formatDecimal(store.completedOrders ?? 0, { decimals: 0 })} label={store.completedOrders === 1 ? 'venta' : 'ventas'} />
               <View style={styles.statDivider} />
-              <Stat value={store.ratingCount ? `★ ${Number(store.avgRating).toFixed(1)}` : '—'}
-                label={store.ratingCount ? `${store.ratingCount} opiniones` : 'sin opiniones'} />
+              <Stat value={store.ratingCount ? `★ ${formatRating(store.avgRating)}` : '—'}
+                label={store.ratingCount ? `${formatDecimal(store.ratingCount, { decimals: 0 })} opiniones` : 'sin opiniones'} />
               <View style={styles.statDivider} />
               <Stat value={store.city} label={store.shipsOutsideCity ? 'y otras ciudades' : 'solo esta ciudad'} />
             </View>

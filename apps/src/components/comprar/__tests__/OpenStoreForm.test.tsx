@@ -4,6 +4,7 @@ import { Keyboard } from 'react-native';
 
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+jest.mock('../../../contexts/CountryContext', () => ({ useCountry: () => ({ userCountry: null }) }));
 jest.mock('../../common/BrandFieldBackground', () => ({ BrandFieldBackground: 'BrandField' }));
 
 import { OpenStoreForm } from '../OpenStoreForm';
@@ -29,6 +30,8 @@ const fields = (tree: renderer.ReactTestRenderer) => [
 ];
 
 it('shows the fee from the server, never a hardcoded number', () => {
+  // A comma-decimal country (Bolivia): 7,5%.
+  require('../../../utils/numberLocale').setNumberLocaleCountry('BO');
   const { tree } = render({ feeBps: 750 });
   const text = JSON.stringify(tree.toJSON());
   expect(text).toContain('Pagas 7,5% solo cuando vendes.');

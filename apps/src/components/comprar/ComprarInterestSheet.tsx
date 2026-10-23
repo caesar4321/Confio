@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNumberLocale } from '../../contexts/NumberLocaleProvider';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useMutation } from '@apollo/client';
@@ -6,6 +7,7 @@ import { Text, TextInput } from '../common/AppText';
 import { colors } from '../../config/theme';
 import { SUBMIT_MARKETPLACE_INTEREST, comprarError } from '../../services/comprar';
 import { CategoryPicker, MarketCategory } from './CategoryPicker';
+import { formatDecimal } from '../../utils/numberLocale';
 
 type Role = 'buyer' | 'seller' | 'both';
 
@@ -22,12 +24,14 @@ const PRICES = [
   { key: '100_300', label: 'US$100–300' },
   { key: 'gt300', label: 'Más de US$300' },
 ];
-const SALES = [
+// Labels built at render: 1.000 vs 1,000 depends on the user's country.
+const usd = (n: number) => `US$${formatDecimal(n, { decimals: 0 })}`;
+const salesOptions = () => [
   { key: 'none', label: 'Aún no vendo' },
-  { key: 'lt200', label: 'Menos de US$200' },
-  { key: '200_1000', label: 'US$200–1.000' },
-  { key: '1000_5000', label: 'US$1.000–5.000' },
-  { key: 'gt5000', label: 'Más de US$5.000' },
+  { key: 'lt200', label: `Menos de ${usd(200)}` },
+  { key: '200_1000', label: `${usd(200)}–${formatDecimal(1000, { decimals: 0 })}` },
+  { key: '1000_5000', label: `${usd(1000)}–${formatDecimal(5000, { decimals: 0 })}` },
+  { key: 'gt5000', label: `Más de ${usd(5000)}` },
 ];
 const CHANNELS = [
   { key: 'instagram', label: 'Instagram' },
@@ -55,6 +59,7 @@ type Props = {
  * where. One short screen; every answer is optional except the role.
  */
 export const ComprarInterestSheet = ({ visible, countryCode, city, categories, onClose, onDone }: Props) => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const [role, setRole] = useState<Role | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [wants, setWants] = useState('');
@@ -142,7 +147,7 @@ export const ComprarInterestSheet = ({ visible, countryCode, city, categories, o
                 {selling ? (
                   <>
                     <Text style={styles.q}>¿Cuánto vendes al mes hoy?</Text>
-                    {chips(SALES, (k) => sales === k, (k) => setSales(sales === k ? null : k))}
+                    {chips(salesOptions(), (k) => sales === k, (k) => setSales(sales === k ? null : k))}
                     <Text style={styles.q}>¿Dónde vendes hoy?</Text>
                     {chips(CHANNELS, (k) => channels.includes(k), (k) => toggle(channels, k, setChannels))}
                   </>

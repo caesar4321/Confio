@@ -1,4 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -14,6 +15,7 @@ const PAGE_SIZE = 20;
 
 /** Mis compras / Mis ventas. Sales show only paid orders (never drafts). */
 export const MarketOrdersScreen = () => {
+  useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const [role, setRole] = useState<'buyer' | 'merchant'>(route.params?.role ?? 'buyer');
