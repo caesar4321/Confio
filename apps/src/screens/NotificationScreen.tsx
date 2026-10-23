@@ -413,6 +413,16 @@ export const NotificationScreen = () => {
         navigation.navigate('CommunityMemberProfile', { userId: communityMember[1] });
         return;
       }
+      // Comprar: an order's buyer or merchant view (same link the push opens).
+      const comprarOrder = normalizedUrl.match(/comprar\/order\/([0-9a-f-]+)/);
+      if (comprarOrder) {
+        navigation.navigate('MarketOrder', { orderId: comprarOrder[1] });
+        return;
+      }
+      if (normalizedUrl.includes('comprar')) {
+        navigation.navigate('BottomTabs', { screen: 'Comprar' });
+        return;
+      }
       if (normalizedUrl.includes('community/my-posts')) {
         navigation.navigate('MyCommunityPosts');
         return;

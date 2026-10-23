@@ -579,6 +579,7 @@ def should_send_push(prefs: NotificationPreference, notification_type: str) -> b
         'PROMOTION': 'push_promotions',
         'ANNOUNCEMENT': 'push_announcements',
         'BUSINESS': 'push_transactions',
+        'MARKETPLACE': 'push_transactions',  # Comprar order updates are money movements
         'ACHIEVEMENT': 'push_promotions',  # Achievements under promotions
     }
     

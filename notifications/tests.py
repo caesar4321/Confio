@@ -123,3 +123,26 @@ class FCMDeviceRegistrationTests(TestCase):
             'recent_users': 1,
             'active_tokens': 3,
         })
+
+
+class NotificationTypeEnumParityTests(SimpleTestCase):
+    """The GraphQL enum is a hand-kept copy of the model's choices. A type the
+    enum lacks fails the WHOLE notifications query for anyone holding one such
+    notification (MARKETPLACE_ORDER_UPDATED did, 2026-10-23)."""
+
+    def test_every_model_type_is_in_the_graphql_enum(self):
+        from notifications.models import NotificationType
+        from notifications.schema import NotificationTypeEnum
+        model = {value for value, _label in NotificationType.choices}
+        enum = {member.value for member in NotificationTypeEnum._meta.enum}
+        self.assertEqual(sorted(model - enum), [])
+
+
+class MarketplacePushPreferenceTests(SimpleTestCase):
+    def test_comprar_order_pushes_follow_the_transactions_switch(self):
+        from types import SimpleNamespace
+        from notifications.fcm_service import should_send_push
+        off = SimpleNamespace(push_enabled=True, push_transactions=False)
+        on = SimpleNamespace(push_enabled=True, push_transactions=True)
+        self.assertFalse(should_send_push(off, 'MARKETPLACE_ORDER_UPDATED'))
+        self.assertTrue(should_send_push(on, 'MARKETPLACE_ORDER_UPDATED'))
