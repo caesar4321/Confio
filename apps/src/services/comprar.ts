@@ -337,7 +337,7 @@ const signAndSubmit = async (
   action: MarketAction,
   calls: BatchCall[],
   intentId: string,
-  extra: { disputeReason?: string } = {},
+  extra: { disputeReason?: string; onStage?: (stage: CheckoutStage) => void } = {},
 ): Promise<{ txHash: string }> => {
   const { apolloClient } = await import('../apollo/client');
   const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
@@ -353,7 +353,10 @@ const signAndSubmit = async (
   for (let attempt = 0; attempt < 3; attempt++) {
     const { execNonce, deadline, intentSignature, authorization } =
       await signBatch(calls, intentId, wallet, sponsored.delegateAddress);
-    const res = await apolloClient.mutate({
+    // Past the deadline the outcome is unknown (the sponsor may still mine it):
+    // the message is not an error code, so callers treat it as unknown, never
+    // as "failed, try again".
+    const res = await withTimeout(apolloClient.mutate({
       mutation: SUBMIT_ACTION,
       variables: {
         orderId,
@@ -364,12 +367,14 @@ const signAndSubmit = async (
         authorization,
         disputeReason: extra.disputeReason || null,
       },
-    });
+    }), SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT);
     const sub = res.data?.submitMarketOrderAction;
     if (!sub?.success && isFaceStepUpRequired(sub?.error) && !faceRetried) {
       // The face window lapsed between prepare and submit: confirm again.
       faceRetried = true;
+      extra.onStage?.('face');
       if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+      extra.onStage?.('paying');
       continue;
     }
     if (!sub?.success) {
@@ -399,31 +404,57 @@ export interface CheckoutInput {
   outsideCityAck?: boolean;
 }
 
+/** Mutations get no timeout from the Apollo link; these bound the money path. */
+const PREPARE_TIMEOUT_MS = 45_000;
+const SUBMIT_TIMEOUT_MS = 90_000;
+/** Thrown when a submit outlived its deadline: it may still land on chain. */
+const SUBMIT_TIMEOUT = 'Submit outcome unknown (timeout)';
+
+const withTimeout = <T,>(work: Promise<T>, ms: number, message: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    work.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+
+/**
+ * Where a checkout is, so the screen can block input while it works and step
+ * aside for what needs the buyer: Confío Face and a changed price.
+ */
+export type CheckoutStage = 'preparing' | 'face' | 'confirming' | 'paying';
+
 /** Prepare the order (server signs the escrow authorization) and pay it. */
 export const placeMarketOrder = async (
   input: CheckoutInput,
   confirmAmount: (amountUsd: string) => Promise<boolean>,
+  onStage: (stage: CheckoutStage) => void = () => {},
 ): Promise<{ orderId: string; txHash: string }> => {
   const { apolloClient } = await import('../apollo/client');
   const { ensureFaceCheck, FACE_STEP_UP_MESSAGE, FaceCheckError, isFaceStepUpRequired } =
     await import('./faceStepUp');
   const { expectedAmountUsd, ...variables } = input;
-  const prepare = async () => (await apolloClient.mutate({ mutation: PREPARE_ORDER, variables }))
-    .data?.prepareMarketOrder;
+  // A prepare that times out is safe to retry: the server reuses the draft.
+  const prepare = async () => (await withTimeout(
+    apolloClient.mutate({ mutation: PREPARE_ORDER, variables }), PREPARE_TIMEOUT_MS, 'network',
+  )).data?.prepareMarketOrder;
+  onStage('preparing');
   let prep = await prepare();
   if (!prep?.success && isFaceStepUpRequired(prep?.error)) {
     // A purchase is a payment: Confío Face, then once more (the draft is reused).
+    onStage('face');
     if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+    onStage('preparing');
     prep = await prepare();
   }
   if (!prep?.success) throw new Error(prep?.error || 'prepare_failed');
   const orderId = prep.order.id as string;
   // Never sign an amount the buyer did not see.
   if (expectedAmountUsd && Number(prep.order.amountUsd) !== Number(expectedAmountUsd)) {
+    onStage('confirming');
     if (!(await confirmAmount(prep.order.amountUsd))) throw new Error('price_not_confirmed');
   }
   try {
-    const { txHash } = await signAndSubmit(orderId, 'deposit', toCalls(prep.calls), prep.intentId);
+    onStage('paying');
+    const { txHash } = await signAndSubmit(orderId, 'deposit', toCalls(prep.calls), prep.intentId, { onStage });
     return { orderId, txHash };
   } catch (e: any) {
     if (e instanceof BscRevertedError) throw new Error('simulation_reverted');
@@ -440,10 +471,12 @@ export const placeMarketOrder = async (
 export const runMarketAction = async (
   orderId: string,
   action: Exclude<MarketAction, 'deposit'>,
-  extra: { disputeReason?: string } = {},
+  extra: { disputeReason?: string; onStage?: (stage: CheckoutStage) => void } = {},
 ): Promise<{ txHash: string }> => {
   const { apolloClient } = await import('../apollo/client');
-  const res = await apolloClient.mutate({ mutation: ACTION_CALLS, variables: { orderId, action } });
+  const res = await withTimeout(
+    apolloClient.mutate({ mutation: ACTION_CALLS, variables: { orderId, action } }), PREPARE_TIMEOUT_MS, 'network',
+  );
   const prep = res.data?.marketOrderActionCalls;
   if (!prep?.success) throw new Error(prep?.error || 'prepare_failed');
   return signAndSubmit(orderId, action, toCalls(prep.calls), prep.intentId, extra);

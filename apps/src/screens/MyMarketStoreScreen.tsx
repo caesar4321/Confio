@@ -3,9 +3,7 @@ import { ActivityIndicator, Alert, FlatList, Image, Pressable, StyleSheet, Switc
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../components/common/AppText';
-import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import {
   DELETE_MARKET_PRODUCT, GET_MY_MARKET_STORE, OPEN_MARKET_STORE, SET_MARKET_PRODUCT_PAUSED,
@@ -17,9 +15,16 @@ import { formatUsd } from '../utils/comprarFormat';
 import { explainLocateOutcome } from '../utils/comprarLocate';
 import { OpenStoreForm } from '../components/comprar/OpenStoreForm';
 import { useAccount } from '../contexts/AccountContext';
+import { ComprarFrame, KitCard } from '../components/comprar/kit';
 
 const PRODUCT_STATUS: Record<string, string> = {
   pending_review: 'En revisión', active: 'Publicado', rejected: 'Rechazado', paused: 'Pausado',
+};
+const STATUS_STYLE: Record<string, { backgroundColor: string; color: string }> = {
+  pending_review: { backgroundColor: colors.warning.background, color: colors.warning.text },
+  active: { backgroundColor: colors.primaryLight, color: colors.primaryDeep },
+  rejected: { backgroundColor: colors.error.background, color: colors.error.text },
+  paused: { backgroundColor: colors.neutralDark, color: colors.text.secondary },
 };
 
 /**
@@ -48,13 +53,8 @@ export const MyMarketStoreScreen = () => {
     ? `la cuenta de ${activeAccount?.business?.name || 'tu negocio'}`
     : 'tu cuenta personal';
 
-  const header = (title: string) => (
-    <Header navigation={navigation} isHomeScreen={false} title={title} backgroundColor="#fff"
-      showBackButton isLight={false} unreadNotifications={0} currentAccountAvatar="U" />
-  );
-
   if (loading && !data) {
-    return <SafeAreaView style={styles.screen} edges={['top']}>{header('Mi tienda')}<ActivityIndicator style={{ marginTop: 48 }} color={colors.primaryDark} /></SafeAreaView>;
+    return <ComprarFrame title="Mi tienda"><ActivityIndicator style={{ marginTop: 48 }} color={colors.primaryDark} /></ComprarFrame>;
   }
 
   if (!store) {
@@ -112,8 +112,7 @@ export const MyMarketStoreScreen = () => {
   }
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      {header('Mi tienda')}
+    <ComprarFrame title="Mi tienda">
       <FlatList
         data={products}
         keyExtractor={(p: any) => String(p.id)}
@@ -123,9 +122,16 @@ export const MyMarketStoreScreen = () => {
         windowSize={21}
         ListHeaderComponent={
           <View style={{ gap: 10, marginBottom: 6 }}>
-            <View style={styles.storeCard}>
-              <Text style={styles.storeName}>{store.name}</Text>
-              <Text style={styles.muted}>{store.city} · {store.completedOrders} ventas{store.ratingCount ? ` · ★ ${Number(store.avgRating).toFixed(1)}` : ''}</Text>
+            <KitCard>
+              <View style={styles.storeHead}>
+                <View style={styles.avatar}>
+                  <Text style={styles.initial}>{(store.name || '?').trim().charAt(0).toUpperCase()}</Text>
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.storeName} numberOfLines={1}>{store.name}</Text>
+                  <Text style={styles.muted}>{store.city} · {store.completedOrders} ventas{store.ratingCount ? ` · ★ ${Number(store.avgRating).toFixed(1)}` : ''}</Text>
+                </View>
+              </View>
               {store.status === 'suspended' ? (
                 <Text style={styles.error}>Tu tienda está suspendida. Escríbenos desde el asistente.</Text>
               ) : (
@@ -137,7 +143,7 @@ export const MyMarketStoreScreen = () => {
                   }} />
                 </View>
               )}
-            </View>
+            </KitCard>
             <Pressable style={styles.salesLink} onPress={() => navigation.navigate('MarketOrders', { role: 'merchant' })}>
               <Icon name="inbox" size={18} color={colors.primaryDark} />
               <Text style={styles.salesText}>Mis ventas</Text>
@@ -154,10 +160,14 @@ export const MyMarketStoreScreen = () => {
             <View style={{ flex: 1 }}>
               <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
               <Text style={styles.muted}>{formatUsd(item.priceUsd)} · stock {item.stock}</Text>
-              <Text style={[styles.muted, item.status === 'rejected' && styles.rejected]}>
-                {PRODUCT_STATUS[item.status] || item.status}
-                {item.status === 'rejected' && item.rejectionReason ? ` — ${item.rejectionReason}` : ''}
-              </Text>
+              <View style={[styles.statusPill, STATUS_STYLE[item.status] || STATUS_STYLE.paused]}>
+                <Text style={[styles.statusText, { color: (STATUS_STYLE[item.status] || STATUS_STYLE.paused).color }]}>
+                  {PRODUCT_STATUS[item.status] || item.status}
+                </Text>
+              </View>
+              {item.status === 'rejected' && item.rejectionReason ? (
+                <Text style={[styles.muted, styles.rejected]} numberOfLines={2}>{item.rejectionReason}</Text>
+              ) : null}
             </View>
             {(item.status === 'active' || item.status === 'paused') && (
               <Pressable hitSlop={8} onPress={async () => {
@@ -183,7 +193,7 @@ export const MyMarketStoreScreen = () => {
         <Icon name="plus" size={20} color={colors.white} />
         <Text style={styles.fabText}>Agregar producto</Text>
       </Pressable>
-    </SafeAreaView>
+    </ComprarFrame>
   );
 };
 
@@ -194,15 +204,19 @@ const styles = StyleSheet.create({
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   switchText: { flex: 1, fontSize: 14, color: colors.text.primary },
   error: { color: colors.error.text, fontSize: 14 },
-  storeCard: { backgroundColor: colors.white, borderRadius: 14, padding: 14, gap: 6 },
+  storeHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  initial: { fontSize: 20, fontWeight: '700', color: colors.primaryDeep },
   storeName: { fontSize: 18, fontWeight: '700', color: colors.textFlat },
+  statusPill: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, marginTop: 2 },
+  statusText: { fontSize: 11, fontWeight: '700' },
   muted: { fontSize: 13, color: colors.text.secondary },
   rejected: { color: colors.error.text },
-  salesLink: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.white, borderRadius: 14, padding: 14 },
+  salesLink: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.white, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.borderLight },
   salesText: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.textFlat },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.textFlat, marginTop: 6 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.white, borderRadius: 14, padding: 12 },
-  thumb: { width: 52, height: 52, borderRadius: 10, backgroundColor: colors.neutralDark },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.white, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: colors.borderLight },
+  thumb: { width: 56, height: 56, borderRadius: 12, backgroundColor: colors.neutralDark },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 15, fontWeight: '600', color: colors.textFlat },
   fab: { position: 'absolute', right: 16, bottom: 28, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.primaryDark, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 14 },

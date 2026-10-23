@@ -1,7 +1,7 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 
-jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView' }));
+jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
 jest.mock('@react-navigation/native', () => ({

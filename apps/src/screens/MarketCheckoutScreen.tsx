@@ -5,14 +5,13 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useQuery } from '@apollo/client';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, TextInput } from '../components/common/AppText';
-import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import {
-  GET_CHECKOUT_QUOTE, GET_MARKETPLACE_PRODUCT, GET_MARKET_ORDER, MarketOutcomeUnknownError, comprarError,
+  CheckoutStage, GET_CHECKOUT_QUOTE, GET_MARKETPLACE_PRODUCT, GET_MARKET_ORDER, MarketOutcomeUnknownError, comprarError,
   placeMarketOrder,
 } from '../services/comprar';
+import { ComprarFrame, KitButton, KitCard, KitFooter, KitRow, ProductThumb, TrustNote, kitText } from '../components/comprar/kit';
 import { formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFormat';
 
 /**
@@ -37,6 +36,9 @@ export const MarketCheckoutScreen = () => {
   const [note, setNote] = useState('');
   const [ack, setAck] = useState(false);
   const [paying, setPaying] = useState(false);
+  // Blocks the screen while the order is prepared and paid; steps aside for
+  // Confío Face and the changed-price question, which need the buyer.
+  const [stage, setStage] = useState<CheckoutStage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Resuming an unpaid draft: same quantity and delivery details, so the
@@ -106,7 +108,7 @@ export const MarketCheckoutScreen = () => {
           { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Pagar', onPress: () => resolve(true) },
         ]);
-      }));
+      }), setStage);
       navigation.replace('MarketOrder', { orderId, justPaid: true });
     } catch (e: any) {
       if (e instanceof MarketOutcomeUnknownError) {
@@ -117,26 +119,35 @@ export const MarketCheckoutScreen = () => {
       setError(comprarError(e?.message));
     } finally {
       setPaying(false);
+      setStage(null);
     }
   };
 
   if (!product) {
     return (
-      <SafeAreaView style={styles.screen} edges={['top']}>
+      <ComprarFrame title="Confirmar compra">
         <ActivityIndicator style={{ marginTop: 48 }} color={colors.primaryDark} />
-      </SafeAreaView>
+      </ComprarFrame>
     );
   }
 
+  const blocking = paying && (stage === 'preparing' || stage === 'paying')
+    ? (stage === 'paying' && quote ? `Pagando ${formatUsd(quote.amountUsd)}…` : 'Preparando tu compra…')
+    : null;
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <Header navigation={navigation} isHomeScreen={false} title="Confirmar compra" backgroundColor="#fff"
-        showBackButton isLight={false} unreadNotifications={0} currentAccountAvatar="U" />
+    <ComprarFrame title="Confirmar compra" blocking={blocking}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.card}>
-            <Text style={styles.productTitle}>{product.title}</Text>
-            <Text style={styles.muted}>{store.name} · {store.city}</Text>
+          <KitCard>
+            <View style={styles.productRow}>
+              <ProductThumb uri={product.photoUrls?.[0]} size={64} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={styles.productTitle} numberOfLines={2}>{product.title}</Text>
+                <Text style={kitText.muted} numberOfLines={1}>{store.name} · {store.city}</Text>
+                <Text style={styles.unitPrice}>{formatUsd(quote?.unitPriceUsd ?? product.priceUsd)}</Text>
+              </View>
+            </View>
+            <View style={styles.divider} />
             <View style={styles.qtyRow}>
               <Text style={styles.label}>Cantidad</Text>
               {resuming ? (
@@ -144,36 +155,38 @@ export const MarketCheckoutScreen = () => {
               ) : (
                 <View style={styles.stepper}>
                   <Pressable onPress={() => setQuantity((q) => Math.max(1, q - 1))} style={styles.stepButton}
-                    accessibilityLabel="Menos"><Icon name="minus" size={16} color={colors.text.primary} /></Pressable>
+                    disabled={quantity <= 1} accessibilityLabel="Menos">
+                    <Icon name="minus" size={16} color={quantity <= 1 ? colors.text.light : colors.text.primary} />
+                  </Pressable>
                   <Text style={styles.qty}>{quantity}</Text>
                   <Pressable onPress={() => setQuantity((q) => Math.min(maxQty, q + 1))} style={styles.stepButton}
-                    accessibilityLabel="Más"><Icon name="plus" size={16} color={colors.text.primary} /></Pressable>
+                    disabled={quantity >= maxQty} accessibilityLabel="Más">
+                    <Icon name="plus" size={16} color={quantity >= maxQty ? colors.text.light : colors.text.primary} />
+                  </Pressable>
                 </View>
               )}
             </View>
-          </View>
+          </KitCard>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Entrega</Text>
+          <KitCard icon="truck" title="Entrega">
             <View style={styles.cityRow}>
-              <Pressable style={[styles.cityOption, !outside && styles.cityOptionOn]} onPress={() => setMode('same')}>
-                <Text style={[styles.cityText, !outside && styles.cityTextOn]}>En {store.city}</Text>
-              </Pressable>
-              <Pressable style={[styles.cityOption, outside && styles.cityOptionOn]}
-                onPress={() => setMode('other')}>
-                <Text style={[styles.cityText, outside && styles.cityTextOn]}>Otra ciudad</Text>
-              </Pressable>
+              {([['same', `En ${store.city}`, 'map-pin'], ['other', 'Otra ciudad', 'navigation']] as const).map(([m, label, icon]) => {
+                const on = mode === m;
+                return (
+                  <Pressable key={m} style={[styles.cityOption, on && styles.cityOptionOn]} onPress={() => setMode(m)}
+                    accessibilityRole="radio" accessibilityState={{ checked: on }}>
+                    <Icon name={icon} size={15} color={on ? colors.primaryDeep : colors.text.secondary} />
+                    <Text style={[styles.cityText, on && styles.cityTextOn]} numberOfLines={1}>{label}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
             {outside && (
-              <TextInput style={styles.input} placeholder="Ciudad de entrega" placeholderTextColor={colors.text.light}
-                value={otherCity} onChangeText={setOtherCity} />
+              <Field icon="map" placeholder="Ciudad de entrega" value={otherCity} onChangeText={setOtherCity} />
             )}
-            <TextInput style={styles.input} placeholder="Dirección (calle, número, zona)" placeholderTextColor={colors.text.light}
-              value={address} onChangeText={setAddress} />
-            <TextInput style={styles.input} placeholder="Teléfono para el repartidor" placeholderTextColor={colors.text.light}
-              keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
-            <TextInput style={styles.input} placeholder="Referencia (opcional)" placeholderTextColor={colors.text.light}
-              value={note} onChangeText={setNote} />
+            <Field icon="home" placeholder="Dirección (calle, número, zona)" value={address} onChangeText={setAddress} />
+            <Field icon="phone" placeholder="Teléfono para el repartidor" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+            <Field icon="message-square" placeholder="Referencia (opcional)" value={note} onChangeText={setNote} />
             {outside && !store.shipsOutsideCity ? (
               <Text style={styles.warn}>Esta tienda solo entrega en {store.city}.</Text>
             ) : outside ? (
@@ -184,93 +197,79 @@ export const MarketCheckoutScreen = () => {
                 </Text>
               </View>
             ) : null}
-          </View>
+          </KitCard>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Resumen</Text>
+          <KitCard icon="file-text" title="Resumen">
             {quoting && !quote ? <ActivityIndicator color={colors.primaryDark} /> : quote ? (
               <>
-                <View style={styles.line}>
-                  <Text style={styles.label}>Producto{quantity > 1 ? ` (${quantity} × ${formatUsd(quote.unitPriceUsd)})` : ''}</Text>
-                  <Text style={styles.value}>{formatUsd(quote.amountUsd)}</Text>
-                </View>
+                <KitRow label={quantity > 1 ? `Producto (${quantity} × ${formatUsd(quote.unitPriceUsd)})` : 'Producto'}
+                  value={formatUsd(quote.amountUsd)} />
+                <KitRow label="Envío (pagas al recibir)" muted value={quote.deliveryEstimateLocal
+                  ? `~${formatLocalPrice(quote.deliveryEstimateLocal, quote.deliveryCurrency || '')}`
+                  : 'A coordinar'} />
+                <View style={styles.divider} />
+                <KitRow label="Pagas ahora" strong value={formatUsd(quote.amountUsd)} />
                 {formatReference(quote.referenceLocal) ? (
-                  <View style={styles.line}>
-                    <Text style={styles.muted}>En moneda local, aprox.</Text>
-                    <Text style={styles.muted}>{formatReference(quote.referenceLocal)}</Text>
-                  </View>
+                  <Text style={[kitText.muted, styles.right]}>{formatReference(quote.referenceLocal)} en moneda local</Text>
                 ) : null}
-                <View style={styles.line}>
-                  <Text style={styles.label}>Envío</Text>
-                  <Text style={styles.value}>
-                    {quote.deliveryEstimateLocal
-                      ? `~${formatLocalPrice(quote.deliveryEstimateLocal, quote.deliveryCurrency || '')}`
-                      : 'A coordinar'}
-                  </Text>
-                </View>
-                <Text style={styles.muted}>
+                <Text style={kitText.muted}>
                   El envío se paga al repartidor{quote.deliveryPartner ? ` (${quote.deliveryPartner})` : ''} al recibir, con tu QR.
                 </Text>
               </>
             ) : (
-              <Pressable onPress={() => { void requote().catch(() => {}); }} testID="checkout-requote">
+              <Pressable onPress={() => { void requote().catch(() => {}); }} testID="checkout-requote" style={styles.retry}>
+                <Icon name="refresh-cw" size={15} color={colors.warning.text} />
                 <Text style={styles.warn}>No pudimos calcular el total. Toca para reintentar.</Text>
               </Pressable>
             )}
-          </View>
+          </KitCard>
 
-          <View style={styles.trust}>
-            <Icon name="shield" size={16} color={colors.primaryDark} />
-            <Text style={styles.trustText}>
-              Tu pago queda guardado hasta que confirmes que recibiste el pedido. Si la tienda no lo envía, puedes recuperarlo.
-            </Text>
-          </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <TrustNote>
+            Tu pago queda guardado hasta que confirmes que recibiste el pedido. Si la tienda no lo envía, puedes recuperarlo.
+          </TrustNote>
+          {error ? <Text style={kitText.error}>{error}</Text> : null}
         </ScrollView>
-        <View style={styles.footer}>
+        <KitFooter>
           {blocker && !paying ? <Text style={styles.blocker} testID="checkout-blocker">{blocker}</Text> : null}
-          <Pressable testID="checkout-pay" style={[styles.payButton, !canPay && styles.payDisabled]} disabled={!canPay} onPress={() => { void pay(); }}>
-            {paying ? <ActivityIndicator color={colors.white} /> : (
-              <Text style={styles.payText}>{quote ? `Pagar ${formatUsd(quote.amountUsd)}` : 'Pagar'}</Text>
-            )}
-          </Pressable>
-        </View>
+          <KitButton testID="checkout-pay" disabled={!canPay} loading={paying} icon="lock"
+            label={quote ? `Pagar ${formatUsd(quote.amountUsd)}` : 'Pagar'} onPress={() => { void pay(); }} />
+        </KitFooter>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </ComprarFrame>
   );
 };
+
+const Field = ({ icon, ...props }: { icon: string } & React.ComponentProps<typeof TextInput>) => (
+  <View style={styles.field}>
+    <Icon name={icon} size={16} color={colors.text.light} />
+    <TextInput style={styles.fieldInput} placeholderTextColor={colors.text.light} {...props} />
+  </View>
+);
 
 export default MarketCheckoutScreen;
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.neutral },
-  content: { padding: 16, gap: 12, paddingBottom: 120 },
-  card: { backgroundColor: colors.white, borderRadius: 14, padding: 14, gap: 10 },
+  content: { padding: 16, gap: 12, paddingBottom: 32 },
+  productRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   productTitle: { fontSize: 16, fontWeight: '600', color: colors.textFlat },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.textFlat },
+  unitPrice: { fontSize: 15, fontWeight: '700', color: colors.textFlat, marginTop: 2 },
+  divider: { height: 1, backgroundColor: colors.borderLight },
   label: { fontSize: 14, color: colors.text.primary },
-  value: { fontSize: 14, fontWeight: '600', color: colors.textFlat },
-  muted: { fontSize: 13, color: colors.text.secondary },
   qtyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  stepButton: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' },
-  qty: { fontSize: 16, fontWeight: '700', minWidth: 20, textAlign: 'center' },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: colors.neutral, borderRadius: 999, padding: 4 },
+  stepButton: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  qty: { fontSize: 16, fontWeight: '700', minWidth: 20, textAlign: 'center', color: colors.textFlat },
   cityRow: { flexDirection: 'row', gap: 8 },
-  cityOption: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center' },
+  cityOption: { flex: 1, flexDirection: 'row', gap: 6, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   cityOptionOn: { borderColor: colors.primaryDark, backgroundColor: colors.primaryLight },
   cityText: { fontSize: 14, color: colors.text.primary },
-  cityTextOn: { fontWeight: '700', color: colors.onHeroField },
-  input: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: colors.text.primary },
+  cityTextOn: { fontWeight: '700', color: colors.primaryDeep },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, backgroundColor: colors.white },
+  fieldInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: colors.text.primary },
   ackRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  ackText: { flex: 1, fontSize: 13, color: colors.text.primary },
-  warn: { fontSize: 13, color: colors.warning.text },
-  line: { flexDirection: 'row', justifyContent: 'space-between' },
-  trust: { flexDirection: 'row', gap: 10, padding: 12, borderRadius: 12, backgroundColor: colors.primaryLight },
-  trustText: { flex: 1, fontSize: 13, color: colors.onHeroField, lineHeight: 19 },
-  error: { color: colors.error.text, fontSize: 14, textAlign: 'center' },
-  footer: { padding: 16, paddingBottom: 28, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
-  blocker: { fontSize: 13, color: colors.text.secondary, textAlign: 'center', marginBottom: 8 },
-  payButton: { backgroundColor: colors.primaryDark, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
-  payDisabled: { backgroundColor: '#D1D5DB' },
-  payText: { color: colors.white, fontSize: 16, fontWeight: '700' },
+  ackText: { flex: 1, fontSize: 13, color: colors.text.primary, lineHeight: 18 },
+  warn: { fontSize: 13, color: colors.warning.text, flexShrink: 1 },
+  retry: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  right: { textAlign: 'right', marginTop: -6 },
+  blocker: { fontSize: 13, color: colors.text.secondary, textAlign: 'center' },
 });

@@ -3,14 +3,13 @@ import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, Sc
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, TextInput } from '../components/common/AppText';
-import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { GET_MY_MARKET_STORE, GET_REFERENCE_RATE, SAVE_MARKET_PRODUCT, comprarError, uploadMarketPhoto } from '../services/comprar';
 import { formatFeeBps, formatLocalPrice } from '../utils/comprarFormat';
 import { CategoryPicker } from '../components/comprar/CategoryPicker';
 import { pickFromLibrary } from '../services/systemPicker';
+import { ComprarFrame, KitButton, KitCard, KitFooter } from '../components/comprar/kit';
 
 const MAX_PHOTOS = 4;
 // Camera originals at full size can pass the 5 MB upload cap; this keeps them
@@ -122,12 +121,10 @@ export const MarketProductEditScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <Header navigation={navigation} isHomeScreen={false} title={productId ? 'Editar producto' : 'Nuevo producto'}
-        backgroundColor="#fff" showBackButton isLight={false} unreadNotifications={0} currentAccountAvatar="U" />
+    <ComprarFrame title={productId ? 'Editar producto' : 'Nuevo producto'}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={styles.label}>Fotos (hasta {MAX_PHOTOS})</Text>
+          <KitCard icon="camera" title="Fotos" right={<Text style={styles.hint}>{photos.length || existing?.photoUrls?.length || 0}/{MAX_PHOTOS}</Text>}>
           <ScrollView horizontal contentContainerStyle={{ gap: 8 }}>
             {(photos.length ? photos : (existing?.photoUrls || []).map((uri: string) => ({ uri }))).map((p: Photo, i: number) => (
               <View key={`${p.uri}-${i}`} style={styles.photo}>
@@ -149,12 +146,15 @@ export const MarketProductEditScreen = () => {
           </ScrollView>
           {photoError ? <Text style={styles.error}>{photoError}</Text> : null}
           <Text style={styles.hint}>Muestra el producto real. No incluyas teléfonos, redes sociales ni QR de pago.</Text>
+          </KitCard>
 
+          <KitCard icon="edit-3" title="Detalles">
           <TextInput style={styles.input} placeholder="Título" placeholderTextColor={colors.text.light}
             value={title} onChangeText={setTitle} maxLength={100} />
           <TextInput style={[styles.input, { minHeight: 90 }]} multiline placeholder="Descripción: materiales, tamaño, detalles"
             placeholderTextColor={colors.text.light} value={description} onChangeText={setDescription} maxLength={2000} />
-          <Text style={styles.label}>Categoría</Text>
+          </KitCard>
+          <KitCard icon="grid" title="Categoría">
           <CategoryPicker
             categories={
               // A listing whose category the admin has since hidden keeps it.
@@ -165,6 +165,8 @@ export const MarketProductEditScreen = () => {
             selected={category ? [category] : []}
             onToggle={setCategory}
           />
+          </KitCard>
+          <KitCard icon="tag" title="Precio y stock">
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Precio (US$)</Text>
@@ -187,25 +189,25 @@ export const MarketProductEditScreen = () => {
               (comisión {formatFeeBps(data.marketplaceFeeBps)}).
             </Text>
           ) : null}
+          </KitCard>
+          <Text style={[styles.hint, styles.center]}>Confío revisa cada publicación antes de mostrarla.</Text>
         </ScrollView>
-        <View style={styles.footer}>
+        <KitFooter>
           {/* Next to the button, not at the end of a long form, so it is seen. */}
-          {error ? <Text style={[styles.error, { marginBottom: 8 }]}>{error}</Text> : null}
-          <Pressable testID="product-submit" style={[styles.primary, (!valid || saving || uploading) && styles.disabled]}
-            disabled={!valid || saving || uploading} onPress={() => { void submit(); }}>
-            {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>Enviar a revisión</Text>}
-          </Pressable>
-        </View>
+          {error ? <Text style={[styles.error, styles.center]}>{error}</Text> : null}
+          <KitButton testID="product-submit" label="Enviar a revisión" icon="send"
+            disabled={!valid || uploading} loading={saving} onPress={() => { void submit(); }} />
+        </KitFooter>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </ComprarFrame>
   );
 };
 
 export default MarketProductEditScreen;
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.neutral },
-  content: { padding: 16, gap: 10, paddingBottom: 40 },
+  content: { padding: 16, gap: 12, paddingBottom: 32 },
+  center: { textAlign: 'center' },
   label: { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
   hint: { fontSize: 12, color: colors.text.secondary },
   input: { backgroundColor: colors.white, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, color: colors.text.primary },
@@ -215,15 +217,6 @@ const styles = StyleSheet.create({
   photoRemove: { position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   addPhoto: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderStyle: 'dashed', borderColor: '#D1D5DB', backgroundColor: colors.white },
   addPhotoText: { fontSize: 12, color: colors.text.secondary, marginTop: 4 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.white, borderWidth: 1, borderColor: '#E5E7EB' },
-  chipOn: { backgroundColor: colors.textFlat, borderColor: colors.textFlat },
-  chipText: { fontSize: 13, color: colors.text.primary },
-  chipTextOn: { color: colors.white, fontWeight: '600' },
   row: { flexDirection: 'row', gap: 10 },
   error: { color: colors.error.text, fontSize: 14 },
-  footer: { padding: 16, paddingBottom: 28, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
-  primary: { backgroundColor: colors.primaryDark, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
-  primaryText: { color: colors.white, fontWeight: '700', fontSize: 16 },
-  disabled: { backgroundColor: '#D1D5DB' },
 });
