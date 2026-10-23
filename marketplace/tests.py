@@ -1347,3 +1347,30 @@ class DeliveryAreaEdgeTests(MarketTestBase):
         with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
             res = UpdateMarketStore.mutate.__wrapped__(None, info, ships_outside_city=True)
         self.assertEqual(res.error, 'outside_delivery_price_required')
+
+
+
+class ReviewerLanguageTests(SimpleTestCase):
+    """Comprar replaces Comunidad's policy when it calls the shared reviewer,
+    and with it Comunidad's "reason in Spanish" rule: each Comprar policy must
+    carry its own (sellers saw English rejection reasons until 2026-10-23)."""
+
+    def test_every_comprar_policy_asks_for_the_reason_in_spanish(self):
+        from .moderation import PRODUCT_POLICY, REVIEW_POLICY
+        for policy in (PRODUCT_POLICY, REVIEW_POLICY):
+            self.assertIn('Latin American Spanish', policy)
+            self.assertIn('"reason"', policy)
+
+    def test_both_passes_send_the_exact_comprar_policy_for_listings_and_reviews(self):
+        from . import moderation
+        for policy in (moderation.PRODUCT_POLICY, moderation.REVIEW_POLICY):
+            with mock.patch('inbox.community._call_reviewer', return_value={'decision': 'escalate'}) as call, \
+                    mock.patch('inbox.community._needs_escalation', return_value=True):
+                moderation._decide('Title: Chompa', object(), policy=policy)
+            self.assertEqual(call.call_count, 2)  # first pass + escalation
+            self.assertTrue(all(c.kwargs['policy'] is policy for c in call.call_args_list))
+
+    def test_every_comprar_policy_keeps_the_untrusted_content_rule(self):
+        from .moderation import PRODUCT_POLICY, REVIEW_POLICY
+        for policy in (PRODUCT_POLICY, REVIEW_POLICY):
+            self.assertIn('UNTRUSTED USER CONTENT', policy)
