@@ -32,7 +32,7 @@ const STORE_FIELDS = `
 `;
 
 const PRODUCT_FIELDS = `
-  id title description category priceLocal currencyCode stock photoUrls status
+  id title description category categoryLabel priceLocal currencyCode stock photoUrls status
   rejectionReason isBuyable
 `;
 
@@ -48,7 +48,7 @@ export const ORDER_FIELDS = `
 export const GET_MARKETPLACE_HOME = gql`
   query MarketplaceHome($countryCode: String!, $city: String!) {
     marketplaceFeeBps
-    marketplaceCategories { key label }
+    marketplaceCategories(countryCode: $countryCode, city: $city) { key label group icon productCount }
     marketplaceCity(countryCode: $countryCode, city: $city) {
       countryCode city currencyCode isLive deliveryEstimate deliveryPartner storeCount
     }
@@ -118,7 +118,7 @@ export const GET_MY_MARKET_STORE = gql`
   query MyMarketStore {
     myMarketStore { ${STORE_FIELDS} }
     myMarketStoreProducts { ${PRODUCT_FIELDS} stockRevision }
-    marketplaceCategories { key label }
+    marketplaceCategories { key label group icon }
     marketplaceFeeBps
   }
 `;

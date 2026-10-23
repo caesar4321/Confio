@@ -47,7 +47,19 @@ export const ComprarScreen = () => {
   });
   const cityInfo = home?.marketplaceCity;
   const isLive = Boolean(cityInfo?.isLive);
+  // All active categories (the probe offers every one); browse shows only
+  // the ones with something to buy in this city, so a long list never means
+  // a row of empty chips.
   const categories = home?.marketplaceCategories || [];
+  const browseCategories = categories.filter((c: any) => (c.productCount || 0) > 0 || c.key === category);
+  // A filter whose category is no longer offered (hidden by the admin) must
+  // not stay applied with no visible chip.
+  React.useEffect(() => {
+    if (category && home?.marketplaceCategories && !categories.some((c: any) => c.key === category)) {
+      setHasMore(true);
+      setCategory(null);
+    }
+  }, [category, categories, home?.marketplaceCategories]);
 
   const variables = useMemo(() => ({
     countryCode, city: city || null, category, search: submittedSearch || null,
@@ -125,7 +137,7 @@ export const ComprarScreen = () => {
               returnKeyType="search" onSubmitEditing={() => { setHasMore(true); setSubmittedSearch(search.trim()); }} />
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-            {[{ key: null, label: 'Todo' }, ...categories].map((c: any) => {
+            {[{ key: null, label: 'Todo' }, ...browseCategories].map((c: any) => {
               const selected = c.key === category;
               return (
                 <Pressable key={c.key || 'all'} onPress={() => { setHasMore(true); setCategory(c.key); }}

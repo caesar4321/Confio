@@ -10,6 +10,7 @@ import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { GET_MY_MARKET_STORE, SAVE_MARKET_PRODUCT, comprarError, uploadMarketPhoto } from '../services/comprar';
 import { formatFeeBps } from '../utils/comprarFormat';
+import { CategoryPicker } from '../components/comprar/CategoryPicker';
 
 const MAX_PHOTOS = 4;
 
@@ -125,13 +126,16 @@ export const MarketProductEditScreen = () => {
           <TextInput style={[styles.input, { minHeight: 90 }]} multiline placeholder="Descripción: materiales, tamaño, detalles"
             placeholderTextColor={colors.text.light} value={description} onChangeText={setDescription} maxLength={2000} />
           <Text style={styles.label}>Categoría</Text>
-          <View style={styles.chips}>
-            {categories.map((c: any) => (
-              <Pressable key={c.key} style={[styles.chip, category === c.key && styles.chipOn]} onPress={() => setCategory(c.key)}>
-                <Text style={[styles.chipText, category === c.key && styles.chipTextOn]}>{c.label}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <CategoryPicker
+            categories={
+              // A listing whose category the admin has since hidden keeps it.
+              existing && !categories.some((c: any) => c.key === existing.category)
+                ? [{ key: existing.category, label: existing.categoryLabel || existing.category, group: 'Categoría actual' }, ...categories]
+                : categories
+            }
+            selected={category ? [category] : []}
+            onToggle={setCategory}
+          />
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Precio (moneda local)</Text>

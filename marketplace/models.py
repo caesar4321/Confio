@@ -29,18 +29,51 @@ from users.models import SoftDeleteModel
 
 COUNTRY_CHOICES = [(code[2], f"{code[0]} ({code[1]})") for code in COUNTRY_CODES]
 
-# Physical goods only. Prohibited goods are screened by moderation.
-CATEGORY_CHOICES = [
-    ('artesanias', 'Artesanías'),
-    ('textiles', 'Textiles y ropa'),
-    ('accesorios', 'Accesorios y joyería'),
-    ('hogar', 'Hogar y decoración'),
-    ('alimentos', 'Alimentos envasados'),
-    ('belleza', 'Belleza y cuidado personal'),
-    ('juguetes', 'Juguetes'),
-    ('otros', 'Otros'),
-]
-CATEGORY_KEYS = {key for key, _ in CATEGORY_CHOICES}
+# Physical goods only; prohibited goods are screened by moderation. The
+# taxonomy lives in the database (MarketplaceCategory, admin-managed), so a
+# new kind of seller never waits for a release. Seeded by migration 0004.
+
+
+def active_categories():
+    return MarketplaceCategory.objects.filter(is_active=True).order_by('group_order', 'sort_order', 'label')
+
+
+def active_category_keys() -> set:
+    return set(MarketplaceCategory.objects.filter(is_active=True).values_list('key', flat=True))
+
+
+CATEGORY_LABELS_CACHE_KEY = 'comprar:category-labels'
+
+
+def category_label(key: str) -> str:
+    """Label for any key (hidden ones too), from a 60s cached map: one query
+    per minute, not one per serialized product."""
+    from django.core.cache import cache
+    labels = cache.get(CATEGORY_LABELS_CACHE_KEY)
+    if labels is None:
+        labels = dict(MarketplaceCategory.objects.values_list('key', 'label'))
+        cache.set(CATEGORY_LABELS_CACHE_KEY, labels, 60)
+    return labels.get(key) or key
+
+
+class MarketplaceCategory(models.Model):
+    """One kind of physical product. Admin-managed: add, rename, reorder or
+    hide (is_active=False keeps existing listings, stops new ones)."""
+
+    key = models.SlugField(max_length=40, unique=True)
+    label = models.CharField(max_length=60)
+    group = models.CharField(max_length=60, help_text='Heading the pickers group it under')
+    group_order = models.PositiveSmallIntegerField(default=100)
+    sort_order = models.PositiveSmallIntegerField(default=100)
+    icon = models.CharField(max_length=30, blank=True, default='tag', help_text='Feather icon name')
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        verbose_name_plural = 'marketplace categories'
+        ordering = ['group_order', 'sort_order', 'label']
+
+    def __str__(self):
+        return f'{self.group} › {self.label}'
 
 
 class MarketplaceCity(models.Model):
@@ -148,7 +181,9 @@ class Product(SoftDeleteModel):
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='products')
     title = models.CharField(max_length=100)
     description = models.TextField(blank=True, default='', max_length=2000)
-    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, db_index=True)
+    # A MarketplaceCategory.key (kept as a plain key so retiring a category
+    # never cascades into listings).
+    category = models.CharField(max_length=40, db_index=True)
     price_local = models.DecimalField(
         max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('1'))],
         help_text="Price in the store's local currency (Bs in Bolivia)")

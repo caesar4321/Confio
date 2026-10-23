@@ -5,6 +5,7 @@ import { useMutation } from '@apollo/client';
 import { Text, TextInput } from '../common/AppText';
 import { colors } from '../../config/theme';
 import { SUBMIT_MARKETPLACE_INTEREST, comprarError } from '../../services/comprar';
+import { CategoryPicker, MarketCategory } from './CategoryPicker';
 
 type Role = 'buyer' | 'seller' | 'both';
 
@@ -43,7 +44,7 @@ type Props = {
   visible: boolean;
   countryCode: string;
   city: string;
-  categories: { key: string; label: string }[];
+  categories: MarketCategory[];
   onClose: () => void;
   onDone: (notify: boolean) => void;
 };
@@ -130,7 +131,8 @@ export const ComprarInterestSheet = ({ visible, countryCode, city, categories, o
             {role ? (
               <>
                 <Text style={styles.q}>{selling ? '¿Qué vendes?' : '¿Qué te gustaría comprar?'}</Text>
-                {chips(categories, (k) => picked.includes(k), (k) => toggle(picked, k, setPicked))}
+                <CategoryPicker categories={categories} selected={picked} multiple max={10}
+                  onToggle={(k) => toggle(picked, k, setPicked)} />
                 <TextInput style={styles.input} placeholder={selling ? 'Ej.: chompas de alpaca, mermeladas caseras' : 'Ej.: ropa tejida, regalos, comida envasada'}
                   placeholderTextColor={colors.text.light} value={wants} onChangeText={setWants} maxLength={300} />
 

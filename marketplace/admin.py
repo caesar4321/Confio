@@ -15,9 +15,37 @@ from django.db.models.functions import TruncMonth
 from django.http import HttpResponse
 from django.utils import timezone
 
-from .models import (MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
+from .models import (MarketplaceCategory, MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
                      MarketplaceLocationCheck, MarketplacePartnerAgreement, Order, OrderRating,
                      Product, Store)
+
+
+class MarketplaceCategoryAdmin(admin.ModelAdmin):
+    """The product taxonomy. Add, rename, reorder or hide without a release;
+    hiding keeps existing listings and stops new ones."""
+
+    list_display = ('key', 'label', 'group', 'group_order', 'sort_order', 'icon', 'is_active', 'listings')
+    list_display_links = ('key',)
+    list_editable = ('label', 'group', 'group_order', 'sort_order', 'icon', 'is_active')
+    list_filter = ('is_active', 'group')
+    search_fields = ('label', 'key', 'group')
+    ordering = ('group_order', 'sort_order', 'label')
+
+    def get_readonly_fields(self, request, obj=None):
+        # The key is what listings store: fixed once created.
+        return ('key',) if obj else ()
+
+    def get_queryset(self, request):
+        from django.db.models import IntegerField, OuterRef, Subquery
+        from django.db.models.functions import Coalesce
+        counts = (Product.objects.filter(category=OuterRef('key'), deleted_at__isnull=True)
+                  .values('category').annotate(n=Count('id')).values('n'))
+        return super().get_queryset(request).annotate(
+            _listings=Coalesce(Subquery(counts, output_field=IntegerField()), 0))
+
+    @admin.display(description='Listings', ordering='_listings')
+    def listings(self, obj):
+        return obj._listings
 
 
 class MarketplaceCityAdmin(admin.ModelAdmin):

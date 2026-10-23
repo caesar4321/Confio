@@ -134,8 +134,19 @@ class EscrowEncodingTests(SimpleTestCase):
         self.assertEqual(ours, reference)
 
 
+def ensure_categories():
+    # Own fixtures: seed rows (migration 0005) can be wiped by another suite's flush.
+    from .models import MarketplaceCategory
+    for key, label, group in [('textiles', 'Textiles y tejidos', 'Artesanía y regalos'),
+                              ('artesanias', 'Artesanías', 'Artesanía y regalos'),
+                              ('alimentos', 'Alimentos envasados', 'Comida envasada')]:
+        MarketplaceCategory.objects.update_or_create(key=key, defaults={'label': label, 'group': group,
+                                                                       'is_active': True})
+
+
 class MarketTestBase(TestCase):
     def setUp(self):
+        ensure_categories()
         # La Paz is seeded (not live) by migration 0002; the tests flip it live.
         self.city, _ = MarketplaceCity.objects.update_or_create(
             country_code='BO', city='La Paz',
@@ -791,6 +802,9 @@ class FaceEnforcementTests(MarketTestBase):
 
 
 class InterestProbeTests(TestCase):
+    def setUp(self):
+        ensure_categories()
+
     def _submit(self, user, **kw):
         from .schema import SubmitMarketplaceInterest
         info = SimpleNamespace(context=SimpleNamespace(user=user, headers={'X-Confio-Version': '5.3.0'}))
@@ -830,3 +844,45 @@ class InterestProbeTests(TestCase):
         self.assertEqual(self._submit(user, role='admin').error, 'bad_input')
         self.assertEqual(self._submit(user, price_range='huge').error, 'bad_input')
         self.assertEqual(self._submit(user, country_code='ZZ').error, 'bad_input')
+
+
+@override_settings(**ENABLED)
+class CategoryTests(MarketTestBase):
+    def test_categories_come_grouped_from_the_db_with_city_counts(self):
+        from .models import MarketplaceCategory
+        from .schema import Query
+        MarketplaceCategory.objects.update_or_create(key='cafe', defaults={
+            'label': 'Café', 'group': 'Comida envasada', 'is_active': True})
+        MarketplaceCategory.objects.update_or_create(key='retired', defaults={
+            'label': 'Retirada', 'group': 'Otros', 'is_active': False})
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        rows = {c.key: c for c in Query.resolve_marketplace_categories(None, info, 'BO', 'La Paz')}
+        self.assertNotIn('retired', rows)                       # hidden: no new listings
+        self.assertEqual(rows['textiles'].product_count, 1)     # the base product
+        self.assertEqual(rows['cafe'].product_count, 0)
+        self.assertEqual(rows['textiles'].group, 'Artesanía y regalos')
+        plain = {c.key: c for c in Query.resolve_marketplace_categories(None, info)}
+        self.assertIsNone(plain['textiles'].product_count)      # no city asked: no counts
+
+    def test_a_listing_needs_an_active_category(self):
+        from .models import MarketplaceCategory
+        from .schema import SaveMarketProduct
+        MarketplaceCategory.objects.filter(key='artesanias').update(is_active=False)
+        info = SimpleNamespace(context=SimpleNamespace(user=self.seller))
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
+            result = SaveMarketProduct.mutate.__wrapped__(
+                None, info, title='Retablo', category='artesanias', price_local='50', stock=1,
+                photo_keys=[f'marketplace/pending/{self.seller.id}/upload.jpg'])
+        self.assertEqual(result.error, 'bad_category')
+
+    def test_existing_listing_keeps_a_since_hidden_category(self):
+        from .models import MarketplaceCategory
+        from .schema import SaveMarketProduct
+        MarketplaceCategory.objects.filter(key='textiles').update(is_active=False)
+        info = SimpleNamespace(context=SimpleNamespace(user=self.seller))
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL), \
+                mock.patch('marketplace.moderation.transaction.on_commit'):
+            result = SaveMarketProduct.mutate.__wrapped__(
+                None, info, title='Chompa de alpaca', category='textiles', price_local='230', stock=3,
+                product_id=self.product.pk, expected_stock=3, expected_stock_revision=0)
+        self.assertTrue(result.success, result.error)

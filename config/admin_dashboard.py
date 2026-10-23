@@ -803,6 +803,7 @@ ConfioAdminSite.DASH_PAGES = [
     ], {'intro': 'Marketplace on ConfioMarketEscrow (BSC): stores, listings, escrowed orders, the partner share and the fake-door answers from cities that are not live.',
         'tools': (
             ('Cities (live, delivery)', 'marketplace_marketplacecity_changelist', ''),
+            ('Categories', 'marketplace_marketplacecategory_changelist', ''),
             ('Stores', 'marketplace_store_changelist', ''),
             ('Listings in review', 'marketplace_product_changelist', 'status__exact=pending_review'),
             ('Orders', 'marketplace_order_changelist', ''),
@@ -1224,15 +1225,16 @@ confio_admin_site.register(FinancieraReview, FinancieraReviewAdmin)
 confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 
 # Comprar (marketplace)
-from marketplace.models import (MarketplaceCity, Store as MarketStore, Product as MarketProduct,
+from marketplace.models import (MarketplaceCategory, MarketplaceCity, Store as MarketStore, Product as MarketProduct,
                                 Order as MarketOrder, OrderRating as MarketOrderRating,
                                 MarketplacePartnerAgreement, MarketplaceFeeLedger,
                                 MarketplaceLocationCheck, MarketplaceInterest)
-from marketplace.admin import (MarketplaceCityAdmin, StoreAdmin as MarketStoreAdmin,
+from marketplace.admin import (MarketplaceCategoryAdmin, MarketplaceCityAdmin, StoreAdmin as MarketStoreAdmin,
                                ProductAdmin as MarketProductAdmin, OrderAdmin as MarketOrderAdmin,
                                OrderRatingAdmin as MarketOrderRatingAdmin,
                                MarketplacePartnerAgreementAdmin, MarketplaceFeeLedgerAdmin,
                                MarketplaceLocationCheckAdmin, MarketplaceInterestAdmin)
+confio_admin_site.register(MarketplaceCategory, MarketplaceCategoryAdmin)
 confio_admin_site.register(MarketplaceCity, MarketplaceCityAdmin)
 confio_admin_site.register(MarketStore, MarketStoreAdmin)
 confio_admin_site.register(MarketProduct, MarketProductAdmin)

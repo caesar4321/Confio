@@ -21,7 +21,7 @@ from . import escrow
 from .checkout import CheckoutError, checkout_quote, jwt_account, prepare_order
 from .permissions import (ACTION_PERMISSIONS, BUY, SHIP, STORE_ADMIN, VIEW_ORDERS, can_act_for,
                           order_actor_account)
-from .models import (CATEGORY_CHOICES, CATEGORY_KEYS, COUNTRY_CHOICES, MarketplaceCity,
+from .models import (COUNTRY_CHOICES, MarketplaceCity, active_categories, active_category_keys, category_label,
                      Order, OrderRating, Product, Store)
 from .moderation import MAX_PHOTOS, pending_prefix, start_review
 
@@ -75,6 +75,9 @@ class MarketplaceCountryType(graphene.ObjectType):
 class MarketplaceCategoryType(graphene.ObjectType):
     key = graphene.String()
     label = graphene.String()
+    group = graphene.String(description='Heading the pickers group it under')
+    icon = graphene.String(description='Feather icon name')
+    product_count = graphene.Int(description='Live listings in the given city (when asked)')
 
 
 class MarketplaceStoreType(graphene.ObjectType):
@@ -110,6 +113,7 @@ class MarketplaceProductType(graphene.ObjectType):
     title = graphene.String()
     description = graphene.String()
     category = graphene.String()
+    category_label = graphene.String()
     price_local = graphene.String()
     currency_code = graphene.String()
     stock = graphene.Int()
@@ -124,7 +128,8 @@ class MarketplaceProductType(graphene.ObjectType):
     def from_model(product, *, for_owner=False, with_store=True):
         return MarketplaceProductType(
             id=product.pk, title=product.title, description=product.description,
-            category=product.category, price_local=str(product.price_local),
+            category=product.category, category_label=category_label(product.category),
+            price_local=str(product.price_local),
             currency_code=product.currency_code, stock=product.stock,
             photo_urls=list(product.photo_urls or []), status=product.status,
             rejection_reason=product.rejection_reason if for_owner else None,
@@ -284,7 +289,10 @@ def _orders_for(account):
 class Query(graphene.ObjectType):
     marketplace_fee_bps = graphene.Int(description='Merchant fee in basis points (800 = 8%). '
                                                    'Never hardcode it in copy.')
-    marketplace_categories = graphene.List(MarketplaceCategoryType)
+    marketplace_categories = graphene.List(
+        MarketplaceCategoryType, country_code=graphene.String(), city=graphene.String(),
+        description='Active categories, grouped by `group` in order. With a country+city, '
+                    'productCount says how many live listings each has there (browse hides empty ones).')
     marketplace_countries = graphene.List(MarketplaceCountryType)
     marketplace_cities = graphene.List(MarketplaceCityType, country_code=graphene.String(required=True))
     marketplace_city = graphene.Field(
@@ -312,8 +320,17 @@ class Query(graphene.ObjectType):
         from .pricing import fee_bps
         return fee_bps()
 
-    def resolve_marketplace_categories(self, info):
-        return [MarketplaceCategoryType(key=k, label=v) for k, v in CATEGORY_CHOICES]
+    def resolve_marketplace_categories(self, info, country_code=None, city=None):
+        counts = {}
+        if country_code and city:
+            counts = dict(
+                _visible_products().filter(store__country_code=country_code.upper().strip(),
+                                           store__city__iexact=city.strip())
+                .values_list('category').annotate(n=Count('id')))
+        return [MarketplaceCategoryType(key=c.key, label=c.label, group=c.group, icon=c.icon,
+                                        product_count=counts.get(c.key, 0) if counts or (country_code and city)
+                                        else None)
+                for c in active_categories()]
 
     def resolve_marketplace_countries(self, info):
         if not _user(info):
@@ -357,7 +374,7 @@ class Query(graphene.ObjectType):
         qs = qs.filter(store__city__in=[c.city for c in live])
         if city:
             qs = qs.filter(store__city__iexact=city.strip())
-        if category and category in CATEGORY_KEYS:
+        if category:
             qs = qs.filter(category=category)
         if store_id:
             qs = qs.filter(store_id=store_id)
@@ -592,7 +609,7 @@ class SubmitMarketplaceInterest(graphene.Mutation):
             user=user, country_code=country, city=city,
             defaults={
                 'account': account, 'role': role,
-                'categories': sorted({c for c in (categories or []) if c in CATEGORY_KEYS}),
+                'categories': sorted(set(categories or []) & active_category_keys())[:20],
                 'wants': (wants or '').strip()[:300],
                 'price_range': price_range if role != 'browsing' else '',
                 'monthly_sales': monthly_sales if selling else '',
@@ -761,8 +778,6 @@ class SaveMarketProduct(graphene.Mutation):
         title = title.strip()
         if not (3 <= len(title) <= 100):
             return SaveMarketProduct(success=False, error='bad_title')
-        if category not in CATEGORY_KEYS:
-            return SaveMarketProduct(success=False, error='bad_category')
         try:
             price = Decimal(price_local).quantize(Decimal('0.01'))
         except (InvalidOperation, TypeError):
@@ -784,6 +799,11 @@ class SaveMarketProduct(graphene.Mutation):
             if not keys:
                 return SaveMarketProduct(success=False, error='photo_required')
             product = Product(store=store)
+        # A new listing, or a change of category, needs an active category; an
+        # existing listing keeps a category the admin has since hidden.
+        unchanged = product.pk is not None and category == product.category
+        if not unchanged and category not in active_category_keys():
+            return SaveMarketProduct(success=False, error='bad_category')
         from django.db import transaction
         from django.db.models import F
         from django.db.models.functions import Greatest
