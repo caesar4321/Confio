@@ -777,3 +777,23 @@ answer `payout_not_prepared`; the client re-prepares them.
 - Wired: app `BUNDLED_HEARTBEAT.address` (emergencyExit/heartbeat.ts), server
   `CONFIO_HEARTBEAT_ADDRESS` (.env.mainnet), GitHub repo variable for the
   watchdog. Design: docs/plans/salida-de-emergencia-design.md § Phase 3.
+
+## ConfioMarketEscrow (Comprar) — deployed 2026-10-23
+
+| | |
+|---|---|
+| Proxy (use THIS) | `0x2DFDC1fB809322c12f54beFE8CC98E0d103a99Fd` |
+| Implementation | `0x0b618364936FA39aB325255e732831006895D4Fc` |
+| Owner | Safe `0xF29A418744E793973BF4eEc676F8a30B2793b623` |
+| orderSigner / arbiter | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
+| Windows | ship 259200 s (3d), release 345600 s (4d), dispute timeout 2592000 s (30d) |
+| Deployer | KMS sponsor, nonces 928–929 |
+
+- `manage.py deploy_confio_market_escrow --broadcast --yes-mainnet` on prod; proxy created
+  with its `initialize` calldata in the same tx. Implementation tx
+  `0xc73de29c1f5ef36c3300efa53ef77987ba3e8161846f399e1ffffc2ac0bd7abc`, proxy tx
+  `0xd9477be5d999f9a14fbb5645d106b6705b99352342b80d71dc7363245adff0a3`.
+- Verified independently after deploy (public RPC): owner/signer/arbiter/windows as above,
+  not paused, ERC-1967 slot → implementation, cUSD `tokenLimits` = 0/0 (not yet accepted).
+- Wired: server `CONFIO_MARKET_ESCROW_ADDRESS` (.env.mainnet).
+- Pending: Safe `setTokenLimits(cUSD 0x6101cC37…543F, maxOrder, maxOpen)` to accept cUSD.
