@@ -1514,7 +1514,7 @@ export const TransactionDetailScreen = () => {
   } catch { }
 
 
-  const friendHistoryRoute = transactionFriendRoute(
+  const friendHistoryRoute = isTip ? null : transactionFriendRoute(
     currentTx,
     counterpartyIdentityVerified,
     currentTx?.type === 'received' ? displayFromName : displayToName,
@@ -2622,8 +2622,10 @@ export const TransactionDetailScreen = () => {
               user) lands on that person's PERSONAL wallet — not the business
               account the button names. Rather than pay the wrong account, we
               don't offer the shortcut. */}
+          {/* Not for a Propina either: it is between Comunidad pseudonyms (no
+              phone, no account to send to), and a tip goes from the chat. */}
           {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll')
-            && !counterpartyIsBusiness && counterpartyIdentityVerified && (
+            && !counterpartyIsBusiness && counterpartyIdentityVerified && !isTip && (
                 <TouchableOpacity
                   style={styles.primaryAction}
                   onPress={() => {
