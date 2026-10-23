@@ -1,4 +1,4 @@
-"""GraphQL for Mensajes (direct messages). Its own operations, so an older
+"""GraphQL for direct messages. Its own operations, so an older
 server only loses the chat, never anything else the app asks for."""
 from datetime import timedelta
 from decimal import Decimal
@@ -303,7 +303,7 @@ class SetDirectMessagesEnabled(graphene.Mutation):
 
 
 class PrepareTip(graphene.Mutation):
-    """Propina, step 1: rules and the note's review, no money. Then the app
+    """Tip, step 1: rules and the note's review, no money. Then the app
     runs the normal BSC send with idempotencyKey = sendKey."""
     class Arguments:
         recipient_user_id = graphene.ID(required=True)

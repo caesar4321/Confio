@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,7 +15,7 @@ import { SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR } from '../apollo/mutations';
 import { GET_LEAGUE_TABLE, GET_MY_TEAM, GET_TEAMS_LOOKING } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { formatPctSigned } from '../utils/portfolioFormat';
-import { LEAGUE_RANGES, LeagueRange, TEAM_MAX_MEMBERS, Team, rankMark } from '../utils/teams';
+import { LEAGUE_RANGES, LeagueRange, LeagueRow, TEAM_MAX_MEMBERS, TEAM_MIN_RANKED, Team, rankMark } from '../utils/teams';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 export type LeagueKind = 'teams' | 'investors';
@@ -27,24 +27,15 @@ type Props = {
   active?: boolean;
 };
 
-type LeagueRow = {
-  rank: number;
-  pct: string;
-  members?: number | null;
-  userId?: string | null;
-  username?: string | null;
-  avatarUrl?: string | null;
-  team?: Pick<Team, 'id' | 'name' | 'emoji' | 'color' | 'memberCount'> | null;
-};
 
 const PAGE = 30;
 
 /**
- * Liga Confío: teams and investors ranked by % return (never by how much
+ * The league: teams and investors ranked by % return (never by how much
  * they have). Badges only, no money prizes. Reciprocal like portfolios: a
  * hidden or unverified viewer sees the top 3 and how to take part.
  */
-export function LigaContent({ initialKind = 'teams', active = true }: Props) {
+export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
   const navigation = useNavigation<Navigation>();
   const isFocused = useIsFocused();
   const client = useApolloClient();
@@ -75,17 +66,15 @@ export function LigaContent({ initialKind = 'teams', active = true }: Props) {
     client.query({ query: GET_MY_TEAM, fetchPolicy: 'network-only' })
       .then(({ data }) => {
         if (generation.current !== requested) return;
-        const team = (data?.myTeam ?? null) as Team | null;
-        setMyTeam(team);
-        if (team) {
-          setLooking([]);
-          return;
-        }
-        client.query({ query: GET_TEAMS_LOOKING, variables: { offset: 0, limit: 10 }, fetchPolicy: 'network-only' })
-          .then((res) => { if (generation.current === requested) setLooking(res.data?.teamsLooking ?? []); })
-          .catch(() => {});
+        setMyTeam((data?.myTeam ?? null) as Team | null);
       })
       .catch(() => {});
+    // Teams still forming (not ranked yet) close the team ranking: teams and the league are one list.
+    if (which === 'teams') {
+      client.query({ query: GET_TEAMS_LOOKING, variables: { offset: 0, limit: 20 }, fetchPolicy: 'network-only' })
+        .then((res) => { if (generation.current === requested) setLooking(res.data?.teamsLooking ?? []); })
+        .catch(() => {});
+    }
     try {
       const { data } = await client.query({
         query: GET_LEAGUE_TABLE,
@@ -174,6 +163,7 @@ export function LigaContent({ initialKind = 'teams', active = true }: Props) {
   };
 
   const locked = isLocked(access);
+  const rankedIds = new Set((rows ?? []).map((r) => r.team?.id).filter(Boolean));
 
   const renderItem = ({ item }: { item: LeagueRow }) => {
     const pct = formatPctSigned(item.pct);
@@ -245,30 +235,6 @@ export function LigaContent({ initialKind = 'teams', active = true }: Props) {
           <Icon name="chevron-right" size={18} color={colors.textSecondary} />
         </Pressable>
       ) : null}
-      {!locked && kind === 'teams' && myTeam === null ? (
-        <View style={styles.looking}>
-          <View style={styles.lookingHead}>
-            <Text style={styles.lookingTitle}>Equipos buscando miembros</Text>
-            <Pressable onPress={() => navigation.navigate('TeamsBrowse')} hitSlop={8} accessibilityRole="button">
-              <Text style={styles.link}>Ver todos</Text>
-            </Pressable>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lookingRow}>
-            <Pressable style={styles.teamCard} onPress={() => navigation.navigate('TeamEdit')} accessibilityRole="button">
-              <View style={styles.plus}><Icon name="plus" size={20} color={colors.primaryDark} /></View>
-              <Text style={styles.teamCardName}>Crear equipo</Text>
-            </Pressable>
-            {looking.map((team) => (
-              <Pressable key={team.id} style={styles.teamCard} onPress={() => navigation.navigate('Team', { teamId: team.id })}
-                accessibilityRole="button">
-                <TeamBadge emoji={team.emoji} color={team.color} size={44} />
-                <Text style={styles.teamCardName} numberOfLines={1}>{team.name}</Text>
-                <Text style={styles.meta}>{team.memberCount}/{TEAM_MAX_MEMBERS}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
       {!locked && kind === 'investors' ? (
         <View style={styles.myTeam}>
           <View style={styles.rowBody}>
@@ -298,6 +264,38 @@ export function LigaContent({ initialKind = 'teams', active = true }: Props) {
         ListFooterComponent={
           <>
             {loadingMore ? <ActivityIndicator style={styles.loading} color={colors.primary} /> : null}
+            {!locked && kind === 'teams' && rows !== null && !hasMore ? (
+              <View style={styles.forming}>
+                <Text style={styles.formingTitle}>Formándose</Text>
+                <Text style={styles.formingHint}>Clasifican con {TEAM_MIN_RANKED} miembros. Únete desde la página del equipo.</Text>
+                {looking.filter((t) => !rankedIds.has(t.id)).map((team) => {
+                  const missing = Math.max(TEAM_MIN_RANKED - team.memberCount, 0);
+                  return (
+                    <Pressable key={team.id} style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                      onPress={() => navigation.navigate('Team', { teamId: team.id })} accessibilityRole="button">
+                      <Text style={styles.rank}>·</Text>
+                      <TeamBadge emoji={team.emoji} color={team.color} size={40} />
+                      <View style={styles.rowBody}>
+                        <Text style={styles.name} numberOfLines={1}>{team.name}</Text>
+                        <Text style={styles.meta}>
+                          {team.memberCount}/{TEAM_MAX_MEMBERS} miembros{missing > 0 ? ` · faltan ${missing} para clasificar` : ''}
+                        </Text>
+                      </View>
+                      <Icon name="chevron-right" size={18} color={colors.textSecondary} />
+                    </Pressable>
+                  );
+                })}
+                {looking.length >= 20 ? (
+                  <Pressable style={styles.more} onPress={() => navigation.navigate('TeamsBrowse')} accessibilityRole="button">
+                    <Text style={styles.link}>Ver más equipos</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable style={styles.create} onPress={() => navigation.navigate('TeamEdit')} accessibilityRole="button">
+                  <Icon name="plus" size={18} color={colors.white} />
+                  <Text style={styles.createText}>Crear equipo</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {locked && access ? (
               <View style={styles.lock}>
                 <InvestorLockCard access={access} busy={publishing} onPublish={() => { void publishOwn(); }}
@@ -357,14 +355,11 @@ const styles = StyleSheet.create({
   up: { color: colors.flowIn.textSmall },
   down: { color: colors.error.icon },
   lock: { padding: 16 },
-  looking: { marginBottom: 12 },
-  lookingHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 },
-  lookingTitle: { fontSize: 15, fontWeight: '700', color: colors.dark },
+  forming: { marginTop: 16 },
+  formingTitle: { paddingHorizontal: 16, fontSize: 15, fontWeight: '700', color: colors.dark },
+  formingHint: { paddingHorizontal: 16, paddingTop: 2, paddingBottom: 8, fontSize: 12, color: colors.textSecondary },
+  more: { alignItems: 'center', paddingVertical: 12 },
+  create: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 16, paddingVertical: 12, borderRadius: 24, backgroundColor: colors.primaryDark },
+  createText: { fontSize: 15, fontWeight: '700', color: colors.white },
   link: { fontSize: 14, fontWeight: '600', color: colors.primaryDark },
-  lookingRow: { gap: 10, paddingHorizontal: 16 },
-  teamCard: {
-    width: 104, alignItems: 'center', gap: 6, paddingVertical: 12, paddingHorizontal: 8, borderRadius: 14,
-    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
-  },
-  teamCardName: { fontSize: 13, fontWeight: '600', color: colors.dark, textAlign: 'center' },
 });

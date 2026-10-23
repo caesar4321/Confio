@@ -1195,9 +1195,14 @@ confio_admin_site.register(DirectMessage, DirectMessageAdmin)
 confio_admin_site.register(DirectMessageReport, DirectMessageReportAdmin)
 confio_admin_site.register(Tip, TipAdmin)
 from teams.admin import (
-    CopiedPlayAdmin, LeagueSeasonAwardAdmin, TeamAdmin, TeamDailyReturnAdmin, TeamGoalAdmin, TeamJoinRequestAdmin,
+    CopiedPlayAdmin, LeagueSeasonAwardAdmin, TeamAdmin, TeamDailyReturnAdmin, TeamGoalAdmin, TeamInviteAdmin,
+    TeamInviteNoticeAdmin, TeamJoinRequestAdmin,
 )
-from teams.models import CopiedPlay, LeagueSeasonAward, Team, TeamDailyReturn, TeamGoal, TeamJoinRequest
+from teams.models import (
+    CopiedPlay, LeagueSeasonAward, Team, TeamDailyReturn, TeamGoal, TeamInvite, TeamInviteNotice, TeamJoinRequest,
+)
+confio_admin_site.register(TeamInvite, TeamInviteAdmin)
+confio_admin_site.register(TeamInviteNotice, TeamInviteNoticeAdmin)
 confio_admin_site.register(Team, TeamAdmin)
 confio_admin_site.register(TeamJoinRequest, TeamJoinRequestAdmin)
 confio_admin_site.register(TeamGoal, TeamGoalAdmin)

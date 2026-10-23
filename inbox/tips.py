@@ -1,4 +1,4 @@
-"""Propinas: optional gifts between members, 0% commission.
+"""Tips: optional gifts between members, 0% commission.
 
 App Store 3.2.1(vii) is why tips skip in-app purchase, and it holds only
 while (a) the gift is completely optional and (b) 100% reaches the

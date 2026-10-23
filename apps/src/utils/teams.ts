@@ -1,10 +1,12 @@
-// Equipos + Liga (server: teams/). The palette and limits mirror teams/rules.py.
+// Teams and the league (server: teams/). The palette and limits mirror teams/rules.py.
 export const TEAM_EMOJIS = ['⚽', '🚀', '🦁', '🐂', '🦅', '🔥', '💎', '🌎', '📈', '🌱', '⭐', '🏆', '🐺', '🦉', '⚡', '🎯'];
 export const TEAM_COLORS = ['#34D399', '#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6', '#111827'];
 export const TEAM_NAME_MIN = 3;
 export const TEAM_NAME_MAX = 24;
 export const TEAM_DESCRIPTION_MAX = 140;
 export const TEAM_MAX_MEMBERS = 20;
+// A team ranks in the league from this many members with history (teams/league.py).
+export const TEAM_MIN_RANKED = 5;
 
 export const LEAGUE_RANGES = [
   { key: '24h', label: '24 h' },
@@ -30,6 +32,16 @@ export const rankMark = (rank: number): string => (rank === 1 ? '🥇' : rank ==
 
 /** BuyStock takes the underlying ticker ("NVDA"); the GM symbol is "NVDAon". */
 export const tickerOfSymbol = (symbol: string): string => symbol.replace(/on$/, '');
+
+export type LeagueRow = {
+  rank: number;
+  pct: string;
+  members?: number | null;
+  userId?: string | null;
+  username?: string | null;
+  avatarUrl?: string | null;
+  team?: { id: string; name: string; emoji: string; color: string; memberCount: number } | null;
+};
 
 export type TeamGoal = {
   kind: 'invested_usd' | 'weekly_investors' | string;
@@ -69,4 +81,22 @@ export const goalLabel = (goal: TeamGoal): string => {
   if (goal.kind === 'invested_usd') return `Invertir juntos $${Number(goal.target).toLocaleString('en-US')}`;
   const n = Number(goal.target);
   return `${n} ${n === 1 ? 'miembro invirtiendo' : 'miembros invirtiendo'} esta semana`;
+};
+
+/**
+ * The team link rides the invite path (/invite/{code}, an app link on both
+ * platforms, and the code survives a store install as the referrer) with a
+ * code no username can take: "team~{token}". It never carries the inviter's
+ * username.
+ */
+export const buildTeamInviteLink = (token: string): string =>
+  `https://confio.lat/invite/team~${encodeURIComponent(token)}?source=team`;
+
+export const buildTeamInviteMessage = (teamName: string, link: string): string =>
+  `Únete a mi equipo "${teamName}" en Confío. Invertimos cada uno desde su cuenta y competimos en la Liga por rentabilidad.\n\n${link}`;
+
+/** The team token in an invite/referral code ("team~…", any case), or null. */
+export const teamTokenFromCode = (code: string | null | undefined): string | null => {
+  const match = /^team~([a-z0-9]{12,32})$/i.exec(String(code || '').trim());
+  return match ? match[1].toLowerCase() : null;
 };

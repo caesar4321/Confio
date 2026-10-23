@@ -23,7 +23,7 @@ type Props = {
 const PAGE = 30;
 
 /**
- * Mensajes: your conversations, and Solicitudes from people you don't follow.
+ * Direct messages: your conversations, and Solicitudes from people you don't follow.
  * Lives in the assistant box (a chat head) and, without the box, on its own screen.
  */
 export function DirectInboxContent({ initialFolder = 'inbox', onOpenConversation, refreshKey = 0 }: Props) {

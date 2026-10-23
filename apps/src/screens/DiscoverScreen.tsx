@@ -23,6 +23,7 @@ import { useCommunityPostExtras } from '../hooks/useCommunityPostExtras';
 import { useCommunityEntryState } from '../hooks/useCommunityComposeEntry';
 import { memberBlockVersion } from '../services/communityEvents';
 import { CommunityComposePrompt } from '../components/CommunityComposePrompt';
+import { LeagueStrips } from '../components/LeagueStrips';
 
 const PAGE_SIZE = 10;
 
@@ -84,6 +85,8 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
   const showPrompt = canCompose && composeSection;
   // Mis publicaciones travels with the composer card (Para ti and Comunidad).
   const showMyPosts = communitySupported && composeSection;
+  // League rows (teams, investors) open Comunidad, above the posts.
+  const showLeague = communitySupported && section === 'community';
 
   // Stepping down is not a failure: the next rung is already on its way.
   const steppingDown = tier < LAST_TIER && isSchemaMismatch(feedError, OLD_SECTIONS_SERVER);
@@ -279,8 +282,9 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
         commentCounts={commentCounts}
         postExtras={postExtras}
         onOpenAuthor={(userId) => navigation.navigate('CommunityMemberProfile', { userId })}
-        sectionAccessory={showPrompt || showMyPosts ? (
+        sectionAccessory={showPrompt || showMyPosts || showLeague ? (
           <>
+            {showLeague ? <LeagueStrips /> : null}
             {showPrompt ? (
               <CommunityComposePrompt onPress={() => navigation.navigate('CommunityCompose')} />
             ) : null}

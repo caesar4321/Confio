@@ -21,7 +21,7 @@ export type AuthStackParamList = {
 // Bottom Tab Navigator - Main app tabs
 export type BottomTabParamList = {
   Home: undefined;
-  Invest: { segment?: 'invest' | 'community' | 'liga'; at?: number } | undefined;
+  Invest: { segment?: 'invest' | 'community'; at?: number } | undefined;
   Comprar: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
@@ -77,8 +77,10 @@ export type MainStackParamList = {
   DirectInbox: { folder?: 'inbox' | 'requests' } | undefined;
   DirectChat: { conversationId?: string; userId?: string; username?: string };
   SendTip: { userId: string; username: string };
-  Liga: { kind?: 'teams' | 'investors' } | undefined;
-  Team: { teamId: string };
+  League: { kind?: 'teams' | 'investors' } | undefined;
+  Team: { teamId: string; inviteToken?: string };
+  TeamInvite: { teamId: string; teamName: string };
+  TeamJoinInvite: { token: string };
   TeamEdit: { teamId?: string } | undefined;
   TeamsBrowse: undefined;
   BlockedMembers: undefined;

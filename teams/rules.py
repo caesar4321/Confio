@@ -1,4 +1,4 @@
-"""Equipos: who can create, join and leave a team, and what captains can do.
+"""Teams: who can create, join and leave a team, and what captains can do.
 
 Lock order, everywhere: the people involved (User rows, by id), then the
 team, then memberships and join requests. Every check that matters is
@@ -11,7 +11,7 @@ repeated after the locks are held.
   COOLDOWN before joining another team; being expelled doesn't.
 - The captain edits the team (name/description AI-reviewed), switches
   open/approval, approves requests, expels, hands over the captaincy and
-  sets the Meta. A captain who leaves passes the captaincy to the
+  sets the goal. A captain who leaves passes the captaincy to the
   earliest-joined member; a team with no members is archived.
 """
 from __future__ import annotations
@@ -228,8 +228,9 @@ def _add_member(team, user):
     _cancel_requests(user)
 
 
-def join_team(user, business, team_id) -> str:
-    """'joined', or 'requested' for a team that approves members."""
+def join_team(user, business, team_id, invite_token: str | None = None) -> str:
+    """'joined', or 'requested' for a team that approves members (unless
+    the person came through the captain's invite link)."""
     block = member_block(user, business)
     if block:
         raise _error(block)
@@ -248,13 +249,20 @@ def join_team(user, business, team_id) -> str:
             raise _error('cooldown')
         if community.is_blocked_between(user.id, team.captain_id):
             raise _error('not_available')
-        if team.join_mode == TeamJoinMode.APPROVAL:
+        if team.join_mode == TeamJoinMode.APPROVAL and not (
+                invite_token and _invite_skips(user, team.id, invite_token)):
             if active_members(team).count() >= MAX_MEMBERS:
                 raise _error('team_full')
             TeamJoinRequest.objects.get_or_create(team=team, user=user, status=RequestStatus.PENDING)
             return 'requested'
         _add_member(team, user)
     return 'joined'
+
+
+def _invite_skips(user, team_id, token) -> bool:
+    from .invites import invite_for_join
+
+    return invite_for_join(user, team_id, token) is not None
 
 
 def cancel_request(user, team_id) -> bool:

@@ -135,6 +135,7 @@ const NOTIFICATIONS: Record<string, IconVisual> = {
   COMMUNITY_REPLY: visual('corner-down-right', 'social'),
   COMMUNITY_MENTION: visual('at-sign', 'social'),
   COMMUNITY_PLAY_COPIED: visual('copy', 'social'),
+  COMMUNITY_TEAM_INVITE: visual('users', 'social'),
 
   // General
   PROMOTION: visual('tag', 'promo'),

@@ -76,7 +76,7 @@ export default function AssistantBubble() {
     nextFetchPolicy: 'cache-first',
     skip: !enabled,
   });
-  // Mensajes (investor DMs) count on the same badge: its own query, an older server has none.
+  // Direct messages between investors count on the same badge: its own query, an older server has none.
   const { data: dmData, refetch: refetchDm } = useQuery(GET_DIRECT_UNREAD_SUMMARY, {
     fetchPolicy: 'network-only',
     nextFetchPolicy: 'cache-first',

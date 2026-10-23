@@ -64,7 +64,7 @@ export const followCountsLabel = (followers: number, following: number) =>
   `${followers} ${followers === 1 ? 'seguidor' : 'seguidores'} · ${following} siguiendo`;
 
 /**
- * Perfil inversor: who the member is (cover, photo, bio, people in common),
+ * Investor profile: who the member is (cover, photo, bio, people in common),
  * follow them, how their investments did (Rentabilidad) and what they hold,
  * and what they posted. Portfolios are reciprocal: a viewer whose own
  * profile is hidden or unverified sees a lock instead (server-enforced).
@@ -134,7 +134,7 @@ export const CommunityMemberProfileScreen = () => {
   const [setPortfolioHiddenWithError] = useMutation(SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR);
   const [hiddenBusy, setHiddenBusy] = useState(false);
 
-  // Campeón del mes badges (Liga): their own query, an older server has none.
+  // Monthly champion badges (league): their own query, an older server has none.
   const [badges, setBadges] = useState<string[]>([]);
   useEffect(() => {
     let live = true;
@@ -597,7 +597,7 @@ export const CommunityMemberProfileScreen = () => {
         refreshKey={returnsRefresh}
       />
       {badges.length > 0 ? (
-        <Pressable style={styles.leagueBadges} onPress={() => navigation.navigate('BottomTabs', { screen: 'Invest', params: { segment: 'liga', at: Date.now() } } as never)} accessibilityRole="button">
+        <Pressable style={styles.leagueBadges} onPress={() => navigation.navigate('League')} accessibilityRole="button">
           {badges.map((month) => (
             <View key={month} style={styles.leagueBadge}>
               <Text style={styles.leagueBadgeText}>🏆 {championLabel(month)}</Text>

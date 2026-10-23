@@ -1554,6 +1554,36 @@ export const SET_TEAM_GOAL = gql`
   }
 `;
 
+export const CREATE_TEAM_INVITE = gql`
+  mutation CreateTeamInvite($teamId: ID!) {
+    createTeamInvite(teamId: $teamId) {
+      success
+      error
+      code
+      token
+    }
+  }
+`;
+
+export const INVITE_CONTACTS_TO_TEAM = gql`
+  mutation InviteContactsToTeam($teamId: ID!, $phones: [String!]!) {
+    inviteContactsToTeam(teamId: $teamId, phones: $phones) {
+      success
+      error
+      code
+      sent
+    }
+  }
+`;
+
+export const JOIN_TEAM_WITH_INVITE = gql`
+  mutation JoinTeamWithInvite($teamId: ID!, $inviteToken: String!) {
+    joinTeamWithInvite(teamId: $teamId, inviteToken: $inviteToken) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
 export const COPY_PLAY = gql`
   mutation CopyPlay($playId: ID!) {
     copyPlay(playId: $playId) {

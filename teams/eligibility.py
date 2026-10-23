@@ -1,4 +1,4 @@
-"""Who counts, in bulk: the Liga and team pages ask about many members at
+"""Who counts, in bulk: the league and team pages ask about many members at
 once, so these are a fixed handful of queries however many people."""
 from __future__ import annotations
 

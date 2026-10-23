@@ -57,7 +57,7 @@ const AVATAR = 84;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
- * Perfil inversor header: cover, avatar, name, bio, follow counts with
+ * Investor profile header: cover, avatar, name, bio, follow counts with
  * people in common, and the action row. On your own profile, the cover,
  * avatar and bio are edited right here (each reviewed by AI first).
  */

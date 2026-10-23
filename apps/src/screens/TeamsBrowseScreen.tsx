@@ -19,7 +19,7 @@ type Navigation = NativeStackNavigationProp<MainStackParamList>;
 
 const PAGE = 20;
 
-/** Equipos buscando miembros (your country first), and Crear equipo. */
+/** Teams looking for members (your country first), and creating one. */
 export const TeamsBrowseScreen = () => {
   const navigation = useNavigation<Navigation>();
   const client = useApolloClient();

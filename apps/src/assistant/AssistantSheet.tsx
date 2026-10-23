@@ -237,7 +237,7 @@ export default function AssistantSheet() {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'ignore',
   });
-  // Mensajes (investor DMs): its own query, so an older server only loses the head.
+  // Direct messages between investors: its own query, so an older server only loses the head.
   const { data: dmData } = useQuery(GET_DIRECT_UNREAD_SUMMARY, {
     skip: !isOpen,
     fetchPolicy: 'network-only',

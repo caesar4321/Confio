@@ -1,4 +1,4 @@
-"""Liga Confío: team and investor tables by % return (spec #6 child #7).
+"""The league: team and investor tables by % return (spec #6 child #7).
 
 Built only from proven days (inbox.PortfolioDailySnapshot), never a live
 or guessed number:
@@ -17,7 +17,7 @@ or guessed number:
   least MIN_SLEEVE_USD at the start of the range's last day.
 - Rankings are cached; who may appear is re-checked on every read
   (someone who hides their profile disappears at once).
-- Each month's #1 team and #1 investor get a permanent "Campeón del mes"
+- Each month's #1 team and #1 investor get a permanent "monthly champion"
   badge, decided on the 1st and never changed.
 """
 from __future__ import annotations
@@ -295,7 +295,7 @@ def contributors_ok(team_id, days) -> bool:
 # ── season awards ────────────────────────────────────────────────────────────
 
 def award_month(month_start: date, *, force: bool = False) -> list:
-    """Campeón del mes for a finished month. Written once, never changed.
+    """Monthly champion for a finished month. Written once, never changed.
     Waits for every final-day snapshot, unless `force` (the last retry)."""
     from .models import LeagueAwardKind, LeagueSeasonAward
 

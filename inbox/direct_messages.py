@@ -1,4 +1,4 @@
-"""Mensajes: private conversations between two Comunidad members.
+"""Direct messages: private conversations between two Comunidad members.
 
 Rules (spec caesar4321/Confio#6, children #3–#4):
 
@@ -489,7 +489,7 @@ def unread_count(conversation, member) -> int:
 
 
 def unread_summary(user) -> tuple[int, int]:
-    """(unread messages in Mensajes, incoming requests) for the badge."""
+    """(unread direct messages, incoming requests) for the badge."""
     unread = sum(unread_count(c, m) for c, m in conversations(user, 'inbox'))
     return unread, len(conversations(user, 'requests'))
 

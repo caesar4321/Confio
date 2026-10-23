@@ -1,4 +1,4 @@
-// Propinas (inbox/tips.py on the server, which enforces all of this).
+// Tips (inbox/tips.py on the server, which enforces all of this).
 export const TIP_MIN = '0.50';
 export const TIP_MAX = '200';
 export const TIP_CHIPS = [1, 2, 5, 10] as const;

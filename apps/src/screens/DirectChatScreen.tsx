@@ -50,7 +50,7 @@ const PAGE = 30;
 const POLL_MS = 3000;
 
 /**
- * One conversation (Mensajes). Every message is reviewed before the other
+ * One conversation (direct messages). Every message is reviewed before the other
  * person sees it: yours show "Revisando…" until then, and the reason if it
  * wasn't sent. Opened from a profile (userId, maybe no conversation yet),
  * the inbox or a push (conversationId).

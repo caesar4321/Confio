@@ -1,6 +1,6 @@
-"""Equipos (investor teams) and the monthly Liga Confío.
+"""Investor teams and the monthly league.
 
-Spec: caesar4321/Confio#6, children #6 (Equipos), #7 (Liga), #9 (Meta).
+Spec: caesar4321/Confio#6, children #6 (teams), #7 (league), #9 (goal).
 """
 from django.conf import settings
 from django.db import models
@@ -113,7 +113,7 @@ class TeamGoalKind(models.TextChoices):
 
 
 class TeamGoal(models.Model):
-    """Meta del equipo: a shared target with aggregate progress. No money is
+    """Team goal: a shared target with aggregate progress. No money is
     ever pooled, escrowed or moved by a goal."""
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='goals')
     kind = models.CharField(max_length=20, choices=TeamGoalKind.choices)
@@ -136,7 +136,7 @@ class TeamGoal(models.Model):
 
 
 class TeamDailyReturn(models.Model):
-    """One UTC day of a team (Liga): the equal-weight mean of its qualifying
+    """One UTC day of a team (league): the equal-weight mean of its qualifying
     members' daily returns (inbox.PortfolioDailySnapshot)."""
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='daily_returns')
     day = models.DateField()
@@ -158,7 +158,7 @@ class LeagueAwardKind(models.TextChoices):
 
 
 class LeagueSeasonAward(models.Model):
-    """Campeón del mes: final once written (a badge, never money)."""
+    """Monthly champion: final once written (a badge, never money)."""
     month = models.DateField(help_text='First day of the month')
     kind = models.CharField(max_length=10, choices=LeagueAwardKind.choices)
     team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name='awards')
@@ -172,7 +172,7 @@ class LeagueSeasonAward(models.Model):
 
 
 class CopiedPlay(models.Model):
-    """Copiar jugada: someone opened a buy from a member's play. Attribution
+    """Copy play: someone opened a buy from a member's play. Attribution
     only; the copier pays the normal fees and nobody is paid for it."""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='copied_plays')
     source_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='plays_copied')
@@ -197,3 +197,34 @@ class CopiedPlayNotice(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['source_batch_id', 'day'], name='teams_copied_notice_uniq')]
+
+
+class TeamInvite(models.Model):
+    """Friend invites: one shareable link per member per team. Joining
+    through the captain's link (or any member's link to an open team) skips
+    the approval step; nothing else about joining changes."""
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='invites')
+    inviter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='team_invites')
+    token = models.CharField(max_length=32, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=['team', 'inviter', 'expires_at'], name='teams_invite_member_idx')]
+
+
+class TeamInviteNotice(models.Model):
+    """One contact invite attempt. Every attempt counts toward the daily cap
+    (sent or not, so the cap says nothing about who got a push); `invitee`
+    is set only when a push went out, and the once-a-week-per-team rule
+    reads those."""
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='invite_notices')
+    inviter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    invitee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['inviter', 'created_at'], name='teams_notice_inviter_idx'),
+            models.Index(fields=['team', 'invitee', 'created_at'], name='teams_notice_invitee_idx'),
+        ]

@@ -1,6 +1,6 @@
 """What a team page shows: members with their returns, the team's holdings
 (who holds what, never amounts), its plays (members' trades while on the
-team, never amounts) and the Meta's progress.
+team, never amounts) and the goal's progress.
 
 Everything here is investment data, so it is only ever served to viewers
 whose own profile is public and verified (inbox.community.portfolio_access
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 STOCK_KINDS = ('stock_buy', 'stock_sell')
 CRYPTO_KINDS = ('crypto_buy', 'crypto_sell')
 PLAYS_LIMIT = 50
-# Copiar jugada: only recent buys can be copied.
+# Copy play: only recent buys can be copied.
 COPY_WINDOW = timedelta(days=7)
 
 
@@ -60,7 +60,7 @@ def _visible_at(team, day):
 
 def _returns(user_ids, days) -> dict:
     """{user_id: percent} over complete proven days of each member's one
-    wallet: the same numbers the Liga uses. Missing = unknown."""
+    wallet: the same numbers the league uses. Missing = unknown."""
     from inbox.models import PortfolioDailySnapshot
 
     from .eligibility import canonical_wallets
@@ -191,7 +191,7 @@ def plays(team, limit: int = PLAYS_LIMIT, exclude=()) -> list[dict]:
     return out
 
 
-# ── Meta del equipo (#9) ─────────────────────────────────────────────────────
+# ── team goal (#9) ─────────────────────────────────────────────────────
 
 MIN_TARGET = {TeamGoalKind.INVESTED_USD: Decimal('100'), TeamGoalKind.WEEKLY_INVESTORS: Decimal('3')}
 
@@ -365,7 +365,7 @@ def set_goal(captain, team, kind: str, target, deadline=None):
         return TeamGoal.objects.create(team=locked, kind=kind, target=target, deadline=deadline, set_by=captain)
 
 
-# ── Copiar jugada (#8) ───────────────────────────────────────────────────────
+# ── copy play (#8) ───────────────────────────────────────────────────────
 
 def copy_play(viewer, batch_id):
     """Record that the viewer is copying a member's recent buy and return

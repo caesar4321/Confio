@@ -1,4 +1,4 @@
-"""GraphQL for Equipos, Liga Confío, Copiar jugada and the team Meta. All
+"""GraphQL for teams, the league, copy play and the team goal. All
 new operations: an older server only loses these screens.
 
 Reciprocity is enforced here: team members, holdings, plays, member
@@ -14,7 +14,7 @@ from graphql_jwt.decorators import login_required
 from inbox import community, profile_pictures
 from inbox.community import CommunityPostError
 
-from . import data, league, rules
+from . import data, invites, league, rules
 from .models import Team, TeamFollow, TeamJoinRequest, TeamJoinRequestStatus
 
 
@@ -156,7 +156,7 @@ def team_type(team, viewer, *, range_key='7d', with_stats=True) -> TeamType:
         if blocked & ({m.user_id for m in rules.active_members(team)} | period):
             pct = None
         current = data.current_goal(team)
-        # The Meta is the team's own: members only, and never when the viewer
+        # The goal is the team's own: members only, and never when the viewer
         # is in a block with someone on it (an aggregate can reveal a balance).
         member_ids = {m.user_id for m in rules.active_members(team)}
         if current is not None and (not is_member or community.block_relation_ids(viewer) & member_ids):
@@ -224,8 +224,9 @@ class TeamsQuery(graphene.ObjectType):
     league_table = graphene.Field(LeagueTableType, required=True, kind=graphene.String(required=True),
                                   range=graphene.String(required=True), offset=graphene.Int(required=False),
                                   limit=graphene.Int(required=False))
-    # "2026-10" months a member was Campeón del mes.
+    # "2026-10" months a member was monthly champion.
     league_badges = graphene.List(graphene.NonNull(graphene.String), required=True, user_id=graphene.ID(required=True))
+    team_invite = graphene.Field(lambda: TeamInviteType, token=graphene.String(required=True))
 
     @staticmethod
     def _team(team_id):
@@ -256,7 +257,7 @@ class TeamsQuery(graphene.ObjectType):
         country = (getattr(viewer, 'phone_country', '') or '')[:2]
         ranked = {row.team_id: row.rank for row in league.table('teams', '30d')}
         # Bounded in the database: open seats only, same country first, then
-        # newest; the Liga rank orders that bounded set.
+        # newest; the league rank orders that bounded set.
         pool = list(Team.objects.filter(archived_at__isnull=True).exclude(captain_id__in=blocked)
                     .annotate(active=Count('memberships', filter=Q(memberships__left_at__isnull=True)))
                     .filter(active__lt=rules.MAX_MEMBERS)
@@ -362,6 +363,16 @@ class TeamsQuery(graphene.ObjectType):
                                              avatar_url=avatars.get(user.id)))
         return LeagueTableType(rows=out, has_more=access == community.ACCESS_OPEN and len(rows) > offset + limit,
                                access=access, my_rank=my_rank, my_pct=my_pct)
+
+    @login_required
+    def resolve_team_invite(self, info, token):
+        invite = invites.resolve(info.context.user, token)
+        if invite is None:
+            return None
+        team = invite.team
+        return TeamInviteType(team_id=str(team.id), team_name=team.name, emoji=team.emoji, color=team.color,
+                              inviter_username=community.author_display_name(invite.inviter),
+                              skips_approval=invites.skips_approval(invite))
 
     @login_required
     def resolve_league_badges(self, info, user_id):
@@ -544,7 +555,7 @@ class CopiedPlayType(graphene.ObjectType):
 
 
 class CopyPlay(graphene.Mutation):
-    """Copiar jugada: returns what the buy screen needs; the copier enters
+    """Copy play: returns what the buy screen needs; the copier enters
     their own amount and pays the normal fees."""
     class Arguments:
         play_id = graphene.ID(required=True)
@@ -573,6 +584,86 @@ class CopyPlay(graphene.Mutation):
                                                           disclosure=disclosure))
 
 
+class TeamInviteType(graphene.ObjectType):
+    team_id = graphene.ID(required=True)
+    team_name = graphene.String(required=True)
+    emoji = graphene.String(required=True)
+    color = graphene.String(required=True)
+    inviter_username = graphene.String(required=True)
+    # Joining through this link skips the captain's approval.
+    skips_approval = graphene.Boolean(required=True)
+
+
+class TeamInviteLinkResult(graphene.ObjectType):
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    code = graphene.String()
+    token = graphene.String()
+
+
+class CreateTeamInvite(graphene.Mutation):
+    """Friend invites: the member's shareable token for their team."""
+    class Arguments:
+        team_id = graphene.ID(required=True)
+
+    Output = TeamInviteLinkResult
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, team_id):
+        user, account, business, _ = _context(info)
+        try:
+            invite = invites.invite_link(user, business, team_id)
+        except CommunityPostError as error:
+            return TeamInviteLinkResult(success=False, error=error.message, code=error.code)
+        return TeamInviteLinkResult(success=True, token=invite.token)
+
+
+class InviteContactsResult(graphene.ObjectType):
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    code = graphene.String()
+    # How many were asked for, never who was actually notified.
+    sent = graphene.Int()
+
+
+class InviteContactsToTeam(graphene.Mutation):
+    class Arguments:
+        team_id = graphene.ID(required=True)
+        # Phone numbers from the sender's contacts (never account ids: knowing
+        # the number is the point).
+        phones = graphene.List(graphene.NonNull(graphene.String), required=True)
+
+    Output = InviteContactsResult
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, team_id, phones):
+        user, account, business, _ = _context(info)
+        try:
+            sent = invites.invite_contacts(user, business, team_id, phones)
+        except CommunityPostError as error:
+            return InviteContactsResult(success=False, error=error.message, code=error.code)
+        return InviteContactsResult(success=True, sent=sent)
+
+
+class JoinTeamWithInvite(graphene.Mutation):
+    """joinTeam through an invite link (its own mutation: an older server has none)."""
+    class Arguments:
+        team_id = graphene.ID(required=True)
+        invite_token = graphene.String(required=True)
+
+    Output = TeamResult
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, team_id, invite_token):
+        def run(user, business):
+            outcome = rules.join_team(user, business, team_id, invite_token=invite_token)
+            return Team.objects.get(id=team_id), outcome
+        return _run(info, run)
+
+
 class TeamsMutation(graphene.ObjectType):
     create_team = CreateTeam.Field()
     update_team = UpdateTeam.Field()
@@ -585,4 +676,7 @@ class TeamsMutation(graphene.ObjectType):
     follow_team = FollowTeam.Field()
     set_team_goal = SetTeamGoal.Field()
     copy_play = CopyPlay.Field()
+    create_team_invite = CreateTeamInvite.Field()
+    invite_contacts_to_team = InviteContactsToTeam.Field()
+    join_team_with_invite = JoinTeamWithInvite.Field()
 

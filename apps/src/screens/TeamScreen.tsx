@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -19,6 +19,7 @@ import {
   EXPEL_TEAM_MEMBER,
   FOLLOW_TEAM,
   JOIN_TEAM,
+  JOIN_TEAM_WITH_INVITE,
   LEAVE_TEAM,
   SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR,
   SET_TEAM_GOAL,
@@ -26,6 +27,7 @@ import {
 } from '../apollo/mutations';
 import {
   GET_TEAM,
+  GET_TEAM_INVITE,
   GET_TEAM_JOIN_REQUESTS,
   GET_TEAM_MEMBERS,
   GET_TEAM_PLAYS,
@@ -57,14 +59,16 @@ const QUERY_OF: Record<Exclude<Tab, 'goal'>, any> = {
 };
 
 /**
- * Equipo: who is in it, what they hold and buy (counts and names, never
- * amounts), the team's Meta, and Copiar jugada. Joining needs a public,
+ * A team: who is in it, what they hold and buy (counts and names, never
+ * amounts), the team's goal, and copy play. Joining needs a public,
  * verified profile (reciprocity); the server decides and says why not.
  */
 export const TeamScreen = () => {
   const navigation = useNavigation<Navigation>();
   const route = useRoute<RouteProps>();
-  const { teamId } = route.params;
+  const { teamId, inviteToken } = route.params;
+  // Arrived through a friend's invite: who sent it, and whether it skips approval.
+  const [invite, setInvite] = useState<{ inviterUsername: string; skipsApproval: boolean } | null>(null);
   const client = useApolloClient();
   const [team, setTeam] = useState<Team | null | undefined>(undefined);
   const [tab, setTab] = useState<Tab>('members');
@@ -77,6 +81,20 @@ export const TeamScreen = () => {
   tabRef.current = tab;
 
   const [joinTeam] = useMutation(JOIN_TEAM);
+  const [joinWithInvite] = useMutation(JOIN_TEAM_WITH_INVITE);
+  useEffect(() => {
+    if (!inviteToken) return;
+    let live = true;
+    client.query({ query: GET_TEAM_INVITE, variables: { token: inviteToken }, fetchPolicy: 'network-only' })
+      .then(({ data }) => {
+        const found = data?.teamInvite;
+        if (live && found && String(found.teamId) === String(teamId)) {
+          setInvite({ inviterUsername: found.inviterUsername, skipsApproval: Boolean(found.skipsApproval) });
+        }
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [client, inviteToken, teamId]);
   const [leaveTeam] = useMutation(LEAVE_TEAM);
   const [cancelRequest] = useMutation(CANCEL_TEAM_JOIN_REQUEST);
   const [decideRequest] = useMutation(DECIDE_TEAM_JOIN_REQUEST);
@@ -181,7 +199,9 @@ export const TeamScreen = () => {
   };
 
   const join = async () => {
-    const result = await act(async () => (await joinTeam({ variables: { teamId } })).data?.joinTeam, 'No pudimos unirte');
+    const result = await act(async () => (invite && inviteToken
+      ? (await joinWithInvite({ variables: { teamId, inviteToken } })).data?.joinTeamWithInvite
+      : (await joinTeam({ variables: { teamId } })).data?.joinTeam), 'No pudimos unirte');
     if (result?.outcome === 'requested') {
       Alert.alert('Solicitud enviada', 'El capitán decide quién entra. Te avisaremos.');
     }
@@ -381,6 +401,10 @@ export const TeamScreen = () => {
         <View style={styles.actions}>
           {team.isMember ? (
             <>
+              <Pressable style={styles.primary} accessibilityRole="button"
+                onPress={() => navigation.navigate('TeamInvite', { teamId, teamName: team.name })}>
+                <Text style={styles.primaryText}>Invitar</Text>
+              </Pressable>
               {team.isCaptain ? (
                 <Pressable style={styles.secondary} onPress={() => navigation.navigate('TeamEdit', { teamId })} accessibilityRole="button">
                   <Text style={styles.secondaryText}>Editar</Text>
@@ -400,7 +424,9 @@ export const TeamScreen = () => {
               ) : (
                 <Pressable style={[styles.primary, (busy || Boolean(team.joinBlock)) && styles.disabled]}
                   disabled={busy || Boolean(team.joinBlock)} onPress={() => { void join(); }} accessibilityRole="button">
-                  <Text style={styles.primaryText}>{team.joinMode === 'approval' ? 'Pedir unirme' : 'Unirme'}</Text>
+                  <Text style={styles.primaryText}>
+                    {team.joinMode === 'approval' && !invite?.skipsApproval ? 'Pedir unirme' : 'Unirme'}
+                  </Text>
                 </Pressable>
               )}
               <Pressable style={styles.secondary} disabled={busy} accessibilityRole="button"
@@ -410,6 +436,9 @@ export const TeamScreen = () => {
             </>
           )}
         </View>
+        {invite && !team.isMember ? (
+          <Text style={styles.invited}>@{invite.inviterUsername} te invitó a este equipo.</Text>
+        ) : null}
         {!team.isMember && team.joinBlockMessage && team.joinRequest !== 'pending' ? (
           <Text style={styles.blockMessage}>{team.joinBlockMessage}</Text>
         ) : null}
@@ -473,7 +502,7 @@ export const TeamScreen = () => {
   );
 };
 
-/** Meta del equipo: aggregate progress only. The captain sets it. */
+/** Team goal: aggregate progress only. The captain sets it. */
 function GoalCard({ team, onSaved }: { team: Team; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [kind, setKind] = useState<'invested_usd' | 'weekly_investors'>('invested_usd');
@@ -573,6 +602,7 @@ const styles = StyleSheet.create({
   secondary: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: colors.border, alignSelf: 'center' },
   secondaryText: { fontSize: 15, fontWeight: '600', color: colors.dark },
   disabled: { opacity: 0.5 },
+  invited: { marginTop: 6, fontSize: 13, fontWeight: '600', color: colors.primaryDark, textAlign: 'center' },
   blockMessage: { marginTop: 6, fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
   lock: { padding: 16 },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.background,

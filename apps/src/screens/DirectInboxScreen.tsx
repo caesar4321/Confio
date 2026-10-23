@@ -13,7 +13,7 @@ type Navigation = NativeStackNavigationProp<MainStackParamList>;
 type RouteProps = NativeStackScreenProps<MainStackParamList, 'DirectInbox'>['route'];
 
 /**
- * Mensajes lives in the assistant box (its own chat head). Pushes and links
+ * Direct messages live in the assistant box (its own chat head). Pushes and links
  * still land on this route: hand them to the box and step back. Without the
  * box, the list is shown here.
  */

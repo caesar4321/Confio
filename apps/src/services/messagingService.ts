@@ -1040,6 +1040,9 @@ class MessagingService {
           } else if (parts[1] === 'chat' && parts[2]) {
             // COMMUNITY_DIRECT_MESSAGE: confio://community/chat/{conversationId}
             this.navigateInsideMain('DirectChat', { conversationId: String(parts[2]) });
+          } else if (parts[1] === 'team-invite' && parts[2]) {
+            // COMMUNITY_TEAM_INVITE: confio://community/team-invite/{token}
+            this.navigateInsideMain('TeamJoinInvite', { token: String(parts[2]) });
           } else if (parts[1] === 'messages') {
             this.navigateInsideMain('DirectInbox');
           } else if (parts[1] === 'member' && parts[2]) {

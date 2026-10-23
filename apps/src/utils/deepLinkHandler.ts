@@ -4,6 +4,8 @@ import { NavigationContainerRef } from '@react-navigation/native';
 // @ts-ignore
 import { PlayInstallReferrer } from 'react-native-play-install-referrer';
 import 'react-native-url-polyfill/auto';
+import { setPendingTeamInvite } from '../services/teamInviteLinks';
+import { teamTokenFromCode } from './teams';
 
 const DEFERRED_LINK_KEY = 'confio_deferred_link';
 const AUTH_TOKEN_KEY = 'confio_auth_token';
@@ -457,6 +459,14 @@ export class DeepLinkHandler {
 
 
   public async storeDeferredLink(linkData: DeepLinkData) {
+    // A team invite ("team~…") arrives on every referral path (the link, the
+    // store install referrer): it opens the team once signed in and is never
+    // a referral code.
+    const teamToken = linkData.type === 'referral' ? teamTokenFromCode(linkData.payload) : null;
+    if (teamToken) {
+      await setPendingTeamInvite(teamToken);
+      return;
+    }
     try {
       await Keychain.setInternetCredentials(
         DEFERRED_LINK_KEY,

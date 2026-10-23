@@ -6,15 +6,13 @@ import { colors } from '../config/theme';
 import { InvestScreen } from './InvestScreen';
 import { DiscoverScreen } from './DiscoverScreen';
 import { CommunityPreviewCard } from '../components/CommunityPreviewCard';
-import { LigaContent } from '../components/LigaContent';
 import { markCommunitySeen, refreshCommunityPeek, useCommunityPeek } from '../services/communityPeek';
 
-export type InvestSegment = 'invest' | 'community' | 'liga';
+export type InvestSegment = 'invest' | 'community';
 
 const SEGMENTS: { key: InvestSegment; label: string }[] = [
   { key: 'invest', label: 'Invertir' },
   { key: 'community', label: 'Comunidad' },
-  { key: 'liga', label: 'Liga' },
 ];
 
 /**
@@ -88,10 +86,7 @@ export const InvestTabScreen = ({ route }: { route?: { params?: { segment?: Inve
       <View style={[styles.pane, segment !== 'community' && styles.hidden]}>
         <DiscoverScreen sections={['community']} />
       </View>
-      {/* Liga Confío: teams and investors ranked by % return (Fomo's clans, our way). */}
-      <View style={[styles.pane, segment !== 'liga' && styles.hidden]}>
-        <LigaContent active={segment === 'liga'} />
-      </View>
+
     </View>
   );
 };

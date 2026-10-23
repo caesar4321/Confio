@@ -18,7 +18,7 @@ type RouteProps = NativeStackScreenProps<MainStackParamList, 'SendTip'>['route']
 const NOTE_MAX = 140;
 
 /**
- * Propina: an optional gift to another investor. 100% reaches them (Confío
+ * Tip: an optional gift to another investor. 100% reaches them (Confío
  * takes no commission) and it never buys anything — not a reply, not
  * advice, not content. The note is reviewed before any money moves; then
  * the normal send flow (face check, signature) runs with the server's key.

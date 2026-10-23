@@ -130,10 +130,14 @@ import CommunityMemberProfileScreen from '../screens/CommunityMemberProfileScree
 import DirectInboxScreen from '../screens/DirectInboxScreen';
 import DirectChatScreen from '../screens/DirectChatScreen';
 import SendTipScreen from '../screens/SendTipScreen';
-import LigaScreen from '../screens/LigaScreen';
+import LeagueScreen from '../screens/LeagueScreen';
 import TeamScreen from '../screens/TeamScreen';
 import TeamEditScreen from '../screens/TeamEditScreen';
 import TeamsBrowseScreen from '../screens/TeamsBrowseScreen';
+import TeamInviteScreen from '../screens/TeamInviteScreen';
+import TeamJoinInviteScreen from '../screens/TeamJoinInviteScreen';
+import { onTeamInvite, takePendingTeamInvite } from '../services/teamInviteLinks';
+import { navigationRef } from './RootNavigation';
 import BlockedMembersScreen from '../screens/BlockedMembersScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 
@@ -156,6 +160,19 @@ export const MainNavigator = () => {
     }, 250);
 
     return () => clearTimeout(timer);
+  }, []);
+
+  // Team invite links (Invitar a un amigo): shown as soon as the main screens are up.
+  useEffect(() => {
+    const show = (token: string) => {
+      setTimeout(() => (navigationRef as any).navigate('Main', { screen: 'TeamJoinInvite', params: { token } }), 300);
+    };
+    takePendingTeamInvite().then((waiting) => { if (waiting) show(waiting); }).catch(() => {});
+    return onTeamInvite((token) => {
+      // Shown now: clear it so the next start doesn't open it again.
+      takePendingTeamInvite().catch(() => {});
+      show(token);
+    });
   }, []);
 
   useEffect(() => {
@@ -270,8 +287,8 @@ export const MainNavigator = () => {
           }}
         />
         <Stack.Screen
-          name="Liga"
-          component={LigaScreen}
+          name="League"
+          component={LeagueScreen}
           options={{
             headerShown: false,
           }}
@@ -288,6 +305,20 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="TeamEdit"
           component={TeamEditScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="TeamInvite"
+          component={TeamInviteScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="TeamJoinInvite"
+          component={TeamJoinInviteScreen}
           options={{
             headerShown: false,
           }}

@@ -476,3 +476,97 @@ class SweeperTests(TeamTestBase):
         rules.join_team(member, None, team.id)
         UserBan.objects.create(user=member, reason='fraud', ban_type='permanent')
         self.assertIn(member.id, dict(community.members_owed_content_removal()))
+
+
+class InviteTests(TeamTestBase):
+    def approval_team(self):
+        team, captain = self.create(join_mode='approval')
+        return team, captain
+
+    def test_the_captains_link_skips_approval_a_members_link_does_not(self):
+        from . import invites
+
+        team, captain = self.approval_team()
+        member = make_user()
+        rules.join_team(member, None, team.id)  # a request
+        rules.decide_request(captain, team.join_requests.get(user=member).id, True)
+        member_link = invites.invite_link(member, None, team.id)
+        captain_link = invites.invite_link(captain, None, team.id)
+        self.assertEqual(rules.join_team(make_user(), None, team.id, invite_token=member_link.token), 'requested')
+        self.assertEqual(rules.join_team(make_user(), None, team.id, invite_token=captain_link.token), 'joined')
+        # The same link until it nears expiry.
+        self.assertEqual(invites.invite_link(captain, None, team.id).token, captain_link.token)
+
+    def test_a_link_still_needs_a_public_verified_profile_and_a_live_inviter(self):
+        from . import invites
+
+        team, captain = self.approval_team()
+        link = invites.invite_link(captain, None, team.id)
+        hidden = make_user()
+        SetCommunityPortfolioHidden.mutate(None, MockInfo(hidden), hidden=True)
+        with self.assertRaises(community.CommunityPostError):
+            rules.join_team(hidden, None, team.id, invite_token=link.token)
+        # Expired, or for another team: an ordinary request.
+        other, _ = self.create(name='Otro Equipo', join_mode='approval')
+        self.assertEqual(rules.join_team(make_user(), None, other.id, invite_token=link.token), 'requested')
+        link.expires_at = timezone.now() - timedelta(minutes=1)
+        link.save()
+        self.assertEqual(rules.join_team(make_user(), None, team.id, invite_token=link.token), 'requested')
+        self.assertIsNone(invites.resolve(make_user(), link.token))
+
+    def test_only_members_invite(self):
+        from . import invites
+
+        team, _ = self.create()
+        with self.assertRaises(community.CommunityPostError) as ctx:
+            invites.invite_link(make_user(), None, team.id)
+        self.assertEqual(ctx.exception.code, 'not_member')
+
+    def phone_user(self, number):
+        from users.models import User
+        from users.phone_utils import phone_lookup_key
+
+        user = make_user()
+        User.objects.filter(id=user.id).update(phone_key=phone_lookup_key(number))
+        return user
+
+    def test_contact_pushes_go_by_phone_and_are_silent_about_who_got_one(self):
+        from . import invites
+        from .models import TeamInviteNotice
+
+        team, captain = self.create()
+        member = self.phone_user('+573001110000')
+        rules.join_team(member, None, team.id)
+        numbers = ['+573001110001', '+573001110002', '+573001110003']
+        for n in numbers:
+            self.phone_user(n)
+        with patch('inbox.community._notify') as notify:
+            # Already in the team, and a number nobody has: tried, not said.
+            self.assertEqual(invites.invite_contacts(captain, None, team.id, numbers + ['+573001110000', '+573009999999']), 5)
+            self.assertEqual(notify.call_count, 3)
+            # Once a week per team per person.
+            invites.invite_contacts(captain, None, team.id, [numbers[0]])
+            self.assertEqual(notify.call_count, 3)
+        # Every attempt counts toward the cap, sent or not.
+        self.assertEqual(TeamInviteNotice.objects.filter(inviter=captain).count(), 6)
+        with patch.object(invites, 'DAILY_PUSHES', 7), self.assertRaises(community.CommunityPostError) as ctx:
+            invites.invite_contacts(captain, None, team.id, ['+573001110004', '+573001110005'])
+        self.assertEqual(ctx.exception.code, 'invite_limit')
+
+    def test_blocked_contacts_get_nothing_and_cant_see_the_invite(self):
+        from . import invites
+
+        team, captain = self.create()
+        friend = self.phone_user('+573001110009')
+        community.block_member(friend, captain.id)
+        with patch('inbox.community._notify') as notify:
+            invites.invite_contacts(captain, None, team.id, ['+573001110009'])
+        notify.assert_not_called()
+        self.assertIsNone(invites.resolve(friend, invites.invite_link(captain, None, team.id).token))
+
+    def test_tokens_ignore_case(self):
+        from . import invites
+
+        team, captain = self.create()
+        token = invites.invite_link(captain, None, team.id).token
+        self.assertEqual(invites.resolve(make_user(), token.upper()).team_id, team.id)

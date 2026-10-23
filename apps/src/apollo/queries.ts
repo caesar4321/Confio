@@ -5267,6 +5267,20 @@ export const GET_TEAM_JOIN_REQUESTS = gql`
   }
 `;
 
+// Friend invites: their own query (an older server has none).
+export const GET_TEAM_INVITE = gql`
+  query GetTeamInvite($token: String!) {
+    teamInvite(token: $token) {
+      teamId
+      teamName
+      emoji
+      color
+      inviterUsername
+      skipsApproval
+    }
+  }
+`;
+
 export const GET_LEAGUE_BADGES = gql`
   query GetLeagueBadges($userId: ID!) {
     leagueBadges(userId: $userId)

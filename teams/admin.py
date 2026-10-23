@@ -1,6 +1,9 @@
 from django.contrib import admin
 
-from .models import CopiedPlay, LeagueSeasonAward, Team, TeamDailyReturn, TeamGoal, TeamJoinRequest, TeamMembership
+from .models import (
+    CopiedPlay, LeagueSeasonAward, Team, TeamDailyReturn, TeamGoal, TeamInvite, TeamInviteNotice, TeamJoinRequest,
+    TeamMembership,
+)
 
 
 class TeamMembershipInline(admin.TabularInline):
@@ -13,7 +16,7 @@ class TeamMembershipInline(admin.TabularInline):
 
 @admin.register(Team)
 class TeamAdmin(admin.ModelAdmin):
-    """Equipos. Staff can archive a team (takedown); members leave with it."""
+    """Teams. Staff can archive a team (takedown); members leave with it."""
     list_display = ('id', 'emoji', 'name', 'captain', 'join_mode', 'country', 'created_at', 'archived_at')
     list_filter = ('join_mode', 'country', 'archived_at')
     search_fields = ('name', 'captain__username')
@@ -64,3 +67,14 @@ class LeagueSeasonAwardAdmin(ReadOnly):
 class CopiedPlayAdmin(ReadOnly):
     list_display = ('id', 'user', 'source_user', 'symbol', 'source_batch_id', 'resulting_batch_id', 'created_at')
     search_fields = ('symbol', 'user__username', 'source_user__username')
+
+
+@admin.register(TeamInvite)
+class TeamInviteAdmin(ReadOnly):
+    list_display = ('id', 'team', 'inviter', 'created_at', 'expires_at')
+    exclude = ('token',)
+
+
+@admin.register(TeamInviteNotice)
+class TeamInviteNoticeAdmin(ReadOnly):
+    list_display = ('id', 'team', 'inviter', 'invitee', 'created_at')
