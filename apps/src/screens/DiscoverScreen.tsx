@@ -43,14 +43,28 @@ const FEED_TIERS = [
 ] as const;
 const LAST_TIER = FEED_TIERS.length - 1;
 
-export const DiscoverScreen = () => {
+type DiscoverScreenProps = {
+  /** Which feeds this instance offers. Invertir's Comunidad shows only the
+   *  member feed (news and Julian's posts live in the assistant bubble); a
+   *  single section hides the chips. */
+  sections?: DiscoverSectionKey[];
+};
+
+export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = {}) => {
+  const offered = useMemo(
+    () => (sectionKeys?.length
+      ? DISCOVER_SECTIONS.filter((s) => sectionKeys.includes(s.key))
+      : DISCOVER_SECTIONS),
+    [sectionKeys],
+  );
   const navigation = useNavigation<Navigation>();
   const client = useApolloClient();
   const [reactToMessageContent] = useMutation(REACT_TO_MESSAGE_CONTENT);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   // Para ti first: everything, with verified sources marked by the Oficial
-  // check; the Oficial-only and community feeds are one tap away.
-  const [section, setSection] = useState<DiscoverSectionKey>('for_you');
+  // check; the Oficial-only and community feeds are one tap away. An instance
+  // limited to some feeds starts on its first.
+  const [section, setSection] = useState<DiscoverSectionKey>(offered[0]?.key ?? 'for_you');
 
   const [tier, setTier] = useState(0);
   const feedTier = FEED_TIERS[tier];
@@ -258,7 +272,7 @@ export const DiscoverScreen = () => {
           feedGeneration.current += 1;
           refetch({ offset: 0, limit: PAGE_SIZE }).catch(() => {});
         }}
-        sections={legacyServer ? [] : DISCOVER_SECTIONS}
+        sections={legacyServer || offered.length < 2 ? [] : offered}
         // The legacy feed is unfiltered: its empty state is Para ti's.
         activeSection={legacyServer ? 'for_you' : section}
         onSelectSection={selectSection}

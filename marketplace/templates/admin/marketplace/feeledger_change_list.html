@@ -1,0 +1,17 @@
+{% extends "admin/change_list.html" %}
+{% block result_list %}
+{% if monthly %}
+<h2>Monthly summary (filtered rows)</h2>
+<table style="margin-bottom:24px">
+  <thead><tr><th>Month</th><th>Country</th><th>Orders</th><th>GMV (USD)</th><th>Fee (USD)</th><th>Partner share</th><th>Confío share</th></tr></thead>
+  <tbody>
+  {% for m in monthly %}
+    <tr><td>{{ m.month|date:"Y-m" }}</td><td>{{ m.country_code }}</td><td>{{ m.orders }}</td>
+        <td>{{ m.gmv|floatformat:2 }}</td><td>{{ m.fee|floatformat:2 }}</td>
+        <td>{{ m.partner|floatformat:2 }}</td><td>{{ m.confio|floatformat:2 }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{{ block.super }}
+{% endblock %}

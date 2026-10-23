@@ -18,6 +18,7 @@ from cusd_plus import schema as cusd_plus_schema
 from cusd_plus import crypto_schema as cusd_plus_crypto_schema
 from usdc_transactions import schema as usdc_transactions_schema
 from financieras import schema as financieras_schema
+from marketplace import schema as marketplace_schema
 from security import schema as security_schema
 from presale import schema as presale_schema
 from humanitarian import schema as humanitarian_schema
@@ -31,7 +32,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(stereum_schema.Query, users_schema.Query, UnifiedTransactionQuery, MonthSummaryQuery, CategoryPromptQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payment_accounts_schema.Query, pending_payin_schema.PendingPayinQuery, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, cusd_plus_schema.Query, cusd_plus_crypto_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, assistant_schema.Query, blockchain_schema.Query, billing_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
+class Query(stereum_schema.Query, users_schema.Query, UnifiedTransactionQuery, MonthSummaryQuery, CategoryPromptQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payment_accounts_schema.Query, pending_payin_schema.PendingPayinQuery, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, cusd_plus_schema.Query, cusd_plus_crypto_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, marketplace_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, assistant_schema.Query, blockchain_schema.Query, billing_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -53,6 +54,7 @@ class Mutation(
 	exchange_rates_schema.Mutation,
 	usdc_transactions_schema.Mutation,
 	financieras_schema.Mutation,
+	marketplace_schema.Mutation,
 	cusd_plus_schema.Mutation,
 	cusd_plus_crypto_schema.Mutation,
 	security_schema.Mutation,

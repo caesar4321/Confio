@@ -21,8 +21,8 @@ export type AuthStackParamList = {
 // Bottom Tab Navigator - Main app tabs
 export type BottomTabParamList = {
   Home: undefined;
-  Invest: undefined;
-  Discover: undefined;
+  Invest: { segment?: 'invest' | 'community' } | undefined;
+  Comprar: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
   Exchange: {
@@ -65,6 +65,13 @@ export type MainStackParamList = {
     contentItemId: number;
   };
   CommunityCompose: { initialBody?: string } | undefined;
+  MarketProduct: { productId: string };
+  MarketStore: { storeId: string };
+  MarketCheckout: { productId: string; resumeOrderId?: string };
+  MarketOrders: { role?: 'buyer' | 'merchant' } | undefined;
+  MarketOrder: { orderId: string; justPaid?: boolean };
+  MyMarketStore: undefined;
+  MarketProductEdit: { productId?: string };
   MyCommunityPosts: undefined;
   CommunityMemberProfile: { userId: string };
   BlockedMembers: undefined;

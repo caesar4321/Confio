@@ -54,6 +54,9 @@ class NotificationType(models.TextChoices):
     RAMP_COMPLETED = 'RAMP_COMPLETED', 'Ramp Completed'
     RAMP_FAILED = 'RAMP_FAILED', 'Ramp Failed'
     
+    # Comprar (marketplace)
+    MARKETPLACE_ORDER_UPDATED = 'MARKETPLACE_ORDER_UPDATED', 'Marketplace Order Updated'
+
     # Account related
     ACCOUNT_VERIFIED = 'ACCOUNT_VERIFIED', 'Account Verified'
     SECURITY_ALERT = 'SECURITY_ALERT', 'Security Alert'

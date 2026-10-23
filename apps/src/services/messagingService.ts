@@ -1046,6 +1046,14 @@ class MessagingService {
             this.navigateInsideMain('Discover');
           }
           break;
+        case 'comprar':
+          // MARKETPLACE_ORDER_UPDATED: confio://comprar/order/{publicId}
+          if (parts[1] === 'order' && parts[2]) {
+            this.navigateInsideMain('MarketOrder', { orderId: String(parts[2]) });
+          } else {
+            this.navigateInsideMain('BottomTabs', { screen: 'Comprar' });
+          }
+          break;
         case 'discover':
           if (parts[1] === 'post' && parts[2]) {
             this.navigateInsideMain('DiscoverPostDetail', {

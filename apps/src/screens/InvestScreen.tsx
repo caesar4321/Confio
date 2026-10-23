@@ -45,7 +45,7 @@ const num = (v: unknown): number | null => {
  * shows the phase, price and how far the raise has come. Red days are allowed
  * here (a hub), never on Home.
  */
-export const InvestScreen = () => {
+export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode } = {}) => {
   const navigation = useNavigation<Nav>();
   const isFocused = useIsFocused();
   const { formatNumber } = useNumberFormat();
@@ -166,6 +166,7 @@ export const InvestScreen = () => {
         </View>
 
         <View style={styles.cards}>
+          {topAccessory}
           {stocks.enabled && (
             <Pressable
               accessibilityRole="button"

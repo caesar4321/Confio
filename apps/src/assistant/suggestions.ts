@@ -4,7 +4,7 @@ export type ScreenHint = { hint: string; prompt: string };
 
 // The bubble only floats over these screens. Camera, confirmation,
 // processing and auth screens stay clean (allowlist, not denylist).
-export const TAB_ROUTES = new Set(['Home', 'Invest', 'Discover', 'Profile']);
+export const TAB_ROUTES = new Set(['Home', 'Invest', 'Comprar', 'Profile']);
 export const BUBBLE_ROUTES = new Set([
   ...TAB_ROUTES,
   'Send',

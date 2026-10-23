@@ -1207,6 +1207,25 @@ confio_admin_site.register(Financiera, FinancieraAdmin)
 confio_admin_site.register(FinancieraReview, FinancieraReviewAdmin)
 confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 
+# Comprar (marketplace)
+from marketplace.models import (MarketplaceCity, Store as MarketStore, Product as MarketProduct,
+                                Order as MarketOrder, OrderRating as MarketOrderRating,
+                                MarketplacePartnerAgreement, MarketplaceFeeLedger,
+                                MarketplaceLocationCheck)
+from marketplace.admin import (MarketplaceCityAdmin, StoreAdmin as MarketStoreAdmin,
+                               ProductAdmin as MarketProductAdmin, OrderAdmin as MarketOrderAdmin,
+                               OrderRatingAdmin as MarketOrderRatingAdmin,
+                               MarketplacePartnerAgreementAdmin, MarketplaceFeeLedgerAdmin,
+                               MarketplaceLocationCheckAdmin)
+confio_admin_site.register(MarketplaceCity, MarketplaceCityAdmin)
+confio_admin_site.register(MarketStore, MarketStoreAdmin)
+confio_admin_site.register(MarketProduct, MarketProductAdmin)
+confio_admin_site.register(MarketOrder, MarketOrderAdmin)
+confio_admin_site.register(MarketOrderRating, MarketOrderRatingAdmin)
+confio_admin_site.register(MarketplacePartnerAgreement, MarketplacePartnerAgreementAdmin)
+confio_admin_site.register(MarketplaceFeeLedger, MarketplaceFeeLedgerAdmin)
+confio_admin_site.register(MarketplaceLocationCheck, MarketplaceLocationCheckAdmin)
+
 # EVM sponsorship ledger + cross-rail auto-swap queue. PendingAutoSwap was
 # never registered, which left the BSC 'BNB' rows — the authoritative
 # allowlist for outbound native BNB — with no admin surface at all.

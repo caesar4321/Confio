@@ -23,7 +23,12 @@ export const DESTINATION_TARGETS: Record<string, Target> = {
   // Stocks and presale are geo-gated: the Invertir tab decides what to show.
   stocks: { tab: 'Invest' },
   presale: { tab: 'Invest' },
-  discover: { tab: 'Discover' },
+  // Descubrir is gone as a tab: its Comunidad lives in Invertir.
+  discover: { tab: 'Invest', params: { segment: 'community' } },
+  community: { tab: 'Invest', params: { segment: 'community' } },
+  comprar: { tab: 'Comprar' },
+  my_store: { screen: 'MyMarketStore' },
+  market_orders: { screen: 'MarketOrders' },
   profile: { tab: 'Profile' },
   verification: { screen: 'Verification' },
   cash_directory: { screen: 'Financieras' },

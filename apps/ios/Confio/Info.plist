@@ -69,14 +69,14 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Confio uses Face ID or Touch ID to unlock the app and confirm transactions.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Confío usa tu ubicación únicamente mientras usas la app para verificar la disponibilidad de Bre-B. No solicitamos acceso permanente ni rastreamos tu ubicación en segundo plano.</string>
+	<string>Confío usa tu ubicación únicamente mientras usas la app, para mostrarte lo disponible en tu ciudad y verificar que puedes usar los servicios que dependen de dónde estás. No solicitamos acceso permanente ni rastreamos tu ubicación en segundo plano.</string>
 	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
 	<dict>
 		<key>BrebLocation</key>
-		<string>Bre-B necesita tu ubicación precisa para confirmar que está disponible donde estás.</string>
+		<string>Confío necesita tu ubicación precisa para confirmar que este servicio está disponible donde estás.</string>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Confío usa tu ubicación precisa para verificar que puedes activar y usar Bre-B desde tu ubicación actual. No rastreamos tu ubicación en segundo plano.</string>
+	<string>Confío usa tu ubicación mientras usas la app, para mostrarte lo disponible en tu ciudad y verificar que puedes usar los servicios que dependen de dónde estás. No rastreamos tu ubicación en segundo plano.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Confío usa el micrófono para los audios que le mandas a Confio Assistant y para la verificación de identidad en video.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

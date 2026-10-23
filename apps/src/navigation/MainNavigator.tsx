@@ -118,6 +118,13 @@ import PayrollDelegatesManageScreen from '../screens/PayrollDelegatesManageScree
 import MessageScreen from '../screens/MessageScreen';
 import DiscoverPostDetailScreen from '../screens/DiscoverPostDetailScreen';
 import CommunityComposeScreen from '../screens/CommunityComposeScreen';
+import MarketProductScreen from '../screens/MarketProductScreen';
+import MarketStoreScreen from '../screens/MarketStoreScreen';
+import MarketCheckoutScreen from '../screens/MarketCheckoutScreen';
+import MarketOrdersScreen from '../screens/MarketOrdersScreen';
+import MarketOrderScreen from '../screens/MarketOrderScreen';
+import MyMarketStoreScreen from '../screens/MyMarketStoreScreen';
+import MarketProductEditScreen from '../screens/MarketProductEditScreen';
 import MyCommunityPostsScreen from '../screens/MyCommunityPostsScreen';
 import CommunityMemberProfileScreen from '../screens/CommunityMemberProfileScreen';
 import BlockedMembersScreen from '../screens/BlockedMembersScreen';
@@ -226,6 +233,14 @@ export const MainNavigator = () => {
             headerShown: false,
           }}
         />
+        {/* Comprar (marketplace) */}
+        <Stack.Screen name="MarketProduct" component={MarketProductScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="MarketStore" component={MarketStoreScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="MarketCheckout" component={MarketCheckoutScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="MarketOrders" component={MarketOrdersScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="MarketOrder" component={MarketOrderScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="MyMarketStore" component={MyMarketStoreScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="MarketProductEdit" component={MarketProductEditScreen} options={{ headerShown: false }} />
         <Stack.Screen
           name="MyCommunityPosts"
           component={MyCommunityPostsScreen}

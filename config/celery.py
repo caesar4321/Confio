@@ -43,6 +43,13 @@ app.conf.beat_schedule.setdefault('relay-cache-heartbeat', {
     'schedule': crontab(minute='*'),
 })
 
+# Comprar escrow keeper: auto-release past releaseAt, refund disputes past
+# the timeout, re-mirror open orders, cancel stale drafts.
+app.conf.beat_schedule.setdefault('marketplace-escrow-keeper', {
+    'task': 'marketplace.run_escrow_keeper',
+    'schedule': crontab(minute='*/5'),
+})
+
 app.conf.beat_schedule.setdefault('fee-ledger-summary', {
     'task': 'cusd_plus.refresh_fee_ledger_summary',
     'schedule': crontab(minute='*/10'),

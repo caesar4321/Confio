@@ -18,7 +18,11 @@ DESTINATIONS = {
     'emergency_exit': 'Salida de emergencia: mover el dinero sin depender de la app ni de los servidores de Confío.',
     'tokenomics': 'Tokenomics de $CONFIO: suministro, distribución y liberación (vesting).',
     'presale': 'Preventa de $CONFIO.',
-    'discover': 'Descubrir: novedades y comunidad.',
+    'discover': 'Comunidad (dentro de Invertir): lo que comparten otros miembros sobre su dinero.',
+    'community': 'Comunidad (dentro de Invertir): lo que comparten otros miembros sobre recargas, retiros, acciones, cripto y oro.',
+    'comprar': 'Comprar: productos de vendedores verificados de tu ciudad, con pago protegido y envío por Yango.',
+    'my_store': 'Mi tienda: abrir tu tienda en Comprar y publicar productos (cuenta personal verificada).',
+    'market_orders': 'Mis compras y ventas en Comprar.',
     'profile': 'Perfil y configuración.',
     'verification': 'Verificación de identidad (KYC).',
     'cash_directory': 'Efectivo con un agente (casas de cambio y agentes).',
@@ -39,7 +43,7 @@ PAID_OFFERS = {'ia_plus': 'ia_plus', 'cuenta_inteligente': 'smart_account'}
 OWNER_ONLY = {'receive', 'top_up', 'withdraw', 'pending_incoming', 'month_summary', 'emergency_exit',
               'ia_plus', 'cuenta_inteligente'}
 # Screens that only exist for personal accounts.
-PERSONAL_ONLY = {'pending_incoming'}
+PERSONAL_ONLY = {'pending_incoming', 'my_store'}
 # Keys newer builds open directly. The action also carries this older key, so
 # a build that doesn't know the new one still lands on the closest screen.
 FALLBACKS = {
@@ -49,4 +53,8 @@ FALLBACKS = {
     'tokenomics': 'invest',
     'ia_plus': 'home',
     'cuenta_inteligente': 'home',
+    'community': 'discover',
+    'comprar': 'home',
+    'my_store': 'profile',
+    'market_orders': 'home',
 }

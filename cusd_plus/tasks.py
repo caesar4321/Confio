@@ -2150,6 +2150,9 @@ _DOMAIN_CONFIRM_TASKS = {
     'presale_buy': 'presale.confirm_bsc_purchase',
     'invite_create': 'send.confirm_bsc_invite_create',
     'invite_reclaim': 'send.confirm_bsc_invite_reclaim',
+    **{kind: 'marketplace.confirm_market_action' for kind in (
+        'market_deposit', 'market_ship', 'market_confirm', 'market_dispute',
+        'market_refund', 'market_reclaim')},
 }
 
 

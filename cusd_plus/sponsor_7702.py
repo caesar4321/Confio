@@ -113,6 +113,14 @@ GAS_PER_SELECTOR = {
     # budget is chosen from the ROUTING (see _pay_v4_gas), not from here.
     SEL_PAY_V4: 240_000,
     _sel('createInvitation(bytes32,address,uint256)'): 140_000,  # transferFrom + struct write
+    # ConfioMarketEscrow (Comprar): deposit = transferFrom + 4-slot order write
+    # + EIP-712 ecrecover; the rest are one state write and at most one transfer.
+    _sel('deposit(bytes32,address,address,uint256,uint16,uint256,bytes)'): 220_000,
+    _sel('markShipped(bytes32)'): 60_000,
+    _sel('confirm(bytes32)'): 100_000,
+    _sel('dispute(bytes32)'): 60_000,
+    _sel('refund(bytes32)'): 90_000,
+    _sel('reclaim(bytes32)'): 90_000,
     _sel('reclaimInvitation(bytes32)'): 90_000,                  # transfer + settle
 }
 
@@ -1075,7 +1083,12 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     if kind not in {'subscribe', 'redeem', 'wrap_cusd', 'unwrap_to_cusd',
                     'mint_cusd', 'stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell',
                     'invite_claim', 'invite_reclaim',
-                    'payroll_withdraw', 'payroll_set_delegate'}:
+                    'payroll_withdraw', 'payroll_set_delegate',
+                    # Comprar: only the deposit moves the actor's money out;
+                    # every other escrow action settles funds already escrowed
+                    # (a held buyer must still be able to take a refund back).
+                    'market_ship', 'market_confirm', 'market_dispute',
+                    'market_refund', 'market_reclaim'}:
         from security.identity_reuse import outgoing_identity_restriction
         restriction = outgoing_identity_restriction(user)
         if restriction:

@@ -1,0 +1,356 @@
+"""
+Comprar — Confío's marketplace for repeat sellers of physical goods.
+
+docs/designs/comprar-marketplace.md. Key invariants:
+
+- A store hangs off one account, personal or business, opened by a
+  Didit-verified user. Never require KYB: informal sellers open from their
+  personal account. Business employees act per their role's permissions.
+- Buyers must be identity-verified too; browsing is open.
+- Money moves only through ConfioMarketEscrow (BSC). The Order row mirrors
+  the chain; `escrow.sync_order` reads the contract and is the only writer of
+  the money states (funded … released/refunded).
+- The merchant fee (8% at launch) is signed into each order. The partner
+  revenue split (Bolivia GTM) is admin accounting only: MarketplaceFeeLedger
+  rows, never on-chain and never in the app.
+- Delivery is paid by the buyer to the courier, off-platform. Confío only
+  shows the per-city estimate set in admin.
+"""
+
+import uuid
+from decimal import Decimal
+
+from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models
+
+from users.country_codes import COUNTRY_CODES
+from users.models import SoftDeleteModel
+
+COUNTRY_CHOICES = [(code[2], f"{code[0]} ({code[1]})") for code in COUNTRY_CODES]
+
+# Physical goods only. Prohibited goods are screened by moderation.
+CATEGORY_CHOICES = [
+    ('artesanias', 'Artesanías'),
+    ('textiles', 'Textiles y ropa'),
+    ('accesorios', 'Accesorios y joyería'),
+    ('hogar', 'Hogar y decoración'),
+    ('alimentos', 'Alimentos envasados'),
+    ('belleza', 'Belleza y cuidado personal'),
+    ('juguetes', 'Juguetes'),
+    ('otros', 'Otros'),
+]
+CATEGORY_KEYS = {key for key, _ in CATEGORY_CHOICES}
+
+
+class MarketplaceCity(models.Model):
+    """A city Comprar knows about: whether it is live and what delivery costs.
+
+    The delivery estimate is what checkout shows ("Envío ~15 Bs, pagas al
+    repartidor"). Lowering it when Yango volume pricing lands is an admin edit,
+    never a release.
+    """
+
+    country_code = models.CharField(max_length=2, choices=COUNTRY_CHOICES, db_index=True)
+    city = models.CharField(max_length=100)
+    currency_code = models.CharField(max_length=3, help_text='Local currency, e.g. BOB')
+    is_live = models.BooleanField(
+        default=False, help_text='Off = the fake door ("Próximamente en tu ciudad")')
+    delivery_estimate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text='Same-city delivery estimate in local currency, paid to the courier '
+                  '(empty = "a coordinar")')
+    delivery_partner = models.CharField(max_length=40, blank=True, default='')
+    # City centre, for matching the phone's GPS to a known city server-side
+    # (no third-party geocoder; each reading is kept in MarketplaceLocationCheck).
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    radius_km = models.PositiveIntegerField(default=40)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'marketplace cities'
+        constraints = [
+            models.UniqueConstraint(fields=['country_code', 'city'], name='marketplace_city_unique'),
+        ]
+        ordering = ['country_code', 'city']
+
+    def __str__(self):
+        return f'{self.city}, {self.country_code}'
+
+
+class MarketplaceLocationCheck(models.Model):
+    """Each GPS reading Comprar used to pick a city, kept like Bre-B's
+    location checks (covered by the Privacy Policy): when, who, the device
+    reading, the request IP/country and the city it matched."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    account = models.ForeignKey('users.Account', null=True, blank=True, on_delete=models.PROTECT,
+                                related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    accuracy_m = models.FloatField(null=True, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    ip_country = models.CharField(max_length=2, blank=True)
+    matched_city = models.ForeignKey(MarketplaceCity, null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name='+')
+
+    class Meta:
+        indexes = [models.Index(fields=['user', '-created_at'])]
+
+
+class Store(SoftDeleteModel):
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('paused', 'Paused by owner'),
+        ('suspended', 'Suspended by Confío'),
+    ]
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='market_stores')
+    # The personal account that sells and is paid. One store per account.
+    owner_account = models.ForeignKey(
+        'users.Account', on_delete=models.CASCADE, related_name='market_stores')
+    name = models.CharField(max_length=80)
+    description = models.TextField(blank=True, default='', max_length=1000)
+    country_code = models.CharField(max_length=2, choices=COUNTRY_CHOICES, db_index=True)
+    city = models.CharField(max_length=100, db_index=True)
+    ships_outside_city = models.BooleanField(
+        default=False, help_text='Seller coordinates delivery to other cities (buyer pays more)')
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='active', db_index=True)
+    suspended_reason = models.CharField(max_length=300, blank=True, default='')
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['owner_account'], condition=models.Q(deleted_at__isnull=True),
+                name='marketplace_one_store_per_account'),
+        ]
+
+    def __str__(self):
+        return f'{self.name} ({self.city}, {self.country_code})'
+
+    @property
+    def is_open(self):
+        return self.status == 'active' and self.deleted_at is None
+
+
+class Product(SoftDeleteModel):
+    STATUS_CHOICES = [
+        ('pending_review', 'Pending review'),
+        ('active', 'Active'),
+        ('rejected', 'Rejected by moderation'),
+        ('paused', 'Paused by seller'),
+    ]
+
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='products')
+    title = models.CharField(max_length=100)
+    description = models.TextField(blank=True, default='', max_length=2000)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, db_index=True)
+    price_local = models.DecimalField(
+        max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('1'))],
+        help_text="Price in the store's local currency (Bs in Bolivia)")
+    currency_code = models.CharField(max_length=3)
+    stock = models.PositiveIntegerField(default=1)
+    # Bumped by every seller stock edit (never by reservations). An edit must
+    # name the revision its form loaded, so a retried save cannot apply twice.
+    stock_revision = models.PositiveIntegerField(default=0)
+    # Public URLs of moderated photos, in display order.
+    photo_urls = models.JSONField(default=list, blank=True)
+    # Private pending upload keys awaiting review (replaced on every edit).
+    pending_photo_keys = models.JSONField(default=list, blank=True)
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default='pending_review', db_index=True)
+    review_claim = models.CharField(max_length=32, blank=True, default='')
+    review_verdict = models.JSONField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=300, blank=True, default='')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['store', 'status'])]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def is_buyable(self):
+        return (self.status == 'active' and self.deleted_at is None
+                and self.stock > 0 and self.store.is_open)
+
+
+class Order(models.Model):
+    """One escrowed purchase: a single product × quantity from one store.
+
+    Money states are written only by escrow.sync_order from the contract.
+    """
+
+    STATUS_CHOICES = [
+        ('draft', 'Prepared, not paid'),
+        ('depositing', 'Payment broadcast'),
+        ('funded', 'Paid, waiting to ship'),
+        ('shipped', 'Shipped'),
+        ('disputed', 'Disputed'),
+        ('released', 'Completed (merchant paid)'),
+        ('refunded', 'Refunded to buyer'),
+        ('cancelled', 'Cancelled before payment'),
+    ]
+    OPEN_STATUSES = ('funded', 'shipped', 'disputed')
+    FINAL_STATUSES = ('released', 'refunded', 'cancelled')
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    # bytes32 orderId on chain, hex without 0x.
+    order_id32 = models.CharField(max_length=64, unique=True)
+
+    buyer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='market_orders')
+    buyer_account = models.ForeignKey(
+        'users.Account', on_delete=models.PROTECT, related_name='market_orders')
+    buyer_address = models.CharField(max_length=42)
+    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name='orders')
+    merchant_address = models.CharField(max_length=42)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='orders')
+    # What the buyer agreed to, frozen at checkout.
+    product_title = models.CharField(max_length=100)
+    unit_price_local = models.DecimalField(max_digits=12, decimal_places=2)
+    quantity = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(20)])
+    subtotal_local = models.DecimalField(max_digits=14, decimal_places=2)
+    currency_code = models.CharField(max_length=3)
+    fx_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, help_text='Local currency units per 1 USD at checkout')
+    amount_usd = models.DecimalField(max_digits=14, decimal_places=6)
+    amount_wei = models.DecimalField(max_digits=40, decimal_places=0)
+    token_address = models.CharField(max_length=42)
+    fee_bps = models.PositiveIntegerField()
+
+    # Delivery (off-platform; buyer pays the courier).
+    delivery_country = models.CharField(max_length=2)
+    delivery_city = models.CharField(max_length=100)
+    delivery_outside_city = models.BooleanField(default=False)
+    delivery_estimate_local = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text='Same-city estimate shown at checkout; null when outside the city')
+    delivery_address = models.CharField(max_length=300)
+    delivery_phone = models.CharField(max_length=20)
+    delivery_note = models.CharField(max_length=300, blank=True, default='')
+    tracking_reference = models.CharField(
+        max_length=120, blank=True, default='', help_text='Yango Envío tracking id / link')
+
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='draft', db_index=True)
+    # Server deposit authorization (EIP-712), pinned for the submit validator.
+    deposit_deadline = models.BigIntegerField()
+    deposit_signature = models.CharField(max_length=132)
+    deposit_signer = models.CharField(max_length=42)
+    # The exact deposit batch built at prepare ([unwrap?, approve, deposit]).
+    deposit_calls = models.JSONField(default=list, blank=True)
+    # An action broadcast and not yet reflected by sync (one at a time).
+    pending_action = models.CharField(max_length=16, blank=True, default='')
+    pending_action_at = models.DateTimeField(null=True, blank=True)
+    last_tx_hash = models.CharField(max_length=66, blank=True, default='')
+    # The deposit's own tx (last_tx_hash moves on with later actions).
+    deposit_tx_hash = models.CharField(max_length=66, blank=True, default='')
+
+    # Chain mirror.
+    ship_by = models.DateTimeField(null=True, blank=True)
+    release_at = models.DateTimeField(null=True, blank=True)
+    disputed_at = models.DateTimeField(null=True, blank=True)
+    dispute_reason = models.CharField(max_length=500, blank=True, default='')
+    funded_at = models.DateTimeField(null=True, blank=True)
+    settled_at = models.DateTimeField(null=True, blank=True)
+    # Stock is reserved when the deposit authorization is issued and handed
+    # back only once it provably expired unspent.
+    stock_reserved = models.BooleanField(default=False)
+    # Block of the last mirrored chain snapshot; older snapshots are dropped.
+    chain_block = models.BigIntegerField(default=0)
+    # Last block at which the order was seen OPEN: the settlement event lies
+    # after it. Only moves while open, so a failed event lookup never skips it.
+    open_block = models.BigIntegerField(default=0)
+    # How far the settlement-event search has scanned (resumes across syncs).
+    settle_scan_block = models.BigIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['buyer', '-created_at']),
+            models.Index(fields=['store', 'status']),
+            models.Index(fields=['status', 'release_at']),
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Order {self.public_id} ({self.status})'
+
+    @property
+    def fee_usd(self):
+        from .pricing import fee_wei
+        return Decimal(fee_wei(int(self.amount_wei), self.fee_bps)) / Decimal(10**18)
+
+
+class OrderRating(models.Model):
+    """Reputation counts only completed escrow orders: one rating per order,
+    from its buyer, after release."""
+
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='rating')
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='ratings')
+    rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    comment = models.CharField(max_length=500, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class MarketplacePartnerAgreement(models.Model):
+    """A local GTM partner's share of the marketplace fee in one country.
+
+    Bolivia: Jason, 50% of the 8% fee, accruing WHILE he stays engaged in
+    marketplace GTM, expansion and upkeep. Set `active=False` with an
+    `ended_at` the day that stops; released orders after that accrue nothing.
+    """
+
+    partner_name = models.CharField(max_length=100)
+    partner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='marketplace_partner_agreements')
+    country_code = models.CharField(max_length=2, choices=COUNTRY_CHOICES, db_index=True)
+    share_bps = models.PositiveIntegerField(
+        validators=[MaxValueValidator(10_000)], help_text='Share of the marketplace fee (5000 = 50%)')
+    active = models.BooleanField(default=True)
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['country_code'], condition=models.Q(active=True),
+                name='marketplace_one_active_partner_per_country'),
+        ]
+
+    def __str__(self):
+        return f'{self.partner_name} — {self.country_code} {self.share_bps / 100:.0f}%'
+
+
+class MarketplaceFeeLedger(models.Model):
+    """One row per released order: the fee and the partner's share of it.
+
+    Written once, by escrow.sync_order, when the order is released. Top-ups,
+    withdrawals, conversion and Pay fees never enter this ledger.
+    """
+
+    order = models.OneToOneField(Order, on_delete=models.PROTECT, related_name='fee_entry')
+    country_code = models.CharField(max_length=2, db_index=True)
+    gross_usd = models.DecimalField(max_digits=14, decimal_places=6)
+    fee_usd = models.DecimalField(max_digits=14, decimal_places=6)
+    partner_agreement = models.ForeignKey(
+        MarketplacePartnerAgreement, null=True, blank=True, on_delete=models.PROTECT,
+        related_name='ledger_entries')
+    partner_share_usd = models.DecimalField(max_digits=14, decimal_places=6, default=Decimal('0'))
+    confio_share_usd = models.DecimalField(max_digits=14, decimal_places=6)
+    released_at = models.DateTimeField(db_index=True)
+    partner_paid_at = models.DateTimeField(
+        null=True, blank=True, help_text='Set when the monthly partner settlement is paid')
+
+    class Meta:
+        ordering = ['-released_at']

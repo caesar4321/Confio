@@ -6,9 +6,8 @@ import { Text } from '../components/common/AppText';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { BottomTabParamList, RootStackParamList } from '../types/navigation';
-import DiscoverScreen from '../screens/DiscoverScreen';
-import { InvestScreen } from '../screens/InvestScreen';
-import { DiscoverStackHeader } from './StackScreenHeaders';
+import { InvestTabScreen } from '../screens/InvestTabScreen';
+import { ComprarScreen } from '../screens/ComprarScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import ScanTab from '../screens/ScanTab';
 import { ChargeScreen } from '../screens/ChargeScreen';
@@ -18,6 +17,7 @@ import { QrPayIcon } from '../components/QrPayIcon';
 import { useHeader } from '../contexts/HeaderContext';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
+import { peekBadge, refreshCommunityPeek, useCommunityPeek } from '../services/communityPeek';
 
 // Single navigator instance
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
@@ -28,6 +28,10 @@ export const BottomTabNavigator = () => {
   const navigation = useNavigation<TabNavigatorNavigationProp>();
   const { unreadNotifications, currentAccountAvatar, profileMenu } = useHeader();
   const { activeAccount, isLoading: accountsLoading } = useAccount();
+  // New Comunidad posts badge the Invertir tab (Comunidad lives inside it).
+  const communityPeek = useCommunityPeek();
+  const investBadge = peekBadge(communityPeek);
+  React.useEffect(() => { void refreshCommunityPeek(); }, []);
   // The message box lives in the floating Confio Assistant bubble (every screen);
   // the Home header no longer has an inbox button.
 
@@ -156,7 +160,7 @@ export const BottomTabNavigator = () => {
         />
         <Tabs.Screen
           name="Invest"
-          component={InvestScreen}
+          component={InvestTabScreen}
           options={{
             // The shared Header, like every main tab: same title size and
             // position everywhere. The screen's hero continues its green.
@@ -174,6 +178,10 @@ export const BottomTabNavigator = () => {
             ),
             tabBarLabel: 'Invertir',
             tabBarIcon: ({ color, size }) => <Icon name="trending-up" size={size} color={color} />,
+            tabBarBadge: investBadge === null ? undefined : investBadge,
+            tabBarBadgeStyle: investBadge === ''
+              ? { minWidth: 10, maxHeight: 10, borderRadius: 5, backgroundColor: colors.secondary }
+              : { backgroundColor: colors.secondary, color: '#fff', fontSize: 10 },
           }}
         />
         {isBusinessAccount && (
@@ -190,13 +198,26 @@ export const BottomTabNavigator = () => {
             options={scanTabOptions}
           />
         )}
+        {/* Comunidad moved into Invertir; news and Julian's posts live in the
+            assistant bubble. The fourth tab is Comprar (marketplace). */}
         <Tabs.Screen
-          name="Discover"
-          component={DiscoverScreen}
+          name="Comprar"
+          component={ComprarScreen}
           options={{
-            header: () => <DiscoverStackHeader showBackButton={false} />,
-            tabBarLabel: 'Descubrir',
-            tabBarIcon: ({ color, size }) => <Icon name="compass" size={size} color={color} />,
+            header: () => (
+              <Header
+                navigation={navigation}
+                isHomeScreen={false}
+                title="Comprar"
+                backgroundColor="#fff"
+                showBackButton={false}
+                isLight={false}
+                unreadNotifications={0}
+                currentAccountAvatar="U"
+              />
+            ),
+            tabBarLabel: 'Comprar',
+            tabBarIcon: ({ color, size }) => <Icon name="shopping-bag" size={size} color={color} />,
           }}
         />
         <Tabs.Screen 
