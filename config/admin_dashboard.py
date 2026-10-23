@@ -864,6 +864,7 @@ from inbox.models import (
     CommunityComment,
     CommunityFollow,
     CommunityProfileSettings,
+    PortfolioDailySnapshot,
     CommunityCommentReaction,
     CommunityCommentReport,
     CommunityPostReport,
@@ -891,6 +892,7 @@ from inbox.admin import (
     CommunityBlockAdmin,
     CommunityFollowAdmin,
     CommunityProfileSettingsAdmin,
+    PortfolioDailySnapshotAdmin,
     CommunityCommentAdmin,
     CommunityCommentReactionAdmin,
     CommunityCommentReportAdmin,
@@ -1179,6 +1181,7 @@ confio_admin_site.register(CommunityBlock, CommunityBlockAdmin)
 confio_admin_site.register(CommunityFollow, CommunityFollowAdmin)
 confio_admin_site.register(CommunityActivityShare, CommunityActivityShareAdmin)
 confio_admin_site.register(CommunityProfileSettings, CommunityProfileSettingsAdmin)
+confio_admin_site.register(PortfolioDailySnapshot, PortfolioDailySnapshotAdmin)
 confio_admin_site.register(ActivityShareIntent, ActivityShareIntentAdmin)
 confio_admin_site.register(ActivityShareImpression, ActivityShareImpressionAdmin)
 confio_admin_site.register(CommunityRulesAcceptance, CommunityRulesAcceptanceAdmin)

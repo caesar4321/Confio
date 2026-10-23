@@ -866,6 +866,45 @@ class CommunityProfileSettings(models.Model):
         return f'{self.user_id} portfolio {"hidden" if self.portfolio_hidden else "public"}'
 
 
+class PortfolioDailySnapshot(models.Model):
+    """One UTC day of a member's investment sleeve (U.S. stocks + Bitcoin &
+    gold), from Confío's own trade ledger and daily closes (see
+    inbox/portfolio_returns.py). Dollars are cash, never performance.
+
+    daily_return is Modified Dietz with flows at mid-day:
+    (value_end - value_start - net_flow) / (value_start + net_flow / 2).
+    It is null whenever the day can't be stated exactly (ledger_trusted is
+    False, untrusted_reason says why): unknown is never a number."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='portfolio_daily_snapshots')
+    wallet = models.CharField(max_length=42)
+    day = models.DateField()
+    value_start_usd = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    value_end_usd = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    # Buys minus sells settled during the day (what the member paid / got).
+    net_flow_usd = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    gain_usd = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    daily_return = models.DecimalField(max_digits=16, decimal_places=10, null=True, blank=True)
+    ledger_trusted = models.BooleanField(default=False)
+    untrusted_reason = models.CharField(max_length=32, blank=True, default='')
+    # The ledger up to the day's end when it was computed: a trade confirmed
+    # or re-settled later changes it, which reopens the day.
+    ledger_sig = models.CharField(max_length=40, blank=True, default='')
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['wallet', 'day'], name='portfolio_snapshot_wallet_day'),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'day'], name='portfolio_snapshot_user_day'),
+            models.Index(fields=['day'], name='portfolio_snapshot_day'),
+        ]
+
+    def __str__(self):
+        return f'{self.wallet} {self.day} {self.daily_return if self.ledger_trusted else self.untrusted_reason}'
+
+
 class ActivityShareIntentStatus(models.TextChoices):
     PENDING = 'pending', 'Pending'
     PUBLISHED = 'published', 'Published'

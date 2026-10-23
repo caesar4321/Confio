@@ -212,3 +212,13 @@ def resolve_activity_share_intents_task(self):
     from .activity_share import resolve_share_intents
 
     return resolve_share_intents()
+
+
+@shared_task(bind=True, max_retries=0, soft_time_limit=50 * 60, time_limit=55 * 60)
+def snapshot_portfolio_returns_task(self):
+    """Yesterday's (and any open) returns days for every investing wallet.
+    Hourly through the early UTC morning: wallets the time budget didn't
+    reach, or whose scan or price feed failed, are picked up next run."""
+    from .portfolio_returns import sync_all
+
+    return sync_all(budget_seconds=40 * 60)

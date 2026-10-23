@@ -113,6 +113,14 @@ app.conf.beat_schedule.setdefault('inbox-resolve-activity-share-intents', {
     'schedule': 15.0,
 })
 
+# Perfil inversor / Liga returns: one investment-sleeve day per wallet.
+# Hourly from 00:40 to 06:40 UTC: the first run that can prove a day writes
+# it, later runs see it and only retry the days still open.
+app.conf.beat_schedule.setdefault('inbox-snapshot-portfolio-returns', {
+    'task': 'inbox.tasks.snapshot_portfolio_returns_task',
+    'schedule': crontab(hour='0-6', minute=40),
+})
+
 app.conf.beat_schedule.setdefault('payroll-reconcile-stranded-bsc', {
     'task': 'payroll.reconcile_stranded_bsc_payroll',
     'schedule': crontab(minute='*/15'),

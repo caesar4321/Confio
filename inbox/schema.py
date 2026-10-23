@@ -1122,6 +1122,44 @@ class CommunityMemberPortfolioType(graphene.ObjectType):
     closed_positions = graphene.List(graphene.NonNull(PortfolioClosedPositionType))
 
 
+class InvestorReturnPointType(graphene.ObjectType):
+    at = graphene.DateTime(required=True)
+    # Cumulative percent since the start of the range, two decimals.
+    pct = graphene.String(required=True)
+
+
+class InvestorReturnsType(graphene.ObjectType):
+    """A member's investment-sleeve return (stocks + Bitcoin & gold, never
+    cash) over a range. pct/gainUsd are null when any day can't be stated
+    exactly (units from outside Confío, a missing close): the app shows "--"."""
+    range = graphene.String(required=True)
+    pct = graphene.String()
+    gain_usd = graphene.String()
+    as_of = graphene.DateTime()
+    points = graphene.List(graphene.NonNull(InvestorReturnPointType), required=True)
+
+
+def build_investor_returns(viewer, user_id, range_key):
+    from . import portfolio_returns
+
+    if range_key not in portfolio_returns.RANGES:
+        return None
+    target = _portfolio_target(viewer, user_id)
+    if target is None:
+        return None
+    result = portfolio_returns.period_return(target, range_key)
+    if result is None:
+        return None
+    known = result.pct is not None
+    return InvestorReturnsType(
+        range=range_key,
+        pct=_pct(result.pct),
+        gain_usd=_money(result.gain_usd),
+        as_of=result.as_of,
+        points=[InvestorReturnPointType(at=at, pct=_pct(pct)) for at, pct in result.points] if known else [],
+    )
+
+
 def _portfolio_target(viewer, user_id):
     """The member whose asset profile this viewer may see, or None."""
     target = community.followable_member(user_id, viewer=viewer)
@@ -1939,6 +1977,9 @@ class Query(graphene.ObjectType):
     # Its own field: added to the portfolio type, a new app would break that
     # whole query against older servers. Same visibility rules.
     community_member_crypto_usd = graphene.String(user_id=graphene.ID(required=True))
+    # Its own field for the same reason. range: '24h' | '7d' | '30d'.
+    investor_returns = graphene.Field(InvestorReturnsType, user_id=graphene.ID(required=True),
+                                      range=graphene.String(required=True))
     community_member_posts = graphene.Field(
         DiscoverFeedPageType,
         required=True,
@@ -2110,6 +2151,10 @@ class Query(graphene.ObjectType):
     @login_required
     def resolve_community_member_portfolio(self, info, user_id):
         return build_member_portfolio(info.context.user, user_id)
+
+    @login_required
+    def resolve_investor_returns(self, info, user_id, range):  # noqa: A002 — GraphQL argument name
+        return build_investor_returns(info.context.user, user_id, range)
 
     @login_required
     def resolve_community_member_crypto_usd(self, info, user_id):

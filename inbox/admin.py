@@ -19,6 +19,7 @@ from .models import (
     CommunityActivityShare,
     CommunityFollow,
     CommunityProfileSettings,
+    PortfolioDailySnapshot,
     AvatarType,
     Channel,
     ChannelMembership,
@@ -1230,6 +1231,23 @@ class CommunityActivityShareAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PortfolioDailySnapshot)
+class PortfolioDailySnapshotAdmin(admin.ModelAdmin):
+    list_display = ('wallet', 'user', 'day', 'daily_return', 'gain_usd', 'value_end_usd', 'ledger_trusted',
+                    'untrusted_reason')
+    list_filter = ('ledger_trusted', 'untrusted_reason', 'day')
+    search_fields = ('wallet', 'user__username')
+    list_select_related = ('user',)
+    date_hierarchy = 'day'
+    readonly_fields = [f.name for f in PortfolioDailySnapshot._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
 
