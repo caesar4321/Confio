@@ -11,8 +11,9 @@ export const TEAM_MIN_RANKED = 5;
 export const LEAGUE_RANGES = [
   { key: '24h', label: '24 h' },
   { key: '7d', label: '7 d' },
-  { key: '30d', label: '30 d' },
   { key: 'month', label: 'Mes' },
+  // All time: each one's unbroken run of proven days, ranked from 30 days.
+  { key: 'all', label: 'Total' },
 ] as const;
 export type LeagueRange = (typeof LEAGUE_RANGES)[number]['key'];
 
@@ -25,6 +26,13 @@ export const championLabel = (month: string): string => {
   if (!match) return '';
   const index = Number(match[2]) - 1;
   return index >= 0 && index < 12 ? `Campeón de ${MONTHS[index]} ${match[1]}` : '';
+};
+
+/** "Clasificas en 3 días" while an all-time run is too short; null otherwise. */
+export const daysToRankLabel = (days: number | null | undefined, team = false): string | null => {
+  if (days === null || days === undefined || days <= 0) return null;
+  const subject = team ? 'Tu equipo clasifica' : 'Clasificas';
+  return `${subject} en ${days} ${days === 1 ? 'día' : 'días'}`;
 };
 
 /** "🥇" / "🥈" / "🥉" for the podium, else "4." */

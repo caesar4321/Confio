@@ -355,6 +355,9 @@ def recompute_member_teams(user) -> None:
     def run():
         for team in Team.objects.filter(id__in=team_ids):
             recompute_team(team, invalidate=True)
+        # Older days too (all time reaches past the window), in the background:
+        # without them now, with them again if they show their profile later.
+        _schedule_history(user)
 
     transaction.on_commit(run)
 
@@ -418,6 +421,20 @@ def on_profile_hidden(user) -> None:
     recompute_member_teams(user)
     leave_team(user, TeamLeaveReason.PROFILE_HIDDEN)
     _cancel_requests(user)
+
+
+def _schedule_history(user) -> None:
+    from .tasks import recompute_member_history_task
+
+    try:
+        recompute_member_history_task.delay(user.id)
+    except Exception:  # noqa: BLE001
+        logger.exception('teams: could not queue the history recompute for %s', user.id)
+
+
+def on_profile_shown(user) -> None:
+    """Showing the profile again restores the person's past team days."""
+    transaction.on_commit(lambda: _schedule_history(user))
 
 
 def follow(user, team_id, on: bool) -> bool:

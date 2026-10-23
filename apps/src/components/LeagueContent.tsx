@@ -12,10 +12,10 @@ import { InvestorAccess, InvestorLockCard, isLocked } from './InvestorLockCard';
 import { TeamBadge } from './TeamBadge';
 import { colors } from '../config/theme';
 import { SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR } from '../apollo/mutations';
-import { GET_LEAGUE_TABLE, GET_MY_TEAM, GET_TEAMS_LOOKING } from '../apollo/queries';
+import { GET_LEAGUE_DAYS_TO_RANK, GET_LEAGUE_TABLE, GET_MY_TEAM, GET_TEAMS_LOOKING } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { formatPctSigned } from '../utils/portfolioFormat';
-import { LEAGUE_RANGES, LeagueRange, LeagueRow, TEAM_MAX_MEMBERS, TEAM_MIN_RANKED, Team, rankMark } from '../utils/teams';
+import { LEAGUE_RANGES, LeagueRange, LeagueRow, TEAM_MAX_MEMBERS, TEAM_MIN_RANKED, Team, daysToRankLabel, rankMark } from '../utils/teams';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 export type LeagueKind = 'teams' | 'investors';
@@ -42,6 +42,8 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
   const [kind, setKind] = useState<Kind>(initialKind);
   // Teams with room, for someone without a team (most aren't ranked yet: 5 members first).
   const [looking, setLooking] = useState<Team[]>([]);
+  // All time: proven days still needed to rank (the viewer, or the viewer's team).
+  const [daysToRank, setDaysToRank] = useState<number | null>(null);
   const [range, setRange] = useState<LeagueRange>('month');
   const [rows, setRows] = useState<LeagueRow[] | null>(null);
   const [access, setAccess] = useState<InvestorAccess | null>(null);
@@ -88,6 +90,12 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
       setHasMore(Boolean(table?.hasMore));
       setAccess((table?.access ?? null) as InvestorAccess | null);
       setMine(table?.myRank ? { rank: table.myRank, pct: table.myPct ?? null } : null);
+      setDaysToRank(null);
+      if (period === 'all' && !table?.myRank) {
+        client.query({ query: GET_LEAGUE_DAYS_TO_RANK, variables: { kind: which }, fetchPolicy: 'network-only' })
+          .then((res) => { if (generation.current === requested) setDaysToRank(res.data?.leagueDaysToRank ?? null); })
+          .catch(() => {});
+      }
       setFailed(false);
     } catch {
       if (generation.current === requested) setFailed(true);
@@ -221,6 +229,7 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
         {kind === 'teams'
           ? 'Gana el equipo con mejor rentabilidad, no el que más invierte. Cuentan los equipos con 5 miembros o más.'
           : 'Gana quien tenga mejor rentabilidad en su portafolio, no quien más invierte.'}
+        {range === 'all' ? ' Total suma los días seguidos con historial y clasifica desde 30 días.' : ''}
         {' '}Solo insignias, sin premios en dinero.
       </Text>
       {!locked && kind === 'teams' && myTeam ? (
@@ -229,7 +238,9 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
           <View style={styles.rowBody}>
             <Text style={styles.name} numberOfLines={1}>{myTeam.name}</Text>
             <Text style={styles.meta}>
-              {mine ? `Tu equipo va ${rankMark(mine.rank)} con ${formatPctSigned(mine.pct)}` : 'Tu equipo aún no clasifica en este periodo'}
+              {mine
+                ? `Tu equipo va ${rankMark(mine.rank)} con ${formatPctSigned(mine.pct)}`
+                : daysToRankLabel(range === 'all' ? daysToRank : null, true) ?? 'Tu equipo aún no clasifica en este periodo'}
             </Text>
           </View>
           <Icon name="chevron-right" size={18} color={colors.textSecondary} />
@@ -240,7 +251,9 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
           <View style={styles.rowBody}>
             <Text style={styles.name}>Tu posición</Text>
             <Text style={styles.meta}>
-              {mine ? `${rankMark(mine.rank)} con ${formatPctSigned(mine.pct)}` : 'Aún no clasificas en este periodo (mínimo $10 invertidos)'}
+              {mine
+                ? `${rankMark(mine.rank)} con ${formatPctSigned(mine.pct)}`
+                : daysToRankLabel(range === 'all' ? daysToRank : null) ?? 'Aún no clasificas en este periodo (mínimo $10 invertidos)'}
             </Text>
           </View>
         </View>

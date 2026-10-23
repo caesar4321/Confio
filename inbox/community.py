@@ -2249,6 +2249,9 @@ def set_portfolio_hidden(user, hidden: bool) -> bool:
             # Reciprocity: a hidden profile can't stay on a team (Equipos).
             from teams.rules import on_profile_hidden
             on_profile_hidden(user)
+        else:
+            from teams.rules import on_profile_shown
+            on_profile_shown(user)
     return hidden
 
 

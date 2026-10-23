@@ -570,3 +570,123 @@ class InviteTests(TeamTestBase):
         team, captain = self.create()
         token = invites.invite_link(captain, None, team.id).token
         self.assertEqual(invites.resolve(make_user(), token.upper()).team_id, team.id)
+
+
+class AllTimeTests(LeagueTests):
+    TODAY = date(2026, 12, 1)
+
+    def setUp(self):
+        super().setUp()
+        from .tasks import recompute_member_history_task
+
+        eager = patch.object(recompute_member_history_task, 'delay',
+                             side_effect=lambda user_id: recompute_member_history_task.run(user_id))
+        eager.start()
+        self.addCleanup(eager.stop)
+
+    def days_back(self, n):
+        return [self.TODAY - timedelta(days=k) for k in range(n, 0, -1)]
+
+    def test_investors_rank_on_their_unbroken_run_from_thirty_days(self):
+        steady, newcomer, broken = make_user(), make_user(), make_user()
+        for day in self.days_back(40):
+            self.snap(steady, day, '0.001')
+        for day in self.days_back(20):
+            self.snap(newcomer, day, '0.05')                 # lucky, but too new to rank
+        for i, day in enumerate(self.days_back(45)):
+            # A gap 10 days ago restarts the run: only the last 9 count.
+            self.snap(broken, day, '0.002', trusted=(i != 35))
+        with patch('teams.league.utc_today', return_value=self.TODAY):
+            rows = league.table('investors', 'all')
+            self.assertEqual([r.user_id for r in rows], [steady.id])
+            self.assertAlmostEqual(float(rows[0].pct), (1.001 ** 40 - 1) * 100, places=4)
+            self.assertEqual(league.days_to_rank_all_time('investors', newcomer), 10)
+            self.assertEqual(league.days_to_rank_all_time('investors', broken), 21)
+            self.assertEqual(league.days_to_rank_all_time('investors', steady), 0)
+            # Thirty days and all time never share a cached table.
+            self.assertNotEqual(league._key('investors', league.window('30d'), '30d'),
+                                league._key('investors', league.window('all'), 'all'))
+
+    def test_teams_need_thirty_shown_days_and_five_members_now(self):
+        team, members = self.team_with(5)
+        other, _ = self.team_with(5, name='Liga B')
+        for i, day in enumerate(self.days_back(35)):
+            TeamDailyReturn.objects.create(team=team, day=day, daily_return=Decimal('0.001'), qualifying_members=5,
+                                           contributors=[m.id for m in members])
+            # Two-member days 20 days ago: the other team's run is too short.
+            TeamDailyReturn.objects.create(team=other, day=day, daily_return=Decimal('0.01'),
+                                           qualifying_members=2 if i == 15 else 5, contributors=[])
+        for m in members:
+            for day in self.days_back(35):
+                self.snap(m, day, '0.001')
+        with patch('teams.league.utc_today', return_value=self.TODAY):
+            rows = league.table('teams', 'all')
+            self.assertEqual([r.team_id for r in rows], [team.id])
+            pct, rank = league.team_return(team.id, 'all')
+            self.assertEqual(rank, 1)
+            self.assertIsNone(league.team_return(other.id, 'all')[0])
+
+    def test_hiding_recomputes_old_days_they_counted_in(self):
+        team, members = self.team_with(5)
+        old = self.TODAY - timedelta(days=60)
+        TeamMembership.objects.filter(team=team).update(joined_at=timezone.now() - timedelta(days=400))
+        for m in members:
+            self.snap(m, old, '0.01')
+        self.assertTrue(league.compute_team_day(team, old))
+        leaver = members[-1]
+        self.assertIn(leaver.id, TeamDailyReturn.objects.get(team=team, day=old).contributors)
+        with self.captureOnCommitCallbacks(execute=True):
+            SetCommunityPortfolioHidden.mutate(None, MockInfo(leaver), hidden=True)
+        row = TeamDailyReturn.objects.get(team=team, day=old)
+        self.assertNotIn(leaver.id, row.contributors)
+        self.assertEqual(row.qualifying_members, 4)
+
+    def test_showing_again_restores_old_days(self):
+        team, members = self.team_with(5)
+        old = self.TODAY - timedelta(days=60)
+        TeamMembership.objects.filter(team=team).update(joined_at=timezone.now() - timedelta(days=400))
+        for m in members:
+            self.snap(m, old, '0.01')
+        league.compute_team_day(team, old)
+        leaver = members[-1]
+        with self.captureOnCommitCallbacks(execute=True):
+            SetCommunityPortfolioHidden.mutate(None, MockInfo(leaver), hidden=True)
+        self.assertEqual(TeamDailyReturn.objects.get(team=team, day=old).qualifying_members, 4)
+        with self.captureOnCommitCallbacks(execute=True):
+            SetCommunityPortfolioHidden.mutate(None, MockInfo(leaver), hidden=False)
+        row = TeamDailyReturn.objects.get(team=team, day=old)
+        self.assertEqual(row.qualifying_members, 5)
+        self.assertIn(leaver.id, row.contributors)
+
+    def test_nightly_repair_recomputes_people_no_longer_shown(self):
+        team, members = self.team_with(5)
+        old = self.TODAY - timedelta(days=60)
+        TeamMembership.objects.filter(team=team).update(joined_at=timezone.now() - timedelta(days=400))
+        for m in members:
+            self.snap(m, old, '0.01')
+        league.compute_team_day(team, old)
+        gone = members[-1]
+        with patch('teams.league._eligible_user_ids', side_effect=lambda ids: set(ids) - {gone.id}):
+            self.assertEqual(league.repair_all_time_people(), 1)
+        self.assertNotIn(gone.id, TeamDailyReturn.objects.get(team=team, day=old).contributors)
+        # Shown again later: the next repair puts them back.
+        self.assertEqual(league.repair_all_time_people(), 1)
+        self.assertIn(gone.id, TeamDailyReturn.objects.get(team=team, day=old).contributors)
+        from .models import TeamHistoryExclusion
+        self.assertFalse(TeamHistoryExclusion.objects.exists())
+
+
+    def test_any_member_left_out_of_a_day_is_remembered(self):
+        from .models import TeamHistoryExclusion
+
+        team, members = self.team_with(5)
+        old = self.TODAY - timedelta(days=60)
+        TeamMembership.objects.filter(team=team).update(joined_at=timezone.now() - timedelta(days=400))
+        for m in members:
+            self.snap(m, old, '0.01')
+        banned = members[2]
+        with patch('teams.league._eligible_user_ids', side_effect=lambda ids: set(ids) - {banned.id}):
+            league.compute_team_day(team, old)
+        self.assertTrue(TeamHistoryExclusion.objects.filter(user_id=banned.id).exists())
+        league.repair_all_time_people()      # eligible again: restored
+        self.assertIn(banned.id, TeamDailyReturn.objects.get(team=team, day=old).contributors)

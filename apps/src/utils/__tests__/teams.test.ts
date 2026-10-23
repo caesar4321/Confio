@@ -1,4 +1,4 @@
-import { buildTeamInviteLink, championLabel, goalLabel, rankMark, teamTokenFromCode, tickerOfSymbol } from '../teams';
+import { buildTeamInviteLink, championLabel, daysToRankLabel, goalLabel, rankMark, teamTokenFromCode, tickerOfSymbol } from '../teams';
 
 test('champion months', () => {
   expect(championLabel('2026-10')).toBe('Campeón de octubre 2026');
@@ -27,4 +27,11 @@ test('team invite links carry no username and survive case changes', () => {
   expect(teamTokenFromCode('TEAM~ABC123DEF456GH78')).toBe('abc123def456gh78');
   expect(teamTokenFromCode('ANA')).toBeNull();
   expect(teamTokenFromCode('team~<x>')).toBeNull();
+});
+
+test('days-to-rank copy', () => {
+  expect(daysToRankLabel(3)).toBe('Clasificas en 3 días');
+  expect(daysToRankLabel(1, true)).toBe('Tu equipo clasifica en 1 día');
+  expect(daysToRankLabel(0)).toBeNull();
+  expect(daysToRankLabel(null)).toBeNull();
 });

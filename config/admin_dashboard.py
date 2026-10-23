@@ -1196,11 +1196,13 @@ confio_admin_site.register(DirectMessageReport, DirectMessageReportAdmin)
 confio_admin_site.register(Tip, TipAdmin)
 from teams.admin import (
     CopiedPlayAdmin, LeagueSeasonAwardAdmin, TeamAdmin, TeamDailyReturnAdmin, TeamGoalAdmin, TeamInviteAdmin,
-    TeamInviteNoticeAdmin, TeamJoinRequestAdmin,
+    TeamHistoryExclusionAdmin, TeamInviteNoticeAdmin, TeamJoinRequestAdmin,
 )
 from teams.models import (
-    CopiedPlay, LeagueSeasonAward, Team, TeamDailyReturn, TeamGoal, TeamInvite, TeamInviteNotice, TeamJoinRequest,
+    CopiedPlay, LeagueSeasonAward, Team, TeamDailyReturn, TeamGoal, TeamHistoryExclusion, TeamInvite, TeamInviteNotice,
+    TeamJoinRequest,
 )
+confio_admin_site.register(TeamHistoryExclusion, TeamHistoryExclusionAdmin)
 confio_admin_site.register(TeamInvite, TeamInviteAdmin)
 confio_admin_site.register(TeamInviteNotice, TeamInviteNoticeAdmin)
 confio_admin_site.register(Team, TeamAdmin)

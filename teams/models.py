@@ -228,3 +228,11 @@ class TeamInviteNotice(models.Model):
             models.Index(fields=['inviter', 'created_at'], name='teams_notice_inviter_idx'),
             models.Index(fields=['team', 'invitee', 'created_at'], name='teams_notice_invitee_idx'),
         ]
+
+
+class TeamHistoryExclusion(models.Model):
+    """Someone whose past team days were recomputed without them (hidden,
+    unverified, banned, deleted). The nightly repair puts them back once they
+    may be shown again, so all-time returns never stay wrong."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)

@@ -152,7 +152,7 @@ def team_type(team, viewer, *, range_key='7d', with_stats=True) -> TeamType:
         # Someone the viewer is in a block with may be part of that aggregate
         # (now, or among those who made up the period).
         blocked = community.block_relation_ids(viewer)
-        period = league.contributors([team.id], league.window(range_key)).get(team.id, set())
+        period = league.counted_contributors(team.id, range_key)
         if blocked & ({m.user_id for m in rules.active_members(team)} | period):
             pct = None
         current = data.current_goal(team)
@@ -200,7 +200,7 @@ def blocked_team(viewer, team_id, range_key='7d') -> bool:
         return False
     if TeamMembership.objects.filter(team_id=team_id, user_id__in=blocked, left_at__isnull=True).exists():
         return True
-    period = league.contributors([team_id], league.window(range_key)).get(int(team_id), set())
+    period = league.counted_contributors(team_id, range_key)
     return bool(blocked & period)
 
 
@@ -220,13 +220,15 @@ class TeamsQuery(graphene.ObjectType):
     team_plays = graphene.List(graphene.NonNull(TeamPlayType), required=True, team_id=graphene.ID(required=True))
     team_join_requests = graphene.List(graphene.NonNull(TeamJoinRequestType), required=True,
                                        team_id=graphene.ID(required=True))
-    # kind: teams | investors; range: 24h | 7d | 30d | month.
+    # kind: teams | investors; range: 24h | 7d | 30d | month | all.
     league_table = graphene.Field(LeagueTableType, required=True, kind=graphene.String(required=True),
                                   range=graphene.String(required=True), offset=graphene.Int(required=False),
                                   limit=graphene.Int(required=False))
     # "2026-10" months a member was monthly champion.
     league_badges = graphene.List(graphene.NonNull(graphene.String), required=True, user_id=graphene.ID(required=True))
     team_invite = graphene.Field(lambda: TeamInviteType, token=graphene.String(required=True))
+    # All time: days the viewer (kind investors) or their team (kind teams) still needs to rank.
+    league_days_to_rank = graphene.Int(kind=graphene.String(required=True))
 
     @staticmethod
     def _team(team_id):
@@ -363,6 +365,13 @@ class TeamsQuery(graphene.ObjectType):
                                              avatar_url=avatars.get(user.id)))
         return LeagueTableType(rows=out, has_more=access == community.ACCESS_OPEN and len(rows) > offset + limit,
                                access=access, my_rank=my_rank, my_pct=my_pct)
+
+    @login_required
+    def resolve_league_days_to_rank(self, info, kind):
+        viewer = info.context.user
+        if viewer_access(viewer) != community.ACCESS_OPEN:
+            return None
+        return league.days_to_rank_all_time('teams' if kind == 'teams' else 'investors', viewer)
 
     @login_required
     def resolve_team_invite(self, info, token):

@@ -33,3 +33,22 @@ def refresh_goals_task(self):
     from .data import refresh_all_goals
 
     return refresh_all_goals()
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=10 * 60, time_limit=12 * 60)
+def recompute_member_history_task(self, user_id):
+    """Someone hid or showed their profile again: every team day they were
+    part of, recomputed from who may be shown now (all time reaches far past
+    the nightly window). Until it runs, reads already leave out anyone hidden."""
+    from users.models import User
+
+    from .league import recompute_member_history
+
+    # all_objects: a deleted account's days must be recomputed without it too.
+    user = User.all_objects.filter(id=user_id).first()
+    if user is None:
+        return 0
+    try:
+        return recompute_member_history(user)
+    except Exception as exc:  # noqa: BLE001
+        raise self.retry(exc=exc)

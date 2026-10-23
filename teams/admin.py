@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from .models import (
     CopiedPlay, LeagueSeasonAward, Team, TeamDailyReturn, TeamGoal, TeamInvite, TeamInviteNotice, TeamJoinRequest,
-    TeamMembership,
+    TeamHistoryExclusion, TeamMembership,
 )
 
 
@@ -78,3 +78,8 @@ class TeamInviteAdmin(ReadOnly):
 @admin.register(TeamInviteNotice)
 class TeamInviteNoticeAdmin(ReadOnly):
     list_display = ('id', 'team', 'inviter', 'invitee', 'created_at')
+
+
+@admin.register(TeamHistoryExclusion)
+class TeamHistoryExclusionAdmin(ReadOnly):
+    list_display = ('user', 'created_at')

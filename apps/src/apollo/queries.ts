@@ -5281,6 +5281,13 @@ export const GET_TEAM_INVITE = gql`
   }
 `;
 
+// All time: days still needed to rank (its own query: an older server has none).
+export const GET_LEAGUE_DAYS_TO_RANK = gql`
+  query GetLeagueDaysToRank($kind: String!) {
+    leagueDaysToRank(kind: $kind)
+  }
+`;
+
 export const GET_LEAGUE_BADGES = gql`
   query GetLeagueBadges($userId: ID!) {
     leagueBadges(userId: $userId)
