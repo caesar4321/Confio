@@ -17,7 +17,7 @@ type Props = {
   homeCity?: string;
   onClose: () => void;
   onSelect: (countryCode: string, city: string) => void;
-  onUseGps: () => void;
+  onUseGps: () => void | Promise<void>;
 };
 
 /**
@@ -129,7 +129,7 @@ export const ComprarLocationModal = ({
             </>
           ) : (
             <>
-              <TouchableOpacity style={styles.gpsRow} onPress={() => { onUseGps(); close(); }}>
+              <TouchableOpacity style={styles.gpsRow} onPress={() => { close(); void onUseGps(); }}>
                 <Icon name="navigation" size={16} color={colors.primaryDark} />
                 <Text style={styles.gpsText}>Usar mi ubicación</Text>
               </TouchableOpacity>

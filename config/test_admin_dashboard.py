@@ -8,6 +8,7 @@ from django.contrib.sessions.backends.signed_cookies import SessionStore
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from config import admin_dashboard_sections as sections
 from config.admin_dashboard import confio_admin_site
@@ -297,3 +298,25 @@ class DashboardPagesTests(TestCase):
         rows = sections.top_countries(8)
         self.assertEqual([r['country_code'] for r in rows], ['VE'])
         self.assertEqual(sections.today_growth(sections.Window.current())['top_countries_metrics'], rows)
+
+    def test_comprar_page_shows_status_and_what_needs_action(self):
+        from marketplace.models import MarketplaceCity, MarketplacePartnerAgreement
+        MarketplaceCity.objects.update_or_create(
+            country_code='BO', city='La Paz', defaults={'currency_code': 'BOB', 'is_live': True})
+        uncapped = (2**128 - 1, 2**128 - 1, 0)
+        with self.settings(MARKETPLACE_ESCROW_ADDRESS='0x' + 'e5' * 20,
+                           CUSD_VAULT_ADDRESS='0x' + 'c0' * 20), \
+                mock.patch('marketplace.escrow.token_limits', return_value=uncapped):
+            html = self.get('dash_comprar').content.decode()
+        self.assertIn('cUSD accepted · no caps', html)
+        self.assertIn('La Paz, BO', html)
+        self.assertIn('No active partner agreement', html)
+        MarketplacePartnerAgreement.objects.create(
+            partner_name='Jason', country_code='BO', share_bps=5000, started_at=timezone.now())
+        with self.settings(MARKETPLACE_ESCROW_ADDRESS='0x' + 'e5' * 20,
+                           CUSD_VAULT_ADDRESS='0x' + 'c0' * 20), \
+                mock.patch('marketplace.escrow.token_limits', side_effect=RuntimeError('rpc down')):
+            html = self.get('dash_comprar').content.decode()
+        self.assertNotIn('No active partner agreement', html)
+        self.assertIn('Jason BO 50% of fee', html)
+        self.assertIn('cUSD limits unreadable', html)  # a failed read is unknown, never "off"

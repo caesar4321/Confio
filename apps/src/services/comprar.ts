@@ -121,6 +121,18 @@ export const GET_MY_MARKET_STORE = gql`
   }
 `;
 
+export const SUBMIT_MARKETPLACE_INTEREST = gql`
+  mutation SubmitMarketplaceInterest($countryCode: String!, $city: String!, $role: String!,
+                                     $categories: [String], $wants: String, $priceRange: String,
+                                     $monthlySales: String, $channels: [String], $notify: Boolean) {
+    submitMarketplaceInterest(countryCode: $countryCode, city: $city, role: $role,
+                              categories: $categories, wants: $wants, priceRange: $priceRange,
+                              monthlySales: $monthlySales, channels: $channels, notify: $notify) {
+      success error
+    }
+  }
+`;
+
 export const OPEN_MARKET_STORE = gql`
   mutation OpenMarketStore($name: String!, $description: String, $countryCode: String!,
                            $city: String!, $shipsOutsideCity: Boolean) {

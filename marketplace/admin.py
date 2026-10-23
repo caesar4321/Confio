@@ -15,8 +15,9 @@ from django.db.models.functions import TruncMonth
 from django.http import HttpResponse
 from django.utils import timezone
 
-from .models import (MarketplaceCity, MarketplaceFeeLedger, MarketplaceLocationCheck,
-                     MarketplacePartnerAgreement, Order, OrderRating, Product, Store)
+from .models import (MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
+                     MarketplaceLocationCheck, MarketplacePartnerAgreement, Order, OrderRating,
+                     Product, Store)
 
 
 class MarketplaceCityAdmin(admin.ModelAdmin):
@@ -35,6 +36,56 @@ class MarketplaceLocationCheckAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+
+class MarketplaceInterestAdmin(admin.ModelAdmin):
+    """Fake-door answers from cities that are not live. The changelist opens
+    with a per-city summary: who would buy vs sell, price bands, current
+    seller volume and how many want to be told when Comprar arrives."""
+
+    list_display = ('created_at', 'city', 'country_code', 'role', 'price_range', 'monthly_sales',
+                    'wants', 'notify', 'user')
+    list_filter = ('country_code', 'role', 'price_range', 'monthly_sales', 'notify')
+    search_fields = ('city', 'wants', 'user__username')
+    raw_id_fields = ('user', 'account')
+    readonly_fields = [f.name for f in MarketplaceInterest._meta.fields]
+    change_list_template = 'admin/marketplace/interest_change_list.html'
+    actions = ['export_csv']
+
+    def has_add_permission(self, request):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        from django.db.models import Q
+        response = super().changelist_view(request, extra_context=extra_context)
+        try:
+            qs = response.context_data['cl'].queryset
+        except (AttributeError, KeyError):
+            return response
+        response.context_data['by_city'] = (
+            qs.values('country_code', 'city').annotate(
+                total=Count('id'),
+                buyers=Count('id', filter=Q(role__in=('buyer', 'both'))),
+                sellers=Count('id', filter=Q(role__in=('seller', 'both'))),
+                browsing=Count('id', filter=Q(role='browsing')),
+                notify=Count('id', filter=Q(notify=True)),
+                sellers_selling=Count('id', filter=Q(role__in=('seller', 'both'))
+                                      & ~Q(monthly_sales__in=('', 'none'))),
+            ).order_by('-total')[:100])
+        return response
+
+    @admin.action(description='Export selected rows as CSV')
+    def export_csv(self, request, queryset):
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="comprar-interest.csv"'
+        writer = csv.writer(response)
+        writer.writerow(['created_at', 'country', 'city', 'role', 'categories', 'wants', 'price_range',
+                         'monthly_sales', 'channels', 'notify', 'user_id', 'app_version'])
+        for r in queryset:
+            writer.writerow([r.created_at.isoformat(), r.country_code, r.city, r.role,
+                             ' '.join(r.categories), r.wants, r.price_range, r.monthly_sales,
+                             ' '.join(r.channels), r.notify, r.user_id, r.app_version])
+        return response
 
 
 class ProductInline(admin.TabularInline):

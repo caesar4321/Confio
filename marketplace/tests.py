@@ -773,3 +773,45 @@ class FaceEnforcementTests(MarketTestBase):
                            merchant='0x' + '2' * 40, amount_wei=5 * WAD, amount_usd=Decimal('5'))
         from security.face_step_up import FACE_STEP_UP_MESSAGE
         self.assertEqual(message, FACE_STEP_UP_MESSAGE)
+
+
+class InterestProbeTests(TestCase):
+    def _submit(self, user, **kw):
+        from .schema import SubmitMarketplaceInterest
+        info = SimpleNamespace(context=SimpleNamespace(user=user, headers={'X-Confio-Version': '5.3.0'}))
+        args = dict(country_code='VE', city='Caracas', role='seller', categories=['textiles', 'nope'],
+                    wants='Ropa tejida a mano', price_range='10_30', monthly_sales='200_1000',
+                    channels=['instagram', 'whatsapp', 'spam'], notify=True)
+        args.update(kw)
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
+            return SubmitMarketplaceInterest.mutate.__wrapped__(None, info, **args)
+
+    def test_seller_answer_is_stored_clean_and_updates_in_place(self):
+        from .models import MarketplaceInterest
+        user = make_user()
+        self.assertTrue(self._submit(user).success)
+        row = MarketplaceInterest.objects.get(user=user)
+        self.assertEqual(row.categories, ['textiles'])          # unknown keys dropped
+        self.assertEqual(row.channels, ['instagram', 'whatsapp'])
+        self.assertEqual(row.monthly_sales, '200_1000')
+        self.assertEqual(row.app_version, '5.3.0')
+        self._submit(user, role='buyer', price_range='30_100')
+        row.refresh_from_db()
+        self.assertEqual(MarketplaceInterest.objects.filter(user=user).count(), 1)
+        self.assertEqual(row.role, 'buyer')
+        self.assertEqual(row.monthly_sales, '')                 # seller-only fields cleared
+        self.assertEqual(row.channels, [])
+
+    def test_browsing_records_intent_without_notice_or_price(self):
+        from .models import MarketplaceInterest
+        user = make_user()
+        self._submit(user, role='browsing')
+        row = MarketplaceInterest.objects.get(user=user)
+        self.assertFalse(row.notify)
+        self.assertEqual(row.price_range, '')
+
+    def test_bad_input_rejected(self):
+        user = make_user()
+        self.assertEqual(self._submit(user, role='admin').error, 'bad_input')
+        self.assertEqual(self._submit(user, price_range='huge').error, 'bad_input')
+        self.assertEqual(self._submit(user, country_code='ZZ').error, 'bad_input')

@@ -1655,3 +1655,102 @@ def trend_chart(rows):
         {'label': row['date'].strftime('%b %-d'), 'dau': row['dau'], 'wau': row['wau'], 'mau': row['mau']}
         for row in rows
     ]
+
+
+def comprar(w):
+    """Comprar (marketplace): is it open, who sells, what is moving, what the
+    partner is owed, and where the fake door says to open next."""
+    from django.conf import settings
+    from marketplace import escrow
+    from marketplace.models import (MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
+                                    MarketplacePartnerAgreement, Order, Product, Store)
+
+    uint128_max = 2**128 - 1
+    limits = None
+    try:
+        if escrow.enabled():
+            max_order, max_open, open_principal = escrow.token_limits()
+            limits = {
+                'accepting': max_order > 0,
+                'uncapped': max_order == uint128_max and max_open == uint128_max,
+                'max_order': Decimal(max_order) / Decimal(10**18),
+                'max_open': Decimal(max_open) / Decimal(10**18),
+                'open_principal': Decimal(open_principal) / Decimal(10**18),
+            }
+    except Exception:  # noqa: BLE001 — a failed read shows as unknown, never as "off"
+        limits = {'unreadable': True}
+
+    from django.db.models.functions import Lower
+
+    stores = Store.objects.filter(deleted_at__isnull=True)
+    # Two grouped queries for every live city at once (no per-city counts).
+    per_city = {
+        (r['country_code'], r['c']): r['n']
+        for r in stores.annotate(c=Lower('city')).values('country_code', 'c').annotate(n=Count('id'))
+    }
+    selling_per_city = {
+        (r['country_code'], r['c']): r['n']
+        for r in stores.filter(status='active', products__status='active',
+                               products__deleted_at__isnull=True, products__stock__gt=0)
+        .annotate(c=Lower('city')).values('country_code', 'c').annotate(n=Count('id', distinct=True))
+    }
+    live_cities = [
+        {'city': city,
+         'stores': per_city.get((city.country_code, city.city.lower()), 0),
+         'selling_stores': selling_per_city.get((city.country_code, city.city.lower()), 0)}
+        for city in MarketplaceCity.objects.filter(is_live=True).order_by('country_code', 'city')
+    ]
+
+    products = Product.objects.filter(deleted_at__isnull=True)
+    # "Live" = what buyers can actually see: in stock, from an open store.
+    visible = products.filter(status='active', stock__gt=0, store__status='active',
+                              store__deleted_at__isnull=True)
+    orders = Order.objects.exclude(status__in=('draft', 'cancelled'))
+    by_status = dict(orders.values_list('status').annotate(n=Count('id')))
+    ledger = MarketplaceFeeLedger.objects.all()
+    money = []
+    for label, since in (('30 days', w.rolling_30_start), ('All time', None)):
+        rows = ledger.filter(released_at__gte=since) if since else ledger
+        agg = rows.aggregate(orders=Count('id'), gmv=Sum('gross_usd'), fee=Sum('fee_usd'),
+                             partner=Sum('partner_share_usd'), confio=Sum('confio_share_usd'))
+        money.append({'label': label, **{k: (v or (0 if k == 'orders' else Decimal('0'))) for k, v in agg.items()}})
+
+    interests = (MarketplaceInterest.objects.values('country_code', 'city')
+                 .annotate(total=Count('id'),
+                           buyers=Count('id', filter=Q(role__in=('buyer', 'both'))),
+                           sellers=Count('id', filter=Q(role__in=('seller', 'both'))),
+                           selling_now=Count('id', filter=Q(role__in=('seller', 'both'))
+                                             & ~Q(monthly_sales__in=('', 'none'))),
+                           notify=Count('id', filter=Q(notify=True)))
+                 .order_by('-total')[:10])
+
+    return {
+        'comprar_escrow_address': getattr(settings, 'MARKETPLACE_ESCROW_ADDRESS', ''),
+        'comprar_limits': limits,
+        'comprar_live_cities': live_cities,
+        'comprar_partner': MarketplacePartnerAgreement.objects.filter(active=True).order_by('country_code'),
+        'comprar_partner_unpaid': ledger.filter(partner_paid_at__isnull=True).aggregate(
+            s=Sum('partner_share_usd'))['s'] or Decimal('0'),
+        'comprar_stores': {
+            'total': stores.count(),
+            'active': stores.filter(status='active').count(),
+            'suspended': stores.filter(status='suspended').count(),
+            'new_7d': stores.filter(created_at__gte=w.last_7_start).count(),
+        },
+        'comprar_products': {
+            'active': visible.count(),
+            'pending_review': products.filter(status='pending_review').count(),
+            'rejected': products.filter(status='rejected').count(),
+        },
+        'comprar_orders': {
+            'funded': by_status.get('funded', 0),
+            'shipped': by_status.get('shipped', 0),
+            'disputed': by_status.get('disputed', 0),
+            'released': by_status.get('released', 0),
+            'refunded': by_status.get('refunded', 0),
+            'depositing': by_status.get('depositing', 0),
+        },
+        'comprar_money': money,
+        'comprar_interests': interests,
+        'comprar_interest_total': MarketplaceInterest.objects.count(),
+    }

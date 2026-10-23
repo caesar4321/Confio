@@ -354,3 +354,52 @@ class MarketplaceFeeLedger(models.Model):
 
     class Meta:
         ordering = ['-released_at']
+
+
+class MarketplaceInterest(models.Model):
+    """The fake door's answer in a city that is not live yet: who would buy
+    or sell, what, at what price, and (sellers) how much they sell today and
+    where. An intent probe, never a deposit or a listing.
+
+    Ranges are in US dollars so cities compare across inflationary currencies.
+    One row per user and city; answering again updates it.
+    """
+
+    ROLE_CHOICES = [('buyer', 'Quiere comprar'), ('seller', 'Quiere vender'), ('both', 'Ambos'),
+                    ('browsing', 'Solo miraba')]
+    PRICE_CHOICES = [('lt10', '< US$10'), ('10_30', 'US$10–30'), ('30_100', 'US$30–100'),
+                     ('100_300', 'US$100–300'), ('gt300', '> US$300')]
+    MONTHLY_SALES_CHOICES = [('none', 'Aún no vende'), ('lt200', '< US$200'),
+                             ('200_1000', 'US$200–1.000'), ('1000_5000', 'US$1.000–5.000'),
+                             ('gt5000', '> US$5.000')]
+    CHANNEL_KEYS = {'instagram', 'whatsapp', 'facebook', 'tiktok', 'feria', 'local', 'delivery_app', 'other'}
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='marketplace_interests')
+    account = models.ForeignKey('users.Account', null=True, blank=True, on_delete=models.SET_NULL,
+                                related_name='+')
+    country_code = models.CharField(max_length=2, choices=COUNTRY_CHOICES, db_index=True)
+    city = models.CharField(max_length=100, db_index=True)
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, db_index=True)
+    categories = models.JSONField(default=list, blank=True)
+    wants = models.CharField(max_length=300, blank=True, default='',
+                             help_text='What they want to buy or sell, in their words')
+    price_range = models.CharField(max_length=10, choices=PRICE_CHOICES, blank=True, default='',
+                                   help_text='Typical price per item (expected or current)')
+    monthly_sales = models.CharField(max_length=10, choices=MONTHLY_SALES_CHOICES, blank=True,
+                                     default='', help_text='Sellers: what they sell per month today')
+    channels = models.JSONField(default=list, blank=True, help_text='Sellers: where they sell today')
+    notify = models.BooleanField(default=True, help_text='Wants to hear when Comprar opens here')
+    app_version = models.CharField(max_length=20, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'country_code', 'city'],
+                                    name='marketplace_one_interest_per_user_city'),
+        ]
+        indexes = [models.Index(fields=['country_code', 'city', 'role'])]
+
+    def __str__(self):
+        return f'{self.get_role_display()} — {self.city}, {self.country_code}'

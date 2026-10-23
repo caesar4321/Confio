@@ -1,0 +1,16 @@
+{% extends "admin/change_list.html" %}
+{% block result_list %}
+{% if by_city %}
+<h2>By city (filtered rows)</h2>
+<table style="margin-bottom:24px">
+  <thead><tr><th>City</th><th>Country</th><th>Answers</th><th>Buyers</th><th>Sellers</th><th>Sellers already selling</th><th>Just browsing</th><th>Want a notice</th></tr></thead>
+  <tbody>
+  {% for c in by_city %}
+    <tr><td>{{ c.city }}</td><td>{{ c.country_code }}</td><td>{{ c.total }}</td><td>{{ c.buyers }}</td>
+        <td>{{ c.sellers }}</td><td>{{ c.sellers_selling }}</td><td>{{ c.browsing }}</td><td>{{ c.notify }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{{ block.super }}
+{% endblock %}

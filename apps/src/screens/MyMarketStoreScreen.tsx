@@ -14,6 +14,7 @@ import {
 import { useComprarLocation } from '../hooks/useComprarLocation';
 import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal';
 import { formatLocalPrice } from '../utils/comprarFormat';
+import { explainLocateOutcome } from '../utils/comprarLocate';
 
 const PRODUCT_STATUS: Record<string, string> = {
   pending_review: 'En revisión', active: 'Publicado', rejected: 'Rechazado', paused: 'Pausado',
@@ -97,7 +98,8 @@ export const MyMarketStoreScreen = () => {
         </View>
         <ComprarLocationModal visible={pickerOpen} countryCode={location?.countryCode || 'BO'} city={location?.city || ''}
           homeCountryCode={home?.countryCode} homeCity={home?.city}
-          onClose={() => setPickerOpen(false)} onSelect={choose} onUseGps={() => { void relocate(); }} />
+          onClose={() => setPickerOpen(false)} onSelect={choose}
+          onUseGps={async () => { explainLocateOutcome(await relocate(), () => setPickerOpen(true)); }} />
       </SafeAreaView>
     );
   }

@@ -5,15 +5,17 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { Text, TextInput } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useComprarLocation } from '../hooks/useComprarLocation';
 import { ComprarLocationModal } from '../components/comprar/ComprarLocationModal';
-import { GET_MARKETPLACE_HOME, GET_MARKETPLACE_PRODUCTS } from '../services/comprar';
+import { GET_MARKETPLACE_HOME, GET_MARKETPLACE_PRODUCTS, SUBMIT_MARKETPLACE_INTEREST } from '../services/comprar';
+import { ComprarInterestSheet } from '../components/comprar/ComprarInterestSheet';
 import { AnalyticsService } from '../services/analyticsService';
 import { formatLocalPrice } from '../utils/comprarFormat';
+import { explainLocateOutcome } from '../utils/comprarLocate';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 const PAGE_SIZE = 20;
@@ -31,9 +33,13 @@ export const ComprarScreen = () => {
   const [search, setSearch] = useState('');
   const [submittedSearch, setSubmittedSearch] = useState('');
   const [answered, setAnswered] = useState<string | null>(null);
+  const [probeOpen, setProbeOpen] = useState(false);
+  const [submitInterest] = useMutation(SUBMIT_MARKETPLACE_INTEREST);
 
   const countryCode = location?.countryCode || '';
   const city = location?.city || '';
+  // Each city's fake door is its own question.
+  React.useEffect(() => { setAnswered(null); }, [countryCode, city]);
   const { data: home } = useQuery(GET_MARKETPLACE_HOME, {
     variables: { countryCode, city },
     skip: !countryCode,
@@ -47,7 +53,7 @@ export const ComprarScreen = () => {
     countryCode, city: city || null, category, search: submittedSearch || null,
     limit: PAGE_SIZE, offset: 0,
   }), [countryCode, city, category, submittedSearch]);
-  const { data, loading, refetch, fetchMore, networkStatus } = useQuery(GET_MARKETPLACE_PRODUCTS, {
+  const { data, loading, error: productsError, refetch, fetchMore, networkStatus } = useQuery(GET_MARKETPLACE_PRODUCTS, {
     variables,
     skip: !countryCode || !isLive,
     fetchPolicy: 'cache-and-network',
@@ -76,10 +82,16 @@ export const ComprarScreen = () => {
   }, [fetchMore, hasMore, loading, products.length, variables]);
 
   const answerFakeDoor = (wants: boolean) => {
-    setAnswered(wants ? 'yes' : 'no');
     void AnalyticsService.logEvent('comprar_fake_door', {
       answer: wants ? 'si_avisame' : 'solo_miraba', country: countryCode, city,
     });
+    if (wants) {
+      // The probe: buy or sell, what, at what price, current sales.
+      setProbeOpen(true);
+      return;
+    }
+    setAnswered('no');
+    void submitInterest({ variables: { countryCode, city, role: 'browsing' } }).catch(() => {});
   };
 
   const header = (
@@ -89,7 +101,7 @@ export const ComprarScreen = () => {
           accessibilityRole="button" accessibilityLabel="Cambiar ciudad">
           <Icon name="map-pin" size={14} color={colors.primaryDark} />
           <Text style={styles.locationText} numberOfLines={1}>
-            {resolving && !location ? 'Buscando tu ciudad…' : city || 'Elige tu ciudad'}
+            {resolving ? 'Buscando tu ciudad…' : city || 'Elige tu ciudad'}
           </Text>
           <Icon name="chevron-down" size={14} color={colors.text.secondary} />
         </Pressable>
@@ -143,7 +155,9 @@ export const ComprarScreen = () => {
       </Text>
       {answered ? (
         <Text style={styles.fakeThanks}>
-          {answered === 'yes' ? '¡Listo! Te avisaremos cuando llegue a tu ciudad.' : 'Gracias por mirar.'}
+          {answered === 'yes' ? '¡Listo! Te avisaremos cuando llegue a tu ciudad.'
+            : answered === 'yes_quiet' ? '¡Gracias! Tus respuestas nos ayudan a decidir dónde abrir.'
+              : 'Gracias por mirar.'}
         </Text>
       ) : (
         <View style={styles.fakeButtons}>
@@ -187,8 +201,29 @@ export const ComprarScreen = () => {
           ListEmptyComponent={
             loading || resolving ? (
               <ActivityIndicator style={{ marginTop: 48 }} color={colors.primaryDark} />
+            ) : productsError ? (
+              // "Couldn't load" must never read as "nobody sells here".
+              <View style={styles.fakeDoor}>
+                <Text style={styles.fakeBody}>No pudimos cargar los productos.</Text>
+                <Pressable style={styles.secondaryButton} onPress={() => { void refetch(); }}>
+                  <Text style={styles.secondaryButtonText}>Reintentar</Text>
+                </Pressable>
+              </View>
+            ) : submittedSearch || category ? (
+              <Text style={styles.empty}>No encontramos productos con ese filtro.</Text>
             ) : (
-              <Text style={styles.empty}>Aún no hay productos aquí.</Text>
+              // Live but nobody has listed yet: stores fill this themselves.
+              <View style={styles.fakeDoor}>
+                <Icon name="home" size={36} color={colors.primaryDark} />
+                <Text style={styles.fakeTitle}>Comprar ya está en {city}</Text>
+                <Text style={styles.fakeBody}>
+                  Abre tu tienda y sé de los primeros en vender a compradores verificados. Sin mensualidades: pagas 8% solo cuando vendes.
+                </Text>
+                <Pressable style={styles.primaryButton} onPress={() => navigation.navigate('MyMarketStore')}>
+                  <Text style={styles.primaryButtonText}>Abrir mi tienda</Text>
+                </Pressable>
+                <Text style={styles.fakeBody}>¿Vienes a comprar? Los primeros productos aparecerán aquí muy pronto.</Text>
+              </View>
             )
           }
           renderItem={({ item }: any) => (
@@ -210,6 +245,15 @@ export const ComprarScreen = () => {
           )}
         />
       )}
+      <ComprarInterestSheet
+        key={`${countryCode}-${city}`}
+        visible={probeOpen}
+        countryCode={countryCode}
+        city={city}
+        categories={categories}
+        onClose={() => setProbeOpen(false)}
+        onDone={(notify) => { setProbeOpen(false); setAnswered(notify ? 'yes' : 'yes_quiet'); }}
+      />
       <ComprarLocationModal
         visible={pickerOpen}
         countryCode={countryCode || 'BO'}
@@ -218,7 +262,10 @@ export const ComprarScreen = () => {
         homeCity={homeLocation?.city}
         onClose={() => setPickerOpen(false)}
         onSelect={(cc, c) => { setHasMore(true); choose(cc, c); }}
-        onUseGps={() => { void relocate(); }}
+        onUseGps={async () => {
+          setHasMore(true);
+          explainLocateOutcome(await relocate(), () => setPickerOpen(true));
+        }}
       />
     </View>
   );

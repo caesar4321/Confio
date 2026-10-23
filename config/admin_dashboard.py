@@ -796,6 +796,22 @@ ConfioAdminSite.DASH_PAGES = [
         ('Push stats', 'notifications_notification_stats', ''),
         ('Blockchain analytics', 'blockchain_analytics', ''),
     )}),
+    ('comprar', 'Comprar', [
+        _w(sections.comprar),
+    ], [
+        'admin/dash/_comprar.html',
+    ], {'intro': 'Marketplace on ConfioMarketEscrow (BSC): stores, listings, escrowed orders, the partner share and the fake-door answers from cities that are not live.',
+        'tools': (
+            ('Cities (live, delivery)', 'marketplace_marketplacecity_changelist', ''),
+            ('Stores', 'marketplace_store_changelist', ''),
+            ('Listings in review', 'marketplace_product_changelist', 'status__exact=pending_review'),
+            ('Orders', 'marketplace_order_changelist', ''),
+            ('Disputed orders', 'marketplace_order_changelist', 'status__exact=disputed'),
+            ('Fee ledger', 'marketplace_marketplacefeeledger_changelist', ''),
+            ('Partner agreements', 'marketplace_marketplacepartneragreement_changelist', ''),
+            ('Fake-door answers', 'marketplace_marketplaceinterest_changelist', ''),
+            ('Location checks', 'marketplace_marketplacelocationcheck_changelist', ''),
+        )}),
     ('archive', 'Archive', [
         _w(sections.disputes),
         _w(sections.legacy_cusd),
@@ -1211,12 +1227,12 @@ confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 from marketplace.models import (MarketplaceCity, Store as MarketStore, Product as MarketProduct,
                                 Order as MarketOrder, OrderRating as MarketOrderRating,
                                 MarketplacePartnerAgreement, MarketplaceFeeLedger,
-                                MarketplaceLocationCheck)
+                                MarketplaceLocationCheck, MarketplaceInterest)
 from marketplace.admin import (MarketplaceCityAdmin, StoreAdmin as MarketStoreAdmin,
                                ProductAdmin as MarketProductAdmin, OrderAdmin as MarketOrderAdmin,
                                OrderRatingAdmin as MarketOrderRatingAdmin,
                                MarketplacePartnerAgreementAdmin, MarketplaceFeeLedgerAdmin,
-                               MarketplaceLocationCheckAdmin)
+                               MarketplaceLocationCheckAdmin, MarketplaceInterestAdmin)
 confio_admin_site.register(MarketplaceCity, MarketplaceCityAdmin)
 confio_admin_site.register(MarketStore, MarketStoreAdmin)
 confio_admin_site.register(MarketProduct, MarketProductAdmin)
@@ -1225,6 +1241,7 @@ confio_admin_site.register(MarketOrderRating, MarketOrderRatingAdmin)
 confio_admin_site.register(MarketplacePartnerAgreement, MarketplacePartnerAgreementAdmin)
 confio_admin_site.register(MarketplaceFeeLedger, MarketplaceFeeLedgerAdmin)
 confio_admin_site.register(MarketplaceLocationCheck, MarketplaceLocationCheckAdmin)
+confio_admin_site.register(MarketplaceInterest, MarketplaceInterestAdmin)
 
 # EVM sponsorship ledger + cross-rail auto-swap queue. PendingAutoSwap was
 # never registered, which left the BSC 'BNB' rows — the authoritative

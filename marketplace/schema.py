@@ -535,6 +535,69 @@ class LocateMarketplaceCity(graphene.Mutation):
         return LocateMarketplaceCity(city=Query._city_type(match) if match else None)
 
 
+class SubmitMarketplaceInterest(graphene.Mutation):
+    """The fake door's probe in a city that is not live: buy or sell, what,
+    at what price, and (sellers) current monthly sales and channels. One row
+    per user and city; answering again updates it."""
+
+    class Arguments:
+        country_code = graphene.String(required=True)
+        city = graphene.String(required=True)
+        role = graphene.String(required=True, description="'buyer' | 'seller' | 'both' | 'browsing'")
+        categories = graphene.List(graphene.String)
+        wants = graphene.String()
+        price_range = graphene.String()
+        monthly_sales = graphene.String()
+        channels = graphene.List(graphene.String)
+        notify = graphene.Boolean()
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @login_required
+    def mutate(self, info, country_code, city, role, categories=None, wants='', price_range='',
+               monthly_sales='', channels=None, notify=True):
+        from .models import MarketplaceInterest
+
+        user = info.context.user
+        country = (country_code or '').upper().strip()
+        city = (city or '').strip()[:100]
+        # GraphQL allows explicit nulls; the columns are not nullable.
+        price_range = price_range or ''
+        monthly_sales = monthly_sales or ''
+        wants = wants or ''
+        notify = True if notify is None else notify
+        roles = {k for k, _ in MarketplaceInterest.ROLE_CHOICES}
+        prices = {k for k, _ in MarketplaceInterest.PRICE_CHOICES}
+        sales = {k for k, _ in MarketplaceInterest.MONTHLY_SALES_CHOICES}
+        if country not in VALID_COUNTRY_CODES or not city or role not in roles:
+            return SubmitMarketplaceInterest(success=False, error='bad_input')
+        if (price_range and price_range not in prices) or (monthly_sales and monthly_sales not in sales):
+            return SubmitMarketplaceInterest(success=False, error='bad_input')
+        selling = role in ('seller', 'both')
+        account = None
+        try:
+            _u, account = _ctx(info)
+        except CheckoutError:
+            pass
+        headers = getattr(info.context, 'headers', None) or {}
+        version = str(headers.get('X-Confio-Version', '') or '')[:20]
+        MarketplaceInterest.objects.update_or_create(
+            user=user, country_code=country, city=city,
+            defaults={
+                'account': account, 'role': role,
+                'categories': sorted({c for c in (categories or []) if c in CATEGORY_KEYS}),
+                'wants': (wants or '').strip()[:300],
+                'price_range': price_range if role != 'browsing' else '',
+                'monthly_sales': monthly_sales if selling else '',
+                'channels': sorted({c for c in (channels or [])
+                                    if c in MarketplaceInterest.CHANNEL_KEYS}) if selling else [],
+                'notify': bool(notify) and role != 'browsing',
+                'app_version': version,
+            })
+        return SubmitMarketplaceInterest(success=True)
+
+
 class OpenMarketStore(graphene.Mutation):
     """An account (personal or business) opens its one store, by a
     Didit-verified user. No KYB: informal sellers open from their personal
@@ -981,6 +1044,7 @@ class RateMarketOrder(graphene.Mutation):
 
 class Mutation(graphene.ObjectType):
     locate_marketplace_city = LocateMarketplaceCity.Field()
+    submit_marketplace_interest = SubmitMarketplaceInterest.Field()
     open_market_store = OpenMarketStore.Field()
     update_market_store = UpdateMarketStore.Field()
     request_market_photo_upload = RequestMarketPhotoUpload.Field()
