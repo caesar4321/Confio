@@ -5157,6 +5157,148 @@ export const GET_DIRECT_UNREAD_SUMMARY = gql`
   }
 `;
 
+// ── Equipos + Liga Confío: own operations (an older server only loses these screens).
+const TEAM_FIELDS = `
+  id
+  name
+  description
+  emoji
+  color
+  joinMode
+  country
+  memberCount
+  captainId
+  isMember
+  isCaptain
+  isFollowing
+  joinRequest
+  joinBlock
+  joinBlockMessage
+  access
+  returnPct
+  leagueRank
+  championMonths
+  pendingRequests
+  goal {
+    kind
+    target
+    progress
+    percent
+    deadline
+    reached
+  }
+`;
+
+export const GET_TEAM = gql`
+  query GetTeam($teamId: ID!, $range: String) {
+    team(teamId: $teamId, range: $range) {
+      ${TEAM_FIELDS}
+    }
+  }
+`;
+
+export const GET_MY_TEAM = gql`
+  query GetMyTeam {
+    myTeam {
+      ${TEAM_FIELDS}
+    }
+  }
+`;
+
+export const GET_TEAMS_LOOKING = gql`
+  query GetTeamsLooking($offset: Int, $limit: Int) {
+    teamsLooking(offset: $offset, limit: $limit) {
+      ${TEAM_FIELDS}
+    }
+  }
+`;
+
+export const GET_TEAM_MEMBERS = gql`
+  query GetTeamMembers($teamId: ID!, $range: String) {
+    teamMembers(teamId: $teamId, range: $range) {
+      userId
+      username
+      avatarUrl
+      role
+      returnPct
+    }
+  }
+`;
+
+export const GET_TEAM_POSITIONS = gql`
+  query GetTeamPositions($teamId: ID!) {
+    teamPositions(teamId: $teamId) {
+      symbol
+      asset
+      ticker
+      name
+      holders
+    }
+  }
+`;
+
+export const GET_TEAM_PLAYS = gql`
+  query GetTeamPlays($teamId: ID!) {
+    teamPlays(teamId: $teamId) {
+      id
+      userId
+      username
+      avatarUrl
+      side
+      symbol
+      asset
+      ticker
+      name
+      at
+      copyable
+    }
+  }
+`;
+
+export const GET_TEAM_JOIN_REQUESTS = gql`
+  query GetTeamJoinRequests($teamId: ID!) {
+    teamJoinRequests(teamId: $teamId) {
+      id
+      userId
+      username
+      avatarUrl
+      createdAt
+    }
+  }
+`;
+
+export const GET_LEAGUE_BADGES = gql`
+  query GetLeagueBadges($userId: ID!) {
+    leagueBadges(userId: $userId)
+  }
+`;
+
+export const GET_LEAGUE_TABLE = gql`
+  query GetLeagueTable($kind: String!, $range: String!, $offset: Int, $limit: Int) {
+    leagueTable(kind: $kind, range: $range, offset: $offset, limit: $limit) {
+      access
+      hasMore
+      myRank
+      myPct
+      rows {
+        rank
+        pct
+        members
+        userId
+        username
+        avatarUrl
+        team {
+          id
+          name
+          emoji
+          color
+          memberCount
+        }
+      }
+    }
+  }
+`;
+
 // The member's own cover image and its review state (myProfilePicture, kind cover).
 export const GET_MY_COVER_PICTURE = gql`
   query GetMyCoverPicture {

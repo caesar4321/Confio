@@ -121,6 +121,25 @@ app.conf.beat_schedule.setdefault('inbox-snapshot-portfolio-returns', {
     'schedule': crontab(hour='0-6', minute=40),
 })
 
+# Liga Confío: team days from the returns snapshots (which run at :40).
+app.conf.beat_schedule.setdefault('teams-compute-league', {
+    'task': 'teams.tasks.compute_league_task',
+    'schedule': crontab(hour='1-7', minute=10),
+})
+
+# Meta del equipo: a goal met before its deadline is recorded on time.
+app.conf.beat_schedule.setdefault('teams-refresh-goals', {
+    'task': 'teams.tasks.refresh_goals_task',
+    'schedule': crontab(minute=25),
+})
+
+# Campeón del mes: decided on the 1st, after the last day of the month is proven.
+app.conf.beat_schedule.setdefault('teams-award-month', {
+    'task': 'teams.tasks.award_month_task',
+    # Retried through the 7th: it waits until every final-day snapshot is in.
+    'schedule': crontab(day_of_month='1-7', hour=8, minute=0),
+})
+
 app.conf.beat_schedule.setdefault('payroll-reconcile-stranded-bsc', {
     'task': 'payroll.reconcile_stranded_bsc_payroll',
     'schedule': crontab(minute='*/15'),

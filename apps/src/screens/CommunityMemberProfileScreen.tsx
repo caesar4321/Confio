@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { memberBlockVersion, notifyMemberBlocked } from '../services/communityEvents';
 import { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -32,7 +32,10 @@ import {
   GET_COMMUNITY_MEMBER_POSTS,
   GET_COMMUNITY_MEMBER_PROFILE,
   GET_INVESTOR_PROFILE,
+  GET_LEAGUE_BADGES,
+  GET_MY_TEAM,
 } from '../apollo/queries';
+import { championLabel } from '../utils/teams';
 import { useCommunityPostExtras } from '../hooks/useCommunityPostExtras';
 import { DiscoverFeedDto, toDiscoverItem } from '../utils/discoverItem';
 import { MainStackParamList } from '../types/navigation';
@@ -131,6 +134,17 @@ export const CommunityMemberProfileScreen = () => {
   const [setPortfolioHiddenWithError] = useMutation(SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR);
   const [hiddenBusy, setHiddenBusy] = useState(false);
 
+  // Campeón del mes badges (Liga): their own query, an older server has none.
+  const [badges, setBadges] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    setBadges([]);
+    client.query({ query: GET_LEAGUE_BADGES, variables: { userId }, fetchPolicy: 'network-only' })
+      .then(({ data }) => { if (live) setBadges(data?.leagueBadges ?? []); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [client, userId]);
+
   // The investor header (bio, cover, access): its own query too.
   const [investor, setInvestor] = useState<InvestorProfile | null>(null);
   const [bioOpen, setBioOpen] = useState(false);
@@ -215,8 +229,24 @@ export const CommunityMemberProfileScreen = () => {
     void loadPortfolio();
   }, [loadPortfolio]);
 
-  const toggleHidden = async (nextHidden: boolean) => {
+  const toggleHidden = async (nextHidden: boolean, teamConfirmed = false) => {
     if (!portfolio || !portfolio.isSelf || hiddenBusy) return;
+    // Teams are made of public portfolios: hiding yours takes you out of yours.
+    if (nextHidden && !teamConfirmed) {
+      // undefined = unknown (failed lookup): warn anyway; an older server has no teams.
+      const team = await client.query({ query: GET_MY_TEAM, fetchPolicy: 'network-only' })
+        .then(({ data }) => (data?.myTeam ?? null) as { name: string } | null)
+        .catch((e) => (isSchemaMismatch(e) ? null : undefined));
+      if (team !== null) {
+        Alert.alert('Saldrás de tu equipo', team
+          ? `Si ocultas tu portafolio, saldrás de ${team.name} y dejarás de ver la Liga.`
+          : 'Si ocultas tu portafolio y estás en un equipo, saldrás de él y dejarás de ver la Liga.', [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Ocultar y salir', style: 'destructive', onPress: () => { void toggleHidden(true, true); } },
+        ]);
+        return;
+      }
+    }
     const forUser = userId;
     const previous = portfolio.hidden;
     // A refresh landing meanwhile must not undo the optimistic value.
@@ -566,6 +596,15 @@ export const CommunityMemberProfileScreen = () => {
         onTip={() => navigation.navigate('SendTip', { userId, username: profile.username })}
         refreshKey={returnsRefresh}
       />
+      {badges.length > 0 ? (
+        <Pressable style={styles.leagueBadges} onPress={() => navigation.navigate('Liga')} accessibilityRole="button">
+          {badges.map((month) => (
+            <View key={month} style={styles.leagueBadge}>
+              <Text style={styles.leagueBadgeText}>🏆 {championLabel(month)}</Text>
+            </View>
+          ))}
+        </Pressable>
+      ) : null}
       {locked && access ? (
         <InvestorLockCard
           access={access}
@@ -664,6 +703,9 @@ export const CommunityMemberProfileScreen = () => {
 export default CommunityMemberProfileScreen;
 
 const styles = StyleSheet.create({
+  leagueBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingVertical: 8 },
+  leagueBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: colors.warning.background },
+  leagueBadgeText: { fontSize: 12, fontWeight: '600', color: colors.warning.text },
   container: {
     flex: 1,
     backgroundColor: colors.neutral,

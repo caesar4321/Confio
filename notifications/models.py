@@ -99,6 +99,7 @@ class NotificationType(models.TextChoices):
     COMMUNITY_MENTION = 'COMMUNITY_MENTION', 'Community Mention'
     COMMUNITY_FOLLOWED_POST = 'COMMUNITY_FOLLOWED_POST', 'Community Followed Member Post'
     COMMUNITY_NEW_FOLLOWER = 'COMMUNITY_NEW_FOLLOWER', 'Community New Follower'
+    COMMUNITY_PLAY_COPIED = 'COMMUNITY_PLAY_COPIED', 'Community Play Copied'
 
 
 class Notification(models.Model):

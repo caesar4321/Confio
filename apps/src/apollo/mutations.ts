@@ -1464,6 +1464,111 @@ export const PREPARE_TIP = gql`
   }
 `;
 
+const TEAM_RESULT = `
+  success
+  error
+  code
+  outcome
+  team {
+    id
+  }
+`;
+
+export const CREATE_TEAM = gql`
+  mutation CreateTeam($name: String!, $description: String, $emoji: String, $color: String, $joinMode: String) {
+    createTeam(name: $name, description: $description, emoji: $emoji, color: $color, joinMode: $joinMode) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const UPDATE_TEAM = gql`
+  mutation UpdateTeam($teamId: ID!, $name: String, $description: String, $emoji: String, $color: String, $joinMode: String) {
+    updateTeam(teamId: $teamId, name: $name, description: $description, emoji: $emoji, color: $color, joinMode: $joinMode) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const JOIN_TEAM = gql`
+  mutation JoinTeam($teamId: ID!) {
+    joinTeam(teamId: $teamId) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const LEAVE_TEAM = gql`
+  mutation LeaveTeam {
+    leaveTeam {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const CANCEL_TEAM_JOIN_REQUEST = gql`
+  mutation CancelTeamJoinRequest($teamId: ID!) {
+    cancelTeamJoinRequest(teamId: $teamId) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const DECIDE_TEAM_JOIN_REQUEST = gql`
+  mutation DecideTeamJoinRequest($requestId: ID!, $approve: Boolean!) {
+    decideTeamJoinRequest(requestId: $requestId, approve: $approve) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const EXPEL_TEAM_MEMBER = gql`
+  mutation ExpelTeamMember($teamId: ID!, $userId: ID!) {
+    expelTeamMember(teamId: $teamId, userId: $userId) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const TRANSFER_TEAM_CAPTAIN = gql`
+  mutation TransferTeamCaptain($teamId: ID!, $userId: ID!) {
+    transferTeamCaptain(teamId: $teamId, userId: $userId) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const FOLLOW_TEAM = gql`
+  mutation FollowTeam($teamId: ID!, $follow: Boolean!) {
+    followTeam(teamId: $teamId, follow: $follow) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const SET_TEAM_GOAL = gql`
+  mutation SetTeamGoal($teamId: ID!, $kind: String!, $target: String!, $deadline: Date) {
+    setTeamGoal(teamId: $teamId, kind: $kind, target: $target, deadline: $deadline) {
+      ${TEAM_RESULT}
+    }
+  }
+`;
+
+export const COPY_PLAY = gql`
+  mutation CopyPlay($playId: ID!) {
+    copyPlay(playId: $playId) {
+      success
+      error
+      code
+      play {
+        symbol
+        asset
+        disclosure
+      }
+    }
+  }
+`;
+
 export const UPDATE_INVESTOR_BIO = gql`
   mutation UpdateInvestorBio($bio: String!) {
     updateInvestorBio(bio: $bio) {

@@ -1,0 +1,331 @@
+import React, { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useApolloClient, useMutation } from '@apollo/client';
+
+import { Text } from '../components/common/AppText';
+import { BylineAvatar } from '../components/PostByline';
+import { EmptyState } from '../components/EmptyState';
+import { InvestorAccess, InvestorLockCard, isLocked } from '../components/InvestorLockCard';
+import { TeamBadge } from '../components/TeamBadge';
+import { Header } from '../navigation/Header';
+import { colors } from '../config/theme';
+import { SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR } from '../apollo/mutations';
+import { GET_LEAGUE_TABLE, GET_MY_TEAM } from '../apollo/queries';
+import { MainStackParamList } from '../types/navigation';
+import { formatPctSigned } from '../utils/portfolioFormat';
+import { LEAGUE_RANGES, LeagueRange, Team, rankMark } from '../utils/teams';
+
+type Navigation = NativeStackNavigationProp<MainStackParamList>;
+type RouteProps = NativeStackScreenProps<MainStackParamList, 'Liga'>['route'];
+type Kind = 'teams' | 'investors';
+
+type LeagueRow = {
+  rank: number;
+  pct: string;
+  members?: number | null;
+  userId?: string | null;
+  username?: string | null;
+  avatarUrl?: string | null;
+  team?: Pick<Team, 'id' | 'name' | 'emoji' | 'color' | 'memberCount'> | null;
+};
+
+const PAGE = 30;
+
+/**
+ * Liga Confío: teams and investors ranked by % return (never by how much
+ * they have). Badges only, no money prizes. Reciprocal like portfolios: a
+ * hidden or unverified viewer sees the top 3 and how to take part.
+ */
+export const LigaScreen = () => {
+  const navigation = useNavigation<Navigation>();
+  const route = useRoute<RouteProps>();
+  const client = useApolloClient();
+  const [kind, setKind] = useState<Kind>(route.params?.kind ?? 'teams');
+  const [range, setRange] = useState<LeagueRange>('month');
+  const [rows, setRows] = useState<LeagueRow[] | null>(null);
+  const [access, setAccess] = useState<InvestorAccess | null>(null);
+  const [mine, setMine] = useState<{ rank: number; pct: string | null } | null>(null);
+  const [myTeam, setMyTeam] = useState<Team | null | undefined>(undefined);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const generation = useRef(0);
+  // No next page while a first-page load is in flight: its offset would be stale.
+  const firstPending = useRef(false);
+  // Server positions consumed so far: the server drops blocked rows after
+  // slicing, so what is shown can be shorter than what was read.
+  const consumed = useRef(0);
+  const [publish, { loading: publishing }] = useMutation(SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR);
+
+  const load = useCallback(async (which: Kind, period: LeagueRange) => {
+    generation.current += 1;
+    const requested = generation.current;
+    firstPending.current = true;
+    client.query({ query: GET_MY_TEAM, fetchPolicy: 'network-only' })
+      .then(({ data }) => { if (generation.current === requested) setMyTeam(data?.myTeam ?? null); })
+      .catch(() => {});
+    try {
+      const { data } = await client.query({
+        query: GET_LEAGUE_TABLE,
+        variables: { kind: which, range: period, offset: 0, limit: PAGE },
+        fetchPolicy: 'network-only',
+      });
+      if (generation.current !== requested) return;
+      const table = data?.leagueTable;
+      setRows(table?.rows ?? []);
+      consumed.current = PAGE;
+      setHasMore(Boolean(table?.hasMore));
+      setAccess((table?.access ?? null) as InvestorAccess | null);
+      setMine(table?.myRank ? { rank: table.myRank, pct: table.myPct ?? null } : null);
+      setFailed(false);
+    } catch {
+      if (generation.current === requested) setFailed(true);
+    } finally {
+      if (generation.current === requested) firstPending.current = false;
+    }
+  }, [client]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void load(kind, range);
+    }, [load, kind, range]),
+  );
+
+  const loadMore = async () => {
+    if (!hasMore || loadingMore || firstPending.current || !rows) return;
+    const requested = generation.current;
+    setLoadingMore(true);
+    try {
+      // A page whose rows were all left out (blocks) reads on, a few pages at most.
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const { data } = await client.query({
+          query: GET_LEAGUE_TABLE,
+          variables: { kind, range, offset: consumed.current, limit: PAGE },
+          fetchPolicy: 'network-only',
+        });
+        if (generation.current !== requested) return;
+        const table = data?.leagueTable;
+        const page: LeagueRow[] = table?.rows ?? [];
+        if (table?.access !== 'open') {
+          // Access changed meanwhile (profile hidden elsewhere): the answer replaces everything shown.
+          setRows(page);
+          setAccess((table?.access ?? null) as InvestorAccess | null);
+          setMine(null);
+          setHasMore(false);
+          return;
+        }
+        consumed.current += PAGE;
+        // Ranks are unique within a table: they key the merge.
+        setRows((current) => {
+          const seen = new Set((current ?? []).map((r) => r.rank));
+          return [...(current ?? []), ...page.filter((r) => !seen.has(r.rank))];
+        });
+        setHasMore(Boolean(table?.hasMore));
+        if (page.length > 0 || !table?.hasMore) return;
+      }
+    } catch {
+      // Reaching the end again retries.
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const switchTo = (nextKind: Kind, nextRange: LeagueRange) => {
+    if (nextKind === kind && nextRange === range) return;
+    setRows(null);
+    setMine(null);
+    setKind(nextKind);
+    setRange(nextRange);
+  };
+
+  const publishOwn = async () => {
+    try {
+      const { data } = await publish({ variables: { hidden: false } });
+      const result = data?.setCommunityPortfolioHidden;
+      if (!result?.success) {
+        Alert.alert('No pudimos hacer público tu perfil', result?.error || 'Inténtalo de nuevo en un momento.');
+        return;
+      }
+      void load(kind, range);
+    } catch {
+      Alert.alert('No pudimos hacer público tu perfil', 'Revisa tu conexión e inténtalo de nuevo.');
+    }
+  };
+
+  const locked = isLocked(access);
+
+  const renderItem = ({ item }: { item: LeagueRow }) => {
+    const pct = formatPctSigned(item.pct);
+    const up = !item.pct.startsWith('-');
+    const open = () => {
+      if (item.team) navigation.navigate('Team', { teamId: item.team.id });
+      else if (item.userId) navigation.navigate('CommunityMemberProfile', { userId: item.userId });
+    };
+    return (
+      <Pressable onPress={open} style={({ pressed }) => [styles.row, pressed && styles.pressed]} accessibilityRole="button">
+        <Text style={styles.rank}>{rankMark(item.rank)}</Text>
+        {item.team ? (
+          <TeamBadge emoji={item.team.emoji} color={item.team.color} size={40} />
+        ) : (
+          <BylineAvatar name={item.username ?? ''} avatarUrl={item.avatarUrl} size={40} />
+        )}
+        <View style={styles.rowBody}>
+          <Text style={styles.name} numberOfLines={1}>{item.team ? item.team.name : item.username}</Text>
+          {item.team ? (
+            <Text style={styles.meta}>{item.members ?? item.team.memberCount} miembros cuentan</Text>
+          ) : null}
+        </View>
+        <Text style={[styles.pct, up ? styles.up : styles.down]}>{pct}</Text>
+      </Pressable>
+    );
+  };
+
+  const header = (
+    <View>
+      <View style={styles.tabs} accessibilityRole="tablist">
+        {(['teams', 'investors'] as Kind[]).map((key) => {
+          const selected = key === kind;
+          return (
+            <Pressable key={key} onPress={() => switchTo(key, range)} style={[styles.tab, selected && styles.tabSelected]}
+              accessibilityRole="tab" accessibilityState={{ selected }}>
+              <Text style={[styles.tabText, selected && styles.tabTextSelected]}>{key === 'teams' ? 'Equipos' : 'Inversores'}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {!locked ? (
+        <View style={styles.ranges}>
+          {LEAGUE_RANGES.map((r) => {
+            const selected = r.key === range;
+            return (
+              <Pressable key={r.key} onPress={() => switchTo(kind, r.key)} style={[styles.range, selected && styles.rangeSelected]}
+                accessibilityRole="button" accessibilityState={{ selected }}>
+                <Text style={[styles.rangeText, selected && styles.rangeTextSelected]}>{r.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+      <Text style={styles.explainer}>
+        {kind === 'teams'
+          ? 'Gana el equipo con mejor rentabilidad, no el que más invierte. Cuentan los equipos con 5 miembros o más.'
+          : 'Gana quien tenga mejor rentabilidad en su portafolio, no quien más invierte.'}
+        {' '}Solo insignias, sin premios en dinero.
+      </Text>
+      {!locked && kind === 'teams' && myTeam !== undefined ? (
+        <Pressable
+          style={styles.myTeam}
+          onPress={() => (myTeam ? navigation.navigate('Team', { teamId: myTeam.id }) : navigation.navigate('TeamsBrowse'))}
+          accessibilityRole="button"
+        >
+          {myTeam ? <TeamBadge emoji={myTeam.emoji} color={myTeam.color} size={36} /> : (
+            <View style={styles.plus}><Icon name="users" size={18} color={colors.primaryDark} /></View>
+          )}
+          <View style={styles.rowBody}>
+            <Text style={styles.name} numberOfLines={1}>{myTeam ? myTeam.name : 'Únete a un equipo'}</Text>
+            <Text style={styles.meta}>
+              {myTeam
+                ? mine ? `Tu equipo va ${rankMark(mine.rank)} con ${formatPctSigned(mine.pct)}` : 'Tu equipo aún no clasifica en este periodo'
+                : 'Busca un equipo o crea el tuyo'}
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={18} color={colors.textSecondary} />
+        </Pressable>
+      ) : null}
+      {!locked && kind === 'investors' ? (
+        <View style={styles.myTeam}>
+          <View style={styles.rowBody}>
+            <Text style={styles.name}>Tu posición</Text>
+            <Text style={styles.meta}>
+              {mine ? `${rankMark(mine.rank)} con ${formatPctSigned(mine.pct)}` : 'Aún no clasificas en este periodo (mínimo $10 invertidos)'}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <View style={styles.container}>
+      <Header title="Liga Confío" navigation={navigation as any} onBackPress={() => navigation.goBack()}
+        backgroundColor={colors.background} isLight={false} />
+      <FlatList
+        data={rows ?? []}
+        keyExtractor={(r) => `${kind}-${r.rank}`}
+        renderItem={renderItem}
+        contentContainerStyle={styles.list}
+        initialNumToRender={15}
+        maxToRenderPerBatch={15}
+        windowSize={11}
+        onEndReachedThreshold={0.4}
+        onEndReached={() => { void loadMore(); }}
+        ListHeaderComponent={header}
+        ListFooterComponent={
+          <>
+            {loadingMore ? <ActivityIndicator style={styles.loading} color={colors.primary} /> : null}
+            {locked && access ? (
+              <View style={styles.lock}>
+                <InvestorLockCard access={access} busy={publishing} onPublish={() => { void publishOwn(); }}
+                  onVerify={() => navigation.navigate('Verification' as never)} />
+              </View>
+            ) : null}
+          </>
+        }
+        refreshControl={
+          <RefreshControl refreshing={refreshing} tintColor={colors.primary}
+            onRefresh={async () => { setRefreshing(true); await load(kind, range); setRefreshing(false); }} />
+        }
+        ListEmptyComponent={failed ? (
+          <EmptyState icon="wifi-off" title="No pudimos cargar la Liga" actionLabel="Reintentar"
+            onAction={() => { void load(kind, range); }} />
+        ) : rows === null ? (
+          <ActivityIndicator style={styles.loading} color={colors.primary} />
+        ) : (
+          <EmptyState icon="award" title="Aún no hay clasificados"
+            subtitle={kind === 'teams' ? 'Los equipos aparecen cuando tienen 5 miembros con historial.' : 'Los inversores aparecen con historial completo del periodo.'} />
+        )}
+      />
+    </View>
+  );
+};
+
+export default LigaScreen;
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.neutral },
+  list: { paddingBottom: 32, flexGrow: 1 },
+  loading: { marginTop: 32 },
+  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 10, backgroundColor: colors.background },
+  tab: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16, backgroundColor: colors.neutral },
+  tabSelected: { backgroundColor: colors.dark },
+  tabText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
+  tabTextSelected: { color: colors.white },
+  ranges: { flexDirection: 'row', gap: 6, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.background },
+  range: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
+  rangeSelected: { borderColor: colors.primaryDark, backgroundColor: colors.primaryLight },
+  rangeText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  rangeTextSelected: { color: colors.dark },
+  explainer: { paddingHorizontal: 16, paddingVertical: 10, fontSize: 12, color: colors.textSecondary },
+  myTeam: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginBottom: 12, padding: 14,
+    borderRadius: 14, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
+  },
+  plus: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryLight },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.borderLight,
+  },
+  pressed: { opacity: 0.7 },
+  rank: { width: 28, fontSize: 16, fontWeight: '700', color: colors.dark, textAlign: 'center' },
+  rowBody: { flex: 1 },
+  name: { fontSize: 15, fontWeight: '600', color: colors.dark },
+  meta: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
+  pct: { fontSize: 15, fontWeight: '700' },
+  up: { color: colors.flowIn.textSmall },
+  down: { color: colors.error.icon },
+  lock: { padding: 16 },
+});

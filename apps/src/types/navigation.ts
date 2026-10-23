@@ -77,6 +77,10 @@ export type MainStackParamList = {
   DirectInbox: { folder?: 'inbox' | 'requests' } | undefined;
   DirectChat: { conversationId?: string; userId?: string; username?: string };
   SendTip: { userId: string; username: string };
+  Liga: { kind?: 'teams' | 'investors' } | undefined;
+  Team: { teamId: string };
+  TeamEdit: { teamId?: string } | undefined;
+  TeamsBrowse: undefined;
   BlockedMembers: undefined;
   CreateBusiness: undefined;
   EditBusiness: undefined;

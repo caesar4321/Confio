@@ -130,6 +130,10 @@ import CommunityMemberProfileScreen from '../screens/CommunityMemberProfileScree
 import DirectInboxScreen from '../screens/DirectInboxScreen';
 import DirectChatScreen from '../screens/DirectChatScreen';
 import SendTipScreen from '../screens/SendTipScreen';
+import LigaScreen from '../screens/LigaScreen';
+import TeamScreen from '../screens/TeamScreen';
+import TeamEditScreen from '../screens/TeamEditScreen';
+import TeamsBrowseScreen from '../screens/TeamsBrowseScreen';
 import BlockedMembersScreen from '../screens/BlockedMembersScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 
@@ -261,6 +265,36 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="SendTip"
           component={SendTipScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Liga"
+          component={LigaScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Team"
+          component={TeamScreen}
+          // One screen per team: a team opened from another team's page is its own screen.
+          getId={({ params }) => params?.teamId}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="TeamEdit"
+          component={TeamEditScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="TeamsBrowse"
+          component={TeamsBrowseScreen}
           options={{
             headerShown: false,
           }}

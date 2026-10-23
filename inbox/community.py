@@ -1805,9 +1805,10 @@ def block_member(user, target_id) -> None:
     follows_you = CommunityFollow.objects.filter(follower_id=target_id, followed_id=user.id).exists()
     from .direct_messages import conversation_between
 
-    # Someone who wrote to you (Mensajes) is reachable too, posts or not.
+    # Someone who wrote to you (Mensajes), or who is on a team (listed on
+    # its page), is reachable too, posts or not.
     in_chat = conversation_between(user.id, target_id) is not None
-    if not has_visible_content(target_id) and not follows_you and not in_chat:
+    if not has_visible_content(target_id) and not follows_you and not in_chat and not in_a_team(target_id):
         raise CommunityPostError('not_found', 'No encontramos a esa persona.')
     CommunityBlock.objects.get_or_create(blocker=user, blocked_id=target_id)
     drop_follows_between(user.id, target_id)
@@ -1872,6 +1873,12 @@ def remove_member_content(user_id: int, *, category: str, reason: str) -> dict:
 
     user = User.all_objects.filter(id=user_id).first()
     pictures = profile_pictures.remove_picture(user) if user else False
+    if user is not None:
+        from teams.models import TeamLeaveReason
+        from teams.rules import leave_team, recompute_member_teams
+
+        recompute_member_teams(user)
+        leave_team(user, TeamLeaveReason.REMOVED)
     from django.db import transaction
 
     from .models import CommunityProfileSettings
@@ -1908,12 +1915,16 @@ def members_owed_content_removal(limit: int = 100) -> list:
         status__in=[ProfilePictureStatus.ACTIVE, ProfilePictureStatus.PENDING],
     )
     bios = CommunityProfileSettings.objects.exclude(bio='')
+    from teams.models import TeamMembership
+
+    teams = TeamMembership.objects.filter(left_at__isnull=True)
     deleted = (
         set(posts.filter(content_item__owner_user__deleted_at__isnull=False)
             .values_list('content_item__owner_user_id', flat=True))
         | set(comments.filter(author__deleted_at__isnull=False).values_list('author_id', flat=True))
         | set(pictures.filter(user__deleted_at__isnull=False).values_list('user_id', flat=True))
         | set(bios.filter(user__deleted_at__isnull=False).values_list('user_id', flat=True))
+        | set(teams.filter(user__deleted_at__isnull=False).values_list('user_id', flat=True))
     )
     banned = set()
     if banned_ids:
@@ -1923,6 +1934,7 @@ def members_owed_content_removal(limit: int = 100) -> list:
             | set(comments.filter(author_id__in=banned_ids).values_list('author_id', flat=True))
             | set(pictures.filter(user_id__in=banned_ids).values_list('user_id', flat=True))
             | set(bios.filter(user_id__in=banned_ids).values_list('user_id', flat=True))
+            | set(teams.filter(user_id__in=banned_ids).values_list('user_id', flat=True))
         )
     deleted.discard(None)
     banned.discard(None)
@@ -2028,7 +2040,17 @@ def followable_member(user_id, viewer=None):
         return target
     if viewer is not None and CommunityFollow.objects.filter(follower_id=user_id, followed_id=viewer.id).exists():
         return target
+    # A member of a team is listed on its page: reachable like a poster.
+    if in_a_team(user_id):
+        return target
     return None
+
+
+def in_a_team(user_id) -> bool:
+    from teams.models import TeamMembership
+
+    return TeamMembership.objects.filter(user_id=user_id, left_at__isnull=True,
+                                         team__archived_at__isnull=True).exists()
 
 
 def follow_member(follower, followed_id):
@@ -2206,8 +2228,13 @@ def set_portfolio_hidden(user, hidden: bool) -> bool:
 
     from .models import CommunityProfileSettings
 
+    from users.models import User
+
     hidden = bool(hidden)
     with transaction.atomic():
+        # The member's own row first: the lock team joins take too, so a join
+        # can't land after the hide.
+        User.objects.select_for_update().filter(pk=user.pk).first()
         settings_row, _ = CommunityProfileSettings.objects.select_for_update().get_or_create(user=user)
         if settings_row.portfolio_hidden == hidden:
             return hidden
@@ -2218,6 +2245,10 @@ def set_portfolio_hidden(user, hidden: bool) -> bool:
         if not hidden:
             settings_row.portfolio_published_at = now
         settings_row.save(update_fields=['portfolio_hidden', 'portfolio_published_at', 'updated_at'])
+        if hidden:
+            # Reciprocity: a hidden profile can't stay on a team (Equipos).
+            from teams.rules import on_profile_hidden
+            on_profile_hidden(user)
     return hidden
 
 

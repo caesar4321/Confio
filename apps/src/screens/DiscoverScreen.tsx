@@ -16,6 +16,7 @@ import {
   GET_DISCOVER_FEED_CARDS,
   GET_DISCOVER_FEED_SECTIONED,
   GET_DIRECT_UNREAD_SUMMARY,
+  GET_MY_TEAM,
 } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
@@ -92,6 +93,9 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
   });
   const dmSummary = dmData?.directUnreadSummary as { unreadMessages: number; requests: number } | undefined;
   const showMessages = Boolean(dmSummary) && composeSection;
+  // Liga Confío: shown once the server answers its own query (an older one has no teams).
+  const { data: ligaData } = useQuery(GET_MY_TEAM, { skip: !communitySupported, fetchPolicy: 'cache-and-network' });
+  const showLiga = ligaData !== undefined && composeSection;
   const dmBadge = (dmSummary?.unreadMessages ?? 0) + (dmSummary?.requests ?? 0);
   useFocusEffect(
     useCallback(() => {
@@ -293,7 +297,7 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
         commentCounts={commentCounts}
         postExtras={postExtras}
         onOpenAuthor={(userId) => navigation.navigate('CommunityMemberProfile', { userId })}
-        sectionAccessory={showPrompt || showMyPosts || showMessages ? (
+        sectionAccessory={showPrompt || showMyPosts || showMessages || showLiga ? (
           <>
             {showPrompt ? (
               <CommunityComposePrompt onPress={() => navigation.navigate('CommunityCompose')} />
@@ -322,6 +326,16 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
                   {dmBadge > 0 ? (
                     <View style={styles.dmBadge}><Text style={styles.dmBadgeText}>{dmBadge > 99 ? '99+' : dmBadge}</Text></View>
                   ) : null}
+                </Pressable>
+              ) : null}
+              {showLiga ? (
+                <Pressable
+                  style={styles.myPosts}
+                  onPress={() => navigation.navigate('Liga')}
+                  accessibilityRole="button"
+                >
+                  <Icon name="award" size={14} color={colors.primaryDark} />
+                  <Text style={styles.myPostsText}>Liga y equipos</Text>
                 </Pressable>
               ) : null}
             </View>
