@@ -246,9 +246,13 @@ class DeliveryAddressAdmin(admin.ModelAdmin):
 
 
 class OrderRatingAdmin(admin.ModelAdmin):
-    list_display = ('order', 'store', 'rating', 'comment', 'created_at')
-    list_filter = ('rating',)
+    list_display = ('order', 'store', 'rating', 'comment', 'comment_status', 'created_at')
+    list_filter = ('rating', 'comment_status')
     raw_id_fields = ('order', 'store')
+    # The reviewed text is what was approved: editable text would publish
+    # words no reviewer saw.
+    readonly_fields = ('order', 'store', 'rating', 'comment', 'comment_verdict', 'comment_reviewed_at',
+                       'comment_queued_at')
 
 
 class MarketplacePartnerAgreementAdmin(admin.ModelAdmin):

@@ -307,7 +307,38 @@ def _orders_for(account):
     ).filter(Q(buyer_account=account) | Q(store__owner_account=account)).exclude(status='cancelled')
 
 
+class StoreReviewType(graphene.ObjectType):
+    id = graphene.ID()
+    rating = graphene.Int()
+    comment = graphene.String(description='Only once moderation approved it; null otherwise')
+    author = graphene.String(description="The buyer's Comunidad name (chosen username or pseudonym), never their name")
+    product_title = graphene.String()
+    created_at = graphene.DateTime()
+
+
 class Query(graphene.ObjectType):
+    marketplace_store_reviews = graphene.List(
+        StoreReviewType, store_id=graphene.ID(required=True), limit=graphene.Int(), offset=graphene.Int(),
+        description="A store's reviews, newest first: every rating, with its text once moderation approved it")
+
+    def resolve_marketplace_store_reviews(self, info, store_id, limit=10, offset=0):
+        if not _user(info):
+            return []
+        limit = max(1, min(int(limit or 10), PAGE_MAX))
+        offset = max(0, int(offset or 0))
+        rows = (OrderRating.objects.select_related('order', 'order__buyer')
+                .filter(store_id=store_id, store__deleted_at__isnull=True)
+                .order_by('-created_at', '-pk')[offset:offset + limit])
+        from inbox.community import author_display_name
+
+        # The Comunidad name: a chosen username or a pseudonym, never a legal
+        # name nor a username signup derived from the email address.
+        return [StoreReviewType(
+            id=str(r.pk), rating=r.rating,
+            comment=r.comment if r.comment_status == 'approved' and r.comment else None,
+            author=author_display_name(r.order.buyer), product_title=r.order.product_title,
+            created_at=r.created_at) for r in rows]
+
     my_delivery_addresses = graphene.List(
         'marketplace.address_book.DeliveryAddressType',
         description="The buyer's saved delivery addresses for the JWT account, plus the Recarga address (read-only)")
@@ -1102,9 +1133,19 @@ class RateMarketOrder(graphene.Mutation):
             return RateMarketOrder(success=False, error='order_not_rateable')
         if not (1 <= rating <= 5):
             return RateMarketOrder(success=False, error='bad_rating')
+        from django.db import transaction
+        from django.utils import timezone
+
+        text = (comment or '').strip()[:500]
         try:
-            OrderRating.objects.create(order=order, store=order.store, rating=rating,
-                                       comment=(comment or '').strip()[:500])
+            with transaction.atomic():
+                saved = OrderRating.objects.create(
+                    order=order, store=order.store, rating=rating, comment=text,
+                    comment_status='pending' if text else 'none',
+                    comment_queued_at=timezone.now() if text else None)
+                if text:
+                    from .tasks import enqueue_rating_review
+                    transaction.on_commit(lambda: enqueue_rating_review(saved.pk))
         except IntegrityError:
             return RateMarketOrder(success=False, error='already_rated')
         return RateMarketOrder(success=True)

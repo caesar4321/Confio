@@ -10,6 +10,7 @@ import { GET_MARKETPLACE_PRODUCT } from '../services/comprar';
 import { formatRating, formatReference, formatUsd } from '../utils/comprarFormat';
 import { formatDecimal } from '../utils/numberLocale';
 import { ComprarFrame, KitButton, KitFooter, TrustNote, kitText } from '../components/comprar/kit';
+import { StoreReviews } from '../components/comprar/StoreReviews';
 
 const WIDTH = Dimensions.get('window').width;
 
@@ -96,6 +97,9 @@ export const MarketProductScreen = () => {
             </View>
             <Icon name="chevron-right" size={18} color={colors.text.light} />
           </Pressable>
+
+          <StoreReviews storeId={String(store.id)} avgRating={store.avgRating} ratingCount={store.ratingCount}
+            preview={2} onSeeAll={() => navigation.navigate('MarketStore', { storeId: String(store.id) })} />
 
           <TrustNote>
             Pago protegido: tu dinero queda guardado hasta que recibas tu pedido. Si la tienda no lo envía, lo recuperas.

@@ -13,10 +13,11 @@ jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: mockParams.current }),
 }));
 const mockOrder = { current: null as any };
+const mockRate = jest.fn((..._args: any[]) => Promise.resolve({ data: { rateMarketOrder: { success: true } } }));
 jest.mock('@apollo/client', () => ({
   gql: () => ({}),
   useQuery: () => ({ data: { marketOrder: mockOrder.current }, loading: false, refetch: jest.fn(), startPolling: jest.fn(), stopPolling: jest.fn() }),
-  useMutation: () => [jest.fn(), { loading: false }],
+  useMutation: () => [mockRate, { loading: false }],
 }));
 
 import { MarketOrderScreen } from '../MarketOrderScreen';
@@ -65,4 +66,19 @@ it('does not wrap the shared header in a second top safe area', () => {
   mockOrder.current = order('shipped', []);
   const tree = render();
   expect(tree.root.findAll((n) => n.type === ('SafeAreaView' as any)).length).toBe(0);
+});
+
+
+it('a delivered order invites a written review, sends it with the stars and says it will be published after review', async () => {
+  mockOrder.current = order('released', []);
+  const tree = render();
+  const star4 = tree.root.findAll((n) => n.props.accessibilityLabel === '4 estrellas' && n.props.onPress)[0];
+  act(() => { star4.props.onPress(); });
+  const box = tree.root.findAll((n) => n.props.testID === 'review-text' && n.props.onChangeText)[0];
+  act(() => { box.props.onChangeText('Muy buena atención, volvería a comprar.'); });
+  const submit = tree.root.findAll((n) => n.props.testID === 'review-submit' && n.props.label)[0];
+  expect(submit.props.label).toBe('Publicar opinión');
+  await act(async () => { submit.props.onPress(); });
+  expect(mockRate).toHaveBeenCalledWith({ variables: { orderId: '9', rating: 4, comment: 'Muy buena atención, volvería a comprar.' } });
+  expect(JSON.stringify(tree.toJSON())).toContain('La publicaremos en la tienda en cuanto la revisemos');
 });

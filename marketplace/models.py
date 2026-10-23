@@ -329,8 +329,17 @@ class OrderRating(models.Model):
 
     order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='rating')
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='ratings')
+    COMMENT_STATUS = [('none', 'No review'), ('pending', 'In review'), ('approved', 'Published'),
+                      ('rejected', 'Rejected')]
+
     rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
     comment = models.CharField(max_length=500, blank=True, default='')
+    # The stars count at once; the text is public only once the AI reviewer
+    # approves it (fail closed: pending or rejected text is never shown).
+    comment_status = models.CharField(max_length=10, choices=COMMENT_STATUS, default='none', db_index=True)
+    comment_verdict = models.JSONField(default=dict, blank=True)
+    comment_reviewed_at = models.DateTimeField(null=True, blank=True)
+    comment_queued_at = models.DateTimeField(null=True, blank=True, help_text='Last handed to the reviewer')
     created_at = models.DateTimeField(auto_now_add=True)
 
 

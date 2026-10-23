@@ -16,7 +16,7 @@ from users.models import Account, User
 
 from . import checkout, escrow, pricing
 from .models import (DeliveryAddress, MarketplaceCity, MarketplaceFeeLedger, MarketplacePartnerAgreement, Order,
-                     Product, Store)
+                     OrderRating, Product, Store)
 
 WAD = 10**18
 ESCROW = '0x' + 'e5' * 20
@@ -1066,3 +1066,102 @@ class AddressBookPrivacyTests(TestCase):
             b = SaveDeliveryAddress.mutate.__wrapped__(None, info, country_code='VE', **args)
         self.assertNotEqual(a.address.id, b.address.id)
         self.assertEqual(sorted(DeliveryAddress.objects.filter(user=user).values_list('country_code', flat=True)), ['BO', 'VE'])
+
+
+@override_settings(**ENABLED)
+class StoreReviewTests(MarketTestBase):
+    def released_order(self):
+        self.prepare()
+        order = Order.objects.get(buyer=self.buyer, product=self.product)
+        Order.objects.filter(pk=order.pk).update(status='released')
+        return order
+
+    def rate(self, order, **kwargs):
+        from .schema import RateMarketOrder
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL), \
+                mock.patch('marketplace.tasks.review_rating.apply_async') as delay, self.captureOnCommitCallbacks(execute=True):
+            res = RateMarketOrder.mutate.__wrapped__(None, info, order_id=str(order.public_id), **kwargs)
+        return res, delay
+
+    def reviews(self):
+        from .schema import Query
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        return Query.resolve_marketplace_store_reviews(None, info, store_id=self.store.pk)
+
+    def test_review_text_waits_for_moderation_but_the_stars_count_at_once(self):
+        order = self.released_order()
+        res, delay = self.rate(order, rating=4, comment='Muy linda la chompa, llegó rápido.')
+        self.assertTrue(res.success, res.error)
+        rating = OrderRating.objects.get(order=order)
+        self.assertEqual(rating.comment_status, 'pending')
+        self.assertEqual(delay.call_args.args[0], (rating.pk,))
+        [review] = self.reviews()
+        self.assertEqual((review.rating, review.comment, review.author), (4, None, self.buyer.username))
+
+    def test_stars_only_needs_no_moderation(self):
+        res, delay = self.rate(self.released_order(), rating=5)
+        self.assertTrue(res.success)
+        delay.assert_not_called()
+        self.assertEqual(OrderRating.objects.get().comment_status, 'none')
+
+    def test_approved_text_is_published_and_rejected_text_never(self):
+        from .moderation import run_rating_review
+        order = self.released_order()
+        self.rate(order, rating=2, comment='Tardó una semana y vino sin etiqueta.')
+        rating = OrderRating.objects.get(order=order)
+        with mock.patch('marketplace.moderation._decide', return_value={'decision': 'approve'}):
+            self.assertEqual(run_rating_review(rating.pk), 'approved')
+        self.assertEqual(self.reviews()[0].comment, 'Tardó una semana y vino sin etiqueta.')
+        # Decided once: a retried task cannot flip it.
+        with mock.patch('marketplace.moderation._decide', return_value={'decision': 'reject'}):
+            self.assertEqual(run_rating_review(rating.pk), 'stale')
+        OrderRating.objects.filter(pk=rating.pk).update(comment_status='pending')
+        with mock.patch('marketplace.moderation._decide', return_value={'decision': 'reject'}):
+            self.assertEqual(run_rating_review(rating.pk), 'rejected')
+        self.assertIsNone(self.reviews()[0].comment)
+
+    def test_a_stalled_review_goes_back_to_the_reviewer_once_per_interval(self):
+        from datetime import timedelta
+        from .tasks import requeue_stuck_reviews
+        order = self.released_order()
+        self.rate(order, rating=3, comment='Correcto, nada especial.')
+        old = timezone.now() - timedelta(hours=2)
+        OrderRating.objects.update(comment_queued_at=old)
+        with mock.patch('marketplace.tasks.review_rating.apply_async') as delay:
+            self.assertEqual(requeue_stuck_reviews()['ratings'], 1)
+            self.assertEqual(requeue_stuck_reviews()['ratings'], 0)  # stamped: not again next run
+        delay.assert_called_once()
+
+
+    def test_a_verdict_only_applies_to_the_text_it_reviewed(self):
+        from .moderation import run_rating_review
+        order = self.released_order()
+        self.rate(order, rating=5, comment='Excelente, recomendado.')
+        rating = OrderRating.objects.get(order=order)
+
+        def decide_then_text_changes(*args, **kwargs):
+            OrderRating.objects.filter(pk=rating.pk).update(comment='Otro texto que nadie revisó.')
+            return {'decision': 'approve'}
+        with mock.patch('marketplace.moderation._decide', side_effect=decide_then_text_changes):
+            self.assertEqual(run_rating_review(rating.pk), 'stale')
+        self.assertEqual(OrderRating.objects.get(pk=rating.pk).comment_status, 'pending')
+
+    def test_a_broker_failure_never_fails_a_saved_rating(self):
+        order = self.released_order()
+        from .schema import RateMarketOrder
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL), \
+                mock.patch('marketplace.tasks.review_rating.apply_async', side_effect=ConnectionError('redis down')), \
+                self.captureOnCommitCallbacks(execute=True):
+            res = RateMarketOrder.mutate.__wrapped__(None, info, order_id=str(order.public_id), rating=5,
+                                                     comment='Todo bien, gracias.')
+        self.assertTrue(res.success)
+        self.assertEqual(OrderRating.objects.get(order=order).comment_status, 'pending')
+
+    def test_reviewers_are_never_shown_by_an_email_derived_username(self):
+        order = self.released_order()
+        self.rate(order, rating=4)
+        with mock.patch('inbox.community.author_display_name', return_value='miembro_x1') as name:
+            self.assertEqual(self.reviews()[0].author, 'miembro_x1')
+        name.assert_called()

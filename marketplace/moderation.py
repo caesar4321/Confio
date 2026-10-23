@@ -33,24 +33,35 @@ REJECT:
 - Photos that do not show the product being sold."""
 
 
+REVIEW_POLICY = """You are the review moderator for "Comprar", a marketplace inside Confío, a digital-dollar wallet used by everyday people in Latin America. A buyer who received an order is leaving a public review of the store, shown on the store's page to other buyers.
+
+ALLOW: honest opinions about the product, the store, delivery and the experience — including NEGATIVE ones, complaints and low ratings. Informal language, mild frustration, spelling mistakes.
+
+REJECT:
+- Contact details or off-platform payment requests (phone numbers, WhatsApp, social handles, emails, bank accounts, links) — of the buyer, the seller or anyone.
+- Personal data of others (addresses, ID numbers, full names of private people beyond the store's name).
+- Harassment, threats, hate, slurs, sexual content.
+- Advertising, spam, promotion of other stores or products, text unrelated to the order."""
+
+
 def pending_prefix(user) -> str:
     return f'{PENDING_PREFIX}{user.id}/'
 
 
-def _decide(body: str, image) -> dict:
+def _decide(body: str, image, policy: str = PRODUCT_POLICY) -> dict:
     from inbox.community import (ESCALATION_INSTRUCTIONS, FIRST_PASS_INSTRUCTIONS,
                                  _call_reviewer, _needs_escalation)
 
     first = _call_reviewer(
         model=settings.COMMUNITY_REVIEW_MODEL, effort=settings.COMMUNITY_REVIEW_REASONING_EFFORT,
         instructions=FIRST_PASS_INSTRUCTIONS, decisions=['approve', 'reject', 'escalate'],
-        body=body, image=image, policy=PRODUCT_POLICY)
+        body=body, image=image, policy=policy)
     if not _needs_escalation(first):
         return first
     return _call_reviewer(
         model=settings.COMMUNITY_ESCALATION_MODEL, effort=settings.COMMUNITY_ESCALATION_REASONING_EFFORT,
         instructions=ESCALATION_INSTRUCTIONS, decisions=['approve', 'reject'],
-        body=body, image=image, policy=PRODUCT_POLICY)
+        body=body, image=image, policy=policy)
 
 
 def _listing_text(product) -> str:
@@ -132,4 +143,25 @@ def run_product_review(product_id: int, claim: str) -> str:
             status='active', review_verdict=verdicts, reviewed_at=timezone.now(),
             photo_urls=urls or product.photo_urls, pending_photo_keys=[]):
         return 'approved'
+    return 'stale'
+
+
+def run_rating_review(rating_id: int) -> str:
+    """Moderate one review's text. Only a pending review moves, and only once
+    (the conditional update), so a retried or re-queued task cannot flip a
+    decision already made."""
+    from .models import OrderRating
+
+    rating = OrderRating.objects.select_related('store', 'order').filter(pk=rating_id).first()
+    if rating is None or rating.comment_status != 'pending':
+        return 'stale'
+    body = (f'Store: {rating.store.name}\nProduct: {rating.order.product_title}\n'
+            f'Stars: {rating.rating}/5\nReview: {rating.comment}')
+    verdict = _decide(body, None, policy=REVIEW_POLICY)
+    status = 'approved' if verdict.get('decision') == 'approve' else 'rejected'
+    # Bound to the text that was reviewed: a comment changed meanwhile keeps
+    # waiting for its own review instead of inheriting this verdict.
+    if OrderRating.objects.filter(pk=rating.pk, comment_status='pending', comment=rating.comment).update(
+            comment_status=status, comment_verdict=verdict, comment_reviewed_at=timezone.now()):
+        return status
     return 'stale'

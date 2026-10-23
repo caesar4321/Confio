@@ -11,6 +11,7 @@ import { formatRating, formatReference, formatUsd } from '../utils/comprarFormat
 import { formatDecimal } from '../utils/numberLocale';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ComprarFrame, kitText } from '../components/comprar/kit';
+import { StoreReviews } from '../components/comprar/StoreReviews';
 
 const GET_STORE = gql`
   query MarketplaceStore($id: ID!) {
@@ -34,6 +35,8 @@ export const MarketStoreScreen = () => {
   const products = data?.marketplaceProducts || [];
   const [hasMore, setHasMore] = useState(true);
   const insets = useSafeAreaInsets();
+  // Reviews start as a preview above the products; "see all" lists them here.
+  const [showAllReviews, setShowAllReviews] = useState(false);
   const busy = useRef(false);
   const loadMore = useCallback(async () => {
     if (busy.current || !hasMore || products.length < PAGE_SIZE) return;
@@ -93,6 +96,8 @@ export const MarketStoreScreen = () => {
             {store.isOpen === false ? (
               <Text style={styles.closed}>La tienda está cerrada por ahora.</Text>
             ) : null}
+            <StoreReviews storeId={String(store.id)} avgRating={store.avgRating} ratingCount={store.ratingCount}
+              preview={showAllReviews ? undefined : 3} onSeeAll={() => setShowAllReviews(true)} />
             <Text style={styles.sectionTitle}>Productos</Text>
           </View>
         ) : null}

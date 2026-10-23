@@ -135,6 +135,15 @@ export const DELETE_DELIVERY_ADDRESS = gql`
   }
 `;
 
+// Reviews: their own query (see the address book note above).
+export const GET_STORE_REVIEWS = gql`
+  query MarketplaceStoreReviews($storeId: ID!, $limit: Int, $offset: Int) {
+    marketplaceStoreReviews(storeId: $storeId, limit: $limit, offset: $offset) {
+      id rating comment author productTitle createdAt
+    }
+  }
+`;
+
 export const GET_REFERENCE_RATE = gql`
   query MarketplaceReferenceRate($countryCode: String!) {
     marketplaceReferenceRate(countryCode: $countryCode) { currency localPerUsd }
@@ -337,6 +346,8 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   address_not_found: 'Esa dirección ya no existe.',
   address_not_editable: 'Tu dirección de Recarga se cambia desde Recarga.',
   already_rated: 'Ya calificaste este pedido.',
+  order_not_rateable: 'Puedes calificar cuando el pedido esté completado.',
+  bad_rating: 'Elige de 1 a 5 estrellas.',
   payment_in_progress: 'Ya tienes un pago en curso para este producto. Revisa Mis compras.',
   stale_form: 'El producto cambió. Vuelve a abrirlo para editarlo.',
   price_not_confirmed: 'Compra cancelada: el precio cambió.',

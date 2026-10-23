@@ -50,6 +50,14 @@ app.conf.beat_schedule.setdefault('marketplace-escrow-keeper', {
     'schedule': crontab(minute='*/5'),
 })
 
+# Comprar moderation sweep: listings and reviews whose review task gave up
+# (a long reviewer outage) go back to the reviewer; separate from the money
+# keeper so a slow broker can never hold up releases or refunds.
+app.conf.beat_schedule.setdefault('marketplace-requeue-stuck-reviews', {
+    'task': 'marketplace.requeue_stuck_reviews',
+    'schedule': crontab(minute='*/10'),
+})
+
 app.conf.beat_schedule.setdefault('fee-ledger-summary', {
     'task': 'cusd_plus.refresh_fee_ledger_summary',
     'schedule': crontab(minute='*/10'),

@@ -137,3 +137,62 @@ def review_product(self, product_id: int, claim: str):
     except ReviewUnavailable as exc:
         logger.warning('[COMPRAR] product %s review unavailable: %s', product_id, exc)
         raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+
+@shared_task(name='marketplace.review_rating', bind=True, max_retries=5)
+def review_rating(self, rating_id: int):
+    from .moderation import ReviewUnavailable, run_rating_review
+
+    try:
+        run_rating_review(rating_id)
+    except ReviewUnavailable as exc:
+        logger.warning('[COMPRAR] review %s moderation unavailable: %s', rating_id, exc)
+        raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+
+# A moderation task that exhausted its retries (a long reviewer outage) would
+# leave its item pending for good: a listing stuck "En revisión", a review
+# never published. A periodic task of its own (never the money keeper, which a
+# slow broker must not hold up) hands them back. The interval outlasts a
+# task's whole retry chain (~31 min), and each hand-back expires at the next
+# one, so a backlog cannot stack copies of the same review.
+STUCK_REVIEW_AFTER_MIN = 60
+
+
+def enqueue_rating_review(rating_id: int) -> None:
+    """Queue a review's moderation; a broker hiccup is logged, never raised
+    (the rating is saved; the stuck-review sweep picks it up)."""
+    try:
+        review_rating.apply_async((rating_id,), expires=STUCK_REVIEW_AFTER_MIN * 60)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('[COMPRAR] could not queue review %s: %s', rating_id, exc)
+
+
+@shared_task(name='marketplace.requeue_stuck_reviews')
+def requeue_stuck_reviews_task():
+    return requeue_stuck_reviews()
+
+
+def requeue_stuck_reviews(now=None) -> dict:
+    from datetime import timedelta
+
+    from .models import OrderRating, Product
+
+    now = now or timezone.now()
+    cutoff = now - timedelta(minutes=STUCK_REVIEW_AFTER_MIN)
+    # Each hand-back is stamped, so a long outage re-queues an item every
+    # STUCK_REVIEW_AFTER_MIN, not on every keeper run.
+    products = list(Product.objects.filter(status='pending_review', deleted_at__isnull=True,
+                                           updated_at__lt=cutoff).exclude(review_claim='')
+                    .values_list('pk', 'review_claim')[:50])
+    for pk, claim in products:
+        if Product.objects.filter(pk=pk, review_claim=claim, status='pending_review',
+                                  updated_at__lt=cutoff).update(updated_at=now):
+            review_product.apply_async((pk, claim), expires=STUCK_REVIEW_AFTER_MIN * 60)
+    ratings = list(OrderRating.objects.filter(comment_status='pending', comment_queued_at__lt=cutoff)
+                   .values_list('pk', flat=True)[:50])
+    for pk in ratings:
+        if OrderRating.objects.filter(pk=pk, comment_status='pending', comment_queued_at__lt=cutoff) \
+                .update(comment_queued_at=now):
+            enqueue_rating_review(pk)
+    return {'products': len(products), 'ratings': len(ratings)}

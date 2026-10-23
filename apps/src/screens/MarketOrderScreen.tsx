@@ -72,6 +72,8 @@ export const MarketOrderScreen = () => {
   const [disputeReason, setDisputeReason] = useState('');
   const [tracking, setTracking] = useState('');
   const [rating, setRating] = useState(0);
+  const [review, setReview] = useState('');
+  const [rated, setRated] = useState<{ stars: number; text: string } | null>(null);
   const [setTrackingRef] = useMutation(SET_MARKET_ORDER_TRACKING);
   const [rate] = useMutation(RATE_MARKET_ORDER);
 
@@ -244,7 +246,7 @@ export const MarketOrderScreen = () => {
           </KitCard>
         ) : null}
 
-        {status === 'released' && !merchant && !order.rating ? (
+        {status === 'released' && !merchant && !order.rating && !rated ? (
           <KitCard icon="star" title="Califica a la tienda">
             <View style={styles.stars}>
               {[1, 2, 3, 4, 5].map((n) => (
@@ -253,11 +255,41 @@ export const MarketOrderScreen = () => {
                 </Pressable>
               ))}
             </View>
-            <KitButton label="Enviar calificación" disabled={rating === 0} onPress={async () => {
-              const res = await rate({ variables: { orderId, rating } });
-              if (!res.data?.rateMarketOrder?.success) setError(comprarError(res.data?.rateMarketOrder?.error));
-              await refetch();
-            }} />
+            <TextInput style={[styles.input, styles.textArea]} multiline maxLength={500} testID="review-text"
+              placeholder="Cuenta cómo te fue: el producto, la entrega, la atención (opcional)"
+              placeholderTextColor={colors.text.light} value={review} onChangeText={setReview} />
+            <Text style={kitText.muted}>Se publica en la tienda con tu usuario. No incluyas teléfonos ni datos personales.</Text>
+            <KitButton testID="review-submit" label={review.trim() ? 'Publicar opinión' : 'Enviar calificación'}
+              disabled={rating === 0} onPress={async () => {
+                setError(null);
+                try {
+                  const res = await rate({ variables: { orderId, rating, comment: review.trim() || null } });
+                  if (!res.data?.rateMarketOrder?.success) {
+                    setError(comprarError(res.data?.rateMarketOrder?.error));
+                    return;
+                  }
+                  setRated({ stars: rating, text: review.trim() });
+                  await refetch();
+                } catch (e: any) {
+                  setError(comprarError(e?.networkError ? 'network' : null));
+                }
+              }} />
+          </KitCard>
+        ) : null}
+
+        {status === 'released' && !merchant && (order.rating || rated) ? (
+          <KitCard icon="star" title="Tu opinión">
+            <View style={styles.stars}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <Icon key={n} name="star" size={22} color={n <= (rated?.stars ?? order.rating) ? '#F59E0B' : '#D1D5DB'} />
+              ))}
+            </View>
+            {rated?.text ? (
+              <>
+                <Text style={kitText.body}>{rated.text}</Text>
+                <Text style={kitText.muted}>¡Gracias! La publicaremos en la tienda en cuanto la revisemos.</Text>
+              </>
+            ) : <Text style={kitText.muted}>¡Gracias por calificar!</Text>}
           </KitCard>
         ) : null}
 
