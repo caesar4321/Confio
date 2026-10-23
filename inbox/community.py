@@ -1805,10 +1805,11 @@ def block_member(user, target_id) -> None:
     follows_you = CommunityFollow.objects.filter(follower_id=target_id, followed_id=user.id).exists()
     from .direct_messages import conversation_between
 
-    # Someone who wrote to you (Mensajes), or who is on a team (listed on
-    # its page), is reachable too, posts or not.
+    # Someone who wrote to you (Mensajes), who is on a team (listed on its
+    # page) or who invests (an investor profile) is reachable too, posts or not.
     in_chat = conversation_between(user.id, target_id) is not None
-    if not has_visible_content(target_id) and not follows_you and not in_chat and not in_a_team(target_id):
+    if (not has_visible_content(target_id) and not follows_you and not in_chat and not in_a_team(target_id)
+            and not has_invested(target_id)):
         raise CommunityPostError('not_found', 'No encontramos a esa persona.')
     CommunityBlock.objects.get_or_create(blocker=user, blocked_id=target_id)
     drop_follows_between(user.id, target_id)
@@ -2043,7 +2044,32 @@ def followable_member(user_id, viewer=None):
     # A member of a team is listed on its page: reachable like a poster.
     if in_a_team(user_id):
         return target
+    # Someone who invests is an investor profile (the league lists them):
+    # reachable like a poster. Their investments still follow
+    # portfolio_access (verified, not hidden, reciprocal).
+    if has_invested(user_id):
+        return target
     return None
+
+
+def has_invested(user_id) -> bool:
+    """A confirmed buy of stocks, Bitcoin, gold or other crypto on the
+    member's personal wallet, or any recorded returns day."""
+    from django.db.models.functions import Upper
+
+    from blockchain.models import SponsoredBatch
+    from users.models import Account
+
+    from .models import PortfolioDailySnapshot
+
+    if PortfolioDailySnapshot.objects.filter(user_id=user_id).exists():
+        return True
+    wallets = [w.upper() for w in Account.objects.filter(user_id=user_id, account_type='personal', deleted_at__isnull=True)
+               .exclude(bsc_address__isnull=True).exclude(bsc_address='').values_list('bsc_address', flat=True)]
+    if not wallets:
+        return False
+    return (SponsoredBatch.objects.annotate(addr=Upper('user_bsc_address'))
+            .filter(addr__in=wallets, kind__in=('stock_buy', 'crypto_buy'), status='confirmed').exists())
 
 
 def in_a_team(user_id) -> bool:

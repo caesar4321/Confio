@@ -690,3 +690,34 @@ class AllTimeTests(LeagueTests):
         self.assertTrue(TeamHistoryExclusion.objects.filter(user_id=banned.id).exists())
         league.repair_all_time_people()      # eligible again: restored
         self.assertIn(banned.id, TeamDailyReturn.objects.get(team=team, day=old).contributors)
+
+
+class InvestorReachTests(LeagueTests):
+    def test_an_investor_who_never_posted_has_a_profile(self):
+        investor, viewer, nobody = make_user(), make_user(), make_user()
+        self.assertIsNone(community.followable_member(investor.id, viewer=viewer))
+        self.snap(investor, self.DAY, '0.01')
+        self.assertEqual(community.followable_member(investor.id, viewer=viewer).id, investor.id)
+        # Their investments still follow the reciprocal rules.
+        self.assertEqual(community.portfolio_access(investor, viewer), community.ACCESS_OPEN)
+        SetCommunityPortfolioHidden.mutate(None, MockInfo(viewer), hidden=True)
+        self.assertEqual(community.portfolio_access(investor, viewer), community.ACCESS_VIEWER_HIDDEN)
+        # Someone who never invested nor posted stays unreachable by id.
+        self.assertIsNone(community.followable_member(nobody.id, viewer=investor))
+        # ...and an investor profile can be blocked, a stranger's id can't.
+        other = make_user()
+        community.block_member(other, investor.id)
+        with self.assertRaises(community.CommunityPostError):
+            community.block_member(other, nobody.id)
+
+    def test_a_confirmed_buy_counts_as_invested(self):
+        from blockchain.models import SponsoredBatch
+        from users.models import Account
+
+        investor = make_user()
+        Account.objects.filter(user=investor, account_type='personal').update(bsc_address=f'0x{investor.id:040x}')
+        fields = {f.name for f in SponsoredBatch._meta.get_fields()}
+        self.assertIn('user_bsc_address', fields)
+        with patch('blockchain.models.SponsoredBatch.objects') as manager:
+            manager.annotate.return_value.filter.return_value.exists.return_value = True
+            self.assertTrue(community.has_invested(investor.id))

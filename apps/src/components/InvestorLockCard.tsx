@@ -36,11 +36,11 @@ export function InvestorLockCard({ access, busy, onPublish, onVerify }: Props) {
   return (
     <View style={styles.card}>
       <Icon name="lock" size={20} color={colors.primaryDeep} />
-      <Text style={styles.title}>Los portafolios son recíprocos</Text>
+      <Text style={styles.title}>{unverified ? 'Verifica tu identidad para ver inversiones' : 'Ocultaste tu perfil de inversor'}</Text>
       <Text style={styles.body}>
         {unverified
-          ? 'Verifica tu identidad y muestra tu portafolio para ver la rentabilidad y las posiciones de otros inversores.'
-          : 'Haz público tu portafolio para ver la rentabilidad y las posiciones de otros inversores.'}
+          ? 'Solo los inversores verificados ven la rentabilidad y las posiciones de otros. Los portafolios son recíprocos.'
+          : 'Por eso no puedes ver la rentabilidad ni las posiciones de otros inversores: los portafolios son recíprocos. Hazlo público para verlas.'}
       </Text>
       <Pressable
         onPress={unverified ? onVerify : onPublish}

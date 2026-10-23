@@ -229,23 +229,28 @@ export const CommunityMemberProfileScreen = () => {
     void loadPortfolio();
   }, [loadPortfolio]);
 
-  const toggleHidden = async (nextHidden: boolean, teamConfirmed = false) => {
+  const toggleHidden = async (nextHidden: boolean, confirmed = false) => {
     if (!portfolio || !portfolio.isSelf || hiddenBusy) return;
-    // Teams are made of public portfolios: hiding yours takes you out of yours.
-    if (nextHidden && !teamConfirmed) {
-      // undefined = unknown (failed lookup): warn anyway; an older server has no teams.
+    // Portfolios are reciprocal: always say what hiding costs before doing it.
+    if (nextHidden && !confirmed) {
+      // undefined = unknown (failed lookup): mention teams anyway; an older server has no teams.
       const team = await client.query({ query: GET_MY_TEAM, fetchPolicy: 'network-only' })
         .then(({ data }) => (data?.myTeam ?? null) as { name: string } | null)
         .catch((e) => (isSchemaMismatch(e) ? null : undefined));
-      if (team !== null) {
-        Alert.alert('Saldrás de tu equipo', team
-          ? `Si ocultas tu portafolio, saldrás de ${team.name} y dejarás de ver la Liga.`
-          : 'Si ocultas tu portafolio y estás en un equipo, saldrás de él y dejarás de ver la Liga.', [
+      const teamLine = team
+        ? `\n\nTambién saldrás de ${team.name} y dejarás de aparecer en la Liga.`
+        : team === undefined ? '\n\nSi estás en un equipo, saldrás de él y dejarás de aparecer en la Liga.' : '';
+      Alert.alert(
+        '¿Ocultar tu perfil de inversor?',
+        'Nadie verá tu rentabilidad ni tus posiciones, y tú tampoco podrás ver las de otros inversores: '
+          + 'los portafolios son recíprocos.' + teamLine
+          + '\n\nPodrás volver a hacerlo público cuando quieras.',
+        [
           { text: 'Cancelar', style: 'cancel' },
-          { text: 'Ocultar y salir', style: 'destructive', onPress: () => { void toggleHidden(true, true); } },
-        ]);
-        return;
-      }
+          { text: 'Ocultar', style: 'destructive', onPress: () => { void toggleHidden(true, true); } },
+        ],
+      );
+      return;
     }
     const forUser = userId;
     const previous = portfolio.hidden;
