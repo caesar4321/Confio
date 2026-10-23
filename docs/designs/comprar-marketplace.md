@@ -212,8 +212,8 @@ The Yango tracking id stays off-chain (in the Order row).
 
 ### Before turning it on
 
-1. Deploy the escrow, then have the Safe call `setTokenLimits(cUSD, 300e18, 10_000e18)`.
-2. Set `CONFIO_MARKET_ESCROW_ADDRESS` and run the migrations. There is no feature flag:
+1. ✅ 2026-10-23: escrow deployed (proxy `0x2DFDC1fB…99Fd`) and cUSD enabled with no caps (Safe nonce 20).
+2. ✅ `CONFIO_MARKET_ESCROW_ADDRESS` wired, migrations run on prod (and testnet). There is no feature flag:
    only app builds with the tab reach Comprar. Per-order and open limits live
    **on-chain only**; checkout reads them from the escrow.
 3. Admin: flip La Paz `is_live` once Jason's first stores are listed. Add the partner

@@ -796,4 +796,9 @@ answer `payout_not_prepared`; the client re-prepares them.
 - Verified independently after deploy (public RPC): owner/signer/arbiter/windows as above,
   not paused, ERC-1967 slot → implementation, cUSD `tokenLimits` = 0/0 (not yet accepted).
 - Wired: server `CONFIO_MARKET_ESCROW_ADDRESS` (.env.mainnet).
-- Pending: Safe `setTokenLimits(cUSD 0x6101cC37…543F, maxOrder, maxOpen)` to accept cUSD.
+- cUSD enabled with **no caps** (Julian 2026-10-23): Safe nonce 20,
+  `setTokenLimits(0x6101cC37…543F, uint128.max, uint128.max)`, signed by KMS owners 1/3/5,
+  executed by the sponsor in block 129236353, tx
+  `0x1cfe4789b8fe5438a64d164cadf1fb0674eda963414c69c11f68f0d64cd5bf33`. SafeTxHash
+  `0x64eb0d93…5e088`. Verified: Safe nonce 21, limits = uint128.max/uint128.max, prod
+  `escrow.token_limits()` reads the same. Tightening later = another Safe tx (no release).
