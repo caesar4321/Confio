@@ -27,7 +27,9 @@ import {
   REPORT_DIRECT_MESSAGE,
   SEND_DIRECT_MESSAGE,
 } from '../apollo/mutations';
-import { GET_DIRECT_CONVERSATION, GET_DIRECT_CONVERSATION_WITH, GET_DIRECT_MESSAGES } from '../apollo/queries';
+import {
+  GET_DIRECT_CONVERSATION, GET_DIRECT_CONVERSATION_WITH, GET_DIRECT_MESSAGES, GET_DIRECT_UNREAD_SUMMARY,
+} from '../apollo/queries';
 import { notifyMemberBlocked } from '../services/communityEvents';
 import { MainStackParamList } from '../types/navigation';
 import {
@@ -72,7 +74,8 @@ export const DirectChatScreen = () => {
   const [sendMessage] = useMutation(SEND_DIRECT_MESSAGE);
   const [accept, { loading: accepting }] = useMutation(ACCEPT_DIRECT_REQUEST);
   const [remove] = useMutation(DELETE_DIRECT_CONVERSATION);
-  const [markRead] = useMutation(MARK_DIRECT_CONVERSATION_READ);
+  // The bubble's badge counts DMs: refresh it once these are read.
+  const [markRead] = useMutation(MARK_DIRECT_CONVERSATION_READ, { refetchQueries: [GET_DIRECT_UNREAD_SUMMARY] });
   const [report] = useMutation(REPORT_DIRECT_MESSAGE);
   const [blockMember] = useMutation(BLOCK_COMMUNITY_MEMBER);
 

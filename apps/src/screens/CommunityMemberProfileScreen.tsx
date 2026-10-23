@@ -597,7 +597,7 @@ export const CommunityMemberProfileScreen = () => {
         refreshKey={returnsRefresh}
       />
       {badges.length > 0 ? (
-        <Pressable style={styles.leagueBadges} onPress={() => navigation.navigate('Liga')} accessibilityRole="button">
+        <Pressable style={styles.leagueBadges} onPress={() => navigation.navigate('BottomTabs', { screen: 'Invest', params: { segment: 'liga', at: Date.now() } } as never)} accessibilityRole="button">
           {badges.map((month) => (
             <View key={month} style={styles.leagueBadge}>
               <Text style={styles.leagueBadgeText}>🏆 {championLabel(month)}</Text>
@@ -613,11 +613,11 @@ export const CommunityMemberProfileScreen = () => {
           onVerify={() => navigation.navigate('Verification' as never)}
         />
       ) : investor ? (
-        <InvestorReturnsCard key={userId} userId={userId} refreshKey={returnsRefresh} />
+        <InvestorReturnsCard key={`returns-${userId}`} userId={userId} refreshKey={returnsRefresh} />
       ) : null}
       {visiblePortfolio && !locked ? (
         <CommunityPortfolioSection
-          key={visiblePortfolio.userId}
+          key={`portfolio-${visiblePortfolio.userId}`}
           portfolio={visiblePortfolio}
           onToggleHidden={visiblePortfolio.isSelf ? (value) => void toggleHidden(value) : undefined}
           hiddenBusy={hiddenBusy}

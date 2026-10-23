@@ -26,7 +26,8 @@ import { navigationRef } from '../navigation/RootNavigation';
 import { logDoorShown, usePaidOffers } from '../services/paidOffers';
 import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
 import { MARK_MESSAGE_CHANNEL_SEEN } from '../apollo/mutations';
-import { GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
+import { GET_DIRECT_UNREAD_SUMMARY, GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
+import { DirectInboxContent } from '../components/DirectInboxContent';
 import { MessageInboxContent } from '../components/MessageInboxContent';
 import { ChannelAvatar } from '../components/MessageInboxShared';
 import {
@@ -176,13 +177,14 @@ function Bubble({ message, onAction, pet }: { message: AssistantMessage; onActio
 export default function AssistantSheet() {
   const insets = useSafeAreaInsets();
   const {
-    isOpen, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel, consumeVoiceNote,
+    isOpen, close, consumePrompt, consumePicker, consumePlus, consumeCall, consumeChannel, consumeDmFolder, consumeVoiceNote,
     consumeVoiceNoteData, openSeq, route, plan,
     setPlan, available,
     aiEnabled, bubbleAnchor, showNavNote, consumeProbe, setBoxShown,
   } = useAssistant();
   // Which chat head is open: Confio Assistant, Julian or Confío News.
   const [channel, setChannel] = useState<BoxChannel>('ia');
+  const [dmFolder, setDmFolder] = useState<'inbox' | 'requests'>('inbox');
   // False until the open request's channel is applied, so nothing acts on
   // the previous visit's channel.
   const [channelReady, setChannelReady] = useState(false);
@@ -235,6 +237,25 @@ export default function AssistantSheet() {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'ignore',
   });
+  // Mensajes (investor DMs): its own query, so an older server only loses the head.
+  const { data: dmData } = useQuery(GET_DIRECT_UNREAD_SUMMARY, {
+    skip: !isOpen,
+    fetchPolicy: 'network-only',
+    errorPolicy: 'ignore',
+  });
+  const dmSummary = dmData?.directUnreadSummary as { unreadMessages: number; requests: number } | undefined;
+  const dmUnread = (dmSummary?.unreadMessages ?? 0) + (dmSummary?.requests ?? 0);
+  const heads: BoxChannel[] = dmSummary || channel === 'mensajes' ? ['ia', 'mensajes', 'julian', 'confio'] : ['ia', 'julian', 'confio'];
+  const openChat = useCallback(
+    (conversationId: string, username: string) => {
+      close();
+      setTimeout(
+        () => (navigationRef as any).navigate('Main', { screen: 'DirectChat', params: { conversationId, username } }),
+        250,
+      );
+    },
+    [close],
+  );
   const unreadByChannel: Record<string, number> = {};
   for (const c of inboxData?.messageInbox?.channels ?? []) {
     const id = c.id === 'confio-news' ? 'confio' : c.id;
@@ -306,6 +327,7 @@ export default function AssistantSheet() {
     setAskOther(false);
     consumeProbe();
     const requested = consumeChannel();
+    setDmFolder(consumeDmFolder() ?? 'inbox');
     setChannel(requested ?? 'ia');
     setChannelReady(true);
     if (consumePicker()) {
@@ -838,7 +860,7 @@ export default function AssistantSheet() {
           style={[styles.card, { opacity: progress, transform: [{ translateY: lift }, { scale: grow }] }]}
         >
         <View style={styles.heads}>
-          {(['ia', 'julian', 'confio'] as BoxChannel[])
+          {heads
             .map((id) => (
               <Pressable
                 key={id}
@@ -847,21 +869,23 @@ export default function AssistantSheet() {
                 style={styles.head}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: channel === id }}
-                accessibilityLabel={id === 'ia' ? (aiEnabled ? 'Confio Assistant' : 'Soporte') : id === 'julian' ? 'Julian Moon' : 'Confío News'}
+                accessibilityLabel={id === 'ia' ? (aiEnabled ? 'Confio Assistant' : 'Soporte') : id === 'mensajes' ? 'Mensajes' : id === 'julian' ? 'Julian Moon' : 'Confío News'}
               >
                 <View style={[styles.headCircle, channel === id && styles.headCircleActive]}>
                   {id === 'ia' && !aiEnabled ? (
                     <ChannelAvatar channel={{ id: 'soporte' } as any} large />
+                  ) : id === 'mensajes' ? (
+                    <Icon name="message-circle" size={22} color={EMERALD_DARK} />
                   ) : id === 'ia' ? (
                     <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
                       size={36} mood={channel === 'ia' ? mood : 'idle'} animated={channel === 'ia'} />
                   ) : (
                     <ChannelAvatar channel={{ id } as any} large />
                   )}
-                  {id !== 'ia' && unreadByChannel[id] > 0 && channel !== id ? <View style={styles.headDot} /> : null}
+                  {id !== 'ia' && (id === 'mensajes' ? dmUnread : unreadByChannel[id]) > 0 && channel !== id ? <View style={styles.headDot} /> : null}
                 </View>
                 <Text style={[styles.headLabel, channel === id && styles.headLabelActive]} numberOfLines={1}>
-                  {id === 'ia' ? (aiEnabled ? petName || 'Confio Assistant' : 'Soporte') : id === 'julian' ? 'Julian' : 'News'}
+                  {id === 'ia' ? (aiEnabled ? petName || 'Confio Assistant' : 'Soporte') : id === 'mensajes' ? 'Mensajes' : id === 'julian' ? 'Julian' : 'News'}
                 </Text>
               </Pressable>
             ))}
@@ -871,7 +895,11 @@ export default function AssistantSheet() {
           </Pressable>
         </View>
 
-        {channel !== 'ia' ? (
+        {channel === 'mensajes' ? (
+          <View style={styles.channelBody}>
+            <DirectInboxContent key={dmFolder} initialFolder={dmFolder} onOpenConversation={(c) => openChat(c.id, c.other.username)} />
+          </View>
+        ) : channel !== 'ia' ? (
           <View style={styles.channelBody}>
             <MessageInboxContent embeddedChannelId={channel} onExit={() => setChannel('ia')} onOpenPost={openPost} />
           </View>

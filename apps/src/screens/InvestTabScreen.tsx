@@ -6,13 +6,15 @@ import { colors } from '../config/theme';
 import { InvestScreen } from './InvestScreen';
 import { DiscoverScreen } from './DiscoverScreen';
 import { CommunityPreviewCard } from '../components/CommunityPreviewCard';
+import { LigaContent } from '../components/LigaContent';
 import { markCommunitySeen, refreshCommunityPeek, useCommunityPeek } from '../services/communityPeek';
 
-export type InvestSegment = 'invest' | 'community';
+export type InvestSegment = 'invest' | 'community' | 'liga';
 
 const SEGMENTS: { key: InvestSegment; label: string }[] = [
   { key: 'invest', label: 'Invertir' },
   { key: 'community', label: 'Comunidad' },
+  { key: 'liga', label: 'Liga' },
 ];
 
 /**
@@ -27,16 +29,18 @@ const SEGMENTS: { key: InvestSegment; label: string }[] = [
  * Invertir shows the latest member posts, the segment carries a "Nuevo" /
  * count pill, and the Invertir tab icon a badge (BottomTabNavigator).
  */
-export const InvestTabScreen = ({ route }: { route?: { params?: { segment?: InvestSegment } } }) => {
+export const InvestTabScreen = ({ route }: { route?: { params?: { segment?: InvestSegment; at?: number } } }) => {
   const navigation = useNavigation<any>();
   const [segment, setSegment] = useState<InvestSegment>(route?.params?.segment ?? 'invest');
   const requested = route?.params?.segment;
+  // A link may ask again for the segment it asked for before (the user left it meanwhile): `at` tells them apart.
+  const requestedAt = route?.params?.at;
   const peek = useCommunityPeek();
   const isFocused = useIsFocused();
   // A deep link (or the assistant) can ask for a segment while mounted.
   React.useEffect(() => {
     if (requested) setSegment(requested);
-  }, [requested]);
+  }, [requested, requestedAt]);
   useFocusEffect(useCallback(() => { void refreshCommunityPeek(); }, []));
   // Looking at Comunidad is what clears the badges — only while it is
   // actually on screen (this tab focused AND the segment selected).
@@ -83,6 +87,10 @@ export const InvestTabScreen = ({ route }: { route?: { params?: { segment?: Inve
       </View>
       <View style={[styles.pane, segment !== 'community' && styles.hidden]}>
         <DiscoverScreen sections={['community']} />
+      </View>
+      {/* Liga Confío: teams and investors ranked by % return (Fomo's clans, our way). */}
+      <View style={[styles.pane, segment !== 'liga' && styles.hidden]}>
+        <LigaContent active={segment === 'liga'} />
       </View>
     </View>
   );

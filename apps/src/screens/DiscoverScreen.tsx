@@ -15,8 +15,6 @@ import {
   GET_DISCOVER_FEED,
   GET_DISCOVER_FEED_CARDS,
   GET_DISCOVER_FEED_SECTIONED,
-  GET_DIRECT_UNREAD_SUMMARY,
-  GET_MY_TEAM,
 } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
@@ -86,22 +84,6 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
   const showPrompt = canCompose && composeSection;
   // Mis publicaciones travels with the composer card (Para ti and Comunidad).
   const showMyPosts = communitySupported && composeSection;
-  // Mensajes: shown once the server answers (an older one has no chat).
-  const { data: dmData, refetch: refetchDm } = useQuery(GET_DIRECT_UNREAD_SUMMARY, {
-    skip: !communitySupported,
-    fetchPolicy: 'cache-and-network',
-  });
-  const dmSummary = dmData?.directUnreadSummary as { unreadMessages: number; requests: number } | undefined;
-  const showMessages = Boolean(dmSummary) && composeSection;
-  // Liga Confío: shown once the server answers its own query (an older one has no teams).
-  const { data: ligaData } = useQuery(GET_MY_TEAM, { skip: !communitySupported, fetchPolicy: 'cache-and-network' });
-  const showLiga = ligaData !== undefined && composeSection;
-  const dmBadge = (dmSummary?.unreadMessages ?? 0) + (dmSummary?.requests ?? 0);
-  useFocusEffect(
-    useCallback(() => {
-      if (communitySupported) refetchDm().catch(() => {});
-    }, [communitySupported, refetchDm]),
-  );
 
   // Stepping down is not a failure: the next rung is already on its way.
   const steppingDown = tier < LAST_TIER && isSchemaMismatch(feedError, OLD_SECTIONS_SERVER);
@@ -297,48 +279,22 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
         commentCounts={commentCounts}
         postExtras={postExtras}
         onOpenAuthor={(userId) => navigation.navigate('CommunityMemberProfile', { userId })}
-        sectionAccessory={showPrompt || showMyPosts || showMessages || showLiga ? (
+        sectionAccessory={showPrompt || showMyPosts ? (
           <>
             {showPrompt ? (
               <CommunityComposePrompt onPress={() => navigation.navigate('CommunityCompose')} />
             ) : null}
-            <View style={styles.links}>
-              {showMyPosts ? (
-                <Pressable
-                  style={styles.myPosts}
-                  onPress={() => navigation.navigate('MyCommunityPosts')}
-                  accessibilityRole="button"
-                >
-                  <Icon name="user" size={14} color={colors.primaryDark} />
-                  <Text style={styles.myPostsText}>Mis publicaciones</Text>
-                  <Icon name="chevron-right" size={14} color={colors.primaryDark} />
-                </Pressable>
-              ) : null}
-              {showMessages ? (
-                <Pressable
-                  style={styles.myPosts}
-                  onPress={() => navigation.navigate('DirectInbox')}
-                  accessibilityRole="button"
-                  accessibilityLabel={dmBadge > 0 ? `Mensajes, ${dmBadge} sin leer` : 'Mensajes'}
-                >
-                  <Icon name="message-circle" size={14} color={colors.primaryDark} />
-                  <Text style={styles.myPostsText}>Mensajes</Text>
-                  {dmBadge > 0 ? (
-                    <View style={styles.dmBadge}><Text style={styles.dmBadgeText}>{dmBadge > 99 ? '99+' : dmBadge}</Text></View>
-                  ) : null}
-                </Pressable>
-              ) : null}
-              {showLiga ? (
-                <Pressable
-                  style={styles.myPosts}
-                  onPress={() => navigation.navigate('Liga')}
-                  accessibilityRole="button"
-                >
-                  <Icon name="award" size={14} color={colors.primaryDark} />
-                  <Text style={styles.myPostsText}>Liga y equipos</Text>
-                </Pressable>
-              ) : null}
-            </View>
+            {showMyPosts ? (
+              <Pressable
+                style={styles.myPosts}
+                onPress={() => navigation.navigate('MyCommunityPosts')}
+                accessibilityRole="button"
+              >
+                <Icon name="user" size={14} color={colors.primaryDark} />
+                <Text style={styles.myPostsText}>Mis publicaciones</Text>
+                <Icon name="chevron-right" size={14} color={colors.primaryDark} />
+              </Pressable>
+            ) : null}
           </>
         ) : null}
         onOpenItem={(item: DiscoverItem) => {
@@ -363,25 +319,6 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 12,
     paddingVertical: 4,
-  },
-  links: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: 18,
-  },
-  dmBadge: {
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 5,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primaryDark,
-  },
-  dmBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.white,
   },
   myPostsText: {
     fontSize: 14,

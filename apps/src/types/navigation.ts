@@ -21,7 +21,7 @@ export type AuthStackParamList = {
 // Bottom Tab Navigator - Main app tabs
 export type BottomTabParamList = {
   Home: undefined;
-  Invest: { segment?: 'invest' | 'community' } | undefined;
+  Invest: { segment?: 'invest' | 'community' | 'liga'; at?: number } | undefined;
   Comprar: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;

@@ -19,7 +19,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../components/common/AppText';
-import { GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
+import { GET_DIRECT_UNREAD_SUMMARY, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { GET_ASSISTANT_THREAD, UPDATE_ASSISTANT_PROFILE, GET_ASSISTANT_SUGGESTIONS, type AssistantSuggestion } from './api';
@@ -76,6 +76,13 @@ export default function AssistantBubble() {
     nextFetchPolicy: 'cache-first',
     skip: !enabled,
   });
+  // Mensajes (investor DMs) count on the same badge: its own query, an older server has none.
+  const { data: dmData, refetch: refetchDm } = useQuery(GET_DIRECT_UNREAD_SUMMARY, {
+    fetchPolicy: 'network-only',
+    nextFetchPolicy: 'cache-first',
+    errorPolicy: 'ignore',
+    skip: !enabled,
+  });
   // Profile only (mascot, color, position). Fails quietly on servers without Confio Assistant.
   const { data: threadData, loading: threadLoading } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: 1, contextKey },
@@ -125,7 +132,8 @@ export default function AssistantBubble() {
   // The support chat exists (server knows it) / is answered by Confio Assistant.
   const chatAvailable = !!threadData?.assistantThread;
   const iaAvailable = !!threadData?.assistantThread?.enabled;
-  const unread = unreadData?.messageInboxUnreadCount || 0;
+  const dmUnread = (dmData?.directUnreadSummary?.unreadMessages || 0) + (dmData?.directUnreadSummary?.requests || 0);
+  const unread = (unreadData?.messageInboxUnreadCount || 0) + dmUnread;
 
   useEffect(() => {
     setAvailable(chatAvailable);
@@ -144,8 +152,10 @@ export default function AssistantBubble() {
   useEffect(() => {
     if (enabled) {
       void refetchUnread();
+      refetchDm().catch(() => {});
     }
-  }, [enabled, accountContextTick, contextKey, refetchUnread, isOpen]);
+    // route: moving between screens re-reads the DM count (a chat just read, a new message).
+  }, [enabled, accountContextTick, contextKey, refetchUnread, refetchDm, isOpen, route]);
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardUp(true));

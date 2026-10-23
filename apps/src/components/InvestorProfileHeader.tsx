@@ -45,6 +45,7 @@ type Props = {
   onEditBio: () => void;
   onOpenMutual?: (userId: string) => void;
   onMessage?: () => void;
+  // Only when messaging isn't open to this viewer: the one button sends a tip (its note is the message).
   onTip?: () => void;
   refreshKey?: number;
 };
@@ -134,9 +135,10 @@ export function InvestorProfileHeader({
         {self ? null : (
           <View style={styles.actions}>
             {investor?.canMessage && onMessage ? (
-              <RoundButton icon="send" label="Enviar mensaje" onPress={onMessage} />
+              <RoundButton icon="send" label={investor.canTip ? 'Enviar mensaje o propina' : 'Enviar mensaje'} onPress={onMessage} />
+            ) : investor?.canTip && onTip ? (
+              <RoundButton icon="gift" label="Enviar propina" onPress={onTip} />
             ) : null}
-            {investor?.canTip && onTip ? <RoundButton icon="gift" label="Enviar propina" onPress={onTip} /> : null}
             {member.isFollowing ? (
               <RoundButton
                 icon={member.notify ? 'bell' : 'bell-off'}

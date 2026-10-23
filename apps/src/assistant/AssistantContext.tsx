@@ -4,7 +4,8 @@ import { navigationRef } from '../navigation/RootNavigation';
 import type { AssistantPlan } from './api';
 import type { VoiceNote } from './voiceNote';
 
-export type BoxChannel = 'ia' | 'julian' | 'confio';
+// 'mensajes': direct messages between investors (Comunidad).
+export type BoxChannel = 'ia' | 'julian' | 'confio' | 'mensajes';
 
 type OpenOptions = {
   prompt?: string;
@@ -14,6 +15,8 @@ type OpenOptions = {
   plus?: boolean;
   call?: boolean;
   channel?: BoxChannel;
+  // With channel 'mensajes': which list to show.
+  dmFolder?: 'inbox' | 'requests';
   // "Confío" was heard: open on Confio Assistant and start recording a voice note.
   voiceNote?: boolean;
   // Hold-to-talk on the bubble already recorded this note (under accountId):
@@ -36,6 +39,7 @@ type AssistantState = {
   consumePlus: () => boolean;
   consumeCall: () => boolean;
   consumeChannel: () => BoxChannel | undefined;
+  consumeDmFolder: () => 'inbox' | 'requests' | undefined;
   consumeVoiceNote: () => boolean;
   consumeVoiceNoteData: () => (VoiceNote & { accountId?: string }) | undefined;
   // Someone (hold-to-talk) owns the microphone: the wake word pauses.
@@ -144,6 +148,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     consume('channel');
     return value;
   }, [request, consume]);
+  const consumeDmFolder = useCallback(() => {
+    const value = request.dmFolder;
+    consume('dmFolder');
+    return value;
+  }, [request, consume]);
   const consumeVoiceNote = useCallback(() => {
     const value = !!request.voiceNote;
     consume('voiceNote');
@@ -158,11 +167,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
-      consumeVoiceNote, consumeVoiceNoteData, available, setAvailable, aiEnabled, setAiEnabled, plan, setPlan, inCall, setInCall,
+      consumeDmFolder, consumeVoiceNote, consumeVoiceNoteData, available, setAvailable, aiEnabled, setAiEnabled, plan, setPlan, inCall, setInCall,
       bubbleAnchor, setBubbleAnchor, micBusy, setMicBusy, openSeq, navNote, showNavNote, boxShown, setBoxShown,
     }),
     [isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
-      consumeVoiceNote, consumeVoiceNoteData, available,
+      consumeDmFolder, consumeVoiceNote, consumeVoiceNoteData, available,
       aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote, boxShown],
   );
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
