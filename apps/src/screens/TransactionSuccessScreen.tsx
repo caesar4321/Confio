@@ -319,7 +319,15 @@ export const TransactionSuccessScreen = () => {
     }
   };
 
+  // A Propina came from a chat: done goes back there (the gift bubble lands in it).
+  const tipChat = (transactionData as any).tip as { userId: string; username: string; fromChat?: boolean } | undefined;
   const handleGoHome = () => {
+    // The tip screen was opened on top of the chat (or profile) and replaced
+    // by this one: going back lands exactly there, never a second copy.
+    if (tipChat && (navigation as any).canGoBack()) {
+      (navigation as any).goBack();
+      return;
+    }
     (navigation as any).navigate('BottomTabs', { screen: 'Home' });
   };
 
@@ -383,10 +391,12 @@ export const TransactionSuccessScreen = () => {
         <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
           <View style={{ backgroundColor: colors.background }}>
             <SuccessHero
-              title={transactionData.type === 'sent' ? '¡Enviado con éxito!' :
+              title={tipChat ? '¡Propina enviada!' : transactionData.type === 'sent' ? '¡Enviado con éxito!' :
                 transactionData.type === 'payment' ? '¡Pago realizado!' : '¡Recibido con éxito!'}
               amount={formatAmount(String(displayedAmount), transactionData.currency)}
-              hint={transactionData.type === 'sent'
+              hint={tipChat
+                ? `Para ${transactionData.recipient}. Aparecerá en su chat con tu nota.`
+                : transactionData.type === 'sent'
                 ? `Enviado a ${transactionData.recipient}`
                 : transactionData.type === 'payment'
                   ? `Pagado a ${transactionData.merchant}`
@@ -561,7 +571,7 @@ export const TransactionSuccessScreen = () => {
       {/* Listo pinned outside the scroll: visible on small phones (design 2F). */}
       <SafeAreaView edges={['bottom']} style={styles.ctaPinned}>
         <TouchableOpacity style={styles.cta} onPress={handleGoHome} activeOpacity={0.85} accessibilityRole="button">
-          <Text style={styles.ctaText}>Listo</Text>
+          <Text style={styles.ctaText}>{tipChat?.fromChat ? 'Volver al chat' : 'Listo'}</Text>
         </TouchableOpacity>
       </SafeAreaView>
 

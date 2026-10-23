@@ -76,7 +76,7 @@ export type MainStackParamList = {
   CommunityMemberProfile: { userId: string };
   DirectInbox: { folder?: 'inbox' | 'requests' } | undefined;
   DirectChat: { conversationId?: string; userId?: string; username?: string };
-  SendTip: { userId: string; username: string };
+  SendTip: { userId: string; username: string; fromChat?: boolean };
   League: { kind?: 'teams' | 'investors' } | undefined;
   Team: { teamId: string; inviteToken?: string };
   TeamInvite: { teamId: string; teamName: string };

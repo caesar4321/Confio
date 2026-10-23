@@ -101,6 +101,8 @@ export const SendTipScreen = () => {
           memo: '',
           // The tip's own key: the server refuses it for any other payment.
           idempotencyKey: result.sendKey,
+          // Done goes back to the chat, where the gift bubble lands.
+          tip: { userId, username, fromChat: Boolean(route.params.fromChat) },
         },
       });
     } catch {

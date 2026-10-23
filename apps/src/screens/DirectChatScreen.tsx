@@ -17,6 +17,7 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { Text } from '../components/common/AppText';
 import { BylineAvatar } from '../components/PostByline';
+import { TipButton } from '../components/TipButton';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import {
@@ -371,11 +372,26 @@ export const DirectChatScreen = () => {
           ]}
         >
           {tip ? (
-            <Text style={[styles.tipTitle, mine && styles.textMine]}>
-              {`🎁 ${mine ? 'Enviaste' : 'Te envió'} una propina${tipLabel ? ` de ${tipLabel}` : ''}`}
-            </Text>
+            // A gift card, same warm colors on both sides: dark text on gold, always readable.
+            <View accessibilityLabel={`${mine ? 'Enviaste' : 'Te envió'} una propina${tipLabel ? ` de ${tipLabel}` : ''}`}>
+              <View style={styles.tipHead}>
+                <View style={styles.tipBadge}><Icon name="gift" size={14} color="#FFFFFF" /></View>
+                <Text style={styles.tipKicker}>{mine ? 'Enviaste una propina' : 'Te envió una propina'}</Text>
+              </View>
+              {tipLabel ? <Text style={styles.tipAmount}>{tipLabel}</Text> : null}
+            </View>
           ) : null}
-          {item.body ? <Text style={[styles.body, mine && !tip && styles.textMine]}>{item.body}</Text> : null}
+          {item.body ? (
+            <Text style={[styles.body, tip ? styles.tipNote : mine && styles.textMine]}>{item.body}</Text>
+          ) : null}
+          {tip ? (
+            // Only a real, confirmed payment renders this card (the server
+            // creates tip messages; nobody can type one), and it says so.
+            <View style={styles.tipProof}>
+              <Icon name="check-circle" size={12} color="#047857" />
+              <Text style={styles.tipProofText}>Pago confirmado en Confío</Text>
+            </View>
+          ) : null}
         </View>
         <Text style={[styles.meta, mine && styles.metaMine]}>
           {item.status === 'sending' || item.status === 'pending'
@@ -473,15 +489,7 @@ export const DirectChatScreen = () => {
         ) : !unavailable ? (
           <View style={styles.composer}>
             {otherId ? (
-              <Pressable
-                onPress={() => navigation.navigate('SendTip', { userId: otherId, username: otherName })}
-                style={styles.giftButton}
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityLabel="Enviar propina"
-              >
-                <Icon name="gift" size={20} color={colors.primaryDeep} />
-              </Pressable>
+              <TipButton onPress={() => navigation.navigate('SendTip', { userId: otherId, username: otherName, fromChat: true })} />
             ) : null}
             <TextInput
               value={draft}
@@ -527,11 +535,21 @@ const styles = StyleSheet.create({
   bubble: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18 },
   bubbleMine: { backgroundColor: colors.dark, borderBottomRightRadius: 6 },
   bubbleTheirs: { backgroundColor: colors.background, borderBottomLeftRadius: 6, borderWidth: 1, borderColor: colors.border },
-  bubbleTip: { backgroundColor: colors.primaryLight, borderWidth: 0 },
+  bubbleTip: {
+    minWidth: 180, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#FEF3C7',
+    borderWidth: 1, borderColor: '#FCD34D',
+  },
+  tipHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tipBadge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B' },
+  tipKicker: { fontSize: 13, fontWeight: '700', color: '#92400E' },
+  tipAmount: { marginTop: 6, fontSize: 26, fontWeight: '800', color: '#78350F' },
+  tipNote: { marginTop: 8, color: '#451A03' },
+  tipProof: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10, paddingTop: 8,
+    borderTopWidth: 1, borderTopColor: '#FCD34D' },
+  tipProofText: { fontSize: 11, fontWeight: '600', color: '#047857' },
   bubblePending: { opacity: 0.6 },
   body: { fontSize: 15, lineHeight: 21, color: colors.dark },
   textMine: { color: colors.white },
-  tipTitle: { fontSize: 14, fontWeight: '700', color: colors.primaryDeep, marginBottom: 2 },
   meta: { marginTop: 2, marginHorizontal: 6, fontSize: 11, color: colors.textSecondary },
   metaMine: { textAlign: 'right' },
   retry: { marginHorizontal: 6, fontSize: 12, fontWeight: '700', color: colors.primaryDeep },
@@ -573,7 +591,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.dark,
   },
-  giftButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   sendButton: {
     width: 40,
     height: 40,
