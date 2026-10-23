@@ -753,6 +753,9 @@ class RequestMarketPhotoUpload(graphene.Mutation):
             return RequestMarketPhotoUpload(success=False, error=exc.code)
         if store is None:
             return RequestMarketPhotoUpload(success=False, error='no_store')
+        # iOS's image picker labels JPEGs "image/jpg"; the presigned POST then
+        # pins the canonical type, which is what S3 stores.
+        content_type = {'image/jpg': 'image/jpeg'}.get((content_type or '').lower(), content_type)
         if content_type not in ALLOWED_IMAGE_TYPES:
             return RequestMarketPhotoUpload(success=False, error='bad_image_type')
         if not take_upload_ticket(user, 'marketplace-photo'):

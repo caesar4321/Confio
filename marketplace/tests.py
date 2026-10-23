@@ -932,3 +932,27 @@ class ReferenceResilienceTests(SimpleTestCase):
             self.assertEqual(pricing.reference_local(Decimal('10'), 'BO'), (Decimal('69.60'), 'BOB'))
         with mock.patch.object(pricing, 'local_per_usd', side_effect=RuntimeError('anything')):
             self.assertIsNone(pricing.reference_local(Decimal('10'), 'BO'))
+
+
+@override_settings(**ENABLED)
+class PhotoUploadTypeTests(MarketTestBase):
+    def request(self, content_type):
+        from .schema import RequestMarketPhotoUpload
+        info = SimpleNamespace(context=SimpleNamespace(user=self.seller))
+        presign = mock.Mock(return_value={'url': 'https://s3', 'key': 'k', 'method': 'POST',
+                                          'fields': {}, 'expires_in': 600})
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL), \
+                mock.patch('inbox.community.take_upload_ticket', return_value=True), \
+                mock.patch('security.s3_utils.generate_presigned_post', presign):
+            return RequestMarketPhotoUpload.mutate.__wrapped__(None, info, content_type=content_type), presign
+
+    def test_ios_image_jpg_label_is_accepted_as_jpeg(self):
+        result, presign = self.request('image/jpg')
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(presign.call_args.kwargs['content_type'], 'image/jpeg')
+        self.assertTrue(presign.call_args.kwargs['key'].endswith('.jpg'))
+
+    def test_unsupported_types_are_still_refused(self):
+        result, presign = self.request('image/gif')
+        self.assertEqual(result.error, 'bad_image_type')
+        presign.assert_not_called()

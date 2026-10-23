@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { launchImageLibrary } from 'react-native-image-picker';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,8 +10,12 @@ import { colors } from '../config/theme';
 import { GET_MY_MARKET_STORE, GET_REFERENCE_RATE, SAVE_MARKET_PRODUCT, comprarError, uploadMarketPhoto } from '../services/comprar';
 import { formatFeeBps, formatLocalPrice } from '../utils/comprarFormat';
 import { CategoryPicker } from '../components/comprar/CategoryPicker';
+import { pickFromLibrary } from '../services/systemPicker';
 
 const MAX_PHOTOS = 4;
+// Camera originals at full size can pass the 5 MB upload cap; this keeps them
+// well under it and still sharp on a phone screen.
+const PHOTO_MAX_SIDE = 1600;
 
 type Photo = { uri: string; key?: string; uploading?: boolean };
 
@@ -42,6 +45,7 @@ export const MarketProductEditScreen = () => {
   const [stock, setStock] = useState('1');
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [seeded, setSeeded] = useState(false);
   // The stock the form loaded: the server applies the seller's change as a
   // delta from it, so units reserved meanwhile stay reserved.
@@ -62,7 +66,19 @@ export const MarketProductEditScreen = () => {
   }, [existing, seeded]);
 
   const addPhoto = async () => {
-    const res = await launchImageLibrary({ mediaType: 'photo', selectionLimit: MAX_PHOTOS - photos.length, quality: 0.8 });
+    setPhotoError(null);
+    // Through the picker guard: a slow pick must not trip the resume lock,
+    // whose unlock lands on Home and throws away this form mid-upload.
+    const res = await pickFromLibrary({
+      mediaType: 'photo', selectionLimit: MAX_PHOTOS - photos.length, quality: 0.8,
+      maxWidth: PHOTO_MAX_SIDE, maxHeight: PHOTO_MAX_SIDE,
+    });
+    if (res.errorCode) {
+      setPhotoError(res.errorCode === 'permission'
+        ? 'Permite el acceso a tus fotos en Ajustes para agregar fotos.'
+        : 'No pudimos abrir tus fotos. Inténtalo de nuevo.');
+      return;
+    }
     for (const asset of res.assets || []) {
       if (!asset.uri) continue;
       const type = asset.type || 'image/jpeg';
@@ -73,7 +89,7 @@ export const MarketProductEditScreen = () => {
         setPhotos((prev) => prev.map((p) => (p === placeholder ? { uri: asset.uri as string, key } : p)));
       } catch (e: any) {
         setPhotos((prev) => prev.filter((p) => p !== placeholder));
-        setError(comprarError(e?.message));
+        setPhotoError(comprarError(e?.message));
       }
     }
   };
@@ -85,13 +101,19 @@ export const MarketProductEditScreen = () => {
 
   const submit = async () => {
     setError(null);
-    const res = await save({ variables: {
-      productId: productId || null, title: title.trim(), description: description.trim(), category,
-      priceUsd: price, stock: Number(stock), photoKeys: newKeys.length ? newKeys : null,
-      expectedStock: productId ? loadedStock : null,
-      expectedStockRevision: productId ? loadedRevision : null,
-    } });
-    const r = res.data?.saveMarketProduct;
+    let r: any;
+    try {
+      const res = await save({ variables: {
+        productId: productId || null, title: title.trim(), description: description.trim(), category,
+        priceUsd: price, stock: Number(stock), photoKeys: newKeys.length ? newKeys : null,
+        expectedStock: productId ? loadedStock : null,
+        expectedStockRevision: productId ? loadedRevision : null,
+      } });
+      r = res.data?.saveMarketProduct;
+    } catch (e: any) {
+      setError(comprarError(e?.networkError ? 'network' : null));
+      return;
+    }
     if (!r?.success) {
       setError(comprarError(r?.error));
       return;
@@ -119,12 +141,13 @@ export const MarketProductEditScreen = () => {
               </View>
             ))}
             {photos.length < MAX_PHOTOS && (
-              <Pressable style={[styles.photo, styles.addPhoto]} onPress={() => { void addPhoto(); }}>
+              <Pressable testID="product-add-photo" style={[styles.photo, styles.addPhoto]} onPress={() => { void addPhoto(); }}>
                 <Icon name="camera" size={22} color={colors.text.secondary} />
                 <Text style={styles.addPhotoText}>{photos.length || !existing ? 'Agregar' : 'Cambiar'}</Text>
               </Pressable>
             )}
           </ScrollView>
+          {photoError ? <Text style={styles.error}>{photoError}</Text> : null}
           <Text style={styles.hint}>Muestra el producto real. No incluyas teléfonos, redes sociales ni QR de pago.</Text>
 
           <TextInput style={styles.input} placeholder="Título" placeholderTextColor={colors.text.light}
@@ -164,10 +187,11 @@ export const MarketProductEditScreen = () => {
               (comisión {formatFeeBps(data.marketplaceFeeBps)}).
             </Text>
           ) : null}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
         </ScrollView>
         <View style={styles.footer}>
-          <Pressable style={[styles.primary, (!valid || saving || uploading) && styles.disabled]}
+          {/* Next to the button, not at the end of a long form, so it is seen. */}
+          {error ? <Text style={[styles.error, { marginBottom: 8 }]}>{error}</Text> : null}
+          <Pressable testID="product-submit" style={[styles.primary, (!valid || saving || uploading) && styles.disabled]}
             disabled={!valid || saving || uploading} onPress={() => { void submit(); }}>
             {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>Enviar a revisión</Text>}
           </Pressable>

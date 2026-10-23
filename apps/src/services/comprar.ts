@@ -293,6 +293,11 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   photo_required: 'Agrega al menos una foto del producto.',
   bad_photo: 'Una de las fotos no es válida. Vuelve a subirla.',
   too_many_uploads: 'Demasiadas subidas seguidas. Espera un rato e inténtalo de nuevo.',
+  bad_image_type: 'Usa una foto JPG, PNG o WebP.',
+  upload_too_large: 'La foto es muy pesada. Elige otra o recórtala.',
+  upload_failed: 'No pudimos subir la foto. Revisa tu conexión e inténtalo de nuevo.',
+  upload_unavailable: 'No pudimos subir la foto ahora. Inténtalo en un momento.',
+  network: 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
   already_rated: 'Ya calificaste este pedido.',
   payment_in_progress: 'Ya tienes un pago en curso para este producto. Revisa Mis compras.',
   stale_form: 'El producto cambió. Vuelve a abrirlo para editarlo.',
@@ -444,8 +449,20 @@ export const runMarketAction = async (
   return signAndSubmit(orderId, action, toCalls(prep.calls), prep.intentId, extra);
 };
 
+/**
+ * The picker's MIME label, as the upload allowlist spells it. iOS
+ * (react-native-image-picker 8) labels JPEGs "image/jpg"; Android re-encodes
+ * HEIC/HEIF to JPEG when it resizes (always, at quality < 1) but keeps the
+ * HEIC label. Both are JPEG bytes.
+ */
+export const normalizeImageType = (type?: string | null): string => {
+  const t = (type || '').toLowerCase();
+  return t === 'image/jpg' || t === 'image/heic' || t === 'image/heif' || !t ? 'image/jpeg' : t;
+};
+
 /** Upload one photo through a presigned POST; returns the pending key. */
-export const uploadMarketPhoto = async (localUri: string, contentType: string): Promise<string> => {
+export const uploadMarketPhoto = async (localUri: string, pickedType: string): Promise<string> => {
+  const contentType = normalizeImageType(pickedType);
   const { apolloClient } = await import('../apollo/client');
   const res = await apolloClient.mutate({ mutation: REQUEST_MARKET_PHOTO_UPLOAD, variables: { contentType } });
   const r = res.data?.requestMarketPhotoUpload;
@@ -454,8 +471,16 @@ export const uploadMarketPhoto = async (localUri: string, contentType: string): 
   const form = new FormData();
   Object.entries(fields).forEach(([k, v]) => form.append(k, v as string));
   form.append('file', { uri: localUri, type: contentType, name: 'upload' } as any);
-  const upload = await fetch(r.upload.url, { method: 'POST', body: form });
-  if (!upload.ok) throw new Error('upload_failed');
+  let upload: Response;
+  try {
+    upload = await fetch(r.upload.url, { method: 'POST', body: form });
+  } catch {
+    throw new Error('upload_failed');
+  }
+  if (!upload.ok) {
+    const body = await upload.text().catch(() => '');
+    throw new Error(body.includes('EntityTooLarge') ? 'upload_too_large' : 'upload_failed');
+  }
   return r.upload.key as string;
 };
 
