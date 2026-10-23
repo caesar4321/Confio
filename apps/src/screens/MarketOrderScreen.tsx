@@ -365,14 +365,16 @@ export const MarketOrderScreen = () => {
 
 /**
  * The seller books the courier in their own app: Yango opens with the
- * buyer's pin as the destination (its route link), so nobody retypes an
- * address. Without Yango, the phone's maps (or app chooser) opens instead.
+ * buyer's pin as the destination (its route link; pickup = where the seller
+ * is), so nobody retypes an address. Yango's scheme is `yandexyango` (its
+ * Android manifest; `yango://` is not registered, which used to fall through
+ * to the maps fallback). Without Yango, the phone's maps or app chooser opens.
  */
 const openInYango = async (pin: Pin) => {
   const lat = pin.latitude.toFixed(6);
   const lon = pin.longitude.toFixed(6);
   try {
-    await Linking.openURL(`yango://route?end-lat=${lat}&end-lon=${lon}`);
+    await Linking.openURL(`yandexyango://route?end-lat=${lat}&end-lon=${lon}`);
   } catch {
     await openInMaps(pin);
   }

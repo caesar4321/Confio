@@ -92,7 +92,7 @@ it("the seller opens the buyer's pin straight in Yango, falling back to maps", a
   const tree = render();
   const yango = tree.root.findAll((n) => n.props.testID === 'order-open-yango' && n.props.label)[0];
   await act(async () => { yango.props.onPress(); });
-  expect(open.mock.calls[0][0]).toBe('yango://route?end-lat=-16.495500&end-lon=-68.133600');
+  expect(open.mock.calls[0][0]).toBe('yandexyango://route?end-lat=-16.495500&end-lon=-68.133600');
   expect(String(open.mock.calls[1][0])).toMatch(/geo:|maps:/); // Yango missing: the phone's maps
   open.mockRestore();
 });
