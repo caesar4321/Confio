@@ -302,9 +302,11 @@ export const MarketCheckoutScreen = () => {
             <Field icon="message-square"
               placeholder={pin && address.trim().length < 8 ? 'Referencia: color de la casa, portón, tienda de al lado' : 'Referencia (opcional)'}
               value={note} onChangeText={setNote} />
+            {/* Label first, switch last, like every other Comprar row: iOS 26's
+                wider switch draws past its 51pt box, into whatever follows it. */}
             <View style={styles.ackRow}>
-              <Switch value={saveToBook} onValueChange={setSaveToBook} testID="checkout-save-address" />
               <Text style={styles.ackText}>Guardar en mis direcciones</Text>
+              <Switch value={saveToBook} onValueChange={setSaveToBook} testID="checkout-save-address" />
             </View>
             </>)}
             {notDelivered ? (
