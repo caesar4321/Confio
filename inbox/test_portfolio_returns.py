@@ -80,6 +80,28 @@ class PriceBookTests(CommunityTestBase):
         self.assertEqual(book.close('stock', 'NVDAon', at(sun, 0), NOW), Decimal('100'))
         self.assertEqual(book.close('stock', 'NVDAon', at(mon, 0), NOW), Decimal('100'))
 
+    def test_a_settled_no_trade_gap_carries_the_last_close(self):
+        # PBRon had no weekend candles while the references traded; two days
+        # on, its own feed has moved past and the gap is still there.
+        sat, sun, mon, tue = date(2026, 10, 10), date(2026, 10, 11), date(2026, 10, 12), date(2026, 10, 13)
+        book = self.book([(at(sat, 0), Decimal('26')), (at(tue, 0), Decimal('26.4'))])
+        book._candles[('stock', 'SPYon')] = [(at(d, 0), Decimal('500')) for d in (sat, sun, mon, tue)]
+        self.assertEqual(book.close('stock', 'NVDAon', at(sun, 0), NOW), Decimal('26'))
+        self.assertEqual(book.close('stock', 'NVDAon', at(mon, 0), NOW), Decimal('26'))
+
+    def test_a_fresh_gap_in_this_symbol_is_retried(self):
+        # The 21st's candle is missing but only a day has passed: maybe late.
+        now = at(D22, 23)
+        book = self.book([(at(D20, 0), Decimal('100')), (at(D22, 0), Decimal('110'))])
+        book._candles[('stock', 'SPYon')] = [(at(d, 0), Decimal('500')) for d in (D20, D21, D22)]
+        with self.assertRaises(pr.Retry):
+            book.close('stock', 'NVDAon', at(D21, 0), now)
+
+    def test_a_gap_its_own_feed_has_not_moved_past_is_not_settled(self):
+        book = self.book([(at(date(2026, 10, 10), 0), Decimal('100'))])
+        with self.assertRaises(pr.Untrusted):
+            book.close('stock', 'NVDAon', at(date(2026, 10, 12), 0), NOW)
+
     def test_a_gap_only_in_this_symbol_is_not_a_closure(self):
         book = self.book([(at(D20, 0), Decimal('100')), (at(D22, 0), Decimal('110'))])
         book._candles[('stock', 'SPYon')] = [(at(D20, 0), Decimal('500')), (at(D21, 0), Decimal('501')),

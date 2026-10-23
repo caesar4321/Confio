@@ -23,9 +23,11 @@ A period chain-links its days, Π(1 + r) - 1, plus today's partial day at
 live prices. 24h is today's partial day alone.
 
 The close at a boundary is the last completed daily candle at or before it,
-and it is only final once the feed has moved past the boundary (a candle
-closing exactly there, or a later completed one): a delayed candle is never
-mistaken for a market closure and frozen into a proven day.
+final only when a candle closes exactly there or the gap is explained: a
+market-wide closure (the broad-market references have no candle in it
+either), or, for a stock, a gap its own feed moved past and still shows
+after SETTLED_GAP (no one traded it that day). A candle running late is
+retried, never frozen into a proven day.
 
 Trust: the ledger must explain the chain now (same rule as Tu mes,
 cusd_plus/stock_month.py) and never sell what it didn't hold at any point.
@@ -62,6 +64,8 @@ UNITS_TOLERANCE = Decimal('0.000001')
 # unknown for good (delisted, feed gap) instead of retried forever.
 PRICE_GRACE = timedelta(days=3)
 CARRY_MAX = timedelta(days=7)
+# A stock's own gap this old, with its feed past it, is a day nobody traded.
+SETTLED_GAP = timedelta(days=2)
 # A trade recorded this close before midnight may have settled after it:
 # its day comes from its block's own timestamp. Covers both in-flight
 # windows (stocks 15 min, crypto 35 min).
@@ -219,10 +223,16 @@ class PriceBook:
             if closed_at == boundary:
                 return price
             # Bitcoin & gold trade every day: a gap is never a closure. A
-            # stock's last close carries only across a market-wide closure.
+            # stock's last close carries across a market-wide closure, or
+            # across a day its own feed skipped for good: Ondo publishes no
+            # candle for a token nobody traded (PBRon on weekends while
+            # AAPLon and the references trade), and a gap its own feed has
+            # moved past and still shows after SETTLED_GAP is a no-trade
+            # day, not a candle running late.
             if (kind == 'stock' and boundary - closed_at <= CARRY_MAX
                     and any(row[0] > boundary for row in completed)
-                    and self._market_closed(symbol, closed_at, boundary, now)):
+                    and (self._market_closed(symbol, closed_at, boundary, now)
+                         or now - boundary > SETTLED_GAP)):
                 return price
         if now - boundary > PRICE_GRACE:
             raise Untrusted(PRICE_MISSING)
