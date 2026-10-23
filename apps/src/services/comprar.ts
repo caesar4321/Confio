@@ -40,7 +40,7 @@ export const ORDER_FIELDS = `
   id role status pendingAction productId productTitle productPhotoUrl quantity
   unitPriceUsd deliveryUsd amountUsd referenceLocal { amount currency } deliveryCurrency feeUsd merchantNetUsd
   deliveryCity deliveryCountry deliveryOutsideCity deliveryEstimateLocal
-  deliveryAddress deliveryPhone deliveryNote buyerDisplayName trackingReference
+  deliveryAddress deliveryLatitude deliveryLongitude deliveryPhone deliveryNote buyerDisplayName trackingReference
   shipBy releaseAt disputedAt createdAt settledAt availableActions rating lastTxHash
   store { ${STORE_FIELDS} }
 `;
@@ -104,11 +104,12 @@ export const GET_CHECKOUT_QUOTE = gql`
 
 // Address book: its own query and mutations (never folded into a shared
 // query, so an older server can only fail this, not checkout).
-const ADDRESS_FIELDS = 'id label countryCode city address phone note isDefault source editable';
+const ADDRESS_FIELDS = 'id label countryCode city address phone note isDefault source editable latitude longitude';
 
 export type DeliveryAddress = {
   id: string; label: string; countryCode: string; city: string; address: string; phone: string;
   note: string; isDefault: boolean; source: 'saved' | 'recarga'; editable: boolean;
+  latitude?: number | null; longitude?: number | null;
 };
 
 export const GET_DELIVERY_ADDRESSES = gql`
@@ -120,10 +121,10 @@ export const GET_DELIVERY_ADDRESSES = gql`
 export const SAVE_DELIVERY_ADDRESS = gql`
   mutation SaveDeliveryAddress($addressId: ID, $label: String, $countryCode: String!, $city: String!,
                                $address: String!, $phone: String!, $note: String, $makeDefault: Boolean,
-                               $markUsed: Boolean) {
+                               $markUsed: Boolean, $latitude: Float, $longitude: Float) {
     saveDeliveryAddress(addressId: $addressId, label: $label, countryCode: $countryCode, city: $city,
                         address: $address, phone: $phone, note: $note, makeDefault: $makeDefault,
-                        markUsed: $markUsed) {
+                        markUsed: $markUsed, latitude: $latitude, longitude: $longitude) {
       success error address { ${ADDRESS_FIELDS} }
     }
   }
@@ -141,6 +142,13 @@ export const GET_STORE_REVIEWS = gql`
     marketplaceStoreReviews(storeId: $storeId, limit: $limit, offset: $offset) {
       id rating comment author productTitle createdAt
     }
+  }
+`;
+
+// Where a delivery map opens when the buyer has no pin yet.
+export const GET_CITY_CENTER = gql`
+  query MarketplaceCityCenter($countryCode: String!, $city: String!) {
+    marketplaceCity(countryCode: $countryCode, city: $city) { countryCode city latitude longitude }
   }
 `;
 
@@ -253,11 +261,13 @@ export const RATE_MARKET_ORDER = gql`
 const PREPARE_ORDER = gql`
   mutation PrepareMarketOrder($productId: ID!, $quantity: Int!, $deliveryCountry: String!,
                               $deliveryCity: String!, $deliveryAddress: String!,
-                              $deliveryPhone: String!, $deliveryNote: String, $outsideCityAck: Boolean) {
+                              $deliveryPhone: String!, $deliveryNote: String, $outsideCityAck: Boolean,
+                              $deliveryLatitude: Float, $deliveryLongitude: Float) {
     prepareMarketOrder(productId: $productId, quantity: $quantity, deliveryCountry: $deliveryCountry,
                        deliveryCity: $deliveryCity, deliveryAddress: $deliveryAddress,
                        deliveryPhone: $deliveryPhone, deliveryNote: $deliveryNote,
-                       outsideCityAck: $outsideCityAck) {
+                       outsideCityAck: $outsideCityAck, deliveryLatitude: $deliveryLatitude,
+                       deliveryLongitude: $deliveryLongitude) {
       success error order { ${ORDER_FIELDS} } calls { to valueWei data } intentId
     }
   }
@@ -344,6 +354,8 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   upload_failed: 'No pudimos subir la foto. Revisa tu conexión e inténtalo de nuevo.',
   upload_unavailable: 'No pudimos subir la foto ahora. Inténtalo en un momento.',
   network: 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
+  bad_location_pin: 'La ubicación del mapa no es válida. Márcala de nuevo.',
+  pin_outside_area: 'La ubicación marcada está fuera de la zona de entrega de la tienda. Revisa el mapa o la ciudad.',
   bad_city: 'Escribe la ciudad.',
   bad_delivery_price: 'El precio de envío debe estar entre US$0 y US$100.',
   outside_delivery_price_required: 'Pon un precio de envío para otras ciudades.',
@@ -458,6 +470,9 @@ export interface CheckoutInput {
   deliveryPhone: string;
   deliveryNote?: string;
   outsideCityAck?: boolean;
+  /** The map pin; with a reference (deliveryNote) it can replace the address. */
+  deliveryLatitude?: number | null;
+  deliveryLongitude?: number | null;
 }
 
 /** Mutations get no timeout from the Apollo link; these bound the money path. */

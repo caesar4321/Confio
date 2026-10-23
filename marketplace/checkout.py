@@ -94,6 +94,77 @@ def live_city_names(country_code: str) -> list:
     return [c.city for c in rows if c.is_live or (c.delivery_area and c.delivery_area in live_areas)]
 
 
+def clean_pin(latitude, longitude):
+    """(lat, lng) as 6-decimal Decimals, None without a pin, or CheckoutError."""
+    from decimal import InvalidOperation
+
+    if latitude is None and longitude is None:
+        return None
+    try:
+        lat = Decimal(str(latitude)).quantize(Decimal('0.000001'))
+        lng = Decimal(str(longitude)).quantize(Decimal('0.000001'))
+    except (InvalidOperation, TypeError, ValueError):
+        raise CheckoutError('bad_location_pin')
+    if not (lat.is_finite() and lng.is_finite() and -90 <= lat <= 90 and -180 <= lng <= 180):
+        raise CheckoutError('bad_location_pin')
+    return lat, lng
+
+
+def check_delivery_place(address: str, note: str, pin) -> None:
+    """A courier needs a written address OR a map pin with a short reference
+    ("puerta verde frente a la tienda"): written addresses often don't exist."""
+    if len((address or '').strip()) >= 8:
+        return
+    if pin is not None and len((note or '').strip()) >= 4:
+        return
+    raise CheckoutError('delivery_address_required')
+
+
+def _km(lat1, lng1, lat2, lng2) -> float:
+    import math
+    dlat, dlng = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(a))
+
+
+# How far from its country's known cities a pin may be and still count as in
+# the country (Bolivia is ~1,500 km across; this only stops another country).
+COUNTRY_REACH_KM = 800
+
+
+def pin_in_destination(country_code: str, city: str, pin) -> bool:
+    """For "another city": a known destination city must contain the pin
+    (its radius, doubled for outskirts); otherwise the pin must at least be in
+    the store's country (near one of its known cities)."""
+    lat, lng = float(pin[0]), float(pin[1])
+    rows = [c for c in MarketplaceCity.objects.filter(country_code=(country_code or '').strip().upper())
+            if c.latitude is not None and c.longitude is not None]
+    if not rows:
+        return True
+    known = next((c for c in rows if _city_key(c.city) == _city_key(city)), None)
+    if known is not None:
+        return _km(lat, lng, float(known.latitude), float(known.longitude)) <= 2 * (known.radius_km or 40)
+    return any(_km(lat, lng, float(c.latitude), float(c.longitude)) <= COUNTRY_REACH_KM for c in rows)
+
+
+def pin_in_area(country_code: str, city: str, pin) -> bool:
+    """Whether the pin falls inside any city of `city`'s delivery area (each
+    city's center + radius). Unknown geometry never refuses."""
+    import math
+
+    cities = [c for c in area_cities(country_code, city) if c.latitude is not None and c.longitude is not None]
+    if not cities:
+        return True
+    lat, lng = float(pin[0]), float(pin[1])
+    for c in cities:
+        dlat, dlng = math.radians(lat - float(c.latitude)), math.radians(lng - float(c.longitude))
+        a = (math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat)) * math.cos(math.radians(float(c.latitude)))
+             * math.sin(dlng / 2) ** 2)
+        if 6371 * 2 * math.asin(math.sqrt(a)) <= (c.radius_km or 40):
+            return True
+    return False
+
+
 def is_outside_city(store, delivery_country: str, delivery_city: str) -> bool:
     """Outside the store's delivery AREA (not just its city name)."""
     return ((delivery_country or '').strip().upper() != store.country_code
@@ -136,7 +207,8 @@ def checkout_quote(product, quantity: int, delivery_country: str, delivery_city:
 
 def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country: str,
                   delivery_city: str, delivery_address: str, delivery_phone: str,
-                  delivery_note: str = '', outside_city_ack: bool = False):
+                  delivery_note: str = '', outside_city_ack: bool = False,
+                  delivery_latitude=None, delivery_longitude=None):
     """Create a draft Order with the server's deposit authorization. Returns
     (order, calls, intent_id_hex). Raises CheckoutError."""
     from cusd_plus import sponsor_7702
@@ -171,8 +243,8 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
         raise CheckoutError('city_not_live')
     delivery_address = (delivery_address or '').strip()
     delivery_phone = ''.join(ch for ch in (delivery_phone or '') if ch.isdigit() or ch == '+')
-    if len(delivery_address) < 8:
-        raise CheckoutError('delivery_address_required')
+    pin = clean_pin(delivery_latitude, delivery_longitude)
+    check_delivery_place(delivery_address, delivery_note, pin)
     if len(delivery_phone) < 7:
         raise CheckoutError('delivery_phone_required')
     # Another city is priced (the store's flat price, in the total) or refused
@@ -180,6 +252,14 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
     # `outside_city_ack` stays accepted for older builds and is ignored.
     terms = checkout_quote(product, quantity, delivery_country, delivery_city)
     q = terms['quote']
+    # Priced as the store's own area: the pin must be in it (typing "El Alto"
+    # with a pin in another city would otherwise pay the area price).
+    if pin is not None and not terms['outside_city'] and not pin_in_area(store.country_code, store.city, pin):
+        raise CheckoutError('pin_outside_area')
+    # Another city: the pin must be in that city, or at least in the country
+    # (the flat "other cities" price is domestic).
+    if pin is not None and terms['outside_city'] and not pin_in_destination(store.country_code, delivery_city, pin):
+        raise CheckoutError('pin_outside_area')
     # The limits live in ONE place: the escrow contract (the Safe sets them).
     try:
         max_order, max_open, open_principal = escrow.token_limits()
@@ -209,6 +289,7 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
         delivery_outside_city=terms['outside_city'], delivery_estimate_local=None,
         delivery_currency=terms['currency'],
         delivery_address=delivery_address[:300], delivery_phone=delivery_phone[:20],
+        delivery_latitude=pin[0] if pin else None, delivery_longitude=pin[1] if pin else None,
         delivery_note=(delivery_note or '').strip()[:300])
 
     # Re-opening checkout with the same terms reuses the open draft: its signed

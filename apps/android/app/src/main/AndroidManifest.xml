@@ -37,6 +37,11 @@
         android:resource="@color/notification_color"
         tools:replace="android:resource" />
         
+      <!-- Google Maps SDK (react-native-maps): Comprar's delivery pin. -->
+      <meta-data
+        android:name="com.google.android.geo.API_KEY"
+        android:value="${GOOGLE_MAPS_API_KEY}" />
+
       <!-- Firebase Messaging default notification icon -->
       <meta-data
         android:name="com.google.firebase.messaging.default_notification_icon"

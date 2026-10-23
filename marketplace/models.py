@@ -279,6 +279,10 @@ class Order(models.Model):
         help_text='Same-city estimate shown at checkout; null when outside the city')
     delivery_currency = models.CharField(max_length=3, blank=True, default='')
     delivery_address = models.CharField(max_length=300)
+    # The buyer's map pin: in much of LATAM the written address does not find
+    # the door; the courier app (Yango…) opens straight at this point.
+    delivery_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    delivery_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     delivery_phone = models.CharField(max_length=20)
     delivery_note = models.CharField(max_length=300, blank=True, default='')
     tracking_reference = models.CharField(
@@ -477,7 +481,9 @@ class DeliveryAddress(models.Model):
     label = models.CharField(max_length=40, blank=True, default='', help_text='"Casa", "Trabajo"…')
     country_code = models.CharField(max_length=2)
     city = models.CharField(max_length=100)
-    address = models.CharField(max_length=300)
+    address = models.CharField(max_length=300, blank=True, default='')
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     # Same limits as the order's delivery fields, so a saved address pays as is.
     phone = models.CharField(max_length=20)
     note = models.CharField(max_length=300, blank=True, default='', help_text='Referencia para el repartidor')

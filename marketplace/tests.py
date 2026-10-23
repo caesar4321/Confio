@@ -1374,3 +1374,58 @@ class ReviewerLanguageTests(SimpleTestCase):
         from .moderation import PRODUCT_POLICY, REVIEW_POLICY
         for policy in (PRODUCT_POLICY, REVIEW_POLICY):
             self.assertIn('UNTRUSTED USER CONTENT', policy)
+
+
+@override_settings(**ENABLED)
+class DeliveryPinTests(MarketTestBase):
+    LA_PAZ = (-16.4955, -68.1336)       # Sopocachi
+    COCHABAMBA = (-17.3935, -66.1570)
+
+    def setUp(self):
+        super().setUp()
+        MarketplaceCity.objects.filter(pk=self.city.pk).update(
+            latitude=Decimal('-16.500000'), longitude=Decimal('-68.150000'), radius_km=40)
+
+    def test_a_pin_with_a_reference_replaces_the_written_address(self):
+        order, _, _ = self.prepare(delivery_address='', delivery_note='Puerta verde frente a la tienda Rosa',
+                                   delivery_latitude=self.LA_PAZ[0], delivery_longitude=self.LA_PAZ[1])
+        self.assertEqual((float(order.delivery_latitude), float(order.delivery_longitude)), self.LA_PAZ)
+
+    def test_a_pin_alone_still_needs_a_reference(self):
+        with self.assertRaisesMessage(checkout.CheckoutError, 'delivery_address_required'):
+            self.prepare(delivery_address='', delivery_latitude=self.LA_PAZ[0], delivery_longitude=self.LA_PAZ[1])
+
+    def test_the_area_price_needs_a_pin_in_the_area(self):
+        with self.assertRaisesMessage(checkout.CheckoutError, 'pin_outside_area'):
+            self.prepare(delivery_latitude=self.COCHABAMBA[0], delivery_longitude=self.COCHABAMBA[1])
+
+    def test_nonsense_coordinates_are_refused(self):
+        for lat, lng in ((91, 0), (0, 181), ('NaN', 0), (1, None)):
+            with self.assertRaisesMessage(checkout.CheckoutError, 'bad_location_pin'):
+                checkout.clean_pin(lat, lng)
+
+    def test_two_pin_only_book_entries_in_one_city_are_two_places(self):
+        from .address_book import SaveDeliveryAddress
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        args = dict(country_code='BO', city='La Paz', address='', phone='+591 70000000', note='Casa de la abuela')
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
+            a = SaveDeliveryAddress.mutate.__wrapped__(None, info, latitude=-16.4955, longitude=-68.1336, **args)
+            b = SaveDeliveryAddress.mutate.__wrapped__(None, info, latitude=-16.5200, longitude=-68.1100, **args)
+        self.assertTrue(a.success and b.success, (a.error, b.error))
+        self.assertNotEqual(a.address.id, b.address.id)
+        self.assertEqual(a.address.latitude, -16.4955)
+
+
+    def test_another_city_needs_the_pin_in_that_city_or_at_least_the_country(self):
+        Store.objects.filter(pk=self.store.pk).update(outside_delivery_price_usd=Decimal('4.00'))
+        MarketplaceCity.objects.update_or_create(
+            country_code='BO', city='Cochabamba',
+            defaults={'currency_code': 'BOB', 'is_live': False, 'latitude': Decimal('-17.393500'),
+                      'longitude': Decimal('-66.157000'), 'radius_km': 40})
+        order, _, _ = self.prepare(delivery_city='Cochabamba', delivery_latitude=self.COCHABAMBA[0],
+                                   delivery_longitude=self.COCHABAMBA[1])
+        self.assertTrue(order.delivery_outside_city)
+        with self.assertRaisesMessage(checkout.CheckoutError, 'pin_outside_area'):  # "Cochabamba", pin in La Paz
+            self.prepare(delivery_city='Cochabamba', delivery_latitude=self.LA_PAZ[0], delivery_longitude=self.LA_PAZ[1])
+        with self.assertRaisesMessage(checkout.CheckoutError, 'pin_outside_area'):  # unknown town, pin in Lima
+            self.prepare(delivery_city='Pueblo Nuevo', delivery_latitude=-12.0464, delivery_longitude=-77.0428)

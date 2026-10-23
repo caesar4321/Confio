@@ -106,6 +106,9 @@ android {
         targetSdkVersion 36
         versionCode 165
         versionName "5.2.1"
+        // Google Maps SDK key (Comprar's delivery pin), from the git-crypted
+        // apps/android/.env; restricted to this package + signing SHA-1.
+        manifestPlaceholders = [GOOGLE_MAPS_API_KEY: envProperties['GOOGLE_MAPS_API_KEY'] ?: '']
         ndk {
             abiFilters(*releaseAbis)
         }

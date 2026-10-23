@@ -82,3 +82,24 @@ it('a delivered order invites a written review, sends it with the stars and says
   expect(mockRate).toHaveBeenCalledWith({ variables: { orderId: '9', rating: 4, comment: 'Muy buena atención, volvería a comprar.' } });
   expect(JSON.stringify(tree.toJSON())).toContain('La publicaremos en la tienda en cuanto la revisemos');
 });
+
+it("the seller opens the buyer's pin straight in Yango, falling back to maps", async () => {
+  const { Linking } = require('react-native');
+  const open = jest.spyOn(Linking, 'openURL').mockImplementationOnce(() => Promise.reject(new Error('no app')))
+    .mockImplementation(() => Promise.resolve(true));
+  mockOrder.current = { ...order('funded', ['ship']), role: 'merchant', deliveryLatitude: -16.4955, deliveryLongitude: -68.1336,
+    deliveryNote: 'Puerta verde', buyerDisplayName: 'ana' };
+  const tree = render();
+  const yango = tree.root.findAll((n) => n.props.testID === 'order-open-yango' && n.props.label)[0];
+  await act(async () => { yango.props.onPress(); });
+  expect(open.mock.calls[0][0]).toBe('yango://route?end-lat=-16.495500&end-lon=-68.133600');
+  expect(String(open.mock.calls[1][0])).toMatch(/geo:|maps:/); // Yango missing: the phone's maps
+  open.mockRestore();
+});
+
+it('a buyer sees the pin but not the seller tools', () => {
+  mockOrder.current = { ...order('funded', []), deliveryLatitude: -16.4955, deliveryLongitude: -68.1336 };
+  const tree = render();
+  expect(tree.root.findAll((n) => n.props.testID === 'order-delivery-map').length).toBeGreaterThan(0);
+  expect(tree.root.findAll((n) => n.props.testID === 'order-open-yango').length).toBe(0);
+});

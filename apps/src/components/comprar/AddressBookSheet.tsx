@@ -7,9 +7,11 @@ import { useMutation, useQuery } from '@apollo/client';
 import { Text, TextInput } from '../common/AppText';
 import { colors } from '../../config/theme';
 import {
-  DELETE_DELIVERY_ADDRESS, DeliveryAddress, GET_DELIVERY_ADDRESSES, SAVE_DELIVERY_ADDRESS, comprarError,
+  DELETE_DELIVERY_ADDRESS, DeliveryAddress, GET_CITY_CENTER, GET_DELIVERY_ADDRESSES, SAVE_DELIVERY_ADDRESS, comprarError,
 } from '../../services/comprar';
 import { KitButton } from './kit';
+import { LocationPickerModal } from './LocationPickerModal';
+import { Pin } from '../../utils/deliveryLocation';
 
 type Props = {
   visible: boolean;
@@ -31,6 +33,7 @@ const labelIcon = (a: DeliveryAddress) => (
 
 type Draft = {
   id?: string; countryCode: string; label: string; city: string; address: string; phone: string; note: string; makeDefault: boolean;
+  pin: Pin | null;
 };
 
 /**
@@ -41,6 +44,10 @@ export const AddressBookSheet = ({ visible, selectedId, countryCode, city, onClo
   const { data, loading, refetch } = useQuery(GET_DELIVERY_ADDRESSES, { fetchPolicy: 'cache-and-network', skip: !visible });
   const addresses: DeliveryAddress[] = data?.myDeliveryAddresses || [];
   const [save, { loading: saving }] = useMutation(SAVE_DELIVERY_ADDRESS);
+  // Without GPS the map still opens: at the store's city.
+  const { data: centerData } = useQuery(GET_CITY_CENTER, { variables: { countryCode, city }, skip: !visible || !city });
+  const cityCenter: Pin | null = centerData?.marketplaceCity?.latitude != null
+    ? { latitude: centerData.marketplaceCity.latitude, longitude: centerData.marketplaceCity.longitude } : null;
   const [remove] = useMutation(DELETE_DELIVERY_ADDRESS);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,9 +57,10 @@ export const AddressBookSheet = ({ visible, selectedId, countryCode, city, onClo
     setDraft(from && from.editable
       // An edit keeps the entry's own country (a Caracas address stays in VE).
       ? { id: from.id, countryCode: from.countryCode, label: from.label, city: from.city, address: from.address,
-        phone: from.phone, note: from.note, makeDefault: from.isDefault }
+        phone: from.phone, note: from.note, makeDefault: from.isDefault,
+        pin: from.latitude != null && from.longitude != null ? { latitude: from.latitude, longitude: from.longitude } : null }
       : { countryCode, label: 'Casa', city: from?.city || city, address: from?.address || '', phone: from?.phone || '',
-        note: '', makeDefault: false });
+        note: '', makeDefault: false, pin: null });
   };
 
   const submit = async () => {
@@ -62,6 +70,7 @@ export const AddressBookSheet = ({ visible, selectedId, countryCode, city, onClo
       const res = await save({ variables: {
         addressId: draft.id || null, label: draft.label, countryCode: draft.countryCode, city: draft.city, address: draft.address,
         phone: draft.phone, note: draft.note, makeDefault: draft.makeDefault,
+        latitude: draft.pin?.latitude ?? null, longitude: draft.pin?.longitude ?? null,
       } });
       const r = res.data?.saveDeliveryAddress;
       if (!r?.success) { setError(comprarError(r?.error)); return; }
@@ -90,8 +99,10 @@ export const AddressBookSheet = ({ visible, selectedId, countryCode, city, onClo
   };
 
   const close = () => { setDraft(null); setError(null); onClose(); };
-  const canSave = !!draft && draft.address.trim().length >= 8 && draft.phone.replace(/\D/g, '').length >= 7
-    && draft.city.trim().length >= 2;
+  // An address, or a map pin with a short reference (the checkout rule).
+  const placeOk = !!draft && (draft.address.trim().length >= 8 || (!!draft.pin && draft.note.trim().length >= 4));
+  const canSave = !!draft && placeOk && draft.phone.replace(/\D/g, '').length >= 7 && draft.city.trim().length >= 2;
+  const [mapOpen, setMapOpen] = useState(false);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
@@ -122,11 +133,18 @@ export const AddressBookSheet = ({ visible, selectedId, countryCode, city, onClo
                 ))}
               </View>
               <Field icon="map" placeholder="Ciudad" value={draft.city} onChangeText={(t) => setDraft({ ...draft, city: t })} />
-              <Field icon="home" placeholder="Dirección (calle, número, zona)" value={draft.address}
-                onChangeText={(t) => setDraft({ ...draft, address: t })} />
+              <Pressable style={[styles.mapRow, draft.pin && styles.mapRowOn]} onPress={() => setMapOpen(true)}
+                accessibilityRole="button" testID="address-map">
+                <Icon name="map-pin" size={16} color={colors.primaryDeep} />
+                <Text style={styles.mapRowText}>{draft.pin ? 'Ubicación marcada en el mapa ✓' : 'Marcar en el mapa (recomendado)'}</Text>
+              </Pressable>
+              <Field icon="home" placeholder={draft.pin ? 'Dirección (opcional con el mapa)' : 'Dirección (calle, número, zona)'}
+                value={draft.address} onChangeText={(t) => setDraft({ ...draft, address: t })} />
               <Field icon="phone" placeholder="Teléfono para el repartidor" keyboardType="phone-pad" value={draft.phone}
                 onChangeText={(t) => setDraft({ ...draft, phone: t })} />
-              <Field icon="message-square" placeholder="Referencia (opcional)" value={draft.note}
+              <Field icon="message-square"
+                placeholder={draft.pin && draft.address.trim().length < 8 ? 'Referencia: color de la casa, portón…' : 'Referencia (opcional)'}
+                value={draft.note}
                 onChangeText={(t) => setDraft({ ...draft, note: t })} />
               <View style={styles.switchRow}>
                 <Text style={styles.switchText}>Usar por defecto</Text>
@@ -156,7 +174,9 @@ export const AddressBookSheet = ({ visible, selectedId, countryCode, city, onClo
                         {a.isDefault ? <Text style={styles.badge}>Por defecto</Text> : null}
                         {a.source === 'recarga' ? <Text style={styles.badge}>De Recarga</Text> : null}
                       </View>
-                      <Text style={styles.rowAddress} numberOfLines={2}>{a.address}</Text>
+                      <Text style={styles.rowAddress} numberOfLines={2}>
+                        {a.address || (a.latitude != null ? `📍 Ubicación en el mapa${a.note ? ` · ${a.note}` : ''}` : '')}
+                      </Text>
                       <Text style={styles.rowMeta} numberOfLines={1}>
                         {usable ? `${a.city}${a.phone ? ` · ${a.phone}` : ''}` : `${a.city} · otro país, esta tienda no entrega allí`}
                       </Text>
@@ -184,6 +204,10 @@ export const AddressBookSheet = ({ visible, selectedId, countryCode, city, onClo
           )}
         </View>
       </KeyboardAvoidingView>
+      {draft ? (
+        <LocationPickerModal visible={mapOpen} initial={draft.pin} fallbackCenter={cityCenter} onClose={() => setMapOpen(false)}
+          onConfirm={(p) => { setDraft({ ...draft, pin: p }); setMapOpen(false); }} />
+      ) : null}
     </Modal>
   );
 };
@@ -223,6 +247,9 @@ const styles = StyleSheet.create({
   chipTextOn: { color: colors.white },
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12 },
   fieldInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: colors.text.primary },
+  mapRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.primaryMuted },
+  mapRowOn: { borderColor: colors.primaryDark, backgroundColor: colors.primaryLight },
+  mapRowText: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.textFlat },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   switchText: { fontSize: 14, color: colors.text.primary },
 });

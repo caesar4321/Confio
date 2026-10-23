@@ -170,3 +170,23 @@ it('an El Alto address priced as the La Paz area is not "another city"', () => {
   expect(blocker(tree)).toBeNull(); // the store has no other-cities price, and needs none here
   expect(JSON.stringify(tree.toJSON())).toContain('US$509.30');
 });
+
+it('a map pin with a reference replaces the written address, and travels with the payment', async () => {
+  const { placeMarketOrder } = require('../../services/comprar');
+  placeMarketOrder.mockReset();
+  placeMarketOrder.mockResolvedValue({ orderId: '9', txHash: '0x1' });
+  const tree = render();
+  const picker = tree.root.findAll((n) => typeof n.props.onConfirm === 'function' && n.props.visible !== undefined)[0];
+  act(() => { picker.props.onConfirm({ latitude: -16.4955, longitude: -68.1336 }); });
+  act(() => { input(tree, 'Teléfono para el repartidor').props.onChangeText('70000000'); });
+  expect(blocker(tree)).toContain('referencia');
+  const reference = tree.root.findAll((n) => typeof n.props.onChangeText === 'function'
+    && String(n.props.placeholder || '').startsWith('Referencia:'))[0];
+  act(() => { reference.props.onChangeText('Puerta verde frente a la tienda Rosa'); });
+  expect(blocker(tree)).toBeNull();
+  await act(async () => { byId(tree, 'checkout-pay').props.onPress(); });
+  expect(placeMarketOrder.mock.calls[0][0]).toEqual(expect.objectContaining({
+    deliveryAddress: '', deliveryLatitude: -16.4955, deliveryLongitude: -68.1336,
+    deliveryNote: 'Puerta verde frente a la tienda Rosa',
+  }));
+});

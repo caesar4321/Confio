@@ -9,10 +9,13 @@ import { useMutation, useQuery } from '@apollo/client';
 import { Text, TextInput } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import {
-  CheckoutStage, DeliveryAddress, GET_CHECKOUT_QUOTE, GET_DELIVERY_ADDRESSES, GET_MARKETPLACE_PRODUCT, GET_MARKET_ORDER,
+  CheckoutStage, DeliveryAddress, GET_CHECKOUT_QUOTE, GET_CITY_CENTER, GET_DELIVERY_ADDRESSES, GET_MARKETPLACE_PRODUCT,
+  GET_MARKET_ORDER,
   MarketOutcomeUnknownError, SAVE_DELIVERY_ADDRESS, comprarError, placeMarketOrder,
 } from '../services/comprar';
 import { AddressBookSheet } from '../components/comprar/AddressBookSheet';
+import { LocationPickerModal } from '../components/comprar/LocationPickerModal';
+import { Pin } from '../utils/deliveryLocation';
 import { ComprarFrame, KitButton, KitCard, KitFooter, KitRow, ProductThumb, TrustNote, kitText } from '../components/comprar/kit';
 import { formatReference, formatUsd } from '../utils/comprarFormat';
 
@@ -37,6 +40,9 @@ export const MarketCheckoutScreen = () => {
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [note, setNote] = useState('');
+  // The map pin: in much of LATAM it, not the street name, finds the door.
+  const [pin, setPin] = useState<Pin | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
   const [paying, setPaying] = useState(false);
   // Blocks the screen while the order is prepared and paid; steps aside for
   // Confío Face and the changed-price question, which need the buyer.
@@ -50,6 +56,12 @@ export const MarketCheckoutScreen = () => {
   const [saveToBook, setSaveToBook] = useState(true);
   const [autoPicked, setAutoPicked] = useState(false);
   const { data: bookData } = useQuery(GET_DELIVERY_ADDRESSES, { fetchPolicy: 'cache-and-network' });
+  // Where the map opens when there is no pin and no GPS yet: the store's city.
+  const { data: centerData } = useQuery(GET_CITY_CENTER, {
+    variables: { countryCode: store?.countryCode || '', city: store?.city || '' }, skip: !store,
+  });
+  const cityCenter: Pin | null = centerData?.marketplaceCity?.latitude != null
+    ? { latitude: centerData.marketplaceCity.latitude, longitude: centerData.marketplaceCity.longitude } : null;
   const [saveAddress] = useMutation(SAVE_DELIVERY_ADDRESS);
 
   // Resuming an unpaid draft: same quantity and delivery details, so the
@@ -66,6 +78,9 @@ export const MarketCheckoutScreen = () => {
     setAddress(resume.deliveryAddress || '');
     setPhone(resume.deliveryPhone || '');
     setNote(resume.deliveryNote || '');
+    if (resume.deliveryLatitude != null && resume.deliveryLongitude != null) {
+      setPin({ latitude: resume.deliveryLatitude, longitude: resume.deliveryLongitude });
+    }
     // The order's own city, whether or not it was "another city": an El Alto
     // draft (the La Paz area) must not come back as La Paz.
     const resumedCity = resume.deliveryCity || '';
@@ -87,6 +102,7 @@ export const MarketCheckoutScreen = () => {
     setAddress(a.address);
     setPhone(a.phone);
     setNote(a.note || '');
+    setPin(a.latitude != null && a.longitude != null ? { latitude: a.latitude, longitude: a.longitude } : null);
     if (sameCity(a.city, store?.city)) {
       setMode('same');
     } else {
@@ -135,10 +151,14 @@ export const MarketCheckoutScreen = () => {
     if (mode === 'other' && city.length < 2) return 'Escribe la ciudad de entrega.';
     if (notDelivered) return `Esta tienda solo entrega en ${store?.city ?? 'su ciudad'} y alrededores.`;
     if (!quote) return quoting ? 'Calculando el total…' : 'No pudimos calcular el total.';
-    if (address.trim().length < 8) return 'Escribe la dirección completa (calle, número y zona).';
+    // An address, or a map pin with a short reference (the server's rule).
+    if (address.trim().length < 8) {
+      if (!pin) return 'Escribe la dirección o marca tu ubicación en el mapa.';
+      if (note.trim().length < 4) return 'Agrega una referencia: color de la casa, portón o tienda de al lado.';
+    }
     if (phone.replace(/\D/g, '').length < 7) return 'Escribe un teléfono para el repartidor.';
     return null;
-  }, [quote, quoting, address, phone, notDelivered, mode, store, city]);
+  }, [quote, quoting, address, phone, notDelivered, mode, store, city, pin, note]);
   const canPay = !blocker && !paying;
 
   // After a payment (or one whose outcome is unknown: the order opens either
@@ -150,6 +170,7 @@ export const MarketCheckoutScreen = () => {
     void saveAddress({ variables: {
       label: picked?.source === 'saved' ? '' : (picked?.label || ''),
       countryCode: country, city, address: address.trim(), phone: phone.trim(), note: note.trim(), markUsed: true,
+      latitude: pin?.latitude ?? null, longitude: pin?.longitude ?? null,
     } }).catch(() => {});
   };
 
@@ -161,6 +182,7 @@ export const MarketCheckoutScreen = () => {
         expectedAmountUsd: quote?.amountUsd,
         productId, quantity, deliveryCountry: country, deliveryCity: city,
         deliveryAddress: address.trim(), deliveryPhone: phone.trim(), deliveryNote: note.trim(),
+        deliveryLatitude: pin?.latitude ?? null, deliveryLongitude: pin?.longitude ?? null,
         // Nothing to acknowledge any more (the price is in the total); kept
         // for a server that still asks for it.
         outsideCityAck: outside,
@@ -242,7 +264,8 @@ export const MarketCheckoutScreen = () => {
                 <Icon name={picked.source === 'recarga' ? 'credit-card' : 'map-pin'} size={18} color={colors.primaryDeep} />
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={styles.pickedLabel}>{picked.label || 'Dirección'}</Text>
-                  <Text style={kitText.body}>{picked.address}</Text>
+                  {picked.address ? <Text style={kitText.body}>{picked.address}</Text> : null}
+                  {pin ? <Text style={kitText.muted}>📍 Ubicación marcada en el mapa</Text> : null}
                   <Text style={kitText.muted}>{picked.city} · {picked.phone}{picked.note ? ` · ${picked.note}` : ''}</Text>
                 </View>
               </Pressable>
@@ -264,9 +287,21 @@ export const MarketCheckoutScreen = () => {
             {mode === 'other' && (
               <Field icon="map" placeholder="Ciudad de entrega" value={otherCity} onChangeText={setOtherCity} />
             )}
-            <Field icon="home" placeholder="Dirección (calle, número, zona)" value={address} onChangeText={setAddress} />
+            <Pressable style={[styles.mapRow, pin && styles.mapRowOn]} onPress={() => setMapOpen(true)}
+              accessibilityRole="button" testID="checkout-map">
+              <Icon name="map-pin" size={18} color={pin ? colors.primaryDeep : colors.primaryDark} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.mapRowTitle}>{pin ? 'Ubicación marcada en el mapa' : 'Marcar mi ubicación en el mapa'}</Text>
+                <Text style={kitText.muted}>{pin ? 'El repartidor llegará a este punto. Toca para cambiarlo.' : 'Recomendado: así el repartidor encuentra tu puerta.'}</Text>
+              </View>
+              <Icon name={pin ? 'check-circle' : 'chevron-right'} size={18} color={pin ? colors.primaryDark : colors.text.light} />
+            </Pressable>
+            <Field icon="home" placeholder={pin ? 'Dirección (opcional con el mapa)' : 'Dirección (calle, número, zona)'}
+              value={address} onChangeText={setAddress} />
             <Field icon="phone" placeholder="Teléfono para el repartidor" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
-            <Field icon="message-square" placeholder="Referencia (opcional)" value={note} onChangeText={setNote} />
+            <Field icon="message-square"
+              placeholder={pin && address.trim().length < 8 ? 'Referencia: color de la casa, portón, tienda de al lado' : 'Referencia (opcional)'}
+              value={note} onChangeText={setNote} />
             <View style={styles.ackRow}>
               <Switch value={saveToBook} onValueChange={setSaveToBook} testID="checkout-save-address" />
               <Text style={styles.ackText}>Guardar en mis direcciones</Text>
@@ -305,6 +340,9 @@ export const MarketCheckoutScreen = () => {
             )}
           </KitCard>
 
+          <LocationPickerModal visible={mapOpen} initial={pin} fallbackCenter={cityCenter}
+            onClose={() => setMapOpen(false)}
+            onConfirm={(p) => { setPin(p); setMapOpen(false); }} />
           <AddressBookSheet visible={bookOpen} selectedId={picked?.id ?? null}
             countryCode={store.countryCode} city={store.city}
             onClose={() => setBookOpen(false)} onSelect={pickAddress} />
@@ -351,6 +389,9 @@ const styles = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, backgroundColor: colors.white },
   fieldInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: colors.text.primary },
   ackRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  mapRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.primaryMuted, backgroundColor: colors.white },
+  mapRowOn: { borderColor: colors.primaryDark, backgroundColor: colors.primaryLight },
+  mapRowTitle: { fontSize: 14, fontWeight: '700', color: colors.textFlat },
   pickedCard: { flexDirection: 'row', gap: 12, padding: 12, borderRadius: 12, backgroundColor: colors.neutral, alignItems: 'flex-start' },
   pickedLabel: { fontSize: 14, fontWeight: '700', color: colors.textFlat },
   ackText: { flex: 1, fontSize: 13, color: colors.text.primary, lineHeight: 18 },

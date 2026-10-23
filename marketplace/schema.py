@@ -69,6 +69,8 @@ class MarketplaceCityType(graphene.ObjectType):
     delivery_partner = graphene.String()
     store_count = graphene.Int()
     suggested_delivery_usd = graphene.String(description="Pre-fills a new store's delivery price")
+    latitude = graphene.Float(description="The city's center (where a delivery map opens)")
+    longitude = graphene.Float()
 
 
 class LocalReferenceType(graphene.ObjectType):
@@ -189,6 +191,8 @@ class MarketplaceOrderType(graphene.ObjectType):
     delivery_outside_city = graphene.Boolean()
     delivery_estimate_local = graphene.String()
     delivery_address = graphene.String()
+    delivery_latitude = graphene.Float(description='Sides of the order only, like the address')
+    delivery_longitude = graphene.Float()
     delivery_phone = graphene.String()
     delivery_note = graphene.String()
     buyer_display_name = graphene.String()
@@ -246,6 +250,8 @@ class MarketplaceOrderType(graphene.ObjectType):
             delivery_estimate_local=(str(order.delivery_estimate_local)
                                      if order.delivery_estimate_local is not None else None),
             delivery_address=order.delivery_address, delivery_phone=order.delivery_phone,
+            delivery_latitude=(float(order.delivery_latitude) if order.delivery_latitude is not None else None),
+            delivery_longitude=(float(order.delivery_longitude) if order.delivery_longitude is not None else None),
             delivery_note=order.delivery_note,
             buyer_display_name=(order.buyer.first_name or 'Cliente') if merchant else None,
             tracking_reference=order.tracking_reference, ship_by=order.ship_by,
@@ -445,7 +451,9 @@ class Query(graphene.ObjectType):
             is_live=area_is_live(city.country_code, city.city),
             delivery_estimate=str(city.delivery_estimate) if city.delivery_estimate is not None else None,
             delivery_partner=city.delivery_partner, store_count=count,
-            suggested_delivery_usd=str(suggested_delivery_usd(city.country_code, city.city)))
+            suggested_delivery_usd=str(suggested_delivery_usd(city.country_code, city.city)),
+            latitude=float(city.latitude) if city.latitude is not None else None,
+            longitude=float(city.longitude) if city.longitude is not None else None)
 
     def resolve_marketplace_cities(self, info, country_code):
         if not _user(info):
@@ -1067,6 +1075,8 @@ class PrepareMarketOrder(graphene.Mutation):
         delivery_phone = graphene.String(required=True)
         delivery_note = graphene.String()
         outside_city_ack = graphene.Boolean()
+        delivery_latitude = graphene.Float(description='The map pin; with a reference it can replace the address')
+        delivery_longitude = graphene.Float()
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -1076,7 +1086,8 @@ class PrepareMarketOrder(graphene.Mutation):
 
     @login_required
     def mutate(self, info, product_id, quantity, delivery_country, delivery_city,
-               delivery_address, delivery_phone, delivery_note='', outside_city_ack=False):
+               delivery_address, delivery_phone, delivery_note='', outside_city_ack=False,
+               delivery_latitude=None, delivery_longitude=None):
         user = info.context.user
         try:
             ctx = _jwt(info, BUY)
@@ -1086,7 +1097,8 @@ class PrepareMarketOrder(graphene.Mutation):
                 user, ctx, product_id=product_id, quantity=quantity,
                 delivery_country=delivery_country, delivery_city=delivery_city,
                 delivery_address=delivery_address, delivery_phone=delivery_phone,
-                delivery_note=delivery_note, outside_city_ack=bool(outside_city_ack))
+                delivery_note=delivery_note, outside_city_ack=bool(outside_city_ack),
+                delivery_latitude=delivery_latitude, delivery_longitude=delivery_longitude)
         except CheckoutError as exc:
             return PrepareMarketOrder(success=False, error=exc.code)
         return PrepareMarketOrder(

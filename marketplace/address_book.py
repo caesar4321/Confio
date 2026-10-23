@@ -14,7 +14,7 @@ from graphql_jwt.decorators import login_required
 
 from users.models import Account
 
-from .checkout import CheckoutError, jwt_account
+from .checkout import CheckoutError, check_delivery_place, clean_pin, jwt_account
 from .models import DeliveryAddress
 from .permissions import BUY
 
@@ -30,6 +30,8 @@ class DeliveryAddressType(graphene.ObjectType):
     phone = graphene.String()
     note = graphene.String()
     is_default = graphene.Boolean()
+    latitude = graphene.Float(description='The map pin, when the buyer set one')
+    longitude = graphene.Float()
     source = graphene.String(description='"saved" (the book) or "recarga" (the Recarga address, read-only)')
     editable = graphene.Boolean()
 
@@ -55,16 +57,23 @@ def _phone_digits(phone: str) -> str:
     return ''.join(ch for ch in (phone or '') if ch.isdigit())
 
 
-def _same_place(address: str, city: str, phone: str, country: str):
-    """What makes two entries the same address (spacing and case aside)."""
-    return (' '.join((address or '').lower().split()), (city or '').strip().lower(), _phone_digits(phone),
-            (country or '').strip().upper())
+def _same_place(address: str, city: str, phone: str, country: str, latitude=None, longitude=None):
+    """What makes two entries the same address (spacing and case aside). With
+    no written address the pin is the address (to ~10 m), so two pins in one
+    city are two places."""
+    text = ' '.join((address or '').lower().split())
+    pin = None
+    if len(text) < 8 and latitude is not None and longitude is not None:
+        pin = (round(float(latitude), 4), round(float(longitude), 4))
+    return (text, (city or '').strip().lower(), _phone_digits(phone), (country or '').strip().upper(), pin)
 
 
 def _saved(a: DeliveryAddress) -> DeliveryAddressType:
     return DeliveryAddressType(
         id=str(a.pk), label=a.label, country_code=a.country_code, city=a.city, address=a.address,
-        phone=a.phone, note=a.note, is_default=a.is_default, source='saved', editable=True)
+        phone=a.phone, note=a.note, is_default=a.is_default, source='saved', editable=True,
+        latitude=float(a.latitude) if a.latitude is not None else None,
+        longitude=float(a.longitude) if a.longitude is not None else None)
 
 
 def _user_phone(user) -> str:
@@ -114,7 +123,7 @@ def resolve_my_delivery_addresses(info):
     return saved
 
 
-def _clean(label, country_code, city, address, phone, note):
+def _clean(label, country_code, city, address, phone, note, latitude=None, longitude=None):
     """The fields as stored, or a CheckoutError code. Exactly checkout's rules
     (checkout.prepare_order) and the order's field sizes: anything checkout
     accepts, the book accepts and stores the same way."""
@@ -122,8 +131,8 @@ def _clean(label, country_code, city, address, phone, note):
     phone = ''.join(ch for ch in (phone or '') if ch.isdigit() or ch == '+')
     city = (city or '').strip()
     country_code = (country_code or '').strip().upper()
-    if len(address) < 8:
-        raise CheckoutError('delivery_address_required')
+    pin = clean_pin(latitude, longitude)
+    check_delivery_place(address, note, pin)  # an address, or a pin + reference
     if len(phone) < 7:
         raise CheckoutError('delivery_phone_required')
     if not (2 <= len(city) <= 100):
@@ -133,6 +142,7 @@ def _clean(label, country_code, city, address, phone, note):
     return {
         'label': (label or '').strip()[:40], 'country_code': country_code, 'city': city[:100],
         'address': address[:300], 'phone': phone[:20], 'note': (note or '').strip()[:300],
+        'latitude': pin[0] if pin else None, 'longitude': pin[1] if pin else None,
     }
 
 
@@ -151,6 +161,8 @@ class SaveDeliveryAddress(graphene.Mutation):
         note = graphene.String()
         make_default = graphene.Boolean()
         mark_used = graphene.Boolean()
+        latitude = graphene.Float()
+        longitude = graphene.Float()
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -158,10 +170,10 @@ class SaveDeliveryAddress(graphene.Mutation):
 
     @login_required
     def mutate(self, info, country_code, city, address, phone, address_id=None, label='', note='',
-               make_default=False, mark_used=False):
+               make_default=False, mark_used=False, latitude=None, longitude=None):
         try:
             user, account = _context(info)
-            fields = _clean(label, country_code, city, address, phone, note)
+            fields = _clean(label, country_code, city, address, phone, note, latitude, longitude)
         except CheckoutError as exc:
             return SaveDeliveryAddress(success=False, error=exc.code)
         with transaction.atomic():
@@ -178,8 +190,10 @@ class SaveDeliveryAddress(graphene.Mutation):
                 if entry is None:
                     return SaveDeliveryAddress(success=False, error='address_not_found')
             else:
-                key = _same_place(fields['address'], fields['city'], fields['phone'], fields['country_code'])
-                entry = next((a for a in book if _same_place(a.address, a.city, a.phone, a.country_code) == key), None)
+                key = _same_place(fields['address'], fields['city'], fields['phone'], fields['country_code'],
+                                  fields['latitude'], fields['longitude'])
+                entry = next((a for a in book if _same_place(a.address, a.city, a.phone, a.country_code,
+                                                             a.latitude, a.longitude) == key), None)
                 if entry is None and len(book) >= DeliveryAddress.MAX_PER_BOOK:
                     return SaveDeliveryAddress(success=False, error='address_book_full')
                 if entry is not None and not fields['label']:

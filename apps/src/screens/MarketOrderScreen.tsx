@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import MapView, { Marker } from 'react-native-maps';
+import { Pin, mapsLink } from '../utils/deliveryLocation';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
@@ -151,6 +153,8 @@ export const MarketOrderScreen = () => {
   const waitingForStore = !merchant && status === 'funded';
   // Orders from before delivery joined the total carry the courier estimate
   // instead (paid to the courier on arrival); new ones never do.
+  const pin: Pin | null = order.deliveryLatitude != null && order.deliveryLongitude != null
+    ? { latitude: order.deliveryLatitude, longitude: order.deliveryLongitude } : null;
   const legacyCourierPay = !order.deliveryOutsideCity && Number(order.deliveryUsd ?? 0) === 0
     && Boolean(order.deliveryEstimateLocal);
 
@@ -218,8 +222,37 @@ export const MarketOrderScreen = () => {
         </KitCard>
 
         <KitCard icon="truck" title="Entrega">
-          <InfoLine icon="map-pin" text={order.deliveryAddress}
+          {pin ? (
+            <View style={styles.mapBox} testID="order-delivery-map">
+              <MapView style={StyleSheet.absoluteFill} liteMode scrollEnabled={false} zoomEnabled={false}
+                pitchEnabled={false} rotateEnabled={false}
+                initialRegion={{ ...pin, latitudeDelta: 0.006, longitudeDelta: 0.006 }}>
+                <Marker coordinate={pin} />
+              </MapView>
+            </View>
+          ) : null}
+          <InfoLine icon="map-pin" text={order.deliveryAddress || (pin ? 'Ubicación marcada en el mapa' : '')}
             sub={`${order.deliveryCity}${order.deliveryNote ? ` · ${order.deliveryNote}` : ''}`} />
+          {pin ? (
+            <View style={styles.pinActions}>
+              {merchant ? (
+                <KitButton testID="order-open-yango" label="Abrir en Yango" icon="navigation"
+                  onPress={() => { void openInYango(pin); }} />
+              ) : null}
+              <View style={styles.pinRow}>
+                <View style={{ flex: 1 }}>
+                  <KitButton testID="order-open-maps" label="Abrir en mapas" variant="secondary" icon="map"
+                    onPress={() => { void openInMaps(pin); }} />
+                </View>
+                {merchant ? (
+                  <View style={{ flex: 1 }}>
+                    <KitButton testID="order-share-location" label="Compartir" variant="secondary" icon="share-2"
+                      onPress={() => { void Share.share({ message: shareText(order, pin) }); }} />
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
           <Pressable onPress={() => { void Linking.openURL(`tel:${order.deliveryPhone}`); }}>
             <InfoLine icon="phone" text={order.deliveryPhone} link />
           </Pressable>
@@ -330,6 +363,42 @@ export const MarketOrderScreen = () => {
   );
 };
 
+/**
+ * The seller books the courier in their own app: Yango opens with the
+ * buyer's pin as the destination (its route link), so nobody retypes an
+ * address. Without Yango, the phone's maps (or app chooser) opens instead.
+ */
+const openInYango = async (pin: Pin) => {
+  const lat = pin.latitude.toFixed(6);
+  const lon = pin.longitude.toFixed(6);
+  try {
+    await Linking.openURL(`yango://route?end-lat=${lat}&end-lon=${lon}`);
+  } catch {
+    await openInMaps(pin);
+  }
+};
+
+/** Android: the app chooser (Yango, inDrive, Google Maps…); iOS: Maps. */
+const openInMaps = async (pin: Pin) => {
+  const lat = pin.latitude.toFixed(6);
+  const lon = pin.longitude.toFixed(6);
+  const native = Platform.OS === 'android' ? `geo:${lat},${lon}?q=${lat},${lon}(Entrega)` : `maps://?q=Entrega&ll=${lat},${lon}`;
+  try {
+    await Linking.openURL(native);
+  } catch {
+    await Linking.openURL(mapsLink(pin)).catch(() => {});
+  }
+};
+
+/** For WhatsApp or a courier: what to look for, and where. */
+const shareText = (order: any, pin: Pin) => [
+  `Entrega del pedido: ${order.quantity} × ${order.productTitle}`,
+  order.deliveryAddress || null,
+  order.deliveryNote ? `Referencia: ${order.deliveryNote}` : null,
+  order.deliveryPhone ? `Teléfono: ${order.deliveryPhone}` : null,
+  mapsLink(pin),
+].filter(Boolean).join('\n');
+
 const Step = ({ n, text }: { n: number; text: string }) => (
   <View style={styles.step}>
     <View style={styles.stepNum}><Text style={styles.stepNumText}>{n}</Text></View>
@@ -357,6 +426,9 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: colors.borderLight },
   right: { textAlign: 'right', marginTop: -6 },
   info: { flexDirection: 'row', gap: 10 },
+  mapBox: { height: 150, borderRadius: 12, overflow: 'hidden', backgroundColor: colors.neutralDark },
+  pinActions: { gap: 8 },
+  pinRow: { flexDirection: 'row', gap: 8 },
   step: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   stepNum: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   stepNumText: { fontSize: 12, fontWeight: '700', color: colors.primaryDeep },
