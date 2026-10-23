@@ -8,9 +8,11 @@ test('valid tip amounts', () => {
 });
 
 test('invalid tip amounts', () => {
-  for (const text of ['', '0.49', '200.01', '1.234', 'abc', '1000', '.5', '-1']) {
+  for (const text of ['', '0.49', '200.01', '1.234', 'abc', '1000', '-1']) {
     expect(parseTipAmount(text)).toBeNull();
   }
+  // Like every amount field: a leading mark reads as 0.
+  expect(parseTipAmount('.5')).toBe('0.50');
 });
 
 describe('isTipTransaction', () => {
@@ -42,5 +44,28 @@ describe('tip receipts', () => {
     expect(parties.senderUsername).toBeUndefined();
     expect(parties.senderAddress).toBeUndefined();
     expect(parties.recipientAddress).toBeUndefined();
+  });
+});
+
+describe('country number format', () => {
+  const { setNumberLocaleCountry } = require('../numberLocale');
+  afterEach(() => setNumberLocaleCountry(null));
+  it('reads tip amounts the way the country writes them', () => {
+    const { parseTipAmount } = require('../tips');
+    setNumberLocaleCountry('VE');
+    expect(parseTipAmount('2,50')).toBe('2.50');
+    expect(parseTipAmount('5')).toBe('5.00');
+    setNumberLocaleCountry('MX');
+    expect(parseTipAmount('2.50')).toBe('2.50');
+  });
+  it('formats Comunidad money and percents with the country separators', () => {
+    const { formatUsd, formatPctSigned, formatAmount } = require('../portfolioFormat');
+    setNumberLocaleCountry('VE');
+    expect(formatUsd('11658.03')).toBe('$11.658,03');
+    expect(formatPctSigned('-2.5')).toBe('-2,50%');
+    expect(formatAmount('1000.5')).toBe('1.000,5');
+    setNumberLocaleCountry('MX');
+    expect(formatUsd('11658.03')).toBe('$11,658.03');
+    expect(formatPctSigned('-2.5')).toBe('-2.50%');
   });
 });

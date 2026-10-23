@@ -3,9 +3,10 @@
  * as a decimal string ("11658.03") or null when it couldn't be read: null
  * stays null here (the screen hides it), never "$0".
  *
- * Amounts use a fixed "1,234.56" grouping so a member's profile reads the
- * same on every phone, whatever its locale.
+ * Separators follow the viewer's country like every number in the app
+ * (utils/numberLocale): "1.234,56" in VE/CO/AR…, "1,234.56" in MX/PE/US….
  */
+import { getSeparators } from './numberLocale';
 
 const DECIMAL = /^([+-])?(\d+)(?:\.(\d+))?$/;
 
@@ -23,7 +24,8 @@ const parseDecimal = (value: string | null | undefined): ParsedDecimal | null =>
   return { negative: match[1] === '-' && !isZero, whole, fraction };
 };
 
-const groupThousands = (whole: string) => whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const groupThousands = (whole: string) => whole.replace(/\B(?=(\d{3})+(?!\d))/g, getSeparators().group);
+const decimalMark = () => getSeparators().decimal;
 
 /** Keeps the server's decimals but drops trailing zeros past `minDecimals`. */
 const trimFraction = (fraction: string, minDecimals: number) => {
@@ -61,7 +63,7 @@ export const moneyParts = (
   return {
     sign,
     whole: `${sign}$${groupThousands(parsed.whole)}`,
-    cents: fraction ? `.${fraction}` : '',
+    cents: fraction ? `${decimalMark()}${fraction}` : '',
   };
 };
 
@@ -78,7 +80,7 @@ export const formatUsd = (
 export const formatPctAbs = (value: string | null | undefined): string | null => {
   const parsed = parseDecimal(value);
   if (!parsed) return null;
-  return `${groupThousands(parsed.whole)}.${trimFraction(parsed.fraction, 2)}%`;
+  return `${groupThousands(parsed.whole)}${decimalMark()}${trimFraction(parsed.fraction, 2)}%`;
 };
 
 /** "+1.20%" / "-0.85%"; null when unknown. */
@@ -94,7 +96,7 @@ export const formatAmount = (value: string | null | undefined): string | null =>
   const parsed = parseDecimal(value);
   if (!parsed) return null;
   const fraction = trimFraction(parsed.fraction, 0);
-  return `${parsed.negative ? '-' : ''}${groupThousands(parsed.whole)}${fraction ? `.${fraction}` : ''}`;
+  return `${parsed.negative ? '-' : ''}${groupThousands(parsed.whole)}${fraction ? `${decimalMark()}${fraction}` : ''}`;
 };
 
 /**

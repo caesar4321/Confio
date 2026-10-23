@@ -1,3 +1,5 @@
+import { formatDecimal } from './numberLocale';
+
 // Teams and the league (server: teams/). The palette and limits mirror teams/rules.py.
 export const TEAM_EMOJIS = ['⚽', '🚀', '🦁', '🐂', '🦅', '🔥', '💎', '🌎', '📈', '🌱', '⭐', '🏆', '🐺', '🦉', '⚡', '🎯'];
 export const TEAM_COLORS = ['#34D399', '#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6', '#111827'];
@@ -86,7 +88,7 @@ export type Team = {
 
 /** "Invertir juntos $1,000" / "3 miembros invirtiendo esta semana". */
 export const goalLabel = (goal: TeamGoal): string => {
-  if (goal.kind === 'invested_usd') return `Invertir juntos $${Number(goal.target).toLocaleString('en-US')}`;
+  if (goal.kind === 'invested_usd') return `Invertir juntos $${formatDecimal(goal.target, { decimals: 0 })}`;
   const n = Number(goal.target);
   return `${n} ${n === 1 ? 'miembro invirtiendo' : 'miembros invirtiendo'} esta semana`;
 };

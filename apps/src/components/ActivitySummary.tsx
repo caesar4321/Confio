@@ -7,6 +7,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
 import { CryptoAssetMark } from './CryptoAssetMark';
+import { formatDecimal, formatUsdAmount } from '../utils/numberLocale';
 
 /** What a Comunidad post made from a money movement shows (communityPostExtras.activity). */
 export type ActivityShare = {
@@ -55,11 +56,12 @@ const flag = (code?: string | null) =>
     ? String.fromCodePoint(...Array.from(code).map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65))
     : '';
 
-const usd = (value?: string | null) => (value ? `US$${value}` : null);
+// The viewer's country decides the separators (utils/numberLocale).
+const usd = (value?: string | null) => (value ? formatUsdAmount(value) : null);
 
 const signed = (value: string, suffix = '') => {
   const n = Number(value);
-  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(2)}${suffix}`;
+  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${formatDecimal(Math.abs(n))}${suffix}`;
 };
 
 const ICONS: Record<string, string> = {
@@ -238,7 +240,7 @@ export function useActivityDestination(activity: ActivityShare | null | undefine
 export const activityAccessibilityLabel = (activity: ActivityShare) => {
   const parts = [activity.headline];
   if (activity.pnlPct && tradeSide(activity) === 'buy') {
-    parts.push(`${activity.position === 'closed' ? 'al vender' : 'desde la compra'} ${activity.pnlPct}%`);
+    parts.push(`${activity.position === 'closed' ? 'al vender' : 'desde la compra'} ${formatDecimal(Number(activity.pnlPct))}%`);
   }
   return parts.join(', ');
 };

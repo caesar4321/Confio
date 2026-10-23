@@ -9,6 +9,7 @@ import { CommunityRulesSheet } from './CommunityRulesSheet';
 import { colors } from '../config/theme';
 import { PictureKind, useCommunityPicture } from '../hooks/useCommunityPicture';
 import type { InvestorAccess } from './InvestorLockCard';
+import { formatUsd } from '../utils/portfolioFormat';
 
 export type InvestorProfile = {
   userId: string;
@@ -188,7 +189,7 @@ export function InvestorProfileHeader({
         ) : null
       ) : null}
       {self && investor?.tipsReceivedUsd && Number(investor.tipsReceivedUsd) > 0 ? (
-        <Text style={styles.status}>{`🎁 Propinas recibidas: $${investor.tipsReceivedUsd}`}</Text>
+        <Text style={styles.status}>{`🎁 Propinas recibidas: ${formatUsd(investor.tipsReceivedUsd) ?? '$0'}`}</Text>
       ) : null}
       {reviewing ? <Text style={styles.status}>Revisando tu imagen… suele tardar unos segundos.</Text> : null}
       {message ? <Text style={styles.refused}>{message}</Text> : null}

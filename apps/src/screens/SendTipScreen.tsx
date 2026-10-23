@@ -11,6 +11,7 @@ import { PREPARE_TIP } from '../apollo/mutations';
 import { MainStackParamList } from '../types/navigation';
 import { newClientKey } from '../utils/directMessages';
 import { parseTipAmount, TIP_CHIPS, TIP_MAX, TIP_MIN } from '../utils/tips';
+import { formatDecimal, sanitizeAmountInput } from '../utils/numberLocale';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 type RouteProps = NativeStackScreenProps<MainStackParamList, 'SendTip'>['route'];
@@ -121,7 +122,7 @@ export const SendTipScreen = () => {
             <Text style={styles.currency}>$</Text>
             <TextInput
               value={amount}
-              onChangeText={(text) => setAmount(text.replace(',', '.').replace(/[^0-9.]/g, '').slice(0, 7))}
+              onChangeText={(text) => setAmount((previous) => sanitizeAmountInput(text, 2, undefined, previous).slice(0, 7))}
               placeholder="0"
               placeholderTextColor={colors.muted}
               keyboardType="decimal-pad"
@@ -139,7 +140,9 @@ export const SendTipScreen = () => {
               </Pressable>
             ))}
           </View>
-          <Text style={styles.limits}>{`De $${TIP_MIN} a $${TIP_MAX}. Se envía de tu saldo en dólares.`}</Text>
+          <Text style={styles.limits}>
+            {`De $${formatDecimal(TIP_MIN)} a $${formatDecimal(TIP_MAX, { decimals: 0 })}. Se envía de tu saldo en dólares.`}
+          </Text>
           <TextInput
             value={note}
             onChangeText={(text) => setNote(text.slice(0, NOTE_MAX))}
@@ -163,7 +166,7 @@ export const SendTipScreen = () => {
           <Pressable onPress={() => { void submit(false); }} disabled={!parsed || loading}
             style={[styles.button, (!parsed || loading) && styles.disabled]} accessibilityRole="button">
             {loading ? <ActivityIndicator color={colors.white} /> : (
-              <Text style={styles.buttonText}>{parsed ? `Enviar propina de $${parsed}` : 'Ingresa un monto'}</Text>
+              <Text style={styles.buttonText}>{parsed ? `Enviar propina de $${formatDecimal(parsed)}` : 'Ingresa un monto'}</Text>
             )}
           </Pressable>
         </View>
