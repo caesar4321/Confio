@@ -12,7 +12,7 @@ from django.utils import timezone
 from ramps import pagoasap_send, ve_pagomovil, ve_send
 from ramps.models import RampTransaction
 from ramps.pagoasap_client import PagoAsapAmbiguousError, PagoAsapError, idempotency_key
-from ramps.ve_send import Outcome
+from ramps.ve_send import Outcome, Settlement
 
 WALLET = '0x' + '12' * 20
 TARGET = '0x' + 'de' * 20
@@ -99,17 +99,32 @@ class SendCoreTests(TestCase):
         return ramp
 
     def _funded(self, **section):
-        return self._ramp(phase='funded', status='PROCESSING', funding_tx_hash=TX, funded_wei=str(WEI), **section)
+        # Settled: Relay's delivery to Pago ASAP is proven; 19.819999 USDC credited.
+        values = dict(funding_tx_hash=TX, funded_wei=str(WEI), credited_usd='19.819999')
+        values.update(section)
+        return self._ramp(phase='settled', status='PROCESSING', **values)
 
     # ---- funding claim and proof
 
-    def test_funding_is_a_single_claim(self):
-        ramp = self._ramp(phase='awaiting_funding', funding_started_at=None)
+    @mock.patch('ramps.pagoasap_send.funding_target', return_value={
+        'deposit_address': TARGET, 'binding': {'request_id': '0x' + '11' * 32, 'deadline': 9999999999}})
+    def test_funding_is_a_single_claim_with_its_target_made_at_claim(self, target):
+        ramp = self._ramp(phase='awaiting_funding', funding_started_at=None, deposit_address=None)
         self.assertTrue(ve_send.can_fund(ramp))
         claimed = ve_send.start_funding(ramp)
-        self.assertEqual(ve_send._phase(claimed), 'funding_reported')
+        self.assertEqual((ve_send._phase(claimed), ve_send._section(claimed)['deposit_address']),
+                         ('funding_reported', TARGET))
+        self.assertEqual(ve_send.funding_details(claimed)['deposit_address'], TARGET)
         with self.assertRaises(ve_send.VeSendError):
             ve_send.start_funding(claimed)
+        self.assertEqual(target.call_count, 1)
+
+    @mock.patch('ramps.pagoasap_send.funding_target', return_value={'deposit_address': ve_send.USDT_BSC})
+    def test_a_bad_target_is_never_claimed(self, _):
+        ramp = self._ramp(phase='awaiting_funding', funding_started_at=None, deposit_address=None)
+        with self.assertRaises(ve_send.VeSendError):
+            ve_send.start_funding(ramp)
+        self.assertTrue(ve_send.can_fund(RampTransaction.objects.get(pk=ramp.pk)))
 
     def test_funding_window_closes_and_unclaimed_is_never_scanned(self):
         ramp = self._ramp(phase='awaiting_funding', funding_started_at=None)
@@ -238,6 +253,63 @@ class SendCoreTests(TestCase):
         self.assertEqual(len(set(amounts)), 3)
         self.assertTrue(all(19_82 * 10 ** 16 - a < 10 ** 16 for a in amounts))  # under one cent
 
+    # ---- settlement (Relay to Polygon)
+
+    def _proven(self, **section):
+        return self._ramp(phase='funded', status='PROCESSING', funding_tx_hash=TX, funded_wei=str(WEI), **section)
+
+    def test_settlement_outcomes(self):
+        cases = [
+            (Settlement('pending'), 'PROCESSING', 'funded', 'bridging'),
+            (Settlement('delivered', credited_usd='19.77', evidence=TX2), 'PROCESSING', 'settled', 'settled'),
+            (Settlement('refunded'), 'FAILED', 'refunded', 'refunded_to_wallet'),
+            (Settlement('review', reason='destination_amount_mismatch'), 'PROCESSING', 'payout_review',
+             'needs_review:settlement:destination_amount_mismatch'),
+        ]
+        for result, status, phase, detail in cases:
+            with mock.patch('ramps.pagoasap_send.settle', return_value=result):
+                ramp = ve_send.sync(self._proven())
+            self.assertEqual((ramp.status, ve_send._phase(ramp), ramp.status_detail), (status, phase, detail))
+
+    def test_one_delivery_settles_one_order(self):
+        with mock.patch('ramps.pagoasap_send.settle', return_value=Settlement('delivered', credited_usd='19.77', evidence=TX2)):
+            first = ve_send.sync(self._proven())
+            second = ve_send.sync(self._proven())
+        self.assertEqual(ve_send._phase(first), 'settled')
+        self.assertEqual(second.status_detail, 'needs_review:settlement:delivery_claimed_elsewhere')
+
+    def test_settle_maps_the_bridge_reconciler(self):
+        ramp = self._proven(bridge={'request_id': '0x' + '11' * 32, 'response': {}, 'deadline': 9999999999,
+                                    'recipient': TARGET, 'amount_out': '19800000', 'amount_out_min': '19700000'})
+
+        def delivered(transfer, client=None):
+            transfer.status, transfer.actual_out_units, transfer.destination_tx_hash = 'delivered', '19770000', TX2
+        with mock.patch('payment_accounts.relay_settlement.reconcile_relay', side_effect=delivered) as rec:
+            result = pagoasap_send.settle(ramp)
+        self.assertEqual((result.kind, result.credited_usd, result.evidence), ('delivered', '19.77', TX2))
+        transfer = rec.call_args.args[0]
+        self.assertEqual((transfer.quote.amount_units, transfer.source_tx_hash, transfer.funding_mode),
+                         (str(WEI), TX, 'wallet'))
+        from payment_accounts.allbridge_next import NextError
+        with mock.patch('payment_accounts.relay_settlement.reconcile_relay', side_effect=NextError('rpc')):
+            self.assertEqual(pagoasap_send.settle(ramp).kind, 'pending')
+
+    def test_a_mixed_delivery_never_overcredits(self):
+        ramp = self._proven(bridge={'request_id': '0x' + '11' * 32, 'response': {}, 'deadline': 9999999999,
+                                    'recipient': TARGET, 'amount_out': '19800000', 'amount_out_min': '19700000'})
+
+        def mixed(transfer, client=None):
+            transfer.status, transfer.actual_out_units, transfer.destination_tx_hash = 'delivered', '49530000', TX2
+        with mock.patch('payment_accounts.relay_settlement.reconcile_relay', side_effect=mixed):
+            result = pagoasap_send.settle(ramp)
+        self.assertEqual((result.kind, result.reason), ('review', 'delivery_amount_unattributable'))
+
+    def test_retry_from_a_settlement_review_settles_again(self):
+        with mock.patch('ramps.pagoasap_send.settle', return_value=Settlement('review', reason='relay_failure')):
+            ramp = ve_send.sync(self._proven())
+        ramp = ve_send.retry_payout(ramp, operator='ops', reviewed_key='', reviewed_revision=0, confirmed_unpaid=True)
+        self.assertEqual(ve_send._phase(ramp), 'funded')
+
     # ---- payout through Pago ASAP
 
     def _pay(self, ramp, client):
@@ -259,7 +331,7 @@ class SendCoreTests(TestCase):
     def test_payout_waits_until_the_balance_covers_it(self):
         busy = self._ramp(phase='payout_pending', status='PROCESSING', payout_claim={'cost': '90'})
         ramp = self._pay(self._funded(), pagoasap_client(balance='100'))
-        self.assertEqual((ve_send._phase(ramp), ramp.status_detail), ('funded', 'waiting_balance'))
+        self.assertEqual((ve_send._phase(ramp), ramp.status_detail), ('settled', 'waiting_balance'))
         busy.delete()
         self.assertEqual(ve_send._phase(self._pay(ramp, pagoasap_client(balance='100'))), 'payout_pending')
 
@@ -323,7 +395,7 @@ class SendCoreTests(TestCase):
     def test_not_enough_funds_retries_with_a_fresh_key(self):
         ramp = self._pay(self._funded(), pagoasap_client())
         ramp = self._pay(ramp, pagoasap_client(intent={'state': 'failed', 'reason': 'not_enough_funds'}))
-        self.assertEqual((ve_send._phase(ramp), ramp.status_detail), ('funded', 'waiting_balance'))
+        self.assertEqual((ve_send._phase(ramp), ramp.status_detail), ('settled', 'waiting_balance'))
         client = pagoasap_client()
         self._pay(ramp, client)
         self.assertEqual(client.create_payout.call_args.kwargs['idempotency_key'],
@@ -371,7 +443,7 @@ class SendCoreTests(TestCase):
         with self.assertRaises(ve_send.VeSendError):
             ve_send.retry_payout(ramp, operator='ops', reviewed_key='stale', reviewed_revision=0, confirmed_unpaid=True)
         ramp = ve_send.retry_payout(ramp, operator='ops', reviewed_key=key, reviewed_revision=0, confirmed_unpaid=True)
-        self.assertEqual((ve_send._phase(ramp), ve_send._section(ramp)['payout_attempt']), ('funded', 1))
+        self.assertEqual((ve_send._phase(ramp), ve_send._section(ramp)['payout_attempt']), ('settled', 1))
         with self.assertRaises(ve_send.VeSendError):
             ve_send.retry_payout(ramp, operator='ops', reviewed_key=key, reviewed_revision=0, confirmed_unpaid=True)
 
@@ -379,7 +451,10 @@ class SendCoreTests(TestCase):
         ramp = self._pay(self._funded(), pagoasap_client())
         ramp = self._pay(ramp, pagoasap_client(intent={'state': 'weird'}))
         self.assertFalse(ve_send.due_for_sync(ramp))
-        ramp = ve_send.mark_paid_manually(ramp, '998877', operator='ops')
+        with self.assertRaises(ve_send.VeSendError):
+            ve_send.mark_paid_manually(ramp, '998877', operator='ops', reviewed_key='stale', reviewed_revision=0)
+        ramp = ve_send.mark_paid_manually(ramp, '998877', operator='ops',
+                                          reviewed_key=ve_send._section(ramp)['payout_key'], reviewed_revision=0)
         self.assertEqual((ramp.status, ve_send._section(ramp)['bank_reference']), ('COMPLETED', '998877'))
 
     @override_settings(VE_PAGOMOVIL_SEND_USER_DAILY_USD='30')

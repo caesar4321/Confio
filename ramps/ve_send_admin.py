@@ -74,7 +74,8 @@ def _act(request) -> None:
             ve_send.update_beneficiary(ramp, beneficiary, operator=operator, reviewed_key=key,
                                        reviewed_revision=revision)
         elif action == 'paid':
-            ve_send.mark_paid_manually(ramp, request.POST.get('reference', ''), operator=operator)
+            ve_send.mark_paid_manually(ramp, request.POST.get('reference', ''), operator=operator,
+                                       reviewed_key=key, reviewed_revision=revision)
         else:
             raise VePagoMovilError('Acción no válida.')
     except VePagoMovilError as exc:

@@ -34,7 +34,7 @@ export const CREATE_VE_SEND = gql`mutation CreateVePagoMovilSend(
 export const START_VE_SEND_FUNDING = gql`mutation StartVePagoMovilSendFunding($orderId: String!) {
   startVePagomovilSendFunding(orderId: $orderId) {
     ${ORDER_FIELDS}
-    funding { depositAddress network depositAmountWei grossDebitAmountWei }
+    funding { depositAddress network depositAmountWei grossDebitAmountWei expiresAt }
   }
 }`;
 
@@ -51,6 +51,8 @@ export interface VeSendFunding {
   network: string;
   depositAmountWei: string;
   grossDebitAmountWei?: string | null;
+  /** Unix seconds: never fund after this (a bridge quote deadline). */
+  expiresAt?: number | null;
 }
 
 export interface VeSendOrder {
@@ -100,7 +102,7 @@ export const fundingPaymentDetails = (funding: VeSendFunding) => ({
 export function sendStage(order: VeSendOrder): number {
   if (order.status === 'COMPLETED') return 3;
   const phase = order.phase || '';
-  if (['funded', 'paying', 'payout_pending', 'payout_failed', 'payout_review'].includes(phase)) return 2;
+  if (['funded', 'settled', 'paying', 'payout_pending', 'payout_failed', 'payout_review'].includes(phase)) return 2;
   if (phase === 'funding_reported') return 1;
   return 0;
 }
@@ -122,7 +124,7 @@ export function sendCopy(order: VeSendOrder): { title: string; body: string } {
   if (order.phase === 'funding_reported') {
     return { title: 'Enviando tus dólares', body: 'Confirmando la transferencia. No cierres esta pantalla.' };
   }
-  if (order.phase === 'funded' || detail === 'waiting_balance') {
+  if (order.phase === 'funded' || order.phase === 'settled' || detail === 'waiting_balance') {
     return { title: 'Convirtiendo a bolívares', body: 'Tus dólares llegaron. Estamos preparando el Pago Móvil.' };
   }
   if (order.phase === 'paying' || order.phase === 'payout_pending') {

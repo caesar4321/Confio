@@ -11,6 +11,9 @@ made under the row lock:
                     in one sponsored batch and reported the hash (or none)
   funded            the BSC chain proves the exact USDT reached the target
                     from the user's wallet
+  settled           the provider holds it (after the adapter's settlement
+                    step, e.g. a bridge delivery proven on the other chain);
+                    `credited_usd` is what a payout may spend
   paying            one payout attempt is at the provider under a fixed key
   payout_pending    the provider accepted it; polled until final
   paid              delivered (COMPLETED)
@@ -31,8 +34,11 @@ the attempt that sent it.
 
 Adapter contract (module attributes/functions):
   PROVIDER, SHARED_DEPOSIT_TARGET, PENDING_STALE, replay_window()
-  deposit_target(ramp) -> str | None          (None: preparation failed)
-  payout_terms(ramp, inflight) -> dict | None (amount + body; None = wait)
+  TARGET_AT_CLAIM: the deposit target is made when the funding is claimed
+    (funding_target(ramp) -> dict), else at creation (deposit_target(ramp))
+  settle(ramp) -> Settlement   (optional: funded -> settled; else immediate)
+  payout_terms(ramp, inflight) -> dict | None (amount + body; None = wait;
+    {'review': reason} = not payable as priced)
   dispatch(ramp, claim) -> Outcome
   poll(ramp) -> Outcome
 """
@@ -109,6 +115,16 @@ class Outcome:
     operation_id: str = ''
     reason: str = ''
     ves_amount: str = ''
+
+
+@dataclass(frozen=True)
+class Settlement:
+    """Where the funded dollars are: pending | delivered (credited_usd,
+    evidence) | refunded (proven back in the user's wallet) | review."""
+    kind: str
+    credited_usd: str = ''
+    evidence: str = ''
+    reason: str = ''
 
 
 def adapter(ramp_or_provider):
@@ -330,18 +346,27 @@ def reserve(*, provider: str, user, account, gross_usd: Decimal, beneficiary: di
     return ramp
 
 
+def _valid_target(ramp: RampTransaction, target: str) -> bool:
+    return (EVM_ADDRESS_RE.fullmatch(target or '') is not None
+            and target.lower() not in (USDT_BSC, '0x' + '0' * 40, (ramp.actor_address or '').lower()))
+
+
 def prepare(ramp: RampTransaction) -> RampTransaction:
     """Fix the deposit target and open the funding window. Nothing can have
     been paid yet, so a failure closes the order."""
+    if getattr(adapter(ramp), 'TARGET_AT_CLAIM', False):
+        # The target is made when the funding is claimed (e.g. a bridge quote
+        # with a short deadline).
+        updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _phase(c) == 'preparing',
+                          phase='awaiting_funding', prepared_at=_now_iso())
+        return updated or RampTransaction.objects.get(pk=ramp.pk)
     try:
         target = adapter(ramp).deposit_target(ramp)
     except Exception:  # noqa: BLE001
         logger.exception('Deposit target failed for VE send %s', ramp.pk)
         target = None
     target = (target or '').strip()
-    valid = (EVM_ADDRESS_RE.fullmatch(target) is not None
-             and target.lower() not in (USDT_BSC, '0x' + '0' * 40, (ramp.actor_address or '').lower()))
-    if not valid:
+    if not _valid_target(ramp, target):
         fail_unfunded(ramp, 'deposit_target_unavailable')
         raise VeSendError('No pudimos preparar el envío. Intenta de nuevo en unos minutos.')
     updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _phase(c) == 'preparing',
@@ -364,19 +389,34 @@ def funding_details(ramp: RampTransaction) -> dict | None:
     address = section.get('deposit_address') or ''
     if not EVM_ADDRESS_RE.fullmatch(address) or not str(section.get('deposit_wei') or '').isdigit():
         return None
+    deadline = (section.get('bridge') or {}).get('deadline')
     return {
         'deposit_address': address,
         'network': 'BSC',
         'deposit_amount_wei': str(section['deposit_wei']),
         'gross_debit_amount_wei': str(section['gross_wei']) if section.get('gross_wei') else None,
+        # Unix seconds after which the target must not be funded (a bridge
+        # quote's deadline), or None.
+        'expires_at': int(deadline) if deadline else None,
     }
 
 
 def start_funding(ramp: RampTransaction) -> RampTransaction:
     """The single right to fund this order: from here it can never be funded
     again, nor cancelled while a broadcast may still land."""
+    values = {}
+    if getattr(adapter(ramp), 'TARGET_AT_CLAIM', False):
+        if not can_fund(RampTransaction.objects.get(pk=ramp.pk)):
+            raise VeSendError('Este envío ya se está procesando.')
+        # Made now (an HTTP call, outside any lock); kept only if this claim
+        # wins. A losing claim's target is never handed out or funded.
+        target = adapter(ramp).funding_target(ramp)
+        address = str(target.get('deposit_address') or '').strip()
+        if not _valid_target(ramp, address):
+            raise VeSendError('No pudimos preparar el envío. Intenta de nuevo en unos minutos.')
+        values = {'deposit_address': address.lower(), 'bridge': target.get('binding')}
     updated = _update(ramp.pk, require=can_fund, detail='confirming_funding',
-                      phase='funding_reported', funding_started_at=_now_iso())
+                      phase='funding_reported', funding_started_at=_now_iso(), **values)
     if updated is None:
         raise VeSendError('Este envío ya se está procesando.')
     return updated
@@ -676,10 +716,13 @@ def retry_payout(ramp: RampTransaction, *, operator: str, reviewed_key: str, rev
                 or not _lease_expired(section)):
             raise VeSendError('Este envío cambió o no se puede reintentar. Recarga la página.')
         metadata = dict(current.metadata or {})
-        section.update(phase='funded', retried_by=operator[:80], retried_at=_now_iso(), **_fresh_attempt(section))
+        # Delivery never proven (e.g. reviewed during settlement): settle again
+        # before any payout; otherwise pay from what was credited.
+        resume = 'settled' if section.get('credited_usd') else 'funded'
+        section.update(phase=resume, retried_by=operator[:80], retried_at=_now_iso(), **_fresh_attempt(section))
         metadata[SECTION] = section
         current.metadata = metadata
-        current.status_detail = 'funded'
+        current.status_detail = resume
         current.save(update_fields=['metadata', 'status_detail', 'updated_at'])
         return current
 
@@ -701,17 +744,25 @@ def update_beneficiary(ramp: RampTransaction, beneficiary: dict, *, operator: st
     return updated
 
 
-def mark_paid_manually(ramp: RampTransaction, reference: str, *, operator: str) -> RampTransaction:
-    """Ops: the provider shows the payout settled (reference from its portal)."""
+def mark_paid_manually(ramp: RampTransaction, reference: str, *, operator: str, reviewed_key: str,
+                       reviewed_revision: int) -> RampTransaction:
+    """Ops: the provider shows the payout settled (reference from its portal);
+    only for the attempt and destination ops reviewed, never mid-dispatch."""
     reference = (reference or '').strip()[:40]
     if not reference:
         raise VeSendError('Escribe la referencia del pago.')
-    updated = _update(ramp.pk, require=lambda c: c.status == 'PROCESSING'
-                      and _phase(c) in ('paying', 'payout_pending', 'payout_review', 'payout_failed'),
-                      status='COMPLETED', detail='delivered', phase='paid', bank_reference=reference,
-                      paid_by=operator[:80])
+
+    def allowed(current):
+        section = _section(current)
+        return (current.status == 'PROCESSING'
+                and _phase(current) in ('paying', 'payout_pending', 'payout_review', 'payout_failed')
+                and (section.get('payout_key') or '') == (reviewed_key or '')
+                and int(section.get('beneficiary_revision') or 0) == int(reviewed_revision)
+                and _lease_expired(section))
+    updated = _update(ramp.pk, require=allowed, status='COMPLETED', detail='delivered', phase='paid',
+                      bank_reference=reference, paid_by=operator[:80])
     if updated is None:
-        raise VeSendError('Este envío no está en pago.')
+        raise VeSendError('Este envío cambió o tiene un pago en curso. Recarga la página.')
     RampTransaction.objects.filter(pk=ramp.pk).update(completed_at=timezone.now())
     return RampTransaction.objects.get(pk=ramp.pk)
 
@@ -733,7 +784,7 @@ def _claim_payout(ramp: RampTransaction) -> dict | None:
         _advisory_lock(PAYOUT_LOCK)
         current = RampTransaction.objects.select_for_update().get(pk=ramp.pk)
         section = _section(current)
-        if current.status != 'PROCESSING' or _phase(current) != 'funded':
+        if current.status != 'PROCESSING' or _phase(current) != 'settled':
             return None
         terms = adapter(current).payout_terms(current, _inflight(current.pk))
         if terms and terms.get('review'):
@@ -826,7 +877,7 @@ def apply_outcome(ramp: RampTransaction, outcome: Outcome, key: str) -> RampTran
     if outcome.kind == 'retry':
         # Definitely not paid and expected to work later (e.g. the deposit is
         # not credited yet): back to funded, the next try gets a NEW key.
-        updated = _update(ramp.pk, require=_same_attempt(key), phase='funded', detail='waiting_balance',
+        updated = _update(ramp.pk, require=_same_attempt(key), phase='settled', detail='waiting_balance',
                           **_fresh_attempt(section))
         return updated or RampTransaction.objects.get(pk=ramp.pk)
     if outcome.kind == 'failed':
@@ -904,6 +955,48 @@ def _poll(ramp: RampTransaction) -> RampTransaction:
     return ramp
 
 
+def _settle(ramp: RampTransaction) -> RampTransaction:
+    """funded -> settled once the provider holds the money: the adapter's
+    settlement step (e.g. a bridge delivery proven on the destination chain),
+    or immediately when there is none."""
+    section = _section(ramp)
+    step = getattr(adapter(ramp), 'settle', None)
+    if step is None:
+        credited = Decimal(str(section.get('funded_wei') or '0')) / Decimal(10 ** 18)
+        result = Settlement('delivered', credited_usd=format(credited, 'f'))
+    else:
+        try:
+            result = step(ramp)
+        except Exception:  # noqa: BLE001 — try again next poll
+            logger.warning('VE send settlement check failed for %s', ramp.pk, exc_info=True)
+            return ramp
+    funded = lambda c: c.status == 'PROCESSING' and _phase(c) == 'funded'  # noqa: E731
+    if result.kind == 'pending':
+        updated = _update(ramp.pk, require=funded, detail='bridging')
+        return updated or RampTransaction.objects.get(pk=ramp.pk)
+    if result.kind == 'delivered':
+        with transaction.atomic():
+            if result.evidence:
+                # One delivery settles one order.
+                _advisory_lock(f've_send:delivery:{result.evidence}')
+                if _sends().filter(**{f'metadata__{SECTION}__delivered_tx': result.evidence}).exclude(
+                        pk=ramp.pk).exists():
+                    result = Settlement('review', reason='delivery_claimed_elsewhere')
+            if result.kind == 'delivered':
+                updated = _update(ramp.pk, require=funded, phase='settled', detail='settled',
+                                  credited_usd=result.credited_usd, delivered_tx=result.evidence or None)
+                return updated or RampTransaction.objects.get(pk=ramp.pk)
+    if result.kind == 'refunded':
+        # Proven back in the user's own wallet: nothing was sent.
+        updated = _update(ramp.pk, require=funded, status='FAILED', detail='refunded_to_wallet', phase='refunded')
+        return updated or RampTransaction.objects.get(pk=ramp.pk)
+    updated = _update(ramp.pk, require=funded, phase='payout_review',
+                      detail=f'needs_review:settlement:{result.reason or "unknown"}')
+    if updated is not None:
+        _alert(updated, updated.status_detail)
+    return updated or RampTransaction.objects.get(pk=ramp.pk)
+
+
 # ------------------------------------------------------------------ reconciliation
 
 def sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
@@ -961,6 +1054,8 @@ def sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
             return _mark_funded(ramp, *found)
         return ramp
     if phase == 'funded':
+        return _settle(ramp)
+    if phase == 'settled':
         return pay_out(ramp)
     if phase == 'paying':
         return _resume_payout(ramp)

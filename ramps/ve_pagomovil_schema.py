@@ -82,6 +82,8 @@ class VePagoMovilFundingType(graphene.ObjectType):
     network = graphene.String()
     deposit_amount_wei = graphene.String()
     gross_debit_amount_wei = graphene.String()
+    # Unix seconds: never fund the target after this (a bridge quote deadline).
+    expires_at = graphene.Int()
 
 
 class VePagoMovilSendOrderType(graphene.ObjectType):

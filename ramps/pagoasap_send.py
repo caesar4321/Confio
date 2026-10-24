@@ -1,9 +1,14 @@
 """Pago ASAP as the VE Pago Móvil send provider (adapter for ramps.ve_send).
 
-Funding: the user's USDT goes to Confío's Pago ASAP deposit address on BSC
-(one address for every send, so ve_send tags each sender's amounts). Pago
-ASAP credits our USD balance. Payout: a Pago Móvil intent for `amountVES`,
-which Pago ASAP converts from that balance at its rate; polled to
+Pago ASAP takes stablecoins on Polygon only. Funding: when the user claims
+the funding, a Relay quote (payment_accounts.relay, the audited bridge
+client) gives a deposit address on BSC that bridges the user's exact USDT to
+native USDC at Confío's Pago ASAP Polygon address. The user pays that
+address in the usual sponsored batch; ve_send proves it on BSC, and settle()
+proves Relay's delivery on Polygon from finalized canonical receipts
+(payment_accounts.relay_settlement). Pago ASAP credits our USD balance.
+Payout: a Pago Móvil intent for `amountVES`, converted from that balance at
+Pago ASAP's rate, sized from the USDC actually delivered; polled to
 completed/failed. No manual step.
 """
 from __future__ import annotations
@@ -17,12 +22,15 @@ from django.conf import settings
 from ramps import ve_pagomovil, ve_send
 from ramps.pagoasap_client import PagoAsapAmbiguousError, PagoAsapClient, PagoAsapError, idempotency_key
 from ramps.ve_pagomovil import VePagoMovilError
-from ramps.ve_send import Outcome
+from ramps.ve_send import Outcome, Settlement
 
 logger = logging.getLogger(__name__)
 
 PROVIDER = 'pagoasap'
+# Several sends of one person may share a Relay deposit route: tag amounts.
 SHARED_DEPOSIT_TARGET = True
+TARGET_AT_CLAIM = True
+SOURCE, DESTINATION = 'BSC:USDT', 'POL:USDC'
 PENDING_STALE = timedelta(hours=2)
 MIN_PAYOUT_VES = Decimal('10')
 UNAVAILABLE = 'Los envíos en bolívares no están disponibles por ahora.'
@@ -54,14 +62,94 @@ def _ves_for(usd: Decimal, rate: Decimal) -> Decimal:
     return (usd * rate).quantize(ve_send.CENT, rounding=ROUND_DOWN)
 
 
+def _polygon_address() -> str:
+    return (getattr(settings, 'PAGOASAP_DEPOSIT_ADDRESS_POLYGON', '') or '').strip()
+
+
 def deposit_target(ramp) -> str | None:
-    return getattr(settings, 'PAGOASAP_DEPOSIT_ADDRESS_BSC', '') or None
+    return None  # made at claim time (funding_target)
+
+
+def funding_target(ramp) -> dict:
+    """A Relay deposit address on BSC for this order's exact USDT, bridging to
+    Pago ASAP's Polygon address. Validated by the bridge client (assets,
+    amounts, recipient, refund to the sender, single ERC20 deposit)."""
+    from payment_accounts.allbridge_next import NextError
+    from payment_accounts.bridge_binding import deposit_call
+    from payment_accounts.relay import RelayClient
+    section = ve_send._section(ramp)
+    amount = str(section['deposit_wei'])
+    recipient = _polygon_address()
+    if not recipient:
+        raise VePagoMovilError(UNAVAILABLE)
+    client = RelayClient()
+    try:
+        route = client.routes(SOURCE, DESTINATION, amount, ramp.actor_address, recipient)[0]
+        build = client.build(route, source_address=ramp.actor_address, destination_address=recipient)
+        deposit, _ = deposit_call(build, SOURCE, amount)
+    except NextError as exc:
+        logger.warning('Relay quote failed for VE send %s: %s', ramp.pk, exc)
+        raise VePagoMovilError('No pudimos preparar el envío. Intenta de nuevo en unos minutos.') from exc
+    return {
+        'deposit_address': deposit,
+        'binding': {
+            'provider': 'relay', 'request_id': build['relay']['request_id'],
+            'response': build['relay']['response'], 'deadline': build['relay']['deadline'],
+            'recipient': recipient.lower(), 'amount_out': build['amountOut'],
+            'amount_out_min': build['amountOutMin'],
+        },
+    }
+
+
+def settle(ramp) -> Settlement:
+    """Relay's delivery to Pago ASAP on Polygon, proven from finalized
+    canonical receipts by the audited bridge reconciler."""
+    from types import SimpleNamespace
+    from payment_accounts.allbridge_next import NextError, TOKENS
+    from payment_accounts.relay_settlement import reconcile_relay
+    section = ve_send._section(ramp)
+    bridge = section.get('bridge') or {}
+    if not bridge.get('request_id') or not section.get('funding_tx_hash'):
+        return Settlement('review', reason='bridge_binding_missing')
+    transfer = SimpleNamespace(
+        quote=SimpleNamespace(source_token_id=SOURCE, destination_token_id=DESTINATION,
+                              amount_units=str(section['deposit_wei']),
+                              source_address=(ramp.actor_address or '').lower(),
+                              destination_address=bridge['recipient']),
+        binding={'request_id': bridge['request_id'], 'response': bridge['response']},
+        deadline=int(bridge['deadline']), source_tx_hash=section['funding_tx_hash'],
+        deposit_address=section['deposit_address'], funding_mode='wallet',
+        amount_out_min=bridge['amount_out_min'], status='bridging', failure_code='',
+        actual_out_units=None, destination_tx_hash='')
+    try:
+        reconcile_relay(transfer)
+    except NextError:
+        return Settlement('pending')  # not resolvable yet; escalates after the deadline
+    if transfer.status == 'delivered':
+        received = int(transfer.actual_out_units)
+        expected = int(bridge.get('amount_out') or 0)
+        # The receipt check sums every USDC transfer to Pago ASAP in the
+        # delivery transaction: credit at most this order's own quoted output,
+        # and let ops look when the transaction plainly carries more.
+        if expected <= 0 or received > expected + max(expected // 50, 50_000):
+            return Settlement('review', reason='delivery_amount_unattributable')
+        units = min(received, expected)
+        usd = Decimal(units) / Decimal(10 ** TOKENS[DESTINATION][1])
+        return Settlement('delivered', credited_usd=format(usd, 'f'), evidence=transfer.destination_tx_hash)
+    if transfer.status == 'refunded':
+        return Settlement('refunded')
+    if transfer.status == 'needs_review':
+        return Settlement('review', reason=transfer.failure_code or 'bridge')
+    return Settlement('pending')
 
 
 def quote(amount: Decimal) -> dict:
     client = _client()
     _, deposit_wei = ve_send.confio_amounts(amount)
     usdt = Decimal(deposit_wei) / Decimal(10 ** 18)
+    recipient = _polygon_address()
+    if not recipient:
+        raise VePagoMovilError(UNAVAILABLE)
     try:
         rate = client.rate('USD', 'VES')
         reference = client.reference_rate()
@@ -70,7 +158,16 @@ def quote(amount: Decimal) -> dict:
         raise VePagoMovilError(GENERIC_ERROR) from exc
     if rate <= 0:
         raise VePagoMovilError(GENERIC_ERROR)
-    ves = _ves_for(_fee_free_usd(usdt), rate)
+    # The bridge's own estimate (no deposit address is made for a quote).
+    from payment_accounts.allbridge_next import NextError, TOKENS
+    from payment_accounts.relay import RelayClient
+    try:
+        estimate = RelayClient().quote(SOURCE, DESTINATION, str(deposit_wei), source_address=recipient,
+                                       destination_address=recipient)
+        delivered = Decimal(str(estimate['details']['currencyOut']['amount'])) / Decimal(10 ** TOKENS[DESTINATION][1])
+    except (NextError, KeyError, TypeError) as exc:
+        raise VePagoMovilError(str(exc) if 'muy pequeño' in str(exc) else GENERIC_ERROR) from exc
+    ves = _ves_for(_fee_free_usd(delivered), rate)
     # The processor's share in dollars: what these bolívares would have cost
     # at the market reference, against the dollars that go in.
     processor_fee = max(usdt - (ves / reference), Decimal('0')) if reference > 0 else Decimal('0')
@@ -85,7 +182,7 @@ def quote(amount: Decimal) -> dict:
 
 
 def create(user, account, amount: Decimal, beneficiary: dict):
-    if not deposit_target(None):
+    if not _polygon_address():
         raise VePagoMovilError(UNAVAILABLE)
     estimate = quote(amount)
     gross_wei, deposit_wei = ve_send.confio_amounts(amount)
@@ -144,7 +241,8 @@ def payout_terms(ramp, inflight) -> dict | None:
     in flight. None: not payable yet (deposit not credited, below minimum)."""
     client = _client()
     section = ve_send._section(ramp)
-    usd = _fee_free_usd(Decimal(str(section.get('funded_wei') or '0')) / Decimal(10 ** 18))
+    # What Relay actually delivered to Pago ASAP (proven on Polygon).
+    usd = _fee_free_usd(Decimal(str(section.get('credited_usd') or '0')))
     rate = client.rate('USD', 'VES')
     if rate <= 0 or usd <= 0:
         return None

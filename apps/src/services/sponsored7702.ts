@@ -122,14 +122,26 @@ export interface SponsoredBatchResultReceipt {
  * stale_auth_nonce) or a silent no-op. Throws on policy rejection or
  * exhaustion.
  */
+/** Refused before signing: the caller's target expires too soon. Nothing was
+ *  broadcast, so callers treat it as a definite "not sent". */
+export class SigningWindowClosedError extends Error {
+  constructor() {
+    super('The funding target expires before this could be signed');
+    this.name = 'SigningWindowClosedError';
+  }
+}
+
 export const executeSponsoredBatch = async (params: {
   wallet: DerivedEvmWallet;
   calls: BatchCall[];
   delegateAddress: string;
   requestId?: string;
+  /** Unix seconds the signed batch must not outlive (e.g. a bridge quote's
+   *  deadline). The intent deadline is capped to it. */
+  notAfter?: number;
 }): Promise<SponsoredBatchResultReceipt> => {
   const { sponsorBscBatch } = await import('./bscServerRpc');
-  const { wallet, calls, delegateAddress, requestId } = params;
+  const { wallet, calls, delegateAddress, requestId, notAfter } = params;
   const from = wallet.address;
 
   let lastError = 'unknown';
@@ -145,7 +157,9 @@ export const executeSponsoredBatch = async (params: {
       delegateNonce(from),
       isDelegatedTo(from, delegateAddress),
     ]);
-    const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+    const now = Math.floor(Date.now() / 1000);
+    if (notAfter !== undefined && notAfter - now < 30) throw new SigningWindowClosedError();
+    const deadline = BigInt(notAfter !== undefined ? Math.min(now + 600, notAfter) : now + 600);
 
     // Savings rail: no prepare step, so derive intentId the way the server
     // does (from the selectors). Domain flows pass the server's intentId.

@@ -39,15 +39,22 @@ decides, then ops review.
    lock. Pago ASAP's deposit address is shared by every send, so each of a
    sender's sends carries a distinct micro-tag (under one cent) in its USDT
    amount.
-2. **Funding**: a single-use claim answers the vouched target once. The app
-   pins the personal wallet and pays with the Retiro batch (redeem with fee +
-   exact transfer); the sponsor spends the Face approval.
-3. **Proof**: the BSC chain decides: one USDT Transfer from the order's wallet
-   to the target for exactly the order's amount, not claimed by another
-   order (receipt, or an incremental log scan watched for 3 days).
-4. **Payout**: priced at payout time from the funded dollars and Pago ASAP's
-   rate, sent only when the provider balance covers it after payouts in
-   flight. A Pago Móvil intent under an idempotency key derived from the
+2. **Funding**: Pago ASAP takes stablecoins on Polygon only. The single-use
+   funding claim takes a Relay quote (the audited `payment_accounts.relay`
+   client) whose deposit address on BSC bridges the order's exact USDT to
+   native USDC at Pago ASAP's Polygon address, and answers it once with the
+   Relay deadline. The app pins the personal wallet and pays with the Retiro
+   batch (redeem with fee + exact transfer), signed never to outlive that
+   deadline; the sponsor spends the Face approval.
+3. **Proof**: the BSC chain decides funding: one USDT Transfer from the
+   order's wallet to the deposit address for exactly the order's amount, in a
+   finalized canonical block, not claimed by another order. Settlement then
+   proves Relay's delivery on Polygon (or a full refund to the user's wallet)
+   from finalized receipts (`payment_accounts.relay_settlement`); an order is
+   credited at most its own quoted bridge output.
+4. **Payout**: priced at payout time from the dollars delivered to Pago ASAP
+   and its rate, sent only when the provider balance covers it after payouts
+   in flight. A Pago Móvil intent under an idempotency key derived from the
    attempt; polled to completed or failed.
 5. **Safety**: every dispatch holds a lease; answers are fenced to their
    attempt; a lost answer is replayed with the same key only inside a short

@@ -572,6 +572,9 @@ export const fundUsdtDestination = async (params: {
   /** Universal cUSD proxy; redeemed first when present. */
   cusdAddress?: string | null;
   wallet?: DerivedEvmWallet;
+  /** Unix seconds the funding must not be signed for beyond (a bridge
+   *  target's deadline). Sponsored path only. */
+  notAfter?: number;
 }): Promise<{ txHash: string; redeemedShares: bigint }> => {
   installBscServerTransport();
   const wallet = params.wallet ?? (await getActiveEvmWallet());
@@ -770,8 +773,13 @@ export const fundUsdtDestination = async (params: {
       wallet,
       calls,
       delegateAddress: sponsored.delegateAddress,
+      notAfter: params.notAfter,
     });
     return { txHash: rec.txHash, redeemedShares: shares };
+  }
+  if (params.notAfter !== undefined) {
+    // A self-signed transfer cannot carry the target's deadline.
+    throw new Error('Expiring funding targets need the sponsored path');
   }
 
   // ── legacy self-signed path (needs the user's OWN BNB) ──

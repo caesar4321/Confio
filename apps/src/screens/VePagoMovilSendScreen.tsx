@@ -208,6 +208,12 @@ export default function VePagoMovilSendScreen() {
       return;
     }
     setOrder({ ...claimed, funding: null });
+    // A bridge target expires: never sign for one that is about to (e.g. the
+    // phone slept after the claim). Nothing is sent; the send can be cancelled.
+    if (claimed.funding.expiresAt && claimed.funding.expiresAt * 1000 < Date.now() + 60_000) {
+      if (alive.current) setError('El envío venció antes de firmarlo. No se envió nada; cancélalo y vuelve a intentarlo.');
+      return;
+    }
     let txHash: string | null = null;
     try {
       // The audited Retiro batch (redeem with fee + exact transfer), signed
@@ -219,6 +225,8 @@ export default function VePagoMovilSendScreen() {
         vaultAddress: vaultAddress || null,
         cusdAddress,
         wallet,
+        // Never signed to outlive the bridge target.
+        notAfter: claimed.funding.expiresAt ? claimed.funding.expiresAt - 30 : undefined,
       });
       txHash = res.txHash;
     } catch (fundError: any) {

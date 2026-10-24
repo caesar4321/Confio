@@ -34,7 +34,7 @@
   {% endif %}
   {% if row.phase == 'paying' or row.phase == 'payout_pending' or row.phase == 'payout_review' or row.phase == 'payout_failed' %}
   <form method="post" class="form-row">{% csrf_token %}
-    <input type="hidden" name="ramp" value="{{ row.ramp.pk }}"><input type="hidden" name="action" value="paid">
+    <input type="hidden" name="ramp" value="{{ row.ramp.pk }}"><input type="hidden" name="action" value="paid"><input type="hidden" name="payout_key" value="{{ row.section.payout_key|default_if_none:'' }}"><input type="hidden" name="beneficiary_revision" value="{{ row.section.beneficiary_revision|default:0 }}">
     Ya pagado (según el proveedor), referencia: <input name="reference" size="16"> <input type="submit" value="Marcar pagado">
   </form>
   {% endif %}
