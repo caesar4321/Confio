@@ -648,6 +648,8 @@ def sync_order(order, chain: dict | None = None) -> str:
         for field, value in updates.items():
             setattr(row, field, value)
         row.save(update_fields=[*updates.keys(), 'updated_at'])
+        from .ledger import sync_order_ledger
+        sync_order_ledger(row)  # history + Tu mes rows (never raises)
         if state == 'released' and row.settled_at is not None:
             # Only with the exact release time: the partner share depends on
             # which agreement was running then. Deferred reads retry next sync.

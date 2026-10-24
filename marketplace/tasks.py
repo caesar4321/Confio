@@ -125,7 +125,14 @@ def run_escrow_keeper():
             synced += 1
         except Exception as exc:  # noqa: BLE001
             logger.warning('[COMPRAR] sync failed for order %s: %s', order.pk, exc)
-    return {'reconciled': reconciled, 'released': released, 'refunded': refunded, 'synced': synced}
+    from .ledger import heal_missing
+    try:
+        healed = heal_missing()
+    except Exception as exc:  # noqa: BLE001
+        healed = 0
+        logger.warning('[COMPRAR] ledger heal failed: %s', exc)
+    return {'reconciled': reconciled, 'released': released, 'refunded': refunded, 'synced': synced,
+            'ledger_healed': healed}
 
 
 @shared_task(name='marketplace.review_product', bind=True, max_retries=5)

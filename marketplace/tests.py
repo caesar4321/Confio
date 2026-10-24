@@ -1,3 +1,5 @@
+from django.core.management import call_command
+import io
 import json
 from datetime import date, timedelta
 from decimal import Decimal
@@ -577,6 +579,84 @@ class SyncAndLedgerTests(MarketTestBase):
         escrow.sync_order(order, self.chain(order, 'funded', block=300))
         order.refresh_from_db()
         self.assertEqual(order.status, 'released')
+
+    def _month(self, user):
+        from zoneinfo import ZoneInfo
+        from users.cashflow import summarize
+        now = timezone.now()
+        return summarize(user, user.accounts.get(), 'personal', None, now.year, now.month, ZoneInfo('UTC')).current
+
+    def _history(self, user):
+        from users.graphql_views import account_unified_queryset
+        return set(account_unified_queryset(user, user.accounts.get(), 'personal', None)
+                   .values_list('payment_reference_id', flat=True))
+
+    def test_purchase_and_sale_reach_history_and_tu_mes(self):
+        order, _, _ = self.prepare()
+        escrow.sync_order(order, self.chain(order, 'funded', block=100))
+        buy = f'comprar:{order.pk}:buy'
+        self.assertEqual(self._history(self.buyer), {buy})
+        # Held in escrow: nothing is the seller's yet.
+        self.assertEqual(self._history(self.seller), set())
+        self.assertEqual(self._month(self.buyer).spending, Decimal('30.00'))
+        self.assertEqual(self._month(self.buyer).spending_by_category, {'shopping': Decimal('30.00')})
+
+        order.refresh_from_db()
+        escrow.sync_order(order, self.chain(order, 'released', block=110))
+        escrow.sync_order(order, self.chain(order, 'released', block=120))  # idempotent
+        self.assertEqual(self._history(self.seller), {f'comprar:{order.pk}:sale'})
+        self.assertEqual(self._history(self.buyer), {buy})
+        self.assertEqual(self._month(self.seller).income, Decimal('27.60'))  # net of the 8% fee
+        self.assertEqual(self._month(self.buyer).spending, Decimal('30.00'))
+
+    def test_refund_shows_in_history_and_nets_out_of_tu_mes(self):
+        order, _, _ = self.prepare()
+        escrow.sync_order(order, self.chain(order, 'funded', block=100))
+        order.refresh_from_db()
+        escrow.sync_order(order, self.chain(order, 'refunded', block=110))
+        self.assertEqual(self._history(self.buyer), {f'comprar:{order.pk}:buy', f'comprar:{order.pk}:refund'})
+        self.assertEqual(self._history(self.seller), set())
+        totals = self._month(self.buyer)
+        self.assertEqual((totals.spending, totals.income), (Decimal('0'), Decimal('0')))
+
+    def test_ledger_failure_never_undoes_the_sync(self):
+        order, _, _ = self.prepare()
+        with mock.patch('marketplace.ledger._write', side_effect=RuntimeError('boom')):
+            self.assertEqual(escrow.sync_order(order, self.chain(order, 'funded', block=100)), 'funded')
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'funded')
+
+    def test_keeper_heals_a_settlement_row_whose_mirror_failed(self):
+        from marketplace.ledger import heal_missing
+        order, _, _ = self.prepare()
+        escrow.sync_order(order, self.chain(order, 'funded', block=100))
+        order.refresh_from_db()
+        with mock.patch('marketplace.ledger._write', side_effect=RuntimeError('boom')):
+            escrow.sync_order(order, self.chain(order, 'released', block=110))
+        self.assertNotIn(f'comprar:{order.pk}:sale', self._history(self.seller))
+        self.assertEqual(heal_missing(), 1)
+        self.assertEqual(self._history(self.seller), {f'comprar:{order.pk}:sale'})
+        self.assertEqual(heal_missing(), 0)  # nothing left to heal
+        # A settlement time found later, whose correction also failed.
+        exact = timezone.now() - timedelta(hours=3)
+        Order.objects.filter(pk=order.pk).update(settled_at=exact)
+        self.assertEqual(heal_missing(), 1)
+        from users.models_unified import UnifiedTransactionTable as U
+        row = U.objects.get(payment_reference_id=f'comprar:{order.pk}:sale')
+        self.assertEqual((row.transaction_date, row.created_at), (exact, exact))
+        self.assertEqual(heal_missing(), 0)
+
+    def test_late_rows_sit_at_the_money_movement_in_history(self):
+        from users.models_unified import UnifiedTransactionTable as U
+        order, _, _ = self.prepare()
+        escrow.sync_order(order, self.chain(order, 'funded', block=100))
+        funded_at = timezone.now() - timedelta(days=40)
+        Order.objects.filter(pk=order.pk).update(funded_at=funded_at)
+        U.objects.filter(payment_reference_id=f'comprar:{order.pk}:buy').delete()
+        call_command('backfill_comprar_ledger', stdout=io.StringIO())
+        row = U.objects.get(payment_reference_id=f'comprar:{order.pk}:buy')
+        self.assertEqual((row.created_at, row.transaction_date), (funded_at, funded_at))
+        self.assertTrue(row.description.startswith('Comprar: '))
 
     def test_partner_share_follows_release_time_not_current_flag(self):
         agreement = MarketplacePartnerAgreement.objects.create(

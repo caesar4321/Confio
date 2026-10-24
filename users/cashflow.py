@@ -26,6 +26,8 @@ from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from marketplace.ledger import parse_reference as parse_market_reference
+
 USD_TOKENS = {'CUSD', 'CUSD_BSC', 'CUSD_PLUS', 'USDT', 'USDC'}
 
 INCOME_KINDS = {'income_person', 'sale', 'payroll_in', 'bonus'}
@@ -151,6 +153,7 @@ class ViewerContext:
     destination_ids: dict = field(default_factory=dict)  # internal_id -> (type, number), normalized
     category_rules: dict = field(default_factory=dict)   # counterparty_key -> category
     category_overrides: dict = field(default_factory=dict)  # unified row id -> category
+    market_orders: dict = field(default_factory=dict)  # Comprar order pk -> (status, store_id, store_name)
 
 
 @dataclass
@@ -163,6 +166,7 @@ class Movement:
     when: datetime | None = None
     row_id: int | None = None
     category: str | None = None   # spending only; None = uncategorized
+    default_category: str | None = None   # used when no override/rule names one
 
 
 class SummaryUnavailable(Exception):
@@ -226,6 +230,8 @@ def _payout_is_own(row, ctx: ViewerContext) -> bool:
 
 
 TIP_COUNTERPARTY_KEY = 'tip'
+# Every Comprar buyer reads as one "Ventas en Comprar" line for the seller.
+MARKET_SALES_KEY = 'comprar:sales'
 
 
 def _is_tip_row(row) -> bool:
@@ -294,6 +300,8 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
     if amount is None:
         return None
     kind = None
+    market_key = None
+    market_ref = parse_market_reference(getattr(row, 'payment_reference_id', None))
 
     if ttype == 'ramp':
         rt = getattr(row, 'ramp_transaction', None)
@@ -322,6 +330,20 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
         kind = 'investment_in' if direction == 'sent' else None
     elif ttype == 'humanitarian':
         kind = 'donation' if direction == 'sent' else 'income_person'
+    elif ttype == 'send' and market_ref:
+        # Comprar: a purchase is spending at the store, a release is the
+        # seller's sale. A refunded order nets to nothing, so neither its
+        # purchase nor its refund counts (as refunded transfers drop out, R11).
+        order_pk, leg = market_ref
+        status, store_id, store_name = ctx.market_orders.get(order_pk, ('', None, ''))
+        if status == 'refunded' or leg == 'refund':
+            return None
+        if leg == 'buy' and direction == 'sent':
+            kind = 'merchant'
+            market_key = (f'store:{store_id}' if store_id else None, store_name or row.counterparty_display_name or '')
+        elif leg == 'sale' and direction == 'received':
+            kind = 'sale'
+            market_key = (MARKET_SALES_KEY, 'Ventas en Comprar')
     elif ttype in ('send', 'exchange'):
         batch_kind = getattr(getattr(row, 'sponsored_batch', None), 'kind', '') or ''
         if _is_tip_row(row):
@@ -343,7 +365,9 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
         return None
 
     key, name = (None, '')
-    if kind in COUNTERPARTY_KINDS and _is_tip_row(row):
+    if market_key is not None:
+        key, name = market_key
+    elif kind in COUNTERPARTY_KINDS and _is_tip_row(row):
         key, name = TIP_COUNTERPARTY_KEY, 'Propinas'
     elif kind in COUNTERPARTY_KINDS:
         if ttype == 'local_transfer' and direction == 'received':
@@ -356,7 +380,8 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
     # numbers, so a drill-down always sums to the figure it was opened from.
     movement = Movement(kind=kind, direction=direction, amount=amount.quantize(CENT, rounding=ROUND_HALF_UP),
                         counterparty_key=key, counterparty_name=name,
-                        when=row.transaction_date, row_id=getattr(row, 'pk', None))
+                        when=row.transaction_date, row_id=getattr(row, 'pk', None),
+                        default_category='shopping' if market_key is not None and kind == 'merchant' else None)
     movement.category = category_for(movement, ctx)
     return movement
 
@@ -368,9 +393,9 @@ def category_for(movement: Movement, ctx: ViewerContext) -> str | None:
         return None
     if movement.row_id is not None and movement.row_id in ctx.category_overrides:
         return ctx.category_overrides[movement.row_id]
-    if movement.counterparty_key:
-        return ctx.category_rules.get(movement.counterparty_key)
-    return None
+    if movement.counterparty_key and movement.counterparty_key in ctx.category_rules:
+        return ctx.category_rules[movement.counterparty_key]
+    return movement.default_category
 
 
 @dataclass
@@ -501,6 +526,13 @@ def prepare_context(user, account, account_type, business_id, scope, rows) -> Vi
             str(internal_id): (_doc_family(id_type), _norm_id(id_number))
             for internal_id, id_type, id_number in PayoutDestination.objects.filter(
                 internal_id__in=dest_ids).values_list('internal_id', 'holder_id_type', 'holder_id_number')
+        }
+    market_pks = {ref[0] for ref in (parse_market_reference(getattr(r, 'payment_reference_id', None)) for r in rows) if ref}
+    if market_pks:
+        from marketplace.models import Order
+        ctx.market_orders = {
+            pk: (status, store_id, store_name) for pk, status, store_id, store_name in
+            Order.objects.filter(pk__in=market_pks).values_list('pk', 'status', 'store_id', 'store__name')
         }
     ctx.category_rules = dict(CounterpartyRule.objects.filter(account=account).values_list('counterparty_key', 'category'))
     ctx.category_overrides = dict(MovementOverride.objects.filter(

@@ -52,6 +52,7 @@ import { phoneKeyToE164, parsePhoneKey } from '../utils/phoneKey';
 import { transactionFriendRoute } from '../utils/transactionFriend';
 import { formatDecimal, formatPercent } from '../utils/numberLocale';
 import { isInvestmentMovement } from '../utils/investmentMovement';
+import { isMarketplaceMovement } from '../utils/marketplaceMovement';
 import { isTipTransaction } from '../utils/tips';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 
@@ -854,8 +855,10 @@ export const TransactionDetailScreen = () => {
   // unified-row-id) only produces a misleading not-found request and flash.
   const isStockMovement = Boolean((transactionData as any)?.isStockMovement)
     || isInvestmentMovement(String((transactionData as any)?.description || ''));
+  // Comprar rows are owned by the order, not a SendTransaction, either.
+  const isMarketplaceRow = isMarketplaceMovement(String((transactionData as any)?.description || ''));
   const needsFetch = Boolean(
-    !isStockMovement &&
+    !isStockMovement && !isMarketplaceRow &&
     (transactionData?.id || transactionData?.transaction_id) &&
     (lacksPhonesForSend || !hasValidInternalId || routeInviteNeedsId || lacksCounterpartyUserId)
   );
@@ -2625,7 +2628,7 @@ export const TransactionDetailScreen = () => {
           {/* Not for a Propina either: it is between Comunidad pseudonyms (no
               phone, no account to send to), and a tip goes from the chat. */}
           {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll')
-            && !counterpartyIsBusiness && counterpartyIdentityVerified && !isTip && (
+            && !counterpartyIsBusiness && counterpartyIdentityVerified && !isTip && !isMarketplaceRow && (
                 <TouchableOpacity
                   style={styles.primaryAction}
                   onPress={() => {

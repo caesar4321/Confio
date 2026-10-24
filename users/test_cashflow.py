@@ -93,6 +93,31 @@ class ClassifyTests(SimpleTestCase):
         self.assertEqual(classify(swap, ctx()).kind, 'conversion')
         self.assertEqual(classify(buy, ctx()).kind, 'investment_in')
 
+    def test_comprar_purchase_is_store_spending_and_release_is_a_sale(self):
+        c = ctx(market_orders={42: ('shipped', 7, 'Tienda Sol')})
+        buy = row('send', direction='sent', token='CUSD_BSC', amount='54.00',
+                  payment_reference_id='comprar:42:buy', counterparty_display_name='Tienda Sol')
+        m = classify(buy, c)
+        self.assertEqual((m.kind, m.counterparty_key, m.counterparty_name), ('merchant', 'store:7', 'Tienda Sol'))
+        self.assertEqual(m.category, 'shopping')  # default until the user picks one
+        c.market_orders[42] = ('released', 7, 'Tienda Sol')
+        sale = row('send', direction='received', token='CUSD_BSC', amount='49.68',
+                   payment_reference_id='comprar:42:sale', sender_display_name='Comprar')
+        m = classify(sale, c)
+        self.assertEqual((m.kind, m.counterparty_key, m.amount), ('sale', 'comprar:sales', Decimal('49.68')))
+
+    def test_comprar_category_rule_beats_the_shopping_default(self):
+        c = ctx(market_orders={42: ('funded', 7, 'Tienda Sol')}, category_rules={'store:7': 'food'})
+        buy = row('send', direction='sent', token='CUSD_BSC', payment_reference_id='comprar:42:buy')
+        self.assertEqual(classify(buy, c).category, 'food')
+
+    def test_refunded_comprar_order_counts_neither_purchase_nor_refund(self):
+        c = ctx(market_orders={42: ('refunded', 7, 'Tienda Sol')})
+        buy = row('send', direction='sent', token='CUSD_BSC', payment_reference_id='comprar:42:buy')
+        refund = row('send', direction='received', token='CUSD_BSC', payment_reference_id='comprar:42:refund')
+        self.assertIsNone(classify(buy, c))
+        self.assertIsNone(classify(refund, c))
+
     def test_savings_delivered_as_raw_usdt_is_not_savings(self):
         r = row('conversion', conversion=SimpleNamespace(conversion_type='to_savings', status='DELIVERED_USDT'))
         self.assertEqual(classify(r, ctx()).kind, 'conversion')
