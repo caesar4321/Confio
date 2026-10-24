@@ -3,7 +3,8 @@
 //
 // Top to bottom: Card A "Te quedaron" (the single 34pt anchor, with the pace
 // line on the current month) · the dollar slot (protection, else savings
-// earned) · Tus acciones (stocks, or an invitation) · Pagos habituales · En qué se fue · Entre tus cuentas · Con quién.
+// earned) · Tus acciones (stocks, or an invitation) · Pagos habituales · Comprar (only with orders) ·
+// En qué se fue · Entre tus cuentas · Con quién.
 // Card A renders as soon as monthSummary answers; the insight cards and the
 // sections below are revealed together (once their queries answer), so nothing moves under
 // the user's finger. Amounts always US$, masked with the balance. A month with
@@ -26,7 +27,8 @@ import { colors } from '../config/theme';
 import { useAccount } from '../contexts/AccountContext';
 import type { MainStackParamList } from '../types/navigation';
 import {
-  GET_MONTH_MOVEMENTS, GET_MONTH_SUMMARY, type CategoryKey, type MonthSummary, type MonthTotals,
+  GET_MONTH_COMPRAR, GET_MONTH_MOVEMENTS, GET_MONTH_SUMMARY, type CategoryKey, type MonthComprar,
+  type MonthSummary, type MonthTotals,
 } from '../apollo/monthSummary';
 import { SummaryCard } from '../components/tuMes/SummaryCard';
 import { ProtectionCard, SavingsCard, StableCard } from '../components/tuMes/ProtectionCard';
@@ -302,6 +304,9 @@ type BodyProps = {
   onOpenCryptoAsset: (symbol: string) => void;
 };
 
+/** Longest the sections wait for the Comprar answer before showing without it. */
+const COMPRAR_WAIT_MS = 4000;
+
 /** One precision on this screen: whole dollars (design C, 2026-10-04). */
 function money(value: string | number, masked: boolean) {
   return masked ? MASK : formatUsd(value, { whole: true });
@@ -353,11 +358,45 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, sto
   // the refreshed summary (a stale "Clasifica 3 pagos" after labeling one).
   const refetchPendingRef = useRef(refetchPending);
   refetchPendingRef.current = refetchPending;
+  // Comprar purchases and sales: their own section, from their own query
+  // (an older server without it just leaves the section out).
+  const { data: comprarData, loading: comprarLoading, error: comprarError, refetch: refetchComprar } = useQuery<{ monthComprar: MonthComprar | null }>(GET_MONTH_COMPRAR, {
+    variables: { year: summary.year, month: summary.month, timezone: summary.timezone },
+    fetchPolicy: 'cache-and-network',
+  });
+  const refetchComprarRef = useRef(refetchComprar);
+  refetchComprarRef.current = refetchComprar;
   const pendingFocused = useRef(false);
   useFocusEffect(useCallback(() => {
-    if (pendingFocused.current) refetchPendingRef.current?.().catch(() => undefined);
+    if (pendingFocused.current) {
+      refetchPendingRef.current?.().catch(() => undefined);
+      refetchComprarRef.current?.().catch(() => undefined);
+    }
     pendingFocused.current = true;
   }, []));
+  const comprar = comprarData?.monthComprar;
+  const comprarRows = comprar ? comprarMonthRows(comprar) : [];
+  // The sections wait for this answer (at most COMPRAR_WAIT_MS), and whether
+  // the section shows is decided once per month view: a late answer must
+  // never insert it above rows the user may be about to tap.
+  const [comprarGaveUp, setComprarGaveUp] = useState(false);
+  useEffect(() => {
+    setComprarGaveUp(false);
+    const timer = setTimeout(() => setComprarGaveUp(true), COMPRAR_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [runKey]);
+  const comprarSettled = comprarData !== undefined || Boolean(comprarError) || !comprarLoading || comprarGaveUp;
+  // Which rows show is frozen too; a refetch only refreshes their amounts
+  // (a refund can bring "Compraste" to US$0, it never removes the row).
+  const comprarShown = useRef<{ key: string; values: Array<'buy' | 'sale'> } | null>(null);
+  if (insights && comprarSettled && comprarShown.current?.key !== runKey) {
+    comprarShown.current = { key: runKey, values: comprarRows.map((r) => r.value) };
+  }
+  const sectionsReady = comprarShown.current?.key === runKey;
+  const shownComprarRows = sectionsReady && comprar
+    ? comprarMonthRows(comprar, comprarShown.current!.values)
+    : [];
+  const showComprar = shownComprarRows.length > 0;
   const pendingCount = uncategorized ? uncategorizedData?.monthMovements.length : 0;
 
 
@@ -414,7 +453,9 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, sto
                 onOpen={(item) => onOpen('counterparty', item.name || 'Sin nombre', item.counterpartyKey)} />
             </Rise>
           )}
-          <Rise index={3}>{renderSections()}</Rise>
+          {sectionsReady
+            ? <Rise index={3}>{renderSections()}</Rise>
+            : <View testID="tumes-sections-loading"><View style={styles.skeletonRow} /></View>}
         </View>
       )}
       {!insights && (
@@ -430,6 +471,27 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, sto
   function renderSections() {
     return (
       <>
+      {showComprar && (
+        <Section title="Comprar">
+          <View style={styles.listCard} testID="tumes-comprar">
+            {shownComprarRows.map((r, i) => (
+              <TouchableOpacity key={r.value} style={[styles.listRow, i > 0 && styles.listRowDivider]}
+                onPress={() => onOpen('comprar', r.label, r.value)} accessibilityRole="button">
+                <View style={[styles.avatar, { backgroundColor: colors.primarySoft }]}>
+                  <Icon name={r.icon} size={18} color={colors.successText} />
+                </View>
+                <View style={styles.listMain}>
+                  <Text style={styles.listName} numberOfLines={1}>{r.label}</Text>
+                  <Text style={styles.listSub}>{r.sub}</Text>
+                </View>
+                <Text style={styles.listAmount}>{money(r.amount, masked)}</Text>
+                <Icon name="chevron-right" size={18} color={colors.text.light} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Section>
+      )}
+
       {cur.spendingByCategory.length === 0 ? (
         <Section title="En qué se fue">
           <EmptyHint text="Cuando gastes, aquí verás en qué se fue tu dinero." testID="empty-spending" />
@@ -545,6 +607,24 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, sto
       </>
     );
   }
+}
+
+/** The Comprar section's rows: what you bought, what you sold (net of the
+ *  fee). No orders this month: no rows, and the section stays out. */
+export function comprarMonthRows(
+  c: MonthComprar, only?: Array<'buy' | 'sale'>,
+): { label: string; sub: string; amount: number; value: 'buy' | 'sale'; icon: string }[] {
+  const rows: { label: string; sub: string; amount: number; value: 'buy' | 'sale'; icon: string }[] = [];
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  // `only`: exactly these rows (the frozen set of a revealed section).
+  const wants = (value: 'buy' | 'sale', count: number) => (only ? only.includes(value) : count > 0);
+  if (wants('buy', c.purchaseCount)) {
+    rows.push({ label: 'Compraste', sub: plural(c.purchaseCount, 'pedido', 'pedidos'), amount: Number(c.purchasesUsd), value: 'buy', icon: 'shopping-bag' });
+  }
+  if (wants('sale', c.saleCount)) {
+    rows.push({ label: 'Vendiste', sub: `${plural(c.saleCount, 'venta', 'ventas')}, ya sin comisión`, amount: Number(c.salesUsd), value: 'sale', icon: 'tag' });
+  }
+  return rows;
 }
 
 /** Direction-aware own-money rows (7F): positive amounts, zero rows hidden. */

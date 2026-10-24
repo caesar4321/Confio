@@ -24,11 +24,21 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: () => undefined,
 }));
 let mockSummary: any;
+let mockComprar: any = null;
 jest.mock('@apollo/client', () => ({
   ...jest.requireActual('@apollo/client'),
-  useQuery: (q: any) => (q.definitions?.[0]?.name?.value === 'MonthSummary'
-    ? { data: { monthSummary: mockSummary }, loading: false, error: undefined, refetch: jest.fn().mockResolvedValue({}) }
-    : { data: { monthMovements: [] }, refetch: jest.fn().mockResolvedValue({}) }),
+  useQuery: (q: any) => {
+    const name = q.definitions?.[0]?.name?.value;
+    if (name === 'MonthSummary') {
+      return { data: { monthSummary: mockSummary }, loading: false, error: undefined, refetch: jest.fn().mockResolvedValue({}) };
+    }
+    if (name === 'MonthComprar') {
+      return mockComprar === 'pending'
+        ? { data: undefined, loading: true, refetch: jest.fn().mockResolvedValue({}) }
+        : { data: { monthComprar: mockComprar }, loading: false, refetch: jest.fn().mockResolvedValue({}) };
+    }
+    return { data: { monthMovements: [] }, refetch: jest.fn().mockResolvedValue({}) };
+  },
 }));
 let mockInsights: any;
 const mockRefreshStocks = jest.fn();
@@ -43,7 +53,7 @@ jest.mock('../../hooks/useMonthInsights', () => ({
 }));
 
 import {
-  MonthSummaryScreen, SETTLING_FAST_TRIES, SETTLING_MAX_TRIES, SETTLING_POLL_MS, SETTLING_SLOW_MS,
+  comprarMonthRows, MonthSummaryScreen, SETTLING_FAST_TRIES, SETTLING_MAX_TRIES, SETTLING_POLL_MS, SETTLING_SLOW_MS,
 } from '../MonthSummaryScreen';
 
 const totals = (spending: string, count: number) => ({
@@ -71,7 +81,45 @@ const order = (tree: renderer.ReactTestRenderer) =>
   tree.root.findAll((n) => typeof n.type === 'string' && typeof n.props.testID === 'string'
     && n.props.testID.startsWith('tumes-') && n.props.testID.endsWith('-card')).map((n) => n.props.testID);
 
-beforeEach(() => { mockParams = {}; });
+beforeEach(() => { mockParams = {}; mockComprar = null; });
+
+it('gives Comprar its own section only in a month with orders', () => {
+  mockSummary = summary(3);
+  mockInsights = { revealed: true, insights: recurring, savings };
+  expect(has(mount(), 'tumes-comprar')).toBe(false);
+  mockComprar = { purchasesUsd: '54.00', purchaseCount: 2, salesUsd: '27.60', saleCount: 1 };
+  const tree = mount();
+  expect(has(tree, 'tumes-comprar')).toBe(true);
+  const text = tree.root.findAll((n) => typeof n.props.children === 'string').map((n) => n.props.children);
+  expect(text).toEqual(expect.arrayContaining(['Comprar', 'Compraste', '2 pedidos', 'Vendiste', '1 venta, ya sin comisión']));
+});
+
+it('never inserts a late Comprar answer above sections already shown', () => {
+  jest.useFakeTimers();
+  try {
+    mockSummary = summary(3);
+    mockInsights = { revealed: true, insights: recurring, savings };
+    mockComprar = 'pending';
+    const tree = mount();
+    expect(has(tree, 'tumes-sections-loading')).toBe(true);   // sections wait for it
+    act(() => { jest.advanceTimersByTime(4000); });          // ...but not forever
+    expect(has(tree, 'tumes-sections-loading')).toBe(false);
+    mockComprar = { purchasesUsd: '54.00', purchaseCount: 2, salesUsd: '0.00', saleCount: 0 };
+    act(() => { tree.update(<MonthSummaryScreen />); });
+    expect(has(tree, 'tumes-comprar')).toBe(false);          // decided for this view
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('lists only the Comprar rows that happened', () => {
+  expect(comprarMonthRows({ purchasesUsd: '0.00', purchaseCount: 0, salesUsd: '9.20', saleCount: 1 }).map((r) => r.value))
+    .toEqual(['sale']);
+  expect(comprarMonthRows({ purchasesUsd: '0.00', purchaseCount: 0, salesUsd: '0.00', saleCount: 0 })).toEqual([]);
+  // A revealed section keeps its rows: a refund zeroes "Compraste", a new sale adds nothing.
+  const frozen = comprarMonthRows({ purchasesUsd: '0.00', purchaseCount: 0, salesUsd: '9.20', saleCount: 1 }, ['buy']);
+  expect(frozen.map((r) => [r.value, r.amount])).toEqual([['buy', 0]]);
+});
 
 it('shows Card A first and holds every insight and section until the reveal', () => {
   mockSummary = summary(3);

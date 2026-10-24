@@ -167,6 +167,7 @@ class Movement:
     row_id: int | None = None
     category: str | None = None   # spending only; None = uncategorized
     default_category: str | None = None   # used when no override/rule names one
+    source: str | None = None   # 'comprar' for marketplace orders (own section, not "Con quién")
 
 
 class SummaryUnavailable(Exception):
@@ -381,7 +382,8 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
     movement = Movement(kind=kind, direction=direction, amount=amount.quantize(CENT, rounding=ROUND_HALF_UP),
                         counterparty_key=key, counterparty_name=name,
                         when=row.transaction_date, row_id=getattr(row, 'pk', None),
-                        default_category='shopping' if market_key is not None and kind == 'merchant' else None)
+                        default_category='shopping' if market_key is not None and kind == 'merchant' else None,
+                        source='comprar' if market_key is not None else None)
     movement.category = category_for(movement, ctx)
     return movement
 
@@ -593,7 +595,8 @@ def summarize(user, account, account_type, business_id, year, month, tz, now=Non
             continue
         if in_current:
             current.add(movement)
-            if movement.kind in COUNTERPARTY_KINDS and movement.counterparty_key:
+            # Comprar has its own section; "Con quién" stays about people.
+            if movement.kind in COUNTERPARTY_KINDS and movement.counterparty_key and movement.source != 'comprar':
                 entry = people.setdefault(movement.counterparty_key, CounterpartyTotal(
                     key=movement.counterparty_key, name=movement.counterparty_name))
                 if movement.kind in INCOME_KINDS:
@@ -613,7 +616,9 @@ def summarize(user, account, account_type, business_id, year, month, tz, now=Non
 
 OWN_MONEY_KINDS = {'top_up', 'withdrawal', 'savings_in', 'savings_out', 'investment_in', 'investment_out'}
 MOVEMENT_FILTERS = {'income', 'spending', 'category', 'uncategorized', 'counterparty', 'counterparties',
-                    'own_money'}
+                    'own_money', 'comprar'}
+# The Comprar section's rows: purchases (Salió at stores) and sales (Entró).
+COMPRAR_KINDS = {'buy': {'merchant'}, 'sale': {'sale'}}
 # "Entre tus cuentas" rows: each opens only the movements behind its own line
 # (savings/investment are nets, so both directions are listed).
 OWN_MONEY_BUCKETS = {
@@ -652,13 +657,35 @@ def month_movements(user, account, account_type, business_id, year, month, tz,
             or (filter_by == 'counterparty' and m.kind in COUNTERPARTY_KINDS and (
                 m.counterparty_key == value
                 or (value == EXTERNAL_KEY and _is_unknown_wallet(m.counterparty_key, m.counterparty_name))))
-            or (filter_by == 'counterparties' and m.kind in COUNTERPARTY_KINDS and m.counterparty_key)
+            or (filter_by == 'counterparties' and m.kind in COUNTERPARTY_KINDS and m.counterparty_key
+                and m.source != 'comprar')
+            or (filter_by == 'comprar' and m.source == 'comprar'
+                and m.kind in COMPRAR_KINDS.get(value, {'merchant', 'sale'} if value is None else ()))
             or (filter_by == 'own_money' and m.kind in OWN_MONEY_BUCKETS.get(value, OWN_MONEY_KINDS if value is None else ()))
         )
         if keep:
             out.append(m)
     out.sort(key=lambda m: m.when, reverse=True)
     return out
+
+
+@dataclass
+class ComprarMonth:
+    purchases: Decimal
+    purchase_count: int
+    sales: Decimal
+    sale_count: int
+
+
+def comprar_month(user, account, account_type, business_id, year, month, tz) -> ComprarMonth:
+    """The Comprar section: what the account bought (gross, refunds netted
+    out) and sold (net of the fee) this month. The same movements as the
+    'comprar' list, so each row adds up to what it opens."""
+    movements = month_movements(user, account, account_type, business_id, year, month, tz, 'comprar')
+    buys = [m.amount for m in movements if m.kind == 'merchant']
+    sales = [m.amount for m in movements if m.kind == 'sale']
+    return ComprarMonth(purchases=sum(buys, Decimal('0')), purchase_count=len(buys),
+                        sales=sum(sales, Decimal('0')), sale_count=len(sales))
 
 
 # ── Tu mes insights (docs/designs/tu-mes-insights.md §5, §6) ──────────────

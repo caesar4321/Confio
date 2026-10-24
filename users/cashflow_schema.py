@@ -216,6 +216,13 @@ def _exact_gain(result):
     return gain, gain_pct
 
 
+class MonthComprarType(graphene.ObjectType):
+    purchases_usd = graphene.String(required=True, description='Bought in Comprar (refunded orders excluded)')
+    purchase_count = graphene.Int(required=True)
+    sales_usd = graphene.String(required=True, description="Sold in Comprar, net of Confío's fee")
+    sale_count = graphene.Int(required=True)
+
+
 class MonthSummaryQuery(graphene.ObjectType):
     month_summary = graphene.Field(
         MonthSummaryType,
@@ -231,9 +238,18 @@ class MonthSummaryQuery(graphene.ObjectType):
         month=graphene.Int(required=True),
         timezone=graphene.String(),
         filter_by=graphene.String(required=True,
-                                  description='income | spending | category | uncategorized | counterparty | counterparties | own_money'),
+                                  description='income | spending | category | uncategorized | counterparty | counterparties | own_money | comprar'),
         value=graphene.String(description='category key, or counterparty key'),
         description='The movements behind one number of monthSummary, newest first. Empty for employees.',
+    )
+
+    month_comprar = graphene.Field(
+        MonthComprarType,
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True),
+        timezone=graphene.String(),
+        description='Tu mes "Comprar" section. Own query: an older server without it fails only this '
+                    'request. Null for employees.',
     )
 
     month_insights = graphene.Field(
@@ -426,6 +442,20 @@ class MonthSummaryQuery(graphene.ObjectType):
             id=m.row_id, kind=m.kind, direction=m.direction, amount_usd=_usd(m.amount), category=m.category,
             counterparty_key=m.counterparty_key, counterparty_name=m.counterparty_name or None, date=m.when)
             for m in movements]
+
+    def resolve_month_comprar(self, info, year, month, timezone=None):
+        from users.cashflow import comprar_month
+        context = _summary_context(info, year, month, timezone)
+        if context is None:
+            return None
+        user, account, account_type, business_id, tz = context
+        try:
+            result = comprar_month(user, account, account_type, business_id, int(year), int(month), tz)
+        except SummaryUnavailable as exc:
+            logger.error('month comprar unavailable for account %s: %s', account.id, exc)
+            raise GraphQLError('El resumen del mes no está disponible.') from exc
+        return MonthComprarType(purchases_usd=_usd(result.purchases), purchase_count=result.purchase_count,
+                                sales_usd=_usd(result.sales), sale_count=result.sale_count)
 
     def resolve_month_summary(self, info, year, month, timezone=None):
         from django.utils import timezone as dj_tz

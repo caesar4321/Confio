@@ -38,6 +38,25 @@ export const GET_MONTH_SUMMARY = gql`
   }
 `;
 
+/** The "Comprar" section: its own request (newer than monthSummary). */
+export const GET_MONTH_COMPRAR = gql`
+  query MonthComprar($year: Int!, $month: Int!, $timezone: String) {
+    monthComprar(year: $year, month: $month, timezone: $timezone) {
+      purchasesUsd
+      purchaseCount
+      salesUsd
+      saleCount
+    }
+  }
+`;
+
+export type MonthComprar = {
+  purchasesUsd: string;
+  purchaseCount: number;
+  salesUsd: string;
+  saleCount: number;
+};
+
 export const GET_MONTH_MOVEMENTS = gql`
   query MonthMovements($year: Int!, $month: Int!, $timezone: String, $filterBy: String!, $value: String) {
     monthMovements(year: $year, month: $month, timezone: $timezone, filterBy: $filterBy, value: $value) {

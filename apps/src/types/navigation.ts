@@ -344,7 +344,7 @@ export type MainStackParamList = {
   MonthMovements: {
     year: number;
     month: number;
-    filterBy: 'income' | 'spending' | 'category' | 'uncategorized' | 'counterparty' | 'counterparties' | 'own_money';
+    filterBy: 'income' | 'spending' | 'category' | 'uncategorized' | 'counterparty' | 'counterparties' | 'own_money' | 'comprar';
     value?: string;
     title: string;
     masked?: boolean;

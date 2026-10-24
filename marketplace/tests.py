@@ -608,6 +608,16 @@ class SyncAndLedgerTests(MarketTestBase):
         self.assertEqual(self._history(self.buyer), {buy})
         self.assertEqual(self._month(self.seller).income, Decimal('27.60'))  # net of the 8% fee
         self.assertEqual(self._month(self.buyer).spending, Decimal('30.00'))
+        from zoneinfo import ZoneInfo
+        from users.cashflow import comprar_month, summarize
+        now, utc = timezone.now(), ZoneInfo('UTC')
+        for user, expected in ((self.buyer, (Decimal('30.00'), 1, Decimal('0'), 0)),
+                               (self.seller, (Decimal('0'), 0, Decimal('27.60'), 1))):
+            c = comprar_month(user, user.accounts.get(), 'personal', None, now.year, now.month, utc)
+            self.assertEqual((c.purchases, c.purchase_count, c.sales, c.sale_count), expected)
+            # Its own section: never a "Con quién" line.
+            month = summarize(user, user.accounts.get(), 'personal', None, now.year, now.month, utc)
+            self.assertEqual(month.counterparties, [])
 
     def test_refund_shows_in_history_and_nets_out_of_tu_mes(self):
         order, _, _ = self.prepare()
