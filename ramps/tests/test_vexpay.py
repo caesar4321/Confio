@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from ramps import vexpay
+from ramps import ve_pagomovil, vexpay
 from ramps.models import RampTransaction, RampWebhookEvent
 from ramps.signals import find_provider_tx_hash
 from ramps.vexpay_client import (
@@ -706,8 +706,8 @@ class VexPayRampTests(TestCase):
         self.assertEqual(kwargs['onward'].network, 'BEP20')
         self.assertEqual(kwargs['external_ref'], ramp.external_id)
 
-    @override_settings(VEXPAY_ONRAMP_MIN_USD='5', VEXPAY_ONRAMP_MAX_USD='100',
-                       VEXPAY_ONRAMP_USER_DAILY_USD='50', VEXPAY_ONRAMP_GLOBAL_DAILY_USD='1000')
+    @override_settings(VE_PAGOMOVIL_TOPUP_MIN_USD='5', VE_PAGOMOVIL_TOPUP_MAX_USD='100',
+                       VE_PAGOMOVIL_TOPUP_USER_DAILY_USD='50', VE_PAGOMOVIL_TOPUP_GLOBAL_DAILY_USD='1000')
     def test_limits(self):
         with self.assertRaises(vexpay.VexPayRampError):
             vexpay.check_limits(self.user, Decimal('4'))
@@ -719,8 +719,8 @@ class VexPayRampTests(TestCase):
         with self.assertRaises(vexpay.VexPayRampError):
             vexpay.check_limits(self.user, Decimal('11'))
 
-    @override_settings(VEXPAY_ONRAMP_MIN_USD='5', VEXPAY_ONRAMP_MAX_USD='100',
-                       VEXPAY_ONRAMP_USER_DAILY_USD='50', VEXPAY_ONRAMP_GLOBAL_DAILY_USD='1000')
+    @override_settings(VE_PAGOMOVIL_TOPUP_MIN_USD='5', VE_PAGOMOVIL_TOPUP_MAX_USD='100',
+                       VE_PAGOMOVIL_TOPUP_USER_DAILY_USD='50', VE_PAGOMOVIL_TOPUP_GLOBAL_DAILY_USD='1000')
     def test_old_orders_paid_or_payable_today_count(self):
         old = timezone.now() - timedelta(days=3)
         paid = self._ramp(status='COMPLETED', metadata={'vexpay': {'usd_amount': '20'}})
@@ -772,7 +772,7 @@ class WebhookTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(RampWebhookEvent.objects.exists())
 
-    @mock.patch('ramps.tasks.sync_vexpay_ramp_task.delay')
+    @mock.patch('ramps.tasks.sync_ve_pagomovil_order.delay')
     def test_event_stored_once_and_enqueued(self, delay):
         body = {'event': 'onward_payout.updated', 'data': {'paymentId': 'pay-1'}}
         self.assertEqual(self._post(body).status_code, 200)
@@ -781,7 +781,7 @@ class WebhookTests(TestCase):
         self.assertTrue(json.loads(duplicate.content)['duplicate'])
         self.assertEqual(delay.call_count, 1)
 
-    @mock.patch('ramps.tasks.sync_vexpay_ramp_task.delay', side_effect=RuntimeError('broker down'))
+    @mock.patch('ramps.tasks.sync_ve_pagomovil_order.delay', side_effect=RuntimeError('broker down'))
     def test_enqueue_failure_still_acknowledges(self, _delay):
         body = {'event': 'payment.completed', 'data': {'paymentId': 'pay-1'}}
         self.assertEqual(self._post(body, event_id='evt-2').status_code, 200)
@@ -802,12 +802,12 @@ class BankMessageTests(SimpleTestCase):
 
 class ClientSupportTests(SimpleTestCase):
     def test_floor_gates_old_builds(self):
-        with override_settings(VEXPAY_RECEIVE_MIN_APP_VERSION='5.2.8'):
-            self.assertTrue(vexpay.client_supports({'HTTP_X_CONFIO_VERSION': '5.2.8'}))
-            self.assertTrue(vexpay.client_supports({'HTTP_X_CONFIO_VERSION': '5.10.0'}))
-            self.assertFalse(vexpay.client_supports({'HTTP_X_CONFIO_VERSION': '5.2.7'}))
-            self.assertFalse(vexpay.client_supports({}))
+        with override_settings(VE_PAGOMOVIL_TOPUP_MIN_APP_VERSION='5.2.8'):
+            self.assertTrue(ve_pagomovil.client_supports(ve_pagomovil.TOPUP, {'HTTP_X_CONFIO_VERSION': '5.2.8'}))
+            self.assertTrue(ve_pagomovil.client_supports(ve_pagomovil.TOPUP, {'HTTP_X_CONFIO_VERSION': '5.10.0'}))
+            self.assertFalse(ve_pagomovil.client_supports(ve_pagomovil.TOPUP, {'HTTP_X_CONFIO_VERSION': '5.2.7'}))
+            self.assertFalse(ve_pagomovil.client_supports(ve_pagomovil.TOPUP, {}))
 
     def test_unset_floor_shows_nobody(self):
-        with override_settings(VEXPAY_RECEIVE_MIN_APP_VERSION=''):
-            self.assertFalse(vexpay.client_supports({'HTTP_X_CONFIO_VERSION': '9.9.9'}))
+        with override_settings(VE_PAGOMOVIL_TOPUP_MIN_APP_VERSION=''):
+            self.assertFalse(ve_pagomovil.client_supports(ve_pagomovil.TOPUP, {'HTTP_X_CONFIO_VERSION': '9.9.9'}))

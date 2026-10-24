@@ -259,9 +259,9 @@ class RampTransactionAdmin(admin.ModelAdmin):
 
     def get_urls(self):
         from django.urls import path
-        from .vexpay_admin import offramp_console
-        view = self.admin_site.admin_view(lambda request: offramp_console(request, self.admin_site))
-        return [path('vexpay-envios/', view, name='vexpay_offramp_console')] + super().get_urls()
+        from .ve_send_admin import send_console
+        view = self.admin_site.admin_view(lambda request: send_console(request, self.admin_site))
+        return [path('envios-ve/', view, name='ve_send_console')] + super().get_urls()
 
     def status_detail_short(self, obj):
         value = obj.status_detail or ''

@@ -28,24 +28,24 @@ import { isOutcomeUnknown } from '../services/evmWallet';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useAccount } from '../contexts/AccountContext';
 import { getSeparators, sanitizeAmountInput } from '../utils/numberLocale';
-import { VEXPAY_BANKS } from '../services/vexpayOnRamp';
+import { VE_BANKS } from '../services/vePagoMovilTopUp';
 import {
-  CANCEL_VEXPAY_OFF_RAMP,
-  CREATE_VEXPAY_OFF_RAMP,
-  REPORT_VEXPAY_OFF_RAMP_FUNDING,
-  START_VEXPAY_OFF_RAMP_FUNDING,
-  VEXPAY_ACTIVE_OFF_RAMP_ORDER,
-  VEXPAY_OFF_RAMP_ORDER,
-  VEXPAY_OFF_RAMP_QUOTE,
-  VexpaySendOrder,
-  VexpaySendQuote,
+  CANCEL_VE_SEND,
+  CREATE_VE_SEND,
+  REPORT_VE_SEND_FUNDING,
+  START_VE_SEND_FUNDING,
+  VE_ACTIVE_SEND,
+  VE_SEND_ORDER,
+  VE_SEND_QUOTE,
+  VeSendOrder,
+  VeSendQuote,
   sendStage,
-  vexpaySendCopy,
-} from '../services/vexpayOffRamp';
+  sendCopy,
+} from '../services/vePagoMovilSend';
 
 // The Retiro funding path redeems from these; served, never hardcoded.
 const SEND_FUNDING_PARAMS = gql`
-  query VexpaySendFundingParams {
+  query VePagoMovilSendFundingParams {
     cusdPlusConvertParams { vaultAddress cusdAddress }
   }
 `;
@@ -62,12 +62,12 @@ const money = (value?: string | number | null, digits = 2) =>
     : Number(value).toLocaleString('es-VE', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const formatBs = (value?: string | null) => (value ? `Bs ${money(value)}` : '—');
 const formatUsd = (value?: string | number | null) => (value === null || value === undefined || value === '' ? '—' : `$${money(value)}`);
-const isOpen = (order: VexpaySendOrder | null) => !!order?.orderId && (order.status === 'PENDING' || order.status === 'PROCESSING');
+const isOpen = (order: VeSendOrder | null) => !!order?.orderId && (order.status === 'PENDING' || order.status === 'PROCESSING');
 
 /**
- * Enviar bolívares por Pago Móvil (VEXPay). One server order per send:
+ * Enviar bolívares por Pago Móvil. One server order per send:
  * recipient → amount → Confío Face → the dollars leave in one sponsored
- * batch to the order's own deposit address → VEXPay converts → the server
+ * batch to the server-vouched deposit address → the provider converts → the server
  * pays the recipient. The order lives on the server, so reopening resumes it.
  */
 export default function VePagoMovilSendScreen() {
@@ -95,10 +95,10 @@ export default function VePagoMovilSendScreen() {
   const [booting, setBooting] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [order, setOrder] = useState<VexpaySendOrder | null>(null);
+  const [order, setOrder] = useState<VeSendOrder | null>(null);
   const [amount, setAmount] = useState('');
   const [amountFocused, setAmountFocused] = useState(false);
-  const [quote, setQuote] = useState<VexpaySendQuote | null>(null);
+  const [quote, setQuote] = useState<VeSendQuote | null>(null);
   const [cedula, setCedula] = useState('');
   const [phone, setPhone] = useState('');
   const [bank, setBank] = useState<Bank | null>(null);
@@ -111,12 +111,12 @@ export default function VePagoMovilSendScreen() {
     if (!keepError) setError('');
     try {
       const [active, bankList] = await Promise.all([
-        client.query({ query: VEXPAY_ACTIVE_OFF_RAMP_ORDER, fetchPolicy: 'network-only' }),
-        client.query({ query: VEXPAY_BANKS, fetchPolicy: 'cache-first' }),
+        client.query({ query: VE_ACTIVE_SEND, fetchPolicy: 'network-only' }),
+        client.query({ query: VE_BANKS, fetchPolicy: 'cache-first' }),
       ]);
       if (!alive.current) return;
-      setOrder(active.data?.vexpayActiveOffRampOrder || null);
-      setBanks(bankList.data?.vexpayBanks || []);
+      setOrder(active.data?.vePagomovilActiveSend || null);
+      setBanks(bankList.data?.vePagomovilBanks || []);
     } catch {
       if (alive.current && !keepError) setError(GENERIC);
     } finally {
@@ -128,8 +128,8 @@ export default function VePagoMovilSendScreen() {
   // error): offer a retry instead of an empty picker.
   const reloadBanks = useCallback(async () => {
     try {
-      const r = await client.query({ query: VEXPAY_BANKS, fetchPolicy: 'network-only' });
-      if (alive.current) setBanks(r.data?.vexpayBanks || []);
+      const r = await client.query({ query: VE_BANKS, fetchPolicy: 'network-only' });
+      if (alive.current) setBanks(r.data?.vePagomovilBanks || []);
     } catch {
       // the empty state stays, with its retry
     }
@@ -143,9 +143,9 @@ export default function VePagoMovilSendScreen() {
     const timer = setTimeout(async () => {
       try {
         const r = await client.query({
-          query: VEXPAY_OFF_RAMP_QUOTE, variables: { usdAmount: String(toNumber(amount)) }, fetchPolicy: 'network-only',
+          query: VE_SEND_QUOTE, variables: { usdAmount: String(toNumber(amount)) }, fetchPolicy: 'network-only',
         });
-        if (!cancelled && alive.current) setQuote(r.data?.vexpayOffRampQuote || null);
+        if (!cancelled && alive.current) setQuote(r.data?.vePagomovilSendQuote || null);
       } catch {
         if (!cancelled && alive.current) setQuote(null);
       }
@@ -155,8 +155,8 @@ export default function VePagoMovilSendScreen() {
 
   const refreshOrder = useCallback(async (orderId: string) => {
     const issued = generation.current;
-    const r = await client.query({ query: VEXPAY_OFF_RAMP_ORDER, variables: { orderId }, fetchPolicy: 'network-only' });
-    const next: VexpaySendOrder | undefined = r.data?.vexpayOffRampOrder;
+    const r = await client.query({ query: VE_SEND_ORDER, variables: { orderId }, fetchPolicy: 'network-only' });
+    const next: VeSendOrder | undefined = r.data?.vePagomovilSendOrder;
     if (next?.success && alive.current && issued === generation.current) setOrder(next);
   }, [client]);
 
@@ -189,16 +189,16 @@ export default function VePagoMovilSendScreen() {
     // mid-flow can then never debit another wallet.
     const wallet = await getActiveEvmWallet({ type: 'personal', index: 0 });
     const expected = (order?.orderId === orderId ? order.wallet : null)
-      || (await client.query({ query: VEXPAY_OFF_RAMP_ORDER, variables: { orderId }, fetchPolicy: 'network-only' }))
-        .data?.vexpayOffRampOrder?.wallet;
+      || (await client.query({ query: VE_SEND_ORDER, variables: { orderId }, fetchPolicy: 'network-only' }))
+        .data?.vePagomovilSendOrder?.wallet;
     if (!expected || wallet.address.toLowerCase() !== String(expected).toLowerCase()) {
       if (alive.current) setError('Este envío pertenece a otra cuenta. No se envió nada.');
       return;
     }
     const start = await client.mutate({
-      mutation: START_VEXPAY_OFF_RAMP_FUNDING, variables: { orderId }, fetchPolicy: 'no-cache',
+      mutation: START_VE_SEND_FUNDING, variables: { orderId }, fetchPolicy: 'no-cache',
     });
-    const claimed: VexpaySendOrder | undefined = start.data?.startVexpayOffRampFunding;
+    const claimed: VeSendOrder | undefined = start.data?.startVePagomovilSendFunding;
     if (!alive.current) return;
     if (!claimed?.success || !claimed.funding || claimed.funding.network !== 'BSC'
         || !/^0x[0-9a-fA-F]{40}$/.test(claimed.funding.depositAddress)
@@ -235,9 +235,9 @@ export default function VePagoMovilSendScreen() {
       if (alive.current) setError(UNKNOWN_SEND);
     }
     const report = await client.mutate({
-      mutation: REPORT_VEXPAY_OFF_RAMP_FUNDING, variables: { orderId, txHash }, fetchPolicy: 'no-cache',
+      mutation: REPORT_VE_SEND_FUNDING, variables: { orderId, txHash }, fetchPolicy: 'no-cache',
     }).catch(() => null);
-    const reported: VexpaySendOrder | undefined = report?.data?.reportVexpayOffRampFunding;
+    const reported: VeSendOrder | undefined = report?.data?.reportVePagomovilSendFunding;
     if (alive.current && reported?.success) setOrder(reported);
   };
 
@@ -250,19 +250,19 @@ export default function VePagoMovilSendScreen() {
     let created: string | null = null;
     try {
       const place = () => client.mutate({
-        mutation: CREATE_VEXPAY_OFF_RAMP,
+        mutation: CREATE_VE_SEND,
         variables: { usdAmount: String(amountValue), cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code },
         fetchPolicy: 'no-cache',
       });
       let response;
       try {
         response = await withFaceStepUp('withdrawal', place,
-          r => isFaceStepUpRequired(r?.data?.createVexpayOffRamp?.nextStep));
+          r => isFaceStepUpRequired(r?.data?.createVePagomovilSend?.nextStep));
       } catch (faceError) {
         if (faceError instanceof FaceCheckError) return;
         throw faceError;
       }
-      const result: VexpaySendOrder | undefined = response?.data?.createVexpayOffRamp;
+      const result: VeSendOrder | undefined = response?.data?.createVePagomovilSend;
       if (!alive.current) return;
       if (result?.nextStep === 'verification') {
         setError(result.error || '');
@@ -313,8 +313,8 @@ export default function VePagoMovilSendScreen() {
     setLoading(true);
     setError('');
     try {
-      const r = await client.mutate({ mutation: CANCEL_VEXPAY_OFF_RAMP, variables: { orderId: order.orderId }, fetchPolicy: 'no-cache' });
-      const result: VexpaySendOrder | undefined = r.data?.cancelVexpayOffRamp;
+      const r = await client.mutate({ mutation: CANCEL_VE_SEND, variables: { orderId: order.orderId }, fetchPolicy: 'no-cache' });
+      const result: VeSendOrder | undefined = r.data?.cancelVePagomovilSend;
       if (!alive.current) return;
       if (result?.success) setOrder(result);
       else setError(result?.error || GENERIC);
@@ -438,8 +438,8 @@ export default function VePagoMovilSendScreen() {
     </>
   );
 
-  const renderOrder = (current: VexpaySendOrder) => {
-    const copy = vexpaySendCopy(current);
+  const renderOrder = (current: VeSendOrder) => {
+    const copy = sendCopy(current);
     if (current.status === 'FAILED') {
       return (
         <RampReveal delay={60}>

@@ -208,17 +208,68 @@ def vexpay_webhook(request):
         ramp_tx = RampTransaction.objects.filter(provider='vexpay', provider_order_id=payment_id).first()
     if ramp_tx is None and external_ref:
         ramp_tx = RampTransaction.objects.filter(provider='vexpay', external_id=external_ref).first()
-    customer_ref = str(data.get('customerRef') or '').strip()
-    if ramp_tx is None and customer_ref.startswith('cfo-'):
-        # A USDT deposit to a send's own address. Only a hint to re-check:
-        # funding is proven on chain, never from this payload.
-        ramp_tx = RampTransaction.objects.filter(
-            provider='vexpay', direction='off_ramp', external_id=customer_ref[4:]).first()
     if ramp_tx is None:
         return JsonResponse({'ok': True, 'stored': True})
+    _enqueue_ve_sync(ramp_tx.pk)
+    return JsonResponse({'ok': True})
+
+
+def _enqueue_ve_sync(ramp_pk: int) -> None:
     try:
-        from ramps.tasks import sync_vexpay_ramp_task
-        sync_vexpay_ramp_task.delay(ramp_tx.pk)
+        from ramps.tasks import sync_ve_pagomovil_order
+        sync_ve_pagomovil_order.delay(ramp_pk)
     except Exception:  # noqa: BLE001 — the poller reconciles within a minute
-        logger.exception('VEXPay webhook enqueue failed for ramp %s', ramp_tx.pk)
+        logger.exception('VE Pago Móvil webhook enqueue failed for ramp %s', ramp_pk)
+
+
+@csrf_exempt
+@require_POST
+def pagoasap_webhook(request):
+    """Signed Pago ASAP event (payment intent or blockchain deposit) → re-check.
+
+    `X-Webhook-Signature` is base64 Ed25519 over the exact raw body. The body
+    is only a hint: payouts are re-read from the API and funding is proven on
+    chain. Store, enqueue, answer 2xx.
+    """
+    import hashlib
+
+    from django.conf import settings
+
+    from ramps.pagoasap_client import verify_webhook_signature
+
+    raw = request.body
+    signature = request.headers.get('X-Webhook-Signature', '')
+    keys = (getattr(settings, 'PAGOASAP_PAYMENT_WEBHOOK_PUBLIC_KEY', ''),
+            getattr(settings, 'PAGOASAP_DEPOSIT_WEBHOOK_PUBLIC_KEY', ''))
+    if not any(verify_webhook_signature(raw, signature, key) for key in keys if key):
+        logger.warning('Pago ASAP webhook rejected: invalid signature')
+        return JsonResponse({'ok': False, 'error': 'Invalid signature'}, status=403)
+    try:
+        payload = json.loads(raw.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON'}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON'}, status=400)
+    event_type = str(payload.get('event') or '')[:120]
+    _, created = RampWebhookEvent.objects.get_or_create(
+        event_id=f'pagoasap:{hashlib.sha256(raw).hexdigest()}'[:120],
+        defaults={'provider': 'pagoasap', 'event_type': event_type, 'payload': payload},
+    )
+    if not created:
+        return JsonResponse({'ok': True, 'duplicate': True})
+    body = payload.get('payload') if isinstance(payload.get('payload'), dict) else {}
+    targets = []
+    intent = body.get('intent') if isinstance(body.get('intent'), dict) else {}
+    if event_type == 'payment_intent_state_termination' and intent.get('id'):
+        targets = list(RampTransaction.objects.filter(
+            provider='pagoasap', direction='off_ramp',
+            metadata__ve_send__operation_id=str(intent['id'])).values_list('pk', flat=True)[:1])
+    movement = body.get('movement') if isinstance(body.get('movement'), dict) else {}
+    sender = str(movement.get('counterpartyAddress') or '').strip().lower()
+    if event_type == 'blockchain_deposit_state_termination' and sender:
+        targets = list(RampTransaction.objects.filter(
+            provider='pagoasap', direction='off_ramp', actor_address__iexact=sender,
+            status__in=('PENDING', 'PROCESSING')).values_list('pk', flat=True)[:5])
+    for pk in targets:
+        _enqueue_ve_sync(pk)
     return JsonResponse({'ok': True})

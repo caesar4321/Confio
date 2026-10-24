@@ -1,0 +1,43 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<p>Envíos en bolívares que necesitan a una persona. Los demás se pagan solos.</p>
+{% if not rows %}<p>No hay envíos que revisar.</p>{% endif %}
+{% for row in rows %}
+<fieldset class="module aligned" style="margin-bottom:24px">
+  <h2>{{ row.ramp.internal_id }} · {{ row.ramp.provider }} · {{ row.phase }} · {{ row.ramp.status_detail }}{% if row.section.payout_key %} · intento <code>{{ row.section.payout_key }}</code>{% endif %}</h2>
+  <div class="form-row">
+    <strong>{{ row.usdt }} USDT</strong> · depósito <code>{{ row.section.deposit_address }}</code><br>
+    tx <code>{{ row.section.funding_tx_hash }}</code> · creado {{ row.ramp.created_at }}<br>
+    Estimado Bs {{ row.section.estimated_ves }}
+    {% if row.section.payout_ves %} · pago <strong>Bs {{ row.section.payout_ves }}</strong>{% endif %}
+    {% if row.section.operation_id %} · operación <code>{{ row.section.operation_id }}</code>{% endif %}<br>
+    Destino: {{ row.section.beneficiary.cedula }} · {{ row.section.beneficiary.phone }} ·
+    {{ row.bank_name }} ({{ row.section.beneficiary.bank_code }}) · revisión {{ row.section.beneficiary_revision|default:0 }}
+  </div>
+  {% if row.phase == 'payout_failed' %}
+  <form method="post" class="form-row">{% csrf_token %}
+    <input type="hidden" name="ramp" value="{{ row.ramp.pk }}"><input type="hidden" name="action" value="retry"><input type="hidden" name="payout_key" value="{{ row.section.payout_key|default_if_none:'' }}"><input type="hidden" name="beneficiary_revision" value="{{ row.section.beneficiary_revision|default:0 }}">
+    <input type="submit" value="Reintentar pago (el proveedor no lo pagó)">
+  </form>
+  <form method="post" class="form-row">{% csrf_token %}
+    <input type="hidden" name="ramp" value="{{ row.ramp.pk }}"><input type="hidden" name="action" value="beneficiary"><input type="hidden" name="payout_key" value="{{ row.section.payout_key|default_if_none:'' }}"><input type="hidden" name="beneficiary_revision" value="{{ row.section.beneficiary_revision|default:0 }}">
+    Corregir destino: cédula <input name="cedula" size="12"> teléfono <input name="phone" size="14">
+    banco <input name="bank_code" size="5"> <input type="submit" value="Guardar">
+  </form>
+  {% endif %}
+  {% if row.phase == 'payout_review' %}
+  <form method="post" class="form-row">{% csrf_token %}
+    <input type="hidden" name="ramp" value="{{ row.ramp.pk }}"><input type="hidden" name="action" value="retry_unpaid"><input type="hidden" name="payout_key" value="{{ row.section.payout_key|default_if_none:'' }}"><input type="hidden" name="beneficiary_revision" value="{{ row.section.beneficiary_revision|default:0 }}">
+    Revisa con el proveedor que NO se pagó y escribe NO PAGADO: <input name="confirm" size="12">
+    <input type="submit" value="Reintentar con una nueva clave">
+  </form>
+  {% endif %}
+  {% if row.phase == 'paying' or row.phase == 'payout_pending' or row.phase == 'payout_review' or row.phase == 'payout_failed' %}
+  <form method="post" class="form-row">{% csrf_token %}
+    <input type="hidden" name="ramp" value="{{ row.ramp.pk }}"><input type="hidden" name="action" value="paid">
+    Ya pagado (según el proveedor), referencia: <input name="reference" size="16"> <input type="submit" value="Marcar pagado">
+  </form>
+  {% endif %}
+</fieldset>
+{% endfor %}
+{% endblock %}

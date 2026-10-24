@@ -145,66 +145,77 @@ def poll_koywe_ramp_transactions():
     return f'Polled {checked_count} Koywe ramps, updated {updated_count}'
 
 
-@shared_task(name='ramps.tasks.poll_vexpay_ramp_transactions')
-def poll_vexpay_ramp_transactions():
-    """Reconcile open VEXPay top-ups. VEXPay delivers each webhook once and
-    never retries, so this poll is the source of truth, not a fallback."""
+@shared_task(name='ramps.tasks.poll_ve_pagomovil')
+def poll_ve_pagomovil():
+    """Reconcile VE Pago Móvil orders: VEXPay top-ups and bolívar sends.
+    Provider webhooks are single-attempt hints; this poll is the source of
+    truth, not a fallback."""
+    from ramps import ve_pagomovil, ve_send
     from ramps.vexpay import due_for_sync, ensure_alerted, open_ramps, sync_vexpay_ramp
     from ramps.vexpay_client import VexPayClient, VexPayError
 
-    client = VexPayClient()
-    if not client.is_configured:
-        return 'VEXPay not configured'
     checked = changed = 0
-    for ramp_tx in open_ramps().iterator():
-        if not due_for_sync(ramp_tx):
-            continue
-        checked += 1
-        before = (ramp_tx.status, ramp_tx.status_detail)
+    client = VexPayClient()
+    if client.is_configured:
+        for ramp_tx in open_ramps().iterator():
+            if not due_for_sync(ramp_tx):
+                continue
+            checked += 1
+            before = (ramp_tx.status, ramp_tx.status_detail)
+            try:
+                ramp_tx = sync_vexpay_ramp(ramp_tx, client)
+                ensure_alerted(ramp_tx)
+            except VexPayError as exc:
+                logger.warning('VEXPay poll failed for ramp %s: %s', ramp_tx.pk, exc)
+                continue
+            except Exception:
+                logger.exception('Unexpected VEXPay poll failure for ramp %s', ramp_tx.pk)
+                continue
+            if (ramp_tx.status, ramp_tx.status_detail) != before:
+                changed += 1
+    # A send whose provider has no adapter any more is never dropped silently.
+    # (VEXPay's manual send path was removed before any order existed.)
+    orphans = RampTransaction.objects.filter(
+        direction=ve_pagomovil.SEND, provider='vexpay', status__in=('PENDING', 'PROCESSING'),
+    ).values_list('pk', 'provider')
+    for pk, provider in orphans[:20]:
         try:
-            ramp_tx = sync_vexpay_ramp(ramp_tx, client)
-            ensure_alerted(ramp_tx)
-        except VexPayError as exc:
-            logger.warning('VEXPay poll failed for ramp %s: %s', ramp_tx.pk, exc)
-            continue
+            from config.ops_alerts import send_ops_alert
+            send_ops_alert(f'⚠️ Envío VE {pk} ({provider}) sin adaptador: revísalo a mano.',
+                           dedupe_key=f've_send:orphan:{pk}', dedupe_seconds=86400)
         except Exception:
-            logger.exception('Unexpected VEXPay poll failure for ramp %s', ramp_tx.pk)
-            continue
-        if (ramp_tx.status, ramp_tx.status_detail) != before:
-            changed += 1
-    # Bolívar sends: funding proven on chain, payouts released by ops.
-    from ramps import vexpay_offramp
-    for ramp_tx in vexpay_offramp.open_off_ramps().iterator():
+            logger.exception('VE send orphan alert failed for %s', pk)
+    for ramp_tx in ve_send.open_sends().iterator():
         # Alerts are retried for every send, even ones waiting on ops.
         try:
-            vexpay_offramp.ensure_alerted(ramp_tx)
+            ve_send.ensure_alerted(ramp_tx)
         except Exception:
-            logger.exception('VEXPay send alert retry failed for %s', ramp_tx.pk)
-        if not vexpay_offramp.due_for_sync(ramp_tx):
+            logger.exception('VE send alert retry failed for %s', ramp_tx.pk)
+        if not ve_send.due_for_sync(ramp_tx):
             continue
         checked += 1
         before = (ramp_tx.status, ramp_tx.status_detail)
         try:
-            ramp_tx = vexpay_offramp.sync_off_ramp(ramp_tx, client)
-            vexpay_offramp.ensure_alerted(ramp_tx)
-        except VexPayError as exc:
-            logger.warning('VEXPay poll failed for send %s: %s', ramp_tx.pk, exc)
-            continue
+            ramp_tx = ve_send.sync(ramp_tx)
+            ve_send.ensure_alerted(ramp_tx)
         except Exception:
-            logger.exception('Unexpected VEXPay poll failure for send %s', ramp_tx.pk)
+            logger.exception('VE send poll failed for %s', ramp_tx.pk)
             continue
         if (ramp_tx.status, ramp_tx.status_detail) != before:
             changed += 1
-    return f'Polled {checked} VEXPay ramps, updated {changed}'
+    return f'Polled {checked} VE Pago Móvil orders, updated {changed}'
 
 
-@shared_task(name='ramps.tasks.sync_vexpay_ramp_task')
-def sync_vexpay_ramp_task(ramp_id: int):
+@shared_task(name='ramps.tasks.sync_ve_pagomovil_order')
+def sync_ve_pagomovil_order(ramp_id: int):
+    """A provider webhook's hint: re-read one order now."""
+    from ramps import ve_pagomovil, ve_send
     from ramps.vexpay import sync_vexpay_ramp
 
-    ramp_tx = RampTransaction.objects.filter(pk=ramp_id, provider='vexpay').first()
-    if ramp_tx and ramp_tx.direction == 'off_ramp':
-        from ramps.vexpay_offramp import sync_off_ramp
-        sync_off_ramp(ramp_tx)
-    elif ramp_tx:
+    ramp_tx = RampTransaction.objects.filter(pk=ramp_id, country_code='VE').first()
+    if ramp_tx is None:
+        return
+    if ramp_tx.direction == ve_pagomovil.SEND and ramp_tx.provider in ve_pagomovil.SEND_ADAPTERS:
+        ve_send.sync(ramp_tx)
+    elif ramp_tx.direction == ve_pagomovil.TOPUP and ramp_tx.provider == 'vexpay':
         sync_vexpay_ramp(ramp_tx)

@@ -25,22 +25,22 @@ import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
 import { getSeparators, sanitizeAmountInput } from '../utils/numberLocale';
 import {
-  CANCEL_VEXPAY_ON_RAMP,
-  CONFIRM_VEXPAY_C2P,
-  CREATE_VEXPAY_ON_RAMP,
-  VEXPAY_ACTIVE_ON_RAMP_ORDER,
-  VEXPAY_BANKS,
-  VEXPAY_ON_RAMP_ORDER,
-  VEXPAY_ON_RAMP_QUOTE,
-  VERIFY_VEXPAY_PAGO_MOVIL,
-  VexpayMethod,
-  VexpayOrder,
-  VexpayQuote,
+  CANCEL_VE_TOP_UP,
+  CONFIRM_VE_TOP_UP_KEY,
+  CREATE_VE_TOP_UP,
+  VE_ACTIVE_TOP_UP,
+  VE_BANKS,
+  VE_TOP_UP_ORDER,
+  VE_TOP_UP_QUOTE,
+  VERIFY_VE_TOP_UP,
+  VeTopUpMethod,
+  VeTopUpOrder,
+  VeTopUpQuote,
   isOrderRegression,
   isoDaysAgo,
   parseDayMonthYear,
-  vexpayProgressCopy,
-} from '../services/vexpayOnRamp';
+  topUpProgressCopy,
+} from '../services/vePagoMovilTopUp';
 
 const POLL_MS = 10_000;
 const GENERIC = 'No pudimos conectar. Intenta de nuevo en unos segundos.';
@@ -54,7 +54,7 @@ const formatUsd = (value?: string | null) =>
   value ? `$${Number(value).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
 
 /**
- * Recargar con bolívares (Pago Móvil, VEXPay). One server order per top-up:
+ * Recargar con bolívares (Pago Móvil). One server order per top-up:
  * amount → who pays → Confío Face → pay from the bank app and enter the
  * reference (or a C2P payment key) → wait for the dollars. The order lives on
  * the server, so reopening this screen resumes it.
@@ -73,24 +73,24 @@ export default function VePagoMovilReceiveScreen() {
   const [booting, setBooting] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [order, setOrderState] = useState<VexpayOrder | null>(null);
+  const [order, setOrderState] = useState<VeTopUpOrder | null>(null);
   // Every write goes through here: an out-of-order response can never move
   // the order backwards (e.g. reopen the payment form after confirming).
-  const setOrder = useCallback((next: VexpayOrder | null) => {
+  const setOrder = useCallback((next: VeTopUpOrder | null) => {
     setOrderState(prev => (next && isOrderRegression(prev, next) ? prev : next));
   }, []);
 
   const [amount, setAmount] = useState('');
   const [amountFocused, setAmountFocused] = useState(false);
-  const [quote, setQuote] = useState<VexpayQuote | null>(null);
-  const [method, setMethod] = useState<VexpayMethod>('pago_movil');
+  const [quote, setQuote] = useState<VeTopUpQuote | null>(null);
+  const [method, setMethod] = useState<VeTopUpMethod>('pago_movil');
   const [cedula, setCedula] = useState('');
   const [phone, setPhone] = useState('');
   const [bank, setBank] = useState<Bank | null>(null);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bankPicker, setBankPicker] = useState(false);
   const [code, setCode] = useState(''); // bank reference or C2P key
-  // When the Pago Móvil was made: VEXPay needs the date unless it was today.
+  // When the Pago Móvil was made: the bank lookup needs the date unless it was today.
   const [paidWhen, setPaidWhen] = useState<'today' | 'yesterday' | 'other'>('today');
   const [paidOn, setPaidOn] = useState(''); // DD/MM/AAAA when 'other'
   const paymentDate = paidWhen === 'today' ? '' : paidWhen === 'yesterday' ? isoDaysAgo(1) : parseDayMonthYear(paidOn);
@@ -102,12 +102,12 @@ export default function VePagoMovilReceiveScreen() {
     if (!keepError) setError('');
     try {
       const [active, bankList] = await Promise.all([
-        client.query({ query: VEXPAY_ACTIVE_ON_RAMP_ORDER, fetchPolicy: 'network-only' }),
-        client.query({ query: VEXPAY_BANKS, fetchPolicy: 'cache-first' }),
+        client.query({ query: VE_ACTIVE_TOP_UP, fetchPolicy: 'network-only' }),
+        client.query({ query: VE_BANKS, fetchPolicy: 'cache-first' }),
       ]);
       if (!alive.current) return;
-      setOrder(active.data?.vexpayActiveOnRampOrder || null);
-      setBanks(bankList.data?.vexpayBanks || []);
+      setOrder(active.data?.vePagomovilActiveTopUp || null);
+      setBanks(bankList.data?.vePagomovilBanks || []);
     } catch {
       if (alive.current && !keepError) setError(GENERIC);
     } finally {
@@ -119,8 +119,8 @@ export default function VePagoMovilReceiveScreen() {
   // error): offer a retry instead of an empty picker.
   const reloadBanks = useCallback(async () => {
     try {
-      const r = await client.query({ query: VEXPAY_BANKS, fetchPolicy: 'network-only' });
-      if (alive.current) setBanks(r.data?.vexpayBanks || []);
+      const r = await client.query({ query: VE_BANKS, fetchPolicy: 'network-only' });
+      if (alive.current) setBanks(r.data?.vePagomovilBanks || []);
     } catch {
       // the empty state stays, with its retry
     }
@@ -135,9 +135,9 @@ export default function VePagoMovilReceiveScreen() {
     const timer = setTimeout(async () => {
       try {
         const r = await client.query({
-          query: VEXPAY_ON_RAMP_QUOTE, variables: { usdAmount: String(toNumber(amount)) }, fetchPolicy: 'network-only',
+          query: VE_TOP_UP_QUOTE, variables: { usdAmount: String(toNumber(amount)) }, fetchPolicy: 'network-only',
         });
-        if (!cancelled && alive.current) setQuote(r.data?.vexpayOnRampQuote || null);
+        if (!cancelled && alive.current) setQuote(r.data?.vePagomovilTopUpQuote || null);
       } catch {
         if (!cancelled && alive.current) setQuote(null);
       }
@@ -147,8 +147,8 @@ export default function VePagoMovilReceiveScreen() {
 
   const refreshOrder = useCallback(async (orderId: string) => {
     const issued = generation.current;
-    const r = await client.query({ query: VEXPAY_ON_RAMP_ORDER, variables: { orderId }, fetchPolicy: 'network-only' });
-    const next: VexpayOrder | undefined = r.data?.vexpayOnRampOrder;
+    const r = await client.query({ query: VE_TOP_UP_ORDER, variables: { orderId }, fetchPolicy: 'network-only' });
+    const next: VeTopUpOrder | undefined = r.data?.vePagomovilTopUpOrder;
     if (next?.success && alive.current && issued === generation.current) setOrder(next);
   }, [client, setOrder]);
 
@@ -177,7 +177,7 @@ export default function VePagoMovilReceiveScreen() {
     setError('');
     try {
       const place = () => client.mutate({
-        mutation: CREATE_VEXPAY_ON_RAMP,
+        mutation: CREATE_VE_TOP_UP,
         variables: { usdAmount: String(amountValue), method, cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code },
         fetchPolicy: 'no-cache',
       });
@@ -185,12 +185,12 @@ export default function VePagoMovilReceiveScreen() {
       try {
         // Each top-up order spends its own Confío Face check, like Recargar.
         response = await withFaceStepUp('on_ramp', place,
-          r => isFaceStepUpRequired(r?.data?.createVexpayOnRamp?.nextStep));
+          r => isFaceStepUpRequired(r?.data?.createVePagomovilTopUp?.nextStep));
       } catch (faceError) {
         if (faceError instanceof FaceCheckError) return;
         throw faceError;
       }
-      const result: VexpayOrder | undefined = response?.data?.createVexpayOnRamp;
+      const result: VeTopUpOrder | undefined = response?.data?.createVePagomovilTopUp;
       if (!alive.current) return;
       if (result?.nextStep === 'verification') {
         setError(result.error || '');
@@ -223,13 +223,13 @@ export default function VePagoMovilReceiveScreen() {
     try {
       const isC2p = order.method === 'c2p';
       const r = await client.mutate({
-        mutation: isC2p ? CONFIRM_VEXPAY_C2P : VERIFY_VEXPAY_PAGO_MOVIL,
+        mutation: isC2p ? CONFIRM_VE_TOP_UP_KEY : VERIFY_VE_TOP_UP,
         variables: isC2p
           ? { orderId: order.orderId, otp: code.trim() }
           : { orderId: order.orderId, reference: code.trim(), paymentDate: paymentDate || undefined },
         fetchPolicy: 'no-cache',
       });
-      const result: VexpayOrder | undefined = isC2p ? r.data?.confirmVexpayC2p : r.data?.verifyVexpayPagoMovil;
+      const result: VeTopUpOrder | undefined = isC2p ? r.data?.confirmVePagomovilTopUpKey : r.data?.verifyVePagomovilTopUp;
       if (!alive.current) return;
       if (!result?.success) {
         setError(result?.error || GENERIC);
@@ -259,8 +259,8 @@ export default function VePagoMovilReceiveScreen() {
     setLoading(true);
     setError('');
     try {
-      const r = await client.mutate({ mutation: CANCEL_VEXPAY_ON_RAMP, variables: { orderId: order.orderId }, fetchPolicy: 'no-cache' });
-      const result: VexpayOrder | undefined = r.data?.cancelVexpayOnRamp;
+      const r = await client.mutate({ mutation: CANCEL_VE_TOP_UP, variables: { orderId: order.orderId }, fetchPolicy: 'no-cache' });
+      const result: VeTopUpOrder | undefined = r.data?.cancelVePagomovilTopUp;
       if (!alive.current) return;
       if (!result?.success) {
         setError(result?.error || GENERIC);
@@ -319,7 +319,7 @@ export default function VePagoMovilReceiveScreen() {
   );
 
   // ─── Pago Móvil: the transfer details, then the reference ───
-  const renderPagoMovil = (current: VexpayOrder) => {
+  const renderPagoMovil = (current: VeTopUpOrder) => {
     const account = current.receivingAccount;
     const ves = current.vesAmount ? String(Number(current.vesAmount)) : null;
     const all = account && ves
@@ -410,7 +410,7 @@ export default function VePagoMovilReceiveScreen() {
     );
   };
 
-  const renderC2p = (current: VexpayOrder) => (
+  const renderC2p = (current: VeTopUpOrder) => (
     <RampReveal delay={60}>
       <View style={styles.section}>
         <RampStepHeader number={1} title="Clave de pago" meta={formatBs(current.vesAmount)} />
@@ -439,8 +439,8 @@ export default function VePagoMovilReceiveScreen() {
   );
 
   // ─── After paying: one timeline, whatever the provider's legs ───
-  const renderProgress = (current: VexpayOrder) => {
-    const progress = vexpayProgressCopy(current);
+  const renderProgress = (current: VeTopUpOrder) => {
+    const progress = topUpProgressCopy(current);
     const credited = current.status === 'COMPLETED' && !!current.deliveredUsdt;
     if (current.status === 'FAILED') {
       return (
@@ -739,13 +739,13 @@ export default function VePagoMovilReceiveScreen() {
 
 const BANK_ROW = 60;
 
-const METHODS: { id: VexpayMethod; icon: string; title: string; text: string }[] = [
+const METHODS: { id: VeTopUpMethod; icon: string; title: string; text: string }[] = [
   { id: 'pago_movil', icon: 'smartphone', title: 'Pago Móvil', text: 'Pagas desde la app de tu banco y escribes la referencia aquí.' },
   { id: 'c2p', icon: 'key', title: 'Clave de pago (C2P)', text: 'Escribes aquí la clave de tu banco y se debita al instante.' },
 ];
 
 /** 0 = paying, 1 = converting, 2 = crediting. */
-function timelineStage(order: VexpayOrder): number {
+function timelineStage(order: VeTopUpOrder): number {
   const detail = order.statusDetail || '';
   if (order.status === 'COMPLETED') return 2;
   if (order.status === 'PROCESSING' && (detail.startsWith('onward_') || detail.startsWith('needs_review'))) return 1;

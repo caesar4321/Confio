@@ -1,6 +1,6 @@
 import { gql } from '@apollo/client';
 
-// Venezuelan Pago Móvil top-up (VEXPay). Its own operations: an older server
+// Venezuelan Pago Móvil top-up (provider chosen by the server). Its own operations: an older server
 // without these fields fails only this screen, never a shared query.
 
 const ORDER_FIELDS = `
@@ -9,40 +9,40 @@ const ORDER_FIELDS = `
   receivingAccount { bankCode bankName phone identification }
 `;
 
-export const VEXPAY_ACTIVE_ON_RAMP_ORDER = gql`query VexpayActiveOnRampOrder {
-  vexpayActiveOnRampOrder { ${ORDER_FIELDS} }
+export const VE_ACTIVE_TOP_UP = gql`query VePagoMovilActiveTopUp {
+  vePagomovilActiveTopUp { ${ORDER_FIELDS} }
 }`;
 
-export const VEXPAY_ON_RAMP_ORDER = gql`query VexpayOnRampOrder($orderId: String!) {
-  vexpayOnRampOrder(orderId: $orderId) { ${ORDER_FIELDS} }
+export const VE_TOP_UP_ORDER = gql`query VePagoMovilTopUpOrder($orderId: String!) {
+  vePagomovilTopUpOrder(orderId: $orderId) { ${ORDER_FIELDS} }
 }`;
 
-export const VEXPAY_ON_RAMP_QUOTE = gql`query VexpayOnRampQuote($usdAmount: String!) {
-  vexpayOnRampQuote(usdAmount: $usdAmount) {
+export const VE_TOP_UP_QUOTE = gql`query VePagoMovilTopUpQuote($usdAmount: String!) {
+  vePagomovilTopUpQuote(usdAmount: $usdAmount) {
     success error usdAmount vesAmount rate estimatedUsdt minUsd maxUsd processorFeeUsd confioFeeUsd
   }
 }`;
 
-export const VEXPAY_BANKS = gql`query VexpayBanks { vexpayBanks { code name } }`;
+export const VE_BANKS = gql`query VePagoMovilBanks { vePagomovilBanks { code name } }`;
 
-export const CREATE_VEXPAY_ON_RAMP = gql`mutation CreateVexpayOnRamp(
+export const CREATE_VE_TOP_UP = gql`mutation CreateVePagoMovilTopUp(
   $usdAmount: String!, $method: String!, $cedula: String!, $phone: String!, $bankCode: String!
 ) {
-  createVexpayOnRamp(usdAmount: $usdAmount, method: $method, cedula: $cedula, phone: $phone, bankCode: $bankCode) {
+  createVePagomovilTopUp(usdAmount: $usdAmount, method: $method, cedula: $cedula, phone: $phone, bankCode: $bankCode) {
     ${ORDER_FIELDS}
   }
 }`;
 
-export const CONFIRM_VEXPAY_C2P = gql`mutation ConfirmVexpayC2p($orderId: String!, $otp: String!) {
-  confirmVexpayC2p(orderId: $orderId, otp: $otp) { ${ORDER_FIELDS} }
+export const CONFIRM_VE_TOP_UP_KEY = gql`mutation ConfirmVePagoMovilTopUpKey($orderId: String!, $otp: String!) {
+  confirmVePagomovilTopUpKey(orderId: $orderId, otp: $otp) { ${ORDER_FIELDS} }
 }`;
 
-export const CANCEL_VEXPAY_ON_RAMP = gql`mutation CancelVexpayOnRamp($orderId: String!) {
-  cancelVexpayOnRamp(orderId: $orderId) { ${ORDER_FIELDS} }
+export const CANCEL_VE_TOP_UP = gql`mutation CancelVePagoMovilTopUp($orderId: String!) {
+  cancelVePagomovilTopUp(orderId: $orderId) { ${ORDER_FIELDS} }
 }`;
 
-export const VERIFY_VEXPAY_PAGO_MOVIL = gql`mutation VerifyVexpayPagoMovil($orderId: String!, $reference: String!, $paymentDate: String) {
-  verifyVexpayPagoMovil(orderId: $orderId, reference: $reference, paymentDate: $paymentDate) { ${ORDER_FIELDS} }
+export const VERIFY_VE_TOP_UP = gql`mutation VerifyVePagoMovilTopUp($orderId: String!, $reference: String!, $paymentDate: String) {
+  verifyVePagomovilTopUp(orderId: $orderId, reference: $reference, paymentDate: $paymentDate) { ${ORDER_FIELDS} }
 }`;
 
 /** YYYY-MM-DD (device-local) for today minus `daysAgo`. */
@@ -60,16 +60,16 @@ export function parseDayMonthYear(value: string): string | null {
   return `${m[3]}-${pad(m[2])}-${pad(m[1])}`;
 }
 
-export type VexpayMethod = 'pago_movil' | 'c2p';
+export type VeTopUpMethod = 'pago_movil' | 'c2p';
 
-export interface VexpayOrder {
+export interface VeTopUpOrder {
   success: boolean;
   error?: string | null;
   nextStep?: string | null;
   orderId?: string | null;
   status?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | string | null;
   statusDetail?: string | null;
-  method?: VexpayMethod | string | null;
+  method?: VeTopUpMethod | string | null;
   usdAmount?: string | null;
   vesAmount?: string | null;
   estimatedUsdt?: string | null;
@@ -81,7 +81,7 @@ export interface VexpayOrder {
   receivingAccount?: { bankCode: string; bankName: string; phone: string; identification: string } | null;
 }
 
-export interface VexpayQuote {
+export interface VeTopUpQuote {
   success: boolean;
   error?: string | null;
   usdAmount?: string | null;
@@ -95,10 +95,10 @@ export interface VexpayQuote {
 }
 
 /** What the person sees while an order is in flight; never a provider leg name. */
-export function vexpayProgressCopy(order: VexpayOrder): { title: string; body: string } {
+export function topUpProgressCopy(order: VeTopUpOrder): { title: string; body: string } {
   const detail = order.statusDetail || '';
   if (order.status === 'COMPLETED') {
-    // VEXPay delivered; Confío's conversion credits the balance shortly after.
+    // The provider delivered; Confío's conversion credits the balance shortly after.
     return order.deliveredUsdt
       ? { title: 'Recarga completada', body: 'Tus dólares ya están en tu cuenta Confío.' }
       : { title: 'Pago enviado a tu cuenta', body: 'Estamos acreditando tus dólares; aparecerán en unos minutos.' };
@@ -132,7 +132,7 @@ const STATUS_RANK: Record<string, number> = { PENDING: 0, PROCESSING: 1, COMPLET
  * A response that would move the same order backwards (a slow poll landing
  * after a confirmation) must never reopen the payment form.
  */
-export function isOrderRegression(current: VexpayOrder | null, next: VexpayOrder): boolean {
+export function isOrderRegression(current: VeTopUpOrder | null, next: VeTopUpOrder): boolean {
   if (!current || !next || current.orderId !== next.orderId) return false;
   const now = STATUS_RANK[current.status || ''] ?? 0;
   const then = STATUS_RANK[next.status || ''] ?? 0;

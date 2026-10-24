@@ -1,40 +1,40 @@
-import { isoDaysAgo, isOrderRegression, parseDayMonthYear, vexpayProgressCopy } from '../vexpayOnRamp';
+import { isoDaysAgo, isOrderRegression, parseDayMonthYear, topUpProgressCopy } from '../vePagoMovilTopUp';
 
-describe('vexpayProgressCopy', () => {
+describe('topUpProgressCopy', () => {
   it('never shows a failure for money that is under review', () => {
-    const copy = vexpayProgressCopy({ success: true, status: 'PROCESSING', statusDetail: 'needs_review:onward_held:x' });
+    const copy = topUpProgressCopy({ success: true, status: 'PROCESSING', statusDetail: 'needs_review:onward_held:x' });
     expect(copy.title).toBe('Estamos revisando tu recarga');
     expect(copy.body).toContain('no hagas otro pago');
   });
 
   it('explains the release hold', () => {
-    expect(vexpayProgressCopy({ success: true, status: 'PROCESSING', statusDetail: 'onward_waiting_release' }).body)
+    expect(topUpProgressCopy({ success: true, status: 'PROCESSING', statusDetail: 'onward_waiting_release' }).body)
       .toContain('unas horas');
   });
 
   it('distinguishes an expired unpaid order from a failed payment', () => {
-    expect(vexpayProgressCopy({ success: true, status: 'FAILED', statusDetail: 'expired_unpaid' }).title)
+    expect(topUpProgressCopy({ success: true, status: 'FAILED', statusDetail: 'expired_unpaid' }).title)
       .toBe('La recarga expiró');
-    expect(vexpayProgressCopy({ success: true, status: 'FAILED', statusDetail: 'payment_failed:51' }).title)
+    expect(topUpProgressCopy({ success: true, status: 'FAILED', statusDetail: 'payment_failed:51' }).title)
       .toBe('La recarga no se completó');
   });
 
   it('a sent charge is never shown as waiting for payment', () => {
-    expect(vexpayProgressCopy({ success: true, status: 'PROCESSING', statusDetail: 'bank_confirming' }).title)
+    expect(topUpProgressCopy({ success: true, status: 'PROCESSING', statusDetail: 'bank_confirming' }).title)
       .toBe('Confirmando tu pago');
-    expect(vexpayProgressCopy({ success: true, status: 'PROCESSING', statusDetail: 'c2p_execute_ambiguous' }).body)
+    expect(topUpProgressCopy({ success: true, status: 'PROCESSING', statusDetail: 'c2p_execute_ambiguous' }).body)
       .toContain('No hagas otro pago');
   });
 
   it('shows a user cancellation as such', () => {
-    expect(vexpayProgressCopy({ success: true, status: 'FAILED', statusDetail: 'cancelled_by_user' }).title)
+    expect(topUpProgressCopy({ success: true, status: 'FAILED', statusDetail: 'cancelled_by_user' }).title)
       .toBe('Recarga cancelada');
   });
 
   it('completes only once the dollars are credited', () => {
-    expect(vexpayProgressCopy({ success: true, status: 'COMPLETED', statusDetail: 'delivered' }).title)
+    expect(topUpProgressCopy({ success: true, status: 'COMPLETED', statusDetail: 'delivered' }).title)
       .toBe('Pago enviado a tu cuenta');
-    expect(vexpayProgressCopy({ success: true, status: 'COMPLETED', statusDetail: 'delivered', deliveredUsdt: '19.5' }).title)
+    expect(topUpProgressCopy({ success: true, status: 'COMPLETED', statusDetail: 'delivered', deliveredUsdt: '19.5' }).title)
       .toBe('Recarga completada');
   });
 });

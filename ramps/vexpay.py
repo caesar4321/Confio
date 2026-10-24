@@ -29,7 +29,9 @@ from django.core.cache import cache
 from django.db import connection, transaction
 from django.utils import timezone
 
+from ramps import ve_pagomovil
 from ramps.models import RampTransaction
+from ramps.ve_pagomovil import VePagoMovilError
 from ramps.vexpay_client import (
     OnwardPayout,
     VexPayAmbiguousError,
@@ -58,68 +60,41 @@ REVERSAL_CHECK_EVERY = timedelta(hours=1)
 STALE_SUBMISSION = timedelta(minutes=5)
 ONWARD_IN_FLIGHT = {'pending', 'converting', 'waiting_release', 'sending'}
 PAYMENT_DEAD = {'FAILED', 'CANCELED'}
-CEDULA_RE = re.compile(r'^[VEJP]\d{6,9}$')
 FEE_TERMS_CACHE_KEY = 'vexpay:fee_terms'
 RESERVE_LOCK = 'vexpay:onramp:reserve'
 
 
-class VexPayRampError(Exception):
+class VexPayRampError(VePagoMovilError):
     """User-facing refusal; the message is Spanish copy for the app."""
 
 
 def enabled() -> bool:
-    return bool(getattr(settings, 'VEXPAY_RAMP_ENABLED', False))
-
-
-def _version(value) -> tuple | None:
-    value = str(value or '').strip()
-    if not re.fullmatch(r'\d{1,4}\.\d{1,4}\.\d{1,4}', value):
-        return None
-    return tuple(int(part) for part in value.split('.'))
-
-
-def client_supports(meta) -> bool:
-    """Only builds that have the VE Pago Móvil screen get the row: an older
-    build would route it to the Infinia receive screen and fail. An unset
-    floor shows it to nobody."""
-    floor = _version(getattr(settings, 'VEXPAY_RECEIVE_MIN_APP_VERSION', ''))
-    version = _version((meta or {}).get('HTTP_X_CONFIO_VERSION', ''))
-    return floor is not None and version is not None and version >= floor
+    """New VE top-ups may be made (the product switch, ramps.ve_pagomovil)."""
+    return ve_pagomovil.enabled(ve_pagomovil.TOPUP)
 
 
 def _setting_decimal(name: str, default: str) -> Decimal:
+    return ve_pagomovil.setting_decimal(name, default)
+
+
+def _neutral(fn, value):
     try:
-        return Decimal(str(getattr(settings, name, default)))
-    except (InvalidOperation, TypeError, ValueError):
-        return Decimal(default)
+        return fn(value)
+    except VePagoMovilError as exc:
+        raise VexPayRampError(str(exc)) from exc
 
 
 def normalize_cedula(value: str) -> str:
-    cleaned = re.sub(r'[^A-Z0-9]', '', str(value or '').upper())
-    if cleaned and cleaned[0].isdigit():
-        cleaned = f'V{cleaned}'
-    if not CEDULA_RE.fullmatch(cleaned):
-        raise VexPayRampError('La cédula debe tener el formato V12345678.')
-    return cleaned
+    return _neutral(ve_pagomovil.normalize_cedula, value)
 
 
 def normalize_phone(value: str) -> str:
     """Venezuelan mobile → 58 + 10 digits (VEXPay's C2P format)."""
-    digits = re.sub(r'\D', '', str(value or ''))
-    if digits.startswith('58') and len(digits) == 12:
-        digits = digits[2:]
-    elif digits.startswith('0') and len(digits) == 11:
-        digits = digits[1:]
-    if not re.fullmatch(r'4(12|14|16|22|24|26)\d{7}', digits):
-        raise VexPayRampError('El teléfono debe ser un móvil venezolano, por ejemplo 0414 1234567.')
-    return f'58{digits}'
+    return _neutral(ve_pagomovil.normalize_phone, value)
 
 
 def normalize_bank_code(value) -> int:
-    digits = re.sub(r'\D', '', str(value or ''))
-    if not digits or len(digits) > 4:
-        raise VexPayRampError('Selecciona el banco desde el que vas a pagar.')
-    return int(digits)
+    return int(_neutral(ve_pagomovil.normalize_bank, value))
 
 
 # ------------------------------------------------------------------ pricing
@@ -224,8 +199,8 @@ def counted_usd(ramp: RampTransaction) -> Decimal:
 
 
 def check_limits(user, usd_amount: Decimal) -> None:
-    minimum = _setting_decimal('VEXPAY_ONRAMP_MIN_USD', '5')
-    maximum = _setting_decimal('VEXPAY_ONRAMP_MAX_USD', '100')
+    minimum = _setting_decimal('VE_PAGOMOVIL_TOPUP_MIN_USD', '5')
+    maximum = _setting_decimal('VE_PAGOMOVIL_TOPUP_MAX_USD', '100')
     if usd_amount < minimum:
         raise VexPayRampError(f'El monto mínimo es ${minimum}.')
     if usd_amount > maximum:
@@ -239,10 +214,10 @@ def check_limits(user, usd_amount: Decimal) -> None:
         Q(created_at__gte=since) | Q(status__in=OPEN_STATUSES) | Q(completed_at__gte=since),
     ).exclude(status='FAILED'))
     user_total = sum((counted_usd(r) for r in recent if r.actor_user_id == user.pk), Decimal('0'))
-    if user_total + usd_amount > _setting_decimal('VEXPAY_ONRAMP_USER_DAILY_USD', '200'):
+    if user_total + usd_amount > _setting_decimal('VE_PAGOMOVIL_TOPUP_USER_DAILY_USD', '200'):
         raise VexPayRampError('Alcanzaste el límite diario de recargas en bolívares. Intenta mañana.')
     global_total = sum((counted_usd(r) for r in recent), Decimal('0'))
-    if global_total + usd_amount > _setting_decimal('VEXPAY_ONRAMP_GLOBAL_DAILY_USD', '2000'):
+    if global_total + usd_amount > _setting_decimal('VE_PAGOMOVIL_TOPUP_GLOBAL_DAILY_USD', '2000'):
         raise VexPayRampError('Las recargas en bolívares alcanzaron su cupo de hoy. Intenta más tarde.')
 
 
@@ -423,7 +398,7 @@ def apply_payment(ramp: RampTransaction, payment: dict, *, direct: bool = False)
 
         if status == 'COMPLETED' and payment.get('usdAmount') is not None:
             section['paid_usd'] = str(payment['usdAmount'])
-            maximum = _setting_decimal('VEXPAY_ONRAMP_MAX_USD', '100')
+            maximum = _setting_decimal('VE_PAGOMOVIL_TOPUP_MAX_USD', '100')
             if Decimal(str(payment['usdAmount'])) > maximum and not section.get('over_limit_alerted'):
                 # Pago Móvil credits an overpayment in full and its onward
                 # payout follows automatically; flag it, it still counts in limits.
