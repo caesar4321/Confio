@@ -960,6 +960,22 @@ MARKET = [
 CANDLES = [{'timestamp': 2, 'close': '170'}, {'timestamp': 1, 'close': '200'}]
 
 
+class PromisedCheckRetryTests(TestCase):
+    def test_a_reply_that_only_promises_to_check_runs_again_with_the_tool(self):
+        from .engine import _promised_unchecked_portfolio
+        user, _ = User.objects.get_or_create(username='pcr', defaults={'phone_country': 'BO', 'firebase_uid': 'fb-pcr'})
+        viewer = Viewer(user=user, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)
+        promised = TurnResult(reply='Para orientarte según lo que ya tienes, necesito revisar tu portafolio.')
+        self.assertTrue(_promised_unchecked_portfolio(belt, promised))
+        checked = TurnResult(reply='Necesito revisar tu portafolio.', tools=[{'name': 'get_portfolio', 'ok': True}])
+        self.assertFalse(_promised_unchecked_portfolio(belt, checked))
+        self.assertFalse(_promised_unchecked_portfolio(belt, TurnResult(reply='Confío Dollar+ rinde 3,18% anual.')))
+        belt.force_tool = 'get_portfolio'  # never a second retry
+        self.assertFalse(_promised_unchecked_portfolio(belt, promised))
+
+
 class IdentityInPromptTests(TestCase):
     def test_unverified_people_are_told_to_verify_before_topping_up(self):
         from .prompts import build_system_prompt

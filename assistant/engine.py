@@ -789,6 +789,8 @@ class Toolbelt:
         self.earlier_user_messages = ''
         # Answering a general question while the team owns the thread.
         self.waiting_for_team = False
+        # A tool the next pass must call first (a reply that only promised it).
+        self.force_tool = ''
         # Paid tools run at most once per user message, whatever the model asks.
         self.paid_used = set()
         self.can_navigate = can_navigate
@@ -1284,6 +1286,20 @@ def _identity_status(viewer):
         return None
 
 
+_PROMISED_CHECK = re.compile(
+    r'\b(necesito|tengo que|voy a|debo|primero|d[eé]jame|antes)\s+(revisar|reviso|ver|consultar|mirar|revise)\b'
+    r'[^.]*\b(portafolio|cartera|saldo|cuenta|n[uú]meros|gastos)', re.I)
+RETRY_NOTE = ('\n# Revisa antes de contestar\nLlama get_portfolio antes de responder (si no lo llamaste ya) y '
+              'contesta con sus datos. Nunca digas que vas a revisar algo: revísalo con la herramienta y contesta.\n')
+
+
+def _promised_unchecked_portfolio(belt, result):
+    called = {str(t.get('name', '')).split(':')[0] for t in result.tools if isinstance(t, dict)}
+    return (not belt.force_tool and 'get_portfolio' not in called
+            and bool(_PROMISED_CHECK.search(result.reply or ''))
+            and any(s.get('name') == 'get_portfolio' for s in belt.specs()))
+
+
 def _open_claimed_screen(belt, result):
     if not belt.can_navigate or any(a.get('type') == 'navigate' for a in result.actions):
         return
@@ -1322,6 +1338,13 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
     try:
         done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                          country=country)
+        if _promised_unchecked_portfolio(belt, done):
+            # "Necesito revisar tu portafolio" and no call: the person got no
+            # answer (2026-10-18, 10-24). Run once more, made to look first.
+            belt.force_tool = 'get_portfolio'
+            done.reply = ''
+            done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
+                             country=country)
         _open_claimed_screen(belt, done)
         return done
     except AssistantUnavailable as exc:
@@ -1357,6 +1380,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
     )
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
+    if belt.force_tool:
+        system += RETRY_NOTE
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     effort = conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')
     specs = belt.specs()
@@ -1375,6 +1400,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
     }
     if effort:
         payload['reasoning'] = {'effort': effort}
+    if belt.force_tool:
+        payload['tool_choice'] = {'type': 'function', 'name': belt.force_tool}
 
     input_items = list(payload['input'])
     for _ in range(conf.get('CONFIO_ASSISTANT_MAX_TOOL_STEPS')):
@@ -1398,6 +1425,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
                 'output': _run_tool(belt, result, call.get('name'), args),
             })
         payload = {**payload, 'input': input_items}
+        if isinstance(payload.get('tool_choice'), dict):
+            del payload['tool_choice']  # the forced call is the first step only
         if belt.saw_web:
             payload['tool_choice'] = 'none'
     else:
