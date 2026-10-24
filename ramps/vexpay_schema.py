@@ -354,6 +354,8 @@ class Query(graphene.ObjectType):
         if amount is None:
             return VexpayOnRampQuoteType(success=False, error='Monto no válido.')
         client = VexPayClient()
+        if not client.is_configured:
+            return VexpayOnRampQuoteType(success=False, error=UNAVAILABLE)
         try:
             terms = vexpay.fee_terms(client)
             quote = client.quote_usd(amount)

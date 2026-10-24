@@ -115,6 +115,16 @@ export default function VePagoMovilReceiveScreen() {
     }
   }, [client, setOrder]);
   useEffect(() => { void boot(); }, [boot]);
+  // The bank list can fail on its own (the server answers [] on any provider
+  // error): offer a retry instead of an empty picker.
+  const reloadBanks = useCallback(async () => {
+    try {
+      const r = await client.query({ query: VEXPAY_BANKS, fetchPolicy: 'network-only' });
+      if (alive.current) setBanks(r.data?.vexpayBanks || []);
+    } catch {
+      // the empty state stays, with its retry
+    }
+  }, [client]);
 
   // Live estimate while typing the amount.
   useEffect(() => {
@@ -585,13 +595,19 @@ export default function VePagoMovilReceiveScreen() {
 
       <RampReveal delay={160}>
         <View style={styles.section}>
-          <RampStepHeader number={3} title="Quién paga" meta="Puede ser otra persona" />
+          <RampStepHeader number={3} title={method === 'c2p' ? 'Cuenta a debitar' : 'Desde dónde pagas'}
+            meta="Puede ser otra persona" />
           <View style={styles.inputCard}>
+            <Text style={[styles.helperText, local.payerHelp]}>
+              {method === 'c2p'
+                ? 'El titular de esta cuenta autoriza el débito con la clave de pago de su banco.'
+                : 'El teléfono, la cédula y el banco desde los que se hará el Pago Móvil. Los usamos para encontrar el pago.'}
+            </Text>
             <Text style={styles.inputLabel}>Cédula</Text>
             <TextInput accessibilityLabel="Cédula" value={cedula} onChangeText={setCedula} autoCapitalize="characters"
               placeholder="V12345678" placeholderTextColor={colors.textTertiary}
               style={[styles.textInput, local.field]} editable={!loading} />
-            <Text style={[styles.inputLabel, local.spaced]}>Teléfono del Pago Móvil</Text>
+            <Text style={[styles.inputLabel, local.spaced]}>{method === 'c2p' ? 'Teléfono de la cuenta' : 'Teléfono del Pago Móvil'}</Text>
             <TextInput accessibilityLabel="Teléfono del Pago Móvil" value={phone} onChangeText={setPhone}
               keyboardType="phone-pad" placeholder="0414 1234567" placeholderTextColor={colors.textTertiary}
               style={[styles.textInput, local.field]} editable={!loading} />
@@ -613,7 +629,8 @@ export default function VePagoMovilReceiveScreen() {
     if (booting) return null;
     if (!order) {
       return (
-        <RampActionBar primaryLabel="Continuar" primaryIconName="arrow-right" onPrimaryPress={() => { void create(); }}
+        <RampActionBar primaryLabel={method === 'c2p' ? 'Continuar con clave de pago' : 'Ver datos para pagar'}
+          primaryIconName="arrow-right" onPrimaryPress={() => { void create(); }}
           primaryDisabled={!amountOk || !payerOk || !quoteMatches} primaryLoading={loading} />
       );
     }
@@ -683,6 +700,16 @@ export default function VePagoMovilReceiveScreen() {
           <FlatList
             data={banks}
             keyExtractor={item => item.code}
+            ListEmptyComponent={(
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No pudimos cargar los bancos</Text>
+                <Text style={styles.emptyText}>Revisa tu conexión e intenta de nuevo.</Text>
+                <TouchableOpacity style={styles.primaryActionButton} accessibilityRole="button"
+                  onPress={() => { void reloadBanks(); }}>
+                  <Text style={styles.primaryActionButtonText}>Reintentar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             initialNumToRender={20}
             maxToRenderPerBatch={10}
             windowSize={21}
@@ -737,6 +764,7 @@ const local = StyleSheet.create({
   pickerPlaceholder: { fontSize: 16, color: colors.textTertiary },
   otp: { letterSpacing: 8, textAlign: 'center' },
   quoteGap: { marginTop: 14 },
+  payerHelp: { marginTop: 0, marginBottom: 12 },
   headlineRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   copyBubble: {
     width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',

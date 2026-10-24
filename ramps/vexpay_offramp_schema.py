@@ -325,8 +325,11 @@ class Query(graphene.ObjectType):
         amount = _parse_usd(usd_amount)
         if amount is None:
             return VexpayOffRampQuoteType(success=False, error='Monto no válido.')
+        client = VexPayClient()
+        if not client.is_configured:
+            return VexpayOffRampQuoteType(success=False, error=UNAVAILABLE)
         try:
-            rate = vexpay_offramp.market_rate(VexPayClient())
+            rate = vexpay_offramp.market_rate(client)
             _, deposit_wei = vexpay_offramp.confio_amounts(amount)
         except vexpay.VexPayRampError as exc:
             return VexpayOffRampQuoteType(success=False, error=str(exc))

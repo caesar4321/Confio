@@ -124,6 +124,16 @@ export default function VePagoMovilSendScreen() {
     }
   }, [client]);
   useEffect(() => { void boot(); }, [boot]);
+  // The bank list can fail on its own (the server answers [] on any provider
+  // error): offer a retry instead of an empty picker.
+  const reloadBanks = useCallback(async () => {
+    try {
+      const r = await client.query({ query: VEXPAY_BANKS, fetchPolicy: 'network-only' });
+      if (alive.current) setBanks(r.data?.vexpayBanks || []);
+    } catch {
+      // the empty state stays, with its retry
+    }
+  }, [client]);
 
   useEffect(() => {
     // A quote belongs to one amount: drop it the moment the amount changes.
@@ -553,6 +563,16 @@ export default function VePagoMovilSendScreen() {
           <FlatList
             data={banks}
             keyExtractor={item => item.code}
+            ListEmptyComponent={(
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No pudimos cargar los bancos</Text>
+                <Text style={styles.emptyText}>Revisa tu conexión e intenta de nuevo.</Text>
+                <TouchableOpacity style={styles.primaryActionButton} accessibilityRole="button"
+                  onPress={() => { void reloadBanks(); }}>
+                  <Text style={styles.primaryActionButtonText}>Reintentar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             initialNumToRender={20}
             maxToRenderPerBatch={10}
             windowSize={21}
