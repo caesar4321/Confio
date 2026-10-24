@@ -19,7 +19,7 @@ export const VEXPAY_ON_RAMP_ORDER = gql`query VexpayOnRampOrder($orderId: String
 
 export const VEXPAY_ON_RAMP_QUOTE = gql`query VexpayOnRampQuote($usdAmount: String!) {
   vexpayOnRampQuote(usdAmount: $usdAmount) {
-    success error usdAmount vesAmount rate estimatedUsdt minUsd maxUsd
+    success error usdAmount vesAmount rate estimatedUsdt minUsd maxUsd processorFeeUsd confioFeeUsd
   }
 }`;
 
@@ -90,6 +90,8 @@ export interface VexpayQuote {
   estimatedUsdt?: string | null;
   minUsd?: string | null;
   maxUsd?: string | null;
+  processorFeeUsd?: string | null;
+  confioFeeUsd?: string | null;
 }
 
 /** What the person sees while an order is in flight; never a provider leg name. */

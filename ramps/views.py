@@ -208,6 +208,12 @@ def vexpay_webhook(request):
         ramp_tx = RampTransaction.objects.filter(provider='vexpay', provider_order_id=payment_id).first()
     if ramp_tx is None and external_ref:
         ramp_tx = RampTransaction.objects.filter(provider='vexpay', external_id=external_ref).first()
+    customer_ref = str(data.get('customerRef') or '').strip()
+    if ramp_tx is None and customer_ref.startswith('cfo-'):
+        # A USDT deposit to a send's own address. Only a hint to re-check:
+        # funding is proven on chain, never from this payload.
+        ramp_tx = RampTransaction.objects.filter(
+            provider='vexpay', direction='off_ramp', external_id=customer_ref[4:]).first()
     if ramp_tx is None:
         return JsonResponse({'ok': True, 'stored': True})
     try:

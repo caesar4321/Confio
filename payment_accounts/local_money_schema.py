@@ -143,6 +143,13 @@ def _request(row):
                                     user_message=row.user_message, submitted_at=row.submitted_at)
 
 
+def _personal_owner(owner, info) -> bool:
+    """The signed-in person acting on their own personal account."""
+    user = getattr(info.context, 'user', None)
+    return (getattr(owner, 'account_type', None) == 'personal' and user is not None
+            and getattr(owner, 'user_id', None) == getattr(user, 'pk', None))
+
+
 class LocalMoneyQuery(graphene.ObjectType):
     local_money_methods = graphene.List(graphene.NonNull(LocalMethodType), required=True,
                                         direction=graphene.String(required=True))
@@ -170,13 +177,30 @@ class LocalMoneyQuery(graphene.ObjectType):
                 rows.append(dict(method=local_money.Method('bo_qr', 'send', 'BOL', 'BO', 'BOB',
                     'QR Bolivia · prueba', 'Escanea o importa un QR bancario boliviano'),
                     status='live', reason='sandbox', requirement=None, account_status='active'))
+        if direction == 'send':
+            # Venezuelan Pago Móvil send (VEXPay): to the user's own account or
+            # anyone's. Owner-only, personal accounts; each send asks for Face.
+            from ramps import vexpay_offramp
+            personal_owner = _personal_owner(owner, info)
+            has_open_send = personal_owner and vexpay_offramp.active_order(info.context.user) is not None
+            if (vexpay_offramp.client_supports(info.context.META) and personal_owner
+                    and (vexpay_offramp.enabled() or has_open_send)):
+                identity = _identity(owner, required=False)
+                # Replaces the waitlist probe of the same rail.
+                rows = [r for r in rows if r['method'].id != 've_pagomovil_send']
+                rows.append(dict(method=local_money.Method(
+                    've_pagomovil_send', 'send', 'VEN', 'VE', 'VES', 'Pago Móvil',
+                    'Envía bolívares a cualquier teléfono y banco', instruction_kind='per_order'),
+                    status='live' if identity else 'needs_verification',
+                    reason='' if identity else 'identity_required',
+                    requirement=None, account_status='active'))
         from . import breb_location
         if direction == 'receive':
             # Venezuelan Pago Móvil top-up (VEXPay). A per-order pay-in, not a
             # standing account; the payer may be a third party. Owner-only,
             # personal accounts; the order itself asks for Confío Face.
             from ramps import vexpay
-            personal_owner = owner.account_type == 'personal' and owner.user_id == info.context.user.pk
+            personal_owner = _personal_owner(owner, info)
             # With the rail switched off, a person with an open top-up (they
             # may already have sent bolívares) still needs the way back to it.
             has_open_order = personal_owner and vexpay.active_order(info.context.user) is not None

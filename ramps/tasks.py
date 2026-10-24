@@ -172,6 +172,29 @@ def poll_vexpay_ramp_transactions():
             continue
         if (ramp_tx.status, ramp_tx.status_detail) != before:
             changed += 1
+    # Bolívar sends: funding proven on chain, payouts released by ops.
+    from ramps import vexpay_offramp
+    for ramp_tx in vexpay_offramp.open_off_ramps().iterator():
+        # Alerts are retried for every send, even ones waiting on ops.
+        try:
+            vexpay_offramp.ensure_alerted(ramp_tx)
+        except Exception:
+            logger.exception('VEXPay send alert retry failed for %s', ramp_tx.pk)
+        if not vexpay_offramp.due_for_sync(ramp_tx):
+            continue
+        checked += 1
+        before = (ramp_tx.status, ramp_tx.status_detail)
+        try:
+            ramp_tx = vexpay_offramp.sync_off_ramp(ramp_tx, client)
+            vexpay_offramp.ensure_alerted(ramp_tx)
+        except VexPayError as exc:
+            logger.warning('VEXPay poll failed for send %s: %s', ramp_tx.pk, exc)
+            continue
+        except Exception:
+            logger.exception('Unexpected VEXPay poll failure for send %s', ramp_tx.pk)
+            continue
+        if (ramp_tx.status, ramp_tx.status_detail) != before:
+            changed += 1
     return f'Polled {checked} VEXPay ramps, updated {changed}'
 
 
@@ -180,5 +203,8 @@ def sync_vexpay_ramp_task(ramp_id: int):
     from ramps.vexpay import sync_vexpay_ramp
 
     ramp_tx = RampTransaction.objects.filter(pk=ramp_id, provider='vexpay').first()
-    if ramp_tx:
+    if ramp_tx and ramp_tx.direction == 'off_ramp':
+        from ramps.vexpay_offramp import sync_off_ramp
+        sync_off_ramp(ramp_tx)
+    elif ramp_tx:
         sync_vexpay_ramp(ramp_tx)

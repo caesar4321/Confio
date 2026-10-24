@@ -31,6 +31,7 @@ import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { PaymentQrScannerModal } from '../components/PaymentQrScannerModal';
 import BoliviaQrSendScreen from './BoliviaQrSendScreen';
+import VePagoMovilSendScreen from './VePagoMovilSendScreen';
 import { formatRampMoney, formatRampRate, USD_UNIT } from '../utils/rampFormat';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
@@ -139,6 +140,7 @@ export default function LocalSendScreen() {
   const {params} = useRoute<Route>();
   const {activeAccount} = useAccount();
   const navigation = useNavigation<Nav>();
+  if (params.methodId === 've_pagomovil_send') return <VePagoMovilSendScreen />;
   if (params.methodId === 'bo_qr') {
     if (!activeAccount?.id) return <View><Text>Selecciona tu cuenta personal.</Text></View>;
     return <BoliviaQrSendScreen key={activeAccount.id} accountId={String(activeAccount.id)} initialQr={params.scannedQr} onBack={() => navigation.goBack()} />;

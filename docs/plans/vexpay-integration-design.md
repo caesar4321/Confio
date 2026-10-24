@@ -1,7 +1,7 @@
 # VEXPay integration for Venezuela (design)
 
-**Status**: on-ramp built behind `VEXPAY_RAMP_ENABLED=False` (2026-10-23);
-off-ramp still a design.
+**Status**: on-ramp and off-ramp built (2026-10-24); off-ramp dark behind
+`VEXPAY_OFFRAMP_ENABLED` and `VEXPAY_SEND_MIN_APP_VERSION`.
 **Scope**: Venezuelan on-ramp (bolívares → USDT on BSC in the user's wallet) and
 off-ramp (USDT on BSC → bolívares by Pago Móvil to the user or a third party),
 both through VEXPay as the first provider. Built so a later provider (Pago
@@ -64,29 +64,37 @@ escalates to `needs_review` with an ops alert.
 enqueues a re-read. Completed orders stay polled for reversals (7 days) and
 for a missing conversion link (30 days).
 
-## Off-ramp (Retirar / Enviar por Pago Móvil, VE)
+## Off-ramp (Enviar por Pago Móvil, VE) — built, dark
 
-VEXPay has no USDT → VES API. VEXPay operates it manually per request; the
-API part is only the deposit and the final Pago Móvil payout.
+VEXPay has no USDT → VES API, so VEXPay converts by hand and ops releases each
+payout. Code: `ramps/vexpay_offramp.py`, `ramps/vexpay_offramp_schema.py`,
+`ramps/vexpay_admin.py` (admin → Ramp transactions → `vexpay-envios/`), app
+`VePagoMovilSendScreen` (row `ve_pagomovil_send`).
 
-1. **Order** — `createRampOrder(direction=off_ramp, provider=vexpay)` with the
-   beneficiary (self or third party: name, cédula, bank code, phone). Amount is
-   fixed in USDT; the Bs amount is an estimate until VEXPay quotes it.
-2. **Deposit address** — `POST /v1/crypto/deposit-addresses`
-   (`customerRef` = account id, `network: BEP20`); the same address returns on
-   every call. The server vouches for it in the order payload, exactly like
-   Koywe (`confioDepositAddress`, `confioDepositNetwork='BSC'`, amount wei).
-3. **Funding** — the app funds that vouched address with the existing sponsored
-   7702 batch (redeems any cUSD/cUSD+ shortfall, sends USDT). Never shown as a
-   plain failure on an unknown outcome.
-4. **Receipt** — `payment.completed` (`method: USDT`, `customerRef`,
-   `amountUsdt`, `feeUsdt`, `txHashes`) matched to the order by tx hash.
-5. **Manual conversion** — the open protocol point (below): VEXPay converts the
-   received USDT to VES and credits our VES balance with the order reference.
-6. **Payout** — once the VES credit for that order is visible
-   (`/v1/balance/transactions` or a webhook), `POST /v1/payments/credit`
-   (banco, cédula, teléfono, monto) to the beneficiary. Not `/v1/payouts`,
-   which only pays micro-deposit-verified merchants.
+1. **Order** — `createVexpayOffRamp` (personal owner, KYC, peeks the
+   withdrawal Face) reserves `RampTransaction(direction='off_ramp')` under a
+   limits lock and fetches the order's OWN BEP20 deposit address
+   (`customerRef = cfo-<order>`), so equal amounts never collide.
+2. **Funding** — `startVexpayOffRampFunding` is a single-use claim that
+   answers the vouched address once. The app pins the personal wallet, checks
+   it against the order, and pays with the Retiro batch (redeem with fee +
+   exact transfer); the sponsor spends the Face approval. The hash is
+   reported; a lost one is fine.
+3. **Proof** — the chain decides: one USDT Transfer from the order's wallet to
+   its address for exactly the vouched amount, by receipt or an incremental
+   log scan (micro-chunk fallback) watched for 3 days. VEXPay's webhook only
+   triggers a re-check.
+4. **Conversion** — ops is notified, asks VEXPay to convert that deposit and
+   marks it converted with the bolívares credited (±25% of the estimate).
+5. **Payout** — `POST /v1/payments/credit` only when the free VES balance
+   covers it after other in-flight payouts. Body and key are committed first;
+   every dispatch holds a lease. VEXPay's idempotency lasts 24 h, so a lost
+   answer is replayed with the same key for 20 h at most, then ops review.
+   Definite bank rejections can be retried with a new key (after correcting
+   the destination); anything unknown needs ops to confirm "NO PAGADO".
+
+The estimate's processor fee (USDT deposit fee, conversion spread) comes from
+`VEXPAY_OFFRAMP_*` settings until VEXPay exposes them.
 
 ## Cross-cutting
 

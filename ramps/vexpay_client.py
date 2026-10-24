@@ -173,6 +173,28 @@ class VexPayClient:
         return self._request('POST', '/v1/payments/pago-movil/verify', json_body=body,
                              idempotency_key=idempotency_key)
 
+    # Off-ramp ----------------------------------------------------------------
+
+    def deposit_address(self, *, customer_ref: str, network: str, idempotency_key: str = '') -> dict:
+        """The static USDT address for one customer ref (same ref, same address)."""
+        return self._request('POST', '/v1/crypto/deposit-addresses', idempotency_key=idempotency_key,
+                             json_body={'customerRef': customer_ref, 'network': network, 'currency': 'USDT'})
+
+    def credit(self, *, bank_code: str, cedula: str, phone: str, ves_amount: Decimal, concept: str,
+               idempotency_key: str) -> dict:
+        """Crédito inmediato to a Pago Móvil destination. The key replays the
+        stored answer for 24 h only; after that the same key pays again."""
+        return self._request('POST', '/v1/payments/credit', idempotency_key=idempotency_key, json_body={
+            'banco': bank_code,
+            'cedula': cedula,
+            'telefono': phone,
+            'monto': float(ves_amount),
+            'concepto': concept[:30],
+        })
+
+    def operation(self, operation_id: str) -> dict:
+        return self._request('GET', f'/v1/payments/operations/{operation_id}')
+
     def get_payment(self, payment_id: str) -> dict:
         return self._request('GET', f'/v1/payments/{payment_id}')
 

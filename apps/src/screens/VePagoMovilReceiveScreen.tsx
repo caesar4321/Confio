@@ -5,6 +5,7 @@ import {
   Modal,
   SafeAreaView,
   ScrollView,
+  StatusBar,
   StyleSheet,
   TouchableOpacity,
   View,
@@ -16,6 +17,11 @@ import { useIsFocused, useNavigation } from '@react-navigation/native';
 
 import { Text, TextInput } from '../components/common/AppText';
 import { colors } from '../config/theme';
+import { RampActionBar } from '../components/ramps/RampActionBar';
+import { RampHero } from '../components/ramps/RampHero';
+import { RampReveal } from '../components/ramps/RampReveal';
+import { RampStepHeader } from '../components/ramps/RampStepHeader';
+import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
 import { getSeparators, sanitizeAmountInput } from '../utils/numberLocale';
 import {
@@ -43,7 +49,9 @@ type Bank = { code: string; name: string };
 
 const toNumber = (value: string) => Number(value.replace(',', '.'));
 const formatBs = (value?: string | null) =>
-  value ? `Bs ${Number(value).toLocaleString('es-VE', { maximumFractionDigits: 2 })}` : '—';
+  value ? `Bs ${Number(value).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
+const formatUsd = (value?: string | null) =>
+  value ? `$${Number(value).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
 
 /**
  * Recargar con bolívares (Pago Móvil, VEXPay). One server order per top-up:
@@ -73,6 +81,7 @@ export default function VePagoMovilReceiveScreen() {
   }, []);
 
   const [amount, setAmount] = useState('');
+  const [amountFocused, setAmountFocused] = useState(false);
   const [quote, setQuote] = useState<VexpayQuote | null>(null);
   const [method, setMethod] = useState<VexpayMethod>('pago_movil');
   const [cedula, setCedula] = useState('');
@@ -109,7 +118,9 @@ export default function VePagoMovilReceiveScreen() {
 
   // Live estimate while typing the amount.
   useEffect(() => {
-    if (order || !amount || !(toNumber(amount) > 0)) { setQuote(null); return; }
+    // A quote belongs to one amount: drop it the moment the amount changes.
+    setQuote(null);
+    if (order || !amount || !(toNumber(amount) > 0)) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
@@ -146,10 +157,11 @@ export default function VePagoMovilReceiveScreen() {
   const max = Number(quote?.maxUsd || 0);
   const amountValue = toNumber(amount);
   const amountOk = amountValue > 0 && (!min || amountValue >= min) && (!max || amountValue <= max);
+  const quoteMatches = !!quote?.success && Number(quote.usdAmount) === amountValue;
   const payerOk = cedula.trim().length >= 6 && phone.replace(/\D/g, '').length >= 10 && !!bank;
 
   const create = async () => {
-    if (busy.current || !amountOk || !payerOk || !bank) return;
+    if (busy.current || !amountOk || !payerOk || !bank || !quoteMatches) return;
     busy.current = true;
     setLoading(true);
     setError('');
@@ -261,211 +273,409 @@ export default function VePagoMovilReceiveScreen() {
   };
 
   const copy = (value: string) => Clipboard.setString(value);
+  const goBack = () => navigation.goBack();
+  const refresh = (orderId: string) => { void refreshOrder(orderId).catch(() => setError(GENERIC)); };
 
-  const button = (title: string, onPress: () => void, disabled = false, secondary = false) => (
-    <TouchableOpacity
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={[styles.button, secondary && styles.buttonSecondary, disabled && styles.disabled]}
-    >
-      <Text style={[styles.buttonText, secondary && styles.buttonTextSecondary]}>{title}</Text>
-    </TouchableOpacity>
-  );
+  const errorCard = error ? (
+    <View style={[styles.warningCard, local.edge]} accessibilityRole="alert">
+      <Icon name="alert-circle" size={18} color={colors.warning.text} />
+      <View style={local.flex}>
+        <Text style={styles.warningText}>{error}</Text>
+      </View>
+    </View>
+  ) : null;
 
-  const copyRow = (label: string, value?: string | null) => (
-    <View style={styles.copyRow}>
-      <View style={styles.copyText}>
-        <Text style={styles.label}>{label}</Text>
-        <Text style={styles.value} selectable>{value || '—'}</Text>
+  const detailRow = (label: string, value?: string | null, last = false) => (
+    <View style={[local.detailRow, !last && local.detailDivider]}>
+      <View style={local.flex}>
+        <Text style={local.detailLabel}>{label}</Text>
+        <Text style={local.detailValue} selectable>{value || '—'}</Text>
       </View>
       {value ? (
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Copiar ${label}`} onPress={() => copy(value)} style={styles.copyButton}>
-          <Icon name="copy" size={18} color={colors.primaryDark} />
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Copiar ${label}`} onPress={() => copy(value)}
+          style={local.copyButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Icon name="copy" size={16} color={colors.primaryDark} />
         </TouchableOpacity>
       ) : null}
     </View>
   );
 
-  const pendingActions = (current: VexpayOrder) => (
-    <>
-      {button('Consultar estado', () => { void refreshOrder(current.orderId as string).catch(() => setError(GENERIC)); }, loading, true)}
-      {current.canCancel && button('Cancelar recarga (no pagué)', () => { void cancel(); }, loading, true)}
-    </>
+  const statusLink = (orderId: string) => (
+    <TouchableOpacity style={[styles.historyPill, local.statusLink]} onPress={() => refresh(orderId)} disabled={loading}
+      accessibilityRole="button">
+      <Icon name="refresh-cw" size={14} color={colors.primary} />
+      <Text style={styles.historyPillText}>Consultar estado</Text>
+    </TouchableOpacity>
   );
 
-  const renderOrder = (current: VexpayOrder) => {
-    // The form shows only while the server accepts a confirmation for it.
-    const pending = current.status === 'PENDING' && current.canConfirm !== false;
-    if (pending && current.method === 'pago_movil') {
-      const account = current.receivingAccount;
-      return (
-        <View style={styles.card}>
-          <Text style={styles.heading}>Haz un Pago Móvil desde tu banco</Text>
-          <Text style={styles.note}>Envía exactamente este monto. Puede pagar otra persona.</Text>
-          {copyRow('Monto', current.vesAmount ? String(Number(current.vesAmount)) : null)}
-          {copyRow('Banco', account ? `${account.bankName} (${account.bankCode})` : null)}
-          {copyRow('Teléfono', account?.phone)}
-          {copyRow('RIF / Cédula', account?.identification)}
-          <Text style={styles.heading}>Referencia del pago</Text>
-          <TextInput
-            accessibilityLabel="Referencia del Pago Móvil"
-            value={code}
-            onChangeText={text => setCode(text.replace(/\D/g, '').slice(0, 32))}
-            keyboardType="number-pad"
-            placeholder="Al menos los últimos 6 dígitos"
-            style={styles.input}
-            editable={!loading}
-          />
-          <Text style={styles.heading}>¿Cuándo hiciste el pago?</Text>
-          <View style={styles.segment}>
-            {([['today', 'Hoy'], ['yesterday', 'Ayer'], ['other', 'Otro día']] as const).map(([id, label]) => (
-              <TouchableOpacity
-                key={id}
-                accessibilityRole="button"
-                accessibilityState={{ selected: paidWhen === id }}
-                onPress={() => setPaidWhen(id)}
-                style={[styles.segmentItem, paidWhen === id && styles.segmentActive]}
-              >
-                <Text style={[styles.segmentText, paidWhen === id && styles.segmentTextActive]}>{label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {paidWhen === 'other' && (
-            <TextInput
-              accessibilityLabel="Fecha del pago"
-              value={paidOn}
-              onChangeText={setPaidOn}
-              keyboardType="numbers-and-punctuation"
-              placeholder="DD/MM/AAAA"
-              style={styles.input}
-              editable={!loading}
-            />
-          )}
-          {button('Ya pagué, confirmar', () => { void confirm(); }, loading || code.length < 4 || paymentDate === null)}
-          {pendingActions(current)}
-        </View>
-      );
-    }
-    if (pending && current.method === 'c2p') {
-      return (
-        <View style={styles.card}>
-          <Text style={styles.heading}>Escribe tu clave de pago</Text>
-          <Text style={styles.note}>
-            {current.otpRequested
-              ? 'Tu banco te envió una clave por SMS.'
-              : 'Genera la clave de pago (C2P) en la app de tu banco.'}{' '}
-            Se debitarán {formatBs(current.vesAmount)}.
-          </Text>
-          <TextInput
-            accessibilityLabel="Clave de pago"
-            value={code}
-            onChangeText={text => setCode(text.replace(/\D/g, '').slice(0, 8))}
-            keyboardType="number-pad"
-            placeholder="6 a 8 dígitos"
-            style={styles.input}
-            editable={!loading}
-          />
-          {button('Pagar', () => { void confirm(); }, loading || code.length < 6)}
-          {pendingActions(current)}
-        </View>
-      );
-    }
-    const progress = vexpayProgressCopy(current);
-    const credited = current.status === 'COMPLETED' && !!current.deliveredUsdt;
-    const final = credited || current.status === 'FAILED';
+  // ─── Pago Móvil: the transfer details, then the reference ───
+  const renderPagoMovil = (current: VexpayOrder) => {
+    const account = current.receivingAccount;
+    const ves = current.vesAmount ? String(Number(current.vesAmount)) : null;
+    const all = account && ves
+      ? `Banco: ${account.bankName} (${account.bankCode})\nTeléfono: ${account.phone}\nRIF: ${account.identification}\nMonto: ${ves}`
+      : null;
     return (
-      <View style={styles.card}>
-        <Text style={styles.heading}>{progress.title}</Text>
-        {progress.body ? <Text>{progress.body}</Text> : null}
-        <Text style={styles.note}>
-          {credited
-            ? `Recibiste ${current.deliveredUsdt} dólares.`
-            : `Recibirás aproximadamente ${current.estimatedUsdt} dólares.`}
-        </Text>
-        {!final && <ActivityIndicator accessibilityLabel="Recarga en proceso" />}
-        {!final && button('Consultar estado', () => { void refreshOrder(current.orderId as string).catch(() => setError(GENERIC)); }, loading, true)}
-        {final && button('Hacer otra recarga', startOver)}
-        {final && button('Volver', () => navigation.goBack(), false, true)}
-      </View>
+      <>
+        <RampReveal delay={60}>
+          <View style={styles.section}>
+            <RampStepHeader number={1} title="Haz el Pago Móvil" meta="Desde tu banco" />
+            <View style={styles.quoteCard}>
+              <Text style={styles.quoteEyebrow}>Envía exactamente</Text>
+              <View style={local.headlineRow}>
+                <Text style={[styles.quoteHeadline, local.flex]} adjustsFontSizeToFit numberOfLines={1}>
+                  {formatBs(current.vesAmount)}
+                </Text>
+                {ves ? (
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Copiar monto" onPress={() => copy(ves)}
+                    style={local.copyBubble}>
+                    <Icon name="copy" size={18} color={colors.primaryDark} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <Text style={styles.quoteRate}>Recibes aprox. {formatUsd(current.estimatedUsdt)} en tu cuenta Confío.</Text>
+              <View style={styles.quoteDivider} />
+              {detailRow('Banco', account ? `${account.bankName} (${account.bankCode})` : null)}
+              {detailRow('Teléfono', account?.phone)}
+              {detailRow('RIF / Cédula', account?.identification, true)}
+              {all ? (
+                <TouchableOpacity style={styles.smallGhost} onPress={() => copy(all)} accessibilityRole="button">
+                  <Icon name="clipboard" size={16} color={colors.successText} />
+                  <Text style={styles.smallGhostText}>Copiar todos los datos</Text>
+                </TouchableOpacity>
+              ) : null}
+              <View style={styles.disclaimerPill}>
+                <Icon name="users" size={14} color={colors.primaryDark} />
+                <Text style={styles.quoteNote}>Puede pagar otra persona. Envía el monto exacto, en un solo pago.</Text>
+              </View>
+            </View>
+          </View>
+        </RampReveal>
+
+        <RampReveal delay={110}>
+          <View style={styles.section}>
+            <RampStepHeader number={2} title="Confirma tu pago" meta="Referencia y fecha" />
+            <View style={styles.inputCard}>
+              <Text style={styles.inputLabel}>Referencia del Pago Móvil</Text>
+              <TextInput
+                accessibilityLabel="Referencia del Pago Móvil"
+                value={code}
+                onChangeText={text => setCode(text.replace(/\D/g, '').slice(0, 32))}
+                keyboardType="number-pad"
+                placeholder="Al menos los últimos 6 dígitos"
+                placeholderTextColor={colors.textTertiary}
+                style={[styles.textInput, local.field]}
+                editable={!loading}
+              />
+              <Text style={[styles.inputLabel, local.spaced]}>¿Cuándo hiciste el pago?</Text>
+              <View style={styles.chipRow}>
+                {([['today', 'Hoy'], ['yesterday', 'Ayer'], ['other', 'Otro día']] as const).map(([id, label]) => (
+                  <TouchableOpacity
+                    key={id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: paidWhen === id }}
+                    onPress={() => setPaidWhen(id)}
+                    style={[styles.chip, paidWhen === id && styles.chipSelected]}
+                  >
+                    <Text style={[styles.chipText, paidWhen === id && styles.chipTextSelected]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {paidWhen === 'other' && (
+                <TextInput
+                  accessibilityLabel="Fecha del pago"
+                  value={paidOn}
+                  onChangeText={setPaidOn}
+                  keyboardType="numbers-and-punctuation"
+                  placeholder="DD/MM/AAAA"
+                  placeholderTextColor={colors.textTertiary}
+                  style={[styles.textInput, local.field, local.spaced]}
+                  editable={!loading}
+                />
+              )}
+            </View>
+          </View>
+        </RampReveal>
+      </>
     );
   };
 
-  return (
-    <SafeAreaView style={styles.root}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Volver" onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={24} color={colors.dark} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Recargar con bolívares</Text>
-        <Text style={styles.subtitle}>Paga por Pago Móvil desde cualquier banco y recibe dólares en tu cuenta.</Text>
-        {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-        {booting ? <ActivityIndicator accessibilityLabel="Cargando" /> : order ? renderOrder(order) : (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.heading}>¿Cuántos dólares quieres recibir?</Text>
+  const renderC2p = (current: VexpayOrder) => (
+    <RampReveal delay={60}>
+      <View style={styles.section}>
+        <RampStepHeader number={1} title="Clave de pago" meta={formatBs(current.vesAmount)} />
+        <View style={styles.inputCard}>
+          <Text style={styles.inputLabel}>
+            {current.otpRequested ? 'Tu banco te envió una clave por SMS' : 'Genera la clave de pago (C2P) en la app de tu banco'}
+          </Text>
+          <View style={styles.amountInputRow}>
+            <TextInput
+              accessibilityLabel="Clave de pago"
+              value={code}
+              onChangeText={text => setCode(text.replace(/\D/g, '').slice(0, 8))}
+              keyboardType="number-pad"
+              placeholder="••••••"
+              placeholderTextColor={colors.textTertiary}
+              style={[styles.amountInput, local.otp]}
+              editable={!loading}
+            />
+          </View>
+          <Text style={styles.helperText}>
+            Se debitarán {formatBs(current.vesAmount)} y recibes aprox. {formatUsd(current.estimatedUsdt)}.
+          </Text>
+        </View>
+      </View>
+    </RampReveal>
+  );
+
+  // ─── After paying: one timeline, whatever the provider's legs ───
+  const renderProgress = (current: VexpayOrder) => {
+    const progress = vexpayProgressCopy(current);
+    const credited = current.status === 'COMPLETED' && !!current.deliveredUsdt;
+    if (current.status === 'FAILED') {
+      return (
+        <RampReveal delay={60}>
+          <View style={styles.emptyStateCard}>
+            <View style={[styles.emptyStateIconWrap, local.failIcon]}>
+              <Icon name={current.statusDetail === 'cancelled_by_user' ? 'x' : 'alert-triangle'} size={22}
+                color={colors.warning.text} />
+            </View>
+            <Text style={styles.emptyStateTitle}>{progress.title}</Text>
+            <Text style={styles.emptyStateText}>{progress.body}</Text>
+          </View>
+        </RampReveal>
+      );
+    }
+    const stage = timelineStage(current);
+    const steps = ['Pago en bolívares', 'Conversión a dólares', 'Dólares en tu cuenta'];
+    return (
+      <RampReveal delay={60}>
+        <View style={styles.reviewCard}>
+          <Text style={styles.reviewTitle}>{progress.title}</Text>
+          {progress.body ? <Text style={styles.helperText}>{progress.body}</Text> : null}
+          <View style={local.timeline}>
+            {steps.map((label, index) => {
+              const done = credited || index < stage;
+              const active = !credited && index === stage;
+              return (
+                <View key={label} style={styles.timelineRow}>
+                  <View style={styles.timelineRail}>
+                    <View style={[styles.timelineDot, done && styles.timelineDotDone, active && styles.timelineDotActive]}>
+                      {done ? <Icon name="check" size={13} color={colors.white} />
+                        : active ? <View style={styles.timelineDotInner} /> : null}
+                    </View>
+                    {index < steps.length - 1 ? <View style={[styles.timelineLine, done && styles.timelineLineDone]} /> : null}
+                  </View>
+                  <Text style={[styles.timelineLabel, !done && !active && styles.timelineLabelTodo,
+                    active && styles.timelineLabelActive]}>{label}</Text>
+                </View>
+              );
+            })}
+          </View>
+          <View style={styles.quoteDivider} />
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Pagaste</Text>
+            <Text style={styles.reviewValue}>{formatBs(current.vesAmount)}</Text>
+          </View>
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>{credited ? 'Recibiste' : 'Recibes aprox.'}</Text>
+            <Text style={styles.reviewValueHighlight}>{formatUsd(credited ? current.deliveredUsdt : current.estimatedUsdt)}</Text>
+          </View>
+          {!credited ? <ActivityIndicator color={colors.primary} accessibilityLabel="Recarga en proceso" /> : null}
+        </View>
+      </RampReveal>
+    );
+  };
+
+  // ─── Before the order: amount, method, payer ───
+  const renderForm = () => (
+    <>
+      <RampReveal delay={60}>
+        <View style={styles.section}>
+          <RampStepHeader number={1} title="Monto" meta="En dólares" />
+          <View style={styles.inputCard}>
+            <Text style={styles.inputLabel}>¿Cuántos dólares quieres recibir?</Text>
+            <View style={[styles.amountInputRow, amountFocused && styles.amountInputRowFocused]}>
               <TextInput
                 accessibilityLabel="Monto en dólares"
                 value={amount}
                 keyboardType="decimal-pad"
                 onChangeText={text => setAmount(prev => sanitizeAmountInput(text, 2, undefined, prev))}
+                onFocus={() => setAmountFocused(true)}
+                onBlur={() => setAmountFocused(false)}
                 placeholder={`0${getSeparators().decimal}00`}
-                style={[styles.input, styles.amountInput]}
+                placeholderTextColor={colors.textTertiary}
+                style={styles.amountInput}
                 editable={!loading}
               />
-              {quote?.success ? (
-                <Text style={styles.note}>
-                  Pagarás {formatBs(quote.vesAmount)} · recibirás aprox. {quote.estimatedUsdt} dólares
-                  {min || max ? `\nEntre $${quote.minUsd} y $${quote.maxUsd} por recarga.` : ''}
-                </Text>
-              ) : quote?.error ? <Text style={styles.error}>{quote.error}</Text> : null}
+              <View style={styles.currencyBadge}><Text style={styles.currencyBadgeText}>USD</Text></View>
             </View>
-
-            <View style={styles.card}>
-              <Text style={styles.heading}>¿Cómo vas a pagar?</Text>
-              <View style={styles.segment}>
-                {([['pago_movil', 'Pago Móvil'], ['c2p', 'Clave de pago']] as const).map(([id, label]) => (
-                  <TouchableOpacity
-                    key={id}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: method === id }}
-                    onPress={() => setMethod(id)}
-                    style={[styles.segmentItem, method === id && styles.segmentActive]}
-                  >
-                    <Text style={[styles.segmentText, method === id && styles.segmentTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
+            {quote?.minUsd && quote?.maxUsd ? (
+              <Text style={styles.limitText}>Entre {formatUsd(quote.minUsd)} y {formatUsd(quote.maxUsd)} por recarga.</Text>
+            ) : null}
+            {quote?.error ? <Text style={styles.errorText}>{quote.error}</Text> : null}
+          </View>
+          {quote?.success ? (
+            <View style={[styles.quoteCard, local.quoteGap]}>
+              <Text style={styles.quoteEyebrow}>Pagarás</Text>
+              <Text style={styles.quoteHeadline} adjustsFontSizeToFit numberOfLines={1}>{formatBs(quote.vesAmount)}</Text>
+              {quote.rate ? <Text style={styles.quoteRate}>Tasa {formatBs(quote.rate)} por dólar</Text> : null}
+              <View style={styles.quoteDivider} />
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>Pagas</Text>
+                <Text style={styles.quoteValue}>{formatUsd(quote.usdAmount)}</Text>
               </View>
-              <Text style={styles.note}>
-                {method === 'pago_movil'
-                  ? 'Envías el Pago Móvil desde la app de tu banco y luego escribes la referencia aquí.'
-                  : 'Escribes aquí la clave de pago de tu banco y se debita al instante.'}
+              {quote.processorFeeUsd ? (
+                <View style={styles.quoteRow}>
+                  <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>
+                  <Text style={styles.quoteValue}>− {formatUsd(quote.processorFeeUsd)}</Text>
+                </View>
+              ) : null}
+              {quote.confioFeeUsd && Number(quote.confioFeeUsd) > 0 ? (
+                <View style={styles.quoteRow}>
+                  <Text style={styles.quoteLabel}>Comisión de Confío</Text>
+                  <Text style={styles.quoteValue}>− {formatUsd(quote.confioFeeUsd)}</Text>
+                </View>
+              ) : null}
+              <View style={styles.quoteFinalDivider} />
+              <View style={styles.quoteFinalRow}>
+                <Text style={styles.quoteFinalLabel}>Recibes aprox.</Text>
+                <Text style={styles.quoteFinalValue}>{formatUsd(quote.estimatedUsdt)}</Text>
+              </View>
+              <View style={styles.disclaimerPill}>
+                <Icon name="info" size={14} color={colors.primaryDark} />
+                <Text style={styles.quoteNote}>Estimado: el monto final se fija al convertir tu pago.</Text>
+              </View>
+            </View>
+          ) : null}
+        </View>
+      </RampReveal>
+
+      <RampReveal delay={110}>
+        <View style={styles.section}>
+          <RampStepHeader number={2} title="Cómo pagas" />
+          <View style={styles.methodList}>
+            {METHODS.map(option => {
+              const selected = method === option.id;
+              return (
+                <TouchableOpacity
+                  key={option.id}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  onPress={() => setMethod(option.id)}
+                  activeOpacity={0.8}
+                  style={[styles.methodCard, selected && styles.methodCardSelected]}
+                >
+                  <View style={[styles.methodIcon, selected && styles.methodIconSelected]}>
+                    <Icon name={option.icon} size={18} color={selected ? colors.white : colors.primaryDark} />
+                  </View>
+                  <View style={styles.methodCopy}>
+                    <Text style={[styles.methodTitle, selected && styles.methodTitleSelected]}>{option.title}</Text>
+                    <Text style={[styles.methodText, selected && styles.methodTextSelected]}>{option.text}</Text>
+                  </View>
+                  <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
+                    {selected ? <View style={styles.radioInner} /> : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      </RampReveal>
+
+      <RampReveal delay={160}>
+        <View style={styles.section}>
+          <RampStepHeader number={3} title="Quién paga" meta="Puede ser otra persona" />
+          <View style={styles.inputCard}>
+            <Text style={styles.inputLabel}>Cédula</Text>
+            <TextInput accessibilityLabel="Cédula" value={cedula} onChangeText={setCedula} autoCapitalize="characters"
+              placeholder="V12345678" placeholderTextColor={colors.textTertiary}
+              style={[styles.textInput, local.field]} editable={!loading} />
+            <Text style={[styles.inputLabel, local.spaced]}>Teléfono del Pago Móvil</Text>
+            <TextInput accessibilityLabel="Teléfono del Pago Móvil" value={phone} onChangeText={setPhone}
+              keyboardType="phone-pad" placeholder="0414 1234567" placeholderTextColor={colors.textTertiary}
+              style={[styles.textInput, local.field]} editable={!loading} />
+            <Text style={[styles.inputLabel, local.spaced]}>Banco</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Elegir banco" onPress={() => setBankPicker(true)}
+              style={[local.field, local.picker]} disabled={loading}>
+              <Text style={bank ? local.pickerValue : local.pickerPlaceholder} numberOfLines={1}>
+                {bank ? bank.name : 'Elige el banco'}
               </Text>
-            </View>
+              <Icon name="chevron-down" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </RampReveal>
+    </>
+  );
 
-            <View style={styles.card}>
-              <Text style={styles.heading}>¿Quién paga?</Text>
-              <Text style={styles.note}>Datos de la cuenta que hace el pago. Puede ser otra persona.</Text>
-              <TextInput accessibilityLabel="Cédula" value={cedula} onChangeText={setCedula} autoCapitalize="characters"
-                placeholder="Cédula (V12345678)" style={styles.input} editable={!loading} />
-              <TextInput accessibilityLabel="Teléfono del Pago Móvil" value={phone} onChangeText={setPhone}
-                keyboardType="phone-pad" placeholder="Teléfono (0414 1234567)" style={styles.input} editable={!loading} />
-              <TouchableOpacity accessibilityRole="button" onPress={() => setBankPicker(true)} style={styles.input} disabled={loading}>
-                <Text style={bank ? styles.value : styles.placeholder}>{bank ? bank.name : 'Banco'}</Text>
-              </TouchableOpacity>
-            </View>
+  const actionBar = () => {
+    if (booting) return null;
+    if (!order) {
+      return (
+        <RampActionBar primaryLabel="Continuar" primaryIconName="arrow-right" onPrimaryPress={() => { void create(); }}
+          primaryDisabled={!amountOk || !payerOk || !quoteMatches} primaryLoading={loading} />
+      );
+    }
+    const pending = order.status === 'PENDING' && order.canConfirm !== false;
+    const cancelProps = order.canCancel
+      ? { secondaryLabel: 'Cancelar recarga (no pagué)', onSecondaryPress: () => { void cancel(); } }
+      : {};
+    if (pending && order.method === 'pago_movil') {
+      return (
+        <RampActionBar primaryLabel="Ya pagué, confirmar" primaryIconName="check" onPrimaryPress={() => { void confirm(); }}
+          primaryDisabled={code.length < 4 || paymentDate === null} primaryLoading={loading} {...cancelProps} />
+      );
+    }
+    if (pending && order.method === 'c2p') {
+      return (
+        <RampActionBar primaryLabel="Pagar" primaryIconName="lock" onPrimaryPress={() => { void confirm(); }}
+          primaryDisabled={code.length < 6} primaryLoading={loading} {...cancelProps} />
+      );
+    }
+    const final = (order.status === 'COMPLETED' && !!order.deliveredUsdt) || order.status === 'FAILED';
+    return final ? (
+      <RampActionBar primaryLabel="Hacer otra recarga" onPrimaryPress={startOver} secondaryLabel="Volver" onSecondaryPress={goBack} />
+    ) : null;
+  };
 
-            {button('Continuar', () => { void create(); }, loading || !amountOk || !payerOk || !quote?.success)}
-            {loading && <ActivityIndicator accessibilityLabel="Creando recarga" />}
-          </>
-        )}
+  const pendingOrder = order && order.status === 'PENDING' && order.canConfirm !== false;
+  const heroTitle = !order ? 'Recarga con bolívares'
+    : pendingOrder && order.method === 'pago_movil' ? 'Paga desde tu banco'
+      : pendingOrder ? 'Autoriza el pago' : 'Tu recarga';
+  const heroSubtitle = !order
+    ? 'Paga por Pago Móvil desde cualquier banco venezolano y recibe dólares en tu cuenta.'
+    : pendingOrder ? 'Usa estos datos tal cual. No cierres hasta confirmar.'
+      : 'Te avisamos cuando tus dólares estén en tu cuenta.';
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroFieldDark} />
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled">
+        <RampReveal delay={0}>
+          <RampHero eyebrow="Venezuela · Pago Móvil" eyebrowCountry="VE" title={heroTitle} subtitle={heroSubtitle}
+            onBack={goBack} compact={!!order} />
+        </RampReveal>
+        {errorCard}
+        {booting ? (
+          <View style={styles.loadingCard}>
+            <ActivityIndicator color={colors.primary} accessibilityLabel="Cargando" />
+            <Text style={styles.loadingText}>Cargando…</Text>
+          </View>
+        ) : !order ? renderForm()
+          : pendingOrder && order.method === 'pago_movil' ? renderPagoMovil(order)
+            : pendingOrder && order.method === 'c2p' ? renderC2p(order)
+              : renderProgress(order)}
+        {order && !booting && order.orderId && (order.status === 'PENDING' || order.status === 'PROCESSING')
+          ? statusLink(order.orderId) : null}
       </ScrollView>
+      {actionBar()}
 
       <Modal visible={bankPicker} animationType="slide" onRequestClose={() => setBankPicker(false)}>
-        <SafeAreaView style={styles.root}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.heading}>Elige el banco</Text>
+        <SafeAreaView style={styles.container}>
+          <View style={local.modalHeader}>
+            <Text style={styles.reviewTitle}>Elige el banco</Text>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar" onPress={() => setBankPicker(false)}>
               <Icon name="x" size={24} color={colors.dark} />
             </TouchableOpacity>
@@ -476,17 +686,23 @@ export default function VePagoMovilReceiveScreen() {
             initialNumToRender={20}
             maxToRenderPerBatch={10}
             windowSize={21}
-            getItemLayout={(_, index) => ({ length: 56, offset: 56 * index, index })}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                accessibilityRole="button"
-                style={styles.bankRow}
-                onPress={() => { setBank(item); setBankPicker(false); }}
-              >
-                <Text style={styles.value}>{item.name}</Text>
-                <Text style={styles.note}>{item.code}</Text>
-              </TouchableOpacity>
-            )}
+            getItemLayout={(_, index) => ({ length: BANK_ROW, offset: BANK_ROW * index, index })}
+            renderItem={({ item }) => {
+              const selected = bank?.code === item.code;
+              return (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  style={local.bankRow}
+                  onPress={() => { setBank(item); setBankPicker(false); }}
+                >
+                  <View style={local.flex}>
+                    <Text style={local.pickerValue} numberOfLines={1}>{item.name}</Text>
+                    <Text style={local.detailLabel}>{item.code}</Text>
+                  </View>
+                  {selected ? <Icon name="check" size={18} color={colors.primaryDark} /> : null}
+                </TouchableOpacity>
+              );
+            }}
           />
         </SafeAreaView>
       </Modal>
@@ -494,33 +710,49 @@ export default function VePagoMovilReceiveScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  content: { padding: 20, gap: 16 },
-  title: { fontSize: 24, fontWeight: '700', color: colors.dark },
-  subtitle: { fontSize: 15, color: colors.text.secondary },
-  card: { padding: 20, gap: 12, backgroundColor: colors.white, borderRadius: 20, borderWidth: 1, borderColor: colors.primaryLight },
-  heading: { fontSize: 16, fontWeight: '600', color: colors.dark },
-  note: { fontSize: 13, color: colors.text.secondary },
-  error: { color: colors.danger },
-  label: { fontSize: 12, color: colors.text.secondary },
-  value: { fontSize: 16, color: colors.dark },
-  placeholder: { fontSize: 16, color: colors.text.secondary },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, fontSize: 16, color: colors.dark },
-  amountInput: { fontSize: 24 },
-  button: { padding: 15, borderRadius: 12, backgroundColor: colors.primaryDark, alignItems: 'center' },
-  buttonSecondary: { backgroundColor: colors.primaryLight },
-  buttonText: { fontWeight: '600', color: colors.white },
-  buttonTextSecondary: { color: colors.primaryDark },
-  disabled: { opacity: 0.45 },
-  segment: { flexDirection: 'row', backgroundColor: colors.background, borderRadius: 10, padding: 4 },
-  segmentItem: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  segmentActive: { backgroundColor: colors.white },
-  segmentText: { color: colors.text.secondary, fontWeight: '600' },
-  segmentTextActive: { color: colors.primaryDark },
-  copyRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  copyText: { flex: 1 },
-  copyButton: { padding: 8 },
+const BANK_ROW = 60;
+
+const METHODS: { id: VexpayMethod; icon: string; title: string; text: string }[] = [
+  { id: 'pago_movil', icon: 'smartphone', title: 'Pago Móvil', text: 'Pagas desde la app de tu banco y escribes la referencia aquí.' },
+  { id: 'c2p', icon: 'key', title: 'Clave de pago (C2P)', text: 'Escribes aquí la clave de tu banco y se debita al instante.' },
+];
+
+/** 0 = paying, 1 = converting, 2 = crediting. */
+function timelineStage(order: VexpayOrder): number {
+  const detail = order.statusDetail || '';
+  if (order.status === 'COMPLETED') return 2;
+  if (order.status === 'PROCESSING' && (detail.startsWith('onward_') || detail.startsWith('needs_review'))) return 1;
+  return 0;
+}
+
+const local = StyleSheet.create({
+  flex: { flex: 1 },
+  edge: { marginHorizontal: 22, marginTop: 0, marginBottom: 16 },
+  spaced: { marginTop: 14 },
+  field: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, backgroundColor: colors.white,
+  },
+  picker: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, gap: 8 },
+  pickerValue: { fontSize: 16, fontWeight: '600', color: colors.dark, flexShrink: 1 },
+  pickerPlaceholder: { fontSize: 16, color: colors.textTertiary },
+  otp: { letterSpacing: 8, textAlign: 'center' },
+  quoteGap: { marginTop: 14 },
+  headlineRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  copyBubble: {
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.primaryLight,
+  },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  detailDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  detailLabel: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  detailValue: { fontSize: 16, fontWeight: '700', color: colors.dark, marginTop: 2 },
+  copyButton: { padding: 6 },
+  statusLink: { marginTop: 4 },
+  timeline: { marginTop: 4 },
+  failIcon: { backgroundColor: colors.warning.background },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20 },
-  bankRow: { height: 56, paddingHorizontal: 20, justifyContent: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  bankRow: {
+    height: BANK_ROW, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
 });

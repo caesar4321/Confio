@@ -240,7 +240,7 @@ const requestLifetimeLink = new ApolloLink((operation, forward) =>
 // Venezuelan top-up: bank payment keys (OTP), payer cédula and phone, and
 // bank references. An error body can echo them back, so both the variables
 // and the error text are redacted.
-const VEXPAY_SENSITIVE_OPERATIONS = ['CreateVexpayOnRamp', 'ConfirmVexpayC2p', 'VerifyVexpayPagoMovil'];
+const VEXPAY_SENSITIVE_OPERATIONS = ['CreateVexpayOnRamp', 'ConfirmVexpayC2p', 'VerifyVexpayPagoMovil', 'CreateVexpayOffRamp'];
 
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
   // Sensitive location evidence must never enter error/telemetry logs.

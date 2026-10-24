@@ -208,7 +208,7 @@ def _ledger_token(ramp_tx: RampTransaction, final_currency: str) -> str:
 
 def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]:
     if (
-        ramp_tx.provider == 'koywe'
+        ramp_tx.provider in ('koywe', 'vexpay')
         and ramp_tx.direction == 'off_ramp'
         and ramp_tx.final_amount is not None
     ):

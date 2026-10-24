@@ -70,6 +70,10 @@ class VexpayOnRampQuoteType(graphene.ObjectType):
     estimated_usdt = graphene.String()
     min_usd = graphene.String()
     max_usd = graphene.String()
+    # Everything VEXPay keeps (pay-in fee, conversion spread, BEP20 payout
+    # fee), from the account's live terms: "Comisión del procesador de pagos".
+    processor_fee_usd = graphene.String()
+    confio_fee_usd = graphene.String()
 
 
 def _order_payload(ramp: RampTransaction) -> VexpayOnRampOrderType:
@@ -353,7 +357,8 @@ class Query(graphene.ObjectType):
         try:
             terms = vexpay.fee_terms(client)
             quote = client.quote_usd(amount)
-            net = vexpay.confio_net(vexpay.estimate_usdt(amount, terms))
+            gross = vexpay.estimate_usdt(amount, terms)
+            net = vexpay.confio_net(gross)
         except vexpay.VexPayRampError as exc:
             return VexpayOnRampQuoteType(success=False, error=str(exc))
         except VexPayError:
@@ -365,6 +370,8 @@ class Query(graphene.ObjectType):
             ves_amount=str(math.ceil(Decimal(str(quote['vesAmount'])) * PAGO_MOVIL_CUSHION)),
             rate=str(quote.get('rate') or quote.get('bcvRate') or ''),
             estimated_usdt=format(net, 'f'),
+            processor_fee_usd=format(max(amount - gross, Decimal('0')), 'f'),
+            confio_fee_usd=format(max(gross - net, Decimal('0')), 'f'),
             min_usd=str(max(vexpay._setting_decimal('VEXPAY_ONRAMP_MIN_USD', '5'),
                             vexpay.provider_minimum_usd(terms))),
             max_usd=str(getattr(settings, 'VEXPAY_ONRAMP_MAX_USD', '100')),
