@@ -674,6 +674,22 @@ export default function VePagoMovilReceiveScreen() {
           <RampHero eyebrow="Venezuela · Pago Móvil" eyebrowCountry="VE" title={heroTitle} subtitle={heroSubtitle}
             onBack={goBack} compact={!!order} />
         </RampReveal>
+        <RampReveal delay={40}>
+          <View style={styles.bannerCard}>
+            <View style={styles.bannerIconWrap}>
+              <Icon name="download" size={16} color={colors.primary} />
+            </View>
+            <View style={styles.bannerCopy}>
+              <Text style={styles.bannerTitle}>Recargas en bolívares</Text>
+              <Text style={styles.bannerText}>Tus recargas por Pago Móvil quedan en tu historial.</Text>
+            </View>
+            <TouchableOpacity style={styles.historyPill} activeOpacity={0.8} accessibilityRole="button"
+              onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}>
+              <Icon name="clock" size={14} color={colors.primary} />
+              <Text style={styles.historyPillText}>Ver recargas</Text>
+            </TouchableOpacity>
+          </View>
+        </RampReveal>
         {errorCard}
         {booting ? (
           <View style={styles.loadingCard}>

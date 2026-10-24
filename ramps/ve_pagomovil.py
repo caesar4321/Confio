@@ -154,6 +154,20 @@ def active_order(user, direction: str):
     return max(found, key=lambda r: r.created_at) if found else None
 
 
+# ------------------------------------------------------------------ display
+
+# What a person sees as the counterparty of a VE order. Never a provider name:
+# partners are confidential (NDA) and can change without the user noticing.
+PUBLIC_NAME = 'Pago Móvil'
+
+
+def public_provider_name(ramp) -> str:
+    """The provider label shown to users for any ramp."""
+    if ramp.provider in TOPUP_ADAPTERS or ramp.provider in SEND_ADAPTERS:
+        return PUBLIC_NAME
+    return ramp.get_provider_display()
+
+
 # ------------------------------------------------------------------ input
 
 def normalize_cedula(value: str) -> str:

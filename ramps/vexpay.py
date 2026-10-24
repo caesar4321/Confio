@@ -685,7 +685,9 @@ def bank_message(exc: VexPayError) -> str:
     """The bank's own Spanish reason without VEXPay's code prefix
     ('ECBG14Es posible…' → 'Es posible…', 'ECBG56000000Tarjeta…' → 'Tarjeta…')."""
     text = re.sub(r'^[A-Z]{2,8}\d+', '', str(exc or '').strip()).strip()
-    if not text or len(text) > 200:
+    # Only the bank's own words: our client's transport/HTTP texts name the
+    # provider, which users must never see.
+    if not text or len(text) > 200 or 'vexpay' in text.lower() or 'http' in text.lower():
         return 'El banco no pudo procesar el pago. Verifica tus datos e intenta de nuevo.'
     return f'El banco respondió: {text}'
 

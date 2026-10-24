@@ -591,7 +591,8 @@ class UnifiedTransactionType(DjangoObjectType):
 
     def resolve_ramp_provider(self, info):
         if self.transaction_type == 'ramp' and getattr(self, 'ramp_transaction', None):
-            return self.ramp_transaction.get_provider_display()
+            from ramps.ve_pagomovil import public_provider_name
+            return public_provider_name(self.ramp_transaction)
         return None
 
     def resolve_ramp_fiat_amount(self, info):

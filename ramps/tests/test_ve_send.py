@@ -497,6 +497,14 @@ class NeutralSchemaTests(TestCase):
         self.assertEqual((topup.success, topup.error), (False, schema.TOPUP_UNAVAILABLE))
 
 
+class PublicNameTests(TestCase):
+    def test_ve_orders_never_show_a_provider_name(self):
+        for provider in ('vexpay', 'pagoasap'):
+            ramp = RampTransaction(provider=provider, direction='on_ramp')
+            self.assertEqual(ve_pagomovil.public_provider_name(ramp), 'Pago Móvil')
+        self.assertEqual(ve_pagomovil.public_provider_name(RampTransaction(provider='koywe')), 'Koywe')
+
+
 class PagoAsapWebhookTests(TestCase):
     def setUp(self):
         from cryptography.hazmat.primitives import serialization

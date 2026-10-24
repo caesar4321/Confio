@@ -676,7 +676,8 @@ def sync_unified_transaction_from_ramp(ramp_tx: RampTransaction) -> UnifiedTrans
     else:
         unified_status = 'PENDING'
 
-    provider_name = ramp_tx.get_provider_display()
+    from ramps.ve_pagomovil import public_provider_name
+    provider_name = public_provider_name(ramp_tx)
     is_on_ramp = ramp_tx.direction == 'on_ramp'
 
     defaults = {

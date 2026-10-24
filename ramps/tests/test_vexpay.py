@@ -788,6 +788,11 @@ class WebhookTests(TestCase):
 
 
 class BankMessageTests(SimpleTestCase):
+    def test_provider_texts_never_reach_users(self):
+        from ramps.vexpay_client import VexPayError
+        for text in ('VEXPay returned HTTP 401', 'VEXPay request failed (ConnectionError)'):
+            self.assertNotIn('VEXPay', vexpay.bank_message(VexPayError(text)))
+
     def test_strips_vexpay_code_prefix(self):
         exc = VexPayError('ECBG14Es posible que el beneficiario no se encuentre afiliado al servicio de Pago Móvil',
                           status=422, code='ECBG14ES')
