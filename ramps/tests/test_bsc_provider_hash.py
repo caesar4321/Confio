@@ -73,7 +73,6 @@ class ProviderHashArrivalTests(TestCase):
             'other wallet': receipt(transfer_log('96.023865', to='0x' + '22' * 20)),
             'amount off': receipt(transfer_log('50')),
             'ambiguous': receipt(transfer_log('96.023865', index=1), transfer_log('96.023865', index=2)),
-            'no receipt': None,
         }
         for label, rpc_receipt in cases.items():
             with self.subTest(label):
@@ -81,6 +80,14 @@ class ProviderHashArrivalTests(TestCase):
                 ramp = self.ramp()
                 self.assertEqual(attach_arrival(ramp, mock.Mock(return_value=rpc_receipt)), 'chain_mismatch')
                 self.assertFalse(RampTransaction.objects.filter(metadata__has_key='bsc_arrival_tx_hash').exists())
+
+    def test_missing_receipt_is_retried_not_recorded_as_mismatch(self):
+        # An RPC gap or an unindexed transaction is not evidence against the
+        # hash: the next sync must check it again.
+        ramp = self.ramp()
+        self.assertEqual(attach_arrival(ramp, mock.Mock(return_value=None), record_mismatch=True), 'no_receipt')
+        ramp.refresh_from_db()
+        self.assertNotIn('bsc_arrival_check', ramp.metadata or {})
 
     def test_dry_run_writes_nothing(self):
         ramp = self.ramp()
@@ -225,6 +232,21 @@ class ProviderHashLifecycleTests(TestCase):
             net_amount_exact=Decimal('96.0'), gross_amount_exact=Decimal('96.023865'))])[0]
         with mock.patch('cusd_plus.tasks._rpc', return_value=receipt()):
             attach_after_koywe_sync(ramp)
+        ramp.refresh_from_db()
+        self.assertEqual(ramp.conversion_id, conversion.pk)
+
+    def test_lost_conversion_link_is_retried_after_the_proof(self):
+        from conversion.models import Conversion
+        ramp = self.ramp()
+        attach_arrival(ramp, mock.Mock(return_value=receipt()))  # proof saved, link lost
+        ramp.refresh_from_db()
+        conversion = Conversion.objects.bulk_create([Conversion(
+            conversion_type='to_savings', status='COMPLETED', actor_type='user', actor_address=WALLET,
+            from_amount=Decimal('96.023865'), to_amount=Decimal('96.0'),
+            net_amount_exact=Decimal('96.0'), gross_amount_exact=Decimal('96.023865'))])[0]
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            attach_after_koywe_sync(ramp)
+        rpc.assert_not_called()
         ramp.refresh_from_db()
         self.assertEqual(ramp.conversion_id, conversion.pk)
 

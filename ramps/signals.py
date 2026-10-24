@@ -335,10 +335,10 @@ def attribute_bsc_ramp_arrival(*, actor_address: str, amount: Decimal,
     tolerance = amount * Decimal('0.05')
 
     def _allowed_senders(provider: str) -> set[str]:
-        setting_name = (
-            'KOYWE_BSC_SETTLEMENT_ADDRESSES'
-            if provider == 'koywe' else 'GUARDARIAN_BSC_SETTLEMENT_ADDRESSES'
-        )
+        setting_name = {
+            'koywe': 'KOYWE_BSC_SETTLEMENT_ADDRESSES',
+            'vexpay': 'VEXPAY_BSC_SETTLEMENT_ADDRESSES',
+        }.get(provider, 'GUARDARIAN_BSC_SETTLEMENT_ADDRESSES')
         raw = getattr(settings, setting_name, ()) or ()
         if isinstance(raw, str):
             raw = raw.split(',')

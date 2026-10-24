@@ -169,6 +169,7 @@ class RampTransaction(models.Model):
         ('guardarian', 'Guardarian'),
         ('koywe', 'Koywe'),
         ('coinbase', 'Coinbase'),
+        ('vexpay', 'VEXPay'),
     ]
 
     DIRECTION_CHOICES = [
@@ -285,6 +286,7 @@ class RampWebhookEvent(models.Model):
     PROVIDER_CHOICES = [
         ('koywe', 'Koywe'),
         ('guardarian', 'Guardarian'),
+        ('vexpay', 'VEXPay'),
     ]
 
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)

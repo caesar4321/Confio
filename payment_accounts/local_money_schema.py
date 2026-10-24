@@ -172,6 +172,23 @@ class LocalMoneyQuery(graphene.ObjectType):
                     status='live', reason='sandbox', requirement=None, account_status='active'))
         from . import breb_location
         if direction == 'receive':
+            # Venezuelan Pago Móvil top-up (VEXPay). A per-order pay-in, not a
+            # standing account; the payer may be a third party. Owner-only,
+            # personal accounts; the order itself asks for Confío Face.
+            from ramps import vexpay
+            personal_owner = owner.account_type == 'personal' and owner.user_id == info.context.user.pk
+            # With the rail switched off, a person with an open top-up (they
+            # may already have sent bolívares) still needs the way back to it.
+            has_open_order = personal_owner and vexpay.active_order(info.context.user) is not None
+            if (vexpay.client_supports(info.context.META) and personal_owner
+                    and (vexpay.enabled() or has_open_order)):
+                identity = _identity(owner, required=False)
+                rows.append(dict(method=local_money.Method(
+                    've_pagomovil_receive', 'receive', 'VEN', 'VE', 'VES', 'Pago Móvil',
+                    'Recarga con bolívares desde cualquier banco', instruction_kind='per_order'),
+                    status='live' if identity else 'needs_verification',
+                    reason='' if identity else 'identity_required',
+                    requirement=None, account_status='active'))
             # Bre-B is listed wherever the person is: its application checks the
             # location (device reading + IP) as a requirement, and every Bre-B
             # operation checks it again. Nothing is hidden up front.

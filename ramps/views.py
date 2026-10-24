@@ -163,3 +163,56 @@ def koywe_webhook(request):
         return JsonResponse({'ok': False, 'error': 'Unexpected error'}, status=500)
 
     return JsonResponse({'ok': True, 'order_id': order_id, 'status': ramp_tx.status})
+
+
+@csrf_exempt
+@require_POST
+def vexpay_webhook(request):
+    """Signed VEXPay event → re-read the payment at VEXPay asynchronously.
+
+    The body is only a hint: the poller and this re-read use the API as the
+    source of truth. Deliveries are single-attempt with a 10 s budget, so
+    answer 2xx once the event is stored, even if enqueueing fails.
+    """
+    from django.conf import settings
+
+    from ramps.vexpay_client import verify_webhook_signature
+
+    raw = request.body
+    if not verify_webhook_signature(
+        raw, request.headers.get('VexPay-Signature', ''),
+        getattr(settings, 'VEXPAY_WEBHOOK_SECRET', ''),
+    ):
+        logger.warning('VEXPay webhook rejected: invalid signature')
+        return JsonResponse({'ok': False, 'error': 'Invalid signature'}, status=403)
+    try:
+        payload = json.loads(raw.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON'}, status=400)
+    event_id = str(request.headers.get('VexPay-Event-Id') or '').strip()
+    if not event_id or not isinstance(payload, dict):
+        return JsonResponse({'ok': False, 'error': 'Missing event id'}, status=400)
+    event_type = str(payload.get('event') or '')[:120]
+    _, created = RampWebhookEvent.objects.get_or_create(
+        event_id=f'vexpay:{event_id}'[:120],
+        defaults={'provider': 'vexpay', 'event_type': event_type, 'payload': payload},
+    )
+    if not created:
+        return JsonResponse({'ok': True, 'duplicate': True})
+
+    data = payload.get('data') if isinstance(payload.get('data'), dict) else {}
+    payment_id = str(data.get('paymentId') or '').strip()
+    external_ref = str(data.get('externalRef') or '').strip()
+    ramp_tx = None
+    if payment_id:
+        ramp_tx = RampTransaction.objects.filter(provider='vexpay', provider_order_id=payment_id).first()
+    if ramp_tx is None and external_ref:
+        ramp_tx = RampTransaction.objects.filter(provider='vexpay', external_id=external_ref).first()
+    if ramp_tx is None:
+        return JsonResponse({'ok': True, 'stored': True})
+    try:
+        from ramps.tasks import sync_vexpay_ramp_task
+        sync_vexpay_ramp_task.delay(ramp_tx.pk)
+    except Exception:  # noqa: BLE001 — the poller reconciles within a minute
+        logger.exception('VEXPay webhook enqueue failed for ramp %s', ramp_tx.pk)
+    return JsonResponse({'ok': True})

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import LocalAccountApplicationScreen from './LocalAccountApplicationScreen';
+import VePagoMovilReceiveScreen from './VePagoMovilReceiveScreen';
 import {
   ActivityIndicator,
   Alert,
@@ -68,6 +69,8 @@ export default function LocalReceiveScreen() {
   const { methodId } = useRoute<Route>().params;
   // Cobre's Bre-B key lives on its application screen.
   if (methodId === 'cobre_co_breb_receive') return <LocalAccountApplicationScreen />;
+  // Venezuela: a per-order Pago Móvil top-up, not a standing account.
+  if (methodId === 've_pagomovil_receive') return <VePagoMovilReceiveScreen />;
   return <InfiniaLocalReceiveScreen />;
 }
 

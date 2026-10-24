@@ -27,12 +27,15 @@ TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 USDT_BSC = '0x55d398326f99059ff775485246999027b3197955'
 UNITS = Decimal('0.000001')
 TOLERANCE = Decimal('0.05')  # same as ramps.signals.attribute_bsc_ramp_arrival
+# Providers that report their BSC delivery hash.
+PROOF_PROVIDERS = ('koywe', 'vexpay')
+NO_RECEIPT = object()
 
 
 def eligible_ramps():
     from ramps.models import RampTransaction
     return RampTransaction.objects.filter(
-        provider='koywe', destination='cusd_plus', direction='on_ramp', status='COMPLETED',
+        provider__in=PROOF_PROVIDERS, destination='cusd_plus', direction='on_ramp', status='COMPLETED',
     ).exclude(metadata__has_key='bsc_arrival_tx_hash')
 
 
@@ -40,7 +43,9 @@ def verify_delivery(rpc, tx_hash: str, wallet: str, expected: Decimal):
     """(on-chain amount, log index) of the single USDT Transfer to `wallet` in
     a successful receipt, within tolerance of `expected`; else None."""
     receipt = rpc('eth_getTransactionReceipt', [tx_hash])
-    if not receipt or receipt.get('status') != '0x1':
+    if not receipt:
+        return NO_RECEIPT  # not indexed yet / RPC gap: retry later, never a mismatch
+    if receipt.get('status') != '0x1':
         return None
     matches = []
     for log in receipt.get('logs') or []:
@@ -91,6 +96,8 @@ def attach_arrival(ramp, rpc, *, tx_hash: str | None = None, apply: bool = True,
     if not wallet or expected <= 0:
         return 'missing_wallet_or_amount'
     verified = verify_delivery(rpc, tx_hash, wallet, expected)
+    if verified is NO_RECEIPT:
+        return 'no_receipt'
     if verified is None:
         if record_mismatch and apply:
             # Re-read under the row lock: a concurrent sync may have stored a
@@ -159,6 +166,11 @@ def _link_completed_conversion(ramp) -> None:
             return
 
 
+def attach_after_provider_sync(ramp) -> None:
+    """Same hook for every provider that reports its BSC delivery hash."""
+    attach_after_koywe_sync(ramp)
+
+
 def attach_after_koywe_sync(ramp) -> None:
     """Live hook after a Koywe status sync: the moment the hash appears, prove
     the arrival, then link an already-completed conversion. Never raises — a
@@ -170,8 +182,14 @@ def attach_after_koywe_sync(ramp) -> None:
         if not isinstance(ramp, RampTransaction) or not ramp.pk:
             return  # only persisted ramps carry proof
         metadata = ramp.metadata or {}
-        if (ramp.provider != 'koywe' or ramp.destination != 'cusd_plus' or ramp.direction != 'on_ramp'
-                or ramp.status != 'COMPLETED' or metadata.get('bsc_arrival_tx_hash')):
+        if (ramp.provider not in PROOF_PROVIDERS or ramp.destination != 'cusd_plus' or ramp.direction != 'on_ramp'
+                or ramp.status != 'COMPLETED'):
+            return
+        if metadata.get('bsc_arrival_tx_hash'):
+            # Proven earlier, but the conversion link may have been lost
+            # (worker died, or the link raised): keep retrying it.
+            if ramp.conversion_id is None:
+                _link_completed_conversion(ramp)
             return
         tx_hash = find_provider_tx_hash(metadata)
         if not tx_hash or (metadata.get('bsc_arrival_check') or {}).get('checked_hash') == tx_hash:
@@ -183,6 +201,6 @@ def attach_after_koywe_sync(ramp) -> None:
             if ramp.conversion_id is None:
                 _link_completed_conversion(ramp)
         else:
-            logger.info('koywe ramp %s: arrival not attached (%s)', ramp.pk, outcome)
+            logger.info('%s ramp %s: arrival not attached (%s)', ramp.provider, ramp.pk, outcome)
     except Exception:  # noqa: BLE001 — proof is best-effort; the sync itself must not fail
-        logger.exception('koywe ramp %s: arrival attachment failed', getattr(ramp, 'pk', None))
+        logger.exception('%s ramp %s: arrival attachment failed', getattr(ramp, 'provider', '?'), getattr(ramp, 'pk', None))

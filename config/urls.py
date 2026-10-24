@@ -208,7 +208,7 @@ if settings.DEBUG:
 # Import the index view
 from .views import index
 from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
-from ramps.views import koywe_webhook
+from ramps.views import koywe_webhook, vexpay_webhook
 from ramps.stereum_views import webhook as stereum_test_webhook
 from payment_accounts.views import cobre_webhook, infinia_webhook
 from security.views import didit_webhook
@@ -221,6 +221,7 @@ urlpatterns += [
     path('api/app-version/', app_version, name='app_version'),
     path('api/didit/webhook/', didit_webhook, name='didit_webhook'),
     path('api/koywe/webhook/', koywe_webhook, name='koywe_webhook'),
+    path('api/vexpay/webhook/', vexpay_webhook, name='vexpay_webhook'),
     path('api/stereum/test/webhook/', stereum_test_webhook, name='stereum_test_webhook'),
     path('api/payment-accounts/cobre/webhook/', cobre_webhook, name='cobre_payment_webhook'),
     path('api/payment-accounts/infinia/webhook/', infinia_webhook, name='infinia_payment_webhook'),

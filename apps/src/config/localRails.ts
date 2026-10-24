@@ -208,7 +208,7 @@ const RECEIVE_RAILS: LocalRail[] = [
     id: 'receive_ve_pagomovil',
     country: 'VE',
     title: 'Pago móvil',
-    subtitle: 'Tus propios datos para que te paguen en bolívares',
+    subtitle: 'Recarga tu propia cuenta con bolívares',
     status: 'probe',
   },
   {

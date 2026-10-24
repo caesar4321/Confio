@@ -732,10 +732,12 @@ const CURRENCY_NAMES: Record<string, string> = {
   MXN: 'pesos mexicanos',
   ARS: 'pesos argentinos',
   BRL: 'reales',
+  VES: 'bolívares',
 };
 
 export const currencyName = (asset: string) => CURRENCY_NAMES[asset] || asset;
-export const currencyShort = (asset: string) => (asset === 'BRL' ? 'reales' : 'pesos');
+export const currencyShort = (asset: string) =>
+  asset === 'BRL' ? 'reales' : asset === 'VES' ? 'bolívares' : 'pesos';
 
 export interface LocalStep {
   label: string;

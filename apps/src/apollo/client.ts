@@ -237,6 +237,11 @@ const requestLifetimeLink = new ApolloLink((operation, forward) =>
   }),
 );
 
+// Venezuelan top-up: bank payment keys (OTP), payer cédula and phone, and
+// bank references. An error body can echo them back, so both the variables
+// and the error text are redacted.
+const VEXPAY_SENSITIVE_OPERATIONS = ['CreateVexpayOnRamp', 'ConfirmVexpayC2p', 'VerifyVexpayPagoMovil'];
+
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
   // Sensitive location evidence must never enter error/telemetry logs.
   const isMembershipClaim = ['ClaimInstitutionMembership', 'ApplyCobreBreb', 'BrebLocationChallenge', 'VerifyBrebLocation'].includes(operation.operationName);
@@ -249,12 +254,14 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
     // Wallet recovery diagnostics describe a user's backup files. Shapes
     // only by construction, but never echo them into error logs.
     'ReportWalletRecoveryDiagnostic',
+    ...VEXPAY_SENSITIVE_OPERATIONS,
   ].includes(operation.operationName);
   // An error body can echo the request back: a proxy or gateway that quotes
   // the payload it rejected turns this log into a copy of what the line
   // above just redacted. Extensions carry server-side detail for the same
   // reason, so they go with it.
-  const redactErrorText = isMembershipClaim || shouldNeverMutateSession(operation.operationName);
+  const redactErrorText = isMembershipClaim || shouldNeverMutateSession(operation.operationName)
+    || VEXPAY_SENSITIVE_OPERATIONS.includes(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {
       console.error('[GraphQL error]:', {

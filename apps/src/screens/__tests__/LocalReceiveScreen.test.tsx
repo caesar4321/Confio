@@ -19,6 +19,7 @@ jest.mock('@apollo/client', () => ({useApolloClient: () => mockApollo, useQuery:
   data: query === 'account' ? {localReceiveAccount: mockAccount} : {}, refetch: mockRefetch,
 })}));
 jest.mock('../LocalAccountApplicationScreen', () => 'Application');
+jest.mock('../VePagoMovilReceiveScreen', () => 'VePagoMovilReceive');
 jest.mock('../../components/breb/BrebLocationGate', () => ({useBrebLocationPass: () => mockPassOk}));
 jest.mock('../../components/ramps/RampActionBar', () => ({RampActionBar: 'ActionBar'}));
 jest.mock('../../components/ramps/RampHero', () => ({RampHero: 'Hero'}));
