@@ -8,6 +8,7 @@ import { Text } from './common/AppText';
 import { colors } from '../config/theme';
 import {
   formatAmount,
+  formatShares,
   formatHoldTime,
   formatMemberSince,
   formatPctAbs,
@@ -243,7 +244,7 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
               ].filter(Boolean);
               const canExpand = details.length > 0;
               const isOpen = expanded === key;
-              const units = formatAmount(position.units);
+              const units = formatShares(position.units);
               // Employees never reach the asset page (it trades): the owner manages investments.
               const destination = isEmployee ? null : positionDestination(position);
               const open = () => destination && navigation.navigate(destination.route, destination.params);
@@ -263,7 +264,7 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
                         <Text style={styles.positionName}>{`  ${position.name}`}</Text>
                       </Text>
                       {units ? (
-                        <Text style={styles.secondary}>{`${units} ${units === '1' ? 'acción' : 'acciones'}`}</Text>
+                        <Text style={styles.secondary}>{`${units} ${Number(position.units) === 1 ? 'acción' : 'acciones'}`}</Text>
                       ) : null}
                     </View>
                     <View style={styles.positionRight}>

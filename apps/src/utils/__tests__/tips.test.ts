@@ -69,3 +69,20 @@ describe('country number format', () => {
     expect(formatPctSigned('-2.5')).toBe('-2.50%');
   });
 });
+
+describe('share counts on profiles', () => {
+  const { setNumberLocaleCountry } = require('../numberLocale');
+  const { formatShares } = require('../portfolioFormat');
+  afterEach(() => setNumberLocaleCountry(null));
+  it('cut to 4 decimals in the country format, never shown as zero', () => {
+    setNumberLocaleCountry('VE');
+    expect(formatShares('1.1275438811438157')).toBe('1,1275');
+    expect(formatShares('0.025741153426636645')).toBe('0,0257');
+    expect(formatShares('2.000000')).toBe('2');
+    expect(formatShares('1234.99999')).toBe('1.234,9999');
+    expect(formatShares('0.00004')).toBe('< 0,0001');
+    expect(formatShares('0')).toBe('0');
+    setNumberLocaleCountry('MX');
+    expect(formatShares('1.1275438811438157')).toBe('1.1275');
+  });
+});

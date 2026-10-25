@@ -100,6 +100,23 @@ export const formatAmount = (value: string | null | undefined): string | null =>
 };
 
 /**
+ * A share count as a profile shows it: at most 4 decimals, cut (never
+ * rounded up, so a holding is never overstated), trailing zeros dropped;
+ * a holding too small for that reads "< 0,0001", never zero.
+ * "1.1275438811438157" → "1,1275" (VE) / "1.1275" (MX).
+ */
+export const formatShares = (value: string | null | undefined): string | null => {
+  const parsed = parseDecimal(value);
+  if (!parsed) return null;
+  const fraction = parsed.fraction.slice(0, 4).replace(/0+$/, '');
+  const whole = groupThousands(parsed.whole);
+  if (/^0*$/.test(parsed.whole) && !fraction) {
+    return /[1-9]/.test(parsed.fraction) ? `< 0${decimalMark()}0001` : '0';
+  }
+  return `${parsed.negative ? '-' : ''}${whole}${fraction ? `${decimalMark()}${fraction}` : ''}`;
+};
+
+/**
  * Average holding time: "12 min", "7h", "3 d". Null when unknown. The server
  * rounds it to the hour (an exact figure would date a trade), so 0 means
  * "under an hour".
