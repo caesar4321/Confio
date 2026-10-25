@@ -367,7 +367,7 @@ Confío aligns revenue with useful financial activity rather than speculative tr
 
 The pricing rule is the same one shown on the public website: **0.9% to enter, 0% to move inside, and 0.9% to leave**. Confío Pay is a separate 0.9% service fee. Exchange rates and any third-party provider charges are disclosed separately where applicable. Network sponsorship is a product cost, not proof that every product action is economically free.
 
-Current fee-capable clients show the final amount before confirmation and itemize the Confío fee there for deposits, withdrawals and transfers; stock, Bitcoin and gold trades state the fee on their information screen and itemize it on the receipt. During the app-store transition, an already-installed legacy build may still render its old “Comisión de Confío — Gratis” label even though the server and contracts apply the 0.9% fee and return the correct post-fee final amount. Legacy builds remain operable during this short compatibility window rather than blocking access while a store review is pending.
+Current fee-capable clients show the Confío fee and final amount before confirmation. During the app-store transition, an already-installed legacy build may still render its old “Comisión de Confío — Gratis” label even though the server and contracts apply the 0.9% fee and return the correct post-fee final amount. Legacy builds remain operable during this short compatibility window rather than blocking access while a store review is pending.
 
 ## 11. Compliance and operating model
 

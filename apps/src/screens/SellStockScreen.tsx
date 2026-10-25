@@ -323,6 +323,13 @@ export const SellStockScreen = () => {
                 <Text style={styles.quoteLabel}>Precio actual</Text>
                 <Text style={styles.quoteValue}>{fmtUsd(stock.priceUsd)}</Text>
               </View>
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>Comisión de Confío</Text>
+                <Text style={styles.quoteValue}>
+                  ~{formatNumber(quote.costPct, { maximumFractionDigits: 2 })}% ·{' '}
+                  {fmtUsd(quote.costUsd)}
+                </Text>
+              </View>
               <View style={styles.quoteDivider} />
               <View style={styles.quoteRow}>
                 <Text style={styles.quoteLabelStrong}>Recibirás en tu ahorro</Text>

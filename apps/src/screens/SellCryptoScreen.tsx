@@ -167,6 +167,7 @@ export const SellCryptoScreen = () => {
   );
   const overBalance = positionUsd != null && !sellAll && amount > positionUsd;
   const netUsd = preview ? Number(preview.netWei) / 1e18 : 0;
+  const feeUsd = preview ? Number(preview.usdtOut - preview.netWei) / 1e18 : 0;
   const costPct = preview ? marketCostPct(preview.poolFeeBps, preview.impactBps) : null;
   const canConfirm = units > 0n && !overBalance && !quoteLoading && preview !== null
     && feeBps != null && !tooSmallForPlus;
@@ -309,6 +310,12 @@ export const SellCryptoScreen = () => {
                 <Text style={styles.quoteLabel}>Vendes</Text>
                 <Text style={styles.quoteValue}>{formatUnits(units, asset.decimals)} {asset.ticker}</Text>
               </View>
+              {feeBps != null && preview && (
+                <View style={styles.quoteRow}>
+                  <Text style={styles.quoteLabel}>Comisión de Confío {feePctLabel(feeBps)}%</Text>
+                  <Text style={styles.quoteValue}>{fmtUsd(feeUsd)}</Text>
+                </View>
+              )}
               {costPct != null && (
                 <View style={styles.quoteRow}>
                   <Text style={styles.quoteLabel}>Costo de mercado</Text>
