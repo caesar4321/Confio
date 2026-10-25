@@ -51,6 +51,18 @@ class AgendaRecentType(graphene.ObjectType):
     holder_name = graphene.String(required=True)
 
 
+class AgendaMethodType(graphene.ObjectType):
+    id = graphene.String(required=True)
+    kind = graphene.String(required=True)
+    country = graphene.String(required=True)
+    title = graphene.String(required=True)
+    subtitle = graphene.String(required=True)
+    allows_third_party = graphene.Boolean(required=True)
+    status = graphene.String(required=True)
+    reason = graphene.String(required=True)
+    payment_method_id = graphene.String()
+
+
 def _entry(row):
     return AgendaEntryType(**agenda.view(row))
 
@@ -58,10 +70,23 @@ def _entry(row):
 class AgendaQuery(graphene.ObjectType):
     agenda_entries = graphene.List(graphene.NonNull(AgendaEntryType), required=True)
     agenda_recents = graphene.List(graphene.NonNull(AgendaRecentType), required=True)
+    agenda_methods = graphene.List(graphene.NonNull(AgendaMethodType), required=True)
 
     def resolve_agenda_entries(self, info):
         try:
             return [_entry(row) for row in agenda.entries(_owner(info))]
+        except (AgendaError, PaymentAccountError) as exc:
+            raise GraphQLError(_error(exc))
+
+    def resolve_agenda_methods(self, info):
+        from .schema import _verified_identity
+        try:
+            owner = _owner(info)
+            try:
+                identity = _verified_identity(owner)
+            except PaymentAccountError:
+                identity = None
+            return [AgendaMethodType(**row) for row in agenda.methods(owner, identity)]
         except (AgendaError, PaymentAccountError) as exc:
             raise GraphQLError(_error(exc))
 

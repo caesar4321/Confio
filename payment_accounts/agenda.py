@@ -161,6 +161,39 @@ def _iso2(method_id) -> str:
     return method.iso2 if method else ''
 
 
+# ------------------------------------------------------------------ what can be added
+
+def methods(account, identity) -> list[dict]:
+    """Every account type the person can add, by country, provider-neutral.
+    `allows_third_party` comes from the rail, so a rail that starts accepting
+    someone else's account changes here, not in the app."""
+    from ramps.models import RampPaymentMethod
+    from .local_money import methods as local_methods
+    rows = [{
+        'id': VE_PAGOMOVIL, 'kind': VE_PAGOMOVIL, 'country': 'VE', 'title': 'Pago Móvil',
+        'subtitle': 'Cédula, teléfono y banco', 'allows_third_party': True, 'status': 'live', 'reason': '',
+        'payment_method_id': None,
+    }]
+    for row in local_methods(account, identity, 'send'):
+        method = row['method']
+        if method.id not in INFINIA_RAILS:
+            continue
+        rows.append({
+            'id': method.id, 'kind': 'local', 'country': method.iso2, 'title': method.title,
+            'subtitle': method.subtitle, 'allows_third_party': method.id in THIRD_PARTY_RAILS,
+            'status': row['status'], 'reason': row['reason'], 'payment_method_id': None,
+        })
+    for method in RampPaymentMethod.objects.filter(is_active=True, supports_off_ramp=True).order_by(
+            'country_code', 'display_order', 'display_name'):
+        rows.append({
+            'id': f'{BANK_INFO}:{method.pk}', 'kind': BANK_INFO, 'country': method.country_code.upper(),
+            'title': method.display_name, 'subtitle': 'Para tus retiros',
+            'allows_third_party': BANK_INFO in THIRD_PARTY_RAILS, 'status': 'live', 'reason': '',
+            'payment_method_id': str(method.pk),
+        })
+    return rows
+
+
 # ------------------------------------------------------------------ Mis cuentas mirror
 
 def _bank_info_country(bank_info) -> str:

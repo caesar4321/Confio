@@ -100,3 +100,28 @@ export function useAgendaAccountKey(): string | null {
   const { activeAccount, isLoading } = useAccount();
   return isLoading ? null : (activeAccount?.id ?? null);
 }
+
+export const AGENDA_METHODS = gql`query AgendaMethods {
+  agendaMethods { id kind country title subtitle allowsThirdParty status reason paymentMethodId }
+}`;
+
+/** An account type that can be added, from the server's rail registry. */
+export interface AgendaMethod {
+  id: string;
+  kind: 've_pagomovil' | 'local' | 'bank_info' | string;
+  country: string;
+  title: string;
+  subtitle: string;
+  allowsThirdParty: boolean;
+  status: string;
+  reason: string;
+  paymentMethodId?: string | null;
+}
+
+/** What to type for each local rail when saving it in the Agenda. */
+export const LOCAL_FIELD_COPY: Record<string, { label: string; placeholder: string; keyboard?: 'default' | 'number-pad' }> = {
+  co_breb: { label: 'Llave Bre-B', placeholder: 'Celular, cédula, correo o alias' },
+  br_pix: { label: 'Chave Pix', placeholder: 'CPF, celular, e-mail o clave aleatoria' },
+  mx_clabe: { label: 'CLABE', placeholder: '18 dígitos', keyboard: 'number-pad' },
+  ar_cvu: { label: 'CVU o CBU', placeholder: '22 dígitos', keyboard: 'number-pad' },
+};

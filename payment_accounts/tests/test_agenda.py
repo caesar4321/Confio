@@ -123,3 +123,21 @@ class AgendaTests(TestCase):
         self.assertEqual((renamed.label, renamed.relationship), ('Nómina', 'own'))
         with self.assertRaises(AgendaError):
             agenda._relationship('third_party', agenda.BANK_INFO)
+
+
+class AgendaMethodsTests(TestCase):
+    def test_methods_say_per_rail_whether_someone_else_can_be_saved(self):
+        from ramps.models import RampPaymentMethod
+        user = User.objects.create_user(username='agenda-methods', firebase_uid='agenda-methods')
+        owner = Account.objects.create(user=user, account_type='personal')
+        RampPaymentMethod.objects.create(code='WIREPE', country_code='pe', display_name='Interbank',
+                                         supports_off_ramp=True)
+        rows = {row['id']: row for row in agenda.methods(owner, None)}
+        self.assertTrue(rows['ve_pagomovil']['allows_third_party'])
+        bank = next(row for row in rows.values() if row['kind'] == 'bank_info' and row['title'] == 'Interbank')
+        self.assertEqual((bank['country'], bank['allows_third_party']), ('PE', False))
+        for rail in agenda.INFINIA_RAILS:
+            if rail in rows:
+                self.assertTrue(rows[rail]['allows_third_party'])
+                self.assertEqual(rows[rail]['kind'], 'local')
+        self.assertFalse(any(row['id'].endswith('_qr') for row in rows.values()))
