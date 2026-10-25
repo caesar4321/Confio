@@ -176,7 +176,6 @@ export const BuyCryptoScreen = () => {
   }
 
   const fundingName = fundingDollarName(funding);
-  const feeUsd = feeBps != null ? amount * (feeBps / 10_000) : 0;
   const costPct = preview ? marketCostPct(preview.poolFeeBps, preview.impactBps) : null;
   const overBalance = amount > balance;
   const overCap = !overBalance && amount > cap;
@@ -327,12 +326,6 @@ export const BuyCryptoScreen = () => {
                 <Text style={styles.quoteLabel}>Precio actual</Text>
                 <Text style={styles.quoteValue}>{formatUsdPrice(asset.priceUsd)}</Text>
               </View>
-              {feeBps != null && (
-                <View style={styles.quoteRow}>
-                  <Text style={styles.quoteLabel}>Comisión de Confío {feePctLabel(feeBps)}%</Text>
-                  <Text style={styles.quoteValue}>{fmtUsd(feeUsd)}</Text>
-                </View>
-              )}
               {costPct != null && (
                 <View style={styles.quoteRow}>
                   <Text style={styles.quoteLabel}>Costo de mercado</Text>

@@ -374,7 +374,7 @@ export const OndoStocksInfoScreen = () => {
           <ExplanationRow
             icon="repeat"
             title="2. Invierte desde tu ahorro"
-            body="La compra usa cUSD+. Antes de confirmar ves el precio y la comisión."
+            body="La compra usa cUSD+. Antes de confirmar ves el precio y lo que recibes."
           />
           <ExplanationRow
             icon="corner-down-left"

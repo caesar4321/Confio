@@ -367,7 +367,7 @@ Confío vincula ingresos con actividad financiera útil, no con trading especula
 
 La regla coincide con la web pública: **0.9% para entrar, 0% para mover dentro y 0.9% para salir**. Confío Pay tiene una comisión de servicio independiente del 0.9%. Tipos de cambio y cargos de terceros se divulgan por separado cuando corresponda. Patrocinar la red es un costo del producto, no prueba de que toda acción sea económicamente gratuita.
 
-Los clientes actuales compatibles muestran comisión e importe final antes de confirmar. Durante la transición de las tiendas, una versión antigua ya instalada puede aún mostrar “Comisión de Confío — Gratis”, aunque servidor y contratos apliquen el 0.9% y devuelvan el neto correcto. Estas versiones permanecen operativas durante esta breve ventana de compatibilidad, en lugar de bloquear acceso mientras se espera la revisión de la tienda.
+Los clientes actuales compatibles muestran el importe final antes de confirmar y detallan ahí la comisión de Confío en depósitos, retiros y transferencias; las operaciones de acciones, Bitcoin y oro indican la comisión en su pantalla informativa y la detallan en el comprobante. Durante la transición de las tiendas, una versión antigua ya instalada puede aún mostrar “Comisión de Confío — Gratis”, aunque servidor y contratos apliquen el 0.9% y devuelvan el neto correcto. Estas versiones permanecen operativas durante esta breve ventana de compatibilidad, en lugar de bloquear acceso mientras se espera la revisión de la tienda.
 
 ## 11. Cumplimiento y modelo operativo
 

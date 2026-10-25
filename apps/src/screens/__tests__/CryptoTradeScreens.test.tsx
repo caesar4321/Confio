@@ -132,7 +132,7 @@ describe('BuyCryptoScreen', () => {
     await typeAmount(tree, 'crypto-buy-amount', '10');
     const shown = text(tree);
     expect(shown).toContain('Confío Dollar+');
-    expect(shown).toContain('Comisión de Confío ');
+    expect(shown).not.toContain('Comisión de Confío'); // receipt only (2026-10-25)
     expect(shown).toContain('Costo de mercado');
     expect(shown).not.toContain('Comprar y luego vender');
     await press(tree, 'crypto-buy-confirm');
@@ -214,6 +214,9 @@ describe('CryptoDetailScreen', () => {
     expect(shown).toContain('Bitcoin respaldado 1:1 por Binance en BNB Chain');
     expect(shown).toContain('Tu inversión');
     expect(shown).toContain('Confío Dollar+');
+    // The fee is explained in Cómo funciona, never as a warning line.
+    expect(shown).toContain('Confío cobra su comisión de');
+    expect(shown).not.toContain('al comprar y al vender.' + ' Comprar');
     expect(tree.root.findAll((n) => n.props?.testID === 'crypto-sparkline').length).toBeGreaterThan(0);
     const comprar = tree.root.findAllByType(TouchableOpacity)
       .find((b) => b.findAll((n) => n.props?.children === 'Comprar').length > 0);

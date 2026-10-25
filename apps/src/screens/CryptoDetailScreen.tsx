@@ -255,9 +255,7 @@ export const CryptoDetailScreen = () => {
               <View style={{ flex: 1 }}>
                 <Text style={styles.fundingTitle}>Pagas con · {funding}</Text>
                 <Text style={styles.fundingSub}>
-                  {feeBps != null
-                    ? `Comisión de Confío ${feePctLabel(feeBps)}% al comprar y al vender.`
-                    : 'Al vender, el dinero vuelve a tu ' + funding + '.'}
+                  {`Al vender, el dinero vuelve a tu ${funding}.`}
                 </Text>
               </View>
             </View>
@@ -275,6 +273,12 @@ export const CryptoDetailScreen = () => {
             custody ? { icon: 'shield', text: custody } : null,
             { icon: 'repeat', text: 'Compras y vendes a través de PancakeSwap, a cualquier hora.' },
             { icon: 'lock', text: 'Queda en tu cuenta, no en Confío. Puedes venderlo cuando quieras.' },
+            // The fee lives here (how it works), never on the trade screens:
+            // the receipt itemizes what was actually charged (2026-10-25).
+            feeBps != null ? {
+              icon: 'percent',
+              text: `Confío cobra su comisión de ${feePctLabel(feeBps)}% al comprar y al vender: es la misma que en cualquier retiro o depósito de tu dólar Confío.`,
+            } : null,
           ]
             .filter((r): r is { icon: string; text: string } => Boolean(r))
             .map((r) => (
