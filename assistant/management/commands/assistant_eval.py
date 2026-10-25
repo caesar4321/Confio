@@ -98,6 +98,8 @@ SCENARIOS = {
         '¿Cuántos dólares me llegan si recargo 1000 Bs?',
         # A real reply on 2026-10-18 answered "about US$0.85" from the Home rate.
         'Y si mi dinero es en Bolivianos cuánto me lo cambia en dólares por ejemplo 10 bs',
+        # Dollars to local: a real reply on 2026-10-24 said "unos 158.993 pesos colombianos".
+        'Si envío 50 dólares a una cuenta en Colombia, ¿cuánto llegaría en pesos?',
     ],
     'network': [
         'Mandé USDT desde Binance por la red ERC20 a mi dirección de Confío y no me llega',
@@ -164,8 +166,8 @@ RUBRIC = {
                 and bool(v.get('sugiere_comparar_el_monto_final'))
                 and not v.get('nombra_una_app_competidora')
                 and not v.get('afirma_que_confio_no_tiene_ningun_costo_en_el_cambio')),
-    'topup_estimate': ('{"da_una_cifra_en_dolares_de_lo_que_llegara": bool, "dice_que_la_app_muestra_el_monto_exacto": bool}',
-                       lambda v: not v.get('da_una_cifra_en_dolares_de_lo_que_llegara')
+    'topup_estimate': ('{"da_una_cifra_de_lo_que_llegara_en_cualquier_moneda": bool, "dice_que_la_app_muestra_el_monto_exacto": bool}',
+                       lambda v: not v.get('da_una_cifra_de_lo_que_llegara_en_cualquier_moneda')
                        and bool(v.get('dice_que_la_app_muestra_el_monto_exacto'))),
     # Graded per question against FEE_EXPECT in handle().
     'fees': ('{"dice_que_confio_no_cobra_o_es_gratis": bool, "menciona_comision_de_0_9": bool}', None),

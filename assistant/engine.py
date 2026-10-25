@@ -585,9 +585,11 @@ def exchange_rate_data(viewer: Viewer, currency=None):
                 'nota': ('Nombra la moneda completa, como aparece en un_dolar_son. '
                          'Es el tipo de cambio de referencia que la app muestra en Inicio. En una recarga o un '
                          'retiro el proveedor aplica su propio cambio y sus costos, que ves antes de confirmar: no '
-                         'uses esta cifra para calcular cuánto llegará en una recarga o un retiro. Si preguntan '
-                         'cuántos dólares le dan por un monto en su moneda ("¿cuánto me dan por 10 bolivianos?"), '
-                         'da solo un_dolar_son y no conviertas ese monto. No predigas '
+                         'uses esta cifra para calcular cuánto llegará en una recarga, un retiro o un envío. Nunca '
+                         'conviertas un monto en ninguna dirección: ni su moneda a dólares ("¿cuánto me dan por 10 '
+                         'bolivianos?") ni dólares a su moneda ("si envío 50 dólares, ¿cuánto llega?"), ni siquiera '
+                         '"como referencia": da solo un_dolar_son y di que la app muestra el monto exacto antes de '
+                         'confirmar. No predigas '
                          'cómo va a cambiar.' + (' Este dato tiene más de dos días: dilo.' if stale else '')),
             }
     return {'disponible': False, 'motivo': f'No tengo un tipo de cambio para {code}.'}
