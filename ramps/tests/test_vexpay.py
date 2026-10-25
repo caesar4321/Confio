@@ -664,6 +664,7 @@ class VexPayRampTests(TestCase):
         ramp.refresh_from_db()
         self.assertTrue(vexpay.can_confirm(ramp))
 
+    @override_settings(VE_PAGOMOVIL_TOPUP_MAX_USD='100')
     @mock.patch('ramps.vexpay._alert')
     def test_overpayment_counts_in_limits_and_alerts(self, alert):
         ramp = self._ramp(metadata={'vexpay': {'method': 'pago_movil', 'usd_amount': '5'}})
@@ -705,6 +706,13 @@ class VexPayRampTests(TestCase):
         self.assertEqual(kwargs['onward'].address, ADDRESS)
         self.assertEqual(kwargs['onward'].network, 'BEP20')
         self.assertEqual(kwargs['external_ref'], ramp.external_id)
+
+    @override_settings(VE_PAGOMOVIL_TOPUP_MIN_USD='', VE_PAGOMOVIL_TOPUP_MAX_USD='',
+                       VE_PAGOMOVIL_TOPUP_USER_DAILY_USD='', VE_PAGOMOVIL_TOPUP_GLOBAL_DAILY_USD='')
+    def test_no_caps_by_default(self):
+        self._ramp(status='COMPLETED', metadata={'vexpay': {'usd_amount': '5000'}})
+        vexpay.check_limits(self.user, Decimal('1'))
+        vexpay.check_limits(self.user, Decimal('25000'))
 
     @override_settings(VE_PAGOMOVIL_TOPUP_MIN_USD='5', VE_PAGOMOVIL_TOPUP_MAX_USD='100',
                        VE_PAGOMOVIL_TOPUP_USER_DAILY_USD='50', VE_PAGOMOVIL_TOPUP_GLOBAL_DAILY_USD='1000')

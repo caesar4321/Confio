@@ -719,9 +719,10 @@ from .cobre_journey_schema import CobreJourneyQuery, CobreJourneyMutation
 
 
 from payment_accounts.local_money_schema import LocalMoneyMutation, LocalMoneyQuery  # noqa: E402
+from .agenda_schema import AgendaMutation, AgendaQuery  # noqa: E402
 
 
-class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, graphene.ObjectType):
+class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, AgendaQuery, graphene.ObjectType):
     payment_bridge = graphene.Field(PaymentBridgeTransferType, internal_id=graphene.UUID(required=True))
 
     def resolve_payment_bridge(self, info, internal_id):
@@ -840,7 +841,8 @@ class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, graphene.ObjectTyp
 from .breb_location_schema import BrebLocationMutation
 
 
-class Mutation(JourneyMutation, CobreJourneyMutation, LocalMoneyMutation, BrebLocationMutation, graphene.ObjectType):
+class Mutation(JourneyMutation, CobreJourneyMutation, LocalMoneyMutation, BrebLocationMutation, AgendaMutation,
+               graphene.ObjectType):
     prepare_payment_bridge = PreparePaymentBridge.Field()
     submit_payment_bridge = SubmitPaymentBridge.Field()
     quote_payment_bridge = QuotePaymentBridge.Field()

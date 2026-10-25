@@ -349,3 +349,18 @@ class BrebLocationCheckAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+from .models import AgendaEntry
+
+
+class AgendaEntryAdmin(admin.ModelAdmin):
+    list_display = ('internal_id', 'confio_account', 'rail', 'country', 'relationship', 'label', 'is_default',
+                    'deleted_at', 'updated_at')
+    list_filter = ('rail', 'country', 'relationship')
+    search_fields = ('internal_id', 'label', 'holder_name')
+    raw_id_fields = ('confio_account', 'bank_info', 'payout_destination')
+    readonly_fields = tuple(field.name for field in AgendaEntry._meta.fields)
+
+    def has_add_permission(self, request):
+        return False

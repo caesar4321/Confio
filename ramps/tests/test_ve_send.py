@@ -355,6 +355,16 @@ class SendCoreTests(TestCase):
         self.assertEqual((ve_send._phase(ramp), ramp.status_detail), ('payout_review', 'needs_review:payout_unpriceable'))
         broke.create_payout.assert_not_called()
 
+    def test_sends_too_small_to_pay_out_are_refused_before_funding(self):
+        client = pagoasap_client()
+        client.preview.side_effect = lambda ves: {'total': '1.00'}
+        with self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'muy pequeño'):
+            pagoasap_send._require_payable(client, Decimal('1.40'))
+        pagoasap_send._require_payable(client, Decimal('1.50'))
+        client.preview.side_effect = lambda ves: {'total': '0'}
+        with self.assertRaises(ve_pagomovil.VePagoMovilError):
+            pagoasap_send._require_payable(client, Decimal('100'))
+
     def test_ambiguous_create_replays_the_same_key_inside_the_window(self):
         ramp = self._pay(self._funded(), pagoasap_client(create=PagoAsapAmbiguousError('timeout')))
         self.assertEqual(ve_send._phase(ramp), 'paying')
@@ -456,6 +466,13 @@ class SendCoreTests(TestCase):
         ramp = ve_send.mark_paid_manually(ramp, '998877', operator='ops',
                                           reviewed_key=ve_send._section(ramp)['payout_key'], reviewed_revision=0)
         self.assertEqual((ramp.status, ve_send._section(ramp)['bank_reference']), ('COMPLETED', '998877'))
+
+    @override_settings(VE_PAGOMOVIL_SEND_MIN_USD='', VE_PAGOMOVIL_SEND_MAX_USD='',
+                       VE_PAGOMOVIL_SEND_USER_DAILY_USD='', VE_PAGOMOVIL_SEND_GLOBAL_DAILY_USD='')
+    def test_no_caps_by_default(self):
+        self._ramp(status='PROCESSING')
+        ve_send.check_limits(self.user, Decimal('1'))
+        ve_send.check_limits(self.user, Decimal('25000'))
 
     @override_settings(VE_PAGOMOVIL_SEND_USER_DAILY_USD='30')
     def test_limits_count_open_sends(self):

@@ -90,6 +90,15 @@ def enabled(direction: str) -> bool:
     return bool(getattr(settings, name, False))
 
 
+def optional_limit(name: str) -> Decimal | None:
+    """A product cap from settings; unset (or not a positive number) means none."""
+    try:
+        value = Decimal(str(getattr(settings, name, '') or ''))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return value if value.is_finite() and value > 0 else None
+
+
 def setting_decimal(name: str, default: str) -> Decimal:
     try:
         return Decimal(str(getattr(settings, name, default)))

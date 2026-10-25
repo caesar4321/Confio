@@ -174,23 +174,29 @@ def _sends():
 
 def check_limits(user, gross_usd: Decimal) -> None:
     from django.db.models import Q
-    setting = ve_pagomovil.setting_decimal
-    minimum = setting('VE_PAGOMOVIL_SEND_MIN_USD', '5')
-    maximum = setting('VE_PAGOMOVIL_SEND_MAX_USD', '100')
-    if gross_usd < minimum:
+    # No caps by default: the quote shows what a small send delivers, the
+    # bridge refuses amounts too small to cross, and the recipient's bank
+    # enforces its Pago Móvil limit. The settings stay as an emergency lever.
+    limit = ve_pagomovil.optional_limit
+    minimum, maximum = limit('VE_PAGOMOVIL_SEND_MIN_USD'), limit('VE_PAGOMOVIL_SEND_MAX_USD')
+    if minimum is not None and gross_usd < minimum:
         raise VeSendError(f'El monto mínimo es ${minimum}.')
-    if gross_usd > maximum:
+    if maximum is not None and gross_usd > maximum:
         raise VeSendError(f'El monto máximo por envío es ${maximum}.')
+    user_cap = limit('VE_PAGOMOVIL_SEND_USER_DAILY_USD')
+    global_cap = limit('VE_PAGOMOVIL_SEND_GLOBAL_DAILY_USD')
+    if user_cap is None and global_cap is None:
+        return
     since = timezone.now() - timedelta(hours=24)
     # Every send not definitely unfunded counts, by when money can move.
     recent = list(_sends().filter(
         Q(created_at__gte=since) | Q(status__in=OPEN_STATUSES) | Q(completed_at__gte=since),
     ).exclude(status='FAILED'))
     user_total = sum((counted_usd(r) for r in recent if r.actor_user_id == user.pk), Decimal('0'))
-    if user_total + gross_usd > setting('VE_PAGOMOVIL_SEND_USER_DAILY_USD', '200'):
+    if user_cap is not None and user_total + gross_usd > user_cap:
         raise VeSendError('Alcanzaste el límite diario de envíos en bolívares. Intenta mañana.')
     global_total = sum((counted_usd(r) for r in recent), Decimal('0'))
-    if global_total + gross_usd > setting('VE_PAGOMOVIL_SEND_GLOBAL_DAILY_USD', '1000'):
+    if global_cap is not None and global_total + gross_usd > global_cap:
         raise VeSendError('Los envíos en bolívares alcanzaron su cupo de hoy. Intenta más tarde.')
 
 

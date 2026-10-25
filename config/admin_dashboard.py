@@ -1389,3 +1389,7 @@ class WalletRecoveryDiagnosticAdmin(admin.ModelAdmin):
 
 
 confio_admin_site.register(WalletRecoveryDiagnostic, WalletRecoveryDiagnosticAdmin)
+
+from payment_accounts.models import AgendaEntry
+from payment_accounts.admin import AgendaEntryAdmin
+confio_admin_site.register(AgendaEntry, AgendaEntryAdmin)

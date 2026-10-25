@@ -9,4 +9,5 @@ class PaymentAccountsConfig(AppConfig):
         from . import checks  # noqa: F401
         from . import activity  # noqa: F401
         from . import infinia_maintenance  # noqa: F401
+        from . import agenda  # noqa: F401
     verbose_name = 'Payment accounts'

@@ -899,3 +899,43 @@ class InfiniaPayoutEstimateBinding(models.Model):
         constraints = [models.UniqueConstraint(
             fields=['confio_account', 'funding_instruction', 'amount_units'],
             name='infinia_payout_estimate_binding_uniq')]
+
+
+class AgendaEntry(models.Model):
+    """One saved payment account in the person's Agenda: theirs or someone
+    else's, on one rail (see payment_accounts/agenda.py). Provider-neutral;
+    `bank_info` / `payout_destination` link the legacy row it mirrors so old
+    app builds keep working on those (docs/plans/agenda-design.md)."""
+
+    OWN = 'own'
+    THIRD_PARTY = 'third_party'
+    RELATIONSHIP_CHOICES = [(OWN, 'Own'), (THIRD_PARTY, 'Third party')]
+
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    confio_account = models.ForeignKey('users.Account', on_delete=models.CASCADE, related_name='agenda_entries')
+    rail = models.CharField(max_length=40)
+    country = models.CharField(max_length=2)
+    relationship = models.CharField(max_length=20, choices=RELATIONSHIP_CHOICES)
+    label = models.CharField(max_length=100)
+    holder_name = models.CharField(max_length=255, blank=True, default='')
+    holder_id_type = models.CharField(max_length=30, blank=True, default='')
+    holder_id_number = models.CharField(max_length=100, blank=True, default='')
+    details = models.JSONField(default=dict)
+    bank_info = models.OneToOneField('users.BankInfo', on_delete=models.CASCADE, null=True, blank=True,
+                                     related_name='agenda_entry')
+    payout_destination = models.OneToOneField(PayoutDestination, on_delete=models.CASCADE, null=True, blank=True,
+                                              related_name='agenda_entry')
+    is_default = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['confio_account', 'deleted_at'])]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(relationship__in=['own', 'third_party']), name='agenda_entry_relationship_valid'),
+        ]
+
+    def __str__(self):
+        return f'{self.rail}:{self.label}'

@@ -90,6 +90,7 @@ import { ScanScreen } from '../screens/ScanScreen';
 import { ChargeScreen } from '../screens/ChargeScreen';
 import { CreateOfferScreen } from '../screens/CreateOfferScreen';
 import { PayoutMethodsScreen } from '../screens/PayoutMethodsScreen';
+import AgendaScreen from '../screens/AgendaScreen';
 import { RampAddressScreen } from '../screens/RampAddressScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
@@ -211,6 +212,13 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="PayoutMethods"
           component={PayoutMethodsScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Agenda"
+          component={AgendaScreen}
           options={{
             headerShown: false,
           }}

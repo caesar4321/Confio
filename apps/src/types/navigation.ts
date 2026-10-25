@@ -43,7 +43,7 @@ export type MainStackParamList = {
   InfiniaPayment: { direction?: 'to_bank' | 'to_wallet' } | undefined;
   CobrePayment: { direction?: 'to_bank' | 'to_wallet' } | undefined;
   LocalAccountFunding: undefined;
-  LocalSend: { methodId: string; scannedQr?: string };
+  LocalSend: { methodId: string; scannedQr?: string; destinationId?: string };
   LocalReceive: { methodId: string };
   Receive: undefined;
   Send: undefined;
@@ -55,6 +55,7 @@ export type MainStackParamList = {
   LocalAccountApplication: { methodId: string };
   BrebLocationCheck: undefined;
   PayoutMethods: undefined;
+  Agenda: undefined;
   RampAddress: undefined;
   ConfioAddress: undefined;
   Notification: undefined;

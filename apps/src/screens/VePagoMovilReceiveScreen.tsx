@@ -25,6 +25,10 @@ import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
 import { getSeparators, sanitizeAmountInput } from '../utils/numberLocale';
 import {
+  VeAgendaPicker, VeAgendaSaveToggle, initialVeAgendaSave, saveVeAgendaEntry, veAgendaSaveReady, vePickFields,
+} from '../components/agenda/VeAgendaPicker';
+import { AgendaEntry } from '../services/agenda';
+import {
   CANCEL_VE_TOP_UP,
   CONFIRM_VE_TOP_UP_KEY,
   CREATE_VE_TOP_UP,
@@ -88,6 +92,8 @@ export default function VePagoMovilReceiveScreen() {
   const [phone, setPhone] = useState('');
   const [bank, setBank] = useState<Bank | null>(null);
   const [banks, setBanks] = useState<Bank[]>([]);
+  // The payer is usually the person, but may be someone else.
+  const [agendaSave, setAgendaSave] = useState(() => initialVeAgendaSave('own'));
   const [bankPicker, setBankPicker] = useState(false);
   const [code, setCode] = useState(''); // bank reference or C2P key
   // When the Pago Móvil was made: the bank lookup needs the date unless it was today.
@@ -168,7 +174,16 @@ export default function VePagoMovilReceiveScreen() {
   const amountValue = toNumber(amount);
   const amountOk = amountValue > 0 && (!min || amountValue >= min) && (!max || amountValue <= max);
   const quoteMatches = !!quote?.success && Number(quote.usdAmount) === amountValue;
-  const payerOk = cedula.trim().length >= 6 && phone.replace(/\D/g, '').length >= 10 && !!bank;
+  const payerOk = cedula.trim().length >= 6 && phone.replace(/\D/g, '').length >= 10 && !!bank
+    && veAgendaSaveReady(agendaSave);
+
+  const pickFromAgenda = (entry: AgendaEntry) => {
+    const fields = vePickFields(entry);
+    setCedula(fields.cedula);
+    setPhone(fields.phone);
+    setBank(banks.find(item => item.code === fields.bankCode) || null);
+    setAgendaSave(initialVeAgendaSave('own'));
+  };
 
   const create = async () => {
     if (busy.current || !amountOk || !payerOk || !bank || !quoteMatches) return;
@@ -205,6 +220,7 @@ export default function VePagoMovilReceiveScreen() {
       }
       setOrder(result);
       setCode('');
+      void saveVeAgendaEntry(client, agendaSave, { cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code });
     } catch {
       if (alive.current) setError(GENERIC);
     } finally {
@@ -520,8 +536,8 @@ export default function VePagoMovilReceiveScreen() {
               />
               <View style={styles.currencyBadge}><Text style={styles.currencyBadgeText}>USD</Text></View>
             </View>
-            {quote?.minUsd && quote?.maxUsd ? (
-              <Text style={styles.limitText}>Entre {formatUsd(quote.minUsd)} y {formatUsd(quote.maxUsd)} por recarga.</Text>
+            {min && amountValue > 0 && amountValue < min ? (
+              <Text style={styles.limitText}>El mínimo es {formatUsd(quote?.minUsd as string)}.</Text>
             ) : null}
             {quote?.error ? <Text style={styles.errorText}>{quote.error}</Text> : null}
           </View>
@@ -603,6 +619,7 @@ export default function VePagoMovilReceiveScreen() {
                 ? 'El titular de esta cuenta autoriza el débito con la clave de pago de su banco.'
                 : 'El teléfono, la cédula y el banco desde los que se hará el Pago Móvil. Los usamos para encontrar el pago.'}
             </Text>
+            <VeAgendaPicker disabled={loading} onPick={pickFromAgenda} />
             <Text style={styles.inputLabel}>Cédula</Text>
             <TextInput accessibilityLabel="Cédula" value={cedula} onChangeText={setCedula} autoCapitalize="characters"
               placeholder="V12345678" placeholderTextColor={colors.textTertiary}
@@ -619,6 +636,7 @@ export default function VePagoMovilReceiveScreen() {
               </Text>
               <Icon name="chevron-down" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
+            <VeAgendaSaveToggle value={agendaSave} onChange={setAgendaSave} disabled={loading} />
           </View>
         </View>
       </RampReveal>

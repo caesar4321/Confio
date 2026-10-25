@@ -59,7 +59,7 @@ def quote(amount: Decimal) -> dict:
         # payout fee), from the account's live terms.
         'processor_fee_usd': format(max(amount - gross, Decimal('0')), 'f'),
         'confio_fee_usd': format(max(gross - net, Decimal('0')), 'f'),
-        'min_usd': str(max(ve_pagomovil.setting_decimal('VE_PAGOMOVIL_TOPUP_MIN_USD', '5'),
+        'min_usd': str(max(ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_MIN_USD') or Decimal('0'),
                            vexpay.provider_minimum_usd(terms))),
     }
 

@@ -746,10 +746,10 @@ export const ProfileScreen = () => {
               canManageBankAccounts && (
                 <TouchableOpacity
                   style={styles.cardOption}
-                  onPress={() => navigation.navigate('PayoutMethods')}
+                  onPress={() => navigation.navigate('Agenda')}
                 >
-                  <Icon name="credit-card" size={18} color={colors.text.secondary} />
-                  <Text style={styles.cardOptionText}>Mis cuentas</Text>
+                  <Icon name="book-open" size={18} color={colors.text.secondary} />
+                  <Text style={styles.cardOptionText}>Agenda</Text>
                   <Icon name="chevron-right" size={16} color={colors.text.light} />
                 </TouchableOpacity>
               )}

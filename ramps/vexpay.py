@@ -199,12 +199,19 @@ def counted_usd(ramp: RampTransaction) -> Decimal:
 
 
 def check_limits(user, usd_amount: Decimal) -> None:
-    minimum = _setting_decimal('VE_PAGOMOVIL_TOPUP_MIN_USD', '5')
-    maximum = _setting_decimal('VE_PAGOMOVIL_TOPUP_MAX_USD', '100')
-    if usd_amount < minimum:
+    # No caps by default: the quote shows what a small top-up nets, VEXPay's
+    # own minimums are checked separately, and the payer's bank enforces its
+    # Pago Móvil limit. The settings stay as an emergency lever.
+    minimum = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_MIN_USD')
+    maximum = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_MAX_USD')
+    if minimum is not None and usd_amount < minimum:
         raise VexPayRampError(f'El monto mínimo es ${minimum}.')
-    if usd_amount > maximum:
+    if maximum is not None and usd_amount > maximum:
         raise VexPayRampError(f'El monto máximo por recarga es ${maximum}.')
+    user_cap = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_USER_DAILY_USD')
+    global_cap = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_GLOBAL_DAILY_USD')
+    if user_cap is None and global_cap is None:
+        return
     from django.db.models import Q
     since = timezone.now() - timedelta(hours=24)
     # By when money can move, not when the order was made: an open order
@@ -214,10 +221,10 @@ def check_limits(user, usd_amount: Decimal) -> None:
         Q(created_at__gte=since) | Q(status__in=OPEN_STATUSES) | Q(completed_at__gte=since),
     ).exclude(status='FAILED'))
     user_total = sum((counted_usd(r) for r in recent if r.actor_user_id == user.pk), Decimal('0'))
-    if user_total + usd_amount > _setting_decimal('VE_PAGOMOVIL_TOPUP_USER_DAILY_USD', '200'):
+    if user_cap is not None and user_total + usd_amount > user_cap:
         raise VexPayRampError('Alcanzaste el límite diario de recargas en bolívares. Intenta mañana.')
     global_total = sum((counted_usd(r) for r in recent), Decimal('0'))
-    if global_total + usd_amount > _setting_decimal('VE_PAGOMOVIL_TOPUP_GLOBAL_DAILY_USD', '2000'):
+    if global_cap is not None and global_total + usd_amount > global_cap:
         raise VexPayRampError('Las recargas en bolívares alcanzaron su cupo de hoy. Intenta más tarde.')
 
 
@@ -398,8 +405,9 @@ def apply_payment(ramp: RampTransaction, payment: dict, *, direct: bool = False)
 
         if status == 'COMPLETED' and payment.get('usdAmount') is not None:
             section['paid_usd'] = str(payment['usdAmount'])
-            maximum = _setting_decimal('VE_PAGOMOVIL_TOPUP_MAX_USD', '100')
-            if Decimal(str(payment['usdAmount'])) > maximum and not section.get('over_limit_alerted'):
+            maximum = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_MAX_USD')
+            if maximum is not None and Decimal(str(payment['usdAmount'])) > maximum \
+                    and not section.get('over_limit_alerted'):
                 # Pago Móvil credits an overpayment in full and its onward
                 # payout follows automatically; flag it, it still counts in limits.
                 section['over_limit_alerted'] = True

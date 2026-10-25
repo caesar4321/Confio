@@ -33,6 +33,7 @@ TARGET_AT_CLAIM = True
 SOURCE, DESTINATION = 'BSC:USDT', 'POL:USDC'
 PENDING_STALE = timedelta(hours=2)
 MIN_PAYOUT_VES = Decimal('10')
+PAYABLE_MARGIN = Decimal('1.5')
 UNAVAILABLE = 'Los envíos en bolívares no están disponibles por ahora.'
 GENERIC_ERROR = 'No pudimos procesar el envío. Intenta de nuevo en unos minutos.'
 
@@ -62,6 +63,22 @@ def _ves_for(usd: Decimal, rate: Decimal) -> Decimal:
     return (usd * rate).quantize(ve_send.CENT, rounding=ROUND_DOWN)
 
 
+TOO_SMALL = 'El monto es muy pequeño para enviarlo. Prueba con un monto mayor.'
+
+
+def _require_payable(client, delivered_usd: Decimal) -> None:
+    """Refuse a send whose bridged dollars could not pay Pago ASAP's smallest
+    payout: once funded it would only reach ops review. There are no product
+    caps, so this is the floor (kept with a margin for rate moves)."""
+    try:
+        smallest = _cost(client, MIN_PAYOUT_VES)
+    except PagoAsapError as exc:
+        logger.exception('Pago ASAP preview failed')
+        raise VePagoMovilError(GENERIC_ERROR) from exc
+    if smallest <= 0 or _fee_free_usd(delivered_usd) < smallest * PAYABLE_MARGIN:
+        raise VePagoMovilError(TOO_SMALL)
+
+
 def _polygon_address() -> str:
     return (getattr(settings, 'PAGOASAP_DEPOSIT_ADDRESS_POLYGON', '') or '').strip()
 
@@ -74,7 +91,7 @@ def funding_target(ramp) -> dict:
     """A Relay deposit address on BSC for this order's exact USDT, bridging to
     Pago ASAP's Polygon address. Validated by the bridge client (assets,
     amounts, recipient, refund to the sender, single ERC20 deposit)."""
-    from payment_accounts.allbridge_next import NextError
+    from payment_accounts.allbridge_next import NextError, TOKENS
     from payment_accounts.bridge_binding import deposit_call
     from payment_accounts.relay import RelayClient
     section = ve_send._section(ramp)
@@ -90,6 +107,9 @@ def funding_target(ramp) -> dict:
     except NextError as exc:
         logger.warning('Relay quote failed for VE send %s: %s', ramp.pk, exc)
         raise VePagoMovilError('No pudimos preparar el envío. Intenta de nuevo en unos minutos.') from exc
+    # The least this bridge may deliver must still pay a payout, checked
+    # again here because the claim is the last step before money moves.
+    _require_payable(_client(), Decimal(str(build['amountOutMin'])) / Decimal(10 ** TOKENS[DESTINATION][1]))
     return {
         'deposit_address': deposit,
         'binding': {
@@ -167,6 +187,7 @@ def quote(amount: Decimal) -> dict:
         delivered = Decimal(str(estimate['details']['currencyOut']['amount'])) / Decimal(10 ** TOKENS[DESTINATION][1])
     except (NextError, KeyError, TypeError) as exc:
         raise VePagoMovilError(str(exc) if 'muy pequeño' in str(exc) else GENERIC_ERROR) from exc
+    _require_payable(client, delivered)
     ves = _ves_for(_fee_free_usd(delivered), rate)
     # The processor's share in dollars: what these bolívares would have cost
     # at the market reference, against the dollars that go in.

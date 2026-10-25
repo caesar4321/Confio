@@ -411,7 +411,8 @@ class Query(graphene.ObjectType):
             if amount is None:
                 raise VePagoMovilError('Monto no válido.')
             quote = ve_pagomovil.topup_adapter().quote(amount)
-            quote.setdefault('max_usd', str(getattr(settings, 'VE_PAGOMOVIL_TOPUP_MAX_USD', '100')))
+            maximum = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_MAX_USD')
+            quote.setdefault('max_usd', format(maximum, 'f') if maximum is not None else None)
             return VePagoMovilTopUpQuoteType(success=True, **quote)
         return _guard(VePagoMovilTopUpQuoteType, run)
 
@@ -436,8 +437,9 @@ class Query(graphene.ObjectType):
             if amount is None:
                 raise VePagoMovilError('Monto no válido.')
             quote = ve_pagomovil.send_adapter().quote(amount)
-            quote.setdefault('min_usd', format(ve_pagomovil.setting_decimal('VE_PAGOMOVIL_SEND_MIN_USD', '5'), 'f'))
-            quote.setdefault('max_usd', format(ve_pagomovil.setting_decimal('VE_PAGOMOVIL_SEND_MAX_USD', '100'), 'f'))
+            for key, name in (('min_usd', 'VE_PAGOMOVIL_SEND_MIN_USD'), ('max_usd', 'VE_PAGOMOVIL_SEND_MAX_USD')):
+                cap = ve_pagomovil.optional_limit(name)
+                quote.setdefault(key, format(cap, 'f') if cap is not None else None)
             return VePagoMovilSendQuoteType(success=True, **quote)
         return _guard(VePagoMovilSendQuoteType, run)
 

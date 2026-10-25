@@ -30,6 +30,10 @@ import { useAccount } from '../contexts/AccountContext';
 import { getSeparators, sanitizeAmountInput } from '../utils/numberLocale';
 import { VE_BANKS } from '../services/vePagoMovilTopUp';
 import {
+  VeAgendaPicker, VeAgendaSaveToggle, initialVeAgendaSave, saveVeAgendaEntry, veAgendaSaveReady, vePickFields,
+} from '../components/agenda/VeAgendaPicker';
+import { AgendaEntry } from '../services/agenda';
+import {
   CANCEL_VE_SEND,
   CREATE_VE_SEND,
   REPORT_VE_SEND_FUNDING,
@@ -105,6 +109,7 @@ export default function VePagoMovilSendScreen() {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bankPicker, setBankPicker] = useState(false);
   const [checked, setChecked] = useState(false);
+  const [agendaSave, setAgendaSave] = useState(() => initialVeAgendaSave('third_party'));
 
   const boot = useCallback(async (keepError = false) => {
     setBooting(true);
@@ -172,7 +177,17 @@ export default function VePagoMovilSendScreen() {
   const amountOk = amountValue > 0 && (!min || amountValue >= min) && (!max || amountValue <= max)
     && amountValue <= available + 1e-9;
   const quoteMatches = !!quote?.success && Number(quote.usdAmount) === amountValue;
-  const recipientOk = cedula.trim().length >= 6 && phone.replace(/\D/g, '').length >= 10 && !!bank;
+  const recipientOk = cedula.trim().length >= 6 && phone.replace(/\D/g, '').length >= 10 && !!bank
+    && veAgendaSaveReady(agendaSave);
+
+  const pickFromAgenda = (entry: AgendaEntry) => {
+    const fields = vePickFields(entry);
+    setCedula(fields.cedula);
+    setPhone(fields.phone);
+    setBank(banks.find(item => item.code === fields.bankCode) || null);
+    // Already saved: nothing to save again.
+    setAgendaSave(initialVeAgendaSave('third_party'));
+  };
 
   /** Claim the order's single funding, pay it, tell the server. */
   const fund = async (orderId: string) => {
@@ -284,6 +299,7 @@ export default function VePagoMovilSendScreen() {
       }
       created = result.orderId;
       setOrder(result);
+      void saveVeAgendaEntry(client, agendaSave, { cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code });
       await fund(result.orderId);
     } catch {
       // Once the order exists, money may be moving: only the status decides.
@@ -354,6 +370,7 @@ export default function VePagoMovilSendScreen() {
         <View style={styles.section}>
           <RampStepHeader number={1} title="Destinatario" meta="Tú u otra persona" />
           <View style={styles.inputCard}>
+            <VeAgendaPicker disabled={loading} onPick={pickFromAgenda} />
             <Text style={styles.inputLabel}>Cédula</Text>
             <TextInput accessibilityLabel="Cédula del destinatario" value={cedula} onChangeText={setCedula}
               autoCapitalize="characters" placeholder="V12345678" placeholderTextColor={colors.textTertiary}
@@ -370,6 +387,7 @@ export default function VePagoMovilSendScreen() {
               </Text>
               <Icon name="chevron-down" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
+            <VeAgendaSaveToggle value={agendaSave} onChange={setAgendaSave} disabled={loading} />
           </View>
         </View>
       </RampReveal>
@@ -394,8 +412,8 @@ export default function VePagoMovilSendScreen() {
               />
               <View style={styles.currencyBadge}><Text style={styles.currencyBadgeText}>USD</Text></View>
             </View>
-            {quote?.minUsd && quote?.maxUsd ? (
-              <Text style={styles.limitText}>Entre {formatUsd(quote.minUsd)} y {formatUsd(quote.maxUsd)} por envío.</Text>
+            {min && amountValue > 0 && amountValue < min ? (
+              <Text style={styles.limitText}>El mínimo es {formatUsd(quote?.minUsd as string)}.</Text>
             ) : null}
             {amountValue > available + 1e-9 ? <Text style={styles.errorText}>Supera tu saldo disponible.</Text> : null}
             {quote?.error ? <Text style={styles.errorText}>{quote.error}</Text> : null}

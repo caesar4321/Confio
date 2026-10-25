@@ -59,6 +59,7 @@ import {
   resolveLocalDestination,
 } from '../services/localMoney';
 import { sanitizeAmountInput } from '../utils/numberLocale';
+import { SaveDestinationToAgenda } from '../components/agenda/SaveDestinationToAgenda';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'LocalSend'>;
 type Route = RouteProp<MainStackParamList, 'LocalSend'>;
@@ -150,7 +151,7 @@ export default function LocalSendScreen() {
 
 function InfiniaLocalSendScreen() {
   const navigation = useNavigation<Nav>();
-  const { methodId, scannedQr: initialQr } = useRoute<Route>().params;
+  const { methodId, scannedQr: initialQr, destinationId: agendaDestinationId } = useRoute<Route>().params;
   const { width } = useWindowDimensions();
   const isCompact = width < 380;
   const copy = COPY[methodId] || COPY.co_breb;
@@ -629,6 +630,18 @@ function InfiniaLocalSendScreen() {
       });
   };
 
+  // Opened from the Agenda with a saved recipient: pick it like a saved row
+  // (it is re-checked before it shows as verified).
+  const agendaPicked = useRef(false);
+  useEffect(() => {
+    if (!agendaDestinationId || agendaPicked.current) return;
+    agendaPicked.current = true;
+    fetchLocalDestination(agendaDestinationId)
+      .then(row => { if (row) pickSaved(row); })
+      .catch(() => setResolveError('No pudimos abrir esa cuenta de tu Agenda. Escríbela de nuevo.'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agendaDestinationId]);
+
   const unavailable = methodsQuery.data && (!method || method.status !== 'live');
   const quoteHeadline = quote ? `≈ ${formatRampMoney(quote.targetAmount, quote.asset)}` : '';
   const currency = method ? currencyName(method.asset) : 'moneda local';
@@ -680,6 +693,7 @@ function InfiniaLocalSendScreen() {
               <Icon name="check" size={12} color={colors.successText} />
               <Text style={styles.verifiedPillText}>Titular verificado</Text>
             </View>
+            {methodId.endsWith('_qr') ? null : <SaveDestinationToAgenda destinationId={destination.id} />}
           </View>
         </View>
       );
