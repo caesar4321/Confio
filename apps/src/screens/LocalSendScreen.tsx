@@ -60,6 +60,7 @@ import {
 } from '../services/localMoney';
 import { sanitizeAmountInput } from '../utils/numberLocale';
 import { SaveDestinationToAgenda } from '../components/agenda/SaveDestinationToAgenda';
+import { AGENDA_ENTRIES, AgendaEntry, useAgendaAccountKey } from '../services/agenda';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'LocalSend'>;
 type Route = RouteProp<MainStackParamList, 'LocalSend'>;
@@ -164,6 +165,12 @@ function InfiniaLocalSendScreen() {
     variables: { methodId }, fetchPolicy: 'cache-and-network', errorPolicy: 'all',
   });
   const limitsQuery = useQuery(LOCAL_MONEY_LIMITS, { fetchPolicy: 'network-only', errorPolicy: 'all' });
+  // Saved recipients of this rail come first ("De tu Agenda"); recents follow.
+  // Its own query: an older server without the Agenda only loses this list.
+  const agendaKey = useAgendaAccountKey();
+  const agendaQuery = useQuery(AGENDA_ENTRIES, {
+    fetchPolicy: 'cache-and-network', errorPolicy: 'all', skip: !agendaKey,
+  });
   // Back from another screen (a document just verified, an account opened):
   // the rail and account state may have changed. A ref keeps the focus effect
   // from depending on query objects that change on every render.
@@ -190,7 +197,12 @@ function InfiniaLocalSendScreen() {
     : (methodsQuery.data?.localMoneyMethods || []).find((row: LocalMethod) =>
       row.country === method?.country && row.id.endsWith('_qr') && row.status === 'live');
   const limits: LocalLimits | undefined = limitsQuery.data?.localMoneyLimits;
-  const saved: LocalDestination[] = savedQuery.data?.localSavedDestinations || [];
+  const agendaRows: AgendaEntry[] = agendaKey ? (agendaQuery.data?.agendaEntries || [])
+    .filter((entry: AgendaEntry) => entry.rail === methodId && entry.destinationId) : [];
+  const agendaIds = new Set(agendaRows.map(entry => String(entry.destinationId)));
+  const saved: LocalDestination[] = (savedQuery.data?.localSavedDestinations || [])
+    .filter((row: LocalDestination) => !agendaIds.has(String(row.id)));
+  const hasSavedChoices = agendaRows.length > 0 || saved.length > 0;
   const place = method ? countryName(method.country) : '';
 
   // Dollar and local accounts are resolved server-side; the app only needs
@@ -630,15 +642,31 @@ function InfiniaLocalSendScreen() {
       });
   };
 
+  // Picked synchronously, like a recent row: pickSaved takes the lookup
+  // token and re-checks the holder, so no separate fetch can land late.
+  const pickAgenda = (entry: AgendaEntry) => {
+    if (locked || submittingRef.current || !entry.destinationId) return;
+    pickSaved({
+      id: entry.destinationId, methodId, label: entry.label, holderName: entry.holderName, holderDocument: '',
+      institution: '', verification: 'pending', country: method?.country || entry.country, asset: method?.asset || '',
+    });
+  };
+
   // Opened from the Agenda with a saved recipient: pick it like a saved row
   // (it is re-checked before it shows as verified).
   const agendaPicked = useRef(false);
   useEffect(() => {
     if (!agendaDestinationId || agendaPicked.current) return;
     agendaPicked.current = true;
+    // Applied only if nothing else was chosen or confirmed meanwhile.
+    const run = lookup.current;
     fetchLocalDestination(agendaDestinationId)
-      .then(row => { if (row) pickSaved(row); })
-      .catch(() => setResolveError('No pudimos abrir esa cuenta de tu Agenda. Escríbela de nuevo.'));
+      .then(row => {
+        if (row && isCurrent(run) && !submittingRef.current) pickSaved(row);
+      })
+      .catch(() => {
+        if (isCurrent(run)) setResolveError('No pudimos abrir esa cuenta de tu Agenda. Escríbela de nuevo.');
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agendaDestinationId]);
 
@@ -808,6 +836,26 @@ function InfiniaLocalSendScreen() {
                   titleColor={colors.dark}
                   metaColor={colors.textSecondary}
                 />
+                {agendaRows.length ? <Text style={agendaStyles.groupLabel}>De tu Agenda</Text> : null}
+                {agendaRows.map(entry => {
+                  const selected = destination?.id === entry.destinationId;
+                  return (
+                    <TouchableOpacity key={entry.id} style={[styles.savedCard, selected && styles.savedCardSelected]}
+                      onPress={() => pickAgenda(entry)} activeOpacity={0.7} accessibilityRole="button">
+                      <Icon name="bookmark" size={16} color={colors.primaryDark} style={agendaStyles.icon} />
+                      <View style={styles.savedCopy}>
+                        <Text style={styles.savedTitle}>{entry.label}</Text>
+                        <Text style={styles.savedText}>
+                          {[entry.relationship === 'own' ? 'Tuya' : entry.holderName, entry.subtitle].filter(Boolean).join(' · ')}
+                        </Text>
+                      </View>
+                      <View style={[styles.radioOuter, selected && styles.radioOuterChecked]}>
+                        {selected ? <View style={styles.radioInner} /> : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                {agendaRows.length && saved.length ? <Text style={agendaStyles.groupLabel}>Recientes</Text> : null}
                 {saved.map(row => {
                   const selected = destination?.id === row.id;
                   return (
@@ -823,8 +871,8 @@ function InfiniaLocalSendScreen() {
                     </TouchableOpacity>
                   );
                 })}
-                <View style={[styles.inputCard, saved.length ? { marginTop: 12 } : null]}>
-                  <Text style={styles.inputLabel}>{saved.length ? 'Nuevo destinatario' : copy.field}</Text>
+                <View style={[styles.inputCard, hasSavedChoices ? { marginTop: 12 } : null]}>
+                  <Text style={styles.inputLabel}>{hasSavedChoices ? 'Nuevo destinatario' : copy.field}</Text>
                   {methodId.endsWith('_qr') && scannedQr ? (
                     // Already scanned: confirm it, and make re-scanning the
                     // quiet option rather than the call to action.
@@ -1134,6 +1182,14 @@ function InfiniaLocalSendScreen() {
 }
 
 // The banner title's bottom margin moves to the flag row so the flag centers on the text.
+const agendaStyles = StyleSheet.create({
+  groupLabel: {
+    fontSize: 11, fontWeight: '700', letterSpacing: 1, color: colors.textTertiary, textTransform: 'uppercase',
+    marginTop: 4, marginBottom: 8, marginLeft: 2,
+  },
+  icon: { marginRight: 10 },
+});
+
 const flagStyles = StyleSheet.create({
   bannerTitleRow: { marginBottom: 4 },
   flush: { marginBottom: 0 },
