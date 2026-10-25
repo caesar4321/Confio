@@ -8,6 +8,7 @@ import { Text } from './common/AppText';
 import { colors } from '../config/theme';
 import { CryptoAssetMark } from './CryptoAssetMark';
 import { formatDecimal, formatUsdAmount } from '../utils/numberLocale';
+import { GET_CRYPTO_TICKERS } from '../apollo/queries';
 
 /** What a Comunidad post made from a money movement shows (communityPostExtras.activity). */
 export type ActivityShare = {
@@ -141,10 +142,21 @@ const OWNER_ONLY_ROUTES = new Set(['TopUp', 'Sell']);
  * (where they can look and buy), or the matching money screen to do the
  * same thing themselves. Null when there's nowhere sensible to go.
  */
-export function activityDestination(activity: ActivityShare): { route: string; params?: object; label: string } | null {
-  // Bitcoin & gold: the Invertir tab, where the card lists them (the
-  // detail screen needs the market's symbol, which a post doesn't carry).
+export function activityDestination(
+  activity: ActivityShare,
+  cryptoAssets: { symbol: string; ticker: string; name: string }[] = [],
+): { route: string; params?: object; label: string } | null {
+  // Bitcoin & gold: the asset's own page, like a stock. A post carries the
+  // ticker; the market list maps it to the symbol the page needs. Until the
+  // list is loaded (or for an asset no longer listed), the Invertir tab.
   if (tradeSide(activity) && cryptoCategoryOf(activity)) {
+    const ticker = (activity.ticker || '').toUpperCase();
+    const asset = ticker
+      ? cryptoAssets.find((a) => a.ticker.toUpperCase() === ticker || a.symbol.toUpperCase() === ticker)
+      : undefined;
+    if (asset) {
+      return { route: 'CryptoDetail', params: { symbol: asset.symbol }, label: `Ver ${asset.ticker || asset.name}` };
+    }
     return { route: 'BottomTabs', params: { screen: 'Invest' }, label: 'Ver oro y bitcoin' };
   }
   switch (activity.kind) {
@@ -226,13 +238,42 @@ export function ActivitySummary({
 }
 
 type Destination = { route: string; params?: object; label: string };
+type TickerAsset = { symbol: string; ticker: string; name: string };
+
+/** The crypto market's ticker → symbol list, read once and then from the
+ * shared cache (no polling per card). Empty until it loads, or if it can't:
+ * the card then opens the Invertir tab instead. */
+function useCryptoTickers(enabled: boolean): TickerAsset[] {
+  const [assets, setAssets] = React.useState<TickerAsset[]>([]);
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    let live = true;
+    try {
+      // Loaded lazily: the app's one client, not the context (cards render
+      // in places without a provider).
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { apolloClient } = require('../apollo/client');
+      apolloClient.query({ query: GET_CRYPTO_TICKERS, fetchPolicy: 'cache-first' })
+        .then(({ data }: any) => { if (live) setAssets(data?.cryptoMarket?.assets ?? []); })
+        .catch(() => {});
+    } catch {
+      // No client here: keep the fallback.
+    }
+    return () => { live = false; };
+  }, [enabled]);
+  return assets;
+}
 
 /** The activity's destination for this viewer: employees never reach the
  * owner's money rails (Recargar / Retirar). Null for no activity. */
 export function useActivityDestination(activity: ActivityShare | null | undefined): Destination | null {
   const { activeAccount } = useAccount();
   const isEmployee = Boolean((activeAccount as { isEmployee?: boolean } | null)?.isEmployee);
-  const target = activity ? activityDestination(activity) : null;
+  const isCrypto = Boolean(activity && tradeSide(activity) && cryptoCategoryOf(activity));
+  const assets = useCryptoTickers(isCrypto && !isEmployee);
+  // An employee never reaches the asset page (it trades): the Invertir tab
+  // tells them the owner manages the account's investments.
+  const target = activity ? activityDestination(activity, isEmployee ? [] : assets) : null;
   return target && isEmployee && OWNER_ONLY_ROUTES.has(target.route) ? null : target;
 }
 

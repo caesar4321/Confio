@@ -16,6 +16,7 @@ jest.mock('../CommunityRulesSheet', () => ({ CommunityRulesSheet: 'CommunityRule
 jest.mock('../PostByline', () => ({ PostByline: 'PostByline' }));
 jest.mock('../../navigation/RootNavigation', () => ({ navigate: jest.fn(), navigationRef: {} }));
 jest.mock('@apollo/client', () => ({ useQuery: jest.fn(), useMutation: () => [jest.fn(), {}], gql: () => '' }));
+jest.mock('../../apollo/client', () => ({ apolloClient: { query: () => Promise.resolve({ data: undefined }) } }));
 jest.mock('../../apollo/queries', () => ({}));
 jest.mock('../../apollo/mutations', () => ({}));
 
@@ -57,6 +58,17 @@ describe('Bitcoin & gold Comunidad posts', () => {
     expect(activityDestination(stock as any)?.route).toBe('StockDetail');
     const tree = await render(stock);
     expect(tree.root.findAll((n) => n.props?.testID === 'activity-crypto-mark')).toHaveLength(0);
+  });
+
+  it('opens the asset page for Bitcoin and gold once the market list maps the ticker', () => {
+    const assets = [{ symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin' }, { symbol: 'XAUT', ticker: 'XAUT', name: 'Oro' }];
+    expect(activityDestination(post({ kind: 'crypto_buy', ticker: 'BTC' }) as any, assets))
+      .toMatchObject({ route: 'CryptoDetail', params: { symbol: 'BTCB' } });
+    expect(activityDestination(post({ kind: 'crypto_sell', ticker: 'xaut', category: 'metal' }) as any, assets))
+      .toMatchObject({ route: 'CryptoDetail', params: { symbol: 'XAUT' } });
+    // An asset no longer listed: the Invertir tab, never a broken page.
+    expect(activityDestination(post({ kind: 'crypto_buy', ticker: 'DOGE' }) as any, assets))
+      .toMatchObject({ route: 'BottomTabs' });
   });
 
   it('opens Invertir (not a stock page) for a crypto post of either spelling', async () => {

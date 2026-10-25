@@ -5410,3 +5410,17 @@ export const GET_SHARE_SHEET_CRYPTO_ACTIVITY = gql`
     }
   }
 `;
+
+// Bitcoin & gold posts open the asset's page: the post carries the ticker,
+// this maps it to the market symbol (read once, from cache after that).
+export const GET_CRYPTO_TICKERS = gql`
+  query CryptoTickers {
+    cryptoMarket {
+      assets {
+        symbol
+        ticker
+        name
+      }
+    }
+  }
+`;
