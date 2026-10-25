@@ -33,7 +33,6 @@ import { MainStackParamList } from '../types/navigation';
 import { useNumberFormat } from '../utils/numberFormatting';
 import {
   custodyNote,
-  feePctLabel,
   formatUnits,
   formatUsdPrice,
   fundingDollarName,
@@ -128,7 +127,6 @@ export const CryptoDetailScreen = () => {
   const canBuy = tradingOn && enabled && Boolean(capabilities?.buyEnabled)
     && Boolean(listedAsset) && position?.listed !== false;
   const custody = custodyNote(asset.custody);
-  const feeBps = capabilities?.feeBps ?? null;
 
   return (
     <View style={styles.container}>
@@ -255,9 +253,8 @@ export const CryptoDetailScreen = () => {
               <View style={{ flex: 1 }}>
                 <Text style={styles.fundingTitle}>Pagas con · {funding}</Text>
                 <Text style={styles.fundingSub}>
-                  {feeBps != null
-                    ? `Comisión de Confío ${feePctLabel(feeBps)}% al comprar y al vender.`
-                    : 'Al vender, el dinero vuelve a tu ' + funding + '.'}
+                  {/* No fee line here: the quote shows it once there is one. */}
+                  {`Al vender, el dinero vuelve a tu ${funding}.`}
                 </Text>
               </View>
             </View>

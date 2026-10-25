@@ -214,6 +214,8 @@ describe('CryptoDetailScreen', () => {
     expect(shown).toContain('Bitcoin respaldado 1:1 por Binance en BNB Chain');
     expect(shown).toContain('Tu inversión');
     expect(shown).toContain('Confío Dollar+');
+    // No fee line before there is a quote (the Buy/Sell quote card shows it).
+    expect(shown).not.toContain('Comisión de Confío');
     expect(tree.root.findAll((n) => n.props?.testID === 'crypto-sparkline').length).toBeGreaterThan(0);
     const comprar = tree.root.findAllByType(TouchableOpacity)
       .find((b) => b.findAll((n) => n.props?.children === 'Comprar').length > 0);
