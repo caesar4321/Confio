@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.6.0',
-    'last_updated': '2026-10-17',
+    'version': '1.7.0',
+    'last_updated': '2026-10-25',
     'is_legally_binding': True,
     'sections': [
         {
@@ -16,12 +16,14 @@ TERMS = {
         {
             'title': '2. Definiciones',
             'content': [
-                {'term': 'Confío', 'definition': 'La plataforma y servicios proporcionados por Confío.'},
+                {'term': 'Confío', 'definition': 'La plataforma y servicios proporcionados por Duende Limited, sociedad constituida en la República de Seychelles. "Confío", "nosotros" y "nuestro" se refieren a Duende Limited.'},
                 {'term': 'Usuario', 'definition': 'Cualquier persona que utilice nuestros servicios.'},
                 {'term': 'Servicios', 'definition': 'Incluye la billetera, transferencias y cualquier otra funcionalidad ofrecida por Confío.'},
-                {'term': 'Monedas', 'definition': 'Incluye cUSD, CONFIO y cualquier otra moneda soportada.'},
+                {'term': 'Monedas', 'definition': 'Incluye cUSD, cUSD+, CONFIO y cualquier otra moneda soportada.'},
+                {'term': 'cUSD (Confío Dollar)', 'definition': 'Token emitido por Duende Limited sobre BNB Chain, respaldado 1:1 por USDT y convertible únicamente en USDT conforme a la sección 5. No es dinero de curso legal ni otorga derecho a recibir dólares estadounidenses.'},
+                {'term': 'a-cUSD (Antiguo Confío Dollar)', 'definition': 'Versión anterior de cUSD sobre Algorand, respaldada 1:1 por USDC y convertible únicamente en USDC a través de su contrato inteligente.'},
                 {'term': 'cUSD+', 'definition': 'Token que representa cUSD depositado en la función de ahorro con rendimiento, respaldado 1:1 por USDY de Ondo Finance.'},
-                {'term': 'USDT', 'definition': 'Stablecoin emitida por Tether, un tercero ajeno a Confío. Las recargas hacia la función de ahorro se acreditan primero en USDT sobre BNB Chain y se convierten a cUSD+ solo si usted es elegible conforme a la sección 9.'},
+                {'term': 'USDT', 'definition': 'Stablecoin emitida por Tether, un tercero ajeno a Confío. Las recargas hacia la función de ahorro se acreditan primero en USDT sobre BNB Chain y se convierten a cUSD+ solo si usted es elegible conforme a la sección 10.'},
                 {'term': 'Acciones tokenizadas', 'definition': 'Tokens emitidos por terceros que representan exposición 1:1 a acciones reales de empresas de los Estados Unidos.'}
             ]
         },
@@ -38,12 +40,27 @@ TERMS = {
             'content': [
                 'Irreversibles una vez confirmadas en la blockchain',
                 'Sin cargo de gas para el usuario final',
-                'Procesadas a través de blockchains públicas: actualmente BNB Chain para el ahorro con rendimiento, las acciones tokenizadas y $CONFIO, y Algorand para los saldos de cUSD existentes',
+                'Procesadas a través de blockchains públicas: actualmente BNB Chain para cUSD, el ahorro con rendimiento, las acciones tokenizadas y $CONFIO, y Algorand para los saldos existentes de a-cUSD',
                 'Podemos incorporar, migrar o dejar de soportar activos y redes. Si dejamos de soportar un activo o una red, se lo informaremos con antelación razonable y mantendremos disponible una vía para retirar o convertir su saldo.'
             ]
         },
         {
-            'title': '5. Preventa y Token $CONFIO',
+            'title': '5. Confío Dollar (cUSD)',
+            'content': [
+                'cUSD es un token emitido por Duende Limited sobre BNB Chain. Cada cUSD en circulación está respaldado por un USDT depositado en un contrato inteligente público, cuyo saldo cualquier persona puede verificar en la blockchain.',
+                'El único derecho que otorga cUSD es convertirlo en USDT a través de ese contrato inteligente, a razón de 1:1 menos la comisión de conversión. Duende Limited no se obliga a pagar, recomprar ni canjear cUSD por dólares estadounidenses ni por ninguna otra moneda de curso legal.',
+                'El nombre "Confío Dollar" y la palabra "dólares" en la app describen la unidad de valor que sigue cUSD; no representan un derecho a recibir dólares estadounidenses.',
+                'cUSD no es dinero de curso legal, ni un depósito bancario, ni una cuenta de pago. No está protegido por seguros de depósito (como FDIC) ni por fondos de garantía estatales.',
+                'cUSD no genera rendimiento ni intereses, y Confío no le paga ningún rendimiento por mantenerlo.',
+                'Las conversiones entre USDT y cUSD pagan una comisión que se muestra antes de confirmar la operación. El contrato limita esa comisión a un máximo de 0,9 % por conversión.',
+                'USDT es emitido por Tether, un tercero ajeno a Confío. El valor de cUSD depende del valor de USDT: si USDT pierde su paridad o su emisor falla, cUSD puede perder valor en la misma medida.',
+                'El contrato inteligente de cUSD es administrado por una billetera multifirma de Confío, que puede actualizarlo y pausarlo. Mientras esté pausado, no es posible enviar cUSD ni convertirlo a USDT.',
+                'a-cUSD, la versión anterior sobre Algorand, está respaldada 1:1 por USDC y solo puede convertirse en USDC a través de su contrato inteligente, a razón de 1:1 y con un mínimo de 1 a-cUSD por conversión. Ese contrato también puede pausarse o congelar cuentas concretas; mientras tanto, la conversión no está disponible para las cuentas afectadas.',
+                'Podemos limitar o suspender la emisión de nuevo cUSD en determinadas jurisdicciones, incluidos los Estados Unidos de América, para cumplir requisitos regulatorios. Esto no afecta la conversión de cUSD existente a USDT ni el envío o retiro de su saldo.'
+            ]
+        },
+        {
+            'title': '6. Preventa y Token $CONFIO',
             'content': [
                 'La preventa de $CONFIO da acceso a un token del ecosistema Confío y no representa acciones, participación societaria, dividendos ni derecho a utilidades, ingresos o activos de Confío.',
                 'La compra de $CONFIO no constituye una cuenta de ahorro, depósito bancario, contrato de inversión, asesoría financiera ni oferta pública de valores.',
@@ -53,7 +70,7 @@ TERMS = {
             ]
         },
         {
-            'title': '6. Ahorro con Rendimiento (cUSD+)',
+            'title': '7. Ahorro con Rendimiento (cUSD+)',
             'content': [
                 'Al usar la función de ahorro, su cUSD se convierte en cUSD+, un token respaldado 1:1 por USDY de Ondo Finance, un activo emitido por terceros y respaldado por bonos del Tesoro de los Estados Unidos de corto plazo, fondos de valores gubernamentales e instrumentos de efectivo.',
                 'El rendimiento es variable, se genera a través de USDY y puede cambiar día a día. No es una tasa fija, no está garantizado y puede diferir del mostrado en la app.',
@@ -61,12 +78,12 @@ TERMS = {
                 'La conversión entre cUSD y cUSD+ depende de contratos inteligentes y de emisores o proveedores terceros; en condiciones excepcionales de mercado o técnicas, los retiros podrían demorarse o verse afectados.',
                 'Existen riesgos técnicos y de terceros, incluyendo errores en contratos inteligentes, cambios regulatorios y riesgo del emisor del activo de respaldo. En casos extremos puede perder parte o la totalidad del valor depositado.',
                 'Las tasas mostradas ya descuentan la comisión de Confío; cualquier costo adicional de una operación se muestra antes de confirmarla.',
-                'Si usted no es elegible para el ahorro con rendimiento conforme a la sección 9, su recarga permanece en USDT: se muestra dentro de su cuenta de ahorro y puede enviarla, gastarla o retirarla en cualquier momento, pero no genera rendimiento ni está respaldada por USDY. En ese caso aplican los riesgos del emisor de USDT (Tether) y no los de Ondo Finance.',
-                'Los retiros y las conversiones de salida no están sujetos a restricciones geográficas: sus fondos siempre se pueden retirar.'
+                'Si usted no es elegible para el ahorro con rendimiento conforme a la sección 10, su recarga permanece en USDT: se muestra dentro de su cuenta de ahorro y puede enviarla, gastarla o retirarla en cualquier momento, pero no genera rendimiento ni está respaldada por USDY. En ese caso aplican los riesgos del emisor de USDT (Tether) y no los de Ondo Finance.',
+                'Los retiros y las conversiones de salida no están sujetos a restricciones geográficas: no ser elegible no le impide retirar sus fondos. Los retiros siguen sujetos a los riesgos técnicos, de mercado y de terceros descritos en esta sección y a las pausas descritas en la sección 5.'
             ]
         },
         {
-            'title': '7. Acciones de EE.UU. (Acciones Tokenizadas)',
+            'title': '8. Acciones de EE.UU. (Acciones Tokenizadas)',
             'content': [
                 'La función de acciones da acceso a acciones tokenizadas respaldadas 1:1 por acciones reales de empresas de los Estados Unidos, emitidas por terceros (Ondo Finance).',
                 'Las acciones tokenizadas representan exposición económica al precio de la acción subyacente y no otorgan derechos directos de accionista, como el voto. Los dividendos se reinvierten automáticamente.',
@@ -77,7 +94,7 @@ TERMS = {
             ]
         },
         {
-            'title': '8. Limitaciones de Responsabilidad',
+            'title': '9. Limitaciones de Responsabilidad',
             'content': [
                 'Pérdidas debido a errores del usuario',
                 'Problemas de conectividad',
@@ -88,7 +105,7 @@ TERMS = {
             ]
         },
         {
-            'title': '9. Restricciones Geográficas',
+            'title': '10. Restricciones Geográficas',
             'content': {
                 'preventa_de_$confio': [
                     'La participación en la preventa de monedas y ciertos servicios financieros de Confío está estrictamente prohibida para:',
@@ -100,13 +117,13 @@ TERMS = {
                     'Estas funciones no están disponibles para personas ubicadas o residentes en: Estados Unidos, Canadá, Afganistán, Bielorrusia, Corea del Norte, Cuba, Irán, Libia, Myanmar, Rusia, Siria, Somalia, Sudán, Sudán del Sur, ni en las regiones ocupadas de Ucrania (Crimea, Donetsk, Luhansk, Jersón, Zaporiyia y Sebastopol).',
                     'En ciertas jurisdicciones solo están disponibles para inversionistas calificados o profesionales según la ley local, incluyendo Brasil, el Espacio Económico Europeo, el Reino Unido, Suiza, Hong Kong, Singapur y Malasia.',
                     'La lista de jurisdicciones del emisor puede cambiar; la versión vigente está publicada en docs.ondo.finance. Podemos bloquear, limitar o suspender estas funciones para cumplir con esos requisitos.',
-                    'Si usted no es elegible, puede seguir usando el resto de Confío con normalidad: recibir, enviar, pagar y retirar dólares digitales. Lo que no está disponible es la conversión a cUSD+ y la compra de acciones tokenizadas.',
+                    'Si usted no es elegible, puede seguir usando el resto de Confío con normalidad: recibir, enviar, pagar y retirar dólares digitales. Lo que no está disponible es la conversión a cUSD+ y la compra de acciones tokenizadas. La emisión de nuevo cUSD puede limitarse por jurisdicción conforme a la sección 5.',
                     'Para aplicar estas reglas usamos el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP.'
                 ]
             }
         },
         {
-            'title': '10. Cumplimiento del Usuario',
+            'title': '11. Cumplimiento del Usuario',
             'content': [
                 'Usted es responsable de verificar que el uso de Confío, la compra de $CONFIO y el uso de las funciones de ahorro e inversión estén permitidos en su jurisdicción.',
                 'Podemos rechazar, limitar o cancelar acceso a servicios, a la preventa o a las funciones de ahorro e inversión si detectamos restricciones regulatorias, sanciones, fraude, suplantación o incumplimiento de estos términos.',
@@ -114,7 +131,7 @@ TERMS = {
             ]
         },
         {
-            'title': '11. Normas de la Comunidad',
+            'title': '12. Normas de la Comunidad',
             'content': [
                 'Comunidad, dentro de Descubrir, permite a personas con identidad verificada publicar textos y fotos, compartir sus propios movimientos (compras y ventas de acciones, recargas, retiros y envíos entre usuarios de Confío) con su monto y resultado, comentar, reaccionar, seguir a otros miembros y usar una foto de perfil. Nada de lo que usted mueve se publica sin que usted lo comparta. Su contenido se muestra a otros miembros con su nombre de usuario de Confío, o con un seudónimo si no eligió uno, nunca con su nombre real; las fotos publicadas y la foto de perfil también pueden verse con su enlace.',
                 'Cada miembro verificado tiene un perfil de inversor visible para otros miembros con su nombre de usuario o seudónimo: el valor de sus dólares en Confío, sus acciones con su resultado, sus posiciones cerradas, los CONFIO comprados en la preventa y sus estadísticas de operación. Usted puede ocultar su perfil de inversor en cualquier momento desde su perfil.',
@@ -126,11 +143,11 @@ TERMS = {
             ]
         },
         {
-            'title': '12. Modificaciones',
+            'title': '13. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '13. Contacto',
+            'title': '14. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'

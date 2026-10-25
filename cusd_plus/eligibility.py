@@ -6,7 +6,7 @@
 # identical for USDY and Ondo Global Markets):
 #   https://docs.ondo.finance/general-access-products/usdy/faq/eligibility
 #   https://docs.ondo.finance/ondo-global-markets/eligibility
-# Mirrored in our Terms v1.4.0 (users/legal/documents.py, section 9).
+# Mirrored in our Terms (users/legal/documents.py, section 10).
 #
 # Signal: User.phone_country (2-letter ISO, set at phone verification).
 # Ondo also prohibits the occupied Ukraine regions (Crimea/DNR/LNR/Kherson/
