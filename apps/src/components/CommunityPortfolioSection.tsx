@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useNavigation } from '@react-navigation/native';
+import { useAccount } from '../contexts/AccountContext';
 import { Pressable, StyleSheet, Switch, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 
@@ -29,6 +31,15 @@ export type PortfolioOpenPosition = {
   pnlUsd?: string | null;
   pnlPct?: string | null;
   dayChangePct?: string | null;
+};
+
+/** Where a position opens: the stock's page (an Ondo token is the ticker
+ * plus "on": PBR → PBRon) or the Bitcoin & gold asset page. */
+export const positionDestination = (position: Pick<PortfolioOpenPosition, 'symbol' | 'ticker'>) => {
+  if (!position.symbol || !position.ticker) return null;
+  return position.symbol === `${position.ticker}on`
+    ? { route: 'StockDetail', params: { ticker: position.ticker } }
+    : { route: 'CryptoDetail', params: { symbol: position.symbol } };
 };
 
 export type PortfolioClosedPosition = {
@@ -86,6 +97,9 @@ type Props = {
 
 /** A member's anonymous asset profile: totals, breakdown and positions. */
 export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBusy }: Props) => {
+  const navigation = useNavigation<any>();
+  const { activeAccount } = useAccount();
+  const isEmployee = Boolean((activeAccount as { isEmployee?: boolean } | null)?.isEmployee);
   const [tab, setTab] = useState<'open' | 'closed'>('open');
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -230,11 +244,14 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
               const canExpand = details.length > 0;
               const isOpen = expanded === key;
               const units = formatAmount(position.units);
+              // Employees never reach the asset page (it trades): the owner manages investments.
+              const destination = isEmployee ? null : positionDestination(position);
+              const open = () => destination && navigation.navigate(destination.route, destination.params);
               return (
                 <Pressable
                   key={key}
-                  onPress={() => canExpand && setExpanded(isOpen ? null : key)}
-                  disabled={!canExpand}
+                  onPress={() => (canExpand ? setExpanded(isOpen ? null : key) : open())}
+                  disabled={!canExpand && !destination}
                   style={({ pressed }) => [styles.positionRow, index > 0 && styles.rowDivider, pressed && styles.pressed]}
                   accessibilityRole={canExpand ? 'button' : undefined}
                   accessibilityState={canExpand ? { expanded: isOpen } : undefined}
@@ -255,6 +272,12 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
                     </View>
                   </View>
                   {isOpen ? <Text style={styles.detail}>{details.join(' · ')}</Text> : null}
+                  {isOpen && destination ? (
+                    <Pressable onPress={open} hitSlop={8} accessibilityRole="link" style={styles.openLink}>
+                      <Text style={styles.openLinkText}>{`Ver ${position.ticker}`}</Text>
+                      <Icon name="chevron-right" size={14} color={colors.primaryDark} />
+                    </Pressable>
+                  ) : null}
                 </Pressable>
               );
             })
@@ -494,6 +517,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  openLink: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 2, marginTop: 8 },
+  openLinkText: { fontSize: 13, fontWeight: '600', color: colors.primaryDark },
   ticker: {
     fontSize: 15,
     fontWeight: '700',

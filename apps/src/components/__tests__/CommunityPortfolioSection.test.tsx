@@ -4,6 +4,9 @@ import { Pressable, Switch } from 'react-native';
 import { CommunityMemberPortfolio, CommunityPortfolioSection } from '../CommunityPortfolioSection';
 
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+const mockNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mockNavigate }) }));
+jest.mock('../../contexts/AccountContext', () => ({ useAccount: () => ({ activeAccount: { type: 'personal' } }) }));
 
 const base: CommunityMemberPortfolio = {
   userId: '7',
@@ -93,4 +96,14 @@ test('Bitcoin & gold get their own row; never a $0 row, never on an older server
     act(() => { tree.update(<CommunityPortfolioSection portfolio={{ ...base, cryptoUsd }} />); });
     expect(textOf(tree)).not.toContain('Oro y Bitcoin');
   }
+});
+
+describe('positionDestination', () => {
+  const { positionDestination } = require('../CommunityPortfolioSection');
+  it('opens the stock page for an Ondo token and the asset page for Bitcoin & gold', () => {
+    expect(positionDestination({ symbol: 'PBRon', ticker: 'PBR' })).toEqual({ route: 'StockDetail', params: { ticker: 'PBR' } });
+    expect(positionDestination({ symbol: 'BTCB', ticker: 'BTC' })).toEqual({ route: 'CryptoDetail', params: { symbol: 'BTCB' } });
+    expect(positionDestination({ symbol: 'TON', ticker: 'TON' })).toEqual({ route: 'CryptoDetail', params: { symbol: 'TON' } });
+    expect(positionDestination({ symbol: '', ticker: 'X' })).toBeNull();
+  });
 });
