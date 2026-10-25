@@ -89,6 +89,38 @@ class PriceBookTests(CommunityTestBase):
         self.assertEqual(book.close('stock', 'NVDAon', at(sun, 0), NOW), Decimal('26'))
         self.assertEqual(book.close('stock', 'NVDAon', at(mon, 0), NOW), Decimal('26'))
 
+    def test_an_untraded_weekend_day_is_final_once_the_market_feed_is_past_it(self):
+        # PBRon: no Saturday candle, SPYon has its Saturday candle, and it's
+        # Sunday morning: nobody traded PBRon on Saturday, Friday's close holds.
+        sat, sun = date(2026, 10, 24), date(2026, 10, 25)
+        book = self.book([(at(sat, 0), Decimal('26'))])
+        book._candles[('stock', 'SPYon')] = [(at(sat, 0), Decimal('500')), (at(sun, 0), Decimal('501'))]
+        self.assertEqual(book.close('stock', 'NVDAon', at(sun, 0), at(sun, 6)), Decimal('26'))
+        # Shown, but provisional: the token's own candle may still come.
+        self.assertTrue(book.provisional)
+        # Past the price grace with still no candle of its own: unknown, not provisional.
+        late = PriceBookTests.book(self, [(at(sat, 0), Decimal('26'))])
+        late._candles[('stock', 'SPYon')] = [(at(sat, 0), Decimal('500')), (at(sun, 0), Decimal('501'))]
+        with self.assertRaises(pr.Untrusted):
+            late.close('stock', 'NVDAon', at(sun, 0), at(sun, 0) + pr.PRICE_GRACE + timedelta(hours=1))
+        # Too soon after midnight: maybe just late.
+        with self.assertRaises(pr.Retry):
+            book.close('stock', 'NVDAon', at(sun, 0), at(sun, 2))
+
+    def test_an_untraded_weekend_needs_the_market_feed_past_it(self):
+        sat, sun = date(2026, 10, 24), date(2026, 10, 25)
+        book = self.book([(at(sat, 0), Decimal('26'))])
+        book._candles[('stock', 'SPYon')] = [(at(sat, 0), Decimal('500'))]     # feed not past Saturday
+        with self.assertRaises(pr.Retry):
+            book.close('stock', 'NVDAon', at(sun, 0), at(sun, 6))
+
+    def test_a_weekday_gap_never_counts_as_an_untraded_weekend(self):
+        mon, tue = date(2026, 10, 26), date(2026, 10, 27)
+        book = self.book([(at(mon, 0), Decimal('26'))])                  # Sunday close, Monday missing
+        book._candles[('stock', 'SPYon')] = [(at(mon, 0), Decimal('500')), (at(tue, 0), Decimal('501'))]
+        with self.assertRaises(pr.Retry):
+            book.close('stock', 'NVDAon', at(tue, 0), at(tue, 6))
+
     def test_a_fresh_gap_in_this_symbol_is_retried(self):
         # The 21st's candle is missing but only a day has passed: maybe late.
         now = at(D22, 23)
@@ -275,6 +307,28 @@ class SyncWalletTests(CommunityTestBase):
         self.assertEqual(rows[1].daily_return, (Decimal('1') / Decimal('121')).quantize(Decimal('1e-10')))
         self.assertEqual(self.sync(user), {'written': 0, 'unchanged': 2, 'retry': 0})
         self.assertEqual(self.sync(user, recompute=True), {'written': 0, 'unchanged': 2, 'retry': 0})
+
+    def test_a_provisional_close_keeps_its_day_open_until_settled(self):
+        user = make_user()
+        prices = TablePrices(self.TABLE)
+        original = TablePrices.close
+
+        def close(book, kind, symbol, boundary, now):
+            if boundary.date() == date(2026, 10, 22):     # the 21st's end: carried, not proven
+                book.provisional = True
+            return original(book, kind, symbol, boundary, now)
+
+        with patch.object(TablePrices, 'close', close):
+            with patch('cusd_plus.stock_month.confirmed_trades', return_value=self.STOCKS), \
+                    patch('cusd_plus.crypto_month.confirmed_trades', return_value=[]), \
+                    patch.object(pr, 'in_flight', return_value=False), \
+                    patch.object(pr, 'check_chain', return_value=None):
+                pr.sync_wallet(user, WALLET, now=NOW, prices=prices)
+        self.assertTrue(PortfolioDailySnapshot.objects.get(day=D21).ledger_sig.endswith('p'))
+        # The next run (a real close now) recomputes and settles it.
+        self.assertEqual(self.sync(user), {'written': 1, 'unchanged': 1, 'retry': 0})
+        self.assertFalse(PortfolioDailySnapshot.objects.get(day=D21).ledger_sig.endswith('p'))
+        self.assertEqual(self.sync(user), {'written': 0, 'unchanged': 2, 'retry': 0})
 
     def test_a_late_confirmed_trade_reopens_only_the_days_it_touches(self):
         user = make_user()

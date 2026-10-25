@@ -721,3 +721,14 @@ class InvestorReachTests(LeagueTests):
         with patch('blockchain.models.SponsoredBatch.objects') as manager:
             manager.annotate.return_value.filter.return_value.exists.return_value = True
             self.assertTrue(community.has_invested(investor.id))
+
+
+class ProvisionalAwardTests(LeagueTests):
+    def test_no_champion_while_a_day_of_the_month_is_provisional(self):
+        user = make_user()
+        days = league.month_window(date(2026, 9, 1))
+        for day in days:
+            self.snap(user, day, '0.001')
+        self.assertTrue(league.month_complete(days))
+        PortfolioDailySnapshot.objects.filter(day=days[-2]).update(ledger_sig='a' * 39 + 'p')
+        self.assertFalse(league.month_complete(days))

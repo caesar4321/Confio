@@ -66,6 +66,11 @@ PRICE_GRACE = timedelta(days=3)
 CARRY_MAX = timedelta(days=7)
 # A stock's own gap this old, with its feed past it, is a day nobody traded.
 SETTLED_GAP = timedelta(days=2)
+# A weekend day this long over, with the broad-market feed already past it,
+# is final for a token that has no candle of its own: nobody traded it.
+# Without this, thin tokens (PBRon, KLACon…) waited for Monday's trade and
+# every holder fell out of the league all weekend.
+WEEKEND_SETTLE = timedelta(hours=6)
 # A trade recorded this close before midnight may have settled after it:
 # its day comes from its block's own timestamp. Covers both in-flight
 # windows (stocks 15 min, crypto 35 min).
@@ -165,6 +170,9 @@ class PriceBook:
     def __init__(self):
         self._candles: dict = {}
         self._block_times: dict = {}
+        # Set when a close came from the untraded-weekend rule: the day it
+        # priced is stored provisional and recomputed until settled.
+        self.provisional = False
 
     def _series(self, kind: str, symbol: str) -> list | None:
         key = (kind, symbol)
@@ -234,9 +242,41 @@ class PriceBook:
                     and (self._market_closed(symbol, closed_at, boundary, now)
                          or now - boundary > SETTLED_GAP)):
                 return price
+            # Only within PRICE_GRACE: a token that never trades again falls
+            # through to Untrusted below instead of staying provisional forever.
+            if (kind == 'stock' and boundary - closed_at <= CARRY_MAX and now - boundary <= PRICE_GRACE
+                    and self._untraded_weekend(symbol, closed_at, boundary, now)):
+                # Good enough to show, not proof: the token's own candle may
+                # still be on its way, so the day stays open (sync_wallet).
+                self.provisional = True
+                return price
         if now - boundary > PRICE_GRACE:
             raise Untrusted(PRICE_MISSING)
         raise Retry(f'close for {symbol} at {boundary.isoformat()} not final yet')
+
+    def _untraded_weekend(self, symbol: str, last_close: datetime, boundary: datetime, now: datetime) -> bool:
+        """Every missing day is a Saturday or Sunday (UTC), it ended at least
+        WEEKEND_SETTLE ago, and a broad-market reference already has its
+        candle for the last of them: the feed published that day, so this
+        token's missing candle means nobody traded it, not that it's late."""
+        if now - boundary < WEEKEND_SETTLE:
+            return False
+        day = last_close
+        while day < boundary:
+            # A candle closing at `day` + 1 covers the UTC day starting at `day`.
+            if day.weekday() < 5:
+                return False
+            day += DAY
+        for ref in MARKET_REFERENCES:
+            if ref == symbol:
+                continue
+            try:
+                series = self._series('stock', ref)
+            except Untrusted:
+                continue
+            if any(at >= boundary for at, _ in (series or []) if at <= now):
+                return True
+        return False
 
     def _market_closed(self, symbol: str, last_close: datetime, boundary: datetime, now: datetime) -> bool:
         """The U.S. market had no session between last_close and boundary
@@ -496,6 +536,22 @@ def _store(user, wallet: str, day: date, values: dict, existing) -> bool:
     return True
 
 
+def provisional_sig(sig: str) -> str:
+    """A hex ledger signature never contains 'p': ending it with one can't
+    match any real signature, so _is_final keeps the day open (and the
+    column's 40 characters still fit)."""
+    return f'{(sig or "")[:39]}p'
+
+
+def _is_shown(row, ledger: Ledger | None) -> bool:
+    """Good to display: final, or provisional on the same ledger (a weekend
+    close carried until the token's own feed settles it)."""
+    if row is None or not row.ledger_trusted or ledger is None:
+        return False
+    sig = ledger.signature(day_start(row.day + DAY))
+    return row.ledger_sig in (sig, provisional_sig(sig))
+
+
 def _is_final(row, ledger: Ledger | None) -> bool:
     return (row is not None and row.ledger_trusted and ledger is not None
             and row.ledger_sig == ledger.signature(day_start(row.day + DAY)))
@@ -552,7 +608,13 @@ def sync_wallet(user, wallet: str, *, days: int = BACKFILL_DAYS, now: datetime |
             values = _row_values(None, sig, reason)
         else:
             try:
-                values = _row_values(compute_day(ledger, day, now, prices), sig)
+                prices.provisional = False
+                computed = compute_day(ledger, day, now, prices)
+                if prices.provisional:
+                    # Shown now, never final: every run recomputes it until a
+                    # close the token's own feed proves replaces the carry.
+                    sig = provisional_sig(sig)
+                values = _row_values(computed, sig)
             except Retry as exc:
                 logger.info('returns: retry %s %s: %s', wallet, day, exc)
                 counts['retry'] += 1
@@ -645,7 +707,7 @@ def period_return(user, range_key: str, now: datetime | None = None) -> PeriodRe
             days.append((day_start(day + DAY), Decimal('0'), Decimal('0')))   # not invested yet
             continue
         row = rows.get(day)
-        if not _is_final(row, ledger) or row.daily_return is None:
+        if not _is_shown(row, ledger) or row.daily_return is None:
             return unknown
         days.append((day_start(day + DAY), row.daily_return, row.gain_usd))
 

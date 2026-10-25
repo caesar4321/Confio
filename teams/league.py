@@ -527,6 +527,9 @@ def award_month(month_start: date, *, force: bool = False) -> list:
     days = month_window(month_start)
     if days[-1] >= utc_today() or not (force or month_complete(days)):
         return []
+    # Not even forced: a permanent champion never rests on a provisional close.
+    if has_provisional_days(days):
+        return []
     # The whole month, recomputed now (an award may run days later), and only
     # teams whose every contributor may still be shown.
     for team in Team.objects.filter(archived_at__isnull=True):
@@ -564,7 +567,25 @@ def month_complete(days) -> bool:
                   .exclude(bsc_address__isnull=True).exclude(bsc_address='')
                   .annotate(addr=Lower('bsc_address')).filter(addr__in=seen).values_list('addr', flat=True))
     last = set(PortfolioDailySnapshot.objects.filter(day=days[-1]).values_list('wallet', flat=True))
-    return current <= last
+    return current <= last and not has_provisional_days(days)
+
+
+def has_provisional_days(days) -> bool:
+    """A weekend close still provisional in these days
+    (inbox/portfolio_returns.provisional_sig ends in 'p'), on a wallet that
+    still counts: a replaced or deleted wallet is never synced again and
+    must not hold an award back forever."""
+    from django.db.models.functions import Lower
+
+    from inbox.models import PortfolioDailySnapshot
+    from users.models import Account
+
+    wallets = set(PortfolioDailySnapshot.objects.filter(day__in=days, ledger_sig__endswith='p')
+                  .values_list('wallet', flat=True))
+    if not wallets:
+        return False
+    return Account.objects.filter(account_type='personal', deleted_at__isnull=True).annotate(
+        addr=Lower('bsc_address')).filter(addr__in=wallets).exists()
 
 
 def badges(*, team_id=None, user_id=None) -> list[str]:
