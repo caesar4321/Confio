@@ -32,6 +32,8 @@ export const RETURN_RANGES = [
   { key: '24h', label: '24 h' },
   { key: '7d', label: '7 d' },
   { key: '30d', label: '30 d' },
+  // All time, from the trade record (investorTotalReturn), not the daily chain.
+  { key: 'all', label: 'Total' },
 ] as const;
 
 export type ReturnRange = (typeof RETURN_RANGES)[number]['key'];

@@ -5,11 +5,15 @@ import Svg, { Path } from 'react-native-svg';
 
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
-import { GET_INVESTOR_RETURNS } from '../apollo/queries';
-import { formatPctSigned, formatUsd, signOf } from '../utils/portfolioFormat';
+import { GET_INVESTOR_RETURNS, GET_INVESTOR_TOTAL_RETURN } from '../apollo/queries';
+import { formatMemberSince, formatPctSigned, formatUsd, signOf } from '../utils/portfolioFormat';
 import { RETURN_RANGES, ReturnPoint, ReturnRange, returnsPath } from '../utils/returnsChart';
 
-type Returns = { range: string; pct?: string | null; gainUsd?: string | null; asOf?: string | null; points: ReturnPoint[] };
+type Returns = {
+  range: string; pct?: string | null; gainUsd?: string | null; asOf?: string | null; points: ReturnPoint[];
+  // Total only: what was bought in all, and since when.
+  investedUsd?: string | null; since?: string | null;
+};
 
 const CHART_HEIGHT = 120;
 const GAIN = colors.successText;
@@ -38,6 +42,23 @@ export function InvestorReturnsCard({ userId, refreshKey = 0 }: Props) {
       const requested = generation.current;
       setLoading(true);
       try {
+        if (key === 'all') {
+          // Since the first trade, from the trade record: no daily line.
+          const { data } = await client.query({
+            query: GET_INVESTOR_TOTAL_RETURN,
+            variables: { userId },
+            fetchPolicy: 'network-only',
+            context: { queryDeduplication: false },
+          });
+          if (generation.current !== requested) return;
+          const total = data?.investorTotalReturn;
+          setByRange((current) => ({
+            ...current,
+            all: total ? { range: 'all', pct: total.pct, gainUsd: total.gainUsd, investedUsd: total.investedUsd,
+              since: total.since, points: [] } : { range: 'all', pct: null, points: [] },
+          }));
+          return;
+        }
         const { data } = await client.query({
           query: GET_INVESTOR_RETURNS,
           variables: { userId, range: key },
@@ -51,7 +72,10 @@ export function InvestorReturnsCard({ userId, refreshKey = 0 }: Props) {
         if (value === null) setHidden(true);
         setByRange((current) => ({ ...current, [key]: value }));
       } catch {
-        if (generation.current === requested) setHidden(true);
+        if (generation.current !== requested) return;
+        // Total is its own query: failing it (an older server) only blanks that tab.
+        if (key === 'all') setByRange((current) => ({ ...current, all: { range: 'all', pct: null, points: [] } }));
+        else setHidden(true);
       } finally {
         if (generation.current === requested) setLoading(false);
       }
@@ -109,19 +133,32 @@ export function InvestorReturnsCard({ userId, refreshKey = 0 }: Props) {
         <>
           <Text style={[styles.pct, { color: tone }]}>{known ? formatPctSigned(current?.pct) : '--'}</Text>
           <Text style={styles.sub}>
-            {known ? `${gain ?? ''} en ${rangeLabel}` : 'Aún no hay datos suficientes para este periodo'}
+            {!known
+              ? 'Aún no hay datos suficientes para este periodo'
+              : range === 'all'
+                ? [
+                  `${gain ?? ''}${current?.since ? ` desde ${formatMemberSince(current.since)}` : ''}`,
+                  current?.investedUsd ? `sobre ${formatUsd(current.investedUsd)} invertidos` : null,
+                ].filter(Boolean).join(' · ')
+                : `${gain ?? ''} en ${rangeLabel}`}
           </Text>
-          <View
-            style={styles.chart}
-            onLayout={(e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width))}
-          >
-            {path ? (
-              <Svg width={width} height={CHART_HEIGHT}>
-                <Path d={path} stroke={tone} strokeWidth={2.5} fill="none" strokeLinejoin="round" strokeLinecap="round" />
-              </Svg>
-            ) : null}
-          </View>
-          <Text style={styles.note}>Sobre lo invertido en acciones, Bitcoin y oro. No cuenta tus dólares.</Text>
+          {range === 'all' ? null : (
+            <View
+              style={styles.chart}
+              onLayout={(e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width))}
+            >
+              {path ? (
+                <Svg width={width} height={CHART_HEIGHT}>
+                  <Path d={path} stroke={tone} strokeWidth={2.5} fill="none" strokeLinejoin="round" strokeLinecap="round" />
+                </Svg>
+              ) : null}
+            </View>
+          )}
+          <Text style={styles.note}>
+            {range === 'all'
+              ? 'Lo ganado y perdido en acciones, Bitcoin y oro desde la primera compra, vendido o no. No cuenta los dólares.'
+              : 'Sobre lo invertido en acciones, Bitcoin y oro. No cuenta tus dólares.'}
+          </Text>
         </>
       )}
     </View>

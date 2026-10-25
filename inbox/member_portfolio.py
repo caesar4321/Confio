@@ -89,6 +89,8 @@ class Portfolio:
     open_positions: list | None = field(default_factory=list)
     closed_positions: list | None = field(default_factory=list)
     crypto_usd: Decimal | None = Decimal('0')
+    # Explained holdings left off open_positions as dust (under DUST_USD).
+    dust_symbols: list = field(default_factory=list)
 
 
 def personal_wallet(user) -> str | None:
@@ -172,6 +174,9 @@ class _Book:
     sold: Decimal = Decimal('0')
     explained: bool = True
     opened_at: datetime | None = None
+    # Ever unexplained in this symbol's history (unlike `explained`, which a
+    # closed episode resets): all-time totals need the whole record.
+    ever_unexplained: bool = False
 
 
 def walk_trades(trades, now):
@@ -189,10 +194,12 @@ def walk_trades(trades, now):
             poisoned = True
             for book in books.values():
                 book.explained = False
+                book.ever_unexplained = True
             continue
         book = books.setdefault(t.symbol, _Book(explained=not poisoned))
         if t.usd is None:
             book.explained = False
+            book.ever_unexplained = True
         if t.kind.endswith('_buy'):
             if book.units <= 0:
                 book.opened_at = t.when
@@ -205,6 +212,7 @@ def walk_trades(trades, now):
         if book.units <= 0 or book.units < t.units * (1 - UNITS_TOLERANCE):
             # Sold more than Confío's ledger holds: units came from outside.
             book.explained = False
+            book.ever_unexplained = True
             book.units = max(book.units - t.units, Decimal('0'))
             continue
         share = min(t.units / book.units, Decimal('1'))
@@ -244,6 +252,8 @@ class _CryptoPart:
     holds: list
     open_holds: list
     trades: list | None
+    # Explained holdings left off open_positions as dust.
+    dust_symbols: list = field(default_factory=list)
 
 
 def crypto_part(wallet: str, now) -> _CryptoPart:
@@ -282,6 +292,7 @@ def crypto_part(wallet: str, now) -> _CryptoPart:
     total: Decimal | None = Decimal('0') if raw is not None and prices is not None else None
     change: Decimal | None = total
     positions = []
+    dust = []
     for symbol, base in sorted((raw or {}).items()):
         token = by_symbol(symbol, include_unlisted=True)
         if token is None or not base:
@@ -313,27 +324,34 @@ def crypto_part(wallet: str, now) -> _CryptoPart:
                 position.pnl_pct = (value - book.cost) / book.cost * 100
         if value is None or value >= DUST_USD:
             positions.append(position)
+        elif position.invested_usd is not None:
+            dust.append(position.symbol)       # explained, worth under DUST_USD
     return _CryptoPart(
         total=total, change_24h=change, open_positions=positions if raw is not None else None,
         closed=closed, holds=holds,
         open_holds=open_hold_seconds(books, held_units, now) if raw is not None else [],
-        trades=trades,
+        trades=trades, dust_symbols=dust,
     )
 
 
-def build_portfolio(user) -> Portfolio | None:
+def build_portfolio(user, *, stock_trades=None, crypto=None, now=None) -> Portfolio | None:
+    """`stock_trades` / `crypto`: a ledger snapshot already read (total_return
+    values holdings against the very trades it adds up)."""
     from cusd_plus.gm_holdings import STALE_AFTER, complete_holdings
     from cusd_plus.stock_month import confirmed_trades
 
     wallet = personal_wallet(user)
     if not wallet:
         return None
-    now = timezone.now()
-    try:
-        trades = confirmed_trades(wallet)
-    except Exception:  # noqa: BLE001
-        logger.warning('portfolio: trade ledger unreadable', exc_info=True)
-        trades = None
+    now = now or timezone.now()
+    if stock_trades is not None:
+        trades = stock_trades
+    else:
+        try:
+            trades = confirmed_trades(wallet)
+        except Exception:  # noqa: BLE001
+            logger.warning('portfolio: trade ledger unreadable', exc_info=True)
+            trades = None
     # A complete scan only: a list scan may skip a failing token, and a
     # skipped holding would publish as a confident, too-low total.
     try:
@@ -353,6 +371,7 @@ def build_portfolio(user) -> Portfolio | None:
     books, closed, holds = walk_trades(trades or [], now)
 
     open_positions = []
+    dust_symbols = []
     known = held is not None and market is not None
     stocks_total: Decimal | None = Decimal('0') if known else None
     change_24h: Decimal | None = Decimal('0') if known else None
@@ -390,7 +409,10 @@ def build_portfolio(user) -> Portfolio | None:
                 position.pnl_pct = (value - book.cost) / book.cost * 100
         if value is None or value >= DUST_USD:
             open_positions.append(position)
-    crypto = crypto_part(wallet, now)
+        elif position.invested_usd is not None:
+            # Left off the list as dust, but explained: still a holding.
+            dust_symbols.append(symbol)
+    crypto = crypto if crypto is not None else crypto_part(wallet, now)
     if crypto.open_positions is not None:
         open_positions.extend(crypto.open_positions)
     open_positions.sort(key=lambda p: p.value_usd or Decimal('0'), reverse=True)
@@ -435,6 +457,7 @@ def build_portfolio(user) -> Portfolio | None:
         open_positions=open_positions if held is not None and crypto.open_positions is not None else None,
         closed_positions=closed_positions[:50] if ledgers_known else None,
         crypto_usd=crypto.total,
+        dust_symbols=dust_symbols + list(crypto.dust_symbols),
     )
 
 
@@ -445,3 +468,72 @@ def _coarse_hold(holds) -> int | None:
     if not holds:
         return None
     return int(round(sum(holds) / len(holds) / 3600)) * 3600
+
+
+@dataclass
+class TotalReturn:
+    gain_usd: Decimal
+    invested_usd: Decimal
+    pct: Decimal | None
+    since: object          # date of the first trade
+
+
+def total_return(user) -> TotalReturn | None:
+    """All-time result of the investment sleeve (stocks + Bitcoin & gold):
+    the open positions' value now, plus everything received from sales,
+    minus everything ever bought. Percent is on everything bought. None
+    when any part can't be stated exactly: a trade with no known price, a
+    symbol the ledger can't read, units from outside Confío, or an open
+    position that can't be valued (then the app shows "--", never a guess)."""
+    from cusd_plus.stock_month import confirmed_trades
+
+    wallet = personal_wallet(user)
+    if not wallet:
+        return None
+    now = timezone.now()
+    try:
+        stock_trades = confirmed_trades(wallet)
+    except Exception:  # noqa: BLE001
+        return None
+    crypto = crypto_part(wallet, now)
+    if stock_trades is None or crypto.trades is None:
+        return None
+    trades = list(stock_trades) + list(crypto.trades)
+    if not trades:
+        return None
+    if any(t.usd is None or t.symbol.startswith('?') for t in trades):
+        return None
+    books = {}
+    for ledger in (stock_trades, crypto.trades):
+        ledger_books, _, _ = walk_trades(ledger, now)
+        books.update(ledger_books)
+    if any(not book.explained or book.ever_unexplained for book in books.values()):
+        return None
+    # The same ledger snapshot: a trade confirming meanwhile can't be valued
+    # in holdings yet missing from the cash flows (or the reverse).
+    portfolio = build_portfolio(user, stock_trades=stock_trades, crypto=crypto, now=now)
+    if portfolio is None or portfolio.open_positions is None:
+        return None
+    value = Decimal('0')
+    held = set()
+    for position in portfolio.open_positions:
+        # Every holding must be one the ledger explains (bought in Confío),
+        # and priced now.
+        if position.value_usd is None or position.invested_usd is None:
+            return None
+        value += position.value_usd
+        held.add(position.symbol)
+    # A position the ledger says is still open must be among them (dust under
+    # DUST_USD is left out of the list and is worth nothing here).
+    held.update(portfolio.dust_symbols)        # worth under DUST_USD: nothing to add
+    for symbol, book in books.items():
+        if book.units > 0 and symbol not in held and book.cost >= DUST_USD:
+            return None
+    bought = sum((t.usd for t in trades if t.kind.endswith('_buy')), Decimal('0'))
+    sold = sum((t.usd for t in trades if not t.kind.endswith('_buy')), Decimal('0'))
+    if bought <= 0:
+        return None
+    gain = value + sold - bought
+    first = min(t.when for t in trades)
+    return TotalReturn(gain_usd=gain, invested_usd=bought, pct=gain / bought * 100,
+                       since=timezone.localdate(first))

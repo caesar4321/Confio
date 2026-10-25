@@ -200,3 +200,66 @@ class CryptoPortfolioTests(CommunityTestBase):
             part = member_portfolio.crypto_part('0x' + '1' * 40, NOW)
         scan.assert_not_called()
         self.assertEqual((part.total, part.open_positions), (Decimal('0'), []))
+
+
+class TotalReturnTests(CommunityTestBase):
+    def total(self, trades, held, market=MARKET):
+        with patch.object(member_portfolio, 'personal_wallet', return_value='0xabc'), \
+                patch('cusd_plus.stock_month.confirmed_trades', return_value=trades), \
+                patch('cusd_plus.gm_holdings.complete_holdings', return_value=(held, {})), \
+                patch.object(member_portfolio, '_market', return_value=market), \
+                patch.object(member_portfolio, 'dollars_usd', return_value=Decimal('0')), \
+                patch.object(member_portfolio, 'presale_totals', return_value=(Decimal('0'), Decimal('0'))):
+            return member_portfolio.total_return(make_user())
+
+    def test_realized_plus_open_value_on_everything_bought(self):
+        # Bought NVDA $100 + $140 (now 2 × $120 = $240), TSLA $10 sold for $15.
+        result = self.total([trade('stock_buy', '1', '100'), trade('stock_buy', '1', '140', hours=1),
+                             trade('stock_buy', '1', '10', symbol='TSLAon', hours=2),
+                             trade('stock_sell', '1', '15', symbol='TSLAon', hours=3)],
+                            {'NVDAon': Decimal('2')})
+        self.assertEqual((result.gain_usd, result.invested_usd), (Decimal('5'), Decimal('250')))
+        self.assertEqual(result.pct, Decimal('2'))
+        self.assertEqual(result.since, timezone.localdate(NOW - timedelta(hours=48)))
+
+    def test_a_partial_sale_counts_its_proceeds(self):
+        # 2 NVDA for $200, 1 sold for $150, 1 left worth $120: +$70 on $200.
+        result = self.total([trade('stock_buy', '2', '200'), trade('stock_sell', '1', '150', hours=1)],
+                            {'NVDAon': Decimal('1')})
+        self.assertEqual((result.gain_usd, result.pct), (Decimal('70'), Decimal('35')))
+
+    def test_anything_unexplained_is_unknown(self):
+        # Units from outside, a trade without a price, an open book not held.
+        self.assertIsNone(self.total([trade('stock_buy', '1', '100')], {'NVDAon': Decimal('3')}))
+        self.assertIsNone(self.total([trade('stock_buy', '1', None)], {'NVDAon': Decimal('1')}))
+        self.assertIsNone(self.total([trade('stock_buy', '1', '100')], {}))
+        self.assertIsNone(self.total([], {}))
+
+    def test_an_outside_sale_in_a_closed_episode_still_makes_it_unknown(self):
+        # Sold a unit from outside, then bought and sold one in Confío.
+        self.assertIsNone(self.total([trade('stock_sell', '1', '100'), trade('stock_buy', '1', '100', hours=1),
+                                      trade('stock_sell', '1', '120', hours=2)], {}))
+
+    def test_holdings_are_valued_against_the_same_ledger_snapshot(self):
+        calls = []
+
+        def ledger(wallet):
+            calls.append(wallet)
+            return [trade('stock_buy', '1', '100')]
+        with patch.object(member_portfolio, 'personal_wallet', return_value='0xabc'), \
+                patch('cusd_plus.stock_month.confirmed_trades', side_effect=ledger), \
+                patch('cusd_plus.gm_holdings.complete_holdings', return_value=({'NVDAon': Decimal('1')}, {})), \
+                patch.object(member_portfolio, '_market', return_value=MARKET), \
+                patch.object(member_portfolio, 'dollars_usd', return_value=Decimal('0')), \
+                patch.object(member_portfolio, 'presale_totals', return_value=(Decimal('0'), Decimal('0'))):
+            member_portfolio.total_return(make_user())
+        self.assertEqual(len(calls), 1)
+
+    def test_an_explained_dust_leftover_does_not_blank_the_total(self):
+        # 1 NVDA for $100, 0.9999 sold for $110, 0.0001 left (worth $0.012 → kept;
+        # make it dust by pricing at $50): Total still counts the sale.
+        market = dict(MARKET, NVDAon={**MARKET['NVDAon'], 'price': Decimal('50')})
+        result = self.total([trade('stock_buy', '1', '100'), trade('stock_sell', '0.9999', '110', hours=1)],
+                            {'NVDAon': Decimal('0.0001')}, market=market)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.gain_usd, Decimal('10'))     # the $0.005 leftover adds nothing

@@ -1140,6 +1140,27 @@ class InvestorReturnsType(graphene.ObjectType):
     points = graphene.List(graphene.NonNull(InvestorReturnPointType), required=True)
 
 
+class InvestorTotalReturnType(graphene.ObjectType):
+    """All-time result since the member's first trade: realized plus open
+    positions' value, on everything bought. Null when it can't be stated
+    exactly (the app shows "--")."""
+    pct = graphene.String()
+    gain_usd = graphene.String()
+    invested_usd = graphene.String()
+    since = graphene.Date()
+
+
+def build_investor_total_return(viewer, user_id):
+    target = _portfolio_target(viewer, user_id)
+    if target is None:
+        return None
+    result = member_portfolio.total_return(target)
+    if result is None:
+        return InvestorTotalReturnType()
+    return InvestorTotalReturnType(pct=_pct(result.pct), gain_usd=_money(result.gain_usd),
+                                   invested_usd=_money(result.invested_usd), since=result.since)
+
+
 def build_investor_returns(viewer, user_id, range_key):
     from . import portfolio_returns
 
@@ -2082,6 +2103,8 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
     # Its own field for the same reason. range: '24h' | '7d' | '30d'.
     investor_returns = graphene.Field(InvestorReturnsType, user_id=graphene.ID(required=True),
                                       range=graphene.String(required=True))
+    # Its own field: an older server only loses the Total tab.
+    investor_total_return = graphene.Field(InvestorTotalReturnType, user_id=graphene.ID(required=True))
     community_member_posts = graphene.Field(
         DiscoverFeedPageType,
         required=True,
@@ -2257,6 +2280,10 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
     @login_required
     def resolve_investor_profile(self, info, user_id):
         return build_investor_profile(info.context.user, user_id)
+
+    @login_required
+    def resolve_investor_total_return(self, info, user_id):
+        return build_investor_total_return(info.context.user, user_id)
 
     @login_required
     def resolve_investor_returns(self, info, user_id, range):  # noqa: A002 — GraphQL argument name

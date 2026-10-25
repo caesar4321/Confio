@@ -5424,3 +5424,15 @@ export const GET_CRYPTO_TICKERS = gql`
     }
   }
 `;
+
+// Total since the first trade (its own query: an older server only loses the tab).
+export const GET_INVESTOR_TOTAL_RETURN = gql`
+  query GetInvestorTotalReturn($userId: ID!) {
+    investorTotalReturn(userId: $userId) {
+      pct
+      gainUsd
+      investedUsd
+      since
+    }
+  }
+`;
