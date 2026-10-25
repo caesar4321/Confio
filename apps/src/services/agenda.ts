@@ -19,8 +19,8 @@ export const AGENDA_RECENTS = gql`query AgendaRecents {
 }`;
 
 export const SAVE_VE_AGENDA_ENTRY = gql`mutation SaveVePagomovilAgendaEntry(
-  $id: String, $label: String, $relationship: String!, $holderName: String,
-  $cedula: String!, $phone: String!, $bankCode: String!
+  $id: String, $label: String, $relationship: String, $holderName: String,
+  $cedula: String, $phone: String!, $bankCode: String!
 ) {
   saveVePagomovilAgendaEntry(
     id: $id, label: $label, relationship: $relationship, holderName: $holderName,
@@ -29,7 +29,7 @@ export const SAVE_VE_AGENDA_ENTRY = gql`mutation SaveVePagomovilAgendaEntry(
 }`;
 
 export const SAVE_DESTINATION_TO_AGENDA = gql`mutation SaveDestinationToAgenda(
-  $destinationId: String!, $label: String, $relationship: String!
+  $destinationId: String!, $label: String, $relationship: String
 ) {
   saveDestinationToAgenda(destinationId: $destinationId, label: $label, relationship: $relationship) {
     success errors entry { ${ENTRY_FIELDS} }
@@ -124,4 +124,13 @@ export const LOCAL_FIELD_COPY: Record<string, { label: string; placeholder: stri
   br_pix: { label: 'Chave Pix', placeholder: 'CPF, celular, e-mail o clave aleatoria' },
   mx_clabe: { label: 'CLABE', placeholder: '18 dígitos', keyboard: 'number-pad' },
   ar_cvu: { label: 'CVU o CBU', placeholder: '22 dígitos', keyboard: 'number-pad' },
+};
+
+/** The person's verified Venezuelan cédula ('' without one). */
+export const AGENDA_OWN_VE_CEDULA = gql`query AgendaOwnVeCedula { agendaOwnVeCedula }`;
+
+/** Same person: compare digits only (V/E is how banks write it). */
+export const sameCedula = (a?: string | null, b?: string | null) => {
+  const left = String(a || '').replace(/\D/g, '');
+  return !!left && left === String(b || '').replace(/\D/g, '');
 };

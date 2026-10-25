@@ -6,7 +6,7 @@ import { useApolloClient } from '@apollo/client';
 import { Text } from '../common/AppText';
 import { colors } from '../../config/theme';
 import {
-  AGENDA_ENTRIES, AgendaEntry, AgendaRelationship, SAVE_DESTINATION_TO_AGENDA, useAgendaAccountKey,
+  AGENDA_ENTRIES, AgendaEntry, SAVE_DESTINATION_TO_AGENDA, useAgendaAccountKey,
 } from '../../services/agenda';
 
 /**
@@ -36,12 +36,13 @@ export function SaveDestinationToAgenda({ destinationId }: { destinationId: stri
 
   useEffect(() => { void load(); }, [load]);
 
-  const save = async (relationship: AgendaRelationship) => {
+  // Whose account it is comes from the holder check, so nothing is asked.
+  const save = async () => {
     setState('saving');
     try {
       const { data } = await client.mutate({
         mutation: SAVE_DESTINATION_TO_AGENDA,
-        variables: { destinationId, relationship },
+        variables: { destinationId },
         fetchPolicy: 'no-cache',
       });
       const result = data?.saveDestinationToAgenda;
@@ -57,11 +58,6 @@ export function SaveDestinationToAgenda({ destinationId }: { destinationId: stri
     }
   };
 
-  const ask = () => Alert.alert('Guardar en mi Agenda', '¿De quién es esta cuenta?', [
-    { text: 'Cancelar', style: 'cancel' },
-    { text: 'Es mía', onPress: () => { void save('own'); } },
-    { text: 'De otra persona', onPress: () => { void save('third_party'); } },
-  ]);
 
   if (state === 'unknown') return null;
   if (state === 'saved') {
@@ -72,7 +68,7 @@ export function SaveDestinationToAgenda({ destinationId }: { destinationId: stri
     );
   }
   return (
-    <TouchableOpacity accessibilityRole="button" onPress={ask} disabled={state === 'saving'} style={styles.button}>
+    <TouchableOpacity accessibilityRole="button" onPress={() => { void save(); }} disabled={state === 'saving'} style={styles.button}>
       <Icon name="bookmark" size={14} color={colors.primaryDark} />
       <Text style={styles.buttonText}>{state === 'saving' ? 'Guardando…' : 'Guardar en mi Agenda'}</Text>
     </TouchableOpacity>

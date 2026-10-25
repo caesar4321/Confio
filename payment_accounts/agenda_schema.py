@@ -71,10 +71,21 @@ class AgendaQuery(graphene.ObjectType):
     agenda_entries = graphene.List(graphene.NonNull(AgendaEntryType), required=True)
     agenda_recents = graphene.List(graphene.NonNull(AgendaRecentType), required=True)
     agenda_methods = graphene.List(graphene.NonNull(AgendaMethodType), required=True)
+    # The person's verified Venezuelan cédula ('' without one): what "Es mía"
+    # fills in, locked, on a Pago Móvil account.
+    agenda_own_ve_cedula = graphene.String(required=True)
+
+    def resolve_agenda_own_ve_cedula(self, info):
+        try:
+            return agenda.own_ve_cedula(_owner(info))
+        except (AgendaError, PaymentAccountError) as exc:
+            raise GraphQLError(_error(exc))
 
     def resolve_agenda_entries(self, info):
         try:
-            return [_entry(row) for row in agenda.entries(_owner(info))]
+            owner = _owner(info)
+            agenda.sync_relationships(owner)
+            return [_entry(row) for row in agenda.entries(owner)]
         except (AgendaError, PaymentAccountError) as exc:
             raise GraphQLError(_error(exc))
 
@@ -110,14 +121,16 @@ class SaveVePagomovilAgendaEntry(_AgendaMutation):
     class Arguments:
         id = graphene.String()
         label = graphene.String()
-        relationship = graphene.String(required=True)
+        # "own" asks for the person's verified cédula; whose it is is decided
+        # by the server from verified data.
+        relationship = graphene.String()
         holder_name = graphene.String()
-        cedula = graphene.String(required=True)
+        cedula = graphene.String()
         phone = graphene.String(required=True)
         bank_code = graphene.String(required=True)
 
     @classmethod
-    def mutate(cls, root, info, relationship, cedula, phone, bank_code, id=None, label='', holder_name=''):
+    def mutate(cls, root, info, phone, bank_code, relationship=None, cedula='', id=None, label='', holder_name=''):
         try:
             row = agenda.save_ve_pagomovil(
                 _owner(info), entry_id=id, label=label, relationship=relationship, holder_name=holder_name,
@@ -131,10 +144,10 @@ class SaveDestinationToAgenda(_AgendaMutation):
     class Arguments:
         destination_id = graphene.String(required=True)
         label = graphene.String()
-        relationship = graphene.String(required=True)
+        relationship = graphene.String()  # ignored: decided by the holder check
 
     @classmethod
-    def mutate(cls, root, info, destination_id, relationship, label=''):
+    def mutate(cls, root, info, destination_id, relationship=None, label=''):
         try:
             row = agenda.save_destination(_owner(info), destination_id=destination_id, label=label,
                                           relationship=relationship)

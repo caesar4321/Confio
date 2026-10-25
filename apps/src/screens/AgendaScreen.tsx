@@ -25,6 +25,7 @@ import { CountryFlag } from '../components/CountryFlag';
 import { EmptyState } from '../components/EmptyState';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { AddPayoutMethodModal } from '../components/AddPayoutMethodModal';
+import { useOwnVeCedula } from '../components/agenda/VeAgendaPicker';
 import { useAccount } from '../contexts/AccountContext';
 import { DELETE_BANK_INFO, GET_USER_BANK_ACCOUNTS, SET_DEFAULT_BANK_INFO } from '../apollo/queries';
 import { VE_BANKS } from '../services/vePagoMovilTopUp';
@@ -116,15 +117,16 @@ export default function AgendaScreen() {
   const [methodsFailed, setMethodsFailed] = useState(false);
   const [addCountry, setAddCountry] = useState<string | null>(null);
   const [localForm, setLocalForm] = useState<{
-    method: AgendaMethod; value: string; relationship: AgendaRelationship; label: string; error: string;
+    method: AgendaMethod; value: string; label: string; error: string;
   } | null>(null);
   const [veForm, setVeForm] = useState<VeForm | null>(null);
   const [veError, setVeError] = useState('');
   const [saving, setSaving] = useState(false);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bankPicker, setBankPicker] = useState(false);
-  const [editEntry, setEditEntry] = useState<{ entry: AgendaEntry; label: string; relationship: AgendaRelationship } | null>(null);
-  const [saveRecent, setSaveRecent] = useState<AgendaRecent | null>(null);
+  const [editEntry, setEditEntry] = useState<{ entry: AgendaEntry; label: string } | null>(null);
+  // "Es mía" on a Pago Móvil account is this cédula, locked.
+  const ownCedula = useOwnVeCedula();
 
   const load = useCallback(async () => {
     const mine = ++seq.current;
@@ -169,7 +171,6 @@ export default function AgendaScreen() {
     setBankModal(null);
     setVeForm(null);
     setEditEntry(null);
-    setSaveRecent(null);
     // Reload for the new account (this also supersedes a focus load that
     // started on the same render).
     void load();
@@ -215,7 +216,7 @@ export default function AgendaScreen() {
       }));
     } else {
       setLocalForm({
-        method, value: '', relationship: method.allowsThirdParty ? tab : 'own', label: '', error: '',
+        method, value: '', label: '', error: '',
       });
     }
   };
@@ -243,7 +244,7 @@ export default function AgendaScreen() {
       }
       const { data } = await client.mutate({
         mutation: SAVE_DESTINATION_TO_AGENDA,
-        variables: { destinationId: destination.id, relationship: localForm.relationship, label: localForm.label.trim() },
+        variables: { destinationId: destination.id, label: localForm.label.trim() },
         fetchPolicy: 'no-cache',
       });
       const result = data?.saveDestinationToAgenda;
@@ -253,11 +254,15 @@ export default function AgendaScreen() {
       }
       setAddSheet(false);
       setLocalForm(null);
-      setTab(localForm.relationship);
+      // Whose it is came from the holder check: show it where it landed.
+      const landed: AgendaRelationship = result.entry?.relationship === 'own' ? 'own' : 'third_party';
+      setTab(landed);
       // Saved either way; a holder not confirmed yet is checked again before
       // every send, and the person is told so.
       setBanner(destination.verification === 'verified' && destination.holderName ? {
-        variant: 'success', message: `${destination.holderName} guardada en tu Agenda`,
+        variant: 'success',
+        message: landed === 'own' ? 'Está a tu nombre: la guardamos en «Mías»'
+          : `${destination.holderName} guardada en «Otras personas»`,
       } : {
         variant: 'success',
         message: 'Guardada. Aún no confirmamos el titular: lo verificamos antes de cada envío.',
@@ -346,7 +351,11 @@ export default function AgendaScreen() {
       id: entry.id, label: entry.label, relationship: entry.relationship, holderName: entry.holderName,
       cedula: entry.cedula || '', phone: localVePhone(entry.phone),
       bank: list.find(b => b.code === entry.bankCode) || null,
-    } : { label: '', relationship, holderName: '', cedula: '', phone: '', bank: null });
+    } : {
+      // "Es mía" needs a verified Venezuelan cédula.
+      label: '', relationship: relationship === 'own' && !ownCedula ? 'third_party' : relationship,
+      holderName: '', cedula: '', phone: '', bank: null,
+    });
   };
 
   const edit = (entry: AgendaEntry) => {
@@ -363,7 +372,7 @@ export default function AgendaScreen() {
       void openVeForm(entry);
       return;
     }
-    setEditEntry({ entry, label: entry.label, relationship: entry.relationship });
+    setEditEntry({ entry, label: entry.label });
   };
 
   const send = (entry: AgendaEntry) =>
@@ -381,8 +390,10 @@ export default function AgendaScreen() {
       const { data } = await client.mutate({
         mutation: SAVE_VE_AGENDA_ENTRY,
         variables: {
-          id: veForm.id, label: veForm.label.trim(), relationship: veForm.relationship,
-          holderName: veForm.holderName.trim(), cedula: veForm.cedula.trim(), phone: veForm.phone.trim(),
+          // "own" means the verified cédula: the server fills it in.
+          id: veForm.id, label: veForm.label.trim(), relationship: veForm.relationship === 'own' ? 'own' : null,
+          holderName: veForm.holderName.trim(), cedula: veForm.relationship === 'own' ? '' : veForm.cedula.trim(),
+          phone: veForm.phone.trim(),
           bankCode: veForm.bank.code,
         },
         fetchPolicy: 'no-cache',
@@ -393,7 +404,7 @@ export default function AgendaScreen() {
         return;
       }
       setVeForm(null);
-      setTab(veForm.relationship);
+      setTab(result.entry?.relationship === 'own' ? 'own' : 'third_party');
       setBanner({ variant: 'success', message: veForm.id ? 'Cuenta actualizada' : 'Cuenta guardada en tu Agenda' });
       await load();
     } catch {
@@ -408,23 +419,20 @@ export default function AgendaScreen() {
     setSaving(true);
     const ok = await run(() => client.mutate({
       mutation: UPDATE_AGENDA_ENTRY,
-      variables: { id: editEntry.entry.id, label: editEntry.label.trim(), relationship: editEntry.relationship },
+      variables: { id: editEntry.entry.id, label: editEntry.label.trim() },
     }), 'updateAgendaEntry', 'Cuenta actualizada');
     setSaving(false);
     if (ok) setEditEntry(null);
   };
 
-  const submitRecent = async (relationship: AgendaRelationship) => {
-    if (!saveRecent || saving) return;
+  // One tap: whose account it is comes from its holder check.
+  const saveRecent = async (recent: AgendaRecent) => {
+    if (saving) return;
     setSaving(true);
-    const ok = await run(() => client.mutate({
-      mutation: SAVE_DESTINATION_TO_AGENDA, variables: { destinationId: saveRecent.destinationId, relationship },
+    await run(() => client.mutate({
+      mutation: SAVE_DESTINATION_TO_AGENDA, variables: { destinationId: recent.destinationId },
     }), 'saveDestinationToAgenda', 'Guardada en tu Agenda');
     setSaving(false);
-    if (ok) {
-      setSaveRecent(null);
-      setTab(relationship);
-    }
   };
 
   // ── rendering ─────────────────────────────────────────────────────────────
@@ -510,7 +518,7 @@ export default function AgendaScreen() {
               {[RAIL_NAMES[recent.rail], recent.holderName ? recent.label : ''].filter(Boolean).join('  ·  ')}
             </Text>
           </View>
-          <TouchableOpacity onPress={() => setSaveRecent(recent)} style={styles.saveChip} accessibilityRole="button"
+          <TouchableOpacity onPress={() => { void saveRecent(recent); }} disabled={saving} style={styles.saveChip} accessibilityRole="button"
             accessibilityLabel={`Guardar ${recent.label}`}>
             <Icon name="bookmark" size={13} color={colors.primaryDark} />
             <Text style={styles.saveChipText}>Guardar</Text>
@@ -698,19 +706,14 @@ export default function AgendaScreen() {
             </ScrollView>
           ) : (
             <ScrollView contentContainerStyle={styles.pageContent} keyboardShouldPersistTaps="handled">
-              {localForm.method.allowsThirdParty ? (
-                <>
-                  <Text style={[styles.label, styles.firstLabel]}>¿De quién es?</Text>
-                  <Segment value={localForm.relationship}
-                    onChange={relationship => setLocalForm({ ...localForm, relationship })} />
-                </>
-              ) : null}
-              <Text style={styles.label}>{LOCAL_FIELD_COPY[localForm.method.id]?.label || localForm.method.title}</Text>
+              <Text style={[styles.label, styles.firstLabel]}>{LOCAL_FIELD_COPY[localForm.method.id]?.label || localForm.method.title}</Text>
               <TextInput value={localForm.value} onChangeText={value => setLocalForm({ ...localForm, value, error: '' })}
                 placeholder={LOCAL_FIELD_COPY[localForm.method.id]?.placeholder}
                 keyboardType={LOCAL_FIELD_COPY[localForm.method.id]?.keyboard || 'default'} autoCapitalize="none"
                 placeholderTextColor={colors.textTertiary} style={styles.input} />
-              <Text style={styles.fieldHelp}>Verificamos a nombre de quién está antes de guardarla.</Text>
+              <Text style={styles.fieldHelp}>
+                Verificamos a nombre de quién está: si es tuya va a «Mías»; si no, a «Otras personas».
+              </Text>
               <Text style={styles.label}>Nombre en tu Agenda (opcional)</Text>
               <TextInput value={localForm.label} onChangeText={label => setLocalForm({ ...localForm, label })}
                 placeholder="Mamá, Mi Nequi…" placeholderTextColor={colors.textTertiary} style={styles.input} />
@@ -721,16 +724,7 @@ export default function AgendaScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ── Save a recent recipient ── */}
-      <Sheet visible={!!saveRecent} onClose={() => { if (!saving) setSaveRecent(null); }}
-        title="¿De quién es esta cuenta?" subtitle={saveRecent ? (saveRecent.holderName || saveRecent.label) : ''}>
-        <SheetOption icon="account" title="Es mía" subtitle="Va a «Mías»" disabled={saving}
-          onPress={() => { void submitRecent('own'); }} />
-        <SheetOption icon="account-multiple" title="De otra persona" subtitle="Va a «Otras personas»" disabled={saving}
-          onPress={() => { void submitRecent('third_party'); }} />
-      </Sheet>
-
-      {/* ── Rename / move a local-send recipient ── */}
+      {/* ── Rename a local-send recipient (whose it is comes from its holder) ── */}
       <Sheet visible={!!editEntry} onClose={() => { if (!saving) setEditEntry(null); }} title="Editar cuenta"
         subtitle={editEntry?.entry.subtitle}>
         {editEntry ? (
@@ -738,8 +732,6 @@ export default function AgendaScreen() {
             <Text style={styles.label}>Nombre en tu Agenda</Text>
             <TextInput value={editEntry.label} onChangeText={label => setEditEntry({ ...editEntry, label })}
               placeholder="Mamá, Mi Nequi…" placeholderTextColor={colors.textTertiary} style={styles.input} />
-            <Text style={styles.label}>¿De quién es?</Text>
-            <Segment value={editEntry.relationship} onChange={relationship => setEditEntry({ ...editEntry, relationship })} />
             <PrimaryButton title="Guardar" loading={saving} onPress={() => { void submitEdit(); }} />
           </>
         ) : null}
@@ -759,7 +751,13 @@ export default function AgendaScreen() {
           {veForm ? (
             <ScrollView contentContainerStyle={styles.pageContent} keyboardShouldPersistTaps="handled">
               <Text style={[styles.label, styles.firstLabel]}>¿De quién es?</Text>
-              <Segment value={veForm.relationship} onChange={relationship => setVeForm({ ...veForm, relationship })} />
+              <Segment value={veForm.relationship} ownDisabled={!ownCedula}
+                onChange={relationship => setVeForm({ ...veForm, relationship })} />
+              {!ownCedula ? (
+                <Text style={styles.fieldHelp}>
+                  Para guardar una cuenta como tuya necesitamos tu cédula venezolana verificada.
+                </Text>
+              ) : null}
               {veForm.relationship === 'third_party' ? (
                 <>
                   <Text style={styles.label}>Nombre de la persona</Text>
@@ -768,9 +766,19 @@ export default function AgendaScreen() {
                 </>
               ) : null}
               <Text style={styles.label}>Cédula</Text>
-              <TextInput value={veForm.cedula} onChangeText={cedula => setVeForm({ ...veForm, cedula })}
-                autoCapitalize="characters" placeholder="V12345678" placeholderTextColor={colors.textTertiary}
-                style={styles.input} />
+              {veForm.relationship === 'own' ? (
+                <View style={[styles.input, styles.picker, styles.lockedInput]}>
+                  <Text style={styles.lockedValue}>{ownCedula}</Text>
+                  <Icon name="lock" size={16} color={colors.text.light} />
+                </View>
+              ) : (
+                <TextInput value={veForm.cedula} onChangeText={cedula => setVeForm({ ...veForm, cedula })}
+                  autoCapitalize="characters" placeholder="V12345678" placeholderTextColor={colors.textTertiary}
+                  style={styles.input} />
+              )}
+              {veForm.relationship === 'own' ? (
+                <Text style={styles.fieldHelp}>La de tu verificación de identidad.</Text>
+              ) : null}
               <Text style={styles.label}>Teléfono del Pago Móvil</Text>
               <TextInput value={veForm.phone} onChangeText={phone => setVeForm({ ...veForm, phone })}
                 keyboardType="phone-pad" placeholder="0414 1234567" placeholderTextColor={colors.textTertiary}
@@ -895,13 +903,17 @@ function SheetOption({ icon, title, subtitle, onPress, disabled }: {
   );
 }
 
-function Segment({ value, onChange }: { value: AgendaRelationship; onChange: (v: AgendaRelationship) => void }) {
+function Segment({ value, onChange, ownDisabled = false }: {
+  value: AgendaRelationship; onChange: (v: AgendaRelationship) => void; ownDisabled?: boolean;
+}) {
   return (
     <View style={styles.segment}>
       {(['own', 'third_party'] as AgendaRelationship[]).map(option => (
         <TouchableOpacity key={option} onPress={() => onChange(option)} accessibilityRole="button"
-          accessibilityState={{ selected: value === option }}
-          style={[styles.segmentItem, value === option && styles.segmentActive]}>
+          disabled={option === 'own' && ownDisabled}
+          accessibilityState={{ selected: value === option, disabled: option === 'own' && ownDisabled }}
+          style={[styles.segmentItem, value === option && styles.segmentActive,
+            option === 'own' && ownDisabled && styles.disabled]}>
           <Text style={[styles.segmentText, value === option && styles.segmentTextActive]}>
             {option === 'own' ? 'Es mía' : 'De otra persona'}
           </Text>
@@ -1032,6 +1044,8 @@ const styles = StyleSheet.create({
   },
   backButton: { marginRight: 8 },
   stepHintFlush: { paddingHorizontal: 0 },
+  lockedInput: { backgroundColor: colors.neutralDark },
+  lockedValue: { fontSize: 16, fontWeight: '600', color: colors.text.secondary },
   fieldHelp: { fontSize: 12, color: colors.text.secondary, marginTop: 6 },
 
   // Forms

@@ -11,6 +11,7 @@ import {
   AGENDA_ENTRIES,
   AgendaEntry,
   AgendaRelationship,
+  AGENDA_OWN_VE_CEDULA,
   SAVE_VE_AGENDA_ENTRY,
   VE_PAGOMOVIL_RAIL,
   localVePhone,
@@ -147,18 +148,37 @@ const SEARCH_FROM = 6;
 
 export interface VeAgendaSaveState {
   save: boolean;
-  relationship: AgendaRelationship;
   holderName: string;
 }
 
-export const initialVeAgendaSave = (relationship: AgendaRelationship): VeAgendaSaveState =>
-  ({ save: false, relationship, holderName: '' });
+export const initialVeAgendaSave = (): VeAgendaSaveState => ({ save: false, holderName: '' });
 
-/** "Guardar en mi Agenda", with whose account it is when it may be someone else's. */
-export function VeAgendaSaveToggle({ value, onChange, ownOnly = false, disabled = false }: {
+/** The person's verified Venezuelan cédula ('' without one or before it loads). */
+export function useOwnVeCedula(): string {
+  const client = useApolloClient();
+  const accountKey = useAgendaAccountKey();
+  const [cedula, setCedula] = useState('');
+  useEffect(() => {
+    let alive = true;
+    setCedula('');
+    if (!accountKey) return undefined;
+    client.query({ query: AGENDA_OWN_VE_CEDULA, fetchPolicy: 'network-only' })
+      .then(({ data }) => { if (alive) setCedula(data?.agendaOwnVeCedula || ''); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [client, accountKey]);
+  return cedula;
+}
+
+/**
+ * "Guardar en mi Agenda". Whose account it is is never asked: the cédula
+ * says it. The person's own verified cédula files it under "Mías"; any
+ * other needs the person's name and goes to "Otras personas".
+ */
+export function VeAgendaSaveToggle({ value, onChange, isOwn, disabled = false }: {
   value: VeAgendaSaveState;
   onChange: (next: VeAgendaSaveState) => void;
-  ownOnly?: boolean;
+  isOwn: boolean;
   disabled?: boolean;
 }) {
   return (
@@ -169,43 +189,35 @@ export function VeAgendaSaveToggle({ value, onChange, ownOnly = false, disabled 
           color={value.save ? colors.primaryDark : colors.textSecondary} />
         <Text style={styles.saveText}>Guardar en mi Agenda</Text>
       </TouchableOpacity>
-      {value.save && !ownOnly ? (
-        <>
-          <View style={styles.segment}>
-            {(['own', 'third_party'] as AgendaRelationship[]).map(option => (
-              <TouchableOpacity key={option} accessibilityRole="button" disabled={disabled}
-                accessibilityState={{ selected: value.relationship === option }}
-                onPress={() => onChange({ ...value, relationship: option })}
-                style={[styles.segmentItem, value.relationship === option && styles.segmentActive]}>
-                <Text style={[styles.segmentText, value.relationship === option && styles.segmentTextActive]}>
-                  {option === 'own' ? 'Es mía' : 'De otra persona'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {value.relationship === 'third_party' ? (
+      {value.save ? (
+        isOwn ? (
+          <Text style={styles.saveHint}>Es tu cédula verificada: la guardamos en «Mías».</Text>
+        ) : (
+          <>
             <TextInput accessibilityLabel="Nombre de la persona" value={value.holderName} editable={!disabled}
               onChangeText={holderName => onChange({ ...value, holderName })} placeholder="Nombre de la persona"
               placeholderTextColor={colors.textTertiary} style={styles.nameInput} />
-          ) : null}
-        </>
+            <Text style={styles.saveHint}>La guardamos en «Otras personas».</Text>
+          </>
+        )
       ) : null}
     </View>
   );
 }
 
-export const veAgendaSaveReady = (value: VeAgendaSaveState) =>
-  !value.save || value.relationship === 'own' || value.holderName.trim().length > 1;
+export const veAgendaSaveReady = (value: VeAgendaSaveState, isOwn: boolean) =>
+  !value.save || isOwn || value.holderName.trim().length > 1;
 
 /** Best effort: an order already made never fails because its account could not be saved. */
 export async function saveVeAgendaEntry(client: ApolloClient<any>, value: VeAgendaSaveState,
-  account: { cedula: string; phone: string; bankCode: string }) {
+  account: { cedula: string; phone: string; bankCode: string }, isOwn: boolean) {
   if (!value.save) return;
   try {
     await client.mutate({
       mutation: SAVE_VE_AGENDA_ENTRY,
       variables: {
-        relationship: value.relationship, holderName: value.relationship === 'own' ? '' : value.holderName.trim(),
+        // The server decides whose it is from the cédula.
+        relationship: isOwn ? 'own' : null, holderName: isOwn ? '' : value.holderName.trim(),
         cedula: account.cedula, phone: account.phone, bankCode: account.bankCode,
       },
       fetchPolicy: 'no-cache',
@@ -269,14 +281,7 @@ const styles = StyleSheet.create({
   saveBox: { marginTop: 14 },
   saveRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
   saveText: { fontSize: 15, fontWeight: '600', color: colors.dark },
-  segment: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  segmentItem: {
-    flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 10, alignItems: 'center',
-    backgroundColor: colors.white,
-  },
-  segmentActive: { borderColor: colors.primaryDark, backgroundColor: colors.primaryLight },
-  segmentText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
-  segmentTextActive: { color: colors.primaryDark },
+  saveHint: { fontSize: 12, color: colors.textSecondary, marginTop: 6 },
   nameInput: {
     marginTop: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14,
     minHeight: 48, fontSize: 16, color: colors.dark, backgroundColor: colors.white,

@@ -25,9 +25,10 @@ import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
 import { getSeparators, sanitizeAmountInput } from '../utils/numberLocale';
 import {
-  VeAgendaPicker, VeAgendaSaveToggle, initialVeAgendaSave, saveVeAgendaEntry, veAgendaSaveReady, vePickFields,
+  VeAgendaPicker, VeAgendaSaveToggle, initialVeAgendaSave, saveVeAgendaEntry, useOwnVeCedula, veAgendaSaveReady,
+  vePickFields,
 } from '../components/agenda/VeAgendaPicker';
-import { AgendaEntry } from '../services/agenda';
+import { AgendaEntry, sameCedula } from '../services/agenda';
 import {
   CANCEL_VE_TOP_UP,
   CONFIRM_VE_TOP_UP_KEY,
@@ -93,7 +94,10 @@ export default function VePagoMovilReceiveScreen() {
   const [bank, setBank] = useState<Bank | null>(null);
   const [banks, setBanks] = useState<Bank[]>([]);
   // The payer is usually the person, but may be someone else.
-  const [agendaSave, setAgendaSave] = useState(() => initialVeAgendaSave('own'));
+  const [agendaSave, setAgendaSave] = useState(() => initialVeAgendaSave());
+  // Whose account it is follows from the cédula, never a choice.
+  const ownCedula = useOwnVeCedula();
+  const agendaIsOwn = sameCedula(cedula, ownCedula);
   const [bankPicker, setBankPicker] = useState(false);
   const [code, setCode] = useState(''); // bank reference or C2P key
   // When the Pago Móvil was made: the bank lookup needs the date unless it was today.
@@ -175,14 +179,14 @@ export default function VePagoMovilReceiveScreen() {
   const amountOk = amountValue > 0 && (!min || amountValue >= min) && (!max || amountValue <= max);
   const quoteMatches = !!quote?.success && Number(quote.usdAmount) === amountValue;
   const payerOk = cedula.trim().length >= 6 && phone.replace(/\D/g, '').length >= 10 && !!bank
-    && veAgendaSaveReady(agendaSave);
+    && veAgendaSaveReady(agendaSave, agendaIsOwn);
 
   const pickFromAgenda = (entry: AgendaEntry) => {
     const fields = vePickFields(entry);
     setCedula(fields.cedula);
     setPhone(fields.phone);
     setBank(banks.find(item => item.code === fields.bankCode) || null);
-    setAgendaSave(initialVeAgendaSave('own'));
+    setAgendaSave(initialVeAgendaSave());
   };
 
   const create = async () => {
@@ -220,7 +224,8 @@ export default function VePagoMovilReceiveScreen() {
       }
       setOrder(result);
       setCode('');
-      void saveVeAgendaEntry(client, agendaSave, { cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code });
+      void saveVeAgendaEntry(client, agendaSave, { cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code },
+        agendaIsOwn);
     } catch {
       if (alive.current) setError(GENERIC);
     } finally {
@@ -636,7 +641,7 @@ export default function VePagoMovilReceiveScreen() {
               </Text>
               <Icon name="chevron-down" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
-            <VeAgendaSaveToggle value={agendaSave} onChange={setAgendaSave} disabled={loading} />
+            <VeAgendaSaveToggle value={agendaSave} onChange={setAgendaSave} isOwn={agendaIsOwn} disabled={loading} />
           </View>
         </View>
       </RampReveal>

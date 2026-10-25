@@ -30,9 +30,10 @@ import { useAccount } from '../contexts/AccountContext';
 import { getSeparators, sanitizeAmountInput } from '../utils/numberLocale';
 import { VE_BANKS } from '../services/vePagoMovilTopUp';
 import {
-  VeAgendaPicker, VeAgendaSaveToggle, initialVeAgendaSave, saveVeAgendaEntry, veAgendaSaveReady, vePickFields,
+  VeAgendaPicker, VeAgendaSaveToggle, initialVeAgendaSave, saveVeAgendaEntry, useOwnVeCedula, veAgendaSaveReady,
+  vePickFields,
 } from '../components/agenda/VeAgendaPicker';
-import { AgendaEntry } from '../services/agenda';
+import { AgendaEntry, sameCedula } from '../services/agenda';
 import {
   CANCEL_VE_SEND,
   CREATE_VE_SEND,
@@ -109,7 +110,10 @@ export default function VePagoMovilSendScreen() {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bankPicker, setBankPicker] = useState(false);
   const [checked, setChecked] = useState(false);
-  const [agendaSave, setAgendaSave] = useState(() => initialVeAgendaSave('third_party'));
+  const [agendaSave, setAgendaSave] = useState(() => initialVeAgendaSave());
+  // Whose account it is follows from the cédula, never a choice.
+  const ownCedula = useOwnVeCedula();
+  const agendaIsOwn = sameCedula(cedula, ownCedula);
 
   const boot = useCallback(async (keepError = false) => {
     setBooting(true);
@@ -178,7 +182,7 @@ export default function VePagoMovilSendScreen() {
     && amountValue <= available + 1e-9;
   const quoteMatches = !!quote?.success && Number(quote.usdAmount) === amountValue;
   const recipientOk = cedula.trim().length >= 6 && phone.replace(/\D/g, '').length >= 10 && !!bank
-    && veAgendaSaveReady(agendaSave);
+    && veAgendaSaveReady(agendaSave, agendaIsOwn);
 
   const pickFromAgenda = (entry: AgendaEntry) => {
     const fields = vePickFields(entry);
@@ -186,7 +190,7 @@ export default function VePagoMovilSendScreen() {
     setPhone(fields.phone);
     setBank(banks.find(item => item.code === fields.bankCode) || null);
     // Already saved: nothing to save again.
-    setAgendaSave(initialVeAgendaSave('third_party'));
+    setAgendaSave(initialVeAgendaSave());
   };
 
   /** Claim the order's single funding, pay it, tell the server. */
@@ -299,7 +303,8 @@ export default function VePagoMovilSendScreen() {
       }
       created = result.orderId;
       setOrder(result);
-      void saveVeAgendaEntry(client, agendaSave, { cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code });
+      void saveVeAgendaEntry(client, agendaSave, { cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code },
+        agendaIsOwn);
       await fund(result.orderId);
     } catch {
       // Once the order exists, money may be moving: only the status decides.
@@ -387,7 +392,7 @@ export default function VePagoMovilSendScreen() {
               </Text>
               <Icon name="chevron-down" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
-            <VeAgendaSaveToggle value={agendaSave} onChange={setAgendaSave} disabled={loading} />
+            <VeAgendaSaveToggle value={agendaSave} onChange={setAgendaSave} isOwn={agendaIsOwn} disabled={loading} />
           </View>
         </View>
       </RampReveal>
