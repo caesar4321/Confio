@@ -35,5 +35,3 @@ export const formatUsdPrice = (value: number | null | undefined): string =>
 /** "0,9" from 90 bps. */
 export const feePctLabel = (feeBps: number): string => formatPercent(feeBps / 100, 2);
 
-/** A buy and a later sale each pay Confío's fee once. */
-export const roundTripLabel = (feeBps: number): string => formatPercent((feeBps * 2) / 100, 2);

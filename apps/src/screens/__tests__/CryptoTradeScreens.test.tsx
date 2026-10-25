@@ -134,7 +134,7 @@ describe('BuyCryptoScreen', () => {
     expect(shown).toContain('Confío Dollar+');
     expect(shown).toContain('Comisión de Confío ');
     expect(shown).toContain('Costo de mercado');
-    expect(shown).toContain('Comprar y luego vender cuesta ≈ ');
+    expect(shown).not.toContain('Comprar y luego vender');
     await press(tree, 'crypto-buy-confirm');
     expect(mockBuy).toHaveBeenCalledTimes(1);
     expect(mockBuy.mock.calls[0][0]).toMatchObject({

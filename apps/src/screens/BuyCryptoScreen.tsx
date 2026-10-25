@@ -57,7 +57,6 @@ import {
   formatUnits,
   formatUsdPrice,
   fundingDollarName,
-  roundTripLabel,
 } from '../utils/cryptoPresentation';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
@@ -358,12 +357,6 @@ export const BuyCryptoScreen = () => {
           {priceMoved && <Text style={styles.hintError} testID="crypto-price-moved">{priceMoved}</Text>}
           {tradeError && <Text style={styles.hintError}>{tradeError}</Text>}
 
-          {feeBps != null && (
-            <Text style={styles.roundTrip}>
-              Comprar y luego vender cuesta ≈ {roundTripLabel(feeBps)}% + costo de mercado.
-            </Text>
-          )}
-
           <View style={{ flex: 1 }} />
 
           <TouchableOpacity
@@ -455,7 +448,6 @@ const styles = StyleSheet.create({
   quoteLabelStrong: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
   quoteValueStrong: { fontSize: 16, fontWeight: '800', color: colors.primaryDark },
   hintError: { fontSize: 13, color: '#DC2626', marginBottom: 14, marginLeft: 4 },
-  roundTrip: { fontSize: 12, color: colors.text.secondary, marginBottom: 14, marginLeft: 4, lineHeight: 17 },
   confirmBtn: {
     flexDirection: 'row',
     alignItems: 'center',

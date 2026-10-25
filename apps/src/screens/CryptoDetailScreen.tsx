@@ -37,7 +37,6 @@ import {
   formatUnits,
   formatUsdPrice,
   fundingDollarName,
-  roundTripLabel,
 } from '../utils/cryptoPresentation';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
@@ -257,7 +256,7 @@ export const CryptoDetailScreen = () => {
                 <Text style={styles.fundingTitle}>Pagas con · {funding}</Text>
                 <Text style={styles.fundingSub}>
                   {feeBps != null
-                    ? `Comisión de Confío ${feePctLabel(feeBps)}% al comprar y al vender. Comprar y luego vender cuesta ≈ ${roundTripLabel(feeBps)}% + costo de mercado.`
+                    ? `Comisión de Confío ${feePctLabel(feeBps)}% al comprar y al vender.`
                     : 'Al vender, el dinero vuelve a tu ' + funding + '.'}
                 </Text>
               </View>
