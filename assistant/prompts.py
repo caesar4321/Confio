@@ -83,6 +83,7 @@ Nombre del usuario: {first_name}. Cuenta activa: {account_label}. País del tel�
 
 # Situation-based investment guidance (Julian, 2026-10-06; docs/designs/confio-assistant-three-jobs.md).
 INVEST_RULES_GUIDANCE = """- Ahorro e inversión: Confío Dollar+ es ahorro y las acciones y ETF de EE.UU. tokenizadas son inversión; si la persona los mezcla ("invertir en Confío Dollar+"), aclara la diferencia en una frase. Puedes orientar según la situación del usuario. Llama `get_portfolio` antes de escribir la respuesta, para basarte en sus números reales (saldo, gasto mensual promedio, lo que ya tiene). Puedes decir si un TIPO de instrumento le encaja o no y por qué (una acción sola, un ETF amplio, Confío Dollar+, cuánto colchón dejar para sus gastos; por ejemplo: "gastas unos US$420 al mes y tienes US$600; poner casi todo en una sola acción es mucho riesgo para dinero que podrías necesitar"), comparar instrumentos (una acción sola, un ETF amplio, Confío Dollar+) explicando concentración, volatilidad y plazo, y tener en cuenta la preferencia de riesgo que te diga.
+- Si `get_stock_quote` encuentra la acción o ETF y la persona quiere invertir en ella o verla, ábrela con `navigate` (destination "stock" y su ticker) en vez de decirle que la busque. Nunca digas que una acción no está disponible después de haberla encontrado.
 - Sobre una acción concreta que nombre (Apple, NVDA…) solo das información y riesgos (concentración, volatilidad, cuánto pesaría en su saldo); nunca un veredicto de "te encaja", "es buena para ti" o "vale la pena".
 - Nunca digas que compre, venda o mantenga una acción concreta, ni cuándo; nunca des precios objetivo ni predicciones; nunca sugieras un porcentaje o monto para poner en una acción específica; nunca prometas rendimientos. La decisión y la compra son del usuario, en la pantalla de la acción (puedes abrirla con `navigate`).
 - Acciones y Confío Dollar+ solo si están disponibles en su país (lo dice `get_portfolio`); si no lo están, explícalo y no los promociones. No digas que no están disponibles sin haberlo visto en `get_portfolio`. Si no lo están, da el motivo que devuelve (`motivo_no_disponible`) y no lo atribuyas a su país si el motivo es desde dónde se conecta. `get_portfolio` habla solo de esta persona: si pregunta por otro país, usa la lista de las respuestas aprobadas. No le sugieras buscar opciones fuera de Confío.
@@ -147,7 +148,8 @@ def _paid_offer_sections(destinations, ia_plus_bundled=False):
 
 # Phone countries with no Recargar/Retirar in the app (faq.md): said per user, so
 # a generic "recarga y retira con medios locales" never reaches them.
-NO_RAMP_COUNTRIES = {'VE', 'NI', 'PA', 'CU'}
+# Ecuador too (2026-10-26): no local top-up there, and Kleber was sent to Recargar.
+NO_RAMP_COUNTRIES = {'VE', 'NI', 'PA', 'CU', 'EC'}
 BO_RAILS_NOTE = ('En Bolivia hoy no se puede retirar a bolivianos ni pagar QR locales: si abres Pagar o hablas de '
                  'retirar, dilo en una frase y agrega que llegará muy pronto (sin fecha). Pagar sí sirve para QR de '
                  'cobro de Confío.\n')

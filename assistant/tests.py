@@ -991,6 +991,9 @@ class IdentityInPromptTests(TestCase):
         venezuela = build_system_prompt(identity='unverified', **{**common, 'country': 'VE'})
         self.assertIn('Identidad: sin verificar.', venezuela)
         self.assertNotIn('y que después recargue', venezuela)  # no Recargar there: no contradiction
+        ecuador = build_system_prompt(identity='unverified', **{**common, 'country': 'EC'})
+        self.assertIn('no hay Recargar ni Retirar', ecuador)
+        self.assertNotIn('y que después recargue', ecuador)
         self.assertIn('documento de identidad del país de su número',
                       build_system_prompt(identity='other_country', **common))
 
