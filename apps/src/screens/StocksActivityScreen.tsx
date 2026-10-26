@@ -112,6 +112,21 @@ export const StocksActivityScreen = () => {
   // country); a Bitcoin or gold row opens only where those can be traded.
   const { capabilities: cryptoCaps } = useCryptoCapabilities();
   const cryptoEnabled = CRYPTO_TRADING_UI_ENABLED && Boolean(cryptoCaps?.enabled);
+  const routes = [
+    stocksEnabled && {
+      key: 'stocks', icon: 'trending-up', label: 'Explorar acciones',
+      open: () => navigation.navigate('StocksList' as any),
+    },
+    cryptoEnabled && {
+      key: 'crypto', icon: 'circle', label: 'Ver oro y bitcoin',
+      // The segment, or the tab reopens on Comunidad if that was the last one.
+      open: () => navigation.navigate('BottomTabs', { screen: 'Invest', params: { segment: 'invest', at: Date.now() } } as any),
+    },
+    perpsEnabled && {
+      key: 'perps', icon: 'activity', label: 'Ver futuros',
+      open: () => navigation.navigate('FuturesMarkets'),
+    },
+  ].filter(Boolean) as { key: string; icon: string; label: string; open: () => void }[];
   const invest = useQuery(INVEST_TRADING_STATS, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
@@ -301,22 +316,29 @@ export const StocksActivityScreen = () => {
             </>
           )}
 
-          {stocksEnabled && <View style={styles.ctaGroup}>
-            <Pressable
-              onPress={() => navigation.navigate('StocksList' as any)}
-              style={({ pressed }) => [styles.ctaPrimary, pressed && styles.rowPressed]}
-              accessibilityRole="button"
-            >
-              <Icon name="trending-up" size={18} color={colors.white} />
-              <Text style={styles.ctaPrimaryText}>Explorar acciones</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => navigation.navigate('OndoStocksInfo' as any)}
-              style={({ pressed }) => [styles.ctaSecondary, pressed && styles.rowPressed]}
-              accessibilityRole="button"
-            >
-              <Text style={styles.ctaSecondaryText}>¿Qué es Ondo Stocks?</Text>
-            </Pressable>
+          {/* One way in per thing counted here, for whoever can trade it:
+              the first is the primary button, the rest sit under it. */}
+          {routes.length > 0 && <View style={styles.ctaGroup}>
+            {routes.map((route, index) => (
+              <Pressable
+                key={route.key}
+                onPress={route.open}
+                style={({ pressed }) => [index === 0 ? styles.ctaPrimary : styles.ctaOutline, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+              >
+                <Icon name={route.icon} size={18} color={index === 0 ? colors.white : colors.primaryDark} />
+                <Text style={index === 0 ? styles.ctaPrimaryText : styles.ctaOutlineText}>{route.label}</Text>
+              </Pressable>
+            ))}
+            {stocksEnabled && (
+              <Pressable
+                onPress={() => navigation.navigate('OndoStocksInfo' as any)}
+                style={({ pressed }) => [styles.ctaSecondary, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.ctaSecondaryText}>¿Qué es Ondo Stocks?</Text>
+              </Pressable>
+            )}
           </View>}
 
           <View style={styles.card}>
@@ -395,6 +417,17 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   ctaPrimaryText: { fontSize: 16, fontWeight: '700', color: colors.white },
+  ctaOutline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: colors.primaryDark,
+    borderRadius: 14,
+    paddingVertical: 13,
+  },
+  ctaOutlineText: { fontSize: 16, fontWeight: '700', color: colors.primaryDark },
   ctaSecondary: { alignItems: 'center', paddingVertical: 10 },
   ctaSecondaryText: { fontSize: 14, fontWeight: '600', color: colors.primaryDark },
   howTitle: { fontSize: 14, fontWeight: '700', color: colors.dark },

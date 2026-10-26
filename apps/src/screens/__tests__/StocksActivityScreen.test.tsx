@@ -162,6 +162,29 @@ describe('StocksActivityScreen as Inversiones en movimiento', () => {
     expect(text(tree)).not.toContain('Explorar acciones');
   });
 
+  it('offers a way in to everything counted, for whoever can trade it', () => {
+    mockPerpsEnabled = true;
+    const tree = render();
+    const press = (label: string) =>
+      act(() => tree.root.find((n) => n.type === Pressable && text({ root: n } as any).includes(label)).props.onPress());
+    press('Ver oro y bitcoin');
+    expect(mockNavigate).toHaveBeenLastCalledWith(
+      'BottomTabs', { screen: 'Invest', params: { segment: 'invest', at: expect.any(Number) } });
+    press('Ver futuros');
+    expect(mockNavigate).toHaveBeenLastCalledWith('FuturesMarkets');
+    // Outside every product's countries: only the numbers, no way to trade.
+    mockStocksEnabled = false;
+    mockCryptoEnabled = false;
+    mockPerpsEnabled = false;
+    const outside = text(render());
+    expect(outside).not.toContain('Explorar acciones');
+    expect(outside).not.toContain('Ver oro y bitcoin');
+    expect(outside).not.toContain('Ver futuros');
+    expect(outside).not.toContain('Ondo Stocks?');
+    mockCryptoEnabled = true;
+    mockPerpsEnabled = null;
+  });
+
   it('a network failure retries the combined query, never the stock-only one', () => {
     mockInvestError = true;
     mockInvestErrorMessage = 'Network request failed';
