@@ -336,6 +336,20 @@ class FollowTests(CommunityTestBase):
         self.assertEqual(notify.call_args.args[0], loud)
         self.assertEqual(notify.call_args.args[2], f'@{member.username} publicó')
 
+    def test_followers_hear_about_a_futuros_post_too(self):
+        # Not promotion: they chose to follow this member's activity (2026-10-26).
+        member, item = self.published_member()
+        item.metadata = {**(item.metadata or {}), 'activity': {
+            'kind': 'perps_open', 'name': 'BTC · Largo 10x', 'ticker': 'BTC', 'amount_usd': '20.00'}}
+        item.save(update_fields=['metadata'])
+        fan = make_user()
+        CommunityFollow.objects.create(follower=fan, followed=member)
+        with patch('inbox.community._notify') as notify:
+            self.assertEqual(community.notify_followers(item.id), 1)
+        self.assertEqual(notify.call_args.args[0], fan)
+        self.assertIn('BTC · Largo 10x', notify.call_args.args[3])
+        self.assertIn('20', notify.call_args.args[3])
+
     def test_followers_hear_about_a_post_once(self):
         member, item = self.published_member()
         CommunityFollow.objects.create(follower=make_user(), followed=member)

@@ -561,8 +561,18 @@ export function hashBatchIntent(
  * preserves released clients' keccak(kind:) digest. Domain flows
  * (send/pay/presale/invite/payroll) pass the intentId the server returned. */
 const SEL_REDEEM_TO_USDT = 'f4794519'; // redeemToUsdt(uint256,uint256,address)
+// Relay's BSC depository (Futuros margin out). Same as cusd_plus/perps_relay.
+export const RELAY_BSC_DEPOSITORY = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
 export function deriveIntentId(calls: BatchCall[], requestId?: string): string {
   const selectors = new Set(calls.map((c) => c.data.replace(/^0x/, '').slice(0, 8)));
+  // Futuros first: an open is the dollar exit plus a Relay deposit; a refund
+  // re-bridge is the deposit alone (sponsor_7702.classify_calls_kind).
+  if (calls.some((c) => c.to.toLowerCase() === RELAY_BSC_DEPOSITORY)) {
+    const exit = selectors.has(SEL_REDEEM_TO_USDT)
+      || selectors.has(selector('redeemWithFee(uint256,uint256,address)').slice(2));
+    const perpsKind = exit ? 'perps_open' : 'perps_bridge_retry';
+    return '0x' + bytesToHex(keccak_256(utf8ToBytes(`${perpsKind}:${requestId || ''}`)));
+  }
   const stockBuy = selector(
     'buyWithSavings((uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32),bytes,uint256,uint256,uint256,uint256)',
   ).slice(2);

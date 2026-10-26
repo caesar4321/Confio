@@ -1,6 +1,8 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { GET_CRYPTO_MONTH, GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH } from '../../apollo/monthSummary';
+import {
+  GET_CRYPTO_MONTH, GET_MONTH_INSIGHTS, GET_PERPS_MONTH, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH,
+} from '../../apollo/monthSummary';
 
 const mockQuery = jest.fn();
 const mockClient = { query: (...a: any[]) => mockQuery(...a) };
@@ -366,5 +368,33 @@ describe('"Oro y Bitcoin" slot', () => {
     await act(async () => { latest.refresh(); });
     expect(mockQuery.mock.calls.filter(([o]: any) => o.query === GET_CRYPTO_MONTH)).toHaveLength(1);
     expect(latest.crypto.valueUsd).toBe('6.00');
+  });
+});
+
+describe('"Futuros" slot', () => {
+  it('money on the bridge is polled on its own slot and resolves in place', async () => {
+    let perps: any = { state: 'settling', valueUsd: '0.00', positions: 0 };
+    mockQuery.mockImplementation(({ query }: any) => Promise.resolve({ data:
+      query === GET_PERPS_MONTH ? { perpsMonth: perps } : {} }));
+    await act(async () => { renderer.create(<Probe {...base} />); });
+    expect(latest.perps.state).toBe('settling');
+    expect(latest.perpsSettling).toBe(true);
+    expect(latest.cryptoSettling).toBe(false);
+    mockQuery.mockClear();
+    perps = { state: 'gain', valueUsd: '23.40', marginInUsd: '20.18', positions: 1 };
+    await act(async () => { latest.refreshPerps(); });
+    expect(mockQuery.mock.calls.map(([o]: any) => o.query)).toEqual([GET_PERPS_MONTH]);
+    expect(latest.perps.marginInUsd).toBe('20.18');
+    expect(latest.perpsSettling).toBe(false);
+  });
+
+  it('an older server without perpsMonth hides the card and breaks nothing else', async () => {
+    mockQuery.mockImplementation(({ query }: any) => (query === GET_PERPS_MONTH
+      ? Promise.reject(new Error('Cannot query field "perpsMonth"'))
+      : Promise.resolve({ data: query === GET_MONTH_INSIGHTS ? { monthInsights: insights(['karen']) } : {} })));
+    await act(async () => { renderer.create(<Probe {...base} />); });
+    expect(latest.revealed).toBe(true);
+    expect(latest.perps).toBeNull();
+    expect(latest.insights.recurring).toHaveLength(1);
   });
 });

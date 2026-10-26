@@ -1,5 +1,6 @@
 """All-time volume traded in Confío, for Home's "Acciones" tile (scope
-'stocks') and the newer "Inversiones" tile (scope 'all': + Bitcoin & gold).
+'stocks') and the newer "Inversiones" tile (scope 'all': + Bitcoin & gold
++ Futuros, at margin: the member's dollars, never the leveraged size).
 
 The sum of every confirmed stock trade's exact settlement (its unified
 history row: what a buy debited, what a sale paid), buys and sales alike.

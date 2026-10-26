@@ -58,7 +58,8 @@ class ReservedUsdtTests(SimpleTestCase):
              mock.patch('ramps.models.RampTransaction.objects') as r_objs, \
              mock.patch('conversion.models.Conversion.objects') as c_objs, \
              mock.patch('payment_accounts.models.PaymentBridgeTransfer.objects') as bridges, \
-             mock.patch('payment_accounts.models.InfiniaJourney.objects') as journeys:
+             mock.patch('payment_accounts.models.InfiniaJourney.objects') as journeys, \
+             mock.patch('cusd_plus.perps_flow.reserved_usdt_wei', return_value=0):
             bridges.filter.return_value.filter.return_value.only.return_value.iterator.return_value = iter([])
             journeys.filter.return_value.exclude.return_value.values_list.return_value = local_units
             s_objs.filter.return_value.exclude.return_value.only.return_value = _Rows(sends)
@@ -113,7 +114,8 @@ class ReservedUsdtTests(SimpleTestCase):
 
     def test_an_unreadable_reservation_raises_rather_than_vanishing(self):
         # Swallowing this would silently make committed funds spendable.
-        with mock.patch('send.models.SendTransaction.objects') as s_objs:
+        with mock.patch('send.models.SendTransaction.objects') as s_objs, \
+             mock.patch('cusd_plus.perps_flow.reserved_usdt_wei', return_value=0):
             s_objs.filter.side_effect = RuntimeError('db down')
             with self.assertRaises(RuntimeError):
                 vault.reserved_usdt_wei(SimpleNamespace(id=1), ADDR)

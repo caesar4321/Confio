@@ -47,4 +47,5 @@ pypdf==6.14.2
 timezonefinder==8.2.0
 # BSC sponsor hot wallet (native KMS secp256k1 signing, blockchain/evm_kms_signer.py)
 eth-account>=0.11,<0.14
+msgpack>=1.0,<2  # Hyperliquid action hashing (cusd_plus/hl_signing.py)
 eth-hash[pycryptodome]

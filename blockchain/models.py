@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from django.db.models import F
 from django.db.models.functions import Upper
@@ -21,7 +23,10 @@ PAYMENT_BATCH_KINDS = (
 # generic deposit/withdrawal reconcilers.
 STOCK_BATCH_KINDS = ('stock_buy', 'stock_sell')
 CRYPTO_BATCH_KINDS = ('crypto_buy', 'crypto_sell')
-INVESTMENT_BATCH_KINDS = STOCK_BATCH_KINDS + CRYPTO_BATCH_KINDS
+# Futuros (cusd_plus/perps_flow.py): the margin's exit + Relay deposit, a
+# refund re-bridge, and the entry of proceeds that came home.
+PERPS_BATCH_KINDS = ('perps_open', 'perps_bridge_retry', 'perps_return')
+INVESTMENT_BATCH_KINDS = STOCK_BATCH_KINDS + CRYPTO_BATCH_KINDS + PERPS_BATCH_KINDS
 LIVE_SPONSORED_BATCH_STATUSES = ('signed', 'sent', 'confirmed')
 
 
@@ -632,6 +637,143 @@ class StockRiskAcknowledgement(models.Model):
 
     def __str__(self):
         return f'{self.user_id} v{self.version}'
+
+
+# ── Futuros (Hyperliquid perps; docs/designs/hyperliquid-perps.md) ─────────
+
+class PerpMarket(models.Model):
+    """One Hyperliquid perp market, synced from the venue's `meta`
+    (cusd_plus/perps_catalog.py). Never hand-edited: ops removes a broken
+    market with PERPS_EXCLUDED_MARKETS. Rows are kept after a delisting so
+    open positions stay closeable."""
+    coin = models.CharField(max_length=40, unique=True,
+                            help_text="Hyperliquid name: 'BTC' (core) or 'xyz:GOLD' (HIP-3)")
+    dex = models.CharField(max_length=16, blank=True, default='', help_text="'' = core perps")
+    asset_id = models.PositiveIntegerField(help_text='Order asset id (HIP-3: 100000 + dex*10000 + index)')
+    sz_decimals = models.PositiveSmallIntegerField()
+    max_leverage = models.PositiveSmallIntegerField()
+    only_isolated = models.BooleanField(default=False)
+    collateral = models.CharField(max_length=16, help_text='Collateral token name; only USDC is tradable')
+    taker_fee_rate = models.DecimalField(max_digits=12, decimal_places=8, default=Decimal('0.00045'),
+                                         help_text='Tier-0 taker rate incl. HIP-3 deployer scale / growth mode')
+    listed = models.BooleanField(default=True, help_text='False once Hyperliquid delists it')
+    first_seen_at = models.DateTimeField(default=timezone.now)
+    synced_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=['dex', 'listed'], name='perp_market_dex_listed_idx')]
+
+    def __str__(self):
+        return self.coin
+
+
+class PerpsRiskAcknowledgement(models.Model):
+    """A person confirmed the Futuros disclosure (cusd_plus/perps_risk.py)
+    before their first open."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='perps_risk_ack')
+    version = models.PositiveIntegerField()
+    acknowledged_at = models.DateTimeField()
+
+    def __str__(self):
+        return f'{self.user_id} v{self.version}'
+
+
+class PerpPosition(models.Model):
+    """One isolated position and the money flows that fund and return it.
+
+    Each step's external id is stored before the next step starts, and
+    states move only on observed facts (BSC receipt, Relay status,
+    Hyperliquid fills/balances). Confío never signs for the member."""
+    STATES = [
+        ('quoted', 'Quoted'),
+        ('failed', 'Failed (nothing moved)'),
+        ('bridging', 'Bridging to Hyperliquid'),
+        ('refunded', 'Refunded to BSC'),
+        ('funded', 'Funded on Hyperliquid'),
+        ('open', 'Open'),
+        ('closed', 'Closed on Hyperliquid'),
+        ('liquidated', 'Liquidated'),
+        ('returning', 'Returning to BSC'),
+        ('return_failed', 'Return failed'),
+        ('landed', 'Landed on BSC'),
+        ('done', 'Done'),
+        ('cancelled', 'Cancelled'),
+    ]
+    SIDES = [('long', 'Long'), ('short', 'Short')]
+    LIQUIDATIONS = [('', 'None'), ('book', 'Book'), ('backstop', 'Backstop')]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='perp_positions')
+    wallet = models.CharField(max_length=42, db_index=True, help_text='Lowercase address (BSC and HyperCore)')
+    market = models.ForeignKey(PerpMarket, on_delete=models.PROTECT, related_name='positions')
+    side = models.CharField(max_length=5, choices=SIDES)
+    leverage = models.PositiveSmallIntegerField()
+    margin_usd = models.DecimalField(max_digits=30, decimal_places=18, help_text='Dollars the member chose to put in')
+    state = models.CharField(max_length=16, choices=STATES, default='quoted', db_index=True)
+    step_error = models.CharField(max_length=120, blank=True, default='')
+    # Server-issued plans and step facts (quotes, exact calls, order plans,
+    # Relay ids, amounts). The app signs exactly what is stored here.
+    flow = models.JSONField(default=dict, blank=True)
+
+    open_batch = models.ForeignKey('SponsoredBatch', null=True, blank=True, on_delete=models.PROTECT,
+                                   related_name='perp_opens')
+    relay_out_id = models.CharField(max_length=66, blank=True, default='')
+    credited_usdc = models.DecimalField(max_digits=30, decimal_places=8, null=True, blank=True)
+    entry_oid = models.BigIntegerField(null=True, blank=True)
+    entry_avg_px = models.DecimalField(max_digits=30, decimal_places=12, null=True, blank=True)
+    size = models.DecimalField(max_digits=30, decimal_places=12, null=True, blank=True)
+    close_oid = models.BigIntegerField(null=True, blank=True)
+    close_avg_px = models.DecimalField(max_digits=30, decimal_places=12, null=True, blank=True)
+    realized_pnl = models.DecimalField(max_digits=30, decimal_places=8, null=True, blank=True)
+    funding = models.DecimalField(max_digits=30, decimal_places=8, null=True, blank=True)
+    venue_fees = models.DecimalField(max_digits=30, decimal_places=8, null=True, blank=True)
+    liquidation = models.CharField(max_length=8, choices=LIQUIDATIONS, blank=True, default='')
+    relay_back_id = models.CharField(max_length=66, blank=True, default='')
+    return_batch = models.ForeignKey('SponsoredBatch', null=True, blank=True, on_delete=models.PROTECT,
+                                     related_name='perp_returns')
+    returned_usd = models.DecimalField(max_digits=30, decimal_places=18, null=True, blank=True,
+                                       help_text='Dollars that re-entered Confío Dollar, fee included')
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+
+    TERMINAL_STATES = ('failed', 'done', 'cancelled')
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'state'], name='perp_pos_user_state_idx')]
+        constraints = [
+            # One live position per member: everything free on the member's
+            # Hyperliquid account belongs to exactly one position.
+            models.UniqueConstraint(
+                fields=['wallet'],
+                condition=~models.Q(state__in=('failed', 'done', 'cancelled', 'quoted')),
+                name='perp_one_live_position_per_wallet'),
+        ]
+
+    def __str__(self):
+        return f'{self.user_id} {self.side} {self.market_id} {self.leverage}x [{self.state}]'
+
+
+class PerpMarginChange(models.Model):
+    """Margin added to (an open leg: exit + bridge) or removed from (a
+    return leg) an open position."""
+    DIRECTIONS = [('add', 'Add'), ('remove', 'Remove')]
+    position = models.ForeignKey(PerpPosition, on_delete=models.PROTECT, related_name='margin_changes')
+    direction = models.CharField(max_length=6, choices=DIRECTIONS)
+    amount_usd = models.DecimalField(max_digits=30, decimal_places=18)
+    state = models.CharField(max_length=16, choices=PerpPosition.STATES, default='quoted')
+    batch = models.ForeignKey('SponsoredBatch', null=True, blank=True, on_delete=models.PROTECT,
+                              related_name='perp_margin_changes')
+    relay_id = models.CharField(max_length=66, blank=True, default='')
+    step_error = models.CharField(max_length=120, blank=True, default='')
+    flow = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.position_id} {self.direction} {self.amount_usd} [{self.state}]'
 
 
 class OndoStockTrade(SponsoredBatch):

@@ -2,6 +2,7 @@ import { summarizeInvestments, InvestmentsSummaryInput } from '../useInvestments
 
 jest.mock('../useCrypto', () => ({}));
 jest.mock('../useSavingsPortfolio', () => ({}));
+jest.mock('../usePerps', () => ({}));
 
 const ASSETS = [
   { name: 'Bitcoin', category: 'crypto' },
@@ -81,5 +82,42 @@ describe('summarizeInvestments gating matrix', () => {
 
   it('a zero-unit row is not a holding', () => {
     expect(summarizeInvestments({ ...base, cryptoHoldings: [btc(0, '0')] }).visible).toBe(false);
+  });
+});
+
+describe('Futuros', () => {
+  const pos = (state: string, valueUsd: number | null, marginUsd = 100) =>
+    ({ id: '1', state, valueUsd, marginUsd, marginUsedUsd: null } as any);
+  it('counts a held position at its own money (margin and result), never the leveraged exposure', () => {
+    const s = summarizeInvestments({ ...base, perpsPositions: [pos('open', 112)] });
+    expect(s.holds).toBe(true);
+    expect(s.totalUsd).toBe(112);
+    expect(s.subtitle).toBe('futuros');
+  });
+  it('never counts money already back on BSC (it is in the dollars)', () => {
+    const s = summarizeInvestments({ ...base, perpsPositions: [pos('landed', 99)] });
+    expect(s.holds).toBe(false);
+    expect(s.totalUsd).toBe(0);
+  });
+  it('a return on its way is unknown, never counted twice', () => {
+    const s = summarizeInvestments({ ...base, perpsPositions: [pos('returning', 99)] });
+    expect(s.totalKnown).toBe(false);
+  });
+  it('an unreadable Futuros balance makes the total unknown, never a known zero', () => {
+    const s = summarizeInvestments({ ...base, stocksEnabled: true, stockPositionCount: 1, stocksTotalUsd: 50,
+      perpsPositions: null, perpsUnreadable: true });
+    expect(s.totalKnown).toBe(false);
+    expect(s.holds).toBe(true);
+    expect(summarizeInvestments({ ...base, perpsPositions: null }).totalKnown).toBe(true);  // still loading
+  });
+
+  it('an open on the bridge counts nothing (it may still be in the dollars) and reads unknown', () => {
+    const s = summarizeInvestments({ ...base, perpsPositions: [{ ...pos('open', 100), state: 'bridging', valueUsd: null }] });
+    expect(s.totalUsd).toBe(0);
+    expect(s.totalKnown).toBe(false);
+  });
+
+  it('never invites to Futuros on Home', () => {
+    expect(summarizeInvestments({ ...base, perpsPositions: [] }).visible).toBe(false);
   });
 });

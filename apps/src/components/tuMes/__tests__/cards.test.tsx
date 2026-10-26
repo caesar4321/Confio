@@ -7,6 +7,7 @@ jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../motion', () => ({ Rise: ({ children }: any) => children, Grow: ({ children }: any) => children }));
 // Asset marks are SVG art (covered elsewhere); here only the rows matter.
 jest.mock('../../CryptoAssetMark', () => ({ CryptoAssetMark: () => null }));
+jest.mock('../../svg/FuturesMark', () => ({ __esModule: true, default: () => null }));
 jest.mock('react-native-svg', () => {
   const R = require('react');
   const C = (p: any) => R.createElement('Svg', p, p.children);
@@ -313,3 +314,58 @@ function StyleFlat(style: any) {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   return require('react-native').StyleSheet.flatten(style);
 }
+
+describe('PerpsCard', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { PerpsCard } = require('../PerpsCard');
+  // A 10x long opened with US$20.18 of margin: the card speaks in margin.
+  const base = {
+    state: 'gain', valueUsd: '23.40', valueStartUsd: '0.00', marginInUsd: '20.18', returnedUsd: '0.00',
+    gainUsd: '3.22', gainPct: '15.96', positions: 1,
+  };
+  const card = (value: any, extra: any = {}) => mount(
+    <PerpsCard value={value} month={10} isCurrent masked={false} onOpen={jest.fn()} {...extra} />);
+
+  it('the month result counts the margin put in, never the leveraged size', () => {
+    const all = texts(card(base)).join(' | ');
+    expect(all).toContain('Futuros');
+    expect(all).toContain('+US$3.22');
+    expect(all).toContain('Pusiste US$20 de margen');
+    expect(all).not.toContain('201');
+    expect(all).toContain('1 posición');
+    expect(all).toContain('abierta');
+  });
+
+  it('a closed month says what came back', () => {
+    const all = texts(card({ ...base, valueUsd: '0.00', valueStartUsd: '30.00', marginInUsd: '0.00',
+      returnedUsd: '26.00', gainUsd: '-4.00', gainPct: '-13.33', positions: 0 })).join(' | ');
+    expect(all).toContain('Volvieron US$26');
+    expect(all).not.toContain('posición');
+  });
+
+  it('money in and money back are stated apart, never netted', () => {
+    const all = texts(card({ ...base, valueUsd: '0.00', marginInUsd: '100.00', returnedUsd: '110.00',
+      gainUsd: '10.00', gainPct: '10.00', positions: 0 })).join(' | ');
+    expect(all).toContain('Pusiste US$100 de margen');
+    expect(all).toContain('Volvieron US$110');
+  });
+
+  it('a down month is calm, never red', () => {
+    const gain = byId(card({ ...base, gainUsd: '-3.10', gainPct: '-1.50' }), 'tumes-perps-gain')[0];
+    expect([].concat(gain.props.children).join('')).toBe('−US$3.10');
+    expect(StyleFlat(gain.props.style).color).toBe(colors.textFlat);
+  });
+
+  it('money on the bridge shows no number, only that it is on its way', () => {
+    const tree = card({ state: 'settling', valueUsd: '0.00', valueStartUsd: null, marginInUsd: null,
+      returnedUsd: null, gainUsd: null, gainPct: null, positions: 0 });
+    expect(texts(tree).join(' | ')).not.toContain('US$');
+    expect(byId(tree, 'tumes-perps-settling-note')).toHaveLength(1);
+    expect(byId(tree, 'tumes-perps-how')).toHaveLength(0);
+  });
+
+  it('masked hides every amount', () => {
+    const all = texts(card(base, { masked: true })).join(' | ');
+    expect(all).not.toMatch(/US\$\d/);
+  });
+});

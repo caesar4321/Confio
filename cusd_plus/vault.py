@@ -233,6 +233,11 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
     if not addr:
         return 0
 
+    # Futuros: a Relay refund waiting for the member's retry, and proceeds
+    # in flight or landed waiting for their entry (cusd_plus/perps_flow.py).
+    from .perps_flow import reserved_usdt_wei as perps_reserved
+    total += Decimal(perps_reserved(addr)) / Decimal(10 ** 18)
+
     try:
         from send.models import SendTransaction
         pending = SendTransaction.objects.filter(

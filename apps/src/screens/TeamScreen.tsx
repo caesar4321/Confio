@@ -311,7 +311,7 @@ export const TeamScreen = () => {
           <BylineAvatar name={p.username} avatarUrl={p.avatarUrl} size={40} />
           <View style={styles.rowBody}>
             <Text style={styles.name} numberOfLines={1}>
-              {p.username} {p.side === 'buy' ? 'compró' : 'vendió'} {p.ticker}
+              {p.username} {p.asset === 'perp' ? (p.side === 'buy' ? 'abrió' : 'cerró') : p.side === 'buy' ? 'compró' : 'vendió'} {p.ticker}
             </Text>
             <Text style={styles.meta}>{p.name} · {chatTime(p.at)}</Text>
           </View>

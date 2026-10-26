@@ -176,6 +176,95 @@ class InvestScopeTests(TestCase):
         self.assertIsNone(gm_volume.traded_usd('stocks'))  # no traders: below the floor
 
 
+class PerpsTradingStatsTests(TestCase):
+    """Futuros in scope 'all': margin in and dollars back, never the leveraged size."""
+
+    def setUp(self):
+        from blockchain.models import PerpMarket
+
+        for scope in gm_trading_stats.SCOPES:
+            for key in (gm_trading_stats.CACHE_KEY, gm_trading_stats.FRESH_KEY, gm_trading_stats.LOCK_KEY):
+                cache.delete(gm_trading_stats._key(key, scope))
+        self.user = User.objects.create_user(username='pts-1', email='pts1@example.com', firebase_uid='pts-1')
+        self.market = PerpMarket.objects.create(coin='BTC', dex='', asset_id=0, sz_decimals=5, max_leverage=40,
+                                                collateral='USDC', synced_at=timezone.now())
+        self.n = 0
+
+    def batch(self, kind, usd, wallet):
+        self.n += 1
+        batch = SponsoredBatch.objects.create(
+            user=self.user, user_bsc_address=wallet, kind=kind, status='confirmed', tx_hash=f'0x{self.n:064x}',
+            calls_json='[]', num_calls=1, gas_limit=1, max_fee_wei='1', client_request_id=f'pts-{self.n}')
+        UnifiedTransactionTable.objects.create(
+            transaction_type='send', amount=str(usd), token_type='CUSD_PLUS', status='CONFIRMED',
+            transaction_date=timezone.now(), sponsored_batch=batch)
+        return batch
+
+    def position(self, wallet, margin, state='open', leverage=10, returned=None):
+        from blockchain.models import PerpPosition
+
+        position = PerpPosition.objects.create(
+            user=self.user, wallet=wallet, market=self.market, side='long', leverage=leverage,
+            margin_usd=Decimal(str(margin)), state=state, open_batch=self.batch('perps_open', margin, wallet))
+        if returned is not None:
+            position.return_batch = self.batch('perps_return', returned, wallet)
+            position.save(update_fields=['return_batch'])
+        return position
+
+    def stats(self):
+        with patch('cusd_plus.stock_month._decode_trades', return_value=[]), \
+                patch.object(gm_trading_stats, '_names', return_value={}):
+            return gm_trading_stats.compute('all')
+
+    def test_margin_counts_never_the_leveraged_size(self):
+        for i in range(3):
+            self.position(f'0x{i:040x}', 20, leverage=10, returned=(23 if i == 0 else None))
+        s = self.stats()
+        self.assertAlmostEqual(s.total_usd, 83.0)          # 3 × US$20 margin + US$23 back; never US$200 each
+        self.assertEqual((s.buy_count, s.sell_count, s.trader_count, s.crypto_trader_count), (3, 1, 3, 3))
+        self.assertEqual([(a.kind, a.symbol, a.ticker, a.trade_count, a.trader_count) for a in s.top_assets],
+                         [('perps', 'BTC', 'BTC', 4, 3)])
+
+    def test_one_persons_return_never_shows_through_the_split(self):
+        for i in range(3):
+            self.position(f'0x{i:040x}', 20, returned=(25 if i == 0 else None))   # one return only
+        for i in range(3, 6):
+            self.batch('stock_buy', 10, f'0x{i:040x}')
+            self.batch('stock_sell', 5, f'0x{i:040x}')
+        with patch('cusd_plus.stock_month._decode_trades', side_effect=lambda b: [None] * 0), \
+                patch.object(gm_trading_stats, '_symbols', side_effect=lambda bs: [
+                    'NVDAon' if b.kind.startswith('stock') else 'BTC' for b in bs]), \
+                patch.object(gm_trading_stats, '_names', return_value={}):
+            s = gm_trading_stats.compute('all')
+        # 'all' sells − 'stocks' sells would be that one member's US$25.
+        self.assertEqual((s.buy_usd, s.sell_usd), (None, None))
+
+    def test_a_refund_kept_as_dollars_never_traded(self):
+        from blockchain.models import PerpMarginChange
+
+        for i in range(3):
+            self.position(f'0x{i:040x}', 20)
+        self.position('0x' + '9' * 40, 50, state='cancelled')
+        live = self.position('0x' + '8' * 40, 10)
+        PerpMarginChange.objects.create(position=live, direction='add', amount_usd=Decimal('5'), state='refunded',
+                                        batch=self.batch('perps_open', 5, '0x' + '8' * 40))
+        s = self.stats()
+        self.assertAlmostEqual(s.total_usd, 70.0)
+        self.assertEqual((s.buy_count, s.trader_count), (4, 4))
+
+    def test_a_late_refund_rebuilds_the_snapshot(self):
+        position = None
+        for i in range(3):
+            position = self.position(f'0x{i:040x}', 20, state='refunded')
+        with patch('cusd_plus.stock_month._decode_trades', return_value=[]), \
+                patch.object(gm_trading_stats, '_names', return_value={}):
+            self.assertEqual(gm_trading_stats.snapshot('all').total_usd, 0.0)   # refunded: not yet traded
+            from blockchain.models import PerpPosition
+            PerpPosition.objects.filter(pk=position.pk).update(state='bridging', updated_at=timezone.now())
+            cache.delete(gm_trading_stats._key(gm_trading_stats.FRESH_KEY, 'all'))
+            self.assertEqual(gm_trading_stats.snapshot('all').total_usd, 20.0)  # re-bridged: it trades now
+
+
 class InvestFieldsGateTests(TestCase):
     def info(self):
         from types import SimpleNamespace

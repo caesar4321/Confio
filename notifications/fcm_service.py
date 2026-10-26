@@ -175,6 +175,10 @@ def send_user_push(
         user=user,
         is_active=True
     ).values_list('token', 'id'))
+    # A Futuros notice opens a screen only builds with Futuros have: never
+    # to a device on an older build (same member, another phone).
+    if notification.notification_type in MIN_BUILD_SETTING:
+        token_data = _tokens_on_builds(token_data, MIN_BUILD_SETTING[notification.notification_type])
     
     logger.info(f"Found {len(token_data)} active FCM tokens for user {user.id}")
     
@@ -192,23 +196,56 @@ def send_user_push(
         user=user
     ).values_list('notification_id', flat=True)
     
-    unread_count = user.notifications.exclude(
-        id__in=read_notification_ids
-    ).count()
-    
+    unread = user.notifications.exclude(id__in=read_notification_ids)
+    unread_count = unread.count()
+
     # Use batch send for all tokens (even if just 1)
     logger.info(f"Sending push notification to {len(token_data)} tokens for notification {notification.id}")
     logger.info(f"Token data: {token_data}")
-    
-    return send_batch_notifications(
-        tokens=token_data,
+
+    send = lambda tokens, badge: send_batch_notifications(  # noqa: E731
+        tokens=tokens,
         title=notification.title,
         body=notification.message,
         data=push_data,
-        badge_count=unread_count,
+        badge_count=badge,
         notification=notification,
         channel_id=android_channel_for(notification.notification_type),
     )
+    # An older build lists no notice it can't open (notifications/schema.py),
+    # so its badge doesn't count them either.
+    hidden = unread.filter(notification_type__in=list(MIN_BUILD_SETTING)).count()
+    if not hidden:
+        return send(token_data, unread_count)
+    supported = set(token_data)
+    for setting in set(MIN_BUILD_SETTING.values()):
+        supported &= set(_tokens_on_builds(token_data, setting))
+    older = [pair for pair in token_data if pair not in supported]
+    results = [send(group, badge) for group, badge in
+               ((list(supported), unread_count), (older, unread_count - hidden)) if group]
+    if len(results) == 1:
+        return results[0]
+    first, second = results
+    return {
+        'success': first['success'] or second['success'],
+        'sent': first['sent'] + second['sent'],
+        'failed': first['failed'] + second['failed'],
+        'errors': first['errors'] + second['errors'],
+        'invalid_tokens': first['invalid_tokens'] + second['invalid_tokens'],
+    }
+
+
+MIN_BUILD_SETTING = {'PERPS_POSITION_UPDATE': 'PERPS_SHARE_MIN_APP_VERSION'}
+
+
+def _tokens_on_builds(token_data, setting: str):
+    """(token, id) pairs whose device last reported a build at or above `setting`."""
+    from users.paid_offers import _at_least
+
+    versions = dict(FCMDeviceToken.objects.filter(id__in=[i for _t, i in token_data])
+                    .values_list('id', 'app_version'))
+    return [(t, i) for t, i in token_data
+            if _at_least({'HTTP_X_CONFIO_VERSION': versions.get(i) or ''}, setting)]
 
 
 def send_broadcast_push(
@@ -580,6 +617,7 @@ def should_send_push(prefs: NotificationPreference, notification_type: str) -> b
         'ANNOUNCEMENT': 'push_announcements',
         'BUSINESS': 'push_transactions',
         'MARKETPLACE': 'push_transactions',  # Comprar order updates are money movements
+        'PERPS': 'push_transactions',  # Futuros: the member's own positions
         'ACHIEVEMENT': 'push_promotions',  # Achievements under promotions
     }
     

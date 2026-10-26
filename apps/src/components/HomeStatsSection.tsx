@@ -18,9 +18,10 @@ import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { useGmHomeTile } from '../hooks/useGmMarket';
 import { useCryptoCapabilities } from '../hooks/useCrypto';
+import { usePerpsCapabilities } from '../hooks/usePerps';
 import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
 
-// Stocks + Bitcoin & gold volume, for the Inversiones tile. Own query: a
+// Stocks + Bitcoin & gold (+ Futuros at margin) volume, for the Inversiones tile. Own query: a
 // server without the field fails only this, and the tile falls back to the
 // stock-only Acciones numbers.
 const INVEST_TRADED_USD = gql`
@@ -135,6 +136,10 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   const { capabilities: cryptoCaps } = useCryptoCapabilities();
   const cryptoEnabled = CRYPTO_TRADING_UI_ENABLED && Boolean(cryptoCaps?.enabled);
   const investEnabled = stocksEnabled || cryptoEnabled;
+  // The Invertido total holds everyone's Futuros (at margin) once the server
+  // has them: it says so, whoever is looking (same rule as its breakdown).
+  const { capabilities: perpsCaps } = usePerpsCapabilities();
+  const perpsInTotal = perpsCaps != null;
   const { data: investData, refetch: refetchInvest } = useQuery(INVEST_TRADED_USD, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
@@ -258,7 +263,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
           // One short word like its neighbours (Movido); the detail is for
           // screen readers and the breakdown, never a visible subline.
           label: 'Invertido',
-          descriptor: 'Acciones, oro y bitcoin',
+          descriptor: perpsInTotal ? 'Acciones, oro, bitcoin y futuros' : 'Acciones, oro y bitcoin',
           onPress: () => navigation.navigate('StocksActivity'),
         }
         : !stocksEnabled
@@ -323,7 +328,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     },
     [s?.totalUsers, verified, tvl, backingDescriptor, flowTotalUsd, flowOperations,
      stockAssetCount, stockInvestedUsd, stockTradedUsd, stocksEnabled, investEnabled, investTradedUsd,
-     s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
+     perpsInTotal, s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
   );
 
   const accessibilityLabelFor = (tile: Tile) =>

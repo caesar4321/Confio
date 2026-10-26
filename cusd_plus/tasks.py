@@ -804,7 +804,8 @@ def _source_row_covers(tx_hash: str, recipient: str) -> bool:
         from blockchain.models import SponsoredBatch
         if SponsoredBatch.objects.filter(
                 tx_hash__iexact=tx_hash,
-                kind__in=('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell', 'payment_bridge'),
+                kind__in=('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell', 'payment_bridge',
+                          'perps_open', 'perps_return'),
                 user_bsc_address__iexact=r,
                 status__in=('signed', 'sent', 'confirmed')).exists():
             return True
@@ -1333,6 +1334,12 @@ def mark_saga_delivered_as_usdt(
     except Exception:  # noqa: BLE001 — must not break the refusal path
         logger.exception('delivered-as-usdt transition failed for %s', bsc_address)
         return 0
+
+
+def _perps_kinds() -> tuple:
+    from blockchain.models import PERPS_BATCH_KINDS
+
+    return PERPS_BATCH_KINDS
 
 
 def _investment_kinds() -> tuple:
@@ -1907,6 +1914,9 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         settle_savings_mint(batch.tx_hash, 'reverted')
         batch.save(update_fields=update_fields)
         logger.info('7702 batch %s reverted', batch.tx_hash)
+        if batch.kind in _perps_kinds():
+            from .perps_flow import on_receipt as perps_on_receipt
+            perps_on_receipt(batch, receipt)
         return
 
     logs = receipt.get('logs') or []
@@ -1937,6 +1947,9 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             batch.save(update_fields=['status', 'updated_at'])
             logger.warning('7702 batch %s mined but did NOT execute (no BatchExecuted[nonce=%s]) for %s',
                            batch.tx_hash, batch.delegate_nonce, batch.user_bsc_address)
+            if batch.kind in _perps_kinds():
+                from .perps_flow import on_receipt as perps_on_receipt
+                perps_on_receipt(batch, None)
             return
     else:
         # Plain KMS contract call (payroll payout / reward / invite claim):
@@ -2014,6 +2027,15 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             logger.warning('crypto history sync failed for %s: %s', batch.tx_hash, exc)
             raise self.retry(countdown=_retry_countdown(self.request.retries))
 
+    if batch.kind in ('perps_open', 'perps_return'):
+        # Same rule: the exact fee-event-backed history row before terminal.
+        from .perps_flow import sync_history as sync_perps_history
+        try:
+            sync_perps_history(batch, receipt)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('perps history sync failed for %s: %s', batch.tx_hash, exc)
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
+
     if batch.kind in ('stock_buy', 'stock_sell'):
         # A confirmed trade without its account-history row is not a complete
         # settlement. Write the exact event-backed row before making the batch
@@ -2067,6 +2089,12 @@ def check_sponsored_batch_receipt(self, batch_id: int):
     batch.status = 'confirmed'
     batch.save(update_fields=['status', 'block_number', 'block_hash', 'updated_at'])
     settle_savings_mint(batch.tx_hash, 'confirmed', receipt=receipt, batch=batch)
+    if batch.kind in _perps_kinds():
+        from .perps_flow import on_receipt as perps_on_receipt
+        try:
+            perps_on_receipt(batch, receipt)
+        except Exception:  # noqa: BLE001 — the reconciler re-derives position state
+            logger.exception('perps receipt hook failed for %s', batch.tx_hash)
     # Every kind, at finality: the stored BSC balances of the signer and of
     # every wallet a token Transfer in this receipt touched (a send's or
     # payment's recipient, a payout, a claim) are stale now. Broadcast-time
@@ -2783,6 +2811,89 @@ def snapshot_crypto_prices():
     from .crypto_prices import snapshot_prices
 
     return snapshot_prices()
+
+
+@shared_task(name='cusd_plus.sync_perps_markets', ignore_result=True)
+def sync_perps_markets():
+    """Hyperliquid market list for Futuros (no-op while disabled)."""
+    if not getattr(settings, 'PERPS_ENABLED', False):
+        return None
+    from .perps_catalog import sync_markets
+
+    return sync_markets()
+
+
+@shared_task(name='cusd_plus.reconcile_perps_positions', ignore_result=True)
+def reconcile_perps_positions():
+    """Advance in-flight Futuros positions from observed facts (Relay status,
+    Hyperliquid fills and balances). Never signs anything."""
+    if not getattr(settings, 'PERPS_TRADING_ENABLED', False):
+        return 0
+    from django.core.cache import cache
+
+    # One sweep at a time: a slow run (Hyperliquid or Relay lagging) must not
+    # overlap the next beat and repeat its reads and signed re-posts. The
+    # sweep stops itself before the lock can lapse, and releases only its own.
+    import time
+    import uuid
+
+    token = uuid.uuid4().hex
+    if not cache.add(PERPS_RECONCILE_LOCK, token, PERPS_RECONCILE_LOCK_S):
+        return 0
+    try:
+        from .hyperliquid import reads_until
+
+        deadline = time.monotonic() + PERPS_RECONCILE_BUDGET_S
+        with reads_until(deadline):
+            return _reconcile_perps_positions(deadline=deadline)
+    finally:
+        if cache.get(PERPS_RECONCILE_LOCK) == token:
+            cache.delete(PERPS_RECONCILE_LOCK)
+
+
+PERPS_RECONCILE_LOCK = 'perps_reconcile_lock'
+# No Hyperliquid read starts past the budget (hyperliquid.reads_until), so a
+# sweep ends within the budget plus one read (≤20s) and a few single Relay
+# or /exchange calls: far inside the lock. A crashed worker's lock lapses
+# within 15 minutes.
+PERPS_RECONCILE_LOCK_S = 900
+PERPS_RECONCILE_BUDGET_S = 180
+
+
+def _reconcile_perps_positions(deadline: float):
+    import time
+
+    from blockchain.models import PerpPosition
+
+    from .hyperliquid import SweepDeadline
+    from .perps_flow import reconcile_position
+
+    moved = 0
+    # Money in motion: every row, every run. Open positions: the 300 checked
+    # longest ago (each check touches updated_at, so the window rotates).
+    in_motion = list(PerpPosition.objects.filter(
+        state__in=('bridging', 'funded', 'returning', 'refunded', 'landed'),
+    ).select_related('market'))
+    open_ = list(PerpPosition.objects.filter(state='open').select_related('market').order_by('updated_at')[:300])
+    with_changes = list(PerpPosition.objects.filter(margin_changes__state='bridging')
+                        .exclude(state__in=PerpPosition.TERMINAL_STATES)
+                        .select_related('market').distinct())
+    seen = set()
+    for position in in_motion + with_changes + open_:
+        if time.monotonic() > deadline:
+            break  # the rest next beat (money in motion comes first)
+        if position.pk in seen:
+            continue
+        seen.add(position.pk)
+        before = position.state
+        try:
+            if reconcile_position(position) != before:
+                moved += 1
+        except SweepDeadline:
+            break  # this row unwound untouched past its last committed step; next beat resumes
+        except Exception:  # noqa: BLE001 — one bad row never stops the sweep
+            logger.exception('perps reconcile failed for position %s', position.id)
+    return moved
 
 
 @shared_task(name='cusd_plus.relay_cache_heartbeat', ignore_result=True)

@@ -284,6 +284,36 @@ export const GET_CRYPTO_MONTH = gql`
   }
 `;
 
+export const GET_PERPS_MONTH = gql`
+  query PerpsMonth($year: Int!, $month: Int!, $timezone: String) {
+    perpsMonth(year: $year, month: $month, timezone: $timezone) {
+      state
+      valueUsd
+      valueStartUsd
+      marginInUsd
+      returnedUsd
+      gainUsd
+      gainPct
+      positions
+    }
+  }
+`;
+
+/** "Futuros" in Tu mes, in the member's own money: margin put in and dollars
+ *  back, never the leveraged exposure (a 10x position on US$100 moved US$100). */
+export type PerpsMonth = {
+  /** 'none' draws nothing; no 'value_only' (the ledger is complete or unknown → null). */
+  state: 'gain' | 'settling' | 'none';
+  valueUsd: string;
+  valueStartUsd: string | null;
+  marginInUsd: string | null;
+  returnedUsd: string | null;
+  /** value − value on the 1st − margin in + dollars back */
+  gainUsd: string | null;
+  gainPct: string | null;
+  positions: number;
+};
+
 export type CryptoMonth = {
   /** Same states as StockMonth; 'none' draws nothing (no invitation). */
   state: 'gain' | 'value_only' | 'settling' | 'none';

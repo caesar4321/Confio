@@ -29,6 +29,7 @@ SOURCES = OrderedDict([
     ('bitcoin', 'Bitcoin'),
     ('gold', 'Gold'),
     ('crypto', 'Other crypto'),
+    ('perps', 'Futuros (Hyperliquid)'),
     ('onramp', 'On-ramp (local money in)'),
     ('offramp', 'Off-ramp (local money out)'),
     ('usdt_in', 'Outside USDT in'),
@@ -176,6 +177,8 @@ def classify(event, batch, ramp_directions: dict, bridge_payouts: set, provider_
             return 'stock'
         if kind in ('crypto_buy', 'crypto_sell'):
             return _crypto_source(batch)
+        if kind in ('perps_open', 'perps_return'):
+            return 'perps'
         if kind in _PAY_KINDS:
             return 'pay'
         if kind == 'payment_bridge':

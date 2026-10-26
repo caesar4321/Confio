@@ -2,6 +2,7 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 
 let mockCaps: any = null;
+let mockPerpsCaps: any = null;
 let mockHoldings: any[] | null = [];
 const mockNavigate = jest.fn();
 const mockAssets = [
@@ -19,6 +20,12 @@ jest.mock('../../apollo/queries', () => ({}));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../../components/common/BrandFieldBackground', () => ({ BrandFieldBackground: 'BrandFieldBackground' }));
 jest.mock('../../components/svg/StocksMark', () => 'StocksMark');
+jest.mock('../../components/svg/FuturesMark', () => 'FuturesMark');
+jest.mock('../../hooks/usePerps', () => ({
+  usePerpsCapabilities: () => ({ capabilities: mockPerpsCaps, refetch: () => Promise.resolve() }),
+  usePerpsMarkets: () => ({ markets: [] }),
+  usePerpsPositions: () => ({ positions: [] }),
+}));
 jest.mock('../../components/CryptoAssetMark', () => ({ CryptoAssetMark: 'CryptoAssetMark' }));
 jest.mock('../../assets/png/Ondo.png', () => 1);
 jest.mock('../../assets/png/CONFIO.png', () => 1);
@@ -49,7 +56,7 @@ const render = async () => {
   return tree;
 };
 
-beforeEach(() => { mockCaps = { enabled: true }; mockHoldings = []; mockNavigate.mockReset(); });
+beforeEach(() => { mockPerpsCaps = null; mockCaps = { enabled: true }; mockHoldings = []; mockNavigate.mockReset(); });
 
 it('orders the cards stocks → Oro y Bitcoin → $CONFIO, one row per listed asset', async () => {
   const tree = await render();
@@ -108,4 +115,18 @@ it('a delisted holding shows next to the listed rows when discovery is on', asyn
   expect(s).toContain('Bitcoin');
   expect(s).toContain('Tether Gold');
   expect(s).toContain('ETH · Solo venta');
+});
+
+it('places Futuros below Oro y Bitcoin and above $CONFIO, only when enabled', async () => {
+  expect(strings(await render())).not.toContain('Futuros');
+  mockPerpsCaps = { enabled: true };
+  const tree = await render();
+  const s = strings(tree);
+  const crypto = s.indexOf('Oro y Bitcoin');
+  const futures = s.indexOf('Futuros');
+  const confio = s.findIndex((t) => t.startsWith('$CONFIO'));
+  expect(futures).toBeGreaterThan(crypto);
+  expect(confio).toBeGreaterThan(futures);
+  await act(async () => { tree.root.find((n) => n.props?.testID === 'invest-futures-card' && typeof n.props.onPress === 'function').props.onPress(); });
+  expect(mockNavigate).toHaveBeenCalledWith('FuturesMarkets');
 });

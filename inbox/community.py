@@ -2069,7 +2069,8 @@ def has_invested(user_id) -> bool:
     if not wallets:
         return False
     return (SponsoredBatch.objects.annotate(addr=Upper('user_bsc_address'))
-            .filter(addr__in=wallets, kind__in=('stock_buy', 'crypto_buy'), status='confirmed').exists())
+            .filter(addr__in=wallets, kind__in=('stock_buy', 'crypto_buy', 'perps_open'),
+                    status='confirmed').exists())
 
 
 def in_a_team(user_id) -> bool:

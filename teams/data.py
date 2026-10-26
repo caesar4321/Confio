@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 STOCK_KINDS = ('stock_buy', 'stock_sell')
 CRYPTO_KINDS = ('crypto_buy', 'crypto_sell')
+# Futuros: an open (margin out) and a close (proceeds home). Never copyable.
+PERPS_KINDS = ('perps_open', 'perps_return')
 PLAYS_LIMIT = 50
 # Copy play: only recent buys can be copied.
 COPY_WINDOW = timedelta(days=7)
@@ -155,15 +157,32 @@ def plays(team, limit: int = PLAYS_LIMIT, exclude=()) -> list[dict]:
 
     earliest = min(m.joined_at for m in by_wallet.values())
     batches = list(SponsoredBatch.objects.annotate(addr=Lower('user_bsc_address')).filter(
-        addr__in=list(by_wallet), kind__in=STOCK_KINDS + CRYPTO_KINDS, status='confirmed',
+        addr__in=list(by_wallet), kind__in=STOCK_KINDS + CRYPTO_KINDS + PERPS_KINDS, status='confirmed',
         created_at__gte=earliest).select_related('unified_transaction').order_by('-created_at')[:limit * 2])
     crypto_symbols = dict(CryptoTrade.objects.filter(batch__in=[b for b in batches if b.kind in CRYPTO_KINDS])
                           .values_list('batch_id', 'symbol'))
+    perps_by_batch = _perps_positions([b for b in batches if b.kind in PERPS_KINDS])
     market = _names()
     out = []
     for batch in batches:
         member = by_wallet.get(batch.user_bsc_address.lower())
         if member is None or batch.created_at < member.joined_at:
+            continue
+        if batch.kind in PERPS_KINDS:
+            position = perps_by_batch.get(batch.id)
+            if position is None:
+                continue
+            from cusd_plus.perps_catalog import ticker_of
+
+            label = (f"{ticker_of(position.market.coin)} · "
+                     f"{'Largo' if position.side == 'long' else 'Corto'} {position.leverage}x")
+            out.append({
+                'id': batch.id, 'user': member.user, 'side': 'buy' if batch.kind == 'perps_open' else 'sell',
+                'symbol': position.market.coin, 'ticker': label, 'name': label, 'asset': 'perp',
+                'at': batch.created_at, 'copyable': False,
+            })
+            if len(out) >= limit:
+                break
             continue
         if batch.kind in STOCK_KINDS:
             decoded = _decode_trades([batch])
@@ -188,6 +207,24 @@ def plays(team, limit: int = PLAYS_LIMIT, exclude=()) -> list[dict]:
         })
         if len(out) >= limit:
             break
+    return out
+
+
+def _perps_positions(batches) -> dict:
+    """batch id -> the PerpPosition it opened or returned."""
+    from blockchain.models import PerpPosition
+
+    ids = [b.id for b in batches]
+    if not ids:
+        return {}
+    out = {}
+    from django.db.models import Q
+
+    for position in PerpPosition.objects.filter(Q(open_batch_id__in=ids) | Q(return_batch_id__in=ids)
+                                                ).select_related('market'):
+        for batch_id in (position.open_batch_id, position.return_batch_id):
+            if batch_id in ids:
+                out[batch_id] = position
     return out
 
 
@@ -278,7 +315,7 @@ def goal_progress(team, goal, as_of=None) -> Decimal:
     # From a few minutes before the week: a buy submitted on Sunday night
     # that landed on Monday belongs to Monday's week (by its block time).
     batches = (SponsoredBatch.objects.annotate(addr=Lower('user_bsc_address')).filter(
-        addr__in=wallets, kind__in=('stock_buy', 'crypto_buy'), status='confirmed',
+        addr__in=wallets, kind__in=('stock_buy', 'crypto_buy', 'perps_open'), status='confirmed',
         created_at__gte=week_start - IN_FLIGHT_MAX_AGE, created_at__lt=week_end))
     active = set()
     times: dict = {}

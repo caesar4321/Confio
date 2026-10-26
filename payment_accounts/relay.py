@@ -81,9 +81,14 @@ class RelayClient:
         self.session = session or requests.Session()
 
     def _request(self, method, path, *, body=None, params=None):
+        from django.conf import settings
+
+        # Relay requires a key on /quote (and /requests/v3); sent whenever configured.
+        key = getattr(settings, 'RELAY_API_KEY', '') or ''
         try:
             response = self.session.request(
                 method, self.BASE_URL + path, json=body, params=params,
+                headers={'x-api-key': key} if key else None,
                 timeout=(5, 20), allow_redirects=False,
             )
         except requests.RequestException as exc:

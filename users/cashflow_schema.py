@@ -203,6 +203,18 @@ class CryptoMonthType(graphene.ObjectType):
     holdings = graphene.Int(required=True, description='Assets held at the end of the month')
 
 
+class PerpsMonthType(graphene.ObjectType):
+    state = graphene.String(required=True, description="'gain' | 'settling' | 'none'")
+    value_usd = graphene.String(required=True, description='Value at the end of the month (today on the current month)')
+    value_start_usd = graphene.String(description='gain: value on the 1st')
+    margin_in_usd = graphene.String(description='gain: margin put in this month — the member\'s dollars, '
+                                                'never the leveraged exposure (0.9% exit included)')
+    returned_usd = graphene.String(description='gain: dollars back this month (after the 0.9% entry)')
+    gain_usd = graphene.String(description='gain: value_usd − value_start_usd − margin_in_usd + returned_usd')
+    gain_pct = graphene.String(description='gain: over (value_start_usd + margin_in_usd), 2 decimals')
+    positions = graphene.Int(required=True, description='Positions holding money at the end of the month')
+
+
 def _exact_gain(result):
     """(gain, gain_pct) from the cents shown, so "¿Cómo lo calculamos?" adds
     up to the cent and the percent never disagrees with the dollars beside it."""
@@ -296,6 +308,39 @@ class MonthSummaryQuery(graphene.ObjectType):
         description='"Oro y Bitcoin" in Tu mes: the month\'s gain net of Confío buys and sells. Null whenever '
                     'anything is unknown (fail closed) or crypto is not offered. Own query.',
     )
+
+    perps_month = graphene.Field(
+        PerpsMonthType,
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True),
+        timezone=graphene.String(),
+        description='"Futuros" in Tu mes: the month\'s result in the member\'s own money (margin in, '
+                    'dollars back). Null whenever anything is unknown (fail closed). Own query.',
+    )
+
+    def resolve_perps_month(self, info, year, month, timezone=None):
+        from django.utils import timezone as dj_tz
+        from cusd_plus.perps_month import perps_month
+        from users.cashflow import month_window
+        context = _summary_context(info, year, month, timezone)
+        if context is None:
+            return None
+        _user, account, _account_type, _business_id, tz = context
+        start, end = month_window(int(year), int(month), tz)
+        try:
+            # Never gated by the open switches: what the member holds is always theirs to see.
+            result = perps_month(account.bsc_address or '', start, end, dj_tz.now())
+        except Exception:  # noqa: BLE001 — an unknown hides the card, never a guess
+            logger.warning('perps month unavailable for account %s', account.id, exc_info=True)
+            return None
+        if result is None:
+            return None
+        opt = lambda v: None if v is None else _usd(v)  # noqa: E731
+        gain, gain_pct = _exact_gain(result)
+        return PerpsMonthType(
+            state=result.state, value_usd=_usd(result.value_end), value_start_usd=opt(result.value_start),
+            margin_in_usd=opt(result.bought), returned_usd=opt(result.sold),
+            gain_usd=opt(gain), gain_pct=opt(gain_pct), positions=result.positions)
 
     def resolve_stock_month(self, info, year, month, timezone=None):
         from django.utils import timezone as dj_tz

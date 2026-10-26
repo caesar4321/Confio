@@ -16,7 +16,9 @@
 //
 // Execution is Direct mode (user gas, public RPCs, zero GraphQL) and moves
 // USER ASSETS ONLY — no close-outs, no native sweeps (engine invariants).
-// BSC only: Algorand balances are not part of the exit.
+// BSC, plus the member's own Hyperliquid account for Futuros (closed and
+// withdrawn with fresh signatures: components/emergency/HyperCoreExitCard).
+// Algorand balances are not part of the exit.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -57,6 +59,7 @@ import {
 } from '../services/emergencyExit/bscExit';
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { LoadingOverlay } from '../components/LoadingOverlay';
+import { HyperCoreExitCard } from '../components/emergency/HyperCoreExitCard';
 import { formatDecimal } from '../utils/numberLocale';
 import { formatLocalDateTime } from '../utils/dateUtils';
 
@@ -961,6 +964,14 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
             {wStep === 3 && (
               <>
             {renderOutcome()}
+            {/* Futuros: the member's own Hyperliquid account, signed here too. */}
+            <HyperCoreExitCard
+              eligible={eligible}
+              address={evmAddress}
+              dest={bscDest}
+              destValid={bscDestValid}
+              exitCtx={selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined}
+            />
 
             {!exitDone && (
               <>

@@ -1229,6 +1229,12 @@ confio_admin_site.register(StockHoldings, StockHoldingsAdmin)
 from blockchain.admin import StockRiskAcknowledgementAdmin
 from blockchain.models import StockRiskAcknowledgement
 confio_admin_site.register(StockRiskAcknowledgement, StockRiskAcknowledgementAdmin)
+
+from blockchain.admin import PerpMarketAdmin, PerpPositionAdmin, PerpsRiskAcknowledgementAdmin
+from blockchain.models import PerpMarket, PerpPosition, PerpsRiskAcknowledgement
+confio_admin_site.register(PerpMarket, PerpMarketAdmin)
+confio_admin_site.register(PerpPosition, PerpPositionAdmin)
+confio_admin_site.register(PerpsRiskAcknowledgement, PerpsRiskAcknowledgementAdmin)
 confio_admin_site.register(ProcessedIndexerTransaction, ProcessedIndexerTransactionAdmin)
 confio_admin_site.register(IndexerAssetCursor, IndexerAssetCursorAdmin)
 

@@ -912,6 +912,10 @@ class MessagingService {
             contentItemId: Number(rawParam),
           });
           return;
+        case 'FuturesPosition':
+          // Futuros notices: only ever about the member's own position.
+          this.navigateInsideMain('FuturesPosition', { positionId: rawParam });
+          return;
         case 'ActiveTrade':
           this.navigateInsideMain('ActiveTrade', {
             trade: {

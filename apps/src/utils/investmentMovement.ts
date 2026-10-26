@@ -1,10 +1,11 @@
 // Ledger rows for investment trades carry a description prefix the server
 // sets (cusd_plus/unified.py): "Ondo Stocks: " for U.S. stocks, "Cripto: "
-// for Bitcoin and other coins, "Oro: " for gold. Everything that treats a
+// for Bitcoin and other coins, "Oro: " for gold, "Futuros: " for a Futuros
+// margin out or proceeds home. Everything that treats a
 // stock trade as an internal settlement (no stranger, no counterparty
 // lookup, its own title and glyph) keys on all three.
 
-export const INVESTMENT_PREFIXES = ['Ondo Stocks: ', 'Cripto: ', 'Oro: '] as const;
+export const INVESTMENT_PREFIXES = ['Ondo Stocks: ', 'Cripto: ', 'Oro: ', 'Futuros: '] as const;
 
 export const investmentPrefix = (description?: string | null): string | null => {
   if (typeof description !== 'string') return null;

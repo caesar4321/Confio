@@ -16,11 +16,25 @@ import { BrandFieldBackground } from '../components/common/BrandFieldBackground'
 import StocksMark from '../components/svg/StocksMark';
 import { CryptoAssetMark } from '../components/CryptoAssetMark';
 import OndoLogo from '../assets/png/Ondo.png';
+import { VenueAttribution, venueA11y } from '../components/VenueAttribution';
 import { FEATURED_STOCK_TICKERS } from '../config/stockPresentation';
 import { colors } from '../config/theme';
 import { useAccount } from '../contexts/AccountContext';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket } from '../hooks/useCrypto';
+import { usePerpsCapabilities, usePerpsMarkets, usePerpsPositions } from '../hooks/usePerps';
+import FuturesMark from '../components/svg/FuturesMark';
+import { PerpMarketMark } from '../components/futures/PerpMarketMark';
+import {
+  SIDE_COLORS,
+  formatPctSigned,
+  formatUsd as formatPerpUsd,
+  formatUsdSigned,
+  pnlColor,
+  sideLabel,
+  stepLabel,
+  positionValueUsd,
+} from '../utils/perpsPresentation';
 import { formatUsdPrice } from '../utils/cryptoPresentation';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { MainStackParamList } from '../types/navigation';
@@ -62,6 +76,13 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
   // Always read for owners: a holder whose country was blocked, or whose
   // token was delisted, must still see it and reach Vender.
   const { holdings: cryptoHoldings } = useCryptoHoldings(isEmployee);
+  // Futuros: its own country policy and switches. Shown below Oro y Bitcoin
+  // and above $CONFIO (cards ordered by risk); never promoted elsewhere.
+  const { capabilities: perps, refetch: refetchPerps } = usePerpsCapabilities(isEmployee);
+  const perpsEnabled = Boolean(perps?.enabled) && !isEmployee;
+  const { markets: perpsMarkets } = usePerpsMarkets(perpsEnabled);
+  // Always read for owners: a holder whose country was blocked must still reach Cerrar.
+  const { positions: perpsPositions, unknown: perpsUnknown } = usePerpsPositions(!isEmployee, { pollMs: 30_000 });
   const { data: presaleData, refetch: refetchPresale } = useQuery(GET_ACTIVE_PRESALE, { fetchPolicy: 'cache-and-network', skip: isEmployee });
   const { data: statusData, refetch: refetchStatus } = useQuery(GET_PRESALE_STATUS, { fetchPolicy: 'cache-and-network', skip: isEmployee });
   // The live curve — the same source ConfioPresaleScreen buys at. The phase
@@ -79,11 +100,12 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
     useCallback(() => {
       if (isEmployee) return;
       refetchCrypto().catch(() => {});
+      refetchPerps().catch(() => {});
       refetchPresale().catch(() => {});
       refetchStatus().catch(() => {});
       refetchCurve().catch(() => {});
       if (claimsOpen) refetchOnchain().catch(() => {});
-    }, [isEmployee, claimsOpen, refetchCrypto, refetchPresale, refetchStatus, refetchCurve, refetchOnchain]),
+    }, [isEmployee, claimsOpen, refetchCrypto, refetchPerps, refetchPresale, refetchStatus, refetchCurve, refetchOnchain]),
   );
 
   const usd = (v: number, digits = 2) =>
@@ -147,6 +169,12 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
       priceUsd: null as number | null, dayChangePct: null as number | null, valueUsd: h.valueUsd, sellOnly: true,
     })),
   ];
+
+  const livePerps = (perpsPositions ?? []).filter(p => p.state !== 'done');
+  const perpsEquity = livePerps.reduce((sum, p) => sum + positionValueUsd(p), 0);
+  const topPerps = [...perpsMarkets]
+    .sort((a, b) => (b.dayVolumeUsd ?? 0) - (a.dayVolumeUsd ?? 0))
+    .slice(0, 3);
 
   return (
     <View style={styles.screen}>
@@ -313,7 +341,97 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
               <Text style={styles.riskNote}>
                 Su precio sube y baja todo el tiempo, también de noche y en fines de semana.
               </Text>
+              <VenueAttribution venue="pancakeswap" testID="invest-crypto-venue" />
             </View>
+          )}
+
+          {(perpsEnabled || livePerps.length > 0 || perpsUnknown) && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Futuros. ${venueA11y('hyperliquid')}`}
+              accessibilityHint={livePerps.length > 0 ? `Tus posiciones: ${formatPerpUsd(perpsEquity)}` : 'Abre los mercados de futuros'}
+              onPress={() => navigation.navigate('FuturesMarkets')}
+              style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+              testID="invest-futures-card"
+            >
+              <View style={styles.cardHead}>
+                <FuturesMark size={44} />
+                <View style={styles.cardHeadText}>
+                  <Text style={styles.cardTitle}>Futuros</Text>
+                  <Text style={styles.cardSub}>
+                    {livePerps.length > 0 ? 'Tu posición' : 'Largo o corto, con apalancamiento · 24/7'}
+                  </Text>
+                </View>
+                {livePerps.length > 0 && (
+                  <View style={styles.cardValue}>
+                    <Text style={styles.cardValueText}>{formatPerpUsd(perpsEquity)}</Text>
+                  </View>
+                )}
+              </View>
+
+              {perpsUnknown && livePerps.length === 0 && (
+                <Text style={styles.riskNote}>No pudimos leer tus futuros ahora. Tu dinero sigue a tu nombre en Hyperliquid.</Text>
+              )}
+              {livePerps.length > 0 ? (
+                <View style={styles.cryptoRows}>
+                  {livePerps.map(p => {
+                    const pending = stepLabel(p.nextAction, p.state);
+                    const roe = p.returnOnEquity != null ? p.returnOnEquity * 100 : null;
+                    return (
+                      <Pressable
+                        key={p.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${p.ticker} ${sideLabel(p.side)} ${p.leverage}x`}
+                        accessibilityHint={pending || `Ganancia ${formatUsdSigned(p.unrealizedPnlUsd)}`}
+                        onPress={() => navigation.navigate('FuturesPosition', { positionId: p.id })}
+                        style={({ pressed }) => [styles.cryptoRow, pressed && styles.pressed]}
+                      >
+                        <PerpMarketMark ticker={p.ticker} size={36} leverage={p.leverage} badgeColor={SIDE_COLORS[p.side].solid} />
+                        <View style={styles.cardHeadText}>
+                          <Text style={styles.cryptoName}>{p.ticker} · {sideLabel(p.side)} {p.leverage}x</Text>
+                          <Text style={[styles.cardSub, pending ? styles.pendingText : null]} numberOfLines={1}>
+                            {pending || p.name}
+                          </Text>
+                        </View>
+                        {!pending && (
+                          <View style={styles.cardValue}>
+                            <Text style={[styles.cryptoPrice, { color: pnlColor(p.unrealizedPnlUsd) }]}>
+                              {formatUsdSigned(p.unrealizedPnlUsd)}
+                            </Text>
+                            <Text style={[styles.delta, { color: pnlColor(roe) }]}>{formatPctSigned(roe)}</Text>
+                          </View>
+                        )}
+                        <Icon name="chevron-right" size={18} color={colors.text.light} />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : topPerps.length > 0 ? (
+                <View style={styles.tickers}>
+                  {topPerps.map(m => {
+                    const up = (m.dayChangePct ?? 0) >= 0;
+                    return (
+                      <View key={m.coin} style={styles.ticker}>
+                        <Text style={styles.tickerName}>{m.ticker}</Text>
+                        <Text style={[styles.delta, !up && styles.deltaDown]}>
+                          {up ? '▲' : '▼'} {formatNumber(Math.abs(m.dayChangePct ?? 0), { maximumFractionDigits: 2 })}%
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              <View style={[styles.cta, styles.ctaFutures]}>
+                <Text style={styles.ctaText}>{livePerps.length > 0 ? 'Ver futuros' : 'Explorar futuros'}</Text>
+                <Icon name="arrow-right" size={18} color={colors.white} />
+              </View>
+              {/* The riskiest product short of the presale: said on the card. */}
+              <Text style={styles.riskNote}>
+                Alto riesgo: con apalancamiento puedes perder todo el margen de una posición.
+              </Text>
+              <VenueAttribution venue="hyperliquid" testID="invest-futures-venue" />
+            </Pressable>
           )}
 
           <Pressable
@@ -476,6 +594,8 @@ const styles = StyleSheet.create({
   },
   ctaStocks: { backgroundColor: colors.primaryDark },
   ctaConfio: { backgroundColor: colors.secondaryDark },
+  ctaFutures: { backgroundColor: '#0F172A' },
+  pendingText: { color: '#92400E', fontWeight: '600' },
   ctaText: { fontSize: 15, fontWeight: '700', color: colors.white },
   partner: { fontSize: 12, color: colors.text.light, textAlign: 'center', marginTop: 10 },
   partnerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 },

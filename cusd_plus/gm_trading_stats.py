@@ -11,8 +11,12 @@ the buy/sale split (else the split is withheld, since one side would be
 the total minus the other), the typical purchase, and each ranked stock.
 
 Two scopes (2026-10-19): 'stocks' (what store builds' Acciones tile and
-screen show) and 'all' (stocks + Bitcoin & gold, the new Inversiones tile
-and Inversiones en movimiento). Each scope's snapshot serves both Home's
+screen show) and 'all' (stocks + Bitcoin & gold + Futuros, the new
+Inversiones tile and Inversiones en movimiento). Futuros count in the
+member's own money: an open (or a margin add) is the margin that left
+Confío dollars, a return the dollars that came back, both from their
+history rows; never the leveraged size (10x on US$100 is US$100). An open
+whose bridge was refunded and kept as dollars never traded: not volume. Each scope's snapshot serves both Home's
 tile (gm_volume) and its breakdown, so they never disagree. It is rebuilt only when a confirmed stock trade was
 added or changed (a cheap signature query), at most every FRESH_FOR, by
 one worker at a time; others keep serving the last snapshot.
@@ -30,7 +34,11 @@ logger = logging.getLogger(__name__)
 
 STOCK_KINDS = ('stock_buy', 'stock_sell')
 CRYPTO_KINDS = ('crypto_buy', 'crypto_sell')
-SCOPES = {'stocks': STOCK_KINDS, 'all': STOCK_KINDS + CRYPTO_KINDS}
+# The margin legs only: a bridge retry re-sends money its open already counted.
+PERPS_KINDS = ('perps_open', 'perps_return')
+SCOPES = {'stocks': STOCK_KINDS, 'all': STOCK_KINDS + CRYPTO_KINDS + PERPS_KINDS}
+# Money that came back as a refund (kept as dollars): the open never traded.
+PERPS_UNTRADED = ('failed', 'refunded', 'cancelled')
 CACHE_KEY = 'gm_trading_stats_v2'
 CACHE_TTL = 24 * 3600          # the last snapshot, served while a refresh runs
 FRESH_KEY = 'gm_trading_stats_fresh_v2'
@@ -57,7 +65,7 @@ class TopAsset:
     name: str
     trade_count: int
     trader_count: int
-    kind: str = 'stock'  # 'stock' | 'crypto': which detail screen a row opens
+    kind: str = 'stock'  # 'stock' | 'crypto' | 'perps': which detail screen a row opens
 
 
 @dataclass
@@ -73,9 +81,10 @@ class TradingStats:
     since: object | None
     top_assets: list = field(default_factory=list)
     computed_at: float = 0.0
-    # Distinct wallets behind the crypto part of scope 'all'. Its total
-    # minus the stock-only total IS the crypto volume, so 'all' is stated
-    # only when that part has MIN_TRADERS wallets too (or none at all).
+    # Distinct wallets behind the non-stock part of scope 'all' (Bitcoin &
+    # gold and Futuros). Its total minus the stock-only total IS that
+    # volume, so 'all' is stated only when that part has MIN_TRADERS
+    # wallets too (or none at all).
     crypto_trader_count: int = 0
 
 
@@ -107,10 +116,50 @@ def _names() -> dict:
         return {}
 
 
+def _perps_names() -> dict:
+    from blockchain.models import PerpMarket
+
+    from . import perps_catalog
+
+    out = {}
+    for market in PerpMarket.objects.all():
+        view = perps_catalog.view(market)
+        out[market.coin] = (view.ticker, view.name)
+    return out
+
+
 def _crypto_names() -> dict:
     from . import crypto_catalog
 
     return {t.symbol: (t.ticker, t.name) for t in crypto_catalog.tokens(include_unlisted=True)}
+
+
+def _perps_legs(batches) -> dict:
+    """batch id → the market coin it traded, for perps batches that moved
+    money into a trade. Absent: refunded and kept as dollars (never traded),
+    or unknown ('?' → counted nowhere)."""
+    from django.db.models import Q
+
+    from blockchain.models import PerpMarginChange, PerpPosition
+
+    ids = [b.id for b in batches]
+    if not ids:
+        return {}
+    out = {}
+    for coin, state, open_id, return_id in PerpPosition.objects.filter(
+            Q(open_batch_id__in=ids) | Q(return_batch_id__in=ids)).values_list(
+            'market__coin', 'state', 'open_batch_id', 'return_batch_id'):
+        if return_id in ids:
+            out[return_id] = coin
+        if open_id in ids and state not in PERPS_UNTRADED:
+            out[open_id] = coin
+    for batch_id, coin, state in PerpMarginChange.objects.filter(batch_id__in=ids).values_list(
+            'batch_id', 'position__market__coin', 'state'):
+        if state in PERPS_UNTRADED:
+            out.pop(batch_id, None)
+        else:
+            out[batch_id] = coin
+    return out
 
 
 def _symbols(batches) -> list:
@@ -120,10 +169,13 @@ def _symbols(batches) -> list:
 
     stock = [b for b in batches if b.kind in STOCK_KINDS]
     decoded = {b.id: t.symbol for b, t in zip(stock, _decode_trades(stock))}
+    perps = _perps_legs([b for b in batches if b.kind in PERPS_KINDS])
     out = []
     for b in batches:
         if b.kind in STOCK_KINDS:
             out.append(decoded.get(b.id, '?'))
+        elif b.kind in PERPS_KINDS:
+            out.append(perps.get(b.id, '?'))
         else:
             trade = getattr(b, 'crypto_trade', None)
             out.append(trade.symbol if trade is not None else '?')
@@ -148,6 +200,10 @@ def compute(scope: str = 'stocks') -> TradingStats:
     sell_wallets = set()
     per_asset: dict[str, dict] = {}
     crypto_wallets = set()
+    # Non-stock wallets per side: 'all' − 'stocks' on one side is exactly
+    # that side's non-stock volume, so it needs its own floor.
+    other_buy_wallets = set()
+    other_sell_wallets = set()
     since = None
     for batch, symbol in zip(batches, symbols):
         # Dollars from the settled history row itself, exactly what Home's
@@ -156,30 +212,40 @@ def compute(scope: str = 'stocks') -> TradingStats:
         usd = _dec(row.amount) if row is not None and row.deleted_at is None else None
         if usd is None:
             continue  # hidden or missing: not volume
+        perps = batch.kind in PERPS_KINDS
+        if perps and symbol.startswith('?'):
+            continue  # refunded and kept as dollars: it never traded
         wallet = batch.user_bsc_address.lower()
         wallets.add(wallet)
-        if batch.kind in CRYPTO_KINDS:
+        other = batch.kind in CRYPTO_KINDS or perps
+        if other:
             crypto_wallets.add(wallet)
         since = since or batch.created_at
-        if batch.kind.endswith('_buy'):
+        if batch.kind.endswith('_buy') or batch.kind == 'perps_open':
             buy_usd += usd
             buy_count += 1
             buys.append(usd)
             buy_wallets.add(wallet)
+            if other:
+                other_buy_wallets.add(wallet)
         else:
             sell_usd += usd
             sell_count += 1
             sell_wallets.add(wallet)
+            if other:
+                other_sell_wallets.add(wallet)
         if symbol.startswith('?'):
             continue  # undecodable: counted above, not ranked
         asset = per_asset.setdefault(symbol, {'count': 0, 'usd': Decimal('0'), 'wallets': set(),
-                                              'kind': 'crypto' if batch.kind in CRYPTO_KINDS else 'stock'})
+                                              'kind': 'perps' if perps else
+                                              'crypto' if batch.kind in CRYPTO_KINDS else 'stock'})
         asset['count'] += 1
         asset['usd'] += usd
         asset['wallets'].add(wallet)
 
     names = _names()
     crypto_names = _crypto_names() if scope != 'stocks' else {}
+    perps_names = _perps_names() if scope != 'stocks' else {}
     ranked = sorted(
         (item for item in per_asset.items() if len(item[1]['wallets']) >= MIN_TRADERS),
         key=lambda item: (item[1]['count'], item[1]['usd']), reverse=True,
@@ -188,13 +254,17 @@ def compute(scope: str = 'stocks') -> TradingStats:
     for symbol, data in ranked:
         if data['kind'] == 'crypto':
             ticker, name = crypto_names.get(symbol, (symbol, symbol))
+        elif data['kind'] == 'perps':
+            ticker, name = perps_names.get(symbol, (symbol, symbol))
         else:
             ticker, name = names.get(symbol, (symbol.removesuffix('on'), symbol.removesuffix('on')))
         # Counts only: per-stock dollars would let anyone subtract their way
         # to the volume of a stock withheld below the floor.
         top.append(TopAsset(symbol=symbol, ticker=ticker, name=name, trade_count=data['count'],
                             trader_count=len(data['wallets']), kind=data['kind']))
-    split_ok = len(buy_wallets) >= MIN_TRADERS and len(sell_wallets) >= MIN_TRADERS
+    split_ok = (len(buy_wallets) >= MIN_TRADERS and len(sell_wallets) >= MIN_TRADERS
+                and all(len(side) == 0 or len(side) >= MIN_TRADERS
+                        for side in (other_buy_wallets, other_sell_wallets)))
     median = (float(statistics.median(buys))
               if len(buys) >= MIN_BUYS_FOR_MEDIAN and len(buy_wallets) >= MIN_TRADERS else None)
     return TradingStats(
@@ -230,7 +300,14 @@ def _signature(scope: str = 'stocks'):
         rows=Count('unified_transaction', filter=Q(unified_transaction__deleted_at__isnull=True)),
         rows_touched=Max('unified_transaction__updated_at'))
     stamp = lambda v: v.timestamp() if v else 0  # noqa: E731
-    return (sig['n'], sig['last'], stamp(sig['touched']), sig['rows'], stamp(sig['rows_touched']))
+    out = (sig['n'], sig['last'], stamp(sig['touched']), sig['rows'], stamp(sig['rows_touched']))
+    if 'perps_open' in SCOPES[scope]:
+        # A refund kept as dollars un-counts an open without touching its batch.
+        from blockchain.models import PerpMarginChange, PerpPosition
+
+        out += (stamp(PerpPosition.objects.aggregate(t=Max('updated_at'))['t']),
+                stamp(PerpMarginChange.objects.aggregate(t=Max('updated_at'))['t']))
+    return out
 
 
 def snapshot(scope: str = 'stocks') -> TradingStats | None:

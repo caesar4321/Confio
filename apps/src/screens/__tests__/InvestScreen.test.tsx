@@ -23,6 +23,12 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 jest.mock('../../components/svg/StocksMark', () => 'StocksMark');
+jest.mock('../../components/svg/FuturesMark', () => 'FuturesMark');
+jest.mock('../../hooks/usePerps', () => ({
+  usePerpsCapabilities: () => ({ capabilities: null, refetch: () => Promise.resolve() }),
+  usePerpsMarkets: () => ({ markets: [] }),
+  usePerpsPositions: () => ({ positions: [] }),
+}));
 jest.mock('../../assets/png/Ondo.png', () => 1);
 jest.mock('../../components/common/BrandFieldBackground', () => ({ BrandFieldBackground: 'BrandFieldBackground' }));
 jest.mock('../../utils/numberFormatting', () => ({

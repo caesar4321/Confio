@@ -972,7 +972,12 @@ class ActivityShareType(graphene.ObjectType):
 
 # Builds that predate crypto posts render an unknown kind badly (amount twice,
 # a sale's P&L labelled "Desde la compra"); they do render stock kinds right.
-_LEGACY_KIND = {'crypto_buy': 'stock_buy', 'crypto_sell': 'stock_sell'}
+_LEGACY_KIND = {'crypto_buy': 'stock_buy', 'crypto_sell': 'stock_sell',
+                'perps_open': 'stock_buy', 'perps_close': 'stock_sell'}
+_LEGACY_SETTING = {'perps_open': 'PERPS_SHARE_MIN_APP_VERSION', 'perps_close': 'PERPS_SHARE_MIN_APP_VERSION'}
+
+
+PERP_SYMBOL_PREFIX = 'perp:'  # cusd_plus.perps_portfolio.SYMBOL_PREFIX (no import cycle)
 
 
 def _client_kind(kind: str, meta) -> str:
@@ -983,18 +988,25 @@ def _client_kind(kind: str, meta) -> str:
         return kind
     from users.paid_offers import _at_least
 
-    return kind if _at_least(meta, 'CRYPTO_SHARE_MIN_APP_VERSION') else _LEGACY_KIND[kind]
+    setting = _LEGACY_SETTING.get(kind, 'CRYPTO_SHARE_MIN_APP_VERSION')
+    return kind if _at_least(meta, setting) else _LEGACY_KIND[kind]
 
 
 def build_activity_type(public: dict, raw: dict, meta=None) -> ActivityShareType:
+    kind = _client_kind(public['kind'], meta)
+    # A build without Futuros cards shows the stock twin: give it the full
+    # label ("BTC · Corto 5x") so a short never reads as a plain purchase.
+    legacy_perps = kind != public['kind'] and public['kind'] in activity_share.PERPS_KINDS
     return ActivityShareType(
-        kind=_client_kind(public['kind'], meta), date=public.get('date'), amount_usd=public.get('amount_usd'),
-        ticker=public.get('ticker'), name=public.get('name'), rail=public.get('rail'),
+        kind=kind, date=public.get('date'), amount_usd=public.get('amount_usd'),
+        ticker=public.get('name') if legacy_perps else public.get('ticker'), name=public.get('name'),
+        rail=public.get('rail'),
         country=public.get('country'), minutes=public.get('minutes'), merchant=public.get('merchant'),
         local=public.get('local'),
         pnl_usd=public.get('pnl_usd'),
         pnl_pct=public.get('pnl_pct'), position=public.get('position'),
-        category=public.get('category'),
+        # 'perp' on a stock twin would read as crypto in those builds.
+        category=None if legacy_perps else public.get('category'),
         headline=activity_share.activity_headline(raw),
     )
 
@@ -1214,7 +1226,10 @@ def build_member_portfolio(viewer, user_id):
         member_since=portfolio.member_since,
         open_positions=None if portfolio.open_positions is None else [
             PortfolioOpenPositionType(
-                symbol=p.symbol, ticker=p.ticker, name=p.name, units=format(p.units.normalize(), 'f'),
+                # A Futuros position: no page to open (it is the member's own),
+                # and its size is leveraged exposure, never shown as holdings.
+                symbol='' if p.symbol.startswith(PERP_SYMBOL_PREFIX) else p.symbol, ticker=p.ticker, name=p.name,
+                units='' if p.symbol.startswith(PERP_SYMBOL_PREFIX) else format(p.units.normalize(), 'f'),
                 value_usd=_money(p.value_usd), invested_usd=_money(p.invested_usd),
                 avg_entry_usd=None if p.avg_entry_usd is None else format(p.avg_entry_usd.quantize(member_portfolio.Decimal('0.0001')), 'f'),
                 pnl_usd=_money(p.pnl_usd), pnl_pct=_pct(p.pnl_pct), day_change_pct=_pct(p.day_change_pct),

@@ -1,11 +1,12 @@
 // Data for the Tu mes insight cards (docs/designs/tu-mes-insights.md 8A and
 // the delta corrections):
 //
-// - Five isolated queries (monthInsights, savingsEarned, protectionValue,
-//   stockMonth, cryptoMonth): each fails alone, and an older server never
-//   breaks monthSummary.
-// - The two investment cards ("Tus acciones", "Oro y Bitcoin") follow the
-//   same rules, each in its own slot: merge, settling poll, one ask at a time.
+// - Six isolated queries (monthInsights, savingsEarned, protectionValue,
+//   stockMonth, cryptoMonth, perpsMonth): each fails alone, and an older
+//   server never breaks monthSummary.
+// - The three investment cards ("Tus acciones", "Oro y Bitcoin", "Futuros")
+//   follow the same rules, each in its own slot: merge, settling poll, one
+//   ask at a time.
 // - One reveal: once Card A has rendered (`ready`), the cards are shown
 //   together, in slot order, when every query has settled (no short window:
 //   a cold stocks scan of ~1.6s must not lose its card). Only a request
@@ -18,8 +19,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApolloClient } from '@apollo/client';
 import {
-  GET_CRYPTO_MONTH, GET_MONTH_INSIGHTS, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH,
-  type CryptoMonth, type MonthInsights, type ProtectionValue, type RecurringPayment, type SavingsEarned,
+  GET_CRYPTO_MONTH, GET_MONTH_INSIGHTS, GET_PERPS_MONTH, GET_PROTECTION_VALUE, GET_SAVINGS_EARNED, GET_STOCK_MONTH,
+  type CryptoMonth, type MonthInsights, type PerpsMonth, type ProtectionValue, type RecurringPayment, type SavingsEarned,
   type StockMonth,
 } from '../apollo/monthSummary';
 import { MIN_SAVINGS_USD } from '../utils/monthInsights';
@@ -36,23 +37,26 @@ export type InsightData = {
   stocks?: StockMonth | null;
   /** "Oro y Bitcoin": null hides the card (unknown, or crypto not offered). */
   crypto?: CryptoMonth | null;
+  /** "Futuros": null hides the card (unknown); 'none' draws nothing. */
+  perps?: PerpsMonth | null;
 };
 
 /** The investment cards: each its own query, merge and settling poll. */
-export type InvestmentSlot = 'stocks' | 'crypto';
-const SLOTS: InvestmentSlot[] = ['stocks', 'crypto'];
+export type InvestmentSlot = 'stocks' | 'crypto' | 'perps';
+const SLOTS: InvestmentSlot[] = ['stocks', 'crypto', 'perps'];
 type Investment = { state: StockMonth['state']; canBuy?: boolean };
 
 const QUERIES = {
   stocks: { query: GET_STOCK_MONTH, field: 'stockMonth' },
   crypto: { query: GET_CRYPTO_MONTH, field: 'cryptoMonth' },
+  perps: { query: GET_PERPS_MONTH, field: 'perpsMonth' },
 } as const;
 
 export type MonthInsightsState =
   | { revealed: false }
   | ({ revealed: true } & InsightData);
 
-const EMPTY: InsightData = { insights: null, savings: null, protection: null, stocks: null, crypto: null };
+const EMPTY: InsightData = { insights: null, savings: null, protection: null, stocks: null, crypto: null, perps: null };
 
 /** What the reveal actually shows: a savings answer under a cent and a
  *  savings answer behind protection are not cards, so they are not "shown"
@@ -88,6 +92,7 @@ export function mergeValues(shown: InsightData, next: InsightData): InsightData 
       : null,
     stocks: mergeInvestment(shown.stocks, next.stocks),
     crypto: mergeInvestment(shown.crypto, next.crypto),
+    perps: mergeInvestment(shown.perps, next.perps),
   };
 }
 
@@ -139,8 +144,8 @@ export function useMonthInsights(params: {
   /** Card A has rendered (monthSummary answered): the insight queries start. */
   ready: boolean;
 }): MonthInsightsState & {
-  refresh: () => void; refreshStocks: () => void; refreshCrypto: () => void;
-  stocksSettling: boolean; cryptoSettling: boolean;
+  refresh: () => void; refreshStocks: () => void; refreshCrypto: () => void; refreshPerps: () => void;
+  stocksSettling: boolean; cryptoSettling: boolean; perpsSettling: boolean;
 } {
   const { accountKey, year, month, timezone, isCurrent, ready } = params;
   const client = useApolloClient();
@@ -152,7 +157,7 @@ export function useMonthInsights(params: {
   // SAME month can never overwrite a newer one.
   const generation = useRef(0);
   const shown = useRef<InsightData | null>(null);
-  const slots = useRef<Record<InvestmentSlot, SlotRefs>>({ stocks: newSlot(), crypto: newSlot() });
+  const slots = useRef<Record<InvestmentSlot, SlotRefs>>({ stocks: newSlot(), crypto: newSlot(), perps: newSlot() });
   useEffect(() => () => { generation.current += 1; }, []);
 
   /** Records an applied answer's state (what the screen polls on). True
@@ -183,7 +188,7 @@ export function useMonthInsights(params: {
       .then((r) => (r.data?.[field] ?? null) as any).catch(() => null);
   }, [client, year, month, timezone]);
 
-  const fetchAll = useCallback((ask: Record<InvestmentSlot, boolean> = { stocks: true, crypto: true }) => {
+  const fetchAll = useCallback((ask: Record<InvestmentSlot, boolean> = { stocks: true, crypto: true, perps: true }) => {
     const opt = { fetchPolicy: 'no-cache' as const };
     const safe = <T,>(p: Promise<{ data?: T }>) => p.then((r) => r.data ?? null).catch(() => null);
     const insights = safe(client.query<{ monthInsights: MonthInsights | null }>(
@@ -199,6 +204,7 @@ export function useMonthInsights(params: {
       insights, savings, protection,
       stocks: (ask.stocks ? fetchSlot('stocks') : Promise.resolve(null)) as Promise<StockMonth | null>,
       crypto: (ask.crypto ? fetchSlot('crypto') : Promise.resolve(null)) as Promise<CryptoMonth | null>,
+      perps: (ask.perps ? fetchSlot('perps') : Promise.resolve(null)) as Promise<PerpsMonth | null>,
     };
   }, [client, year, month, timezone, isCurrent, fetchSlot]);
 
@@ -228,14 +234,15 @@ export function useMonthInsights(params: {
       for (const slot of SLOTS) noteSlot(slot, got[slot]?.state ?? null);
       setState({ revealed: true, ...shown.current });
     };
-    const { insights, savings, protection, stocks, crypto } = fetchAll();
+    const { insights, savings, protection, stocks, crypto, perps } = fetchAll();
     insights.then((v) => { if (!closed) got.insights = v; });
     savings.then((v) => { if (!closed) got.savings = v; });
     protection.then((v) => { if (!closed) got.protection = v; });
     stocks.then((v) => { if (!closed) got.stocks = v; });
     crypto.then((v) => { if (!closed) got.crypto = v; });
+    perps.then((v) => { if (!closed) got.perps = v; });
     const timer = setTimeout(reveal, REVEAL_HANG_GUARD_MS);
-    Promise.all([insights, savings, protection, stocks, crypto]).then(() => {
+    Promise.all([insights, savings, protection, stocks, crypto, perps]).then(() => {
       clearTimeout(timer);
       reveal();
     });
@@ -267,10 +274,10 @@ export function useMonthInsights(params: {
       refs.inFlight = gen;
       answers[slot].finally(() => { if (refs.inFlight === gen) refs.inFlight = null; });
     }
-    const { insights, savings, protection, stocks, crypto } = answers;
-    Promise.all([insights, savings, protection, stocks, crypto]).then(([i, s, p, k, c]) => {
+    const { insights, savings, protection, stocks, crypto, perps } = answers;
+    Promise.all([insights, savings, protection, stocks, crypto, perps]).then(([i, s, p, k, c, f]) => {
       if (generation.current !== gen || !shown.current) return;
-      const got: Record<InvestmentSlot, Investment | null> = { stocks: k, crypto: c };
+      const got: Record<InvestmentSlot, Investment | null> = { stocks: k, crypto: c, perps: f };
       const next: InsightData = { insights: i, savings: s, protection: p };
       const resolves: Partial<Record<InvestmentSlot, boolean>> = {};
       for (const slot of SLOTS) {
@@ -308,11 +315,12 @@ export function useMonthInsights(params: {
   }, [fetchSlot, noteSlot, mergeAnswers]);
   const refreshStocks = useCallback(() => refreshSlot('stocks'), [refreshSlot]);
   const refreshCrypto = useCallback(() => refreshSlot('crypto'), [refreshSlot]);
+  const refreshPerps = useCallback(() => refreshSlot('perps'), [refreshSlot]);
 
   // Only a shown card can resolve in place (a dropped one never appears).
   const settlingIn = (slot: InvestmentSlot) => Boolean(shown.current?.[slot]) && slots.current[slot].last === 'settling';
   return {
-    ...state, refresh, refreshStocks, refreshCrypto,
-    stocksSettling: settlingIn('stocks'), cryptoSettling: settlingIn('crypto'),
+    ...state, refresh, refreshStocks, refreshCrypto, refreshPerps,
+    stocksSettling: settlingIn('stocks'), cryptoSettling: settlingIn('crypto'), perpsSettling: settlingIn('perps'),
   };
 }

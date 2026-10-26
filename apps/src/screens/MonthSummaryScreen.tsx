@@ -37,6 +37,7 @@ import { Rise } from '../components/tuMes/motion';
 import { TuMesIntro } from '../components/tuMes/TuMesIntro';
 import { StocksCard } from '../components/tuMes/StocksCard';
 import { CryptoCard } from '../components/tuMes/CryptoCard';
+import { PerpsCard } from '../components/tuMes/PerpsCard';
 import {
   useMonthInsights, type InsightData,
 } from '../hooks/useMonthInsights';
@@ -171,6 +172,7 @@ export function MonthSummaryScreen() {
   }, []));
   const stocksPhase = useSettlingPoll(insights.revealed && insights.stocksSettling, insights.refreshStocks, focused, resumePolls);
   const cryptoPhase = useSettlingPoll(insights.revealed && insights.cryptoSettling, insights.refreshCrypto, focused, resumePolls);
+  const perpsPhase = useSettlingPoll(insights.revealed && insights.perpsSettling, insights.refreshPerps, focused, resumePolls);
 
   // Back from a movement list where categories may have changed: re-read.
   // (refetch via ref: the effect must run per focus, never per render.)
@@ -244,6 +246,7 @@ export function MonthSummaryScreen() {
         <MonthBody
           stocksPhase={stocksPhase}
           cryptoPhase={cryptoPhase}
+          perpsPhase={perpsPhase}
           summary={summary}
           masked={masked}
           isCurrent={isCurrent}
@@ -261,6 +264,7 @@ export function MonthSummaryScreen() {
           onOpenStock={(ticker) => navigation.navigate('StockDetail', { ticker })}
           onOpenCrypto={() => navigation.navigate('BottomTabs', { screen: 'Invest' })}
           onOpenCryptoAsset={(symbol) => navigation.navigate('CryptoDetail', { symbol })}
+          onOpenPerps={() => navigation.navigate('FuturesMarkets')}
         />
       )}
       {/* Joyful full-screen intro on every entry (founder 2026-10-05); tap to skip. */}
@@ -286,6 +290,7 @@ function SkeletonState() {
 type BodyProps = {
   stocksPhase: SettlingPhase;
   cryptoPhase: SettlingPhase;
+  perpsPhase: SettlingPhase;
   summary: MonthSummary;
   masked: boolean;
   isCurrent: boolean;
@@ -301,6 +306,7 @@ type BodyProps = {
   onOpenStocks: () => void;
   onOpenStock: (ticker: string) => void;
   onOpenCrypto: () => void;
+  onOpenPerps: () => void;
   onOpenCryptoAsset: (symbol: string) => void;
 };
 
@@ -342,7 +348,7 @@ const isUnknownWallet = (key: string, name: string) =>
 /** A single unknown wallet is a deposit only if no money went out to it. */
 const externalName = (sent: number) => (sent > 0 ? 'Billetera externa' : 'Depósito externo');
 
-function MonthBody({ summary, masked, isCurrent, business, insights, runKey, stocksPhase, cryptoPhase, onOpen, onSend, onReceive, onSave, onTopUp, onOpenStocks, onOpenStock, onOpenCrypto, onOpenCryptoAsset }: BodyProps) {
+function MonthBody({ summary, masked, isCurrent, business, insights, runKey, stocksPhase, cryptoPhase, perpsPhase, onOpen, onSend, onReceive, onSave, onTopUp, onOpenStocks, onOpenStock, onOpenCrypto, onOpenCryptoAsset, onOpenPerps }: BodyProps) {
   const cur = summary.current;
 
   const uncategorized = cur.spendingByCategory.find((c) => c.category === 'uncategorized');
@@ -446,6 +452,11 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, sto
             // Same states as stocks; 'none' draws nothing (no invitation).
             <CryptoCard value={insights.crypto} month={summary.month} isCurrent={isCurrent} masked={masked}
               settlingPhase={cryptoPhase} onOpenAll={onOpenCrypto} onOpenAsset={onOpenCryptoAsset} />
+          )}
+          {insights.perps && insights.perps.state !== 'none' && (
+            // gain · settling (money on the bridge); 'none' draws nothing (no invitation).
+            <PerpsCard value={insights.perps} month={summary.month} isCurrent={isCurrent} masked={masked}
+              settlingPhase={perpsPhase} onOpen={onOpenPerps} />
           )}
           {insights.insights && (
             <Rise index={2}>

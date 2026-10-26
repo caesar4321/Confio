@@ -568,6 +568,12 @@ def batch_matches_stock_intent(batch, calls: list) -> bool:
 def classify_calls_kind(calls: list) -> str:
     from .crypto_policy import SEL_CRYPTO_BUY, SEL_CRYPTO_SELL
 
+    from .perps_flow import classify as perps_classify
+
+    # Futuros first: a Relay-deposit batch also carries an exit.
+    perps_kind = perps_classify(calls)
+    if perps_kind:
+        return perps_kind
     selectors = {c['data'][2:10].lower() for c in calls}
     # Investment trades first: their batch also carries an approve, and the
     # client's deriveIntentId (services/evmWallet.ts) uses the same order.
@@ -601,6 +607,13 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
         raise PolicyError('vault_not_configured')
     user_word = user_addr.lower().replace('0x', '').rjust(64, '0')
     cusd = _cusd_address()
+
+    from . import perps_flow
+    if perps_flow.has_relay_deposit(calls):
+        # Futuros: only the exact calls the server issued for this member's
+        # quote (exit + approve + Relay deposit, or a refund re-bridge).
+        perps_flow.validate_batch(calls, user, user_addr)
+        return
 
     stock_actions = [a for c in calls if (a := _decode_stock_call(c)) is not None]
     if len(stock_actions) > 1:
@@ -1082,6 +1095,9 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     # Pay, payroll, bridge funding and purchases must not bypass identity holds.
     if kind not in {'subscribe', 'redeem', 'wrap_cusd', 'unwrap_to_cusd',
                     'mint_cusd', 'stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell',
+                    # Futuros: margin to the member's OWN HyperCore account,
+                    # and proceeds back home.
+                    'perps_open', 'perps_bridge_retry', 'perps_return',
                     'invite_claim', 'invite_reclaim',
                     'payroll_withdraw', 'payroll_set_delegate',
                     # Comprar: only the deposit moves the actor's money out;

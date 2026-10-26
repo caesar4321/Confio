@@ -1,6 +1,6 @@
 // "Inversiones en movimiento": the community's trading in U.S. stocks,
-// Bitcoin and gold, the twin of Dinero en movimiento (same hero, cards and
-// bars). Opened from Home's Inversiones proof tile. Against a server
+// Bitcoin, gold and Futuros (Futuros at margin, never the leveraged size),
+// the twin of Dinero en movimiento (same hero, cards and bars). Opened from Home's Inversiones proof tile. Against a server
 // without investTradingStats it falls back to the stock-only
 // "Acciones en movimiento" (gmTradingStats).
 //
@@ -23,6 +23,7 @@ import { BrandFieldBackground } from '../components/common/BrandFieldBackground'
 import { EmptyState } from '../components/EmptyState';
 import { formatDecimal } from '../utils/numberLocale';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { usePerpsCapabilities } from '../hooks/usePerps';
 
 export const GM_TRADING_STATS = gql`
   query GmTradingStats {
@@ -97,6 +98,14 @@ export const StocksActivityScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { stocks: stockPortfolio } = useSavingsPortfolio();
   const stocksEnabled = Boolean(stockPortfolio?.enabled);
+  // Futuros count in the combined totals at margin (server); a Futuros row
+  // opens its market only for someone who can trade it.
+  const { capabilities: perps } = usePerpsCapabilities();
+  const perpsEnabled = Boolean(perps?.enabled);
+  // What the total contains, whoever is looking: the server's combined total
+  // includes everyone's Futuros once Futuros exist (capabilities answered),
+  // even for a viewer who can't open one.
+  const perpsInTotal = perps != null;
   const invest = useQuery(INVEST_TRADING_STATS, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
@@ -168,7 +177,8 @@ export const StocksActivityScreen = () => {
             <BrandFieldBackground id="stocksActivityField" ringCy="25%" ringR={80} ringWidth={20} />
             <View style={styles.fieldInner}>
               <Text style={styles.fieldEyebrow}>
-                {investMode ? 'OPERADO EN ACCIONES, ORO Y BITCOIN' : 'OPERADO EN ACCIONES DE EE.UU.'}
+                {!investMode ? 'OPERADO EN ACCIONES DE EE.UU.'
+                  : perpsInTotal ? 'OPERADO EN ACCIONES, ORO, BITCOIN Y FUTUROS' : 'OPERADO EN ACCIONES, ORO Y BITCOIN'}
               </Text>
               <Text style={styles.fieldStat}>
                 {whole(stats.totalUsd)}
@@ -233,10 +243,12 @@ export const StocksActivityScreen = () => {
                   key={asset.symbol}
                   // A stock opens only for someone who may see stocks: the
                   // detail would answer "no disponible" to anyone else.
-                  disabled={asset.assetKind !== 'crypto' && !stocksEnabled}
-                  onPress={() => (asset.assetKind === 'crypto'
-                    ? navigation.navigate('CryptoDetail' as any, { symbol: asset.symbol } as any)
-                    : navigation.navigate('StockDetail' as any, { ticker: asset.ticker } as any))}
+                  disabled={asset.assetKind === 'perps' ? !perpsEnabled : asset.assetKind !== 'crypto' && !stocksEnabled}
+                  onPress={() => (asset.assetKind === 'perps'
+                    ? navigation.navigate('FuturesMarket', { coin: asset.symbol })
+                    : asset.assetKind === 'crypto'
+                      ? navigation.navigate('CryptoDetail' as any, { symbol: asset.symbol } as any)
+                      : navigation.navigate('StockDetail' as any, { ticker: asset.ticker } as any))}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   accessibilityRole="button"
                   accessibilityLabel={`${index + 1}. ${asset.ticker}, ${asset.name}: ${asset.tradeCount} operaciones de ${asset.traderCount} personas`}
@@ -246,7 +258,9 @@ export const StocksActivityScreen = () => {
                     <Text style={styles.rank}>{index + 1}</Text>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.ticker} numberOfLines={1}>{asset.ticker}</Text>
-                      <Text style={styles.assetName} numberOfLines={1}>{asset.name}</Text>
+                      <Text style={styles.assetName} numberOfLines={1}>
+                        {asset.assetKind === 'perps' ? `${asset.name} · Futuros` : asset.name}
+                      </Text>
                     </View>
                     <View style={styles.countCol}>
                       <Text style={styles.count}>{whole(asset.tradeCount)}</Text>
@@ -294,7 +308,9 @@ export const StocksActivityScreen = () => {
             <Text style={styles.howTitle}>Cómo lo contamos</Text>
             <Text style={styles.howText}>
               Sumamos cada compra y venta {investMode ? 'de acciones de EE.UU., oro y bitcoin' : 'de acciones de EE.UU.'} completada en Confío, por el monto
-              exacto que se cobró o se pagó. No incluye depósitos ni retiros (esos están en Dinero en
+              exacto que se cobró o se pagó.{investMode && perpsInTotal
+                ? ' En Futuros contamos tu dinero: el margen al abrir y lo que vuelve al cerrar, nunca el tamaño apalancado.'
+                : ''} No incluye depósitos ni retiros (esos están en Dinero en
               movimiento). El total es acumulado desde el inicio y no muestra a nadie en particular.
             </Text>
           </View>

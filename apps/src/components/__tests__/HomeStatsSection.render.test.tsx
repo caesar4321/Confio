@@ -53,6 +53,8 @@ jest.mock('../../hooks/useCrypto', () => ({
   useCryptoCapabilities: () => ({capabilities: {enabled: mockCryptoEnabled}, loading: false, refetch: jest.fn()}),
 }));
 jest.mock('../../config/features', () => ({CRYPTO_TRADING_UI_ENABLED: true}));
+let mockPerpsCaps: any = null;  // null: a server without Futuros
+jest.mock('../../hooks/usePerps', () => ({ usePerpsCapabilities: () => ({ capabilities: mockPerpsCaps }) }));
 
 import { HomeStatsSection } from '../HomeStatsSection';
 
@@ -177,6 +179,10 @@ describe('HomeStatsSection layout', () => {
     const label = tileLabels(root)[3];
     expect(label).toContain('Invertido: 3.500');
     expect(label).toContain('Acciones, oro y bitcoin');
+    // A server with Futuros counts them (at margin) in the total: the tile says so.
+    mockPerpsCaps = { enabled: false };
+    expect(tileLabels(render().root)[3]).toContain('Acciones, oro, bitcoin y futuros');
+    mockPerpsCaps = null;
     act(() => root.find((node: any) => node.props.accessibilityLabel?.startsWith?.('Invertido:') && node.props.onPress).props.onPress());
     expect(mockNavigate).toHaveBeenCalledWith('StocksActivity');
     mockInvestTraded = null;

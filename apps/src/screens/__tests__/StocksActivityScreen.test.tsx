@@ -30,6 +30,10 @@ jest.mock('../../hooks/useSavingsPortfolio', () => ({
   useSavingsPortfolio: () => ({ stocks: { enabled: mockStocksEnabled } }),
 }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mockNavigate }) }));
+let mockPerpsEnabled: boolean | null = null;  // null: a server without Futuros
+jest.mock('../../hooks/usePerps', () => ({
+  usePerpsCapabilities: () => ({ capabilities: mockPerpsEnabled === null ? null : { enabled: mockPerpsEnabled } }),
+}));
 jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
 jest.mock('../../components/common/BrandFieldBackground', () => ({ BrandFieldBackground: () => null }));
 jest.mock('../../components/EmptyState', () => {
@@ -124,6 +128,26 @@ describe('StocksActivityScreen as Inversiones en movimiento', () => {
     expect(text(tree)).toContain('OPERADO EN ACCIONES, ORO Y BITCOIN');
     act(() => tree.root.find((n) => n.type === Pressable && n.props.accessibilityHint === 'Ver BTC').props.onPress());
     expect(mockNavigate).toHaveBeenLastCalledWith('CryptoDetail', { symbol: 'BTCB' });
+  });
+
+  it('names Futuros, says it counts margin, and opens a Futuros row on its market', () => {
+    mockPerpsEnabled = true;
+    mockStats = { ...INVEST, topAssets: [...INVEST.topAssets,
+      { symbol: 'xyz:GOLD', ticker: 'GOLD', name: 'Oro', tradeCount: 5, traderCount: 3, assetKind: 'perps' }] };
+    const tree = render();
+    const all = text(tree);
+    expect(all).toContain('OPERADO EN ACCIONES, ORO, BITCOIN Y FUTUROS');
+    expect(all).toContain('nunca el tamaño apalancado');
+    expect(all).toContain('Oro · Futuros');
+    act(() => tree.root.find((n) => n.type === Pressable && n.props.accessibilityHint === 'Ver GOLD').props.onPress());
+    expect(mockNavigate).toHaveBeenLastCalledWith('FuturesMarket', { coin: 'xyz:GOLD' });
+    mockPerpsEnabled = false;
+    const closed = render();
+    expect(closed.root.find((n) => n.type === Pressable && n.props.accessibilityHint === 'Ver GOLD').props.disabled).toBe(true);
+    // The total still holds everyone's Futuros: it says so to every viewer.
+    expect(text(closed)).toContain('OPERADO EN ACCIONES, ORO, BITCOIN Y FUTUROS');
+    mockPerpsEnabled = null;
+    expect(text(render())).toContain('OPERADO EN ACCIONES, ORO Y BITCOIN');
   });
 
   it('a crypto-only member cannot open a stock or the stock explorer', () => {

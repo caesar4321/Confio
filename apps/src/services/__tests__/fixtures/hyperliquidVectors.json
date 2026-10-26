@@ -1,0 +1,169 @@
+{
+ "address": "0x14791697260e4c9a71f18484c9f997b308e59325",
+ "order": {
+  "action": {
+   "type": "order",
+   "orders": [
+    {
+     "a": 110003,
+     "b": false,
+     "p": "2650.2",
+     "s": "0.0075",
+     "r": true,
+     "t": {
+      "limit": {
+       "tif": "Ioc"
+      }
+     }
+    }
+   ],
+   "grouping": "na"
+  },
+  "nonce": 1792971608244,
+  "msgpack": "83a474797065a56f72646572a66f72646572739186a161ce0001adb3a162c2a170a6323635302e32a173a6302e30303735a172c3a17481a56c696d697481a3746966a3496f63a867726f7570696e67a26e61",
+  "hash": "0xc78cef8a8e90815685cba8e8d8a564072f8e5da68bb9a6e3d41ba6d6742beeb0",
+  "sig": {
+   "r": "0x828c72c2b0cd9163bd8e64f1555e95f04258a96c044d4e3a31dfb1b08f90db51",
+   "s": "0x25f16aa99a88f111daa5c56c6d373f31aa9b329eb0c691c93f9492cbf40400c4",
+   "v": 28
+  }
+ },
+ "lev": {
+  "action": {
+   "type": "updateLeverage",
+   "asset": 3,
+   "isCross": false,
+   "leverage": 25
+  },
+  "nonce": 1792971608245,
+  "msgpack": "84a474797065ae7570646174654c65766572616765a5617373657403a7697343726f7373c2a86c6576657261676519",
+  "hash": "0x6c6167e28aeb434cda580ede9f2e00d7d53ee02b41a67a95501f5de36a5961ef",
+  "sig": {
+   "r": "0xc9ded5b7c095d94b7be59fbcc86f99b8843f2e71c88569190dfd6979489f42a6",
+   "s": "0x2b670252b1f404ce8b84089e824110b3b7b736e1b94fd1945cf78760b4743f63",
+   "v": 27
+  }
+ },
+ "iso": {
+  "action": {
+   "type": "updateIsolatedMargin",
+   "asset": 0,
+   "isBuy": true,
+   "ntli": 12345678
+  },
+  "nonce": 1792971608246,
+  "msgpack": "84a474797065b475706461746549736f6c617465644d617267696ea5617373657400a56973427579c3a46e746c69ce00bc614e",
+  "hash": "0xec06fef8f9bc9f068dd38188ca5182ba64669486647f171b06385cab223af87d",
+  "sig": {
+   "r": "0x3f68aa8abd3e9f959d3c45193d70cbc64a8ad8d44e2444737bd21d0f8ff8e010",
+   "s": "0x6c04e2eb916d9e94958359e2f8da233c2764afd1f8807ca7efb37840d8d6f6a4",
+   "v": 28
+  }
+ },
+ "tpsl": {
+  "action": {
+   "type": "order",
+   "orders": [
+    {
+     "a": 0,
+     "b": false,
+     "p": "110000",
+     "s": "0.001",
+     "r": true,
+     "t": {
+      "trigger": {
+       "isMarket": true,
+       "triggerPx": "110000",
+       "tpsl": "tp"
+      }
+     }
+    }
+   ],
+   "grouping": "positionTpsl"
+  },
+  "nonce": 1792971608247,
+  "msgpack": "83a474797065a56f72646572a66f72646572739186a16100a162c2a170a6313130303030a173a5302e303031a172c3a17481a77472696767657283a869734d61726b6574c3a9747269676765725078a6313130303030a47470736ca27470a867726f7570696e67ac706f736974696f6e5470736c",
+  "hash": "0xcd14c925408509009f149fa4195b23bd853750479ac14e7417b4cb77500138cc",
+  "sig": {
+   "r": "0x1fc2d4de2b98da4267c0dfe4b103d5c5bd9774ff8386fc11e4598ccf14498dda",
+   "s": "0x732f57d6378a741f6db1ba5337c3b0280dda58d0a2c2f83147987c5b6fe2626",
+   "v": 27
+  }
+ },
+ "send": {
+  "action": {
+   "type": "sendAsset",
+   "signatureChainId": "0xa4b1",
+   "hyperliquidChain": "Mainnet",
+   "destination": "0x66cf0aace1b4e562593bec10ec7868fba9932224",
+   "sourceDex": "",
+   "destinationDex": "xyz",
+   "token": "USDC:0x6d1e7cde53ba9467b783cb7c530ce054",
+   "amount": "19.9",
+   "fromSubAccount": "",
+   "nonce": 1792971608244
+  },
+  "sig": {
+   "r": "0x7af6cf54cb57a59038428ec850ceaa8bf73026abbe60c0668840278fbb4636d7",
+   "s": "0x25909414d64d1b7261d479d491da27f80ddabd7fd85079deb307dd9ca0ccd474",
+   "v": 27
+  }
+ },
+ "abstraction": {
+  "action": {
+   "type": "userSetAbstraction",
+   "signatureChainId": "0xa4b1",
+   "hyperliquidChain": "Mainnet",
+   "user": "0x14791697260e4c9a71f18484c9f997b308e59325",
+   "abstraction": "disabled",
+   "nonce": 1792971608244
+  },
+  "sig": {
+   "r": "0xa851c5765a5bc9afde83d3826dd3fa2936b2daea0ec52e3a62fc78c3c5f5886c",
+   "s": "0x24443cdda45c4eb91c94b57dc282ef2275ed38342e98e39f49bc2a8f2a3105c4",
+   "v": 28
+  }
+ },
+ "mapping": {
+  "value": {
+   "chainId": "hyperliquid",
+   "wallet": "0x14791697260e4c9a71f18484c9f997b308e59325",
+   "depositor": "0x14791697260e4c9a71f18484c9f997b308e59325",
+   "id": "0x3adf942989f7bd4c66be69e59d25f91993e7a7429e56331f5fef8362f91c8947",
+   "nonce": 1792971608244
+  },
+  "sig": {
+   "r": "0xa64ea54e08b2de419d7b6407b543864686efdcc4647029ab0b0dd2ef91ff6fd4",
+   "s": "0x1cf78ac2f77815a62fd8c1694559a9bfe88c366ff3523d9ae62e50ad2642f766",
+   "v": 27
+  }
+ },
+ "withdraw": {
+  "action": {
+   "type": "withdraw3",
+   "signatureChainId": "0xa4b1",
+   "hyperliquidChain": "Mainnet",
+   "destination": "0x5e9ee1089755c3435139848e47e6635505d5a13a",
+   "amount": "12.5",
+   "time": 1792971608300
+  },
+  "sig": {
+   "r": "0x6e96389f82573f0edbc4dd03ec60e6083d3a484276b30e63ebe5c75031198",
+   "s": "0x57c73411efdd11ffc796862e345fbdad4d85f97f85a1a61e361418d2079d4a61",
+   "v": 27
+  }
+ },
+ "noop": {
+  "action": {
+   "type": "noop"
+  },
+  "nonce": 1792971700000,
+  "msgpack": "81a474797065a46e6f6f70",
+  "hash": "0x8be5409edd421abea93402154d07d4b0d3bdf2f7832f43afcde19c1f9de0ac3d",
+  "sig": {
+   "r": "0xcbb6811f4c2dc8ea396c4e91c7c1e0ac41734d1255b9c6f41e5f14249c049d7a",
+   "s": "0x410500b75bfabe2cf53ce76efc273d85811c9e43dcd19476cded943dcd0b0d19",
+   "v": 27
+  }
+ }
+}

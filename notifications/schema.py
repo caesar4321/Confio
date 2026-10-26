@@ -105,6 +105,7 @@ class NotificationTypeEnum(graphene.Enum):
     COMMUNITY_PLAY_COPIED = 'COMMUNITY_PLAY_COPIED'
     COMMUNITY_TEAM_INVITE = 'COMMUNITY_TEAM_INVITE'
     MARKETPLACE_ORDER_UPDATED = 'MARKETPLACE_ORDER_UPDATED'
+    PERPS_POSITION_UPDATE = 'PERPS_POSITION_UPDATE'
 
 
 class NotificationType(DjangoObjectType):
@@ -268,6 +269,8 @@ class NotificationConnection(graphene.Connection):
                 created_at__gte=user.date_joined
             ).exclude(
                 id__in=read_notification_ids
+            ).exclude(
+                notification_type__in=_types_this_build_cannot_open(info)
             ).count()
             
             # Count unread broadcast notifications (only from when user joined)
@@ -280,6 +283,17 @@ class NotificationConnection(graphene.Connection):
             
             return personal_unread + broadcast_unread
         return 0
+
+
+def _types_this_build_cannot_open(info) -> list:
+    """Notification types whose screen the requesting build lacks (a member
+    with Futuros on a newer phone still opens Confío on an older one)."""
+    from users.paid_offers import _at_least
+
+    from .fcm_service import MIN_BUILD_SETTING
+
+    meta = getattr(info.context, 'META', {}) or {}
+    return [kind for kind, setting in MIN_BUILD_SETTING.items() if not _at_least(meta, setting)]
 
 
 class Query(graphene.ObjectType):
@@ -354,7 +368,8 @@ class Query(graphene.ObjectType):
             )
         
         # Only show notifications created after the user joined
-        qs = qs.filter(created_at__gte=user.date_joined)
+        qs = qs.filter(created_at__gte=user.date_joined).exclude(
+            notification_type__in=_types_this_build_cannot_open(info))
         
         # Apply additional filters if provided
         if 'notification_type' in kwargs:
@@ -560,6 +575,8 @@ class Query(graphene.ObjectType):
             created_at__gte=user.date_joined
         ).exclude(
             id__in=read_notification_ids
+        ).exclude(
+            notification_type__in=_types_this_build_cannot_open(info)
         ).count()
         
         # Count unread broadcast notifications (only from when user joined)

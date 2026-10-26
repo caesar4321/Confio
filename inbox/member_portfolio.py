@@ -334,7 +334,7 @@ def crypto_part(wallet: str, now) -> _CryptoPart:
     )
 
 
-def build_portfolio(user, *, stock_trades=None, crypto=None, now=None) -> Portfolio | None:
+def build_portfolio(user, *, stock_trades=None, crypto=None, perps=None, now=None) -> Portfolio | None:
     """`stock_trades` / `crypto`: a ledger snapshot already read (total_return
     values holdings against the very trades it adds up)."""
     from cusd_plus.gm_holdings import STALE_AFTER, complete_holdings
@@ -415,17 +415,26 @@ def build_portfolio(user, *, stock_trades=None, crypto=None, now=None) -> Portfo
     crypto = crypto if crypto is not None else crypto_part(wallet, now)
     if crypto.open_positions is not None:
         open_positions.extend(crypto.open_positions)
+    from cusd_plus.perps_portfolio import live_part as perps_part
+
+    perps = perps if perps is not None else perps_part(wallet, now)
+    if perps.open_positions is not None:
+        open_positions.extend(perps.open_positions)
     open_positions.sort(key=lambda p: p.value_usd or Decimal('0'), reverse=True)
 
     from cusd_plus.crypto_catalog import by_symbol as crypto_token
     from cusd_plus.crypto_month import display_name as crypto_name
 
     closed_positions = []
-    for symbol, bought, sold, pnl, when in sorted(closed + crypto.closed, key=lambda e: e[4], reverse=True):
+    for symbol, bought, sold, pnl, when in sorted(closed + crypto.closed + perps.closed,
+                                                  key=lambda e: e[4], reverse=True):
         info = (market or {}).get(symbol) or {}
         token = crypto_token(symbol, include_unlisted=True)
         if token is not None:
             info = {'ticker': token.ticker, 'name': crypto_name(token)}
+        if symbol in perps.labels:
+            label = perps.labels[symbol]
+            info = {'ticker': label.split(' · ')[0], 'name': label}
         closed_positions.append(ClosedPosition(
             symbol=symbol, ticker=info.get('ticker') or symbol.removesuffix('on'),
             name=info.get('name') or symbol.removesuffix('on'), invested_usd=bought, proceeds_usd=sold,
@@ -435,11 +444,12 @@ def build_portfolio(user, *, stock_trades=None, crypto=None, now=None) -> Portfo
 
     dollars = dollars_usd(wallet)
     presale_confio, presale_usd = presale_totals(user)
-    parts = (dollars, stocks_total, crypto.total)
+    parts = (dollars, stocks_total, crypto.total, perps.total)
     total = sum(parts, Decimal('0')) if all(p is not None for p in parts) else None
     if change_24h is not None:
         change_24h = change_24h + crypto.change_24h if crypto.change_24h is not None else None
-    ledgers_known = trades is not None and crypto.trades is not None
+    ledgers_known = trades is not None and crypto.trades is not None and perps.trades is not None
+    perps_opens = sum(1 for t in (perps.trades or []) if t.kind == 'perps_buy' and t.units > 0)
     joined = getattr(user, 'date_joined', None)
     return Portfolio(
         dollars_usd=dollars,
@@ -448,13 +458,16 @@ def build_portfolio(user, *, stock_trades=None, crypto=None, now=None) -> Portfo
         stocks_change_24h_usd=change_24h,
         presale_confio=presale_confio,
         presale_invested_usd=presale_usd,
-        trade_count=len(trades) + len(crypto.trades) if ledgers_known else None,
+        trade_count=len(trades) + len(crypto.trades) + perps_opens if ledgers_known else None,
         avg_hold_seconds=(
-            _coarse_hold(holds + open_hold_seconds(books, held, now) + crypto.holds + crypto.open_holds)
-            if ledgers_known and held is not None and crypto.open_positions is not None else None
+            _coarse_hold(holds + open_hold_seconds(books, held, now) + crypto.holds + crypto.open_holds
+                         + perps.holds + perps.open_holds)
+            if (ledgers_known and held is not None and crypto.open_positions is not None
+                and perps.open_positions is not None) else None
         ),
         member_since=joined.strftime('%Y-%m') if joined else None,
-        open_positions=open_positions if held is not None and crypto.open_positions is not None else None,
+        open_positions=(open_positions if held is not None and crypto.open_positions is not None
+                        and perps.open_positions is not None else None),
         closed_positions=closed_positions[:50] if ledgers_known else None,
         crypto_usd=crypto.total,
         dust_symbols=dust_symbols + list(crypto.dust_symbols),
@@ -496,10 +509,15 @@ def total_return(user) -> TotalReturn | None:
     except Exception:  # noqa: BLE001
         return None
     crypto = crypto_part(wallet, now)
-    if stock_trades is None or crypto.trades is None:
+    from cusd_plus.perps_portfolio import live_part as perps_part
+
+    perps = perps_part(wallet, now)
+    if stock_trades is None or crypto.trades is None or perps.trades is None or perps.total is None:
         return None
     trades = list(stock_trades) + list(crypto.trades)
-    if not trades:
+    perps_bought = sum((t.usd for t in perps.trades if t.kind == 'perps_buy'), Decimal('0'))
+    perps_sold = sum((t.usd for t in perps.trades if t.kind == 'perps_sell'), Decimal('0'))
+    if not trades and not perps.trades:
         return None
     if any(t.usd is None or t.symbol.startswith('?') for t in trades):
         return None
@@ -511,12 +529,17 @@ def total_return(user) -> TotalReturn | None:
         return None
     # The same ledger snapshot: a trade confirming meanwhile can't be valued
     # in holdings yet missing from the cash flows (or the reverse).
-    portfolio = build_portfolio(user, stock_trades=stock_trades, crypto=crypto, now=now)
+    portfolio = build_portfolio(user, stock_trades=stock_trades, crypto=crypto, perps=perps, now=now)
     if portfolio is None or portfolio.open_positions is None:
         return None
-    value = Decimal('0')
+    # Futuros: open equity and money on its way home (landed proceeds too:
+    # they are the sleeve's until they enter Confío dollars).
+    value = perps.total + perps.landed_usd
     held = set()
+    perps_symbols = {p.symbol for p in perps.open_positions or []}
     for position in portfolio.open_positions:
+        if position.symbol in perps_symbols:
+            continue
         # Every holding must be one the ledger explains (bought in Confío),
         # and priced now.
         if position.value_usd is None or position.invested_usd is None:
@@ -529,11 +552,11 @@ def total_return(user) -> TotalReturn | None:
     for symbol, book in books.items():
         if book.units > 0 and symbol not in held and book.cost >= DUST_USD:
             return None
-    bought = sum((t.usd for t in trades if t.kind.endswith('_buy')), Decimal('0'))
-    sold = sum((t.usd for t in trades if not t.kind.endswith('_buy')), Decimal('0'))
+    bought = sum((t.usd for t in trades if t.kind.endswith('_buy')), Decimal('0')) + perps_bought
+    sold = sum((t.usd for t in trades if not t.kind.endswith('_buy')), Decimal('0')) + perps_sold
     if bought <= 0:
         return None
     gain = value + sold - bought
-    first = min(t.when for t in trades)
+    first = min(t.when for t in trades + list(perps.trades))
     return TotalReturn(gain_usd=gain, invested_usd=bought, pct=gain / bought * 100,
                        since=timezone.localdate(first))

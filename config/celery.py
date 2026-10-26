@@ -68,6 +68,16 @@ app.conf.beat_schedule.setdefault('crypto-snapshot-prices', {
     'schedule': crontab(minute='*/15'),
 })
 
+app.conf.beat_schedule.setdefault('perps-reconcile-positions', {
+    'task': 'cusd_plus.reconcile_perps_positions',
+    'schedule': crontab(minute='*'),
+})
+
+app.conf.beat_schedule.setdefault('perps-sync-markets', {
+    'task': 'cusd_plus.sync_perps_markets',
+    'schedule': crontab(minute='*/10'),
+})
+
 app.conf.beat_schedule.setdefault('exchange-rates-snapshot-daily-rates', {
     'task': 'exchange_rates.snapshot_daily_rates',
     'schedule': crontab(minute=20),

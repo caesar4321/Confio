@@ -1183,7 +1183,8 @@ class ReconcileStockBatchesTests(SimpleTestCase):
         self.assertEqual(result, {'requeued': 1})
         receipt_task.apply_async.assert_called_once_with(args=[44], countdown=3)
         first_filter = objects.filter.call_args_list[0].kwargs
-        self.assertEqual(first_filter['kind__in'], ('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell'))
+        self.assertEqual(first_filter['kind__in'], ('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell',
+                                                    'perps_open', 'perps_bridge_retry', 'perps_return'))
         self.assertEqual(first_filter['status'], 'sent')
 
     def test_terminalized_stock_is_not_requeued(self):
@@ -1504,7 +1505,8 @@ class StockHistoryTests(SimpleTestCase):
             self.assertTrue(_source_row_covers(self.TXH, USER))
             kwargs = batches.filter.call_args.kwargs
             self.assertEqual(
-            kwargs['kind__in'], ('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell', 'payment_bridge'))
+            kwargs['kind__in'], ('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell', 'payment_bridge',
+                                 'perps_open', 'perps_return'))
             self.assertEqual(kwargs['user_bsc_address__iexact'], USER)
 
 

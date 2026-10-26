@@ -670,9 +670,16 @@ class Query(graphene.ObjectType):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated or not _invest_surfaces_enabled(user, info):
             return None
+        from users.paid_offers import _at_least
+
         from . import gm_trading_stats
 
-        return _trading_stats_type(gm_trading_stats.trading_stats('all'))
+        stats = gm_trading_stats.trading_stats('all')
+        if stats is not None and not _at_least(getattr(info.context, 'META', {}), 'PERPS_SHARE_MIN_APP_VERSION'):
+            # Builds without Futuros would open a Futuros row as a stock.
+            from dataclasses import replace
+            stats = replace(stats, top_assets=[a for a in stats.top_assets if a.kind != 'perps'])
+        return _trading_stats_type(stats)
 
     def resolve_invest_traded_usd(self, info):
         user = getattr(info.context, 'user', None)
@@ -1832,7 +1839,14 @@ class SponsorBscBatch(graphene.Mutation):
 
         now = int(_time.time())
         if not (now + 60 <= deadline_i <= now + 1800):
-            return SponsorBscBatch(success=False, error='bad_deadline')
+            # A Futuros batch already recorded under this request id is an
+            # exact replay candidate: it continues to the replay lookup (calls,
+            # wallet and intent signature still checked) and gets its
+            # transaction back, never a deadline rejection.
+            from blockchain.models import PERPS_BATCH_KINDS, SponsoredBatch
+            if not (request_id and SponsoredBatch.objects.filter(
+                    user=user, client_request_id=request_id, kind__in=PERPS_BATCH_KINDS).exists()):
+                return SponsorBscBatch(success=False, error='bad_deadline')
 
         # cUSD+ acquisition gate. Fee-capable clients route ineligible users
         # to cUSD; this remains the server-side guard against a stale or
@@ -1879,12 +1893,30 @@ class SponsorBscBatch(graphene.Mutation):
         try:
             from payment_accounts.infinia_fee_collection import mint_policy_calls, persist_local_fee
             policy_calls = mint_policy_calls(norm_calls, user, user_addr, request_id)
-            sponsor_7702.validate_policy(policy_calls, user, user_addr)
+            from . import perps_flow as _perps_flow
+            # An exact replay (same request id, same calls) of a Futuros batch
+            # already signed and recorded goes straight to the existing-batch
+            # answer below (after the intent signature check): its transaction,
+            # never a rejection by today's quote/state guards.
+            perps_replay = _perps_flow.recorded_batch(user, norm_calls, request_id)
+            if perps_replay is None:
+                sponsor_7702.validate_policy(policy_calls, user, user_addr)
 
             # The generic savings rail's kind (and thus the intentId the user
             # signed) is derived from the selectors; the client derives the
             # SAME value. source_id is omitted (no domain row here).
             kind = sponsor_7702.classify_calls_kind(norm_calls)
+            # The kind the batch is STORED and settled as. It differs from
+            # the signed intent kind only for a Futuros return, whose entry
+            # calls are an ordinary mint (cusd_plus/perps_flow.return_kind).
+            stored_kind = (perps_replay.kind if perps_replay is not None
+                           else _perps_flow.return_kind(kind, norm_calls, request_id, user))
+            if kind in _perps_flow.PERPS_KINDS and perps_replay is None:
+                from . import perps_risk
+                refusal = (perps_risk.open_gate(user, getattr(info.context, 'META', {}))
+                           if kind == 'perps_open' else perps_risk.exit_gate())
+                if refusal:
+                    return SponsorBscBatch(success=False, error=refusal)
             if kind in ('crypto_buy', 'crypto_sell'):
                 from . import crypto_risk
                 from .crypto_policy import decode_crypto_call
@@ -1955,7 +1987,7 @@ class SponsorBscBatch(graphene.Mutation):
                 ).order_by('-id').first()
                 if existing is not None:
                     exact_match = sponsor_7702.batch_matches_calls(
-                        existing, kind, norm_calls)
+                        existing, stored_kind, norm_calls)
                     stock_match = (
                         kind in ('stock_buy', 'stock_sell')
                         and existing.kind == kind
@@ -2042,9 +2074,12 @@ class SponsorBscBatch(graphene.Mutation):
 
             tx_hash, batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, norm_calls, nonce_i, deadline_i,
-                intent_signature, auth_dict, kind,
+                intent_signature, auth_dict, stored_kind,
                 client_request_id=request_id, intent_id=intent_id,
-                persist_signed=(persist_local_fee if request_id.startswith('local-mint-')
+                # Futuros: the position and its batch commit together,
+                # before broadcast (perps_flow.link_signed).
+                persist_signed=(_perps_flow.link_signed if stored_kind in _perps_flow.PERPS_KINDS
+                                else persist_local_fee if request_id.startswith('local-mint-')
                                 else _persist_savings_mint if request_id.startswith('savings-mint-')
                                 else None))
             broadcast_tx_hash = tx_hash  # past the point of no return
@@ -2073,7 +2108,9 @@ class SponsorBscBatch(graphene.Mutation):
                 except Exception:  # noqa: BLE001
                     logger.warning('crypto post-broadcast invalidation failed for %s',
                                    user_addr, exc_info=True)
-            if mint_call is not None and mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
+            if stored_kind == 'perps_return':
+                pass  # its history row is the position's return (perps_flow.sync_history)
+            elif mint_call is not None and mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
                 # Gate passed and the batch is on the wire: record the mint as
                 # history. subscribeAndMint(uint256 usdtAmount, ...) — first
                 # word of calldata we validated, never a client-supplied value.
@@ -2119,7 +2156,7 @@ class SponsorBscBatch(graphene.Mutation):
             same_address = existing.user_bsc_address.lower() == user_addr
             exact_match = (
                 same_address
-                and sponsor_7702.batch_matches_calls(existing, kind, norm_calls)
+                and sponsor_7702.batch_matches_calls(existing, stored_kind, norm_calls)
             )
             stock_match = (
                 same_address

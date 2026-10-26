@@ -108,10 +108,14 @@ class Untrusted(Exception):
 class Ledger:
     stocks: list
     crypto: list
+    # Futuros: episodes (cusd_plus/perps_portfolio.Episode) and their ledger
+    # rows (margin out = perps_buy, proceeds in = perps_sell, close marker).
+    perps: list = field(default_factory=list)
+    perps_rows: list = field(default_factory=list)
 
     @property
     def all(self) -> list:
-        return self.stocks + self.crypto
+        return self.stocks + self.crypto + self.perps_rows
 
     def first_day(self) -> date | None:
         trades = self.all
@@ -199,6 +203,21 @@ class PriceBook:
 
         out = []
         cutoff = None
+        if kind == 'perp':
+            # Hyperliquid's own daily candles (UTC days, the venue's marks).
+            from cusd_plus import hyperliquid
+
+            end = int(timezone.now().timestamp() * 1000)
+            for c in hyperliquid.candles(symbol, '1d', end - 400 * 86_400_000, end):
+                price = _dec(c.get('c')) if isinstance(c, dict) else None
+                start = c.get('t') if isinstance(c, dict) else None
+                if price is None or price <= 0 or not isinstance(start, int):
+                    continue
+                closed_at = datetime.fromtimestamp(start / 1000, tz=dt_timezone.utc) + DAY
+                if closed_at <= timezone.now():
+                    out.append((closed_at, price))
+            out.sort(key=lambda row: row[0])
+            return out
         if kind == 'stock':
             cutoff = timezone.now() - STOCK_CANDLE_MAX_AGE
             rows = gm_api.ohlc(symbol, STOCK_OHLC_RANGE) or []
@@ -309,19 +328,38 @@ class PriceBook:
 
 # --- ledger and trust -------------------------------------------------------
 
-def _settled_when(trade, prices: PriceBook):
-    """The trade with its true UTC day: a batch recorded just before
+def _settled_at(when, block, prices: PriceBook):
+    """The true UTC time of a chain row: a batch recorded just before
     midnight may have landed after it."""
-    when = trade.when.astimezone(dt_timezone.utc)
-    midnight = day_start(when.date() + DAY)
-    if midnight - when > NEAR_MIDNIGHT:
-        return trade
-    if trade.block is None:
+    utc = when.astimezone(dt_timezone.utc)
+    midnight = day_start(utc.date() + DAY)
+    if midnight - utc > NEAR_MIDNIGHT:
+        return when
+    if block is None:
         raise Retry('confirmed trade without a block')
-    landed = prices.block_time(trade.block)
+    landed = prices.block_time(block)
     if landed is None:
-        raise Retry(f'no time for block {trade.block}')
-    return replace(trade, when=landed)
+        raise Retry(f'no time for block {block}')
+    return landed
+
+
+def _settled_when(trade, prices: PriceBook):
+    when = _settled_at(trade.when, trade.block, prices)
+    return trade if when is trade.when else replace(trade, when=when)
+
+
+def _settled_episode(ep, prices: PriceBook):
+    """An episode valued on the same clock as its cash flows: dollars out
+    and back in at the time their blocks landed."""
+    moved = {when: _settled_at(when, block, prices) for when, _usd, block in ep.put_in}
+    put_in = [(moved[when], usd, block) for when, usd, block in ep.put_in]
+    # A top-up in flight starts when its batch landed, like its cash flow.
+    pending = [(moved.get(start, start), until, usd, arrived, applied)
+               for start, until, usd, arrived, applied in ep.pending_topups]
+    returned = ep.returned
+    if returned is not None and returned[2] is not None:
+        returned = (_settled_at(returned[0], returned[2], prices), returned[1], returned[2])
+    return replace(ep, put_in=sorted(put_in, key=lambda r: r[0]), returned=returned, pending_topups=pending)
 
 
 def _walk_units(trades: list, before: datetime | None = None) -> dict:
@@ -353,17 +391,26 @@ def _check_running_units(trades: list) -> None:
 
 
 def load_ledger(wallet: str, prices: PriceBook) -> Ledger:
-    from cusd_plus import crypto_month, stock_month
+    from cusd_plus import crypto_month, perps_portfolio, stock_month
 
     try:
         stocks = stock_month.confirmed_trades(wallet)
         crypto = crypto_month.confirmed_trades(wallet)
+        perps = perps_portfolio.episodes(wallet)
+    except perps_portfolio.PerpsLedgerUnknown as exc:
+        raise Retry('perps settlement pending') from exc
     except Exception as exc:  # noqa: BLE001 — a DB/registry blip is not a verdict
         raise Retry('ledger unreadable') from exc
     if any(t.symbol.startswith('?') for t in stocks + crypto):
         raise Untrusted(UNREADABLE_TRADE)
+    # Chain rows take their block's time near midnight, on the episodes
+    # themselves (valuation and cash flows share one clock); venue facts
+    # (close, fill/cost/size markers, refunds) have no block and keep theirs.
+    perps = [_settled_episode(ep, prices) for ep in perps]
+    perps_rows = list(perps_portfolio.ledger_trades(perps))
     ledger = Ledger(stocks=sorted((_settled_when(t, prices) for t in stocks), key=lambda t: t.when),
-                    crypto=sorted((_settled_when(t, prices) for t in crypto), key=lambda t: t.when))
+                    crypto=sorted((_settled_when(t, prices) for t in crypto), key=lambda t: t.when),
+                    perps=perps, perps_rows=sorted(perps_rows, key=lambda t: t.when))
     _check_running_units(ledger.stocks)
     _check_running_units(ledger.crypto)
     return ledger
@@ -373,8 +420,10 @@ def in_flight(wallet: str) -> bool:
     """A stock trade or crypto swap on the wire, each by its own window."""
     from cusd_plus.crypto_holdings import batches_in_flight
     from cusd_plus.gm_holdings import stock_batches_in_flight
+    from cusd_plus.perps_portfolio import batches_in_flight as perps_in_flight
 
-    return stock_batches_in_flight(wallet).exists() or batches_in_flight(wallet).exists()
+    return (stock_batches_in_flight(wallet).exists() or batches_in_flight(wallet).exists()
+            or perps_in_flight(wallet).exists())
 
 
 def check_chain(wallet: str, ledger: Ledger) -> None:
@@ -431,10 +480,14 @@ def held_at(trades: list, when: datetime) -> dict:
 
 
 def value_at(ledger: Ledger, when: datetime, now: datetime, prices: PriceBook) -> Decimal:
+    from cusd_plus.perps_portfolio import equity_at
+
     total = Decimal('0')
     for kind, trades in (('stock', ledger.stocks), ('crypto', ledger.crypto)):
         for symbol, units in held_at(trades, when).items():
             total += units * prices.close(kind, symbol, when, now)
+    for episode in ledger.perps:
+        total += equity_at(episode, when, lambda coin: prices.close('perp', coin, when, now))
     return total
 
 
@@ -490,6 +543,21 @@ def live_value(ledger: Ledger, now: datetime) -> Decimal:
             if price is None:
                 raise Retry(f'no live price for {symbol}')
             total += units * price
+    if ledger.perps:
+        from cusd_plus.perps_portfolio import equity_at, live_marks
+
+        try:
+            marks = live_marks({e.coin for e in ledger.perps})
+        except Exception as exc:  # noqa: BLE001
+            raise Retry('perps marks unavailable') from exc
+
+        def mark(coin):
+            if marks.get(coin) is None:
+                raise Retry(f'no live mark for {coin}')
+            return marks[coin]
+
+        for episode in ledger.perps:
+            total += equity_at(episode, now, mark)
     return total
 
 
@@ -636,7 +704,7 @@ def wallets_to_snapshot():
 
     wallets = set(
         w.lower() for w in SponsoredBatch.objects.filter(
-            kind__in=('stock_buy', 'stock_sell', *CRYPTO_BATCH_KINDS), status='confirmed')
+            kind__in=('stock_buy', 'stock_sell', *CRYPTO_BATCH_KINDS, 'perps_open'), status='confirmed')
         .values_list('user_bsc_address', flat=True).distinct() if w)
     if not wallets:
         return []

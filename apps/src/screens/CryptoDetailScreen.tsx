@@ -23,6 +23,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
+import { VenueAttribution } from '../components/VenueAttribution';
 import { CryptoAssetMark } from '../components/CryptoAssetMark';
 import { colors } from '../config/theme';
 import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
@@ -282,6 +283,7 @@ export const CryptoDetailScreen = () => {
             ))}
         </View>
 
+        <VenueAttribution venue="pancakeswap" testID="crypto-venue" />
         <Text style={styles.footerDisclaimer}>
           El precio puede subir o bajar, también de noche y en fines de semana. Puedes perder parte de lo
           que inviertas. No es asesoría financiera.
@@ -361,5 +363,5 @@ const styles = StyleSheet.create({
   fundingSub: { fontSize: 12, color: colors.text.secondary, marginTop: 1, lineHeight: 16 },
   howRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 10 },
   howText: { flex: 1, fontSize: 13, color: colors.text.secondary, lineHeight: 18 },
-  footerDisclaimer: { fontSize: 11, color: colors.text.light, textAlign: 'center', lineHeight: 16 },
+  footerDisclaimer: { fontSize: 11, color: colors.text.light, textAlign: 'center', lineHeight: 16, marginTop: 10 },
 });

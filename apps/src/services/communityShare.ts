@@ -11,11 +11,11 @@
  * dropped (and may be asked again later).
  */
 
-export type ActivityShareGroup = 'stock' | 'crypto' | 'send' | 'ramp' | 'pay';
+export type ActivityShareGroup = 'stock' | 'crypto' | 'perps' | 'send' | 'ramp' | 'pay';
 
 export type ActivityShareRequest = {
   group: ActivityShareGroup;
-  /** stock / crypto → trade tx hash; send → SendTransaction internalId; ramp → Koywe orderId or Infinia journey internalId. */
+  /** stock / crypto / perps → the batch tx hash; send → SendTransaction internalId; ramp → Koywe orderId or Infinia journey internalId. */
   reference: string | null | undefined;
 };
 

@@ -147,16 +147,18 @@ export function StocksCard({ value, month, isCurrent, masked, settlingPhase = 'f
 
 /** "¿Cómo lo calculamos?": the month's arithmetic, row by row (shared by the
  *  investment cards; each says where its prices come from in `body`). */
-export function HowSheet({ visible, onClose, value, month, isCurrent, masked, body, testID }: {
+export function HowSheet({ visible, onClose, value, month, isCurrent, masked, body, testID, inLabel = 'Compraste', outLabel = 'Vendiste' }: {
   visible: boolean; onClose: () => void; month: number; isCurrent: boolean; masked: boolean;
   value: Pick<StockMonth, 'valueUsd' | 'valueStartUsd' | 'boughtUsd' | 'soldUsd' | 'gainUsd'>;
   body: string; testID: string;
+  /** The money-in and money-out rows (Futuros: margin put in, dollars back). */
+  inLabel?: string; outLabel?: string;
 }) {
   const usd = (v: string | null, sign = '') => (masked ? MASK : `${sign}${formatUsdAmount(Number(v ?? 0), { decimals: 2 })}`);
   const rows: [string, string][] = [
     [`Valían el 1 de ${monthName(month)}`, usd(value.valueStartUsd)],
-    ['Compraste', usd(value.boughtUsd, '+ ')],
-    ['Vendiste', usd(value.soldUsd, '− ')],
+    [inLabel, usd(value.boughtUsd, '+ ')],
+    [outLabel, usd(value.soldUsd, '− ')],
     [isCurrent ? 'Valen hoy' : `Valían al cierre de ${monthName(month)}`, usd(value.valueUsd)],
     ['Resultado del mes', masked ? MASK : signedUsd(Number(value.gainUsd))],
   ];

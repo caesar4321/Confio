@@ -1,0 +1,61 @@
+{
+  "_comment": "Display overlay for the Hyperliquid market sync (cusd_plus/perps_catalog.py). Listing comes from Hyperliquid, never from here. Core perps default to crypto, HIP-3 markets to stock; only exceptions and Spanish names live here.",
+  "markets": {
+    "BTC": {"name": "Bitcoin"},
+    "ETH": {"name": "Ethereum"},
+    "SOL": {"name": "Solana"},
+    "BNB": {"name": "BNB"},
+    "XRP": {"name": "XRP"},
+    "DOGE": {"name": "Dogecoin"},
+    "PAXG": {"name": "Oro (PAXG)", "asset_class": "commodity"},
+
+    "xyz:GOLD": {"name": "Oro", "asset_class": "commodity"},
+    "xyz:SILVER": {"name": "Plata", "asset_class": "commodity"},
+    "xyz:PLATINUM": {"name": "Platino", "asset_class": "commodity"},
+    "xyz:PALLADIUM": {"name": "Paladio", "asset_class": "commodity"},
+    "xyz:COPPER": {"name": "Cobre", "asset_class": "commodity"},
+    "xyz:CL": {"name": "Petróleo WTI", "asset_class": "commodity"},
+    "xyz:BRENTOIL": {"name": "Petróleo Brent", "asset_class": "commodity"},
+    "xyz:NATGAS": {"name": "Gas natural", "asset_class": "commodity"},
+    "xyz:HO": {"name": "Diésel (heating oil)", "asset_class": "commodity"},
+
+    "xyz:EUR": {"name": "Euro", "asset_class": "fx"},
+    "xyz:GBP": {"name": "Libra esterlina", "asset_class": "fx"},
+    "xyz:JPY": {"name": "Yen japonés", "asset_class": "fx"},
+
+    "xyz:XYZ100": {"name": "XYZ100 (tecnológicas de EE.UU.)", "asset_class": "index"},
+    "xyz:SP500": {"name": "S&P 500", "asset_class": "index"},
+    "xyz:KR200": {"name": "KOSPI 200 (Corea)", "asset_class": "index"},
+    "xyz:JP225": {"name": "Nikkei 225 (Japón)", "asset_class": "index"},
+    "xyz:EWY": {"name": "ETF de Corea del Sur", "asset_class": "index"},
+    "xyz:EWJ": {"name": "ETF de Japón", "asset_class": "index"},
+    "xyz:EWZ": {"name": "ETF de Brasil", "asset_class": "index"},
+    "xyz:EWT": {"name": "ETF de Taiwán", "asset_class": "index"},
+    "xyz:URNM": {"name": "ETF de uranio", "asset_class": "index"},
+    "xyz:XLE": {"name": "ETF de energía de EE.UU.", "asset_class": "index"},
+    "xyz:SMH": {"name": "ETF de semiconductores", "asset_class": "index"},
+    "xyz:SOXL": {"name": "ETF de semiconductores 3x", "asset_class": "index"},
+    "xyz:MAGS": {"name": "ETF de las 7 magníficas", "asset_class": "index"},
+    "xyz:XBI": {"name": "ETF de biotecnología", "asset_class": "index"},
+    "xyz:TLT": {"name": "Bonos del Tesoro de EE.UU. a 20+ años", "asset_class": "index"},
+    "xyz:KORU": {"name": "ETF de Corea del Sur 3x", "asset_class": "index"},
+
+    "io:EWY": {"name": "ETF de Corea del Sur", "asset_class": "index"},
+
+    "para:TOTAL2": {"name": "Cripto sin Bitcoin (capitalización)", "asset_class": "crypto"},
+    "para:OTHERS": {"name": "Cripto fuera del top 10 (capitalización)", "asset_class": "crypto"},
+    "para:BTCD": {"name": "Dominancia de Bitcoin", "asset_class": "crypto"},
+    "para:2Y": {"name": "Tasa del Tesoro de EE.UU. a 2 años", "asset_class": "index"},
+    "para:10Y": {"name": "Tasa del Tesoro de EE.UU. a 10 años", "asset_class": "index"},
+    "para:30Y": {"name": "Tasa del Tesoro de EE.UU. a 30 años", "asset_class": "index"},
+    "para:IGV": {"name": "ETF de software", "asset_class": "index"},
+    "para:SMH": {"name": "ETF de semiconductores", "asset_class": "index"},
+    "para:GDX": {"name": "ETF de mineras de oro", "asset_class": "index"},
+
+    "mkts:US500": {"name": "S&P 500", "asset_class": "index"},
+    "mkts:USTECH": {"name": "Nasdaq 100", "asset_class": "index"},
+    "mkts:SMALL2000": {"name": "Russell 2000", "asset_class": "index"},
+    "mkts:USBOND": {"name": "Bonos del Tesoro de EE.UU.", "asset_class": "index"},
+    "mkts:BVIV": {"name": "Volatilidad de Bitcoin", "asset_class": "crypto"}
+  }
+}

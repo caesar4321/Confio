@@ -6,7 +6,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from .models import (
-    Balance, CryptoSwapTrade, IndexerAssetCursor, OndoStockTrade, PendingAutoSwap,
+    Balance, CryptoSwapTrade, IndexerAssetCursor, OndoStockTrade, PendingAutoSwap, PerpMarginChange,
     ProcessedIndexerTransaction, SponsoredBatch, StockHoldings, StockRiskAcknowledgement,
 )
 
@@ -240,3 +240,49 @@ class StockRiskAcknowledgementAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False                     # only the person can acknowledge, in the app
+
+
+# ── Futuros (Hyperliquid perps): read-only; the venue and the chain are the truth ──
+
+class _ReadOnlyAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class PerpMarketAdmin(_ReadOnlyAdmin):
+    """Synced from Hyperliquid every 10 minutes (cusd_plus.sync_perps_markets).
+    Remove a broken market with PERPS_EXCLUDED_MARKETS, not here."""
+    list_display = ['coin', 'dex', 'asset_id', 'max_leverage', 'sz_decimals', 'collateral', 'listed', 'synced_at']
+    list_filter = ['dex', 'listed', 'collateral']
+    search_fields = ['coin']
+
+
+class PerpsRiskAcknowledgementAdmin(_ReadOnlyAdmin):
+    list_display = ['user', 'version', 'acknowledged_at']
+    search_fields = ['user__username', 'user__email']
+
+
+class PerpMarginChangeInline(admin.TabularInline):
+    model = PerpMarginChange
+    extra = 0
+    can_delete = False
+    fields = ['direction', 'amount_usd', 'state', 'batch', 'relay_id', 'step_error', 'created_at']
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+class PerpPositionAdmin(_ReadOnlyAdmin):
+    list_display = ['id', 'user', 'market', 'side', 'leverage', 'margin_usd', 'state',
+                    'liquidation', 'returned_usd', 'created_at']
+    list_filter = ['state', 'side', 'liquidation']
+    search_fields = ['user__username', 'user__email', 'wallet', 'market__coin', 'relay_out_id', 'relay_back_id']
+    raw_id_fields = ['user', 'open_batch', 'return_batch']
+    inlines = [PerpMarginChangeInline]

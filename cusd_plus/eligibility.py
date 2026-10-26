@@ -135,6 +135,52 @@ CRYPTO_POLICY = GeoPolicy(
 )
 
 
+# ── Futuros (Hyperliquid perps) ────────────────────────────────────────
+# Not an Ondo product either. The baseline is the venue's own restricted list
+# (US, Ontario, sanctioned territories): Canada is blocked whole because a
+# phone or IP country cannot tell Ontario apart. GB and BE follow the extra
+# exclusions of other wallets offering the same venue. Only OPENS are gated;
+# a holder can always close and bring the money home.
+PERPS_BASELINE_BLOCKED = frozenset({'US', 'CA', 'CU', 'IR', 'KP', 'SY', 'GB', 'BE'})
+
+PERPS_INELIGIBLE_MESSAGE = (
+    'Los futuros no están disponibles en tu país. '
+    'Si tienes posiciones abiertas, puedes cerrarlas cuando quieras.'
+)
+
+
+def _country_list(setting_name: str) -> frozenset:
+    configured = getattr(settings, setting_name, ())
+    if isinstance(configured, str):
+        configured = configured.split(',')
+    return frozenset(str(country).strip().upper() for country in configured if str(country).strip())
+
+
+def _perps_blocked_countries():
+    return PERPS_BASELINE_BLOCKED | _country_list('PERPS_BLOCKED_COUNTRIES')
+
+
+PERPS_POLICY = GeoPolicy(
+    name='perps',
+    phone_blocked=_perps_blocked_countries,
+    message=PERPS_INELIGIBLE_MESSAGE,
+    allow_missing_phone=False,
+    ip_blocked=_perps_blocked_countries,
+    # A lookup that raises propagates; perps_risk.country_allowed refuses.
+    # An IP that resolves to nothing (provider down, unknown range) still
+    # passes, as in every GeoPolicy: the verified phone country is the
+    # attested jurisdiction and fails closed above; IP only adds refusals.
+    ip_fails_open_on_error=False,
+)
+
+
+def perps_promotion_blocked(user) -> bool:
+    """True where Futuros may be used but never promoted (phone country)."""
+    from security.geo import phone_country_of
+
+    return (phone_country_of(user) or '') in _country_list('PERPS_PROMOTION_BLOCKED_COUNTRIES')
+
+
 def is_ondo_eligible(user) -> bool:
     """Phone country ONLY — the half-check.
 

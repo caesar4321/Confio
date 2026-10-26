@@ -105,6 +105,10 @@ const failover = async (method: string, params: unknown[]): Promise<any> => {
   throw lastErr instanceof Error ? lastErr : new Error('all BSC RPCs failed');
 };
 
+/** A read over the bundled public BSC RPCs, never through Confío's server:
+ *  for values the app must not take from the server (a price it bounds by). */
+export const publicBscCall = (method: string, params: unknown[]): Promise<any> => failover(method, params);
+
 /**
  * Install the emergency transport (public RPCs, failover). Returns a
  * restore function — call it after the exit so normal app flows go back

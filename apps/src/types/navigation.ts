@@ -216,6 +216,11 @@ export type MainStackParamList = {
   CryptoDetail: { symbol: string };
   BuyCrypto: { symbol: string };
   SellCrypto: { symbol: string };
+  // Futuros (Hyperliquid perps): keyed by the Hyperliquid coin ('BTC', 'xyz:GOLD').
+  FuturesMarkets: undefined;
+  FuturesMarket: { coin: string };
+  FuturesOrder: { coin: string; side: 'long' | 'short' };
+  FuturesPosition: { positionId: string };
   Financieras: undefined;
   FinancieraDetail: { financieraId: string };
   FinancieraReview: { financieraId: string };

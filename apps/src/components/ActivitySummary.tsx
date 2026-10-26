@@ -7,6 +7,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Text } from './common/AppText';
 import { colors } from '../config/theme';
 import { CryptoAssetMark } from './CryptoAssetMark';
+import { PerpMarketMark } from './futures/PerpMarketMark';
 import { formatDecimal, formatUsdAmount } from '../utils/numberLocale';
 import { GET_CRYPTO_TICKERS } from '../apollo/queries';
 
@@ -34,16 +35,22 @@ export type ActivityShare = {
   headline: string;
 };
 
+/** A Futuros post (perps_open / perps_close, category 'perp'). */
+export function isPerps(a: Pick<ActivityShare, 'kind' | 'category'>): boolean {
+  return a.kind === 'perps_open' || a.kind === 'perps_close' || a.category === 'perp';
+}
+
 /** 'crypto' | 'metal' for a Bitcoin & gold post, whichever kind spelling it came with; null otherwise. */
 export function cryptoCategoryOf(a: Pick<ActivityShare, 'kind' | 'category'>): string | null {
+  if (isPerps(a)) return null;
   if (a.category) return a.category;
   return a.kind === 'crypto_buy' || a.kind === 'crypto_sell' ? 'crypto' : null;
 }
 
 /** buy | sell for any investment trade (stock or crypto, either spelling); null otherwise. */
 export function tradeSide(a: Pick<ActivityShare, 'kind'>): 'buy' | 'sell' | null {
-  if (a.kind === 'stock_buy' || a.kind === 'crypto_buy') return 'buy';
-  if (a.kind === 'stock_sell' || a.kind === 'crypto_sell') return 'sell';
+  if (a.kind === 'stock_buy' || a.kind === 'crypto_buy' || a.kind === 'perps_open') return 'buy';
+  if (a.kind === 'stock_sell' || a.kind === 'crypto_sell' || a.kind === 'perps_close') return 'sell';
   return null;
 }
 
@@ -76,6 +83,9 @@ const ICONS: Record<string, string> = {
 };
 
 function titleFor(a: ActivityShare): string {
+  if (isPerps(a)) {
+    return `${a.kind === 'perps_close' ? 'Cerró' : 'Abrió'} ${a.name || a.ticker || 'una posición'}`;
+  }
   const side = tradeSide(a);
   if (side && cryptoCategoryOf(a)) {
     const what = a.ticker || (cryptoCategoryOf(a) === 'metal' ? 'oro' : 'cripto');
@@ -102,6 +112,7 @@ function titleFor(a: ActivityShare): string {
 }
 
 function detailFor(a: ActivityShare): string | null {
+  if (isPerps(a)) return 'Futuros en Hyperliquid';
   if (tradeSide(a)) {
     return a.name && a.name !== a.ticker ? a.name : null;
   }
@@ -124,8 +135,9 @@ function PnlLine({ a }: { a: ActivityShare }) {
   if (!a.pnlPct) return null;
   const n = Number(a.pnlPct);
   const color = n > 0 ? colors.flowIn.text : n < 0 ? colors.error.icon : colors.text.secondary;
-  const label =
-    tradeSide(a) === 'sell' ? 'Resultado' : a.position === 'closed' ? 'Al vender' : 'Desde la compra';
+  const label = isPerps(a)
+    ? (a.kind === 'perps_close' ? 'Resultado' : a.position === 'closed' ? 'Al cerrar' : 'Desde la apertura')
+    : tradeSide(a) === 'sell' ? 'Resultado' : a.position === 'closed' ? 'Al vender' : 'Desde la compra';
   const money = a.pnlUsd ? ` (${signed(a.pnlUsd).replace(/^([+−]?)/, '$1US$')})` : '';
   return (
     <Text style={[styles.pnl, { color }]}>
@@ -146,6 +158,10 @@ export function activityDestination(
   activity: ActivityShare,
   cryptoAssets: { symbol: string; ticker: string; name: string }[] = [],
 ): { route: string; params?: object; label: string } | null {
+  // Futuros: the market list (a post carries the ticker, not the venue coin).
+  if (isPerps(activity)) {
+    return { route: 'FuturesMarkets', label: 'Ver futuros' };
+  }
   // Bitcoin & gold: the asset's own page, like a stock. A post carries the
   // ticker; the market list maps it to the symbol the page needs. Until the
   // list is loaded (or for an asset no longer listed), the Invertir tab.
@@ -202,7 +218,11 @@ export function ActivitySummary({
   const destination = useActivityDestination(navigable ? activity : null);
   const content = (
     <View style={[styles.box, compact && styles.compact]}>
-      {cryptoCategoryOf(activity) && tradeSide(activity) ? (
+      {isPerps(activity) ? (
+        <View style={styles.markIcon} testID="activity-perps-mark">
+          <PerpMarketMark ticker={activity.ticker || '?'} size={32} />
+        </View>
+      ) : cryptoCategoryOf(activity) && tradeSide(activity) ? (
         <View style={styles.markIcon} testID="activity-crypto-mark">
           <CryptoAssetMark ticker={activity.ticker} category={cryptoCategoryOf(activity)} size={32} />
         </View>

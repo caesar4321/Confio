@@ -15,7 +15,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { Text, TextInput } from './common/AppText';
-import { ActivitySummary, cryptoCategoryOf, tradeSide, type ActivityShare } from './ActivitySummary';
+import { ActivitySummary, cryptoCategoryOf, isPerps, tradeSide, type ActivityShare } from './ActivitySummary';
 import { CommunityRulesSheet } from './CommunityRulesSheet';
 import { PostByline } from './PostByline';
 import { colors } from '../config/theme';
@@ -63,6 +63,7 @@ const DEFAULT_NOTE_MAX = 280;
 const SUBTITLE = '¿Lo cuentas en Comunidad? Inspira a otros con tu movimiento.';
 
 export function headlineFor(activity: ActivityShare, pending: boolean): string {
+  if (isPerps(activity)) return activity.kind === 'perps_close' ? 'Posición cerrada ✅' : '¡Posición abierta! 🎯';
   const side = tradeSide(activity);
   if (side && cryptoCategoryOf(activity)) {
     if (side === 'sell') return 'Venta lista ✅';
@@ -93,6 +94,8 @@ const CHIPS: Record<string, string[]> = {
   stock_sell: ['🎯 Tomé ganancias', '🔁 Rebalanceando', '📚 Aprendí algo'],
   crypto_buy: ['🛡️ Para guardar valor', '🧪 Empezando con poco', '📅 Pensando a largo plazo'],
   crypto_sell: ['🎯 Tomé ganancias', '🔁 Rebalanceando', '💵 Volví a mis dólares'],
+  perps_open: ['🎯 Con stop puesto', '📊 Siguiendo la tendencia', '🧪 Probando con poco'],
+  perps_close: ['🎯 Tomé ganancias', '🛑 Salí a tiempo', '💵 Volví a mis dólares'],
   top_up: ['⚡ Fue rapidísimo', '🏦 Sin ir al banco', '💵 Dólares en minutos'],
   withdraw: ['⚡ Llegó rapidísimo', '✅ Sin complicaciones', '🏦 Directo a mi cuenta'],
   send: ['💸 Sin comisiones', '🤝 A mi familia', '⚡ Llegó al instante'],
@@ -149,7 +152,9 @@ export function CommunityShareProvider() {
 
 function ActivityShareSheet({ request, onClose }: { request: Request; onClose: () => void }) {
   // Crypto shares exist only on servers that also serve `category`.
-  const sheetQuery = request.group === 'crypto' ? GET_SHARE_SHEET_CRYPTO_ACTIVITY : GET_SHARE_SHEET_ACTIVITY;
+  // Crypto and Futuros shares exist only on servers that also serve `category`.
+  const sheetQuery = request.group === 'crypto' || request.group === 'perps'
+    ? GET_SHARE_SHEET_CRYPTO_ACTIVITY : GET_SHARE_SHEET_ACTIVITY;
   const { data, loading, error: queryError, refetch } = useQuery(sheetQuery, {
     variables: { group: request.group, reference: request.reference },
     fetchPolicy: 'network-only',
@@ -353,7 +358,8 @@ function Composer({
   onDismiss,
 }: ComposerProps) {
   const side = tradeSide(activity);
-  const chips = chipsFor(side && cryptoCategoryOf(activity) ? `crypto_${side}` : activity.kind);
+  const chips = chipsFor(isPerps(activity) ? activity.kind
+    : side && cryptoCategoryOf(activity) ? `crypto_${side}` : activity.kind);
   // The preview hides money when "Mostrar monto" is off (the % stays).
   const preview: ActivityShare = showAmount ? activity : { ...activity, amountUsd: null, pnlUsd: null };
   const trimmed = note.trim();

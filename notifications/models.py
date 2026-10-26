@@ -102,6 +102,9 @@ class NotificationType(models.TextChoices):
     COMMUNITY_PLAY_COPIED = 'COMMUNITY_PLAY_COPIED', 'Community Play Copied'
     COMMUNITY_TEAM_INVITE = 'COMMUNITY_TEAM_INVITE', 'Community Team Invite'
 
+    # Futuros (Hyperliquid perps): only about the member's own positions
+    PERPS_POSITION_UPDATE = 'PERPS_POSITION_UPDATE', 'Futures Position Update'
+
 
 class Notification(models.Model):
     # For personalized notifications (1:1)

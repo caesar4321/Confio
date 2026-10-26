@@ -33,6 +33,10 @@ import { SellStockScreen } from '../screens/SellStockScreen';
 import { CryptoDetailScreen } from '../screens/CryptoDetailScreen';
 import { BuyCryptoScreen } from '../screens/BuyCryptoScreen';
 import { SellCryptoScreen } from '../screens/SellCryptoScreen';
+import { FuturesMarketsScreen } from '../screens/FuturesMarketsScreen';
+import { FuturesMarketScreen } from '../screens/FuturesMarketScreen';
+import { FuturesOrderScreen } from '../screens/FuturesOrderScreen';
+import { FuturesPositionScreen } from '../screens/FuturesPositionScreen';
 import { FinancierasScreen } from '../screens/FinancierasScreen';
 import { FinancieraDetailScreen } from '../screens/FinancieraDetailScreen';
 import { FinancieraReviewScreen } from '../screens/FinancieraReviewScreen';
@@ -539,6 +543,10 @@ export const MainNavigator = () => {
             headerShown: false,
           }}
         />
+        <Stack.Screen name="FuturesMarkets" component={FuturesMarketsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="FuturesMarket" component={FuturesMarketScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="FuturesOrder" component={FuturesOrderScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="FuturesPosition" component={FuturesPositionScreen} options={{ headerShown: false }} />
         <Stack.Screen
           name="Financieras"
           component={FinancierasScreen}

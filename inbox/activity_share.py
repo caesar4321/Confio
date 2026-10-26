@@ -44,7 +44,13 @@ WITHDRAW = 'withdraw'
 SEND = 'send'
 RECEIVE = 'receive'
 PAY = 'pay'
-KINDS = (STOCK_BUY, STOCK_SELL, CRYPTO_BUY, CRYPTO_SELL, TOP_UP, WITHDRAW, SEND, RECEIVE, PAY)
+# Futuros: an open (margin out) and a close (proceeds home, exact result).
+PERPS_OPEN = 'perps_open'
+PERPS_CLOSE = 'perps_close'
+KINDS = (STOCK_BUY, STOCK_SELL, CRYPTO_BUY, CRYPTO_SELL, TOP_UP, WITHDRAW, SEND, RECEIVE, PAY,
+         PERPS_OPEN, PERPS_CLOSE)
+PERPS_KINDS = (PERPS_OPEN, PERPS_CLOSE)
+PERPS_BATCH_KINDS = ('perps_open', 'perps_return')
 # Investment trades share one P&L engine (average cost over the wallet's own
 # Confío trades of the same asset class).
 STOCK_KINDS = (STOCK_BUY, STOCK_SELL)
@@ -56,6 +62,7 @@ GROUPS = {
     'stock': (STOCK_BUY, STOCK_SELL),
     # Crypto & metals swaps (ConfioSwapRouter): one group for both classes.
     'crypto': (CRYPTO_BUY, CRYPTO_SELL),
+    'perps': (PERPS_OPEN, PERPS_CLOSE),
     # Ramp orders and local-account transfers: a local transfer can also be
     # a QR payment, a send to someone else, or money received from someone.
     'ramp': (TOP_UP, WITHDRAW, PAY, SEND, RECEIVE),
@@ -68,6 +75,7 @@ GROUPS = {
 GROUP_SOURCES = {
     'stock': ('sponsored_batch_id',),
     'crypto': ('sponsored_batch_id',),
+    'perps': ('sponsored_batch_id',),
     'ramp': ('ramp_transaction_id', 'local_money_flow_id'),
     'send': ('send_transaction_id',),
     'receive': ('send_transaction_id',),
@@ -142,6 +150,8 @@ def snapshot_for(row, user) -> Snapshot | None:
         if row.sponsored_batch_id:
             if row.sponsored_batch.kind in CRYPTO_KINDS:
                 return _crypto_snapshot(row, user)
+            if row.sponsored_batch.kind in PERPS_BATCH_KINDS:
+                return _perps_snapshot(row, user)
             return _stock_snapshot(row, user)
         if row.ramp_transaction_id:
             return _ramp_snapshot(row, user)
@@ -342,6 +352,91 @@ def _crypto_snapshot(row, user) -> Snapshot | None:
     if batch.kind == CRYPTO_SELL:
         data = _with_realized(data, _crypto_wallet_trades(batch.user_bsc_address), batch.id)
     return Snapshot(batch.kind, data)
+
+
+def _perps_position(batch):
+    from blockchain.models import PerpPosition
+
+    field = 'open_batch' if batch.kind == 'perps_open' else 'return_batch'
+    return PerpPosition.objects.filter(**{field: batch}).select_related('market').first()
+
+
+def _perps_data(batch, position, usd: Decimal) -> dict | None:
+    """An open: the margin that left Confío dollars. A close: what came
+    back, with the position's exact result (every cost included)."""
+    from cusd_plus.perps_catalog import view
+
+    if position is None or usd is None or usd < 0:
+        return None
+    market = view(position.market)
+    label = f"{market.ticker} · {'Largo' if position.side == 'long' else 'Corto'} {position.leverage}x"
+    kind = PERPS_OPEN if batch.kind == 'perps_open' else PERPS_CLOSE
+    if kind == PERPS_CLOSE and position.returned_usd is not None:
+        usd = Decimal(position.returned_usd)  # this position's own return
+    data = {
+        'kind': kind, 'symbol': position.market.coin, 'ticker': market.ticker, 'name': label,
+        'category': 'perp', 'amount_usd': _money(usd), 'date': _date(batch.created_at),
+        # Server-side only; never serialized.
+        'wallet': batch.user_bsc_address.lower(), 'batch_id': batch.id, 'position_id': position.id,
+    }
+    if kind == PERPS_CLOSE:
+        invested = _perps_invested(position)
+        if invested is not None and invested > 0:
+            pnl = usd - invested
+            data['pnl_usd'] = _money(pnl)
+            data['pnl_pct'] = format((pnl / invested * 100).quantize(Decimal('0.01')), 'f')
+    return data
+
+
+def _perps_invested(position) -> Decimal | None:
+    from cusd_plus.perps_portfolio import PerpsLedgerUnknown, episodes
+
+    try:
+        for ep in episodes(position.wallet):
+            if ep.position_id == position.id:
+                # Refunded top-ups came back to dollars on their own.
+                return ep.invested - ep.refunded
+    except PerpsLedgerUnknown:
+        return None
+    return None
+
+
+def _perps_snapshot(row, user) -> Snapshot | None:
+    batch = row.sponsored_batch
+    if batch.kind not in PERPS_BATCH_KINDS or batch.status != 'confirmed':
+        return None
+    if _personal_account(user, batch.user_bsc_address) is None:
+        return None
+    data = _perps_data(batch, _perps_position(batch), _dec(row.amount))
+    return Snapshot(data['kind'], data) if data else None
+
+
+def _perps_live(activity) -> tuple[str | None, Decimal | None, Decimal | None]:
+    """('open', live P&L %, $) while the opened position is open; ('closed',
+    exact result %, $) once it came home; (None, None, None) when unknown."""
+    from blockchain.models import PerpPosition
+
+    position = PerpPosition.objects.filter(pk=activity.get('position_id')).select_related('market').first()
+    if position is None:
+        return None, None, None
+    invested = _perps_invested(position)
+    if position.state == 'done' and position.returned_usd is not None and invested:
+        result = Decimal(position.returned_usd) - invested
+        return 'closed', result / invested * 100, result
+    if position.state != 'open' or not invested:
+        return None, None, None
+    # The same number the profile shows: the position's whole value (margin,
+    # realized, funding, fees, top-ups) against everything put in.
+    try:
+        from cusd_plus.perps_portfolio import SYMBOL_PREFIX, live_part
+
+        part = live_part(position.wallet)
+    except Exception:  # noqa: BLE001
+        return 'open', None, None
+    row = next((p for p in part.open_positions or [] if p.symbol == f'{SYMBOL_PREFIX}{position.id}'), None)
+    if row is None:
+        return 'open', None, None
+    return 'open', row.pnl_pct, row.pnl_usd
 
 
 def _ramp_rail(code: str) -> str:
@@ -789,7 +884,18 @@ def activity_payloads(items) -> dict:
             # 'crypto' | 'metal' for crypto-class posts (absent for stocks).
             'category': activity.get('category'),
         }
-        if activity['kind'] in SELL_KINDS:
+        if activity['kind'] == PERPS_CLOSE:
+            public['pnl_pct'] = activity.get('pnl_pct')
+            public['pnl_usd'] = activity.get('pnl_usd') if show_amount else None
+        elif activity['kind'] == PERPS_OPEN:
+            state, pct, usd = _perps_live(activity)
+            public['position'] = state
+            if pct is not None:
+                public['pnl_pct'] = format(pct.quantize(Decimal('0.01')), 'f')
+                # The same position's dollars (top-ups included), never % × the opening.
+                if show_amount and usd is not None:
+                    public['pnl_usd'] = _money(usd)
+        elif activity['kind'] in SELL_KINDS:
             public['pnl_pct'] = activity.get('pnl_pct')
             public['pnl_usd'] = activity.get('pnl_usd') if show_amount else None
         elif activity['kind'] in BUY_KINDS:
@@ -821,6 +927,8 @@ KIND_VERBS = {
     STOCK_SELL: 'Vendió',
     CRYPTO_BUY: 'Compró',
     CRYPTO_SELL: 'Vendió',
+    PERPS_OPEN: 'Abrió',
+    PERPS_CLOSE: 'Cerró',
     TOP_UP: 'Recargó',
     WITHDRAW: 'Retiró',
     SEND: 'Envió dinero a otro usuario de Confío',
@@ -840,11 +948,12 @@ def activity_headline(activity: dict) -> str:
     # reader, or the notification's recipient via reading_as).
     amount = activity.get('amount_usd') if activity.get('show_amount', True) else None
     money = f'US${format_amount(amount, trim=False)}' if amount else None
-    if kind in BUY_KINDS + SELL_KINDS:
-        parts = [f"{verb} {activity.get('ticker') or ''}".strip()]
+    if kind in BUY_KINDS + SELL_KINDS + PERPS_KINDS:
+        subject = activity.get('name') if kind in PERPS_KINDS else activity.get('ticker')
+        parts = [f"{verb} {subject or ''}".strip()]
         if money:
             parts.append(money)
-        if kind in SELL_KINDS and activity.get('pnl_pct') is not None:
+        if kind in SELL_KINDS + (PERPS_CLOSE,) and activity.get('pnl_pct') is not None:
             pct = _dec(activity['pnl_pct'])
             if pct is not None:
                 parts.append(f"{'+' if pct >= 0 else ''}{format_amount(pct, trim=False)}%")
@@ -932,11 +1041,12 @@ def public_activity(raw: dict) -> dict:
 INTENT_WINDOWS = {
     'stock': timedelta(hours=2),
     'crypto': timedelta(hours=2),
+    'perps': timedelta(hours=2),
     'send': timedelta(hours=2),
     'pay': timedelta(hours=2),
     'ramp': timedelta(hours=48),
 }
-PREVIEW_ONLY_KEYS = ('wallet', 'batch_id')
+PREVIEW_ONLY_KEYS = ('wallet', 'batch_id', 'position_id')
 
 
 def _stock_preview(user, reference):
@@ -1091,8 +1201,30 @@ def _crypto_preview(user, reference):
     return Snapshot(batch.kind, data)
 
 
-PREVIEWERS = {'stock': _stock_preview, 'crypto': _crypto_preview, 'send': _send_preview,
-              'ramp': _ramp_preview, 'pay': _pay_preview}
+def _perps_preview(user, reference):
+    """A Futuros open or close on the wire: the exit's gross (open) or the
+    entry's USDT (close) from the server-issued plan."""
+    from blockchain.models import SponsoredBatch
+
+    if not (reference or '').lower().startswith('0x'):
+        return None
+    batch = SponsoredBatch.objects.filter(
+        tx_hash__iexact=reference, kind__in=PERPS_BATCH_KINDS,
+        status__in=('signed', 'sent', 'confirmed')).first()
+    if batch is None or _personal_account(user, batch.user_bsc_address) is None:
+        return None
+    position = _perps_position(batch)
+    if position is None:
+        return None
+    flow = position.flow or {}
+    wei = flow.get('gross_wei') if batch.kind == 'perps_open' else (flow.get('entry') or {}).get('amount_wei')
+    usd = Decimal(int(wei)) / Decimal(10 ** 18) if wei else None
+    data = _perps_data(batch, position, usd)
+    return Snapshot(data['kind'], data) if data else None
+
+
+PREVIEWERS = {'stock': _stock_preview, 'crypto': _crypto_preview, 'perps': _perps_preview,
+              'send': _send_preview, 'ramp': _ramp_preview, 'pay': _pay_preview}
 
 
 def _row_for_reference(user, reference):
