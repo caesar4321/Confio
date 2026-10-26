@@ -635,6 +635,14 @@ class AllTimeTests(LeagueTests):
         with patch('teams.league.utc_today', return_value=self.TODAY):
             rows = league.table('investors', 'all')
             self.assertEqual([r.user_id for r in rows], [steady.id])
+            # Dollars over the money at work: $0.10 a day on $100, forty days.
+            self.assertAlmostEqual(float(rows[0].pct), 4.0, places=4)
+            # A day with an unknown flow has no known capital: the chained %.
+            from inbox.models import PortfolioDailySnapshot
+            PortfolioDailySnapshot.objects.filter(user=steady, day=self.days_back(40)[5]).update(net_flow_usd=None)
+            from django.core.cache import cache
+            cache.delete(league._key('investors', league.window('all'), 'all'))
+            rows = league.table('investors', 'all')
             self.assertAlmostEqual(float(rows[0].pct), (1.001 ** 40 - 1) * 100, places=4)
             self.assertEqual(league.days_to_rank_all_time('investors', newcomer), 10)
             self.assertEqual(league.days_to_rank_all_time('investors', broken), 21)
@@ -642,6 +650,67 @@ class AllTimeTests(LeagueTests):
             # Thirty days and all time never share a cached table.
             self.assertNotEqual(league._key('investors', league.window('30d'), '30d'),
                                 league._key('investors', league.window('all'), 'all'))
+
+    def test_the_percent_always_has_the_sign_of_the_dollars(self):
+        # angelconfio's week on prod (2026-10-19..25): +US$0.07, but the
+        # chained daily % read -1.95% (the funding day's costs fell on half
+        # a day's capital). Now dollars over the average money at work.
+        from inbox.models import PortfolioDailySnapshot
+
+        angel = make_user()
+        wallet = f'0x{angel.id:040x}'
+        from users.models import Account
+        Account.objects.filter(user=angel, account_type='personal').update(bsc_address=wallet)
+        week = [  # start, net flow, gain, daily return
+            ('0', '35.12', '-0.738958', '-0.0420819059'),
+            ('34.381042', '0', '-0.297335', '-0.0086482275'),
+            ('34.083707', '0', '0.308496', '0.0090511239'),
+            ('34.392203', '0', '-0.128726', '-0.0037428832'),
+            ('34.263477', '0', '0.927870', '0.0270804467'),
+            ('35.191347', '0', '0', '0'),
+            ('35.191347', '0', '0', '0'),
+        ]
+        days = self.days_back(7)
+        for day, (start, flow, gain, ret) in zip(days, week):
+            PortfolioDailySnapshot.objects.create(
+                user=angel, wallet=wallet, day=day, value_start_usd=Decimal(start),
+                value_end_usd=Decimal(start) + Decimal(flow) + Decimal(gain), net_flow_usd=Decimal(flow),
+                gain_usd=Decimal(gain), daily_return=Decimal(ret), ledger_trusted=True)
+        with patch('teams.league.utc_today', return_value=self.TODAY):
+            row = next(r for r in league.investor_table(days) if r.user_id == angel.id)
+        self.assertAlmostEqual(float(row.pnl), 0.071347, places=5)
+        self.assertGreater(row.pct, 0)
+        capital = (17.56 + 34.381042 + 34.083707 + 34.392203 + 34.263477 + 35.191347 * 2) / 7
+        self.assertAlmostEqual(float(row.pct), 0.071347 / capital * 100, places=4)
+
+    def test_a_sell_out_day_never_cancels_the_capital(self):
+        from inbox.models import PortfolioDailySnapshot
+        from users.models import Account
+
+        seller = make_user()
+        wallet = f'0x{seller.id:040x}'
+        Account.objects.filter(user=seller, account_type='personal').update(bsc_address=wallet)
+        days = self.days_back(2)
+        for day, (start, flow, gain) in zip(days, [('100', '0', '0'), ('100', '-399', '299')]):
+            PortfolioDailySnapshot.objects.create(
+                user=seller, wallet=wallet, day=day, value_start_usd=Decimal(start), value_end_usd=Decimal('0'),
+                net_flow_usd=Decimal(flow), gain_usd=Decimal(gain), daily_return=Decimal('0'), ledger_trusted=True)
+        with patch('teams.league.utc_today', return_value=self.TODAY):
+            row = next(r for r in league.investor_table(days) if r.user_id == seller.id)
+        self.assertEqual(row.pct, Decimal('299'))  # $299 on $100 at work
+
+    def test_team_percent_is_member_dollars_over_member_capital(self):
+        team, members = self.team_with(5)
+        days = self.days_back(2)
+        for day, cap in zip(days, ['100', None]):
+            TeamDailyReturn.objects.create(team=team, day=day, daily_return=Decimal('-0.01'), qualifying_members=5,
+                                           mean_gain_usd=Decimal('1'), mean_capital_usd=cap and Decimal(cap),
+                                           contributors=[m.id for m in members])
+        with patch('teams.league.utc_today', return_value=self.TODAY):
+            # A day without its capital: the chained % (as before), never a guess.
+            self.assertLess(league.team_table(days)[0].pct, 0)
+            TeamDailyReturn.objects.filter(team=team).update(mean_capital_usd=Decimal('50'))
+            self.assertEqual(league.team_table(days)[0].pct, Decimal('4'))  # $2 on $50
 
     def test_teams_need_thirty_shown_days_and_five_members_now(self):
         team, members = self.team_with(5)

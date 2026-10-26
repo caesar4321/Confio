@@ -129,7 +129,8 @@ WITH good AS (
     WHERE {key} = ANY(%s) AND day BETWEEN %s AND %s AND {good}
 )
 SELECT k, COUNT(*), COALESCE(SUM(CASE WHEN 1 + r > 0 THEN LN(1 + r) END), 0), BOOL_OR(1 + r <= 0), MIN(day),
-       COALESCE(SUM(g), 0), BOOL_OR(g IS NULL), AVG(s), COUNT(*) FILTER (WHERE s >= 1)
+       COALESCE(SUM(g), 0), BOOL_OR(g IS NULL), AVG(s), COUNT(*) FILTER (WHERE s >= 1),
+       AVG(c), BOOL_OR(c IS NULL)
 FROM good GROUP BY k, island HAVING MAX(day) = %s
 '''
 
@@ -143,26 +144,56 @@ class Run:
     gain: Decimal | None   # None: a day in the run has no dollar gain yet
     avg_start: Decimal | None
     holding_days: int = 0
+    avg_capital: Decimal | None = None  # None: a day in the run has no capital yet
 
 
 def _runs(model, key: str, ret: str, good: str, ids, first: date, last: date, *, gain: str,
-          start: str = 'NULL::numeric') -> dict:
+          capital: str, start: str = 'NULL::numeric') -> dict:
     from django.db import connection
 
     ids = list(ids)
     if not ids:
         return {}
-    sql = _RUNS_SQL.format(key=key, ret_cols=f'{ret} AS r, {gain} AS g, {start} AS s', good=good,
+    sql = _RUNS_SQL.format(key=key, ret_cols=f'{ret} AS r, {gain} AS g, {start} AS s, {capital} AS c', good=good,
                            table=model._meta.db_table)
     with connection.cursor() as cursor:
         cursor.execute(sql, [ids, first, last, last])
         return {k: Run(n, Decimal(lg), bool(zero), first_day, None if missing else Decimal(g),
-                       None if s is None else Decimal(s), int(held or 0))
-                for k, n, lg, zero, first_day, g, missing, s, held in cursor.fetchall()}
+                       None if s is None else Decimal(s), int(held or 0),
+                       None if (no_capital or c is None) else Decimal(c))
+                for k, n, lg, zero, first_day, g, missing, s, held, c, no_capital in cursor.fetchall()}
 
 
 def _run_pct(log_sum: Decimal, total_loss: bool) -> Decimal:
     return Decimal('-100') if total_loss else (log_sum.exp() - 1) * 100
+
+
+def _gain_pct(pnl: Decimal, avg_capital: Decimal | None, chained: Decimal) -> Decimal:
+    """The % beside the dollars: the period's dollar result over the average
+    money at work, so its sign is always the dollars' (a chained daily % can
+    disagree: a first day's costs weigh on half a day's capital). The chained
+    % only for days computed before the capital was stored."""
+    if avg_capital is None:
+        return chained
+    if avg_capital <= 0:
+        return Decimal('0')
+    return pnl / avg_capital * 100
+
+
+def _day_capital(start, flow) -> Decimal | None:
+    """The money at work on a day: what it started with, plus half of what
+    came in (a deposit counts from mid-day, as the daily return has it). A
+    withdrawal was at work until it left, so it never subtracts: a day that
+    sells everything would otherwise go negative and cancel real capital."""
+    if start is None or flow is None:
+        return None
+    return Decimal(start) + max(Decimal(flow), Decimal('0')) / 2
+
+
+# The same in SQL, for the all-time runs.
+# GREATEST ignores NULL, so an unknown flow is kept unknown explicitly.
+_SNAPSHOT_CAPITAL = ('CASE WHEN net_flow_usd IS NULL THEN NULL '
+                     'ELSE value_start_usd + GREATEST(net_flow_usd, 0) / 2 END')
 
 
 def month_window(month_start: date) -> list[date]:
@@ -213,20 +244,24 @@ def compute_team_day(team, day: date) -> bool:
                                                  ignore_conflicts=True)
     wallets = canonical_wallets(eligible)
     owner = {wallet: user_id for user_id, wallet in wallets.items()}
-    returns, gains = {}, {}
-    for wallet, ret, gain in (PortfolioDailySnapshot.objects.filter(
+    returns, gains, capitals = {}, {}, {}
+    for wallet, ret, gain, start_usd, flow in (PortfolioDailySnapshot.objects.filter(
             wallet__in=list(wallets.values()), day=day, ledger_trusted=True, value_start_usd__gte=MIN_SLEEVE_USD)
             .exclude(daily_return__isnull=True).exclude(gain_usd__isnull=True)
-            .values_list('wallet', 'daily_return', 'gain_usd')):
+            .values_list('wallet', 'daily_return', 'gain_usd', 'value_start_usd', 'net_flow_usd')):
         returns[wallet], gains[wallet] = ret, gain
+        capitals[wallet] = _day_capital(start_usd, flow)
     if not returns:
         TeamDailyReturn.objects.filter(team=team, day=day).delete()
         return False
     mean = sum(returns.values(), Decimal('0')) / len(returns)
     mean_gain = sum(gains.values(), Decimal('0')) / len(gains)
+    mean_capital = (None if any(c is None for c in capitals.values())
+                    else sum(capitals.values(), Decimal('0')) / len(capitals))
     TeamDailyReturn.objects.update_or_create(team=team, day=day, defaults={
         'daily_return': mean.quantize(Decimal('0.0000000001')), 'qualifying_members': len(returns),
         'mean_gain_usd': mean_gain.quantize(Decimal('0.000001')),
+        'mean_capital_usd': None if mean_capital is None else mean_capital.quantize(Decimal('0.000001')),
         'contributors': sorted(owner[w] for w in returns)})
     return True
 
@@ -329,7 +364,7 @@ def _key(kind: str, days, range_key: str) -> str:
     the window it was computed for, and two ranges over the same days (30 d
     and all time early on) never share an entry."""
     span = f'{days[0].isoformat()}:{days[-1].isoformat()}' if days else 'empty'
-    return f'league:v2:{kind}:{range_key}:{span}'
+    return f'league:v3:{kind}:{range_key}:{span}'
 
 
 def warm() -> None:
@@ -358,6 +393,14 @@ class Row:
     people: frozenset = frozenset()
 
 
+def _average(values) -> Decimal | None:
+    """None when any day has no value (computed before it was stored)."""
+    values = list(values)
+    if not values or any(v is None for v in values):
+        return None
+    return sum((Decimal(v) for v in values), Decimal('0')) / len(values)
+
+
 def _chain(returns) -> Decimal:
     growth = Decimal('1')
     for r in returns:
@@ -374,10 +417,11 @@ def team_table(days: list[date], all_time: bool = False) -> list[Row]:
         return _team_table_all_time(days)
     by_team: dict = {}
     people: dict = {}
-    for team_id, day, ret, qualifying, ids, gain in TeamDailyReturn.objects.filter(
+    for team_id, day, ret, qualifying, ids, gain, capital in TeamDailyReturn.objects.filter(
             day__in=days, team__archived_at__isnull=True).values_list(
-            'team_id', 'day', 'daily_return', 'qualifying_members', 'contributors', 'mean_gain_usd'):
-        by_team.setdefault(team_id, {})[day] = (ret, qualifying, gain)
+            'team_id', 'day', 'daily_return', 'qualifying_members', 'contributors', 'mean_gain_usd',
+            'mean_capital_usd'):
+        by_team.setdefault(team_id, {})[day] = (ret, qualifying, gain, capital)
         people.setdefault(team_id, set()).update(ids or [])
     last = days[-1]
     created = dict(Team.objects.filter(id__in=by_team).values_list('id', 'created_at'))
@@ -387,13 +431,14 @@ def team_table(days: list[date], all_time: bool = False) -> list[Row]:
         if latest is None or latest[1] < MIN_TEAM_MEMBERS:
             continue
         # Never a day that is really one or two people's return.
-        if any(q < MIN_SHOWN_MEMBERS for _, q, _g in per_day.values()):
+        if any(q < MIN_SHOWN_MEMBERS for _, q, _g, _c in per_day.values()):
             continue
         # A day without its dollars (computed before they existed) is never guessed.
-        if any(g is None for _, _q, g in per_day.values()):
+        if any(g is None for _, _q, g, _c in per_day.values()):
             continue
-        pct = _chain(per_day[d][0] for d in days if d in per_day)
         pnl = sum((per_day[d][2] for d in days if d in per_day), Decimal('0'))
+        pct = _gain_pct(pnl, _average([c for _r, _q, _g, c in per_day.values()]),
+                        _chain(per_day[d][0] for d in days if d in per_day))
         rows.append((pnl, pct, latest[1], created.get(team_id), team_id))
     # Ties: more qualifying members, then the older team (the % never decides).
     rows.sort(key=lambda r: (-r[0], -r[2], r[3] or timezone.now()))
@@ -411,14 +456,14 @@ def _team_table_all_time(days: list[date]) -> list[Row]:
                                                  qualifying_members__gte=MIN_TEAM_MEMBERS)
                   .values_list('team_id', 'qualifying_members'))
     runs = _runs(TeamDailyReturn, 'team_id', 'daily_return', f'qualifying_members >= {MIN_SHOWN_MEMBERS}',
-                 latest, days[0], last, gain='mean_gain_usd')
+                 latest, days[0], last, gain='mean_gain_usd', capital='mean_capital_usd')
     created = dict(Team.objects.filter(id__in=runs).values_list('id', 'created_at'))
     rows = []
     for team_id, run in runs.items():
         if run.days < MIN_ALL_TIME_DAYS or run.gain is None:
             continue
-        rows.append((run.gain, _run_pct(run.log_sum, run.total_loss), latest[team_id], created.get(team_id),
-                     team_id, run.first_day))
+        rows.append((run.gain, _gain_pct(run.gain, run.avg_capital, _run_pct(run.log_sum, run.total_loss)),
+                     latest[team_id], created.get(team_id), team_id, run.first_day))
     rows.sort(key=lambda r: (-r[0], -r[2], r[3] or timezone.now()))
     out = []
     for i, (pnl, pct, q, _, team_id, start) in enumerate(rows):
@@ -444,20 +489,23 @@ def investor_table(days: list[date], all_time: bool = False) -> list[Row]:
     if all_time:
         return _investor_table_all_time(days, wallets)
     by_wallet: dict = {}
-    for wallet, day, ret, trusted, start, gain in PortfolioDailySnapshot.objects.filter(
+    for wallet, day, ret, trusted, start, gain, flow in PortfolioDailySnapshot.objects.filter(
             wallet__in=list(wallets.values()), day__in=days).values_list(
-            'wallet', 'day', 'daily_return', 'ledger_trusted', 'value_start_usd', 'gain_usd'):
-        by_wallet.setdefault(wallet, {})[day] = (ret if trusted else None, start, gain if trusted else None)
+            'wallet', 'day', 'daily_return', 'ledger_trusted', 'value_start_usd', 'gain_usd', 'net_flow_usd'):
+        by_wallet.setdefault(wallet, {})[day] = (ret if trusted else None, start, gain if trusted else None,
+                                                 _day_capital(start, flow))
     rows = []
     for user_id, wallet in wallets.items():
         per_day = by_wallet.get(wallet, {})
         # Every day proven on the member's one wallet (no gaps, no guesses).
-        if any(per_day.get(day, (None, None, None))[0] is None or per_day[day][2] is None for day in days):
+        if any(per_day.get(day, (None, None, None, None))[0] is None or per_day[day][2] is None for day in days):
             continue
         if not _invests_enough([per_day[day][1] for day in days]):
             continue
         pnl = sum((per_day[day][2] for day in days), Decimal('0'))
-        rows.append((pnl, _chain(per_day[day][0] for day in days), user_id))
+        pct = _gain_pct(pnl, _average([per_day[day][3] for day in days]),
+                        _chain(per_day[day][0] for day in days))
+        rows.append((pnl, pct, user_id))
     rows.sort(key=lambda r: (-r[0], -r[1], r[2]))
     return [Row(rank=i + 1, pct=pct, pnl=pnl, user_id=user_id, people=frozenset([user_id]))
             for i, (pnl, pct, user_id) in enumerate(rows)]
@@ -480,14 +528,16 @@ def _investor_table_all_time(days: list[date], wallets: dict) -> list[Row]:
 
     last = days[-1]
     runs = _runs(PortfolioDailySnapshot, 'wallet', 'daily_return', 'ledger_trusted AND daily_return IS NOT NULL',
-                 wallets.values(), days[0], last, gain='gain_usd', start='value_start_usd')
+                 wallets.values(), days[0], last, gain='gain_usd', start='value_start_usd',
+                 capital=_SNAPSHOT_CAPITAL)
     rows = []
     for user_id, wallet in wallets.items():
         run = runs.get(wallet)
         if (run is None or run.days < MIN_ALL_TIME_DAYS or run.gain is None
                 or (run.avg_start or 0) < MIN_AVG_SLEEVE_USD or run.holding_days < MIN_HOLDING_DAYS):
             continue
-        rows.append((run.gain, _run_pct(run.log_sum, run.total_loss), user_id, run.first_day))
+        rows.append((run.gain, _gain_pct(run.gain, run.avg_capital, _run_pct(run.log_sum, run.total_loss)),
+                     user_id, run.first_day))
     rows.sort(key=lambda r: (-r[0], -r[1], r[2]))
     return [Row(rank=i + 1, pct=pct, pnl=pnl, user_id=user_id, people=frozenset([user_id]), since=since)
             for i, (pnl, pct, user_id, since) in enumerate(rows)]
@@ -551,12 +601,15 @@ def team_result(team_id, range_key: str) -> tuple[Decimal | None, Decimal | None
 
     days = counted_days(team_id, range_key)
     rows = list(TeamDailyReturn.objects.filter(team_id=team_id, day__in=days).values_list(
-        'daily_return', 'qualifying_members', 'mean_gain_usd'))
+        'daily_return', 'qualifying_members', 'mean_gain_usd', 'mean_capital_usd'))
     rank = next((row.rank for row in table('teams', range_key) if row.team_id == int(team_id)), None)
-    if not rows or any(q < MIN_SHOWN_MEMBERS for _, q, _g in rows) or not contributors_ok(team_id, days):
+    if not rows or any(q < MIN_SHOWN_MEMBERS for _, q, _g, _c in rows) or not contributors_ok(team_id, days):
         return None, None, rank
-    pnl = None if any(g is None for _, _q, g in rows) else sum((g for _, _q, g in rows), Decimal('0'))
-    return _chain(r for r, _q, _g in rows), pnl, rank
+    chained = _chain(r for r, _q, _g, _c in rows)
+    if any(g is None for _, _q, g, _c in rows):
+        return chained, None, rank
+    pnl = sum((g for _, _q, g, _c in rows), Decimal('0'))
+    return _gain_pct(pnl, _average([c for _r, _q, _g, c in rows]), chained), pnl, rank
 
 
 def contributors(team_ids, days) -> dict:

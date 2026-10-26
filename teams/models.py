@@ -145,6 +145,10 @@ class TeamDailyReturn(models.Model):
     # (realized and unrealized, their own money): what the league ranks by.
     # Null on days computed before it existed, until recomputed.
     mean_gain_usd = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    # The same members' mean money at work that day (start value plus half
+    # the day's net flow): the league's % is the dollars over its average.
+    # Null on days computed before it existed, until recomputed.
+    mean_capital_usd = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
     qualifying_members = models.PositiveSmallIntegerField()
     # Who the day is made of (user ids): read paths re-check each one is still
     # eligible and not in a block with the viewer.
