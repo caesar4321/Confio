@@ -139,10 +139,31 @@ export const DELETE_DELIVERY_ADDRESS = gql`
 // Adults-only rules (alcoholic beverages): their own queries, never fields on
 // the shared product/order fragments (see the address book note above).
 export const GET_MARKETPLACE_AGE_RULES = gql`
-  query MarketplaceAgeRules($countryCode: String) {
-    marketplaceAgeRules(countryCode: $countryCode) { minimumAge categoryKeys viewerOfAge }
+  query MarketplaceAgeRules($countryCode: String, $city: String, $deliveryCity: String) {
+    marketplaceAgeRules(countryCode: $countryCode, city: $city, deliveryCity: $deliveryCity) {
+      minimumAge categoryKeys viewerOfAge salesClosedReason
+    }
   }
 `;
+
+// The store's municipal alcohol licence (Ley 259): its own query/mutation.
+export const GET_MY_ALCOHOL_LICENSE = gql`
+  query MyAlcoholLicense {
+    myAlcoholLicense { status note expiresOn }
+  }
+`;
+
+export const SUBMIT_ALCOHOL_LICENSE = gql`
+  mutation SubmitAlcoholLicense($photoKey: String!, $licenseNumber: String) {
+    submitAlcoholLicense(photoKey: $photoKey, licenseNumber: $licenseNumber) { success error }
+  }
+`;
+
+export type AlcoholLicense = {
+  status: 'none' | 'pending' | 'approved' | 'rejected' | 'expired';
+  note: string | null;
+  expiresOn: string | null;
+};
 
 export const GET_MARKET_ORDER_ADULTS_ONLY = gql`
   query MarketOrderAdultsOnly($id: ID!) {
@@ -150,7 +171,10 @@ export const GET_MARKET_ORDER_ADULTS_ONLY = gql`
   }
 `;
 
-export type MarketplaceAgeRules = { minimumAge: number; categoryKeys: string[]; viewerOfAge: boolean };
+export type MarketplaceAgeRules = {
+  minimumAge: number; categoryKeys: string[]; viewerOfAge: boolean;
+  salesClosedReason?: 'alcohol_hours' | 'alcohol_paused' | null;
+};
 
 // Reviews: their own query (see the address book note above).
 export const GET_STORE_REVIEWS = gql`
@@ -330,6 +354,10 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   identity_required: 'Verifica tu identidad para comprar y vender en Confío.',
   age_required: 'Este producto es solo para mayores de 18, según tu documento verificado.',
   photos_required: 'Al sacar el producto de Vinos, cervezas y licores, vuelve a subir sus fotos.',
+  alcohol_hours: 'Por ley, las bebidas alcohólicas no se venden entre las 03:00 y las 09:00.',
+  alcohol_paused: 'Hoy rige la ley seca: no se venden bebidas alcohólicas en esta ciudad.',
+  store_license_required: 'Esta tienda no tiene su licencia para vender bebidas alcohólicas al día.',
+  alcohol_license_required: 'Para vender bebidas alcohólicas, primero sube la licencia de funcionamiento de tu tienda.',
   product_unavailable: 'Este producto ya no está disponible.',
   own_store: 'No puedes comprar en tu propia tienda.',
   city_not_live: 'Esta tienda todavía no vende en Confío.',

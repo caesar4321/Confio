@@ -32,20 +32,29 @@ export const MarketCheckoutScreen = () => {
   const route = useRoute<any>();
   const productId = route.params?.productId as string;
   const { data: productData } = useQuery(GET_MARKETPLACE_PRODUCT, { variables: { id: productId } });
-  // Adults-only (alcohol): its own query. Unknown rules never block here;
-  // the server's age check (age_required) is the authority.
-  const { data: ageData } = useQuery<{ marketplaceAgeRules: MarketplaceAgeRules | null }>(GET_MARKETPLACE_AGE_RULES, {
-    // Birthdays count in the store's country (the server's rule).
-    variables: { countryCode: productData?.marketplaceProduct?.store?.countryCode ?? null },
-    fetchPolicy: 'cache-and-network',
-  });
-  const ageRules = ageData?.marketplaceAgeRules ?? null;
   const product = productData?.marketplaceProduct;
   const store = product?.store;
 
   const [quantity, setQuantity] = useState(1);
   const [mode, setMode] = useState<'same' | 'other'>('same');
   const [otherCity, setOtherCity] = useState('');
+  // Adults-only (alcohol): its own query. Unknown rules never block here;
+  // the server's checks (age, hours, ley seca at both ends) are the authority.
+  const [closedPoll, setClosedPoll] = useState(0);
+  const { data: ageData } = useQuery<{ marketplaceAgeRules: MarketplaceAgeRules | null }>(GET_MARKETPLACE_AGE_RULES, {
+    // Birthdays count in the store's country (the server's rule).
+    variables: {
+      countryCode: store?.countryCode ?? null,
+      city: store?.city ?? null,
+      deliveryCity: mode === 'other' && otherCity.trim().length >= 2 ? otherCity.trim() : null,
+    },
+    fetchPolicy: 'cache-and-network',
+    // Closed for the hour or a ley seca: look again each minute, so Pagar
+    // opens by itself when sales reopen (09:00, or the pause lifted).
+    pollInterval: closedPoll,
+  });
+  const ageRules = ageData?.marketplaceAgeRules ?? null;
+  useEffect(() => { setClosedPoll(ageRules?.salesClosedReason ? 60_000 : 0); }, [ageRules?.salesClosedReason]);
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [note, setNote] = useState('');
@@ -161,6 +170,7 @@ export const MarketCheckoutScreen = () => {
     if (adultsOnly && ageRules && !ageRules.viewerOfAge) {
       return `Solo mayores de ${ageRules.minimumAge} pueden comprar este producto, según su documento verificado.`;
     }
+    if (adultsOnly && ageRules?.salesClosedReason) return comprarError(ageRules.salesClosedReason);
     if (mode === 'other' && city.length < 2) return 'Escribe la ciudad de entrega.';
     if (notDelivered) return `Esta tienda solo entrega en ${store?.city ?? 'su ciudad'} y alrededores.`;
     if (!quote) return quoting ? 'Calculando el total…' : 'No pudimos calcular el total.';

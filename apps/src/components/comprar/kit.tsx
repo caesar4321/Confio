@@ -198,11 +198,24 @@ export const AdultsOnlyNote = ({ minimumAge, audience }: {
       : `Solo para mayores de ${minimumAge}. Quien lo reciba debe ser adulto y puede tener que mostrar su carnet.`;
   return (
     <View style={styles.adults} testID="adults-only-note">
-      <View style={styles.adultsBadge}><Text style={styles.adultsBadgeText}>+{minimumAge}</Text></View>
-      <Text style={styles.adultsText}>{text}</Text>
+      <View style={styles.adultsRow}>
+        <View style={styles.adultsBadge}><Text style={styles.adultsBadgeText}>+{minimumAge}</Text></View>
+        <Text style={styles.adultsText}>{text}</Text>
+      </View>
+      {/* The two warnings Bolivia's Ley 259 (art. 9) requires wherever alcohol is sold. */}
+      {audience !== 'seller' ? (
+        <Text style={styles.adultsLegal} testID="alcohol-legal-warnings">
+          {ALCOHOL_WARNINGS.join('\n')}
+        </Text>
+      ) : null}
     </View>
   );
 };
+
+export const ALCOHOL_WARNINGS = [
+  'EL CONSUMO EXCESIVO DE ALCOHOL ES DAÑINO PARA LA SALUD',
+  'VENTA PROHIBIDA A MENORES DE 18 AÑOS DE EDAD',
+];
 
 /** The protected-payment promise, said the same way everywhere. */
 export const TrustNote = ({ children }: { children: React.ReactNode }) => (
@@ -264,7 +277,9 @@ const styles = StyleSheet.create({
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
   trust: { flexDirection: 'row', gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.primaryLight, alignItems: 'flex-start' },
   trustText: { flex: 1, fontSize: 13, color: colors.primaryDeep, lineHeight: 19 },
-  adults: { flexDirection: 'row', gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.warning.background, alignItems: 'center' },
+  adults: { gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.warning.background },
+  adultsRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  adultsLegal: { fontSize: 12, fontWeight: '700', color: colors.warning.text, lineHeight: 17 },
   adultsBadge: { minWidth: 34, height: 24, paddingHorizontal: 6, borderRadius: 12, backgroundColor: colors.warning.text, alignItems: 'center', justifyContent: 'center' },
   adultsBadgeText: { fontSize: 12, fontWeight: '700', color: colors.white },
   adultsText: { flex: 1, fontSize: 13, color: colors.warning.text, lineHeight: 19 },

@@ -47,11 +47,7 @@ def local_today(country_code: str | None):
     """Today's date where the sale happens (the store's country). An
     unknown country takes the furthest-west date, so a birthday never
     arrives early."""
-    from zoneinfo import ZoneInfo
-    from django.utils import timezone
-    from users.cashflow import TIMEZONE_BY_PHONE_COUNTRY
-    name = TIMEZONE_BY_PHONE_COUNTRY.get((country_code or '').upper(), 'Etc/GMT+12')
-    return timezone.now().astimezone(ZoneInfo(name)).date()
+    return local_now(country_code).date()
 
 
 def buyer_age(user, today):
@@ -77,13 +73,77 @@ def category_is_age_restricted(key: str) -> bool:
     return MarketplaceCategory.objects.filter(key=key, age_restricted=True).exists()
 
 
+# Ley 259 art. 17: no alcohol sold 03:00–09:00 (local time). Municipal
+# hours may be stricter; this is the national floor.
+ALCOHOL_QUIET_HOURS = (3, 9)
+
+
+def local_now(country_code: str | None):
+    from zoneinfo import ZoneInfo
+    from django.utils import timezone
+    from users.cashflow import TIMEZONE_BY_PHONE_COUNTRY
+    name = TIMEZONE_BY_PHONE_COUNTRY.get((country_code or '').upper(), 'Etc/GMT+12')
+    return timezone.now().astimezone(ZoneInfo(name))
+
+
+def ley_seca_error(country_code: str | None, cities) -> str | None:
+    """'alcohol_paused' when any of these cities (or its delivery area) is under a ley seca. Names
+    match the way delivery does (case, accents, spacing). A name Comprar does
+    not know is paused whenever any city of the country is: a nationwide ley
+    seca must not have a way around it."""
+    rows = list(MarketplaceCity.objects.filter(country_code=(country_code or '').strip().upper())
+                .values_list('city', 'alcohol_sales_paused', 'delivery_area'))
+    if not any(p for _, p, _ in rows):
+        return None
+    # A pause covers its whole delivery area: a "La Paz" order may carry a
+    # pin in El Alto (one area), so the label alone cannot clear it.
+    paused_areas = {a for _, p, a in rows if p and a}
+    paused = {_city_key(c) for c, p, a in rows if p or (a and a in paused_areas)}
+    known = {_city_key(c) for c, _, _ in rows}
+    for name in cities:
+        # A blank (or symbols-only) name is unknown too, never a free pass.
+        key = _city_key(name)
+        if key in paused or key not in known:
+            return 'alcohol_paused'
+    return None
+
+
+def alcohol_window_error(country_code: str | None, cities) -> str | None:
+    """When alcohol may not be sold right now, regardless of buyer: the
+    national quiet hours, or a "ley seca" pause on any of these cities."""
+    start, end = ALCOHOL_QUIET_HOURS
+    if start <= local_now(country_code).hour < end:
+        return 'alcohol_hours'
+    return ley_seca_error(country_code, cities)
+
+
+def alcohol_sale_error(user, store, delivery_city: str = '') -> str | None:
+    """Everything an adults-only sale needs beyond the buyer's age: the
+    store's valid licence, the hour, and no ley seca at either end."""
+    if not store.alcohol_license_valid():
+        return 'store_license_required'
+    return alcohol_window_error(store.country_code, [store.city, delivery_city])
+
+
+def ship_alcohol_error(order) -> str | None:
+    """'alcohol_paused' when an adults-only order would ship into or out of a
+    city under ley seca; else None."""
+    if not order.age_restricted:
+        return None
+    return ley_seca_error(order.store.country_code, [order.store.city, order.delivery_city])
+
+
 def deposit_age_error(user, order) -> str | None:
-    """'age_required' when this order is adults-only and `user` (whoever
-    fetches or submits the deposit, e.g. another employee of the buying
-    business) is not of age; else None."""
+    """The adults-only rules again when the deposit is fetched or submitted,
+    on whoever pays (e.g. another employee of the buying business): age,
+    licence, hour and ley seca. None when the order may be paid."""
     needs = order.age_restricted or category_is_age_restricted(order.product.category)
     if needs and not is_of_age(user, order.store.country_code):
         return 'age_required'
+    if needs:
+        sale_error = alcohol_sale_error(user, order.store, order.delivery_city)
+        if sale_error:
+            return sale_error
     if needs and not order.age_restricted:
         # Flagged after checkout: the order is adults-only from now on, so
         # the seller's notice and order view carry the ID handover rule.
@@ -279,6 +339,10 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
     age_restricted = category_is_age_restricted(product.category)
     if age_restricted and not is_of_age(user, product.store.country_code):
         raise CheckoutError('age_required')
+    if age_restricted:
+        sale_error = alcohol_sale_error(user, product.store, delivery_city)
+        if sale_error:
+            raise CheckoutError(sale_error)
     # A deposit for this purchase is still settling: a second order now is how
     # an uncertain first payment turns into paying twice.
     if Order.objects.filter(buyer_account=account, product=product, status='depositing').exists():

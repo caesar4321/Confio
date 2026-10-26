@@ -120,6 +120,10 @@ class MarketplaceCity(models.Model):
     # in El Alto shops the La Paz stores at the city delivery price, the way a
     # courier actually covers the metro. Blank = the city alone.
     delivery_area = models.CharField(max_length=40, blank=True, default='', db_index=True)
+    # "Ley seca" (election weekends, Día del Peatón, municipal jornadas under
+    # DS 3980): no alcohol is sold to or from this city while on.
+    alcohol_sales_paused = models.BooleanField(
+        default=False, help_text='Ley seca: no alcoholic beverages sold to or from this city while on')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -183,6 +187,27 @@ class Store(SoftDeleteModel):
     # null = the store delivers in its own delivery area only.
     outside_delivery_price_usd = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
 
+    # Municipal licence to sell alcohol (Ley 259 art. 4: Licencia de
+    # Funcionamiento, valid 2 years, art. 7). Required to list or sell in an
+    # adults-only category; Confío reviews the photo in the admin.
+    LICENSE_STATUSES = [
+        ('none', 'Not submitted'),
+        ('pending', 'Pending review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+    alcohol_license_status = models.CharField(
+        max_length=10, choices=LICENSE_STATUSES, default='none', db_index=True)
+    # Private upload key (community upload bucket); never published.
+    alcohol_license_key = models.CharField(max_length=300, blank=True, default='')
+    alcohol_license_number = models.CharField(max_length=60, blank=True, default='')
+    alcohol_license_expires_on = models.DateField(
+        null=True, blank=True, help_text='Set on approval from the licence (2 years under Ley 259 art. 7)')
+    alcohol_license_note = models.CharField(
+        max_length=300, blank=True, default='', help_text='Shown to the seller when rejected')
+    alcohol_license_submitted_at = models.DateTimeField(null=True, blank=True)
+    alcohol_license_reviewed_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -196,6 +221,15 @@ class Store(SoftDeleteModel):
     @property
     def is_open(self):
         return self.status == 'active' and self.deleted_at is None
+
+    def alcohol_license_valid(self, today=None) -> bool:
+        """Approved and not expired (an expiry is required to count)."""
+        if self.alcohol_license_status != 'approved' or self.alcohol_license_expires_on is None:
+            return False
+        if today is None:
+            from .checkout import local_today
+            today = local_today(self.country_code)
+        return self.alcohol_license_expires_on >= today
 
 
 class Product(SoftDeleteModel):

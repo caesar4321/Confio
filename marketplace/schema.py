@@ -15,6 +15,7 @@ import logging
 import graphene
 from django.conf import settings
 from django.db.models import Avg, Count, Q
+from django.utils import timezone
 from graphql_jwt.decorators import login_required
 
 from . import escrow
@@ -110,6 +111,15 @@ class MarketplaceAgeRulesType(graphene.ObjectType):
                                   description='Adults-only categories (alcoholic beverages)')
     viewer_of_age = graphene.Boolean(required=True,
                                      description="The viewer's verified ID shows legal age")
+    sales_closed_reason = graphene.String(
+        description="alcohol_hours | alcohol_paused when alcohol can't be sold right now in the given "
+                    "city (Ley 259 quiet hours, ley seca); null otherwise. Display hint only")
+
+
+class AlcoholLicenseType(graphene.ObjectType):
+    status = graphene.String(required=True, description='none | pending | approved | rejected | expired')
+    note = graphene.String(description='Why it was rejected (shown to the seller)')
+    expires_on = graphene.Date()
 
 
 class MarketplaceStoreType(graphene.ObjectType):
@@ -311,8 +321,24 @@ class PhotoUploadType(graphene.ObjectType):
 
 # ── queries ─────────────────────────────────────────────────────────────
 
+def _licensed_alcohol_q() -> Q:
+    """Adults-only listings show only from stores with a current alcohol
+    licence (Ley 259 art. 4). Display filter; checkout re-checks exactly."""
+    from .models import age_restricted_keys
+    keys = age_restricted_keys()
+    if not keys:
+        return Q()
+    # The furthest-west date: a licence stays listed until its expiry day has
+    # ended everywhere (exact local expiry is re-checked at checkout).
+    from .checkout import local_today
+    today = local_today(None)
+    return ~Q(category__in=keys) | Q(store__alcohol_license_status='approved',
+                                     store__alcohol_license_expires_on__gte=today)
+
+
 def _visible_products():
     return Product.objects.filter(
+        _licensed_alcohol_q(),
         deleted_at__isnull=True, status='active', stock__gt=0,
         store__deleted_at__isnull=True, store__status='active',
     ).select_related('store', 'store__owner')
@@ -414,7 +440,9 @@ class Query(graphene.ObjectType):
     market_order = graphene.Field(MarketplaceOrderType, id=graphene.ID(required=True))
     # Adults-only rules: their own queries (never fields on the shared types,
     # which would fail whole shared queries against an older server).
-    marketplace_age_rules = graphene.Field(MarketplaceAgeRulesType, country_code=graphene.String())
+    marketplace_age_rules = graphene.Field(MarketplaceAgeRulesType, country_code=graphene.String(),
+                                           city=graphene.String(), delivery_city=graphene.String())
+    my_alcohol_license = graphene.Field(AlcoholLicenseType)
     market_order_adults_only = graphene.Boolean(id=graphene.ID(required=True))
     market_checkout_quote = graphene.Field(
         CheckoutQuoteType, product_id=graphene.ID(required=True), quantity=graphene.Int(required=True),
@@ -526,6 +554,8 @@ class Query(graphene.ObjectType):
             owner = False
         if not owner and product.status != 'active':
             return None
+        if not owner and not Product.objects.filter(_licensed_alcohol_q(), pk=product.pk).exists():
+            return None
         return MarketplaceProductType.from_model(product, for_owner=owner)
 
     def resolve_marketplace_store(self, info, id):
@@ -573,15 +603,30 @@ class Query(graphene.ObjectType):
         return [MarketplaceOrderType.from_model(o, user, account)
                 for o in qs.order_by('-created_at')[offset: offset + min(limit, PAGE_MAX)]]
 
-    def resolve_marketplace_age_rules(self, info, country_code=None):
-        from .checkout import is_of_age
+    def resolve_marketplace_age_rules(self, info, country_code=None, city=None, delivery_city=None):
+        from .checkout import alcohol_window_error, is_of_age
         from .models import MINIMUM_AGE, age_restricted_keys
         user = _user(info)
         if not user:
             return None
-        # Display hint only (the server re-checks at checkout and payment).
+        # Display hints only (the server re-checks at checkout and payment).
+        named = [c for c in (city, delivery_city) if c]  # only the ends the app named
+        closed = alcohol_window_error(country_code, named) if country_code else None
         return MarketplaceAgeRulesType(minimum_age=MINIMUM_AGE, category_keys=sorted(age_restricted_keys()),
-                                       viewer_of_age=is_of_age(user, country_code))
+                                       viewer_of_age=is_of_age(user, country_code), sales_closed_reason=closed)
+
+    def resolve_my_alcohol_license(self, info):
+        try:
+            _u, _account, store = _seller_store(info)
+        except CheckoutError:
+            return None
+        if store is None:
+            return None
+        status = store.alcohol_license_status
+        if status == 'approved' and not store.alcohol_license_valid():
+            status = 'expired'
+        return AlcoholLicenseType(status=status, note=store.alcohol_license_note or None,
+                                  expires_on=store.alcohol_license_expires_on)
 
     def resolve_market_order_adults_only(self, info, id):
         try:
@@ -944,6 +989,42 @@ class RequestMarketPhotoUpload(graphene.Mutation):
             fields=presigned.get('fields'), expires_in=presigned['expires_in']))
 
 
+class SubmitAlcoholLicense(graphene.Mutation):
+    """The store's municipal alcohol licence (a photo, already uploaded via
+    requestMarketPhotoUpload): pending until Confío reviews it in the admin."""
+
+    class Arguments:
+        photo_key = graphene.String(required=True)
+        license_number = graphene.String()
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @login_required
+    def mutate(self, info, photo_key, license_number=''):
+        try:
+            user, _account, store = _seller_store(info)
+        except CheckoutError as exc:
+            return SubmitAlcoholLicense(success=False, error=exc.code)
+        if store is None:
+            return SubmitAlcoholLicense(success=False, error='no_store')
+        if not (photo_key or '').startswith(pending_prefix(user)):
+            return SubmitAlcoholLicense(success=False, error='bad_photo')
+        if store.alcohol_license_valid():
+            # A renewal: the current licence keeps selling until Confío
+            # reviews the new one (submitted_at > reviewed_at = to review).
+            Store.objects.filter(pk=store.pk).update(
+                alcohol_license_key=photo_key, alcohol_license_number=(license_number or '').strip()[:60],
+                alcohol_license_submitted_at=timezone.now())
+            return SubmitAlcoholLicense(success=True)
+        Store.objects.filter(pk=store.pk).update(
+            alcohol_license_status='pending', alcohol_license_key=photo_key,
+            alcohol_license_number=(license_number or '').strip()[:60], alcohol_license_note='',
+            alcohol_license_expires_on=None, alcohol_license_submitted_at=timezone.now(),
+            alcohol_license_reviewed_at=None)
+        return SubmitAlcoholLicense(success=True)
+
+
 class SaveMarketProduct(graphene.Mutation):
     """Create or edit a listing. Every save goes back through moderation;
     `photo_keys` (pending uploads) replace the photos when given."""
@@ -1007,9 +1088,12 @@ class SaveMarketProduct(graphene.Mutation):
         unchanged = product.pk is not None and category == product.category
         if not unchanged and category not in active_category_keys():
             return SaveMarketProduct(success=False, error='bad_category')
+        from .checkout import category_is_age_restricted
+        # Selling alcohol needs the store's current municipal licence.
+        if category_is_age_restricted(category) and not store.alcohol_license_valid():
+            return SaveMarketProduct(success=False, error='alcohol_license_required')
         # Leaving an adults-only category: the kept photos were approved as
         # alcohol, so new ones must be uploaded and reviewed with the new text.
-        from .checkout import category_is_age_restricted
         if (not unchanged and product.pk is not None and not keys
                 and category_is_age_restricted(product.category) and not category_is_age_restricted(category)):
             return SaveMarketProduct(success=False, error='photos_required')
@@ -1189,6 +1273,11 @@ class MarketOrderActionCalls(graphene.Mutation):
             age_error = deposit_age_error(info.context.user, order)
             if age_error:
                 return MarketOrderActionCalls(success=False, error=age_error)
+        if action == 'ship':
+            from .checkout import ship_alcohol_error
+            ship_error = ship_alcohol_error(order)
+            if ship_error:
+                return MarketOrderActionCalls(success=False, error=ship_error)
         calls = escrow.action_calls(order, action)
         return MarketOrderActionCalls(
             success=True,
@@ -1304,6 +1393,7 @@ class Mutation(graphene.ObjectType):
     update_market_store = UpdateMarketStore.Field()
     request_market_photo_upload = RequestMarketPhotoUpload.Field()
     save_market_product = SaveMarketProduct.Field()
+    submit_alcohol_license = SubmitAlcoholLicense.Field()
     set_market_product_paused = SetMarketProductPaused.Field()
     delete_market_product = DeleteMarketProduct.Field()
     prepare_market_order = PrepareMarketOrder.Field()

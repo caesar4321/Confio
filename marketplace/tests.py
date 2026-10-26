@@ -1532,6 +1532,12 @@ class AdultsOnlyTests(MarketTestBase):
         cache.delete(AGE_RESTRICTED_CACHE_KEY)
         self.addCleanup(cache.delete, AGE_RESTRICTED_CACHE_KEY)
         Product.objects.filter(pk=self.product.pk).update(category='bebidas_alcoholicas', title='Vino tinto Tannat')
+        # A licensed store, at a time alcohol may be sold (hour rules have their own tests).
+        Store.objects.filter(pk=self.store.pk).update(
+            alcohol_license_status='approved', alcohol_license_expires_on=timezone.now().date() + timedelta(days=365))
+        p = mock.patch.object(checkout, 'ALCOHOL_QUIET_HOURS', (0, 0))
+        p.start()
+        self.addCleanup(p.stop)
 
     def _born(self, years_ago, days=0):
         from datetime import date
@@ -1639,3 +1645,118 @@ class AdultsOnlyTests(MarketTestBase):
         order_status_changed(order, 'depositing')
         seller_note = Notification.objects.filter(user=self.seller).latest('id')
         self.assertTrue(seller_note.message.endswith(ADULTS_NOTE.strip()))
+
+
+@override_settings(**ENABLED)
+class AlcoholRulesTests(AdultsOnlyTests):
+    """Ley 259: licence (art. 4/7), quiet hours (art. 17), ley seca."""
+
+    def _adult(self):
+        IdentityVerification.objects.filter(user=self.buyer).update(verified_date_of_birth=date(1990, 1, 1))
+
+    def _code(self):
+        with self.assertRaises(checkout.CheckoutError) as err:
+            self.prepare()
+        return err.exception.code
+
+    def test_no_sale_without_a_current_licence(self):
+        self._adult()
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='pending')
+        self.assertEqual(self._code(), 'store_license_required')
+        Store.objects.filter(pk=self.store.pk).update(
+            alcohol_license_status='approved', alcohol_license_expires_on=timezone.now().date() - timedelta(days=2))
+        self.assertEqual(self._code(), 'store_license_required')
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_expires_on=None)
+        self.assertEqual(self._code(), 'store_license_required')  # approved needs an expiry to count
+
+    def test_unlicensed_alcohol_is_hidden_from_buyers(self):
+        from .schema import _visible_products
+        Product.objects.filter(pk=self.product.pk).update(status='active')
+        self.assertTrue(_visible_products().filter(pk=self.product.pk).exists())
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
+        self.assertFalse(_visible_products().filter(pk=self.product.pk).exists())
+
+    def test_quiet_hours_03_to_09(self):
+        from datetime import datetime, timezone as dt_tz
+        self._adult()
+        with mock.patch.object(checkout, 'ALCOHOL_QUIET_HOURS', (3, 9)):
+            # 08:30 in La Paz (UTC-4) = 12:30 UTC: closed. 09:00 local: open.
+            with mock.patch('django.utils.timezone.now', return_value=datetime(2026, 10, 27, 12, 30, tzinfo=dt_tz.utc)):
+                self.assertEqual(self._code(), 'alcohol_hours')
+            with mock.patch('django.utils.timezone.now', return_value=datetime(2026, 10, 27, 13, 0, tzinfo=dt_tz.utc)):
+                self.assertTrue(self.prepare()[0].age_restricted)
+
+    def test_ley_seca_pauses_the_city(self):
+        self._adult()
+        MarketplaceCity.objects.filter(pk=self.city.pk).update(alcohol_sales_paused=True)
+        self.assertEqual(self._code(), 'alcohol_paused')
+
+    def test_ley_seca_matches_any_spelling_and_unknown_destinations(self):
+        from .checkout import ley_seca_error
+        MarketplaceCity.objects.update_or_create(country_code='BO', city='El Alto', defaults={
+            'currency_code': 'BOB', 'alcohol_sales_paused': True})
+        self.assertEqual(ley_seca_error('BO', ['La Paz', 'el  ALTO']), 'alcohol_paused')
+        self.assertEqual(ley_seca_error('BO', ['La Paz', 'Pueblo Desconocido']), 'alcohol_paused')
+        self.assertIsNone(ley_seca_error('BO', ['La Paz']))
+        self.assertEqual(ley_seca_error('BO', ['La Paz', '  ']), 'alcohol_paused')
+        self.assertEqual(ley_seca_error('BO', ['La Paz', '🍷']), 'alcohol_paused')
+        # One delivery area (a La Paz label may carry an El Alto pin): paused together.
+        MarketplaceCity.objects.filter(country_code='BO', city__in=['La Paz', 'El Alto']).update(delivery_area='BO-LA-PAZ')
+        self.assertEqual(ley_seca_error('BO', ['La Paz']), 'alcohol_paused')
+        MarketplaceCity.objects.filter(country_code='BO', city__in=['La Paz', 'El Alto']).update(delivery_area='')
+        MarketplaceCity.objects.filter(city='El Alto').update(alcohol_sales_paused=False)
+        self.assertIsNone(ley_seca_error('BO', ['La Paz', 'Pueblo Desconocido']))
+
+    def test_a_paid_alcohol_order_does_not_ship_during_ley_seca(self):
+        from .checkout import ship_alcohol_error
+        self._adult()
+        order, _, _ = self.prepare()
+        order.status = 'funded'
+        MarketplaceCity.objects.filter(pk=self.city.pk).update(alcohol_sales_paused=True)
+        self.assertEqual(ship_alcohol_error(order), 'alcohol_paused')
+        with mock.patch.object(escrow, 'actor_allowed', return_value=True):
+            result = escrow.submit_action(self.seller, order, 'ship', 0, int(timezone.now().timestamp()) + 600, '0x', None)
+        self.assertEqual(result, {'success': False, 'error': 'alcohol_paused'})
+
+    def test_payment_rechecks_licence_hours_and_ley_seca(self):
+        from .checkout import deposit_age_error
+        self._adult()
+        order, _, _ = self.prepare()
+        MarketplaceCity.objects.filter(pk=self.city.pk).update(alcohol_sales_paused=True)
+        self.assertEqual(deposit_age_error(self.buyer, order), 'alcohol_paused')
+        MarketplaceCity.objects.filter(pk=self.city.pk).update(alcohol_sales_paused=False)
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
+        order.store.refresh_from_db()
+        self.assertEqual(deposit_age_error(self.buyer, order), 'store_license_required')
+
+    def test_listing_alcohol_needs_the_licence(self):
+        from .schema import SaveMarketProduct
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='none')
+        self.store.refresh_from_db()
+        info = mock.Mock()
+        info.context.user = self.seller
+        with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)):
+            result = SaveMarketProduct.mutate.__wrapped__(None, info, title='Cerveza artesanal', category='bebidas_alcoholicas',
+                                                          price_usd='3.00', stock=3, photo_keys=[f'marketplace/pending/{self.seller.id}/a.jpg'])
+        self.assertEqual(result.error, 'alcohol_license_required')
+
+    def test_renewal_keeps_the_current_licence_selling(self):
+        from .schema import SubmitAlcoholLicense
+        info = mock.Mock()
+        info.context.user = self.seller
+        key = f'marketplace/pending/{self.seller.id}/licence.jpg'
+        self.store.refresh_from_db()  # the licensed store from setUp
+        with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)):
+            self.assertTrue(SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key=key).success)
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'approved')
+        self.assertEqual(self.store.alcohol_license_key, key)
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
+        self.store.refresh_from_db()
+        with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)):
+            self.assertTrue(SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key=key).success)
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'pending')
+        with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)):
+            self.assertEqual(SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key='elsewhere/x.jpg').error,
+                             'bad_photo')

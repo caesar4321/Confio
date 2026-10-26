@@ -50,11 +50,22 @@ class MarketplaceCategoryAdmin(admin.ModelAdmin):
 
 class MarketplaceCityAdmin(admin.ModelAdmin):
     list_display = ('city', 'country_code', 'is_live', 'delivery_area', 'delivery_estimate', 'currency_code',
-                    'delivery_partner', 'latitude', 'longitude', 'radius_km', 'updated_at')
-    list_filter = ('country_code', 'is_live', 'delivery_area')
+                    'delivery_partner', 'latitude', 'longitude', 'radius_km', 'alcohol_sales_paused', 'updated_at')
+    list_filter = ('country_code', 'is_live', 'delivery_area', 'alcohol_sales_paused')
     # Same delivery_area = one metro for delivery and browsing (La Paz + El Alto).
-    list_editable = ('is_live', 'delivery_area', 'delivery_estimate')
+    list_editable = ('is_live', 'delivery_area', 'delivery_estimate', 'alcohol_sales_paused')
     search_fields = ('city',)
+    actions = ['pause_alcohol', 'resume_alcohol']
+
+    @admin.action(description='Ley seca: pause alcohol sales in selected cities')
+    def pause_alcohol(self, request, queryset):
+        n = queryset.update(alcohol_sales_paused=True)
+        self.message_user(request, f'Alcohol sales paused in {n} city(ies).')
+
+    @admin.action(description='Ley seca over: resume alcohol sales in selected cities')
+    def resume_alcohol(self, request, queryset):
+        n = queryset.update(alcohol_sales_paused=False)
+        self.message_user(request, f'Alcohol sales resumed in {n} city(ies).')
 
 
 class MarketplaceLocationCheckAdmin(admin.ModelAdmin):
@@ -128,19 +139,44 @@ class ProductInline(admin.TabularInline):
 
 class StoreAdmin(admin.ModelAdmin):
     list_display = ('name', 'city', 'country_code', 'owner', 'status', 'ships_outside_city',
-                    'product_count', 'created_at')
-    list_filter = ('country_code', 'status', 'ships_outside_city')
+                    'alcohol_license_status', 'alcohol_license_expires_on', 'product_count', 'created_at')
+    list_filter = ('country_code', 'status', 'ships_outside_city', 'alcohol_license_status')
     search_fields = ('name', 'city', 'owner__username', 'owner__phone_number')
     raw_id_fields = ('owner', 'owner_account')
     # Derived from the price on every save, so older clients that still read
     # it never disagree with what checkout does.
-    readonly_fields = ('ships_outside_city',)
+    readonly_fields = ('ships_outside_city', 'alcohol_license_photo', 'alcohol_license_key',
+                       'alcohol_license_submitted_at', 'alcohol_license_reviewed_at')
 
     def save_model(self, request, obj, form, change):
         obj.ships_outside_city = obj.outside_delivery_price_usd is not None
+        if change and {'alcohol_license_status', 'alcohol_license_expires_on'} & set(form.changed_data):
+            obj.alcohol_license_reviewed_at = timezone.now()
         super().save_model(request, obj, form, change)
+        if obj.alcohol_license_status == 'approved' and obj.alcohol_license_expires_on is None:
+            self.message_user(request, 'Approved without an expiry date: the licence does not count until '
+                              'you set "Alcohol license expires on".', level=messages.WARNING)
     inlines = [ProductInline]
     actions = ['suspend', 'reinstate']
+
+    @admin.display(description='Alcohol licence photo')
+    def alcohol_license_photo(self, obj):
+        """A 5-minute link to the private upload (never published)."""
+        from django.conf import settings
+        from django.utils.html import format_html
+        from security.s3_utils import generate_presigned_get
+        if not obj.alcohol_license_key:
+            return '—'
+        try:
+            url = generate_presigned_get(key=obj.alcohol_license_key, expires_in_seconds=300,
+                                         bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
+        except Exception:  # noqa: BLE001 — the page must still render
+            return 'unavailable'
+        renewal = (obj.alcohol_license_status == 'approved' and obj.alcohol_license_submitted_at
+                   and (obj.alcohol_license_reviewed_at is None
+                        or obj.alcohol_license_submitted_at > obj.alcohol_license_reviewed_at))
+        return format_html('<a href="{}" target="_blank" rel="noopener">Open licence</a>{}', url,
+                           ' (renewal to review: set the new expiry)' if renewal else '')
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_products=Count('products'))

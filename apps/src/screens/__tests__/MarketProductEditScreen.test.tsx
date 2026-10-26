@@ -10,8 +10,15 @@ jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: {} }),
 }));
 const mockSave = jest.fn();
+const mockAlcohol = { license: null as any };
 jest.mock('@apollo/client', () => {
-  const store = { data: { myMarketStore: { countryCode: 'BO' }, myMarketStoreProducts: [], marketplaceCategories: [], marketplaceFeeBps: 800 } };
+  const store = { data: {
+    myMarketStore: { countryCode: 'BO' }, myMarketStoreProducts: [], marketplaceFeeBps: 800,
+    marketplaceCategories: [{ key: 'textiles', label: 'Textiles', group: 'Artesanía' },
+      { key: 'bebidas_alcoholicas', label: 'Vinos, cervezas y licores', group: 'Comida envasada' }],
+    marketplaceAgeRules: { minimumAge: 18, categoryKeys: ['bebidas_alcoholicas'], viewerOfAge: true, salesClosedReason: null },
+    get myAlcoholLicense() { return mockAlcohol.license; },
+  }, refetch: () => Promise.resolve() };
   return {
     gql: () => ({}),
     useQuery: (q: any, opts: any) => (opts?.variables?.countryCode !== undefined ? { data: undefined } : store),
@@ -97,4 +104,29 @@ it('takes the price with the user\'s decimal mark and sends the server a canonic
   } finally {
     setNumberLocaleCountry(null);
   }
+});
+
+const chooseCategory = (tree: renderer.ReactTestRenderer, key: string) => {
+  const picker = tree.root.findAll((n) => typeof n.props.onToggle === 'function')[0];
+  act(() => { picker.props.onToggle(key); });
+};
+const hasId = (tree: renderer.ReactTestRenderer, id: string) => tree.root.findAll((n) => n.props.testID === id).length > 0;
+
+it('asks for the alcohol licence before an alcohol listing can be sent', () => {
+  mockAlcohol.license = { status: 'none', note: null, expiresOn: null };
+  const tree = render();
+  chooseCategory(tree, 'bebidas_alcoholicas');
+  expect(hasId(tree, 'alcohol-license-card')).toBe(true);
+  expect(hasId(tree, 'alcohol-legal-warnings')).toBe(true);
+  expect(text(tree)).toContain('licencia de funcionamiento');
+  expect(byTestId(tree, 'product-submit').props.disabled).toBe(true);
+  chooseCategory(tree, 'textiles');
+  expect(hasId(tree, 'alcohol-license-card')).toBe(false);
+});
+
+it('shows an approved licence with its expiry', () => {
+  mockAlcohol.license = { status: 'approved', note: null, expiresOn: '2028-10-26' };
+  const tree = render();
+  chooseCategory(tree, 'bebidas_alcoholicas');
+  expect(text(tree)).toContain('vigente hasta el 26/10/2028');
 });

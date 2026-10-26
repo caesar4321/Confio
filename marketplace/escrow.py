@@ -408,6 +408,13 @@ def submit_action(user, order, action: str, nonce: int, deadline: int,
     else:
         if order.status not in ALLOWED_FROM[action]:
             return {'success': False, 'error': 'action_not_allowed'}
+        if action == 'ship':
+            # Ley seca covers distribution too: an adults-only order paid
+            # before it waits to be sent (the ship-by deadline still runs).
+            from .checkout import ship_alcohol_error
+            ship_error = ship_alcohol_error(order)
+            if ship_error:
+                return {'success': False, 'error': ship_error}
         if order.pending_action and not _pending_expired(order):
             return {'success': False, 'error': 'action_in_progress'}
 

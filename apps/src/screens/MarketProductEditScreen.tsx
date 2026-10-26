@@ -6,7 +6,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import { Text, TextInput } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import {
-  GET_MARKETPLACE_AGE_RULES, GET_MY_MARKET_STORE, GET_REFERENCE_RATE, SAVE_MARKET_PRODUCT, comprarError,
+  GET_MARKETPLACE_AGE_RULES, GET_MY_ALCOHOL_LICENSE, GET_MY_MARKET_STORE, type AlcoholLicense, GET_REFERENCE_RATE, SAVE_MARKET_PRODUCT, comprarError,
   type MarketplaceAgeRules, uploadMarketPhoto,
 } from '../services/comprar';
 import { formatFeeBps, formatLocalPrice, formatUsd } from '../utils/comprarFormat';
@@ -15,6 +15,7 @@ import { normalizeAmountInput } from '../utils/numberLocale';
 import { CategoryPicker } from '../components/comprar/CategoryPicker';
 import { pickFromLibrary } from '../services/systemPicker';
 import { AdultsOnlyNote, ComprarFrame, KitButton, KitCard, KitFooter } from '../components/comprar/kit';
+import { AlcoholLicenseCard } from '../components/comprar/AlcoholLicenseCard';
 
 const MAX_PHOTOS = 4;
 // Camera originals at full size can pass the 5 MB upload cap; this keeps them
@@ -106,8 +107,14 @@ export const MarketProductEditScreen = () => {
   const uploading = photos.some((p) => p.uploading);
   const newKeys = photos.filter((p) => p.key).map((p) => p.key as string);
   const priceValue = parseAmount(price);
+  // Alcohol: the store's licence must be approved and current (server rule).
+  const alcohol = Boolean(category && ageRules?.categoryKeys.includes(category));
+  const { data: licenseData, refetch: refetchLicense } = useQuery<{ myAlcoholLicense: AlcoholLicense | null }>(
+    GET_MY_ALCOHOL_LICENSE, { skip: !alcohol, fetchPolicy: 'cache-and-network' });
+  const license = licenseData?.myAlcoholLicense ?? null;
+  const licensed = license?.status === 'approved';
   const valid = title.trim().length >= 3 && category && priceValue >= 0.5 && Number.isInteger(Number(stock))
-    && (productId ? true : newKeys.length > 0);
+    && (productId ? true : newKeys.length > 0) && (!alcohol || licensed);
 
   const submit = async () => {
     setError(null);
@@ -176,8 +183,11 @@ export const MarketProductEditScreen = () => {
             selected={category ? [category] : []}
             onToggle={setCategory}
           />
-          {category && ageRules?.categoryKeys.includes(category) ? (
-            <AdultsOnlyNote minimumAge={ageRules.minimumAge} audience="listing" />
+          {alcohol && ageRules ? (
+            <>
+              <AdultsOnlyNote minimumAge={ageRules.minimumAge} audience="listing" />
+              <AlcoholLicenseCard license={license} onSubmitted={() => { refetchLicense().catch(() => undefined); }} />
+            </>
           ) : null}
           </KitCard>
           <KitCard icon="tag" title="Precio y stock">
