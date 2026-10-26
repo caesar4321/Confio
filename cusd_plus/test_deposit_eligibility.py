@@ -115,6 +115,7 @@ class DepositReceiptTests(SimpleTestCase):
         with mock.patch('send.models.SendTransaction.all_objects') as sends, \
              mock.patch('notifications.utils.create_notification') as notify, \
              mock.patch('payment_accounts.activity.arrival_owned', return_value=False), \
+             mock.patch('cusd_plus.perps_flow.return_arrival', return_value=False), \
              mock.patch('payment_accounts.models.PaymentBridgeTransfer.objects') as bridges:
             # No outbound bridge in flight from this wallet, so the push goes out.
             bridges.filter.return_value.exclude.return_value.exclude.return_value \

@@ -487,6 +487,7 @@ class DepositNotificationCopyTests(SimpleTestCase):
 
         with mock.patch('conversion.models.Conversion.objects') as conv_objs, \
              mock.patch('payment_accounts.activity.arrival_owned', return_value=False), \
+             mock.patch('cusd_plus.perps_flow.return_arrival', return_value=False), \
              mock.patch('payment_accounts.models.PaymentBridgeTransfer.objects') as bridges, \
              mock.patch('users.models.Account.objects') as acct_objs, \
              mock.patch('send.models.SendTransaction.all_objects') as sends, \

@@ -613,6 +613,8 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         shares = int(log['data'], 16)
         amount_usd = (Decimal(shares) * Decimal(pps_wad) / Decimal(10 ** 36)).quantize(
             Decimal('0.000001'), rounding=_RD)
+        if is_mint and _wrap_covered(log['transactionHash'], key, int(log.get('blockNumber', '0x0'), 16)):
+            continue  # the member's own cUSD, already in history, wrapped
         if amount_usd < min_deposit:
             continue  # dust — strangers must not spam rows/notifications
         # Externally-originated cUSD+ arriving at a registered address is a
@@ -703,6 +705,81 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
                 )
         except Exception:  # noqa: BLE001 — comms failure must not lose the row
             logger.exception('cUSD+ receive notification failed for %s', reference)
+
+
+WRAP_COVERAGE_MAX_BLOCKS = 600_000  # ~3 days of BSC blocks: bounds the log reads
+
+
+def _wrap_covered(tx_hash: str, holder: str, wrap_block: int) -> bool:
+    """Is this mint the holder wrapping cUSD whose arrival is already in history?
+
+    The app wraps an eligible holder's cUSD into cUSD+ (wrap_cusd). A Comprar
+    payout or a received send has its own row, so the wrap's mint is the
+    same money again, not a deposit. But nothing scans plain cUSD transfers:
+    cUSD that came with no row of its own has only this mint as a record.
+
+    So the mint is skipped only when, after the holder's previous wrap,
+    every cUSD transfer in is already recorded AND those recorded arrivals,
+    less every cUSD that left, cover what this wrap converted. Older cUSD
+    (a remainder the previous wrap left, recorded or not) is then still
+    unwrapped, and keeps its record when a later wrap fails this test."""
+    from blockchain.models import SponsoredBatch
+    from conversion.models import Conversion
+
+    try:
+        holder = (holder or '').lower()
+        cusd = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+        batch = SponsoredBatch.objects.filter(
+            kind='wrap_cusd', tx_hash__iexact=tx_hash, user_bsc_address__iexact=holder,
+        ).order_by('-created_at').first()
+        if batch is None or not cusd:
+            return False
+        previous = SponsoredBatch.objects.filter(
+            kind='wrap_cusd', user_bsc_address__iexact=holder, status='confirmed',
+            created_at__lt=batch.created_at,
+        ).exclude(tx_hash='').order_by('-created_at').first()
+        if previous is None:
+            return False  # no known empty balance to count from
+        receipt = _rpc('eth_getTransactionReceipt', [previous.tx_hash])
+        if not receipt or receipt.get('status') != '0x1':
+            return False
+        start = int(receipt['blockNumber'], 16)
+        if wrap_block - start > WRAP_COVERAGE_MAX_BLOCKS:
+            return False
+        # After the previous wrap's block: anything in that block counts as
+        # older cUSD, which only makes the test stricter.
+        inbound = _get_logs_chunked(
+            start + 1, wrap_block, [TRANSFER_TOPIC, None, _address_topic(holder)], address=cusd)
+        outbound = _get_logs_chunked(
+            start + 1, wrap_block, [TRANSFER_TOPIC, _address_topic(holder)], address=cusd)
+        escrow = (getattr(settings, 'MARKETPLACE_ESCROW_ADDRESS', '') or '').lower()
+        covered = 0
+        for log in inbound:
+            sender = ('0x' + log['topics'][1][-40:]).lower()
+            arrival = log['transactionHash']
+            if sender == holder:
+                continue
+            # Comprar's escrow pays out only through orders, each with its row.
+            owned = (escrow and sender == escrow) or _source_row_covers(arrival, holder) or \
+                Conversion.objects.filter(
+                    to_transaction_hash__iexact=arrival, user_bsc_address__iexact=holder,
+                    is_deleted=False).exists()
+            if not owned:
+                return False
+            covered += int(log['data'], 16)
+        wrapped = spent = 0
+        for log in outbound:
+            receiver = ('0x' + log['topics'][2][-40:]).lower()
+            if receiver == holder:
+                continue
+            if (log.get('transactionHash') or '').lower() == tx_hash.lower():
+                wrapped += int(log['data'], 16)
+            else:
+                spent += int(log['data'], 16)
+        return wrapped > 0 and covered - spent >= wrapped
+    except Exception:  # noqa: BLE001 — never drop a mint on a lookup error
+        logger.exception('wrap coverage check failed for %s', tx_hash)
+        return False
 
 
 def _system_addresses() -> set:
