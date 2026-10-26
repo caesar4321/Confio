@@ -120,8 +120,8 @@ export const FuturesPositionScreen = () => {
               { label: 'Estado', value: 'Cerrada', color: colors.success, icon: 'check-circle' },
             ]}
           />
-          <Pressable style={styles.primary} onPress={() => navigation.goBack()}>
-            <Text style={styles.primaryText}>Listo</Text>
+          <Pressable style={styles.successCta} onPress={() => navigation.goBack()}>
+            <Text style={styles.successCtaText}>Listo</Text>
           </Pressable>
         </StockTradeSuccessContent>
       </View>
@@ -426,6 +426,9 @@ function TpSlSheet({ visible, onClose, onConfirm, position, markPx }: {
 }
 
 const styles = StyleSheet.create({
+  // A success screen centers its column: the CTA carries its own width, like the Oro y Bitcoin twin.
+  successCta: { backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 40, marginTop: 32 },
+  successCtaText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   container: { flex: 1, backgroundColor: colors.neutral },
   center: { alignItems: 'center', justifyContent: 'center', padding: 32 },
   muted: { color: colors.text.secondary, textAlign: 'center' },
