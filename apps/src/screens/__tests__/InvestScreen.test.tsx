@@ -81,7 +81,9 @@ jest.mock('@apollo/client', () => ({
 
 import { InvestScreen } from '../InvestScreen';
 
-const text = (tree: renderer.ReactTestRenderer) => JSON.stringify(tree.toJSON());
+// Rendered text only: props such as refreshControl hold React elements (circular).
+const text = (tree: renderer.ReactTestRenderer) => JSON.stringify(tree.toJSON(), (key, value) =>
+  (key === 'refreshControl' ? undefined : value));
 
 beforeEach(() => {
   mockEnabled = true; mockEmployee = false; mockClaims = false; mockPositions = [];

@@ -47,7 +47,7 @@ class EquityTests(SimpleTestCase):
     def test_partial_close_values_later_days_with_the_smaller_size(self):
         half = T0 + timedelta(days=1)
         ep = _episode(size_signed=Decimal('1'), credited=Decimal('20000'),
-                      size_events=[(half, Decimal('0.5'), Decimal('0'))])
+                      size_events=[(half, Decimal('0.5'), Decimal('0'), None)])
         up = lambda c: Decimal('110000')  # noqa: E731
         self.assertEqual(perps_portfolio.equity_at(ep, T0 + timedelta(hours=1), up), Decimal('30000'))
         self.assertEqual(perps_portfolio.equity_at(ep, half + timedelta(hours=1), up), Decimal('25000'))

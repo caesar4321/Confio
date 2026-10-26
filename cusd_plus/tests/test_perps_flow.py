@@ -25,7 +25,7 @@ WAD = 10 ** 18
 
 OPEN_SETTINGS = dict(
     PERPS_ENABLED=True, PERPS_TRADING_ENABLED=True, PERPS_OPEN_ENABLED=True, PERPS_IOS_ENABLED=True,
-    PERPS_ALLOWED_USER_IDS='', PERPS_BLOCKED_COUNTRIES='', PERPS_EXCLUDED_MARKETS='',
+    PERPS_ALLOWED_USER_IDS='', PERPS_BLOCKED_COUNTRIES='US,CA,GB,BE', PERPS_EXCLUDED_MARKETS='',
     CUSD_PLUS_7702_ENABLED=True, CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '7a' * 20,
     CUSD_VAULT_ADDRESS=CUSD, CUSD_PLUS_VAULT_ADDRESS=VAULT,
 )
@@ -555,7 +555,6 @@ class HyperliquidActionTests(TestCase):
         self.assertEqual(again['request_id'], entry['request_id'], 'fresh: kept while its prices hold')
 
 
-
     @mock.patch('cusd_plus.perps_relay.time.time', return_value=NOW)
     @mock.patch('cusd_plus.perps_flow.time.time', return_value=NOW)
     def test_failed_return_retries_after_a_normal_trade_and_excludes_opens(self, *_):
@@ -618,7 +617,8 @@ class HyperliquidActionTests(TestCase):
             perps_flow._track_size(self.position, {'szi': '0.5'})
         self.position.refresh_from_db()
         events = self.position.flow['size_events']
-        self.assertEqual([(e['size'], e['realized']) for e in events], [('1.5', '5'), ('0.5', '12')])
+        # The opening fill is an event too (a limit entry may fill in parts).
+        self.assertEqual([(e['size'], e['realized']) for e in events], [('2', '0'), ('1.5', '5'), ('0.5', '12')])
         self.assertEqual(self.position.size, Decimal('0.5'))
 
     def test_a_lost_open_never_recorded_is_released_but_an_unreadable_one_is_kept(self):
@@ -811,3 +811,186 @@ class RepostTests(SimpleTestCase):
             self.assertEqual(perps_flow._repost({'action': {}}), 'unknown')
         with mock.patch('cusd_plus.hyperliquid.exchange', return_value=cases[2][0]):
             self.assertEqual(perps_flow._send_return(1, {}), 'rejected')
+
+
+@override_settings(**OPEN_SETTINGS)
+class LimitOrderTests(TestCase):
+    """Limit entries rest on the book with the money on the venue; take-profit
+    and stop-loss chosen at the order ride the entry (normalTpsl)."""
+
+    setUp = HyperliquidActionTests.setUp
+    _signed = HyperliquidActionTests._signed
+
+    def _intent(self, **kw):
+        self.position.flow = {**self.position.flow, 'order': perps_flow.order_intent(**kw)}
+        self.position.save()
+
+    def _plan(self, **kw):
+        with mock.patch('cusd_plus.hyperliquid.user_abstraction', return_value='disabled'), \
+                mock.patch('cusd_plus.hyperliquid.clearinghouse_state', return_value=_ch_state()):
+            return perps_flow.open_plan(self.user, self.position.id, **kw)
+
+    def test_a_limit_entry_rests_at_the_members_price_with_its_protection(self):
+        self._intent(order_type='limit', limit_px='95000.37', take_profit_px='110000', stop_loss_px='90000')
+        plan = self._plan()
+        action = plan['steps'][-1]['action']
+        entry, *children = action['orders']
+        self.assertEqual(action['grouping'], 'normalTpsl')
+        self.assertEqual(entry['t'], {'limit': {'tif': 'Gtc'}})
+        self.assertLessEqual(Decimal(entry['p']), Decimal('95000.37'), 'a buy never pays more than chosen')
+        self.assertEqual([c['t']['trigger']['tpsl'] for c in children], ['tp', 'sl'])
+        self.assertTrue(all(c['r'] and not c['b'] and c['s'] == entry['s'] for c in children))
+        self.assertEqual(plan['impact_bps'], 0, 'a resting order takes nothing from the book')
+
+    def test_protection_on_the_wrong_side_is_refused_before_money_moves(self):
+        with mock.patch('cusd_plus.hyperliquid.l2_book', return_value=BOOK):
+            with self.assertRaises(perps_flow.FlowError) as ctx:
+                perps_flow._check_intent(self.btc, 'long', perps_flow.order_intent('market', None, '90000', None))
+            self.assertEqual(ctx.exception.code, 'bad_trigger_side')
+            with self.assertRaises(perps_flow.FlowError) as ctx:
+                perps_flow._check_intent(self.btc, 'long', perps_flow.order_intent('limit', '20000'))
+            self.assertEqual(ctx.exception.code, 'limit_too_far')
+
+    def test_the_market_moved_past_a_stop_the_member_opens_without_it(self):
+        self._intent(order_type='market', stop_loss_px='100500')  # now above the market for a long
+        with self.assertRaises(perps_flow.FlowError) as ctx:
+            self._plan()
+        self.assertEqual(ctx.exception.code, 'bad_trigger_side')
+        plan = self._plan(drop_protection=True)
+        self.assertEqual(plan['steps'][-1]['action']['grouping'], 'na')
+        self.position.refresh_from_db()
+        self.assertIsNone(self.position.flow['order']['sl'])
+
+    def _rest(self):
+        self._intent(order_type='limit', limit_px='95000')
+        plan = self._plan()
+        leverage, order = plan['steps'][0]['action'], plan['steps'][1]['action']
+        nonce = perps_flow._now_ms()
+        resting = {'status': 'ok', 'response': {'type': 'order', 'data': {'statuses': [{'resting': {'oid': 9}}]}}}
+        with mock.patch('cusd_plus.hyperliquid.exchange', return_value={'status': 'ok', 'response': {'type': 'default'}}):
+            perps_flow.submit_action(self.user, self.position.id, 'leverage', json.dumps(leverage), nonce,
+                                     self._signed(leverage, nonce))
+        with mock.patch('cusd_plus.hyperliquid.exchange', return_value=resting):
+            perps_flow.submit_action(self.user, self.position.id, 'open_order', json.dumps(order), nonce,
+                                     self._signed(order, nonce))
+        self.position.refresh_from_db()
+        return order
+
+    def test_a_resting_entry_keeps_the_money_funded_and_waits(self):
+        from cusd_plus.perps_schema import _next_action
+
+        order = self._rest()
+        self.assertEqual(self.position.state, 'funded')
+        self.assertEqual(self.position.flow['resting']['oid'], 9)
+        self.assertEqual(self.position.flow['resting']['cloid'], order['orders'][0]['c'])
+        self.assertEqual(_next_action(self.position), 'wait_fill')
+
+    def test_the_way_home_cancels_the_resting_entry_first(self):
+        self._rest()
+        waiting = [{'coin': 'BTC', 'oid': 9, 'reduceOnly': False, 'isTrigger': False},
+                   # Its protection is never cancelled on the way home (Hyperliquid drops it with the entry).
+                   {'coin': 'BTC', 'oid': 10, 'reduceOnly': True, 'isTrigger': True}]
+        with mock.patch('cusd_plus.hyperliquid.frontend_open_orders', return_value=waiting):
+            plan = perps_flow.return_plan(self.user, self.position.id)
+            self.assertEqual(plan['steps'][0]['purpose'], 'return_cancel')
+            self.assertEqual(plan['steps'][0]['action'], {'type': 'cancel', 'cancels': [{'a': 0, 'o': 9}]})
+            # Never money out while the order could still fill.
+            with self.assertRaises(perps_flow.FlowError) as ctx:
+                perps_flow._guard_not_live(self.position)
+            self.assertEqual(ctx.exception.code, 'order_resting')
+        cancel = plan['steps'][0]['action']
+        nonce = perps_flow._now_ms()
+        refused = {'status': 'ok', 'response': {'type': 'cancel', 'data': {'statuses': [{'error': 'Rate limited'}]}}}
+        with mock.patch('cusd_plus.hyperliquid.exchange', return_value=refused):
+            with self.assertRaises(perps_flow.FlowError) as ctx:
+                perps_flow.submit_action(self.user, self.position.id, 'return_cancel', json.dumps(cancel), nonce,
+                                         self._signed(cancel, nonce))
+        self.assertEqual(ctx.exception.code, 'cancel_rejected')
+        self.position.refresh_from_db()
+        self.assertEqual(self.position.flow['resting']['oid'], 9, 'a refused cancel leaves the order followed')
+        done = {'status': 'ok', 'response': {'type': 'cancel', 'data': {'statuses': ['success']}}}
+        with mock.patch('cusd_plus.hyperliquid.exchange', return_value=done):
+            perps_flow.submit_action(self.user, self.position.id, 'return_cancel', json.dumps(cancel), nonce + 1,
+                                     self._signed(cancel, nonce + 1))
+        self.position.refresh_from_db()
+        self.assertIsNone(self.position.flow['resting'])
+
+    def test_a_fill_while_away_opens_the_position_and_tells_the_member(self):
+        self._rest()
+        live = {'coin': 'BTC', 'szi': '0.00098', 'entryPx': '95000'}
+        fills = [{'coin': 'BTC', 'oid': 9, 'sz': '0.00098', 'px': '95000', 'time': perps_flow._now_ms(),
+                  'dir': 'Open Long', 'closedPnl': '0', 'fee': '0.01'}]
+        status = {'status': 'filled', 'order': {'oid': 9, 'origSz': '0.00098', 'sz': '0'}}
+        with mock.patch('cusd_plus.hyperliquid.clearinghouse_state', return_value=_ch_state(positions=[live])), \
+                mock.patch('cusd_plus.perps_flow._order_status', return_value=status), \
+                mock.patch('cusd_plus.hyperliquid.user_fills_by_time', return_value=fills), \
+                mock.patch('notifications.utils.create_notification') as notify:
+            perps_flow.reconcile_position(self.position)
+        self.position.refresh_from_db()
+        self.assertEqual(self.position.state, 'open')
+        self.assertEqual(self.position.entry_avg_px, Decimal('95000'))
+        self.assertEqual(notify.call_args.kwargs['data']['event'], 'filled')
+
+    def test_an_entry_the_venue_cancelled_frees_the_money(self):
+        self._rest()
+        gone = {'status': 'canceled', 'order': {'oid': 9, 'origSz': '0.00098', 'sz': '0.00098'}}
+        with mock.patch('cusd_plus.perps_flow._order_status', return_value=gone):
+            perps_flow.reconcile_position(self.position)
+        self.position.refresh_from_db()
+        self.assertEqual(self.position.state, 'funded')
+        self.assertIsNone(self.position.flow['resting'])
+
+    def test_a_close_cancels_the_unfilled_rest_before_closing(self):
+        self.position.state = 'open'
+        self.position.save()
+        live = {'coin': 'BTC', 'szi': '0.0005', 'entryPx': '95000'}
+        orders = [{'coin': 'BTC', 'oid': 9, 'reduceOnly': False, 'isTrigger': False},
+                  {'coin': 'BTC', 'oid': 10, 'reduceOnly': True, 'isTrigger': True}]
+        with mock.patch('cusd_plus.hyperliquid.clearinghouse_state', return_value=_ch_state(positions=[live])), \
+                mock.patch('cusd_plus.hyperliquid.frontend_open_orders', return_value=orders):
+            plan = perps_flow.close_plan(self.user, self.position.id)
+        # The rest is cancelled alone first; the close is sized once nothing can still fill.
+        self.assertEqual([s['purpose'] for s in plan['steps']], ['close_cancel'])
+        self.assertTrue(plan['replan'])
+        self.assertEqual(plan['steps'][0]['action']['cancels'], [{'a': 0, 'o': 9}], 'never the protection')
+
+
+@override_settings(**OPEN_SETTINGS)
+class LimitEdgeTests(TestCase):
+    setUp = HyperliquidActionTests.setUp
+
+    def test_flat_with_an_entry_still_waiting_stays_open_and_closing_cancels_it(self):
+        self.position.state = 'open'
+        self.position.size = Decimal('0.0005')
+        self.position.save()
+        rest = [{'coin': 'BTC', 'oid': 9, 'reduceOnly': False, 'isTrigger': False}]
+        with mock.patch('cusd_plus.hyperliquid.frontend_open_orders', return_value=rest):
+            perps_flow.reconcile_position(self.position)       # flat: protection closed the filled part
+            self.position.refresh_from_db()
+            self.assertEqual(self.position.state, 'open', 'its rest may still fill: never closed underneath it')
+            plan = perps_flow.close_plan(self.user, self.position.id)
+        self.assertEqual([s['purpose'] for s in plan['steps']], ['close_cancel'])
+
+    def test_no_second_entry_while_one_rests(self):
+        self.position.flow = {**self.position.flow, 'resting': {'oid': 9, 'cloid': '0x' + '11' * 16}}
+        self.position.save()
+        with self.assertRaises(perps_flow.FlowError) as ctx:
+            perps_flow._store_plan(self.position, 'open_plan', [])
+        self.assertEqual(ctx.exception.code, 'order_resting')
+
+    def test_a_crossing_limit_is_judged_only_on_what_it_can_take(self):
+        book = {'levels': [[{'px': '99', 'sz': '5'}], [{'px': '101', 'sz': '0.1'}, {'px': '150', 'sz': '50'}]]}
+        avg, mid = perps_flow._limit_walk(book, True, Decimal('1'), Decimal('102'))
+        self.assertEqual(avg, Decimal('101'), 'never the $150 level beyond its price')
+        self.assertIsNone(perps_flow._limit_walk(book, True, Decimal('1'), Decimal('100')), 'rests whole')
+
+    def test_a_lost_cancel_answer_is_settled_from_the_venue(self):
+        self.position.flow = {**self.position.flow, 'return_plan': {
+            'steps': [{'purpose': 'return_cancel', 'action': {'type': 'cancel', 'cancels': [{'a': 0, 'o': 9}]}}],
+            'consumed': [], 'issued_ms': 1, 'claims': {'0': {'status': 'unconfirmed', 'at': 1}}}}
+        self.position.save()
+        gone = {'status': 'order', 'order': {'status': 'canceled', 'order': {'oid': 9}}}
+        with mock.patch('cusd_plus.hyperliquid.info', return_value=gone):
+            perps_flow._settle_lost_cancel(self.position)
+        self.position.refresh_from_db()
+        self.assertFalse(perps_flow._pending_claim(self.position, 'return_plan'), 'never blocks opening again')

@@ -27,7 +27,7 @@ import {
   bindDepositQuote, bindReturnQuote,
 } from './relayQuotes';
 import {
-  fetchBounded, venueFill, venueLeverage, venueMarket, venueOrderOutcome, venuePosition, venueTriggers,
+  fetchBounded, venueFill, venueLeverage, venueMarket, venueOpenOrders, venueOrderOutcome, venuePosition, venueTriggers,
 } from './hyperliquidInfo';
 import { HlSignature, nextNonce, signAction, signRelayNonceMapping } from './hyperliquidSigning';
 
@@ -98,6 +98,7 @@ export const GET_PERPS_CANDLES = gql`
 const POSITION_FIELDS = `
   id coin ticker name assetClass side leverage marginUsd state stepError nextAction
   size entryPx markPx unrealizedPnlUsd returnOnEquity liquidationPx marginUsedUsd valueUsd pendingMarginUsd protectionKnown takeProfitPx stopLossPx
+  orderType limitPx restingPx plannedTakeProfitPx plannedStopLossPx
   positionValueUsd fundingUsd realizedPnlUsd venueFeesUsd returnedUsd resultUsd putInUsd liquidation
   costs { marginUsd exitFeeUsd bridgeCostUsd activationUsd creditedUsd notionalUsd openFeeUsd }
   createdAt openedAt closedAt doneAt
@@ -119,8 +120,10 @@ const BATCH_PLAN = `success error positionId callsJson requestId kind deadline r
   costs { marginUsd exitFeeUsd bridgeCostUsd activationUsd creditedUsd notionalUsd openFeeUsd }`;
 
 const PREPARE_OPEN = gql`
-  mutation PerpsPrepareOpen($coin: String!, $side: String!, $leverage: Int!, $marginUsd: String!) {
-    perpsPrepareOpen(coin: $coin, side: $side, leverage: $leverage, marginUsd: $marginUsd) { ${BATCH_PLAN} }
+  mutation PerpsPrepareOpen($coin: String!, $side: String!, $leverage: Int!, $marginUsd: String!,
+                            $orderType: String, $limitPx: String, $takeProfitPx: String, $stopLossPx: String) {
+    perpsPrepareOpen(coin: $coin, side: $side, leverage: $leverage, marginUsd: $marginUsd, orderType: $orderType,
+                     limitPx: $limitPx, takeProfitPx: $takeProfitPx, stopLossPx: $stopLossPx) { ${BATCH_PLAN} }
   }
 `;
 const PREPARE_MARGIN_ADD = gql`
@@ -139,8 +142,10 @@ const PREPARE_ENTRY = gql`
   }
 `;
 const PLAN = gql`
-  mutation PerpsPlan($positionId: ID!, $stage: String!, $takeProfitPx: String, $stopLossPx: String) {
-    perpsPlan(positionId: $positionId, stage: $stage, takeProfitPx: $takeProfitPx, stopLossPx: $stopLossPx) {
+  mutation PerpsPlan($positionId: ID!, $stage: String!, $takeProfitPx: String, $stopLossPx: String,
+                     $dropProtection: Boolean) {
+    perpsPlan(positionId: $positionId, stage: $stage, takeProfitPx: $takeProfitPx, stopLossPx: $stopLossPx,
+              dropProtection: $dropProtection) {
       success error replan impactBps impactWarn avgPx size liquidationPx relayQuoteJson
       steps { purpose actionJson }
       mappingTypedJson sendActionJson returnUsd returnMinUsd
@@ -174,6 +179,7 @@ const DOLLAR_ADDRESSES = gql`
 // ── types ───────────────────────────────────────────────────────────────
 
 export type AssetClass = 'crypto' | 'stock' | 'index' | 'commodity' | 'fx';
+export type OrderType = 'market' | 'limit';
 export type Side = 'long' | 'short';
 
 export interface PerpsCapabilities {
@@ -227,7 +233,7 @@ export interface PerpCosts {
 }
 
 export type NextAction =
-  | 'sign_open' | 'wait_bridge' | 'retry_bridge' | 'open_order' | 'manage' | 'finish_margin'
+  | 'sign_open' | 'wait_bridge' | 'retry_bridge' | 'open_order' | 'wait_fill' | 'manage' | 'finish_margin'
   | 'return' | 'enter' | 'wait_return' | 'none';
 
 export interface PerpPosition {
@@ -268,6 +274,14 @@ export interface PerpPosition {
   putInUsd: number | null;
   liquidation: string | null;
   costs: PerpCosts | null;
+  /** How the member chose to enter: at the market, or at a limit price. */
+  orderType?: OrderType | null;
+  limitPx?: number | null;
+  /** A limit entry (or its unfilled rest) waiting on the book, at this price. */
+  restingPx?: number | null;
+  /** Protection chosen with the entry: armed once it fills. */
+  plannedTakeProfitPx?: number | null;
+  plannedStopLossPx?: number | null;
   createdAt: string;
   openedAt: string | null;
   closedAt: string | null;
@@ -278,6 +292,9 @@ export interface PerpPosition {
 
 const ERROR_COPY: Record<string, string> = {
   trade_not_available: 'Los futuros no están disponibles para tu cuenta en este momento.',
+  order_resting: 'Tu orden límite sigue esperando su precio. Cancélala para traer tu dinero o para abrir de otra forma.',
+  limit_too_far: 'Ese precio está demasiado lejos del mercado. Elige uno más cercano.',
+  bad_order_type: 'Ese tipo de orden no está disponible.',
   perps_ack_required: 'Antes de tu primera operación, lee y acepta cómo funcionan los futuros.',
   open_pending: 'Tu orden anterior todavía puede llegar a Hyperliquid. Por seguridad no firmamos otra; inténtalo mañana o trae tu dinero de vuelta.',
   return_amount_changed: 'No trajimos tu dinero: Hyperliquid muestra un monto distinto al de tu posición. Inténtalo de nuevo.',
@@ -310,7 +327,7 @@ const ERROR_COPY: Record<string, string> = {
   step_out_of_order: 'La operación cambió mientras firmabas. Vuelve a intentarlo.',
   plan_expired: 'La operación venció. Vuelve a intentarlo.',
   action_mismatch: 'La operación cambió mientras firmabas. Vuelve a intentarlo.',
-  already_open: 'Tu posición ya está abierta.',
+  already_open: 'Tu orden ya se ejecutó: tu posición está abierta. Puedes cerrarla desde aquí.',
   entry_in_flight: 'Tu dinero ya está entrando a tus dólares.',
   nothing_to_bridge: 'No encontramos los USDT devueltos en tu cuenta.',
   one_position_at_a_time: 'Por ahora puedes tener una posición a la vez: cierra la que tienes para abrir otra.',
@@ -480,16 +497,18 @@ const ALLOWED_BY_PURPOSE: Record<string, string[]> = {
   close_order: ['order'],
   tpsl_cancel: ['cancel'],
   tpsl: ['order'],
+  close_cancel: ['cancel'],
+  return_cancel: ['cancel'],
 };
 
 export type PlanStage = 'open' | 'close' | 'tpsl' | 'margin' | 'return';
 
 const STAGE_PURPOSES: Record<PlanStage, string[]> = {
   open: ['abstraction', 'fund_dex', 'leverage', 'open_order'],
-  close: ['close_order'],
+  close: ['close_cancel', 'close_order'],
   tpsl: ['tpsl_cancel', 'tpsl'],
   margin: ['margin_fund_dex', 'margin_add'],
-  return: ['return_dex'],
+  return: ['return_cancel', 'return_dex'],
 };
 
 /** The trade the member chose: every action must be exactly about it. */
@@ -513,7 +532,32 @@ export interface TradeContext {
   deepCloseOk?: boolean;
   /** The least exposure (size × mark) the open must deliver: what was reviewed, less costs. */
   minNotionalUsd?: number | null;
+  /** How the member chose to enter (the open's order is built from exactly this). */
+  entry?: EntryChoice;
+  /** The market's size decimals (Hyperliquid's price rounding depends on it). */
+  szDecimals?: number;
 }
+
+/** Hyperliquid's price rounding (mirrors cusd_plus/perps_flow.wire_price):
+ *  ≤ 5 significant figures and ≤ 6 − szDecimals decimals, integers allowed. */
+export const venuePrice = (px: number, szDecimals: number, up: boolean): number => {
+  const digits = Math.floor(Math.log10(px)) + 1;
+  const places = Math.min(Math.max(5 - digits, 0), Math.max(6 - szDecimals, 0));
+  const f = 10 ** places;
+  const round = (x: number) => (up ? Math.ceil(x - 1e-9) : Math.floor(x + 1e-9));
+  return digits > 5 ? round(px) : round(px * f) / f;
+};
+
+/** The entry the member reviewed: market or limit, and the protection chosen with it. */
+export interface EntryChoice {
+  type: OrderType;
+  limitPx: number | null;
+  tp: number | null;
+  sl: number | null;
+}
+
+/** A limit entry is never placed further than this from the market (a typo, not a plan). */
+const LIMIT_MAX_DISTANCE = 0.5;
 
 /** How far from the mark an order's limit may sit: opens are tight (the
  *  server uses its slippage setting), closes get room to fill. */
@@ -562,20 +606,11 @@ export const verifyAction = (
     if (!orders.length) throw coded('unsafe_plan');
     const opening = purpose === 'open_order';
     const isBuy = opening ? trade.side === 'long' : trade.side === 'short';
-    if (orders.some((o: any) => o?.a !== trade.assetId || o.b !== isBuy || o.r !== !opening)) {
-      throw coded('unsafe_plan');
-    }
     const off = (px: number) => Math.abs(px - trade.markPx) / trade.markPx;
     if (opening) {
-      const [o] = orders;
-      // Judged at the mark, not the limit: a sell's limit is a floor, not a price.
-      // A client order id is required: it is how a retry finds this order again.
-      if (orders.length !== 1 || action.grouping !== 'na' || !o.t?.limit || o.t.limit.tif !== 'Ioc'
-          || typeof o.c !== 'string' || !/^0x[0-9a-f]{32}$/.test(o.c)
-          || finite(o.s) * trade.markPx > trade.maxNotionalUsd || off(finite(o.p)) > OPEN_PX_DEVIATION
-          || (trade.minNotionalUsd != null && finite(o.s) * trade.markPx < trade.minNotionalUsd)) {
-        throw coded('unsafe_plan');
-      }
+      verifyEntry(action, orders, isBuy, trade, off);
+    } else if (orders.some((o: any) => o?.a !== trade.assetId || o.b !== isBuy || o.r !== true)) {
+      throw coded('unsafe_plan');
     } else if (trade.maxSize == null || orders.some((o: any) => finite(o.s) > trade.maxSize! * (1 + 1e-9))) {
       throw coded('unsafe_plan');
     }
@@ -623,6 +658,63 @@ export const verifyAction = (
       || (trade.budgetUsd != null && finite(action.ntli) > trade.budgetUsd * 1_000_000)
       || (trade.budgetUsd != null && finite(action.ntli) < trade.budgetUsd * MIN_TOPUP_SHARE * 1_000_000))) {
     throw coded('unsafe_plan'); // a top-up only ever adds margin, at most what the member added
+  }
+};
+
+const CLOID = /^0x[0-9a-f]{32}$/;
+
+/** The open's order: exactly the entry the member reviewed (market or limit,
+ *  this market, side and size), and exactly the protection chosen with it. */
+const verifyEntry = (
+  action: Record<string, any>, orders: any[], isBuy: boolean, trade: TradeContext, off: (px: number) => number,
+): void => {
+  const entry = trade.entry ?? { type: 'market', limitPx: null, tp: null, sl: null };
+  const [o, ...children] = orders;
+  if (o?.a !== trade.assetId || o.b !== isBuy || o.r !== false || typeof o.c !== 'string' || !CLOID.test(o.c)) {
+    throw coded('unsafe_plan');
+  }
+  const px = finite(o.p);
+  if (entry.type === 'limit') {
+    const limit = entry.limitPx;
+    // Resting at the member's price: never a worse one (a buy never above it,
+    // a sell never below), rounding aside, and never absurdly far from the market.
+    // Exactly the reviewed limit as Hyperliquid rounds it (never worse for the member).
+    const expected = limit != null && limit > 0 && trade.szDecimals != null
+      ? venuePrice(limit, trade.szDecimals, !isBuy) : null;
+    if (limit == null || !(limit > 0) || o.t?.limit?.tif !== 'Gtc' || expected == null
+        || Math.abs(px - expected) > expected * 1e-12
+        || (isBuy ? px > limit * (1 + 1e-9) : px < limit * (1 - 1e-9)) || off(px) > LIMIT_MAX_DISTANCE) {
+      throw coded('unsafe_plan');
+    }
+  } else if (o.t?.limit?.tif !== 'Ioc' || off(px) > OPEN_PX_DEVIATION) {
+    // Judged at the mark, not the limit: a sell's limit is a floor, not a price.
+    throw coded('unsafe_plan');
+  }
+  // Exposure judged at the dearer of the mark and the limit (the server sizes at it).
+  const ref = entry.type === 'limit' && entry.limitPx ? Math.max(trade.markPx, entry.limitPx) : trade.markPx;
+  const size = finite(o.s);
+  if (size * ref > trade.maxNotionalUsd
+      || (trade.minNotionalUsd != null && size * ref < trade.minNotionalUsd)) {
+    throw coded('unsafe_plan');
+  }
+  // Protection: exactly the take-profit / stop-loss chosen, none missing, none extra.
+  const asked = (['tp', 'sl'] as const).filter((k) => entry[k] != null);
+  if (action.grouping !== (asked.length ? 'normalTpsl' : 'na') || children.length !== asked.length) {
+    throw coded('unsafe_plan');
+  }
+  const kinds = children.map((c: any) => c?.t?.trigger?.tpsl);
+  if (new Set(kinds).size !== kinds.length || asked.some((k) => !kinds.includes(k))) throw coded('unsafe_plan');
+  for (const c of children) {
+    const t = c?.t?.trigger;
+    const target = t?.tpsl === 'tp' ? entry.tp : t?.tpsl === 'sl' ? entry.sl : null;
+    // Reduce-only, the opposite side, the entry's whole size, at the prices chosen.
+    if (c.a !== trade.assetId || c.b !== !isBuy || c.r !== true || c.s !== o.s
+        || typeof c.c !== 'string' || !CLOID.test(c.c)
+        || !t || t.isMarket !== true || target == null
+        || Math.abs(finite(t.triggerPx) - target) / target > TRIGGER_TOLERANCE
+        || Math.abs(finite(c.p) - finite(t.triggerPx)) / finite(t.triggerPx) > TRIGGER_LIMIT_DEVIATION) {
+      throw coded('unsafe_plan');
+    }
   }
 };
 
@@ -1127,11 +1219,85 @@ export interface ReviewedOpen {
   coin: string; side: Side; leverage: number; marginUsd: string; dollar?: 'cusd' | 'cusd_plus';
   /** The exposure the review showed (the quote's notional). */
   notionalUsd?: number | null;
+  /** Market (default) or limit, and the protection chosen with the entry. */
+  orderType?: OrderType;
+  limitPx?: number | null;
+  takeProfitPx?: number | null;
+  stopLossPx?: number | null;
 }
+
+// ── the entry the member reviewed, kept on this device ──────────────────
+// A resumed open signs the entry reviewed HERE (market or limit, and the
+// protection chosen), never the server's account of it. Only an open begun
+// on another device falls back to what the position screen shows.
+
+const REVIEWED_ENTRY_SERVICE = 'confio_perps_reviewed_entry';
+const REVIEWED_ENTRY_KEEP_MS = 14 * 24 * 3600 * 1000;
+type ReviewedEntries = Record<string, {
+  coin: string; side: Side; leverage: number; marginUsd: string; notionalUsd?: number | null;
+  orderType: OrderType; limitPx: number | null; takeProfitPx: number | null; stopLossPx: number | null; at: number;
+}>;
+
+const readReviewedEntries = async (): Promise<ReviewedEntries> => {
+  const Keychain = await import('react-native-keychain');
+  const stored = await Keychain.getGenericPassword({ service: REVIEWED_ENTRY_SERVICE });
+  if (!stored) return {};
+  // A damaged store is never read as "no review": a resume would trust the server.
+  const all = JSON.parse(stored.password);
+  if (!all || typeof all !== 'object' || Array.isArray(all)) throw coded('unavailable');
+  const px = (v: unknown) => v === null || (typeof v === 'number' && Number.isFinite(v) && v > 0);
+  for (const e of Object.values(all) as any[]) {
+    if (!e || typeof e !== 'object' || typeof e.coin !== 'string' || !['long', 'short'].includes(e.side)
+        || !Number.isInteger(e.leverage) || e.leverage < 1
+        || typeof e.marginUsd !== 'string' || !/^\d+(\.\d{1,2})?$/.test(e.marginUsd) || !(Number(e.marginUsd) > 0)
+        || !(e.notionalUsd === undefined || px(e.notionalUsd)) || !['market', 'limit'].includes(e.orderType)
+        || !px(e.limitPx) || !px(e.takeProfitPx) || !px(e.stopLossPx) || (e.orderType === 'limit' && e.limitPx == null)) {
+      throw coded('unavailable');
+    }
+  }
+  return all;
+};
+
+export const rememberReviewedEntry = async (positionId: string, r: ReviewedOpen): Promise<void> => {
+  const Keychain = await import('react-native-keychain');
+  const all = await readReviewedEntries();
+  const now = Date.now();
+  for (const [id, e] of Object.entries(all)) if (now - e.at > REVIEWED_ENTRY_KEEP_MS) delete all[id];
+  all[positionId] = {
+    coin: r.coin, side: r.side, leverage: r.leverage, marginUsd: r.marginUsd, notionalUsd: r.notionalUsd ?? null,
+    orderType: r.orderType ?? 'market', limitPx: r.limitPx ?? null,
+    takeProfitPx: r.takeProfitPx ?? null, stopLossPx: r.stopLossPx ?? null, at: now,
+  };
+  const ok = await Keychain.setGenericPassword('perps', JSON.stringify(all), { service: REVIEWED_ENTRY_SERVICE });
+  // Never sign an entry this device could not remember: a resume would trust the server.
+  if (!ok) throw coded('unavailable');
+};
+
+/** The trade a resumed open may sign: the whole trade reviewed on this
+ *  device when it has one (market, side, leverage, margin, entry and
+ *  protection); else what the position screen showed at the tap. An
+ *  unreadable store is never read as "no record". */
+export const reviewedForResume = async (p: PerpPosition): Promise<ReviewedOpen> => {
+  const base = reviewedFromPosition(p);
+  let mine: ReviewedEntries[string] | undefined;
+  try {
+    mine = (await readReviewedEntries())[p.id];
+  } catch {
+    throw coded('unavailable');
+  }
+  return mine ? {
+    coin: mine.coin, side: mine.side, leverage: mine.leverage, marginUsd: mine.marginUsd,
+    notionalUsd: mine.notionalUsd ?? null,
+    orderType: mine.orderType, limitPx: mine.limitPx,
+    takeProfitPx: mine.takeProfitPx, stopLossPx: mine.stopLossPx,
+  } : base;
+};
 
 /** What a member sees on a position: the trade a resumed open may sign. */
 export const reviewedFromPosition = (p: PerpPosition): ReviewedOpen => ({
   coin: p.coin, side: p.side, leverage: p.leverage, marginUsd: p.marginUsd.toFixed(2),
+  orderType: p.orderType ?? 'market', limitPx: p.limitPx ?? null,
+  takeProfitPx: p.plannedTakeProfitPx ?? null, stopLossPx: p.plannedStopLossPx ?? null,
 });
 
 /** Asked when Hyperliquid holds more than the position showed (beyond 5% + $1):
@@ -1148,6 +1314,8 @@ export interface PlanOptions {
   onAmount?: AmountPrompt;
   budgetUsd?: number | null;
   triggers?: { tp: number | null; sl: number | null };
+  /** Open without the protection chosen with the entry (the market moved past it). */
+  dropProtection?: boolean;
 }
 
 /** The signing context, from Hyperliquid itself and from what the member
@@ -1190,12 +1358,19 @@ const tradeContext = async (stage: PlanStage, position: PerpPosition, wallet: st
   const slip = 1 + 2 * Math.min((await capabilitiesSlippageBps()) ?? 50, 300) / 10_000;
   return {
     stage, assetId: market.assetId, dex: market.dex, side, leverage, markPx: market.markPx,
+    szDecimals: market.szDecimals,
     // Never more exposure than the review showed (plus a lot and a mark move).
     maxNotionalUsd: quoted ? Math.min(quoted * 1.02 + lot, margin * leverage * slip) : margin * leverage * slip,
     maxSize: live ? Math.abs(live.szi) : null,
     // An open moves at most its reviewed margin into a builder dex.
     budgetUsd: opts.budgetUsd ?? (reviewed ? Number(reviewed.marginUsd) : null), triggers: opts.triggers,
     minNotionalUsd,
+    entry: reviewed ? {
+      type: reviewed.orderType ?? 'market',
+      limitPx: reviewed.orderType === 'limit' ? reviewed.limitPx ?? null : null,
+      tp: opts.dropProtection ? null : reviewed.takeProfitPx ?? null,
+      sl: opts.dropProtection ? null : reviewed.stopLossPx ?? null,
+    } : undefined,
   } as TradeContext;
 };
 
@@ -1215,7 +1390,9 @@ const runPlan = async (
   // order or a transfer to go past what the member reviewed.
   const signed = new Set<string>();
   for (let round = 0; round < 4; round++) {
-    const plan: any = await mutate(PLAN, { positionId, stage, ...extra }, 'perpsPlan');
+    const plan: any = await mutate(PLAN, {
+      positionId, stage, ...extra, ...(stage === 'open' && opts.dropProtection ? { dropProtection: true } : {}),
+    }, 'perpsPlan');
     const purposes = (plan.steps || []).map((st: any) => st.purpose);
     // Protection is replaced, never just removed: a cancel only with its new triggers.
     if (purposes.includes('tpsl_cancel') && !purposes.includes('tpsl')) throw coded('unsafe_plan');
@@ -1250,20 +1427,58 @@ const runPlan = async (
       // the limit sits within the member's slippage of that fill.
       const order = actions[openIndex].orders[0];
       const caps = await capabilitiesLimits();
-      const fill = await venueFill(position.coin, order.b, finite(order.s)).catch(() => null);
-      if (!fill) throw coded('hyperliquid_unavailable');
-      const impactBps = (Math.abs(fill.avgPx - fill.mid) / fill.mid) * 10_000;
+      // A limit that rests on the book takes nothing from it: no impact. One
+      // at or past the mid may fill at once, so it passes the same caps (its
+      // price bound is the member's own limit, checked in verifyEntry).
+      const resting = order.t?.limit?.tif === 'Gtc';
+      let crosses = !resting;
+      if (resting) {
+        // Where the market is, from a sliver of the book (never the full size).
+        const top = await venueFill(position.coin, order.b, 10 ** -8).catch(() => null);
+        if (!top) throw coded('hyperliquid_unavailable');
+        // Against the best price it could take now (the ask for a buy), not the mid.
+        crosses = order.b ? finite(order.p) >= top.avgPx : finite(order.p) <= top.avgPx;
+      }
+      const fill = crosses ? await venueFill(position.coin, order.b, finite(order.s)).catch(() => null) : null;
+      // Crossing into a book too thin to measure: never signed without its impact known.
+      if (crosses && !fill) throw coded(resting ? 'impact_too_high' : 'hyperliquid_unavailable');
+      const impactBps = crosses ? (Math.abs(fill!.avgPx - fill!.mid) / fill!.mid) * 10_000 : 0;
       if (impactBps > caps.maxBps) throw coded('impact_too_high');
-      // (+50 bps: the book moves between the server's plan and this read.)
-      const bound = fill.avgPx * (1 + (order.b ? 1 : -1) * (caps.slippageBps + 50) / 10_000);
-      if (order.b ? finite(order.p) > bound : finite(order.p) < bound) throw coded('unsafe_plan');
-      if (impactBps > caps.warnBps || plan.impactWarn) {
-        const go = onImpact ? await onImpact({ impactBps: Math.round(impactBps), avgPx: fill.avgPx }) : false;
+      if (!resting) {
+        // (+50 bps: the book moves between the server's plan and this read.)
+        const bound = fill!.avgPx * (1 + (order.b ? 1 : -1) * (caps.slippageBps + 50) / 10_000);
+        if (order.b ? finite(order.p) > bound : finite(order.p) < bound) throw coded('unsafe_plan');
+      }
+      if (crosses && (impactBps > caps.warnBps || plan.impactWarn)) {
+        const go = onImpact ? await onImpact({ impactBps: Math.round(impactBps), avgPx: fill!.avgPx }) : false;
         if (!go) throw coded('impact_declined');
       }
     }
     for (const [i, step] of (plan.steps || []).entries()) {
       const action = actions[i];
+      if (step.purpose === 'close_cancel' || step.purpose === 'return_cancel') {
+        // Only this market's own orders, read from Hyperliquid itself. Before a
+        // close: only the unfilled rest of a limit entry, never the protection.
+        const open = await venueOpenOrders(wallet.address, position.coin).catch(() => null);
+        if (!open) throw coded('hyperliquid_unavailable');
+        if (step.purpose === 'return_cancel') {
+          // On the way home only: Hyperliquid itself must show no position, or
+          // these orders are a live position's protection.
+          const exposure = await venuePosition(wallet.address, position.coin).catch(() => undefined);
+          if (exposure === undefined) throw coded('hyperliquid_unavailable');
+          if (exposure) throw coded('already_open');
+        }
+        for (const c of action.cancels) {
+          const live = open.find((o) => o.oid === c.o);
+          // Every order cancelled must be live on the venue right now (one gone
+          // already means the plan is stale: it is asked for again).
+          if (!live) throw coded('plan_expired');
+          // Before a close: only the unfilled rest of a limit entry, never protection.
+          if (step.purpose === 'close_cancel' && (live.reduceOnly || live.isTrigger)) throw coded('unsafe_plan');
+          // On the way home: only entries (the server never cancels protection there).
+          if (step.purpose === 'return_cancel' && (live.reduceOnly || live.isTrigger)) throw coded('unsafe_plan');
+        }
+      }
       if (step.purpose === 'tpsl_cancel') {
         // The old protection is cancelled only once Hyperliquid itself shows
         // the new triggers live, full size, at the prices entered.
@@ -1289,6 +1504,11 @@ const runPlan = async (
         ]).catch(() => [null, undefined] as const);
         if (!setting || existing === undefined) throw coded('hyperliquid_unavailable');
         if (existing) throw coded('already_open');
+        // Never a second entry beside one already waiting on the book (its
+        // nonce record may be gone; the order is not).
+        const waiting = await venueOpenOrders(wallet.address, position.coin).catch(() => null);
+        if (!waiting) throw coded('hyperliquid_unavailable');
+        if (waiting.some((o) => !o.reduceOnly && !o.isTrigger)) throw coded('order_resting');
         if (setting.type !== 'isolated' || setting.value !== trade.leverage) throw coded('unsafe_plan');
         // The reviewed setting is live: whatever update held the shared nonce, no other can apply now.
         await spendLeverageNonce(wallet.address, position.coin, trade.leverage);
@@ -1361,13 +1581,22 @@ export interface OpenParams {
   side: Side;
   leverage: number;
   marginUsd: string;
+  orderType?: OrderType;
+  limitPx?: number | null;
+  takeProfitPx?: number | null;
+  stopLossPx?: number | null;
   onStep?: (step: PerpsStep) => void;
 }
 
 /** Quote only (creates the position as "quoted"): costs for the review. */
-export const quoteOpen = async ({ coin, side, leverage, marginUsd }: OpenParams) => {
+export const quoteOpen = async ({ coin, side, leverage, marginUsd, orderType, limitPx, takeProfitPx, stopLossPx }:
+  OpenParams) => {
+  const px = (v?: number | null) => (v != null && v > 0 ? String(v) : null);
   const { result, quote } = await withRelayOrder<any>(
-    PREPARE_OPEN, { coin, side, leverage, marginUsd }, 'perpsPrepareOpen', usdToWei(marginUsd));
+    PREPARE_OPEN, {
+      coin, side, leverage, marginUsd, orderType: orderType ?? 'market',
+      limitPx: orderType === 'limit' ? px(limitPx) : null, takeProfitPx: px(takeProfitPx), stopLossPx: px(stopLossPx),
+    }, 'perpsPrepareOpen', usdToWei(marginUsd));
   // The review shows what the app's OWN order delivers, never more: credited
   // margin and exposure come from Relay's signed order, not the server's word.
   const credited = Number(quote.expectedOut) / 1e8;
@@ -1390,6 +1619,8 @@ export const confirmOpen = async (
 ): Promise<FlowResult> => {
   onStep?.('exit');
   await retireOutstanding(await signer());
+  // Before any money moves: a resumed open signs this entry, never the server's account of it.
+  await rememberReviewedEntry(quote.positionId, reviewed);
   const receipt = await sendBatch(quote, {
     direction: 'out', maxWei: usdToWei(reviewed.marginUsd), dollar: reviewed.dollar ?? null,
     relayDeposit: quote.memberRelay,
@@ -1400,19 +1631,33 @@ export const confirmOpen = async (
   onStep?.('open');
   await openOnVenue(quote.positionId, { reviewed, onImpact });
   onStep?.('done');
-  const position = await waitForPosition(quote.positionId, (p) => p.state === 'open', { timeoutMs: 30_000 });
+  // Open, or (a limit) waiting on the book for its price.
+  const position = await waitForPosition(quote.positionId, (p) => p.state === 'open' || p.nextAction === 'wait_fill',
+    { timeoutMs: 30_000 });
   return { position, txHash: receipt?.txHash ?? null };
 };
 
 export const openOnVenue = async (positionId: string, opts: PlanOptions = {}) =>
   runPlan(positionId, 'open', {}, opts);
 
+/** A limit entry waiting on the book: cancel it and bring the margin home. */
+export const cancelOrderAndBringHome = (
+  p: PerpPosition, onStep?: (s: PerpsStep) => void, onAmount?: AmountPrompt,
+) => bringHome(p.id, onStep, onAmount, positionValueUsd(p), p.coin);
+
 export const closePosition = async (
   positionId: string, onStep?: (s: PerpsStep) => void, onAmount?: AmountPrompt, shownUsd?: number | null,
   expectedCoin?: string, onImpact?: ImpactPrompt,
 ) => {
   onStep?.('close');
-  await runPlan(positionId, 'close', {}, { expectedCoin, onImpact });
+  try {
+    await runPlan(positionId, 'close', {}, { expectedCoin, onImpact });
+  } catch (e) {
+    // Cancelling a waiting entry may already have finished the position
+    // (it was flat): nothing left to close, the money comes home below.
+    const code = (e as { code?: string })?.code;
+    if (code !== 'position_already_closed' && code !== 'bad_state') throw e;
+  }
   await waitForPosition(positionId, (p) => ['closed', 'liquidated', 'done'].includes(p.state), { timeoutMs: 60_000 });
   return bringHome(positionId, onStep, onAmount, shownUsd, expectedCoin);
 };
@@ -1426,6 +1671,8 @@ export const bringHome = async (
 ): Promise<FlowResult> => {
   let txHash: string | null = null;
   let p = await fetchPosition(positionId);
+  // The waiting order filled meanwhile: it is a live position now, to close, not money to bring home.
+  if (p?.state === 'open') throw coded('already_open');
   if (p && ['closed', 'liquidated', 'funded', 'return_failed'].includes(p.state)) {
     onStep?.('return');
     await runPlan(positionId, 'return', {}, { shownUsd: shownUsd ?? 0, onAmount, expectedCoin });
@@ -1449,9 +1696,18 @@ export const bringHome = async (
   return { position: final, txHash };
 };
 
-export const retryBridge = async (positionId: string, onStep?: (s: PerpsStep) => void, onImpact?: ImpactPrompt) => {
+export const retryBridge = async (
+  positionId: string, onStep?: (s: PerpsStep) => void, onImpact?: ImpactPrompt, reviewed?: ReviewedOpen,
+) => {
   const position = await fetchPosition(positionId);
   if (!position) throw coded('unavailable');
+  // The trade the member saw (or reviewed on this device), never one the
+  // server changed after the tap.
+  const trade = reviewed ?? await reviewedForResume(position);
+  if (trade.coin !== position.coin || trade.side !== position.side || trade.leverage !== position.leverage
+      || Number(trade.marginUsd) !== Number(position.marginUsd.toFixed(2))) {
+    throw coded('unsafe_plan');
+  }
   const { result: plan, quote } = await withRelayOrder<any>(
     PREPARE_RETRY, { positionId }, 'perpsPrepareBridgeRetry', usdToWei(position.marginUsd));
   onStep?.('bridge');
@@ -1462,7 +1718,7 @@ export const retryBridge = async (positionId: string, onStep?: (s: PerpsStep) =>
   });
   await waitForPosition(positionId, (p) => ['funded', 'open'].includes(p.state), { failOn: ['refunded'] });
   onStep?.('open');
-  await openOnVenue(positionId, { onImpact, reviewed: reviewedFromPosition(position) });
+  await openOnVenue(positionId, { onImpact, reviewed: trade });
   onStep?.('done');
 };
 
@@ -1499,18 +1755,23 @@ export const setTpSl = async (
 /** Continue whatever step a position stopped at. */
 export const resumePosition = async (
   p: PerpPosition, onStep?: (s: PerpsStep) => void, onImpact?: ImpactPrompt, onAmount?: AmountPrompt,
+  reviewed?: ReviewedOpen,
 ): Promise<unknown> => {
+  // The trade as it was at the tap (or as reviewed on this device), captured
+  // before any waiting: a later server answer never becomes "what was reviewed".
+  const trade = reviewed ?? (['wait_bridge', 'retry_bridge', 'open_order'].includes(p.nextAction)
+    ? await reviewedForResume(p) : undefined);
   switch (p.nextAction) {
     case 'wait_bridge':
       onStep?.('bridge');
       await waitForPosition(p.id, (x) => x.nextAction !== 'wait_bridge', { failOn: ['refunded'] });
-      return resumePosition((await fetchPosition(p.id))!, onStep, onImpact, onAmount);
+      return resumePosition((await fetchPosition(p.id))!, onStep, onImpact, onAmount, trade);
     case 'retry_bridge':
-      return retryBridge(p.id, onStep, onImpact);
+      return retryBridge(p.id, onStep, onImpact, trade);
     case 'open_order':
       onStep?.('open');
-      // The trade on the member's screen is the one that may be signed.
-      await openOnVenue(p.id, { onImpact, reviewed: reviewedFromPosition(p) });
+      // The entry reviewed on this device (else the one on the member's screen at the tap).
+      await openOnVenue(p.id, { onImpact, reviewed: trade });
       onStep?.('done');
       return;
     case 'finish_margin':

@@ -97,6 +97,8 @@ class TeamType(graphene.ObjectType):
     # Investment data below: null/empty unless access is 'open'.
     access = graphene.String(required=True)
     return_pct = graphene.String()
+    # Dollars per member over the range (what the league ranks by).
+    return_pnl_usd = graphene.String()
     league_rank = graphene.Int()
     champion_months = graphene.List(graphene.NonNull(graphene.String), required=True)
     goal = graphene.Field(TeamGoalType)
@@ -106,6 +108,12 @@ class TeamType(graphene.ObjectType):
 class LeagueRowType(graphene.ObjectType):
     rank = graphene.Int(required=True)
     pct = graphene.String(required=True)
+    # What ranks (since 2026-10-26): dollars over the period, realized and
+    # unrealized, the member's own money (a team: per member, averaged).
+    pnl_usd = graphene.String()
+    # Investors: Futuros held in the period (null: none).
+    avg_leverage = graphene.Float()
+    liquidations = graphene.Int()
     team = graphene.Field(TeamType)
     user_id = graphene.ID()
     username = graphene.String()
@@ -120,6 +128,7 @@ class LeagueTableType(graphene.ObjectType):
     access = graphene.String(required=True)
     my_rank = graphene.Int()
     my_pct = graphene.String()
+    my_pnl_usd = graphene.String()
 
 
 class TeamJoinRequestType(graphene.ObjectType):
@@ -145,16 +154,16 @@ def team_type(team, viewer, *, range_key='7d', with_stats=True) -> TeamType:
             block = 'cooldown'
         if not block and rules.active_members(team).count() >= rules.MAX_MEMBERS:
             block = 'team_full'
-    pct = rank = None
+    pct = pnl = rank = None
     goal = None
     if with_stats and access == community.ACCESS_OPEN:
-        pct, rank = league.team_return(team.id, range_key)
+        pct, pnl, rank = league.team_result(team.id, range_key)
         # Someone the viewer is in a block with may be part of that aggregate
         # (now, or among those who made up the period).
         blocked = community.block_relation_ids(viewer)
         period = league.counted_contributors(team.id, range_key)
         if blocked & ({m.user_id for m in rules.active_members(team)} | period):
-            pct = None
+            pct = pnl = None
         current = data.current_goal(team)
         # The goal is the team's own: members only, and never when the viewer
         # is in a block with someone on it (an aggregate can reveal a balance).
@@ -182,7 +191,7 @@ def team_type(team, viewer, *, range_key='7d', with_stats=True) -> TeamType:
         is_following=TeamFollow.objects.filter(team=team, user=viewer).exists(),
         join_request='pending' if pending else None,
         join_block=block, join_block_message=rules.MESSAGES.get(block) if block else None,
-        access=access, return_pct=_pct(pct), league_rank=rank,
+        access=access, return_pct=_pct(pct), return_pnl_usd=_pct(pnl), league_rank=rank,
         champion_months=league.badges(team_id=team.id),
         goal=goal,
         pending_requests=(TeamJoinRequest.objects.filter(team=team, status=TeamJoinRequestStatus.PENDING).count()
@@ -334,7 +343,7 @@ class TeamsQuery(graphene.ObjectType):
         elif blocked:
             # Current members, and the people the shown result is made of.
             page = [r for r in page if not (blocked & r.people) and not blocked_team(viewer, r.team_id, range_key)]
-        my_rank = my_pct = None
+        my_rank = my_pct = my_pnl = None
         if access == community.ACCESS_OPEN:
             if kind == 'investors':
                 mine = next((r for r in rows if r.user_id == viewer.id), None)
@@ -344,27 +353,38 @@ class TeamsQuery(graphene.ObjectType):
                 if mine and (blocked & mine.people or blocked_team(viewer, mine.team_id, range_key)):
                     mine = None
             if mine:
-                my_rank, my_pct = mine.rank, _pct(mine.pct)
+                my_rank, my_pct, my_pnl = mine.rank, _pct(mine.pct), _pct(mine.pnl)
         out = []
         if kind == 'teams':
             teams = {t.id: t for t in Team.objects.filter(id__in=[r.team_id for r in page])}
             for r in page:
                 if r.team_id in teams:
-                    out.append(LeagueRowType(rank=r.rank, pct=_pct(r.pct), members=r.members,
+                    # Dollars beside the % would reveal a balance: full access only.
+                    out.append(LeagueRowType(rank=r.rank, pct=_pct(r.pct),
+                                             pnl_usd=_pct(r.pnl) if access == community.ACCESS_OPEN else None,
+                                             members=r.members,
                                              team=team_type(teams[r.team_id], viewer, with_stats=False)))
         else:
             from users.models import User
 
             users = {u.id: u for u in User.objects.filter(id__in=[r.user_id for r in page])}
             avatars = profile_pictures.picture_urls(list(users))
+            open_access = access == community.ACCESS_OPEN
+            risk = league.futures_risk_for_rows(page, league.window(range_key)) if open_access else {}
             for r in page:
                 user = users.get(r.user_id)
                 if user is not None:
-                    out.append(LeagueRowType(rank=r.rank, pct=_pct(r.pct), user_id=str(user.id),
+                    lev, liquidations = risk.get(user.id, (None, 0))
+                    out.append(LeagueRowType(rank=r.rank, pct=_pct(r.pct),
+                                             # Dollars beside the % would reveal a balance: full access only.
+                                             pnl_usd=_pct(r.pnl) if open_access else None,
+                                             avg_leverage=float(round(lev, 1)) if lev is not None else None,
+                                             liquidations=liquidations if open_access else None,
+                                             user_id=str(user.id),
                                              username=community.author_display_name(user),
                                              avatar_url=avatars.get(user.id)))
         return LeagueTableType(rows=out, has_more=access == community.ACCESS_OPEN and len(rows) > offset + limit,
-                               access=access, my_rank=my_rank, my_pct=my_pct)
+                               access=access, my_rank=my_rank, my_pct=my_pct, my_pnl_usd=my_pnl)
 
     @login_required
     def resolve_league_days_to_rank(self, info, kind):

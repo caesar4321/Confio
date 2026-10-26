@@ -339,8 +339,63 @@ def _cancel_quotes(wallet: str) -> None:
     PerpMarginChange.objects.filter(position__wallet=wallet, state='quoted').update(state='cancelled', updated_at=now)
 
 
+def _positive_px(value, code: str) -> Decimal | None:
+    if value in (None, ''):
+        return None
+    try:
+        px = _d(value)
+    except ArithmeticError as exc:
+        raise FlowError(code) from exc
+    if not px.is_finite() or px <= 0:
+        raise FlowError(code)
+    return px
+
+
+def order_intent(order_type: str | None, limit_px=None, take_profit_px=None, stop_loss_px=None) -> dict:
+    """What the member chose on the order screen, stored with the quote: the
+    open plan builds exactly this order (prices are judged against the
+    market when the order is planned, not now)."""
+    order_type = order_type or 'market'
+    if order_type not in ('market', 'limit'):
+        raise FlowError('bad_order_type')
+    limit = _positive_px(limit_px, 'bad_price')
+    if (order_type == 'limit') != (limit is not None):
+        raise FlowError('bad_price')
+    tp = _positive_px(take_profit_px, 'bad_price')
+    sl = _positive_px(stop_loss_px, 'bad_price')
+    return {'type': order_type, 'limit_px': str(limit) if limit else None,
+            'tp': str(tp) if tp else None, 'sl': str(sl) if sl else None}
+
+
+def _check_intent(market, side: str, order: dict) -> None:
+    """Prices judged against the market now, before any money moves (the
+    open plan judges them again when the margin has arrived)."""
+    if order.get('type') == 'market' and not order.get('tp') and not order.get('sl'):
+        return
+    is_buy = side == 'long'
+    try:
+        book = hyperliquid.l2_book(market.coin)
+    except hyperliquid.HyperliquidError as exc:
+        raise FlowError('hyperliquid_unavailable') from exc
+    _, mid, _ = walk_book(book, is_buy, Decimal('0.00000001'))
+    reference = mid
+    # Judged as Hyperliquid will see them: the prices as they go on the wire.
+    if order.get('type') == 'limit':
+        limit = _d(wire_price(_d(order['limit_px']), market.sz_decimals, up=not is_buy))
+        if abs(limit - mid) / mid > LIMIT_MAX_DISTANCE:
+            raise FlowError('limit_too_far')
+        reference = limit
+    for kind in ('tp', 'sl'):
+        if order.get(kind):
+            trigger = _d(wire_price(_d(order[kind]), market.sz_decimals, up=not is_buy))
+            above = trigger > reference
+            if trigger == reference or (kind == 'tp') != (above == is_buy):
+                raise FlowError('bad_trigger_side')
+
+
 @transaction.atomic
-def prepare_open(user, wallet: str, meta, coin: str, side: str, leverage: int, margin_usd) -> dict:
+def prepare_open(user, wallet: str, meta, coin: str, side: str, leverage: int, margin_usd,
+                 order: dict | None = None) -> dict:
     """Quote an open and issue its exact batch. Creates PerpPosition(quoted)."""
     from blockchain.models import PerpPosition
 
@@ -372,6 +427,8 @@ def prepare_open(user, wallet: str, meta, coin: str, side: str, leverage: int, m
             .exclude(state='quoted').select_related('market').first())
     if live is not None:
         raise FlowError('position_exists' if live.market_id == market.id else 'one_position_at_a_time')
+    order = order or order_intent('market')
+    _check_intent(market, side, order)
     new_account = _new_account(wallet)
     minimum = FIRST_MIN_MARGIN_USD if new_account else MIN_MARGIN_USD
     if margin < minimum:
@@ -391,7 +448,7 @@ def prepare_open(user, wallet: str, meta, coin: str, side: str, leverage: int, m
         margin_usd=margin, state='quoted',
         flow={'dollar': dollar, 'gross_wei': str(gross), 'deposit_wei': str(deposit),
               'relay_out': relay, 'calls': calls, 'request_id': request_id,
-              'new_account': new_account, 'costs': costs},
+              'new_account': new_account, 'costs': costs, 'order': order or order_intent('market')},
         relay_out_id=relay['request_id'],
     )
     return {'position': position, 'calls': calls, 'request_id': request_id, 'kind': 'perps_open', 'relay_quote': relay_raw,
@@ -989,6 +1046,10 @@ def _store_plan(position, name: str, steps: list, **extra) -> None:
                 # top-up): an unresolved claim is resolved there, at any age,
                 # never replaced by a plan that could execute it a second time.
                 raise FlowError('step_unconfirmed')
+        if name == 'open_plan' and flow.get('resting'):
+            # An entry already waits on the book (another request just placed
+            # it): never a second one beside it.
+            raise FlowError('order_resting')
         flow[name] = {'steps': steps, 'consumed': [], 'claims': {}, 'issued_ms': _now_ms(), **extra}
         PerpPosition.objects.filter(pk=position.pk).update(flow=flow, updated_at=timezone.now())
     position.flow = flow
@@ -1030,13 +1091,19 @@ def _open_policy(user, meta, market) -> None:
         raise FlowError('market_not_openable')
 
 
-def open_plan(user, position_id, meta=None) -> dict:
-    """The Hyperliquid steps that turn a funded position into an open one."""
+def open_plan(user, position_id, meta=None, drop_protection: bool = False) -> dict:
+    """The Hyperliquid steps that turn a funded position into an open one.
+    `drop_protection`: the market moved past a take-profit / stop-loss chosen
+    with the entry while the margin crossed; the member chose to open without it."""
     from blockchain.models import PerpPosition
 
     position = _position(user, position_id)
     if position.state != 'funded':
         raise FlowError('bad_state')
+    intent = dict((position.flow or {}).get('order') or {})
+    if drop_protection and (intent.get('tp') or intent.get('sl')):
+        intent.update(tp=None, sl=None)
+        position.flow = _merge_flow(position.pk, order=intent)
     _open_policy(user, meta, position.market)
     market, wallet = position.market, position.wallet
     credited = Decimal(position.credited_usdc or 0)
@@ -1051,6 +1118,9 @@ def open_plan(user, position_id, meta=None) -> dict:
         if _live_position(wallet, market) is not None:
             reconcile_position(position)
             raise FlowError('already_open')
+        if open_orders(position):
+            # A limit entry is waiting on the book: cancel it (return) first.
+            raise FlowError('order_resting')
         if (hyperliquid.user_abstraction(wallet) != 'disabled'
                 and not (position.flow or {}).get('done_abstraction')):
             # Standard mode first: separate core and per-dex balances, the
@@ -1080,34 +1150,118 @@ def open_plan(user, position_id, meta=None) -> dict:
             steps.append({'purpose': 'leverage', 'action': {
                 'type': 'updateLeverage', 'asset': market.asset_id, 'isCross': False, 'leverage': position.leverage}})
         is_buy = position.side == 'long'
+        intent = (position.flow or {}).get('order') or {'type': 'market'}
+        limit = _d(intent['limit_px']) if intent.get('type') == 'limit' and intent.get('limit_px') else None
         book = hyperliquid.l2_book(market.coin)
         _, mid, _ = walk_book(book, is_buy, Decimal('0.00000001'))
         # Hyperliquid margins the order at its MARK price and takes the taker
         # fee from the same balance: size so both fit what was credited, at
-        # the dearer of mid and mark plus the slippage the order may pay.
+        # the dearest of mid, mark and the limit plus the slippage it may pay.
         meta, ctxs = hyperliquid.meta_and_asset_ctxs(market.dex)
         index = next((i for i, u in enumerate(meta.get('universe') or []) if u.get('name') == market.coin), None)
         mark = _d((ctxs[index] or {}).get('markPx') or '0') if index is not None and index < len(ctxs) else Decimal(0)
         if mark <= 0:
             raise FlowError('hyperliquid_unavailable')
         _warn, _cap, slip = _impact_limits()
-        price = max(mid, mark) * (BPS + slip) / BPS
+        price = max(mid, mark, limit or 0) * (BPS + slip) / BPS
         per_unit = price / position.leverage + price * _d(market.taker_fee_rate)
         size = _round_size(credited * (BPS - SIZE_FEE_BUFFER_BPS) / BPS / per_unit, market.sz_decimals)
-        if size <= 0 or size * mid < VENUE_MIN_NOTIONAL_USD:
+        if size <= 0 or size * min(mid, limit or mid) < VENUE_MIN_NOTIONAL_USD:
             raise FlowError('notional_too_small')
         issued = _now_ms()
-        order = _plan_order(market, is_buy, size, False, cloid=_cloid(position.pk, 'open', issued))
+        cloid = _cloid(position.pk, 'open', issued)
+        if limit is None:
+            order = _plan_order(market, is_buy, size, False, cloid=cloid)
+        else:
+            order = _plan_limit_order(market, book, mid, is_buy, size, limit, cloid)
     except hyperliquid.HyperliquidError as exc:
         raise FlowError('hyperliquid_unavailable') from exc
     if order['impact_blocked']:
         raise FlowError('impact_too_high')
+    # The entry price the protection is judged from: the limit, or the expected fill.
+    reference = _d(order['action']['orders'][0]['p']) if limit is not None else _d(order['avg_px'])
+    children = _entry_protection(market, position.pk, is_buy, size, reference, intent, issued)
+    if children:
+        # Placed with the entry and armed only once it fills, sized to it.
+        order['action'] = {**order['action'], 'orders': order['action']['orders'] + children,
+                           'grouping': 'normalTpsl'}
     steps.append({'purpose': 'open_order', 'action': order['action']})
-    liq = estimate_liquidation_px(_d(order['avg_px']), size, credited, position.side, market.max_leverage)
+    liq = estimate_liquidation_px(reference, size, credited, position.side, market.max_leverage)
     _store_plan(position, 'open_plan', steps, credited_usd=str(credited))
     return {'position': position, 'steps': steps, 'replan': False, 'impact_bps': order['impact_bps'],
             'impact_warn': order['impact_warn'], 'avg_px': order['avg_px'], 'size': str(size),
             'liquidation_px': str(liq) if liq is not None else None}
+
+
+# A limit further than this from the market is refused (a typo, not a plan).
+LIMIT_MAX_DISTANCE = Decimal('0.5')
+
+
+def _plan_limit_order(market, book: dict, mid: Decimal, is_buy: bool, size: Decimal, limit: Decimal,
+                      cloid: str) -> dict:
+    """A resting (Gtc) entry at the member's price. One that crosses the
+    book fills at once like a market order, so it passes the same impact cap."""
+    # Never a worse price than the member chose: a buy rounds down, a sell up.
+    px = wire_price(limit, market.sz_decimals, up=not is_buy)
+    if abs(_d(px) - mid) / mid > LIMIT_MAX_DISTANCE:
+        raise FlowError('limit_too_far')
+    order = {'a': market.asset_id, 'b': is_buy, 'p': px, 's': _wire(size), 'r': False,
+             't': {'limit': {'tif': 'Gtc'}}, 'c': cloid}
+    impact, warn_hit, blocked, avg = 0, False, False, _d(px)
+    taken = _limit_walk(book, is_buy, size, _d(px))
+    if taken is not None:
+        # What it takes now, up to its price; the rest rests.
+        warn, cap, _slip = _impact_limits()
+        avg = taken[0]
+        impact = impact_bps(*taken)
+        warn_hit, blocked = impact > warn, impact > cap
+    return {'action': {'type': 'order', 'orders': [order], 'grouping': 'na'},
+            'avg_px': str(avg), 'mid_px': str(mid), 'impact_bps': impact,
+            'impact_warn': warn_hit, 'impact_blocked': blocked}
+
+
+def _limit_walk(book: dict, is_buy: bool, size: Decimal, limit: Decimal) -> tuple[Decimal, Decimal] | None:
+    """(average, mid) of what a limit order takes from the book right now:
+    the levels at or better than its price, up to its size. None when it
+    takes nothing (it rests whole)."""
+    bids, asks = book['levels']
+    if not bids or not asks:
+        return None
+    mid = (_d(bids[0]['px']) + _d(asks[0]['px'])) / 2
+    left, cost, took = size, Decimal(0), Decimal(0)
+    for level in (asks if is_buy else bids):
+        px = _d(level['px'])
+        if (is_buy and px > limit) or (not is_buy and px < limit) or left <= 0:
+            break
+        take = min(left, _d(level['sz']))
+        cost += take * px
+        took += take
+        left -= take
+    if took <= 0:
+        return None
+    return cost / took, mid
+
+
+def _entry_protection(market, position_pk, is_buy: bool, size: Decimal, reference: Decimal, intent: dict,
+                      issued_ms: int) -> list:
+    """Take-profit / stop-loss children of the entry (normalTpsl): reduce-only
+    market triggers on the entry's size, each on its own side of the entry."""
+    close_is_buy = not is_buy
+    long = is_buy
+    children = []
+    for kind in ('tp', 'sl'):
+        value = intent.get(kind)
+        if not value:
+            continue
+        wire = wire_price(_d(value), market.sz_decimals, up=close_is_buy)
+        above = _d(wire) > reference
+        # Take-profit above the entry for a long, below for a short; stop-loss the reverse.
+        if _d(wire) == reference or (kind == 'tp') != (above == long):
+            raise FlowError('bad_trigger_side')
+        children.append({'a': market.asset_id, 'b': close_is_buy, 'p': wire, 's': _wire(size), 'r': True,
+                         't': {'trigger': {'isMarket': True, 'triggerPx': wire, 'tpsl': kind}},
+                         'c': _cloid(position_pk, f'open-{kind}', issued_ms)})
+    return children
 
 
 def close_plan(user, position_id) -> dict:
@@ -1116,7 +1270,21 @@ def close_plan(user, position_id) -> dict:
         raise FlowError('bad_state')
     market = position.market
     try:
+        # Orders first, then the position: a rest filling in between shows in
+        # the size read second, never left out of the close.
+        remainder = resting_entries(position)
         live = _live_position(position.wallet, market)
+    except hyperliquid.HyperliquidError as exc:
+        raise FlowError('hyperliquid_unavailable') from exc
+    if remainder:
+        # The unfilled part of a limit entry goes first, alone (and needs no
+        # order book): it must never fill after the close (and the return) and
+        # open a position again; the close is sized only once nothing can fill.
+        steps = [{'purpose': 'close_cancel', 'action': _cancel_action(market, remainder)}]
+        _store_plan(position, 'close_plan', steps)
+        return {'position': position, 'steps': steps, 'replan': True, 'impact_bps': 0,
+                'impact_warn': False, 'avg_px': None, 'size': None}
+    try:
         if live is None:
             reconcile_position(position)
             raise FlowError('position_already_closed')
@@ -1138,6 +1306,24 @@ def protections(position) -> list:
     market = position.market
     return [o for o in hyperliquid.frontend_open_orders(position.wallet, market.dex)
             if o.get('coin') == market.coin and o.get('isTrigger') and o.get('reduceOnly') and o.get('oid') is not None]
+
+
+def open_orders(position) -> list:
+    """Every order of this market on the member's account (one live position
+    per member: they are all this position's): a resting limit entry and,
+    while it waits, the protection attached to it."""
+    market = position.market
+    return [o for o in hyperliquid.frontend_open_orders(position.wallet, market.dex)
+            if o.get('coin') == market.coin and o.get('oid') is not None]
+
+
+def resting_entries(position) -> list:
+    """The unfilled part of a limit entry: never a take-profit or stop-loss."""
+    return [o for o in open_orders(position) if not o.get('reduceOnly') and not o.get('isTrigger')]
+
+
+def _cancel_action(market, orders: list) -> dict:
+    return {'type': 'cancel', 'cancels': [{'a': market.asset_id, 'o': int(o['oid'])} for o in orders]}
 
 
 def tpsl_plan(user, position_id, take_profit_px, stop_loss_px) -> dict:
@@ -1238,9 +1424,9 @@ def margin_plan(user, position_id) -> dict:
 
 PLAN_OF_PURPOSE = {
     'abstraction': 'open_plan', 'fund_dex': 'open_plan', 'leverage': 'open_plan', 'open_order': 'open_plan',
-    'close_order': 'close_plan', 'tpsl_cancel': 'tpsl_plan', 'tpsl': 'tpsl_plan',
+    'close_cancel': 'close_plan', 'close_order': 'close_plan', 'tpsl_cancel': 'tpsl_plan', 'tpsl': 'tpsl_plan',
     'margin_fund_dex': 'margin_plan', 'margin_add': 'margin_plan',
-    'return_dex': 'return_plan',
+    'return_cancel': 'return_plan', 'return_dex': 'return_plan',
 }
 
 
@@ -1268,6 +1454,15 @@ def _claim_step(position_id, purpose: str, action: dict, nonce: int,
         if purpose in OPEN_PURPOSES and _return_quoted(position.flow):
             raise FlowError('return_in_progress')
         flow = dict(position.flow or {})
+        # An entry and a return never go out together (same lock): money never
+        # leaves while an entry is being placed or waits on the book, and no
+        # entry is placed while money is leaving.
+        if purpose in ('return_dex', 'return_cancel') and _pending_claim(position, 'open_plan'):
+            raise FlowError('step_in_flight')
+        if purpose == 'return_dex' and flow.get('resting'):
+            raise FlowError('order_resting')
+        if purpose in OPEN_PURPOSES and _pending_claim(position, 'return_plan'):
+            raise FlowError('return_in_progress')
         plan = dict(flow.get(name) or {})
         if not plan or _now_ms() - int(plan.get('issued_ms') or 0) > PLAN_TTL_MS:
             raise FlowError('plan_expired')
@@ -1329,6 +1524,27 @@ def _settle_claim(position_id, name: str, index: int, outcome: str, observed: di
         return True
 
 
+def _statuses(body: dict) -> list:
+    response = body.get('response') or {}
+    data = response.get('data') if isinstance(response, dict) else None
+    statuses = data.get('statuses') if isinstance(data, dict) else None
+    return statuses if isinstance(statuses, list) else []
+
+
+def _resting_of(body: dict) -> dict | None:
+    """The entry's answer when it now rests on the book (a limit order)."""
+    statuses = _statuses(body)
+    first = statuses[0] if statuses else None
+    return first['resting'] if isinstance(first, dict) and isinstance(first.get('resting'), dict) else None
+
+
+def _child_errors(body: dict) -> dict:
+    """A take-profit / stop-loss attached to the entry that Hyperliquid refused:
+    recorded (the position shows no such protection; the member sets it again)."""
+    errors = [st.get('error') for st in _statuses(body)[1:] if isinstance(st, dict) and st.get('error')]
+    return {'entry_protection_error': str(errors[0])[:120]} if errors else {}
+
+
 def _fill_of(body: dict) -> tuple[dict | None, str | None]:
     response = body.get('response') or {}
     data = response.get('data') if isinstance(response, dict) else None
@@ -1355,9 +1571,9 @@ def submit_action(user, position_id, purpose: str, action_json: str, nonce: int,
         raise FlowError(gate)
     required = {
         'abstraction': ('funded',), 'fund_dex': ('funded',), 'leverage': ('funded',), 'open_order': ('funded',),
-        'close_order': ('open',), 'tpsl_cancel': ('open',), 'tpsl': ('open',), 'margin_fund_dex': ('open',),
-        'margin_add': ('open',),
-        'return_dex': RETURNABLE_STATES,
+        'close_cancel': ('open',), 'close_order': ('open',), 'tpsl_cancel': ('open',), 'tpsl': ('open',),
+        'margin_fund_dex': ('open',), 'margin_add': ('open',),
+        'return_cancel': RETURNABLE_STATES, 'return_dex': RETURNABLE_STATES,
     }.get(purpose)
     if required is None:
         raise FlowError('bad_purpose')
@@ -1368,6 +1584,14 @@ def submit_action(user, position_id, purpose: str, action_json: str, nonce: int,
         raise FlowError('return_in_progress')
     if purpose in OPEN_PURPOSES:
         _open_policy(user, meta, position.market)
+    if purpose in ('return_cancel', 'return_dex'):
+        # Checked again right before it goes out: a fill since the plan was
+        # issued makes these orders a live position's protection, and money
+        # never leaves the market's balance while an entry could still fill.
+        # The venue's own order list decides (a stale flag never strands money).
+        waiting = _refuse_if_live(position)
+        if purpose == 'return_dex' and waiting:
+            raise FlowError('order_resting')
     try:
         action = json.loads(action_json)
         nonce = int(nonce)
@@ -1395,11 +1619,21 @@ def submit_action(user, position_id, purpose: str, action_json: str, nonce: int,
         order = (action.get('orders') or [{}])[0]
         _, cap, _slip = _impact_limits()
         try:
-            avg, mid, _ = walk_book(hyperliquid.l2_book(position.market.coin), bool(order.get('b')), _d(order.get('s')))
+            if (position.flow or {}).get('resting') or resting_entries(position):
+                # Never a second entry beside one already waiting on the book.
+                raise FlowError('order_resting')
+            book = hyperliquid.l2_book(position.market.coin)
+            if ((order.get('t') or {}).get('limit') or {}).get('tif') == 'Gtc':
+                # A limit: only what it can take now, up to its own price.
+                taken = _limit_walk(book, bool(order.get('b')), _d(order.get('s')), _d(order.get('p')))
+                if taken is not None and impact_bps(*taken) > cap:
+                    raise FlowError('impact_too_high')
+            else:
+                avg, mid, _ = walk_book(book, bool(order.get('b')), _d(order.get('s')))
+                if impact_bps(avg, mid) > cap:
+                    raise FlowError('impact_too_high')
         except hyperliquid.HyperliquidError as exc:
             raise FlowError('hyperliquid_unavailable') from exc
-        if impact_bps(avg, mid) > cap:
-            raise FlowError('impact_too_high')
     name, index, observed = _claim_step(position.pk, purpose, action, nonce, required)
     payload = {'action': action, 'nonce': nonce, 'signature': signature}
     if action['type'] in hl_signing.L1_TYPES:
@@ -1441,7 +1675,18 @@ def submit_action(user, position_id, purpose: str, action_json: str, nonce: int,
             step_error=str(body.get('response') or 'hyperliquid_error')[:120], updated_at=timezone.now())
         raise FlowError('hyperliquid_rejected')
 
-    if purpose in ('open_order', 'close_order'):
+    if purpose == 'open_order' and _resting_of(body) is not None:
+        # A limit entry now waits on the book: the money stays on the venue,
+        # the position funded, until it fills (reconcile_position) or the
+        # member cancels it on the way home (return_plan).
+        rest = _resting_of(body)
+        order = action['orders'][0]
+        _settle_claim(position.pk, name, index, 'consumed', observed=observed,
+                      resting={'oid': rest.get('oid'), 'cloid': order.get('c'), 'px': order.get('p'),
+                               'sz': order.get('s'), 'at': _now_ms()},
+                      **_child_errors(body))
+        PerpPosition.objects.filter(pk=position.pk).update(step_error='', updated_at=timezone.now())
+    elif purpose in ('open_order', 'close_order'):
         filled, error = _fill_of(body)
         if filled is None:
             _settle_claim(position.pk, name, index, 'released', observed=observed)
@@ -1453,7 +1698,7 @@ def submit_action(user, position_id, purpose: str, action_json: str, nonce: int,
                            entry_avg_px=_d(filled.get('avgPx')), size=_d(filled.get('totalSz')),
                            opened_at=timezone.now(), step_error=''):
                 _merge_flow(position.pk, size_initial=str(_d(filled.get('totalSz'))))
-            _settle_claim(position.pk, name, index, 'consumed', observed=observed)
+            _settle_claim(position.pk, name, index, 'consumed', observed=observed, **_child_errors(body))
         else:
             _settle_claim(position.pk, name, index, 'consumed', observed=observed)
             PerpPosition.objects.filter(pk=position.pk, state='open').update(
@@ -1478,6 +1723,21 @@ def submit_action(user, position_id, purpose: str, action_json: str, nonce: int,
                     and (now_plan.get('claims') or {}).get(str(index)) == observed['claim']):
                 _apply_margin_add(position.pk, now_plan.get('change_id'), Decimal(action['ntli']) / 1_000_000)
                 _settle_claim(position.pk, name, index, 'consumed', observed=observed, margin_pending_payload=None)
+    elif purpose in ('close_cancel', 'return_cancel'):
+        # Each cancel answers on its own: cancelled, or gone already (filled or
+        # cancelled before). Any other refusal leaves the order live: nothing is
+        # recorded as cancelled, and the member is told.
+        refused = [st.get('error') for st in _statuses(body) if isinstance(st, dict) and st.get('error')
+                   and 'already canceled' not in str(st.get('error')).lower()
+                   and 'never placed' not in str(st.get('error')).lower()]
+        if refused or len(_statuses(body)) != len(action.get('cancels') or []):
+            _settle_claim(position.pk, name, index, 'released', observed=observed)
+            PerpPosition.objects.filter(pk=position.pk).update(
+                step_error=str(refused[0] if refused else 'cancel_incomplete')[:120], updated_at=timezone.now())
+            raise FlowError('cancel_rejected')
+        _settle_claim(position.pk, name, index, 'consumed', observed=observed, resting=None)
+        if purpose == 'close_cancel':
+            reconcile_position(PerpPosition.objects.select_related('market').get(pk=position.pk))
     elif purpose in ('fund_dex', 'margin_fund_dex'):
         amount = _d(action['amount'])
         if purpose == 'fund_dex':
@@ -1551,6 +1811,11 @@ def return_plan(user, position_id) -> dict:
     # A top-up step may be moving money between the member's balances right
     # now (core → the market's dex): the return reads them only once it settled.
     _release_stale_margin(position)
+    try:
+        # A cancel sent on an earlier try whose answer was lost: settled from the venue.
+        _settle_lost_cancel(position)
+    except hyperliquid.HyperliquidError as exc:
+        raise FlowError('hyperliquid_unavailable') from exc
     position.refresh_from_db()
     if _pending_claim(position, 'margin_plan'):
         raise FlowError('step_in_flight')
@@ -1562,6 +1827,18 @@ def return_plan(user, position_id) -> dict:
     # just moved the money between the balances).
     steps_seen = json.dumps([(position.flow or {}).get('open_plan'), (position.flow or {}).get('margin_plan')],
                             sort_keys=True, default=str)
+    # A position live on the venue (an entry that filled before we saw it)
+    # keeps its protection: it is never cancelled on the way home.
+    waiting = _refuse_if_live(position)
+    if waiting:
+        # A limit entry still on the book: cancelled first, then the money is
+        # read. Only the entry, never a trigger: Hyperliquid drops the
+        # protection waiting on an entry with it, and if the entry fills in
+        # that same instant the cancel fails and its protection stays armed.
+        # (A reduce-only trigger with no position can never execute.)
+        steps = [{'purpose': 'return_cancel', 'action': _cancel_action(market, waiting)}]
+        _store_plan(position, 'return_plan', steps)
+        return {'position': position, 'steps': steps, 'relay': None, 'replan': True}
     _guard_not_live(position)
     unapplied = sum((_d((c.flow or {}).get('credited') or '0')
                      for c in position.margin_changes.filter(state='funded')), Decimal(0))
@@ -1636,10 +1913,13 @@ def _repost(payload: dict) -> str:
     return 'rejected'
 
 
-def _guard_not_live(position) -> None:
-    """Never send home the margin of a position that is live on the venue
-    (an order whose answer was lost may have filled)."""
+def _refuse_if_live(position) -> list:
+    """A position live on the venue (an order whose answer was lost may have
+    filled) is never treated as money waiting to come home. Returns the entry
+    orders still waiting, read FIRST: a rest that fills between the reads
+    then shows as live, never as flat with nothing waiting."""
     try:
+        waiting = resting_entries(position)
         live = _live_position(position.wallet, position.market) is not None
         # Before an open was ever confirmed, a filled order is a lost answer;
         # after a close, it is just history (the venue check above decides).
@@ -1649,6 +1929,14 @@ def _guard_not_live(position) -> None:
     if live or filled:
         reconcile_position(position)
         raise FlowError('already_open')
+    return waiting
+
+
+def _guard_not_live(position) -> None:
+    """Never send home the margin of a position that is live on the venue, or
+    while an entry on the book could still fill after the money left."""
+    if _refuse_if_live(position):
+        raise FlowError('order_resting')
 
 
 def submit_return(user, position_id, mapping_signature: dict, send_signature: dict) -> dict:
@@ -1821,7 +2109,8 @@ def _settle_closed(position, liquidation: str = '') -> bool:
             fields['close_avg_px'] = sum((_d(f['px']) * _d(f['sz']) for f in closes), Decimal(0)) / total
     events = _size_events(fills)
     # Partial closes and costs never seen while it was open still date past days.
-    _merge_flow(position.pk, cost_events=_cost_events(position), costs_synced_at=time.time(),
+    # Settled only once no entry waits (the callers check the venue): no rest to follow.
+    _merge_flow(position.pk, cost_events=_cost_events(position), costs_synced_at=time.time(), resting=None,
                 **({'size_events': events} if events else {}))
     return _transition(PerpPosition, position.pk, ('open',), **fields)
 
@@ -1972,29 +2261,136 @@ def _adopt_open(position, live: dict) -> bool:
                        entry_avg_px=entry_px, opened_at=opened, flow=flow, step_error='')
 
 
+def _adopt_resting(position) -> bool:
+    """An entry whose answer was lost and that Hyperliquid shows resting on
+    the book (a limit order): its claim is done, the order is followed as
+    resting. Strict: only the venue's own 'open' status counts."""
+    plan = (position.flow or {}).get('open_plan') or {}
+    steps = plan.get('steps') or []
+    for i, c in (plan.get('claims') or {}).items():
+        if c.get('status') not in ('sending', 'unconfirmed') or not c.get('cloid'):
+            continue
+        if int(i) >= len(steps) or steps[int(i)].get('purpose') != 'open_order':
+            continue
+        order = _order_status(position.wallet, c['cloid'])
+        if order is None or order.get('status') != 'open' or _had_fill(order):
+            continue
+        inner = order.get('order') or {}
+        entry = steps[int(i)]['action']['orders'][0]
+        return _settle_claim(position.pk, 'open_plan', int(i), 'consumed',
+                             observed={'issued_ms': plan.get('issued_ms'), 'claim': c},
+                             resting={'oid': inner.get('oid'), 'cloid': c['cloid'], 'px': entry.get('p'),
+                                      'sz': entry.get('s'), 'at': _now_ms()})
+    return False
+
+
+def _clear_dead_resting(position) -> None:
+    """A resting entry Hyperliquid no longer holds and never filled (cancelled,
+    or cancelled by the venue for margin): the money is free again. Strict:
+    an unreadable status keeps it."""
+    resting = (position.flow or {}).get('resting') or {}
+    order = _order_status(position.wallet, resting.get('cloid') or '')
+    if order is not None and order.get('status') != 'open' and not _had_fill(order):
+        _merge_flow(position.pk, resting=None)
+
+
+def _track_entry_growth(position, live: dict) -> None:
+    """An open position whose limit entry may still be filling: its size and
+    average follow the venue's fills (_track_size, dated per fill); here only
+    whether the rest still waits. Strict: an unreadable status keeps it."""
+    resting = (position.flow or {}).get('resting') or {}
+    order = _order_status(position.wallet, resting.get('cloid') or '')
+    if order is not None and order.get('status') != 'open':
+        _merge_flow(position.pk, resting=None)
+
+
+def _settle_lost_cancel(position) -> None:
+    """A cancel on the way home sent with its answer lost: settled from the
+    venue's own order status (strict: an unreadable status keeps it), so a
+    lost answer never blocks the member from opening again or returning."""
+    plan = (position.flow or {}).get('return_plan') or {}
+    steps = plan.get('steps') or []
+    for i, c in (plan.get('claims') or {}).items():
+        if c.get('status') not in ('sending', 'unconfirmed') or _now_ms() - int(c.get('at') or 0) < 120_000:
+            continue
+        if int(i) >= len(steps) or steps[int(i)].get('purpose') != 'return_cancel':
+            continue
+        statuses = []
+        for cancel in steps[int(i)]['action'].get('cancels') or []:
+            body = hyperliquid.info({'type': 'orderStatus', 'user': position.wallet, 'oid': int(cancel['o'])})
+            order = body.get('order') if isinstance(body, dict) and body.get('status') == 'order' else None
+            if isinstance(body, dict) and body.get('status') == 'unknownOid':
+                statuses.append('gone')
+            elif isinstance(order, dict):
+                statuses.append('open' if order.get('status') == 'open' else 'gone')
+            else:
+                return  # unreadable: decided next time
+        observed = {'issued_ms': plan.get('issued_ms'), 'claim': c}
+        if all(st == 'gone' for st in statuses):
+            _settle_claim(position.pk, 'return_plan', int(i), 'consumed', observed=observed)
+        else:
+            # Still on the book: the cancel never applied; it may be planned again.
+            _settle_claim(position.pk, 'return_plan', int(i), 'released', observed=observed)
+
+
+def _note_resting_rest(position) -> None:
+    """An entry adopted after its answer was lost may still be filling: its
+    unfilled rest is followed (shown, cancelled before a close)."""
+    if (position.flow or {}).get('resting'):
+        return
+    for cloid in _open_cloids(position):
+        order = _order_status(position.wallet, cloid)
+        if order is not None and order.get('status') == 'open':
+            inner = order.get('order') or {}
+            _merge_flow(position.pk, resting={'oid': inner.get('oid'), 'cloid': cloid, 'px': inner.get('limitPx'),
+                                              'sz': inner.get('sz'), 'at': _now_ms()})
+            return
+
+
 def _size_events(fills: list) -> list:
-    """Rebuilt from the venue's fills, one event per closing fill at its own
-    time: two partial closes either side of midnight stay two events.
-    Realized is gross; every venue fee is counted once, in cost_events."""
-    events, realized = [], Decimal(0)
+    """Rebuilt from the venue's fills, one event per fill that changed the
+    size, at its own time: two partial closes either side of midnight stay
+    two events, and so do the fills of a limit entry filling in parts (a past
+    day keeps the exposure it really had). Realized is gross; every venue fee
+    is counted once, in cost_events."""
+    events, realized, entry = [], Decimal(0), None
     for f in sorted(fills, key=lambda f: int(f.get('time') or 0)):
         realized += _d(f.get('closedPnl', '0'))
-        if not (str(f.get('dir', '')).startswith('Close') or f.get('liquidation')):
+        direction = str(f.get('dir', ''))
+        opening = direction.startswith('Open')
+        if not (direction.startswith('Close') or opening or f.get('liquidation')):
             continue
         signed = _d(f.get('sz', '0')) * (1 if f.get('side') == 'B' else -1)
+        before = abs(_d(f.get('startPosition', '0')))
         after = abs(_d(f.get('startPosition', '0')) + signed)
+        if opening:
+            # The average entry as of this fill: an earlier day keeps the price
+            # it really had, not one blended with later fills.
+            px, sz = _d(f.get('px', '0')), _d(f.get('sz', '0'))
+            entry = px if entry is None or before == 0 else (entry * before + px * sz) / (before + sz)
         at = datetime.fromtimestamp(int(f.get('time') or 0) / 1000, tz=dt_timezone.utc)
-        events.append({'at': at.isoformat(), 'size': str(after), 'realized': str(realized)})
+        event = {'at': at.isoformat(), 'size': str(after), 'realized': str(realized)}
+        if entry is not None:
+            event['entry'] = str(entry)
+        events.append(event)
     return events
 
 
 def _track_size(position, live: dict) -> None:
-    """A partial close: record the size from now on (and realized so far),
-    so a past day is valued with the exposure it had then."""
+    """A partial close, or a limit entry filling in parts: record the size
+    (and realized so far, and the entry as of each fill) from the venue's own
+    fills, so a past day is valued with the exposure it had then."""
     from blockchain.models import PerpPosition
 
     size = abs(_d(live.get('szi', '0')))
-    if position.size is None or size == Decimal(position.size):
+    venue_entry = _d(live['entryPx']) if live.get('entryPx') else None
+    # Re-read while an entry may still fill too: a fill offset by a partial
+    # close leaves the size unchanged but not the history or the entry.
+    changed = (position.size is not None and size != Decimal(position.size)) \
+        or bool((position.flow or {}).get('resting')) \
+        or (venue_entry is not None and position.entry_avg_px is not None
+            and venue_entry != Decimal(position.entry_avg_px))
+    if position.size is None or not changed:
         return
     since = int(position.created_at.timestamp() * 1000)
     fills = [f for f in hyperliquid.user_fills_by_time(position.wallet, since)
@@ -2008,7 +2404,11 @@ def _track_size(position, live: dict) -> None:
             return
         flow = dict(locked.flow or {})
         flow['size_events'] = events
-        PerpPosition.objects.filter(pk=position.pk).update(size=size, flow=flow, updated_at=timezone.now())
+        fields = {'size': size, 'flow': flow, 'updated_at': timezone.now()}
+        if venue_entry is not None:
+            # The venue's own average entry for the whole size now (it moves only on adds).
+            fields['entry_avg_px'] = venue_entry
+        PerpPosition.objects.filter(pk=position.pk).update(**fields)
 
 
 COST_EVENT_EVERY_S = 3600
@@ -2112,25 +2512,58 @@ def reconcile_position(position) -> str:
                 PerpPosition.objects.filter(pk=position.pk, state='bridging').update(
                     step_error='relay_failure', updated_at=timezone.now())
         elif state == 'funded':
+            _settle_lost_cancel(position)
+            position.refresh_from_db()
+            # Orders first, then the position: a rest filling in between shows
+            # as live on the second read, never as flat with nothing waiting.
+            waiting = resting_entries(position)
             live = _live_position(position.wallet, position.market)
             if live is not None:
-                _adopt_open(position, live)
+                if _adopt_open(position, live):
+                    adopted = PerpPosition.objects.select_related('market').get(pk=position.pk)
+                    if (position.flow or {}).get('resting'):
+                        # A limit entry filled while the member was away.
+                        _notify(adopted, 'filled')
+                    else:
+                        _note_resting_rest(adopted)
             elif _pending_claim(position, 'open_plan') and not _filled_cloid(position):
-                _release_lost_open(position)
+                if not _adopt_resting(position):
+                    _release_lost_open(position)
+            elif (position.flow or {}).get('resting') and not _filled_cloid(position):
+                _clear_dead_resting(position)
             elif _filled_cloid(position):
                 # Filled (answer lost) and already gone: liquidated or closed
                 # before anyone looked. Its opening size and price come from
                 # its own fills, so past days keep the exposure they had.
                 if _adopt_open(position, _opened_from_fills(position)):
-                    _settle_closed(PerpPosition.objects.select_related('market').get(pk=position.pk))
+                    adopted = PerpPosition.objects.select_related('market').get(pk=position.pk)
+                    if waiting:
+                        # Part of its limit entry still waits and may fill:
+                        # it stays open (flat) until that rest is cancelled.
+                        _note_resting_rest(adopted)
+                        _track_size(adopted, {'szi': '0'})
+                    else:
+                        _settle_closed(adopted)
         elif state == 'open':
+            # Orders first, then the position (see 'funded').
+            waiting = resting_entries(position)
             live = _live_position(position.wallet, position.market)
-            if live is None:
+            if live is None and waiting:
+                # Flat for now, but part of its limit entry still waits: it may
+                # fill and reopen it. It stays open (manageable) until that rest
+                # is cancelled (a close is then just the cancel) or fills. Its
+                # history still follows the venue: zero size, the closing fill's
+                # result and its costs, dated.
+                _track_size(position, {'szi': '0'})
+                _track_costs(position, {})
+            elif live is None:
                 member_closed = position.close_oid is not None
                 if _settle_closed(position) and not member_closed:
                     # Take-profit, stop-loss or liquidation while away.
                     _notify(PerpPosition.objects.select_related('market').get(pk=position.pk))
             else:
+                if (position.flow or {}).get('resting'):
+                    _track_entry_growth(position, live)
                 if position.entry_oid and not (position.flow or {}).get('entry_fill_ms'):
                     fill_ms = _entry_fill_ms(position, position.entry_oid)
                     if fill_ms:
@@ -2216,6 +2649,8 @@ def reconcile_position(position) -> str:
                                     match={'relay_back_id': position.relay_back_id}, state='return_failed',
                                     step_error='return_expired')
                     # Sent (or unknown): Relay delivers or refunds it; keep waiting.
+        elif state in ('closed', 'liquidated', 'return_failed'):
+            _settle_lost_cancel(position)
         elif state == 'refunded':
             refunded_at = int((position.flow or {}).get('refunded_at') or 0)
             if refunded_at and time.time() - refunded_at > REFUND_HOLD_S:
@@ -2299,6 +2734,7 @@ def reserved_usdt_wei(wallet: str) -> int:
 # ── notifications ───────────────────────────────────────────────────────
 
 _NOTICES = {
+    'filled': ('Tu orden de {ticker} se ejecutó', 'Tu posición ya está abierta.'),
     'closed': ('Tu posición en {ticker} se cerró', 'Abre Confío para traer el dinero a tus dólares.'),
     'liquidated': ('Tu posición en {ticker} se liquidó', 'Revisa el resultado en Futuros.'),
     'landed': ('Tu dinero de {ticker} ya llegó', 'Confirma para sumarlo a tus dólares.'),

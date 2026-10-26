@@ -8,7 +8,7 @@ from cusd_plus import hyperliquid, perps_catalog
 
 OPEN_SETTINGS = dict(
     PERPS_ENABLED=True, PERPS_TRADING_ENABLED=True, PERPS_OPEN_ENABLED=True, PERPS_IOS_ENABLED=True,
-    PERPS_ALLOWED_USER_IDS='', PERPS_BLOCKED_COUNTRIES='', PERPS_EXCLUDED_MARKETS='',
+    PERPS_ALLOWED_USER_IDS='', PERPS_BLOCKED_COUNTRIES='US,CA,GB,BE', PERPS_EXCLUDED_MARKETS='',
     CUSD_PLUS_7702_ENABLED=True, CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '7a' * 20,
 )
 
@@ -202,6 +202,8 @@ class PerpsGateTests(TestCase):
             self.assertEqual(self._gate(country), 'trade_not_available', country or 'missing phone')
         with override_settings(PERPS_BLOCKED_COUNTRIES='ar'):
             self.assertEqual(self._gate('AR'), 'trade_not_available')
+            # The ops list replaces the default; sanctioned countries stay blocked in code.
+            self.assertEqual(self._gate('IR'), 'trade_not_available')
         self.assertIsNone(perps_risk.exit_gate())
         with override_settings(PERPS_TRADING_ENABLED=False):
             self.assertEqual(perps_risk.exit_gate(), 'trade_not_available')

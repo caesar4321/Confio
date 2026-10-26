@@ -4,7 +4,7 @@
 // return to confirm) shows that one next step, so nothing is ever stuck.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { Alert, Modal, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -29,11 +29,15 @@ import {
   addMargin,
   bringHome,
   closePosition,
+  openOnVenue,
   perpsErrorCopy,
   releaseRefund,
   resumePosition,
+  rememberReviewedEntry,
+  reviewedForResume,
   setTpSl,
 } from '../services/perps';
+import { useLiveMid } from '../hooks/useLiveMids';
 import { MainStackParamList } from '../types/navigation';
 import { confirmDeepClose, confirmImpact, confirmReturnAmount } from '../components/futures/confirmImpact';
 import { parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
@@ -71,6 +75,13 @@ export const FuturesPositionScreen = () => {
   const [finished, setFinished] = useState<PerpPosition | null>(null);
 
   useFocusEffect(useCallback(() => { refetch().catch(() => {}); }, [refetch]));
+  const liveMid = useLiveMid(position?.coin ?? null);
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refetch().catch(() => {});
+    setRefreshing(false);
+  }, [refetch]);
 
   const running = useRef(false);
   const run = async (kind: ProgressKind, work: () => Promise<unknown>) => {
@@ -137,12 +148,18 @@ export const FuturesPositionScreen = () => {
   }
 
   const side = SIDE_COLORS[position.side];
-  const pnl = position.unrealizedPnlUsd;
-  const roe = position.returnOnEquity != null ? position.returnOnEquity * 100 : null;
   const pending = stepLabel(position.nextAction, position.state);
   const isOpen = position.state === 'open';
   const done = position.state === 'done';
-  const markPx = position.markPx ?? market?.markPx ?? null;
+  // Live from Hyperliquid's own feed while this screen is open; the server's mark otherwise.
+  const markPx = liveMid ?? position.markPx ?? market?.markPx ?? null;
+  // The open result moves with the price between the server's reads.
+  const pnl = isOpen && liveMid != null && position.entryPx && position.size != null
+    ? (liveMid - position.entryPx) * position.size : position.unrealizedPnlUsd;
+  const margin = position.marginUsedUsd ?? null;
+  const roe = isOpen && pnl != null && margin ? (pnl / margin) * 100
+    : position.returnOnEquity != null ? position.returnOnEquity * 100 : null;
+  const waitingFill = position.nextAction === 'wait_fill';
   const chartUp = closes.length >= 2 ? closes[closes.length - 1] >= closes[0] : true;
 
   return (
@@ -157,7 +174,8 @@ export const FuturesPositionScreen = () => {
         isLight
         showBackButton
       />
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />}>
         <View style={[styles.hero, { borderColor: side.solid }]}>
           <View style={styles.heroTop}>
             <View style={[styles.sideTag, { backgroundColor: side.soft }]}>
@@ -190,13 +208,23 @@ export const FuturesPositionScreen = () => {
           )}
         </View>
 
-        {pending && !done && (
+        {waitingFill && (
+          <OrderWaitingCard position={position} markPx={markPx} disabled={Boolean(busy)}
+            onCancel={() => Alert.alert(
+              'Cancelar tu orden',
+              'La orden se cancela en Hyperliquid y tu margen vuelve a tus dólares. Se aplican el costo de la transferencia y el 0,9% de entrada.',
+              [{ text: 'Seguir esperando', style: 'cancel' },
+                { text: 'Cancelar orden', style: 'destructive', onPress: () => run('close', () => bringHome(position.id, setStep, confirmReturnAmount, positionValueUsd(position), position.coin)) }],
+            )} />
+        )}
+
+        {pending && !done && !waitingFill && (
           <NextStepCard position={position} label={pending} disabled={Boolean(busy)}
             onContinue={() => run(position.nextAction === 'return' || position.nextAction === 'enter'
               || position.nextAction === 'wait_return' ? 'close' : position.nextAction === 'finish_margin' ? 'margin' : 'resume',
             () => (['return', 'enter', 'wait_return'].includes(position.nextAction)
               ? bringHome(position.id, setStep, confirmReturnAmount, positionValueUsd(position), position.coin)
-              : resumePosition(position, setStep, confirmImpact, confirmReturnAmount)))}
+              : resumeOrOpenUnprotected(position, setStep)))}
             onRelease={position.nextAction === 'retry_bridge' ? () => Alert.alert(
               'Volver a tus dólares',
               'Tus USDT vuelven a tu saldo. Se aplica el 0,9% de entrada, como en cualquier regreso.',
@@ -215,6 +243,18 @@ export const FuturesPositionScreen = () => {
           <View style={styles.card}>
             <LiquidationGauge side={position.side} entryPx={position.entryPx} markPx={markPx}
               liquidationPx={position.liquidationPx} />
+          </View>
+        )}
+
+        {isOpen && position.restingPx != null && (
+          <View style={styles.restNote}>
+            <Icon name="clock" size={15} color="#92400E" />
+            <Text style={styles.restText}>
+              Parte de tu orden sigue esperando a {formatPerpPrice(position.restingPx)}. Al cerrar, la cancelamos primero.
+              {(position.plannedTakeProfitPx || position.plannedStopLossPx) && position.takeProfitPx == null && position.stopLossPx == null
+                ? ' La protección que elegiste se activa cuando la orden se completa: usa Proteger para cubrir ya lo abierto.'
+                : ''}
+            </Text>
           </View>
         )}
 
@@ -273,6 +313,72 @@ export const FuturesPositionScreen = () => {
   );
 };
 
+/** Resume an open; if the market moved past the protection chosen with the
+ *  entry while the margin crossed, the member chooses to open without it. */
+const resumeOrOpenUnprotected = async (position: PerpPosition, onStep: (s: PerpsStep) => void) => {
+  try {
+    return await resumePosition(position, onStep, confirmImpact, confirmReturnAmount);
+  } catch (e) {
+    if ((e as { code?: string })?.code !== 'bad_trigger_side') throw e;
+    const go = await new Promise<boolean>((resolve) => Alert.alert(
+      'El precio pasó tu protección',
+      'Mientras tu margen cruzaba, el precio pasó el nivel de toma de ganancia o de stop que elegiste. Puedes abrir sin esa protección y ponerla después, o traer tu dinero de vuelta.',
+      [{ text: 'Ahora no', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Abrir sin protección', onPress: () => resolve(true) }],
+    ));
+    if (!go) throw e;
+    onStep('open');
+    // The member's new choice, kept like the original review: a retry signs it too.
+    const reviewed = { ...(await reviewedForResume(position)), takeProfitPx: null, stopLossPx: null };
+    await rememberReviewedEntry(position.id, reviewed);
+    return openOnVenue(position.id, { reviewed, onImpact: confirmImpact, dropProtection: true });
+  }
+};
+
+function OrderWaitingCard({ position, markPx, onCancel, disabled }: {
+  position: PerpPosition; markPx: number | null; onCancel: () => void; disabled: boolean;
+}) {
+  const px = position.restingPx ?? position.limitPx ?? null;
+  const away = px && markPx ? Math.abs(markPx - px) / markPx * 100 : null;
+  const moveWord = px && markPx ? (px < markPx ? 'baje' : 'suba') : null;
+  return (
+    <View style={styles.waitCard}>
+      <View style={styles.nextHead}>
+        <View style={styles.pulseDot} />
+        <Text style={styles.waitTitle}>Tu orden espera su precio</Text>
+      </View>
+      <View style={styles.waitRow}>
+        <View>
+          <Text style={styles.waitLabel}>Se abre a</Text>
+          <Text style={styles.waitPx}>{formatPerpPrice(px)}</Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={styles.waitLabel}>Ahora</Text>
+          <Text style={styles.waitNow}>{formatPerpPrice(markPx)}</Text>
+        </View>
+      </View>
+      {away != null && moveWord && (
+        <Text style={styles.waitHint}>
+          Falta que {position.ticker} {moveWord} {formatPctSigned(away).replace(/^[+−]/, '')}. Te avisamos cuando se ejecute.
+        </Text>
+      )}
+      {(position.plannedTakeProfitPx || position.plannedStopLossPx) ? (
+        <View style={styles.waitProtect}>
+          <Icon name="shield" size={14} color={colors.primaryDark} />
+          <Text style={styles.waitProtectText}>
+            {[position.plannedTakeProfitPx ? `Ganancia en ${formatPerpPrice(position.plannedTakeProfitPx)}` : null,
+              position.plannedStopLossPx ? `Stop en ${formatPerpPrice(position.plannedStopLossPx)}` : null]
+              .filter(Boolean).join(' · ')}
+          </Text>
+        </View>
+      ) : null}
+      <Pressable style={styles.waitCancel} onPress={onCancel} disabled={disabled} testID="perps-cancel-order">
+        <Text style={styles.waitCancelText}>Cancelar y traer a mis dólares</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function NextStepCard({ position, label, onContinue, onRelease, disabled }: {
   position: PerpPosition; label: string; onContinue: () => void; onRelease?: () => void; disabled: boolean;
 }) {
@@ -294,6 +400,15 @@ function NextStepCard({ position, label, onContinue, onRelease, disabled }: {
         {waiting ? 'Normalmente tarda segundos. Puedes salir: te avisamos cuando termine.'
           : 'Tu dinero está seguro en una cuenta a tu nombre. Falta un paso con tu firma.'}
       </Text>
+      {(position.nextAction === 'open_order' || position.nextAction === 'retry_bridge') && (
+        // What gets signed, on screen before the tap.
+        <Text style={styles.nextEntry}>
+          {[position.orderType === 'limit' && position.limitPx ? `Entrada a ${formatPerpPrice(position.limitPx)}` : 'Entrada al precio del momento',
+            position.plannedTakeProfitPx ? `ganancia en ${formatPerpPrice(position.plannedTakeProfitPx)}` : null,
+            position.plannedStopLossPx ? `stop en ${formatPerpPrice(position.plannedStopLossPx)}` : null]
+            .filter(Boolean).join(' · ')}
+        </Text>
+      )}
       {cta && (
         <Pressable style={styles.nextBtn} onPress={onContinue} disabled={disabled}>
           <Text style={styles.nextBtnText}>{cta}</Text>
@@ -426,6 +541,21 @@ function TpSlSheet({ visible, onClose, onConfirm, position, markPx }: {
 }
 
 const styles = StyleSheet.create({
+  nextEntry: { fontSize: 13, fontWeight: '700', color: '#78350F', marginTop: 8 },
+  restNote: { flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: '#FEF3C7', borderRadius: 14, padding: 12, marginBottom: 14 },
+  restText: { flex: 1, fontSize: 13, lineHeight: 18, color: '#92400E' },
+  waitCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#FDE68A' },
+  waitTitle: { fontSize: 15, fontWeight: '800', color: '#92400E' },
+  pulseDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#F59E0B' },
+  waitRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
+  waitLabel: { fontSize: 12, fontWeight: '700', color: colors.text.light },
+  waitPx: { fontSize: 26, fontWeight: '800', color: colors.text.primary, marginTop: 2 },
+  waitNow: { fontSize: 18, fontWeight: '700', color: colors.text.secondary, marginTop: 6 },
+  waitHint: { fontSize: 13, lineHeight: 18, color: colors.text.secondary, marginTop: 10 },
+  waitProtect: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 10, backgroundColor: '#ECFDF5', borderRadius: 10, padding: 10 },
+  waitProtectText: { flex: 1, fontSize: 12, fontWeight: '600', color: colors.primaryDark },
+  waitCancel: { marginTop: 14, borderRadius: 14, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  waitCancelText: { fontSize: 15, fontWeight: '800', color: colors.text.primary },
   // A success screen centers its column: the CTA carries its own width, like the Oro y Bitcoin twin.
   successCta: { backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 40, marginTop: 32 },
   successCtaText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },

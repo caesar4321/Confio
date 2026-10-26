@@ -46,6 +46,11 @@ export const tickerOfSymbol = (symbol: string): string => symbol.replace(/on$/, 
 export type LeagueRow = {
   rank: number;
   pct: string;
+  /** What ranks: dollars over the period, realized and unrealized (a team: per member). */
+  pnlUsd?: string | null;
+  /** Investors: Futuros held in the period (null: none). */
+  avgLeverage?: number | null;
+  liquidations?: number | null;
   members?: number | null;
   userId?: string | null;
   username?: string | null;
@@ -80,6 +85,8 @@ export type Team = {
   joinBlockMessage?: string | null;
   access: 'open' | 'viewer_hidden' | 'viewer_unverified' | string;
   returnPct?: string | null;
+  /** Dollars per member over the range (what the league ranks by). */
+  returnPnlUsd?: string | null;
   leagueRank?: number | null;
   championMonths: string[];
   pendingRequests?: number | null;
@@ -103,10 +110,34 @@ export const buildTeamInviteLink = (token: string): string =>
   `https://confio.lat/invite/team~${encodeURIComponent(token)}?source=team`;
 
 export const buildTeamInviteMessage = (teamName: string, link: string): string =>
-  `Únete a mi equipo "${teamName}" en Confío. Invertimos cada uno desde su cuenta y competimos en la Liga por rentabilidad.\n\n${link}`;
+  `Únete a mi equipo "${teamName}" en Confío. Invertimos cada uno desde su cuenta y competimos en la Liga por ganancias.\n\n${link}`;
 
 /** The team token in an invite/referral code ("team~…", any case), or null. */
 export const teamTokenFromCode = (code: string | null | undefined): string | null => {
   const match = /^team~([a-z0-9]{12,32})$/i.exec(String(code || '').trim());
   return match ? match[1].toLowerCase() : null;
+};
+
+/** The league table, in dollars; a server without the dollar fields answers
+ *  the % table instead (never an empty league). */
+export const queryLeagueTable = async (
+  client: { query: (opts: any) => Promise<any> },
+  variables: { kind: string; range: string; offset: number; limit: number },
+) => {
+  const { GET_LEAGUE_TABLE, GET_LEAGUE_TABLE_LEGACY } = await import('../apollo/queries');
+  try {
+    return { ...(await client.query({ query: GET_LEAGUE_TABLE, variables, fetchPolicy: 'network-only' })), legacy: false };
+  } catch (e) {
+    // An older server answers a validation error: in the message, in
+    // graphQLErrors, or (HTTP 400) inside networkError.result.errors.
+    const err = e as any;
+    const messages = [
+      err?.message,
+      ...(err?.graphQLErrors ?? []).map((g: any) => g?.message),
+      ...(err?.networkError?.result?.errors ?? []).map((g: any) => g?.message),
+    ].map((m) => String(m ?? ''));
+    if (!messages.some((m) => /Cannot query field/.test(m))) throw e;
+    // An older server: it still ranks by % with its own floor (the copy says so).
+    return { ...(await client.query({ query: GET_LEAGUE_TABLE_LEGACY, variables, fetchPolicy: 'network-only' })), legacy: true };
+  }
 };

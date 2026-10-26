@@ -157,7 +157,8 @@ class LeagueTests(TeamTestBase):
         Account.objects.filter(user=user, account_type='personal').update(bsc_address=wallet)
         PortfolioDailySnapshot.objects.create(
             user=user, wallet=wallet, day=day, value_start_usd=Decimal(start),
-            value_end_usd=Decimal(start), net_flow_usd=Decimal('0'), gain_usd=Decimal('0'),
+            value_end_usd=Decimal(start), net_flow_usd=Decimal('0'),
+            gain_usd=(Decimal(start) * Decimal(ret)) if trusted else None,
             daily_return=Decimal(ret) if trusted else None, ledger_trusted=trusted)
 
     def team_with(self, n, name='Liga A'):
@@ -205,6 +206,41 @@ class LeagueTests(TeamTestBase):
         for d in days:
             self.snap(c, d, '0.10', start='5')
         self.assertEqual([r.user_id for r in league.investor_table(days)], [a.id])
+
+    def test_investors_rank_by_dollars_with_the_percent_beside_them(self):
+        whale, small, dust = make_user(), make_user(), make_user()
+        days = [self.DAY - timedelta(days=1), self.DAY]
+        for d in days:
+            self.snap(whale, d, '0.005', start='10000')    # +$50 a day, +1% over two days
+            self.snap(small, d, '0.40', start='50')        # +$20 a day, nearly doubling
+            self.snap(dust, d, '1.00', start='12')         # +100% a day on dust: under the $20 floor
+        rows = league.investor_table(days)
+        self.assertEqual([r.user_id for r in rows], [whale.id, small.id])
+        self.assertEqual(rows[0].pnl, Decimal('100'))
+        self.assertGreater(rows[1].pct, rows[0].pct, 'the % stays shown: the small account doubled')
+
+    def test_a_team_ranks_by_its_members_average_dollars(self):
+        team, members = self.team_with(3)
+        self.snap(members[0], self.DAY, '0.10', start='1000')   # +$100
+        self.snap(members[1], self.DAY, '0.00', start='20')     # $0
+        self.snap(members[2], self.DAY, '0.10', start='20')     # +$2
+        league.compute_team_day(team, self.DAY)
+        self.assertEqual(TeamDailyReturn.objects.get(team=team, day=self.DAY).mean_gain_usd, Decimal('34'))
+
+    def test_futures_risk_shows_leverage_and_liquidations_in_the_period(self):
+        from blockchain.models import PerpMarket, PerpPosition
+
+        user = make_user()
+        market = PerpMarket.objects.create(coin='BTC', dex='', asset_id=0, sz_decimals=5, max_leverage=40,
+                                           collateral='USDC', synced_at=timezone.now())
+        start = timezone.make_aware(timezone.datetime(2026, 10, 21, 6))
+        PerpPosition.objects.create(user=user, wallet='0x1', market=market, side='long', leverage=10,
+                                    margin_usd=Decimal('30'), state='done', opened_at=start,
+                                    closed_at=start + timedelta(hours=2), liquidation='book')
+        PerpPosition.objects.create(user=user, wallet='0x1', market=market, side='short', leverage=2,
+                                    margin_usd=Decimal('10'), state='open', opened_at=start)
+        lev, liquidations = league.futures_risk([user.id], [self.DAY])[user.id]
+        self.assertEqual((lev, liquidations), (Decimal('8'), 1))
 
     def test_locked_viewers_see_only_the_top_three(self):
         viewer = make_user()
@@ -612,9 +648,9 @@ class AllTimeTests(LeagueTests):
         other, _ = self.team_with(5, name='Liga B')
         for i, day in enumerate(self.days_back(35)):
             TeamDailyReturn.objects.create(team=team, day=day, daily_return=Decimal('0.001'), qualifying_members=5,
-                                           contributors=[m.id for m in members])
+                                           mean_gain_usd=Decimal('0.02'), contributors=[m.id for m in members])
             # Two-member days 20 days ago: the other team's run is too short.
-            TeamDailyReturn.objects.create(team=other, day=day, daily_return=Decimal('0.01'),
+            TeamDailyReturn.objects.create(team=other, day=day, daily_return=Decimal('0.01'), mean_gain_usd=Decimal('0.2'),
                                            qualifying_members=2 if i == 15 else 5, contributors=[])
         for m in members:
             for day in self.days_back(35):

@@ -12,10 +12,10 @@ import { InvestorAccess, InvestorLockCard, isLocked } from './InvestorLockCard';
 import { TeamBadge } from './TeamBadge';
 import { colors } from '../config/theme';
 import { SET_COMMUNITY_PORTFOLIO_HIDDEN_WITH_ERROR } from '../apollo/mutations';
-import { GET_LEAGUE_DAYS_TO_RANK, GET_LEAGUE_TABLE, GET_MY_TEAM, GET_TEAMS_LOOKING } from '../apollo/queries';
+import { GET_LEAGUE_DAYS_TO_RANK, GET_MY_TEAM, GET_TEAMS_LOOKING } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
-import { formatPctSigned } from '../utils/portfolioFormat';
-import { LEAGUE_RANGES, LeagueRange, LeagueRow, TEAM_MAX_MEMBERS, TEAM_MIN_RANKED, Team, daysToRankLabel, rankMark } from '../utils/teams';
+import { formatPctSigned, formatUsd } from '../utils/portfolioFormat';
+import { LEAGUE_RANGES, LeagueRange, LeagueRow, TEAM_MAX_MEMBERS, TEAM_MIN_RANKED, Team, daysToRankLabel, queryLeagueTable, rankMark } from '../utils/teams';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 export type LeagueKind = 'teams' | 'investors';
@@ -30,10 +30,16 @@ type Props = {
 
 const PAGE = 30;
 
+/** "8" / "2.5": leverage with at most one decimal, no trailing zero. */
+const formatDecimalShort = (n: number) => String(Math.round(n * 10) / 10);
+
 /**
- * The league: teams and investors ranked by % return (never by how much
- * they have). Badges only, no money prizes. Reciprocal like portfolios: a
- * hidden or unverified viewer sees the top 3 and how to take part.
+ * The league: investors ranked by what they gained in dollars over the
+ * period (realized and unrealized, their own money; Futuros at margin),
+ * teams by that gain per member (averaged, so size never wins). The % sits
+ * beside it, and Futuros risk (average leverage, liquidations) on investor
+ * rows. Badges only, no money prizes. Reciprocal like portfolios: a hidden
+ * or unverified viewer sees the top 3 and how to take part.
  */
 export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
   const navigation = useNavigation<Navigation>();
@@ -47,12 +53,14 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
   const [range, setRange] = useState<LeagueRange>('month');
   const [rows, setRows] = useState<LeagueRow[] | null>(null);
   const [access, setAccess] = useState<InvestorAccess | null>(null);
-  const [mine, setMine] = useState<{ rank: number; pct: string | null } | null>(null);
+  const [mine, setMine] = useState<{ rank: number; pct: string | null; pnl: string | null } | null>(null);
   const [myTeam, setMyTeam] = useState<Team | null | undefined>(undefined);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // An older server ranks by % (its rules, not the dollar ones).
+  const [legacy, setLegacy] = useState(false);
   const generation = useRef(0);
   // No next page while a first-page load is in flight: its offset would be stale.
   const firstPending = useRef(false);
@@ -78,18 +86,15 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
         .catch(() => {});
     }
     try {
-      const { data } = await client.query({
-        query: GET_LEAGUE_TABLE,
-        variables: { kind: which, range: period, offset: 0, limit: PAGE },
-        fetchPolicy: 'network-only',
-      });
+      const { data, legacy: old } = await queryLeagueTable(client, { kind: which, range: period, offset: 0, limit: PAGE });
       if (generation.current !== requested) return;
+      setLegacy(old);
       const table = data?.leagueTable;
       setRows(table?.rows ?? []);
       consumed.current = PAGE;
       setHasMore(Boolean(table?.hasMore));
       setAccess((table?.access ?? null) as InvestorAccess | null);
-      setMine(table?.myRank ? { rank: table.myRank, pct: table.myPct ?? null } : null);
+      setMine(table?.myRank ? { rank: table.myRank, pct: table.myPct ?? null, pnl: table.myPnlUsd ?? null } : null);
       setDaysToRank(null);
       if (period === 'all' && !table?.myRank) {
         client.query({ query: GET_LEAGUE_DAYS_TO_RANK, variables: { kind: which }, fetchPolicy: 'network-only' })
@@ -116,11 +121,7 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
     try {
       // A page whose rows were all left out (blocks) reads on, a few pages at most.
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const { data } = await client.query({
-          query: GET_LEAGUE_TABLE,
-          variables: { kind, range, offset: consumed.current, limit: PAGE },
-          fetchPolicy: 'network-only',
-        });
+        const { data } = await queryLeagueTable(client, { kind, range, offset: consumed.current, limit: PAGE });
         if (generation.current !== requested) return;
         const table = data?.leagueTable;
         const page: LeagueRow[] = table?.rows ?? [];
@@ -175,7 +176,12 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
 
   const renderItem = ({ item }: { item: LeagueRow }) => {
     const pct = formatPctSigned(item.pct);
-    const up = !item.pct.startsWith('-');
+    const pnl = formatUsd(item.pnlUsd, { signed: true });
+    const up = !(item.pnlUsd ?? item.pct).startsWith('-');
+    const risk = [
+      item.avgLeverage != null ? `${formatDecimalShort(item.avgLeverage)}x prom.` : null,
+      item.liquidations ? `${item.liquidations} ${item.liquidations === 1 ? 'liquidación' : 'liquidaciones'}` : null,
+    ].filter(Boolean) as string[];
     const open = () => {
       if (item.team) navigation.navigate('Team', { teamId: item.team.id });
       else if (item.userId) navigation.navigate('CommunityMemberProfile', { userId: item.userId });
@@ -191,10 +197,21 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
         <View style={styles.rowBody}>
           <Text style={styles.name} numberOfLines={1}>{item.team ? item.team.name : item.username}</Text>
           {item.team ? (
-            <Text style={styles.meta}>{item.members ?? item.team.memberCount} miembros cuentan</Text>
+            <Text style={styles.meta}>{item.members ?? item.team.memberCount} miembros cuentan · por miembro</Text>
+          ) : risk.length ? (
+            <View style={styles.riskRow}>
+              {risk.map((r) => (
+                <View key={r} style={[styles.riskChip, r.includes('liquid') && styles.riskChipBad]}>
+                  <Text style={[styles.riskText, r.includes('liquid') && styles.riskTextBad]}>{r}</Text>
+                </View>
+              ))}
+            </View>
           ) : null}
         </View>
-        <Text style={[styles.pct, up ? styles.up : styles.down]}>{pct}</Text>
+        <View style={styles.result}>
+          <Text style={[styles.pnl, up ? styles.up : styles.down]}>{pnl ?? pct}</Text>
+          {pnl && pct ? <Text style={styles.pctSmall}>{pct}</Text> : null}
+        </View>
       </Pressable>
     );
   };
@@ -233,9 +250,13 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
         </View>
       ) : null}
       <Text style={styles.explainer}>
-        {kind === 'teams'
-          ? 'Gana el equipo con mejor rentabilidad, no el que más invierte. Cuentan los equipos con 5 miembros o más.'
-          : 'Gana quien tenga mejor rentabilidad en su portafolio, no quien más invierte.'}
+        {legacy
+          ? (kind === 'teams'
+            ? 'Gana el equipo con mejor rentabilidad, no el que más invierte. Cuentan los equipos con 5 miembros o más.'
+            : 'Gana quien tenga mejor rentabilidad en su portafolio, no quien más invierte.')
+          : kind === 'teams'
+            ? 'Gana el equipo que más gana por miembro, en dólares: un promedio, así ser más grande no da ventaja. Cuentan los equipos con 5 miembros o más.'
+            : 'Gana quien más gana en dólares en el periodo, contando lo que vendió y lo que aún tiene. Al lado ves el %, y en futuros el apalancamiento y las liquidaciones. Clasificas con $20 invertidos en promedio.'}
         {range === 'all' ? ' Total suma los días seguidos con historial y clasifica desde 30 días.' : ''}
         {' '}Solo insignias, sin premios en dinero.
       </Text>
@@ -246,7 +267,7 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
             <Text style={styles.name} numberOfLines={1}>{myTeam.name}</Text>
             <Text style={styles.meta}>
               {mine
-                ? `Tu equipo va ${rankMark(mine.rank)} con ${formatPctSigned(mine.pct)}`
+                ? `Tu equipo va ${rankMark(mine.rank)} con ${formatUsd(mine.pnl, { signed: true }) ?? formatPctSigned(mine.pct)} por miembro`
                 : daysToRankLabel(range === 'all' ? daysToRank : null, true) ?? 'Tu equipo aún no clasifica en este periodo'}
             </Text>
           </View>
@@ -259,8 +280,9 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
             <Text style={styles.name}>Tu posición</Text>
             <Text style={styles.meta}>
               {mine
-                ? `${rankMark(mine.rank)} con ${formatPctSigned(mine.pct)}`
-                : daysToRankLabel(range === 'all' ? daysToRank : null) ?? 'Aún no clasificas en este periodo (mínimo $10 invertidos)'}
+                ? `${rankMark(mine.rank)} con ${[formatUsd(mine.pnl, { signed: true }), formatPctSigned(mine.pct)].filter(Boolean).join(' · ')}`
+                : daysToRankLabel(range === 'all' ? daysToRank : null)
+                  ?? `Aún no clasificas en este periodo (mínimo ${legacy ? '$10 invertidos' : '$20 invertidos en promedio'})`}
             </Text>
           </View>
         </View>
@@ -366,6 +388,14 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: '600', color: colors.dark },
   meta: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
   pct: { fontSize: 15, fontWeight: '700' },
+  result: { alignItems: 'flex-end' },
+  pnl: { fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  pctSmall: { marginTop: 2, fontSize: 12, fontWeight: '600', color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+  riskRow: { flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' },
+  riskChip: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, backgroundColor: colors.neutral },
+  riskChipBad: { backgroundColor: '#FEE2E2' },
+  riskText: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
+  riskTextBad: { color: '#B91C1C' },
   up: { color: colors.flowIn.textSmall },
   down: { color: colors.error.icon },
   lock: { padding: 16 },

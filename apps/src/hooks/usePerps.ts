@@ -2,7 +2,8 @@
 // services/perps): against a server without Futuros only these fail, and a
 // failure reads as "not available", never as zero.
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import { AppState } from 'react-native';
 import { useQuery } from '@apollo/client';
 
 import { useAuthReady } from '../contexts/AuthContext';
@@ -15,6 +16,20 @@ import {
   PerpPosition,
   PerpsCapabilities,
 } from '../services/perps';
+
+/** Back in the foreground: read again at once (prices moved while away;
+ *  polls don't run in the background), not at the next poll tick. */
+const useRefetchOnForeground = (refetch: () => Promise<unknown>, enabled: boolean) => {
+  const latest = useRef(refetch);
+  latest.current = refetch;
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') latest.current().catch(() => {});
+    });
+    return () => sub.remove();
+  }, [enabled]);
+};
 
 export const usePerpsCapabilities = (skip = false) => {
   const authReady = useAuthReady();
@@ -29,9 +44,10 @@ export const usePerpsCapabilities = (skip = false) => {
 export const usePerpsMarkets = (enabled: boolean) => {
   const { data, loading, refetch } = useQuery(GET_PERPS_MARKETS, {
     fetchPolicy: 'cache-and-network',
-    pollInterval: enabled ? 20_000 : 0,
+    pollInterval: enabled ? 15_000 : 0,
     skip: !enabled,
   });
+  useRefetchOnForeground(refetch, enabled);
   const markets: PerpMarket[] = useMemo(() => data?.perpsMarkets ?? [], [data]);
   const byCoin = (coin: string) => markets.find((m) => m.coin === coin);
   return { markets, byCoin, loading: loading && !data, refetch };
@@ -46,11 +62,17 @@ export const usePerpsPositions = (enabled: boolean, { includeDone = false, pollM
     pollInterval: enabled ? pollMs : 0,
     skip: !enabled || !authReady,
   });
+  useRefetchOnForeground(refetch, enabled && authReady);
   const positions: PerpPosition[] | null = data ? data.perpsPositions ?? null : null;
   // Asked and not answered (Hyperliquid unreadable, or the query failed):
   // "we don't know", never "you have nothing".
   // An older server without Futuros rejects the field: nobody holds any there.
-  const unsupported = /Cannot query field/.test(error?.message ?? '');
+  // (Also inside graphQLErrors, or an HTTP 400's networkError.result.errors.)
+  const unsupported = [error?.message, ...((error as any)?.graphQLErrors ?? []).map((g: any) => g?.message),
+    ...((error as any)?.networkError?.result?.errors ?? []).map((g: any) => g?.message)]
+    // Only the root field missing means "no Futuros here": a missing sub-field
+    // (an older server than this build) is unknown, never "you have nothing".
+    .some((m) => /Cannot query field "perpsPositions"/.test(String(m ?? '')));
   const unknown = enabled && authReady && !loading
     && ((Boolean(error) && !unsupported) || (Boolean(data) && data.perpsPositions == null));
   return { positions, loading: loading && !data, unknown, refetch };

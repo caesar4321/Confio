@@ -136,12 +136,13 @@ CRYPTO_POLICY = GeoPolicy(
 
 
 # ── Futuros (Hyperliquid perps) ────────────────────────────────────────
-# Not an Ondo product either. The baseline is the venue's own restricted list
-# (US, Ontario, sanctioned territories): Canada is blocked whole because a
-# phone or IP country cannot tell Ontario apart. GB and BE follow the extra
-# exclusions of other wallets offering the same venue. Only OPENS are gated;
-# a holder can always close and bring the money home.
-PERPS_BASELINE_BLOCKED = frozenset({'US', 'CA', 'CU', 'IR', 'KP', 'SY', 'GB', 'BE'})
+# Not an Ondo product either. Like Bitcoin & gold, only sanctioned countries
+# are fixed in code; everything else comes from PERPS_BLOCKED_COUNTRIES (no
+# deploy to change it), whose default is the venue's own restricted list (US,
+# Ontario: Canada whole, a phone or IP country cannot tell Ontario apart) plus
+# GB and BE, as other wallets offering the same venue exclude. Only OPENS are
+# gated; a holder can always close and bring the money home.
+PERPS_SANCTIONED = frozenset({'CU', 'IR', 'KP', 'SY'})
 
 PERPS_INELIGIBLE_MESSAGE = (
     'Los futuros no están disponibles en tu país. '
@@ -157,7 +158,7 @@ def _country_list(setting_name: str) -> frozenset:
 
 
 def _perps_blocked_countries():
-    return PERPS_BASELINE_BLOCKED | _country_list('PERPS_BLOCKED_COUNTRIES')
+    return PERPS_SANCTIONED | _country_list('PERPS_BLOCKED_COUNTRIES')
 
 
 PERPS_POLICY = GeoPolicy(

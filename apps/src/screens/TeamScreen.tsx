@@ -27,6 +27,7 @@ import {
 } from '../apollo/mutations';
 import {
   GET_TEAM,
+  GET_TEAM_PNL,
   GET_TEAM_INVITE,
   GET_TEAM_JOIN_REQUESTS,
   GET_TEAM_MEMBERS,
@@ -35,7 +36,7 @@ import {
 } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { chatTime } from '../utils/directMessages';
-import { formatPctSigned } from '../utils/portfolioFormat';
+import { formatPctSigned, formatUsd } from '../utils/portfolioFormat';
 import { TEAM_MAX_MEMBERS, Team, championLabel, goalLabel, tickerOfSymbol } from '../utils/teams';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
@@ -135,6 +136,16 @@ export const TeamScreen = () => {
       if (generation.current !== requested) return;
       const next = (data?.team ?? null) as Team | null;
       setTeam(next);
+      if (next && !isLocked(next.access as InvestorAccess)) {
+        // Dollars per member: their own read (an older server lacks the field).
+        client.query({ query: GET_TEAM_PNL, variables: { teamId, range: '7d' }, fetchPolicy: 'network-only' })
+          .then((r) => {
+            if (generation.current !== requested) return;
+            const pnl = r.data?.team?.returnPnlUsd ?? null;
+            setTeam((t) => (t ? { ...t, returnPnlUsd: pnl } : t));
+          })
+          .catch(() => {});
+      }
       setFailed(false);
       if (!next || isLocked(next.access as InvestorAccess)) {
         setRows([]);
@@ -376,6 +387,7 @@ export const TeamScreen = () => {
     ...(team.isCaptain ? [{ key: 'requests' as Tab, label: `Solicitudes${team.pendingRequests ? ` (${team.pendingRequests})` : ''}` }] : []),
   ];
   const pct = formatPctSigned(team.returnPct);
+  const pnl = formatUsd(team.returnPnlUsd, { signed: true });
 
   const header = (
     <View>
@@ -388,7 +400,8 @@ export const TeamScreen = () => {
         </Text>
         {!locked && (team.leagueRank || pct) ? (
           <Text style={styles.stat}>
-            {team.leagueRank ? `#${team.leagueRank} en la Liga · ` : ''}{pct ? `${pct} en 7 días` : ''}
+            {team.leagueRank ? `#${team.leagueRank} en la Liga · ` : ''}
+            {pnl ? `${pnl} por miembro${pct ? ` (${pct})` : ''} en 7 días` : pct ? `${pct} en 7 días` : ''}
           </Text>
         ) : null}
         {team.championMonths.length > 0 ? (

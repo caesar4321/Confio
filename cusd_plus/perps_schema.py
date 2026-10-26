@@ -140,6 +140,11 @@ class PerpPositionType(graphene.ObjectType):
     result_usd = graphene.Float(description='Done: dollars back - dollars put in (all costs included)')
     liquidation = graphene.String()
     costs = graphene.Field(PerpCostsType)
+    order_type = graphene.String(description="'market' | 'limit': how the member chose to enter")
+    limit_px = graphene.Float(description='Limit entries: the price chosen')
+    resting_px = graphene.Float(description='A limit entry (or its unfilled rest) waiting on the book, at this price')
+    planned_take_profit_px = graphene.Float(description='Take-profit chosen with the entry (armed once it fills)')
+    planned_stop_loss_px = graphene.Float(description='Stop-loss chosen with the entry (armed once it fills)')
     created_at = graphene.DateTime(required=True)
     opened_at = graphene.DateTime()
     closed_at = graphene.DateTime()
@@ -155,7 +160,8 @@ def _next_action(position) -> str:
     if state == 'refunded':
         return 'retry_bridge'
     if state == 'funded':
-        return 'open_order'
+        # A limit entry on the book: nothing to sign until it fills or is cancelled.
+        return 'wait_fill' if (position.flow or {}).get('resting') else 'open_order'
     if state == 'open':
         if any(c.direction == 'add' and c.state == 'funded' for c in position.margin_changes.all()):
             return 'finish_margin'
@@ -245,6 +251,8 @@ def _position_type(position, live: dict | None, contexts: dict, free_usd=Decimal
         result = float(Decimal(position.returned_usd) + refunded - put_in)
     cum = ((live or {}).get('cumFunding') or {}).get('sinceOpen')
     triggers = _triggers(position)
+    intent = (position.flow or {}).get('order') or {}
+    resting = (position.flow or {}).get('resting') or {}
     return PerpPositionType(
         id=position.id, coin=position.market.coin, ticker=view.ticker, name=view.name,
         asset_class=view.asset_class, side=position.side, leverage=position.leverage,
@@ -267,6 +275,9 @@ def _position_type(position, live: dict | None, contexts: dict, free_usd=Decimal
         realized_pnl_usd=_float(position.realized_pnl), venue_fees_usd=_float(position.venue_fees),
         returned_usd=_float(position.returned_usd), result_usd=result, put_in_usd=float(put_in - refunded),
         liquidation=position.liquidation or None, costs=_costs_type((position.flow or {}).get('costs')),
+        order_type=intent.get('type') or 'market', limit_px=_float(intent.get('limit_px')),
+        resting_px=_float(resting.get('px')) if resting else None,
+        planned_take_profit_px=_float(intent.get('tp')), planned_stop_loss_px=_float(intent.get('sl')),
         created_at=position.created_at, opened_at=position.opened_at, closed_at=position.closed_at,
         done_at=position.done_at,
     )
@@ -490,10 +501,15 @@ class PerpsPrepareOpen(graphene.Mutation):
         side = graphene.String(required=True)
         leverage = graphene.Int(required=True)
         margin_usd = graphene.String(required=True, description='Decimal string, dollars')
+        order_type = graphene.String(description="'market' (default) or 'limit'")
+        limit_px = graphene.String(description='Limit orders: the price the member chose')
+        take_profit_px = graphene.String(description='Optional take-profit placed with the entry')
+        stop_loss_px = graphene.String(description='Optional stop-loss placed with the entry')
 
     Output = PerpBatchPlanType
 
-    def mutate(self, info, coin, side, leverage, margin_usd):
+    def mutate(self, info, coin, side, leverage, margin_usd, order_type=None, limit_px=None,
+               take_profit_px=None, stop_loss_px=None):
         from . import perps_flow, perps_relay
 
         user = _user(info)
@@ -501,7 +517,9 @@ class PerpsPrepareOpen(graphene.Mutation):
         if user is None or wallet is None:
             return PerpBatchPlanType(success=False, error='not_available')
         try:
-            return _batch_plan(perps_flow.prepare_open(user, wallet, _meta(info), coin, side, leverage, margin_usd))
+            order = perps_flow.order_intent(order_type, limit_px, take_profit_px, stop_loss_px)
+            return _batch_plan(perps_flow.prepare_open(user, wallet, _meta(info), coin, side, leverage, margin_usd,
+                                                       order=order))
         except (perps_flow.FlowError, perps_relay.RelayError) as exc:
             return PerpBatchPlanType(success=False, error=_flow_error(exc))
         except Exception:  # noqa: BLE001
@@ -599,10 +617,12 @@ class PerpsPlan(graphene.Mutation):
         stage = graphene.String(required=True)
         take_profit_px = graphene.String()
         stop_loss_px = graphene.String()
+        drop_protection = graphene.Boolean(description='Open: without the take-profit / stop-loss chosen '
+                                                       'with the entry (the market moved past it)')
 
     Output = PerpPlanType
 
-    def mutate(self, info, position_id, stage, take_profit_px=None, stop_loss_px=None):
+    def mutate(self, info, position_id, stage, take_profit_px=None, stop_loss_px=None, drop_protection=False):
         from . import perps_flow, perps_relay
 
         user = _user(info)
@@ -610,7 +630,8 @@ class PerpsPlan(graphene.Mutation):
             return PerpPlanType(success=False, error='position_not_found')
         try:
             if stage == 'open':
-                result = perps_flow.open_plan(user, position_id, meta=_meta(info))
+                result = perps_flow.open_plan(user, position_id, meta=_meta(info),
+                                              drop_protection=bool(drop_protection))
             elif stage == 'close':
                 result = perps_flow.close_plan(user, position_id)
             elif stage == 'tpsl':

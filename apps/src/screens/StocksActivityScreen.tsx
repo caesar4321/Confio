@@ -144,6 +144,8 @@ export const StocksActivityScreen = () => {
   // single person's trades): then only the counts show.
   const splitKnown = stats?.buyUsd != null && stats?.sellUsd != null;
   const buys = stats?.buyUsd ?? 0;
+  const buyOps = stats?.buyCount ?? 0;
+  const sellOps = stats?.sellCount ?? 0;
   const sells = stats?.sellUsd ?? 0;
   const top: TopAsset[] = stats?.topAssets ?? [];
   const maxTrades = top.reduce((m, a) => Math.max(m, a.tradeCount), 0);
@@ -191,11 +193,13 @@ export const StocksActivityScreen = () => {
           </View>
 
           <View style={styles.card}>
+            {/* In dollars when the split may be stated; otherwise by number of
+                operations (already public), never an empty bar. */}
             <View style={styles.splitBar}>
-              {splitKnown && buys + sells > 0 && (
+              {(splitKnown ? buys + sells : buyOps + sellOps) > 0 && (
                 <>
-                  <View style={[styles.splitIn, { flex: buys }]} />
-                  <View style={[styles.splitOut, { flex: sells }]} />
+                  <View style={[styles.splitIn, { flex: splitKnown ? buys : buyOps }]} />
+                  <View style={[styles.splitOut, { flex: splitKnown ? sells : sellOps }]} />
                 </>
               )}
             </View>
@@ -217,6 +221,11 @@ export const StocksActivityScreen = () => {
                 <Text style={styles.splitCount}>{whole(stats.sellCount)} operaciones</Text>
               </View>
             </View>
+            {!splitKnown && (
+              <Text style={styles.splitNote}>
+                Mostramos los montos de compras y ventas cuando cada lado reúne al menos 3 personas, para que nadie quede expuesto.
+              </Text>
+            )}
           </View>
 
           {/* The hook: you don't need much to start. A median stated as one,
@@ -342,6 +351,7 @@ const styles = StyleSheet.create({
   dotOut: { backgroundColor: STOCKS_INDIGO },
   splitLabel: { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
   splitValue: { fontSize: 18, fontWeight: '800', color: colors.dark, marginTop: 4 },
+  splitNote: { fontSize: 12, lineHeight: 17, color: colors.text.secondary, marginTop: 10 },
   splitCount: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   factCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   factTitle: { fontSize: 15, fontWeight: '700', color: colors.dark, lineHeight: 20 },

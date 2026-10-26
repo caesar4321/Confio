@@ -3,7 +3,7 @@
 // An open position in this market is shown in place of the doors.
 
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,6 +15,7 @@ import { AreaChart } from '../components/futures/AreaChart';
 import { PerpMarketMark } from '../components/futures/PerpMarketMark';
 import { colors } from '../config/theme';
 import { useGmMarket } from '../hooks/useGmMarket';
+import { useLiveMid } from '../hooks/useLiveMids';
 import {
   PERPS_RANGES,
   PERPS_RANGE_LABELS,
@@ -35,6 +36,7 @@ import {
   formatPerpPrice,
   formatUsdSigned,
   fundingLine,
+  livePnl,
   pnlColor,
   sideLabel,
 } from '../utils/perpsPresentation';
@@ -47,9 +49,17 @@ export const FuturesMarketScreen = () => {
   const { coin } = useRoute<R>().params;
   const { capabilities } = usePerpsCapabilities();
   const enabled = Boolean(capabilities?.enabled);
-  const { byCoin, loading } = usePerpsMarkets(enabled);
+  const { byCoin, loading, refetch: refetchMarkets } = usePerpsMarkets(enabled);
   const market = byCoin(coin);
-  const { positions } = usePerpsPositions(true);
+  const { positions, refetch: refetchPositions } = usePerpsPositions(true);
+  // Hyperliquid's live price while this screen is open.
+  const liveMid = useLiveMid(coin);
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([refetchMarkets().catch(() => {}), refetchPositions().catch(() => {})]);
+    setRefreshing(false);
+  };
   const position = (positions ?? []).find((p) => p.coin === coin && p.state !== 'done');
   const [range, setRange] = useState<PerpsRange>('1D');
   const { closes, loading: chartLoading, failed } = usePerpsCandles(coin, range);
@@ -94,10 +104,11 @@ export const FuturesMarketScreen = () => {
         isLight
         showBackButton
       />
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void onRefresh(); }} tintColor={colors.primary} colors={[colors.primary]} />}>
         <View style={styles.card}>
           <View style={styles.priceRow}>
-            <Text style={styles.price}>{formatPerpPrice(market.markPx)}</Text>
+            <Text style={styles.price}>{formatPerpPrice(liveMid ?? market.markPx)}</Text>
             <View style={[styles.change, { backgroundColor: (change ?? 0) >= 0 ? '#D1FAE5' : '#FEE2E2' }]}>
               <Text style={[styles.changeText, { color: (change ?? 0) >= 0 ? '#047857' : '#B91C1C' }]}>
                 {formatPctSigned(change)} 24 h
@@ -139,11 +150,17 @@ export const FuturesMarketScreen = () => {
               <Text style={styles.posLabel}>Tu posición</Text>
               <Icon name="chevron-right" size={18} color={colors.text.light} style={{ marginLeft: 'auto' }} />
             </View>
-            <Text style={[styles.posPnl, { color: pnlColor(position.unrealizedPnlUsd) }]}>
-              {formatUsdSigned(position.unrealizedPnlUsd)}
+            <Text style={[styles.posPnl, { color: pnlColor(livePnl(position, liveMid)) }]}>
+              {formatUsdSigned(livePnl(position, liveMid))}
             </Text>
             <Text style={styles.posSub}>
-              {position.returnOnEquity != null ? `${formatPctSigned(position.returnOnEquity * 100)} sobre tu margen` : 'Abriendo…'}
+              {(() => {
+                // The % from the same live result as the dollars above it.
+                const pnl = livePnl(position, liveMid);
+                const roe = pnl != null && position.marginUsedUsd ? (pnl / position.marginUsedUsd) * 100
+                  : position.returnOnEquity != null ? position.returnOnEquity * 100 : null;
+                return roe != null ? `${formatPctSigned(roe)} sobre tu margen` : 'Abriendo…';
+              })()}
             </Text>
           </Pressable>
         )}

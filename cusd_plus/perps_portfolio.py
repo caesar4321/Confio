@@ -224,7 +224,8 @@ def episodes(wallet: str) -> list[Episode]:
         for event in flow.get('size_events') or []:
             try:
                 sizes.append((datetime.fromisoformat(event['at']), Decimal(str(event['size'])) * sign,
-                              Decimal(str(event['realized']))))
+                              Decimal(str(event['realized'])),
+                              Decimal(str(event['entry'])) if event.get('entry') is not None else None))
             except (KeyError, TypeError, ValueError, ArithmeticError):
                 raise PerpsLedgerUnknown(f'position {p.id} has an unreadable size event')
         out.append(Episode(
@@ -285,9 +286,13 @@ def ledger_trades(episodes_: list[Episode]) -> list:
                               usd=Decimal(0), when=when))
         for when, usd in ep.credit_events:
             rows.append(Trade(symbol=ep.symbol, kind='perps_mark', units=usd, usd=Decimal(0), when=when))
-        for when, size, realized in ep.size_events:
-            rows.append(Trade(symbol=ep.symbol, kind='perps_mark', units=abs(size) + abs(realized),
-                              usd=Decimal(0), when=when))
+        for index, (when, size, realized, entry) in enumerate(ep.size_events):
+            # Each part of the event is its own mark (size, realized, entry as of
+            # the fill): any correction changes the signature and reopens its days.
+            for name, part in (('size', abs(size)), ('realized', realized), ('entry', entry or Decimal(0))):
+                # The event's place in order too: two fills in one millisecond stay distinct.
+                rows.append(Trade(symbol=f'{ep.symbol}#{index}#{name}', kind='perps_mark', units=part, usd=Decimal(0),
+                                  when=when))
         if ep.returned is not None:
             rows.append(Trade(symbol=ep.symbol, kind='perps_sell', units=Decimal(1),
                               usd=ep.returned[1], when=ep.returned[0], block=ep.returned[2]))
@@ -316,10 +321,13 @@ def equity_at(ep: Episode, when, price_at) -> Decimal:
         if ep.credited is not None and (ep.filled_at is None or when <= ep.filled_at):
             return credited_at(ep, when)
         return sum((row[1] for row in ep.put_in if row[0] < when), Decimal(0))
-    size, realized = ep.size_signed, Decimal(0)
-    for at, event_size, event_realized in ep.size_events:
+    size, realized, entry = ep.size_signed, Decimal(0), ep.entry_px
+    for at, event_size, event_realized, event_entry in ep.size_events:
         if at < when:
             size, realized = event_size, event_realized
+            # The entry as of that fill (a limit entry filling in parts);
+            # older events carry none and keep the position's entry.
+            entry = event_entry if event_entry is not None else entry
     paid = fees = Decimal(0)
     for at, funding_paid, fees_so_far in ep.cost_events:
         # Half-open, as the ledger signature: a cost at exactly midnight is the
@@ -329,7 +337,7 @@ def equity_at(ep: Episode, when, price_at) -> Decimal:
     base = credited_at(ep, when) + realized - paid - fees + topups_in_flight(ep, when)
     if size == 0:
         return max(base, Decimal(0))
-    return max(base + size * (price_at(ep.coin) - ep.entry_px), Decimal(0))
+    return max(base + size * (price_at(ep.coin) - entry), Decimal(0))
 
 
 def topups_in_flight(ep: Episode, when, exclude_applied: bool = False) -> Decimal:

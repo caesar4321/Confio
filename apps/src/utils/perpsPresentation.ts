@@ -8,6 +8,13 @@ import type { AssetClass, PerpPosition, Side } from '../services/perps';
 
 /** What the money already shown is worth: the open position's margin on
  *  the venue, else its step's known amount, else what was put in (in flight). */
+/** An open position's result at a live price (between the server's reads);
+ *  the server's own figure when there is no live price or no size yet. */
+export const livePnl = (p: PerpPosition, mid: number | null | undefined): number | null =>
+  p.state === 'open' && mid != null && p.entryPx && p.size != null
+    ? (mid - p.entryPx) * p.size
+    : p.unrealizedPnlUsd;
+
 export const positionValueUsd = (p: PerpPosition): number =>
   p.valueUsd ?? p.marginUsedUsd ?? p.marginUsd ?? 0;
 
@@ -120,6 +127,8 @@ export const stepLabel = (nextAction: string, state: string): string | null => {
       return 'Tu margen llegó: falta abrir la posición';
     case 'finish_margin':
       return 'Tu margen extra llegó: falta sumarlo';
+    case 'wait_fill':
+      return 'Tu orden espera su precio';
     case 'return':
       return state === 'liquidated' ? 'Se liquidó: revisa si quedó saldo' : 'Cerrada: trae el dinero a tus dólares';
     case 'wait_return':

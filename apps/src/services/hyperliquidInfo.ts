@@ -131,6 +131,19 @@ export const venueTriggers = async (
     }));
 };
 
+/** Every open order on `coin`: a resting limit entry, and the protection
+ *  waiting on it (reduce-only triggers). */
+export const venueOpenOrders = async (
+  user: string, coin: string, fetcher: typeof fetch = fetch,
+): Promise<{ oid: number; reduceOnly: boolean; isTrigger: boolean }[]> => {
+  const dex = dexOf(coin);
+  const orders = await hlInfo(dex ? { type: 'frontendOpenOrders', user, dex } : { type: 'frontendOpenOrders', user }, fetcher);
+  if (!Array.isArray(orders)) throw new Error('Hyperliquid respondió incompleto');
+  return orders
+    .filter((o: any) => o?.coin === coin)
+    .map((o: any) => ({ oid: Number(o.oid), reduceOnly: Boolean(o.reduceOnly), isTrigger: Boolean(o.isTrigger) }));
+};
+
 export interface VenuePosition { szi: number; leverage: number; isolated: boolean }
 
 /** The member's live position on `coin`, or null when there is none. */

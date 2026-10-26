@@ -6,7 +6,7 @@
 // here, so nothing is ever left half-done out of sight.
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,6 +18,8 @@ import { PerpMarketMark } from '../components/futures/PerpMarketMark';
 import { colors } from '../config/theme';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { usePerpsCapabilities, usePerpsMarkets, usePerpsPositions } from '../hooks/usePerps';
+import { useLiveMids } from '../hooks/useLiveMids';
+import { livePnl } from '../utils/perpsPresentation';
 import type { AssetClass, PerpMarket, PerpPosition } from '../services/perps';
 import { MainStackParamList } from '../types/navigation';
 import {
@@ -44,14 +46,25 @@ export const FuturesMarketsScreen = () => {
   const navigation = useNavigation<Nav>();
   const { capabilities, loading: capsLoading } = usePerpsCapabilities();
   const enabled = Boolean(capabilities?.enabled);
-  const { markets, loading } = usePerpsMarkets(enabled);
+  const { markets, loading, refetch: refetchMarkets } = usePerpsMarkets(enabled);
   const { positions, unknown: positionsUnknown, refetch: refetchPositions } = usePerpsPositions(true);
+  // Hyperliquid's live prices while this screen is open (the server's poll otherwise).
+  const mids = useLiveMids(useMemo(() => markets.map((m) => m.coin), [markets]));
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([refetchMarkets().catch(() => {}), refetchPositions().catch(() => {})]);
+    setRefreshing(false);
+  }, [refetchMarkets, refetchPositions]);
   const { stocks } = useGmMarket(true);
   const [tab, setTab] = useState<Tab>('all');
   const [sort, setSort] = useState<Sort>('volume');
   const [query, setQuery] = useState('');
 
-  useFocusEffect(useCallback(() => { refetchPositions().catch(() => {}); }, [refetchPositions]));
+  useFocusEffect(useCallback(() => {
+    refetchPositions().catch(() => {});
+    refetchMarkets().catch(() => {});
+  }, [refetchPositions, refetchMarkets]));
 
   const logos = useMemo(() => new Map(stocks.map((s) => [s.ticker.toUpperCase(), s.logoUrl])), [stocks]);
   const classes = useMemo(
@@ -70,17 +83,18 @@ export const FuturesMarketsScreen = () => {
 
   const live = (positions ?? []).filter((p) => p.state !== 'done');
   const equity = live.reduce((sum, p) => sum + positionValueUsd(p), 0);
-  const unrealized = live.reduce((sum, p) => sum + (p.unrealizedPnlUsd ?? 0), 0);
+  const unrealized = live.reduce((sum, p) => sum + (livePnl(p, mids[p.coin]) ?? 0), 0);
 
   const renderMarket = ({ item }: { item: PerpMarket }) => {
     const change = item.dayChangePct;
     const up = (change ?? 0) >= 0;
+    const price = mids[item.coin] ?? item.markPx;
     return (
       <Pressable
         onPress={() => navigation.navigate('FuturesMarket', { coin: item.coin })}
         style={({ pressed }) => [styles.marketRow, pressed && styles.pressed]}
         accessibilityRole="button"
-        accessibilityLabel={`${item.name}, ${formatPerpPrice(item.markPx)}, ${formatPctSigned(change)} en 24 horas`}
+        accessibilityLabel={`${item.name}, ${formatPerpPrice(price)}, ${formatPctSigned(change)} en 24 horas`}
       >
         <PerpMarketMark ticker={item.ticker} logoUrl={logos.get(item.ticker.toUpperCase())} size={40} />
         <View style={styles.marketText}>
@@ -91,7 +105,7 @@ export const FuturesMarketsScreen = () => {
           </View>
         </View>
         <View style={styles.marketRight}>
-          <Text style={styles.marketPrice}>{formatPerpPrice(item.markPx)}</Text>
+          <Text style={styles.marketPrice}>{formatPerpPrice(price)}</Text>
           <View style={[styles.changePill, { backgroundColor: change == null ? '#F3F4F6' : up ? '#D1FAE5' : '#FEE2E2' }]}>
             <Text style={[styles.changeText, { color: change == null ? '#6B7280' : up ? '#047857' : '#B91C1C' }]}>
               {formatPctSigned(change)}
@@ -125,7 +139,7 @@ export const FuturesMarketsScreen = () => {
             </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.positionStrip}>
-            {live.map((p) => <PositionChip key={p.id} position={p} logoUrl={logos.get(p.ticker.toUpperCase())}
+            {live.map((p) => <PositionChip key={p.id} position={p} logoUrl={logos.get(p.ticker.toUpperCase())} mid={mids[p.coin]}
               onPress={() => navigation.navigate('FuturesPosition', { positionId: p.id })} />)}
           </ScrollView>
         </View>
@@ -204,6 +218,8 @@ export const FuturesMarketsScreen = () => {
           data={rows}
           keyExtractor={(m) => m.coin}
           renderItem={renderMarket}
+          extraData={mids}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />}
           ListHeaderComponent={header}
           ListEmptyComponent={
             <Text style={styles.empty}>{loading ? 'Cargando mercados…' : 'Ningún mercado coincide con tu búsqueda.'}</Text>
@@ -225,9 +241,13 @@ export const FuturesMarketsScreen = () => {
   );
 };
 
-function PositionChip({ position, logoUrl, onPress }: { position: PerpPosition; logoUrl?: string; onPress: () => void }) {
+function PositionChip({ position, logoUrl, onPress, mid }: {
+  position: PerpPosition; logoUrl?: string; onPress: () => void; mid?: number;
+}) {
   const pending = stepLabel(position.nextAction, position.state);
-  const roe = position.returnOnEquity != null ? position.returnOnEquity * 100 : null;
+  const pnl = livePnl(position, mid);
+  const roe = pnl != null && position.marginUsedUsd ? (pnl / position.marginUsedUsd) * 100
+    : position.returnOnEquity != null ? position.returnOnEquity * 100 : null;
   const side = SIDE_COLORS[position.side];
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
@@ -248,9 +268,7 @@ function PositionChip({ position, logoUrl, onPress }: { position: PerpPosition; 
         </View>
       ) : (
         <>
-          <Text style={[styles.chipPnl, { color: pnlColor(position.unrealizedPnlUsd) }]}>
-            {formatUsdSigned(position.unrealizedPnlUsd)}
-          </Text>
+          <Text style={[styles.chipPnl, { color: pnlColor(pnl) }]}>{formatUsdSigned(pnl)}</Text>
           <Text style={[styles.chipRoe, { color: pnlColor(roe) }]}>{formatPctSigned(roe)}</Text>
         </>
       )}

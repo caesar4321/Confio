@@ -141,6 +141,10 @@ class TeamDailyReturn(models.Model):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='daily_returns')
     day = models.DateField()
     daily_return = models.DecimalField(max_digits=16, decimal_places=10)
+    # The equal-weight mean of the same members' dollar gains that day
+    # (realized and unrealized, their own money): what the league ranks by.
+    # Null on days computed before it existed, until recomputed.
+    mean_gain_usd = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
     qualifying_members = models.PositiveSmallIntegerField()
     # Who the day is made of (user ids): read paths re-check each one is still
     # eligible and not in a block with the viewer.

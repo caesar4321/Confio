@@ -5294,14 +5294,17 @@ export const GET_LEAGUE_BADGES = gql`
   }
 `;
 
-export const GET_LEAGUE_TABLE = gql`
-  query GetLeagueTable($kind: String!, $range: String!, $offset: Int, $limit: Int) {
-    leagueTable(kind: $kind, range: $range, offset: $offset, limit: $limit) {
-      access
-      hasMore
-      myRank
-      myPct
-      rows {
+// A team's dollars per member: its own query (an older server lacks the field).
+export const GET_TEAM_PNL = gql`
+  query GetTeamPnl($teamId: ID!, $range: String) {
+    team(teamId: $teamId, range: $range) {
+      id
+      returnPnlUsd
+    }
+  }
+`;
+
+const LEAGUE_ROW_FIELDS = `
         rank
         pct
         members
@@ -5314,7 +5317,34 @@ export const GET_LEAGUE_TABLE = gql`
           emoji
           color
           memberCount
-        }
+        }`;
+
+/** For a server without the dollar ranking fields (leagueTable falls back to it). */
+export const GET_LEAGUE_TABLE_LEGACY = gql`
+  query GetLeagueTableLegacy($kind: String!, $range: String!, $offset: Int, $limit: Int) {
+    leagueTable(kind: $kind, range: $range, offset: $offset, limit: $limit) {
+      access
+      hasMore
+      myRank
+      myPct
+      rows {${LEAGUE_ROW_FIELDS}
+      }
+    }
+  }
+`;
+
+export const GET_LEAGUE_TABLE = gql`
+  query GetLeagueTable($kind: String!, $range: String!, $offset: Int, $limit: Int) {
+    leagueTable(kind: $kind, range: $range, offset: $offset, limit: $limit) {
+      access
+      hasMore
+      myRank
+      myPct
+      myPnlUsd
+      rows {${LEAGUE_ROW_FIELDS}
+        pnlUsd
+        avgLeverage
+        liquidations
       }
     }
   }

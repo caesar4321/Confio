@@ -35,9 +35,11 @@ import { PerpMarketMark } from '../components/futures/PerpMarketMark';
 import { FuturesProgress } from '../components/futures/FuturesProgress';
 import { colors } from '../config/theme';
 import { usePerpsCapabilities, usePerpsMarkets, usePerpsPositions } from '../hooks/usePerps';
+import { useLiveMid } from '../hooks/useLiveMids';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { requestActivityShare } from '../services/communityShare';
 import {
+  OrderType,
   PerpPosition,
   PerpsStep,
   ReviewedOpen,
@@ -66,6 +68,18 @@ type R = RouteProp<MainStackParamList, 'FuturesOrder'>;
 type Phase = 'input' | 'quoting' | 'review' | 'processing' | 'success';
 
 const QUICK = [10, 25, 50, 100];
+// Price chips, as a move from the reference price (the limit, or the market).
+const LIMIT_STEPS = [1, 2, 5];
+const TP_STEPS = [5, 10, 25];
+const SL_STEPS = [2, 5, 10];
+
+/** Hyperliquid prices carry 5 significant figures. */
+const roundPx = (px: number) => (px > 0 ? Number(px.toPrecision(5)) : 0);
+const pxInput = (px: number) => toAmountInput(roundPx(px), 8);
+const parsePx = (raw: string) => {
+  const v = parseAmountInput(raw);
+  return Number.isFinite(v) && v > 0 ? v : null;
+};
 // Relay's cost is roughly fixed per crossing; the review shows the exact one.
 const BRIDGE_ESTIMATE_USD = 0.05;
 
@@ -80,6 +94,11 @@ export const FuturesOrderScreen = () => {
 
   const [side, setSide] = useState<Side>(route.params.side);
   const [raw, setRaw] = useState('');
+  const [orderType, setOrderType] = useState<OrderType>('market');
+  const [limitRaw, setLimitRaw] = useState('');
+  const [protect, setProtect] = useState(false);
+  const [tpRaw, setTpRaw] = useState('');
+  const [slRaw, setSlRaw] = useState('');
   const [leverage, setLeverage] = useState(2);
   const [phase, setPhase] = useState<Phase>('input');
   const [quote, setQuote] = useState<any>(null);
@@ -122,16 +141,36 @@ export const FuturesOrderScreen = () => {
   // Live estimate before the quote: exit fee, a typical Relay cost.
   const credited = Math.max(0, afterExitFee(margin, feeBps) - BRIDGE_ESTIMATE_USD);
   const notional = credited * leverage;
-  const markPx = market?.markPx ?? null;
-  const liq = markPx ? estimateLiquidationPx(markPx, notional, credited, side, market?.maxLeverage ?? 1) : null;
-  const liqDistance = markPx && liq != null ? Math.abs(liq - markPx) / markPx : null;
+  // Live from Hyperliquid while choosing (estimates and price chips follow it).
+  const liveMid = useLiveMid(route.params.coin);
+  const markPx = liveMid ?? market?.markPx ?? null;
+  const limitPx = orderType === 'limit' ? parsePx(limitRaw) : null;
+  // Where the position starts: the member's limit, or the market now.
+  const entryPx = orderType === 'limit' ? limitPx : markPx;
+  const liq = entryPx ? estimateLiquidationPx(entryPx, notional, credited, side, market?.maxLeverage ?? 1) : null;
+  const liqDistance = entryPx && liq != null ? Math.abs(liq - entryPx) / entryPx : null;
+  const dir = side === 'long' ? 1 : -1;
+  // A limit that would fill at once is a market order with a price cap: said, not refused.
+  const limitFillsNow = limitPx != null && markPx != null && (side === 'long' ? limitPx >= markPx : limitPx <= markPx);
+  const limitTooFar = limitPx != null && markPx != null && Math.abs(limitPx - markPx) / markPx > 0.5;
+  const tpPx = protect ? parsePx(tpRaw) : null;
+  const slPx = protect ? parsePx(slRaw) : null;
+  // Take-profit beyond the entry in the trade's direction, stop-loss the other way.
+  const tpWrong = tpPx != null && entryPx != null && (tpPx - entryPx) * dir <= 0;
+  const slWrong = slPx != null && entryPx != null && (slPx - entryPx) * dir >= 0;
+  const slPastLiq = slPx != null && liq != null && !slWrong && (slPx - liq) * dir <= 0;
+  // What the member's margin does at each level (never more than the margin is lost).
+  const resultAt = (px: number | null) => (px && entryPx
+    ? Math.max(-credited, notional * ((px - entryPx) / entryPx) * dir) : null);
+  const priceInvalid = (orderType === 'limit' && (limitPx == null || limitTooFar))
+    || (protect && (tpWrong || slWrong || (tpPx == null && slPx == null)));
   const move = notional * 0.05;
   const takerFee = notional * (market?.takerFeeRate ?? 0.00045);
   const tooSmall = margin > 0 && margin < minMargin;
   const overBalance = margin > balance + 0.001;
   const notionalTooSmall = margin >= minMargin && notional < 12;
   const canReview = Boolean(market) && Boolean(capabilities?.openEnabled) && margin >= minMargin
-    && !overBalance && !notionalTooSmall && !busy && phase === 'input';
+    && !overBalance && !notionalTooSmall && !busy && phase === 'input' && !priceInvalid;
 
   const setAmount = (value: string, exact = false) => {
     setError(null);
@@ -153,6 +192,8 @@ export const FuturesOrderScreen = () => {
     setPhase('quoting'); // inputs freeze: the review is exactly what was quoted
     const reviewed: ReviewedOpen = {
       coin: market.coin, side, leverage, marginUsd: margin.toFixed(2), dollar: fundingDollar, notionalUsd: null,
+      orderType, limitPx: orderType === 'limit' ? roundPx(limitPx ?? 0) : null,
+      takeProfitPx: tpPx ? roundPx(tpPx) : null, stopLossPx: slPx ? roundPx(slPx) : null,
     };
     try {
       const q = await quoteOpen(reviewed);
@@ -196,7 +237,8 @@ export const FuturesOrderScreen = () => {
       setError(perpsErrorCopy(e));
       // The money may already be on its way: the position screen continues it.
       if (code === 'timeout' || code === 'refunded' || code === 'order_not_filled' || code === 'impact_declined'
-          || code === 'hyperliquid_unavailable' || code === 'hyperliquid_rejected') {
+          || code === 'hyperliquid_unavailable' || code === 'hyperliquid_rejected'
+          || code === 'bad_trigger_side' || code === 'limit_too_far' || code === 'impact_too_high') {
         navigation.replace('FuturesPosition', { positionId: quote.positionId });
         return;
       }
@@ -216,6 +258,38 @@ export const FuturesOrderScreen = () => {
   }
 
   const sideColors = SIDE_COLORS[side];
+
+  if (phase === 'success' && opened && opened.nextAction === 'wait_fill') {
+    const waitPx = opened.restingPx ?? opened.limitPx ?? null;
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
+        <SafeAreaView edges={['top']} style={{ backgroundColor: colors.heroField }} />
+        <StockTradeSuccessContent>
+          <SuccessHero
+            title="Tu orden está esperando"
+            amount={`${market.ticker} · ${sideLabel(side)} ${leverage}x`}
+            amountColor={sideColors.text}
+            hint={`Se abre si ${market.ticker} llega a ${formatPerpPrice(waitPx)}. Te avisamos cuando se ejecute; puedes cancelarla cuando quieras.`}
+            icon={<PerpMarketMark ticker={market.ticker} size={72} leverage={leverage} badgeColor={sideColors.solid} />}
+          />
+          <ReceiptCard
+            style={{ marginTop: 4 }}
+            items={[
+              { label: `Salió de tu ${fundingName}`, value: formatUsd(Number(quote?.reviewed?.marginUsd ?? margin)) },
+              { label: 'Precio de entrada', value: formatPerpPrice(waitPx) },
+              ...(opened.plannedTakeProfitPx ? [{ label: 'Tomar ganancia', value: formatPerpPrice(opened.plannedTakeProfitPx), color: '#047857' }] : []),
+              ...(opened.plannedStopLossPx ? [{ label: 'Limitar pérdida', value: formatPerpPrice(opened.plannedStopLossPx), color: '#B91C1C' }] : []),
+              { label: 'Estado', value: 'Esperando precio', color: '#B45309', icon: 'clock' },
+            ]}
+          />
+          <Pressable style={styles.successCta} onPress={() => navigation.replace('FuturesPosition', { positionId: opened.id })}>
+            <Text style={styles.successCtaText}>Ver mi orden</Text>
+          </Pressable>
+        </StockTradeSuccessContent>
+      </View>
+    );
+  }
 
   if (phase === 'success' && opened) {
     return (
@@ -286,6 +360,60 @@ export const FuturesOrderScreen = () => {
           )}
 
           <View style={styles.card}>
+            <Text style={styles.label}>Cómo entrar</Text>
+            <View style={styles.typeRow}>
+              {([['market', 'Ahora', 'zap'], ['limit', 'A mi precio', 'target']] as const).map(([t, label, icon]) => (
+                <Pressable key={t} onPress={() => { setOrderType(t); setError(null); if (t === 'limit' && !limitRaw && markPx) setLimitRaw(pxInput(markPx)); }}
+                  disabled={phase !== 'input'} testID={`perps-type-${t}`}
+                  style={[styles.typeBtn, orderType === t && styles.typeBtnOn]}
+                  accessibilityRole="tab" accessibilityState={{ selected: orderType === t }}>
+                  <Icon name={icon} size={15} color={orderType === t ? colors.primaryDark : colors.text.secondary} />
+                  <Text style={[styles.typeText, orderType === t && styles.typeTextOn]}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {orderType === 'market' ? (
+              <Text style={styles.typeHint}>
+                Al mejor precio del momento{markPx ? `, cerca de ${formatPerpPrice(markPx)}` : ''}.
+              </Text>
+            ) : (
+              <>
+                <View style={styles.pxRow}>
+                  <Text style={styles.pxCurrency}>$</Text>
+                  <TextInput
+                    style={styles.pxInput}
+                    value={limitRaw}
+                    onChangeText={(v) => { setError(null); setLimitRaw((prev) => sanitizeAmountInput(v, 8, undefined, prev)); }}
+                    keyboardType="decimal-pad"
+                    placeholder={markPx ? pxInput(markPx) : '0.00'}
+                    placeholderTextColor={colors.text.light}
+                    editable={phase === 'input'}
+                    testID="perps-limit"
+                  />
+                  {markPx ? <Text style={styles.pxMark}>Ahora {formatPerpPrice(markPx)}</Text> : null}
+                </View>
+                <View style={styles.quickRow}>
+                  {markPx ? LIMIT_STEPS.map((pct) => (
+                    <Pressable key={pct} style={styles.quick} disabled={phase !== 'input'}
+                      onPress={() => setLimitRaw(pxInput(markPx * (1 - dir * pct / 100)))}>
+                      <Text style={styles.quickText}>{side === 'long' ? '−' : '+'}{pct}%</Text>
+                    </Pressable>
+                  )) : null}
+                </View>
+                <Text style={[styles.typeHint, limitTooFar && styles.error]}>
+                  {limitTooFar
+                    ? 'Ese precio está demasiado lejos del mercado.'
+                    : limitFillsNow
+                      ? `Ese precio ya está disponible: se abre al instante, sin pasar de ${formatPerpPrice(limitPx)}.`
+                      : limitPx
+                        ? `Se abre solo si ${market.ticker} ${side === 'long' ? 'baja' : 'sube'} a ${formatPerpPrice(limitPx)}. Mientras espera, tu margen queda en tu cuenta de Hyperliquid y puedes cancelar cuando quieras.`
+                        : 'Elige el precio al que quieres entrar.'}
+                </Text>
+              </>
+            )}
+          </View>
+
+          <View style={styles.card}>
             <Text style={styles.label}>Margen</Text>
             <View style={styles.amountRow}>
               <Text style={styles.currency}>$</Text>
@@ -352,6 +480,47 @@ export const FuturesOrderScreen = () => {
           </View>
 
           <View style={styles.card}>
+            <Pressable style={styles.protectHead} onPress={() => { setProtect((v) => !v); setError(null); }}
+              disabled={phase !== 'input'} accessibilityRole="switch" accessibilityState={{ checked: protect }}
+              testID="perps-protect">
+              <View style={[styles.protectIcon, protect && styles.protectIconOn]}>
+                <Icon name="shield" size={16} color={protect ? '#FFFFFF' : colors.primaryDark} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.protectTitle}>Proteger al abrir</Text>
+                <Text style={styles.protectSub}>
+                  {protect ? 'Se activan cuando tu orden se ejecuta.' : 'Cierra solo con ganancia o limita la pérdida.'}
+                </Text>
+              </View>
+              <View style={[styles.toggle, protect && styles.toggleOn]}>
+                <View style={[styles.knob, protect && styles.knobOn]} />
+              </View>
+            </Pressable>
+            {protect && (
+              <>
+                <TriggerField
+                  label="Tomar ganancia" icon="trending-up" tone="#047857" value={tpRaw} editable={phase === 'input'}
+                  onChange={(v) => { setError(null); setTpRaw((prev) => sanitizeAmountInput(v, 8, undefined, prev)); }}
+                  steps={TP_STEPS} sign={dir} reference={entryPx} onStep={(px) => setTpRaw(pxInput(px))}
+                  result={resultAt(tpPx)} testID="perps-tp"
+                  error={tpWrong ? `Debe estar ${side === 'long' ? 'por encima' : 'por debajo'} de tu entrada.` : null}
+                />
+                <TriggerField
+                  label="Limitar pérdida" icon="shield-off" tone="#B91C1C" value={slRaw} editable={phase === 'input'}
+                  onChange={(v) => { setError(null); setSlRaw((prev) => sanitizeAmountInput(v, 8, undefined, prev)); }}
+                  steps={SL_STEPS} sign={-dir} reference={entryPx} onStep={(px) => setSlRaw(pxInput(px))}
+                  result={resultAt(slPx)} testID="perps-sl"
+                  error={slWrong ? `Debe estar ${side === 'long' ? 'por debajo' : 'por encima'} de tu entrada.`
+                    : slPastLiq ? 'Tu posición se liquidaría antes de llegar a este precio.' : null}
+                />
+                {tpPx == null && slPx == null && (
+                  <Text style={styles.typeHint}>Elige al menos uno de los dos niveles.</Text>
+                )}
+              </>
+            )}
+          </View>
+
+          <View style={styles.card}>
             <Text style={styles.label}>Costos</Text>
             <Row label={`Comisión de Confío Dollar (${(feeBps / 100).toFixed(1).replace('.', ',')}%) al salir`} value={formatUsd(margin * feeBps / 10_000)} />
             <Row label="Transferencia a Hyperliquid" value={`~${formatUsd(BRIDGE_ESTIMATE_USD)}`} />
@@ -371,7 +540,9 @@ export const FuturesOrderScreen = () => {
               : <Text style={styles.primaryText}>Revisar {side === 'long' ? 'largo' : 'corto'}</Text>}
           </Pressable>
           <Text style={styles.footnote}>
-            La orden se ejecuta en Hyperliquid al mejor precio del momento, con un límite de {((capabilities?.slippageBps ?? 50) / 100).toFixed(1).replace('.', ',')}%.
+            {orderType === 'limit'
+              ? 'Tu orden espera en Hyperliquid hasta que el precio llegue. Puedes cancelarla y traer tu dinero cuando quieras.'
+              : `La orden se ejecuta en Hyperliquid al mejor precio del momento, con un límite de ${((capabilities?.slippageBps ?? 50) / 100).toFixed(1).replace('.', ',')}%.`}
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -424,6 +595,44 @@ export const FuturesOrderScreen = () => {
   );
 };
 
+function TriggerField({
+  label, icon, tone, value, onChange, editable, steps, sign, reference, onStep, result, error, testID,
+}: {
+  label: string; icon: string; tone: string; value: string; onChange: (v: string) => void; editable: boolean;
+  steps: number[]; sign: number; reference: number | null; onStep: (px: number) => void;
+  result: number | null; error: string | null; testID: string;
+}) {
+  return (
+    <View style={styles.trigger}>
+      <View style={styles.triggerHead}>
+        <Icon name={icon} size={14} color={tone} />
+        <Text style={[styles.triggerLabel, { color: tone }]}>{label}</Text>
+        {result != null && !error ? (
+          <Text style={[styles.triggerResult, { color: result >= 0 ? '#047857' : '#B91C1C' }]}>
+            {result >= 0 ? '+' : '−'}{formatUsd(Math.abs(result))}
+          </Text>
+        ) : null}
+      </View>
+      <View style={styles.pxRow}>
+        <Text style={styles.pxCurrency}>$</Text>
+        <TextInput style={styles.pxInput} value={value} onChangeText={onChange} keyboardType="decimal-pad"
+          placeholder="Precio" placeholderTextColor={colors.text.light} editable={editable} testID={testID} />
+      </View>
+      {reference ? (
+        <View style={styles.quickRow}>
+          {steps.map((pct) => (
+            <Pressable key={pct} style={styles.quick} disabled={!editable}
+              onPress={() => onStep(reference * (1 + sign * pct / 100))}>
+              <Text style={styles.quickText}>{sign > 0 ? '+' : '−'}{pct}%</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
 function Scenario({ up, label, value }: { up: boolean; label: string; value: number }) {
   const positive = value >= 0;
   return (
@@ -454,7 +663,10 @@ function ReviewSheet({
 }) {
   const c = quote?.costs || {};
   const credited = c.creditedUsd ?? 0;
-  const liq = markPx ? estimateLiquidationPx(markPx, credited * leverage, credited, side, maxLeverage) : null;
+  const r: ReviewedOpen | undefined = quote?.reviewed;
+  const limit = r?.orderType === 'limit' ? r.limitPx ?? null : null;
+  const entry = limit ?? markPx;
+  const liq = entry ? estimateLiquidationPx(entry, credited * leverage, credited, side, maxLeverage) : null;
   const sideColors = SIDE_COLORS[side];
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
@@ -472,14 +684,18 @@ function ReviewSheet({
           <Row label="Tu margen en Hyperliquid" value={`≈ ${formatUsd(credited)}`} strong />
           <Row label="Tu posición" value={`≈ ${formatUsd(c.notionalUsd)}`} strong color={sideColors.text} />
           <Row label="Comisión de Hyperliquid al abrir" value={`≈ ${formatUsd(c.openFeeUsd)}`} />
+          <Row label="Entrada" value={limit ? `A ${formatPerpPrice(limit)}` : 'Al precio del momento'} />
+          {r?.takeProfitPx ? <Row label="Tomar ganancia" value={formatPerpPrice(r.takeProfitPx)} color="#047857" /> : null}
+          {r?.stopLossPx ? <Row label="Limitar pérdida" value={formatPerpPrice(r.stopLossPx)} color="#B91C1C" /> : null}
           <Row label="Se liquida en (aprox.)" value={formatPerpPrice(liq)} color="#B91C1C" />
         </View>
         <Text style={styles.sheetNote}>
-          Firmas una sola vez con tu llave. El margen cruza a tu cuenta en Hyperliquid y la orden se abre al mejor
-          precio del momento. Puedes perder todo el margen.
+          {limit
+            ? `Firmas una sola vez con tu llave. El margen cruza a tu cuenta en Hyperliquid y tu orden espera hasta que ${ticker} llegue a ${formatPerpPrice(limit)}. Puedes cancelarla cuando quieras. Puedes perder todo el margen.`
+            : 'Firmas una sola vez con tu llave. El margen cruza a tu cuenta en Hyperliquid y la orden se abre al mejor precio del momento. Puedes perder todo el margen.'}
         </Text>
         <Pressable style={[styles.primary, { backgroundColor: sideColors.solid }]} onPress={onConfirm} testID="perps-confirm">
-          <Text style={styles.primaryText}>Confirmar y abrir</Text>
+          <Text style={styles.primaryText}>{limit ? 'Confirmar orden' : 'Confirmar y abrir'}</Text>
         </Pressable>
         <Pressable style={styles.secondary} onPress={onCancel}>
           <Text style={styles.secondaryText}>Cancelar</Text>
@@ -542,4 +758,27 @@ const styles = StyleSheet.create({
   sheetNote: { fontSize: 12, lineHeight: 17, color: colors.text.secondary, marginVertical: 14 },
   secondary: { alignItems: 'center', paddingVertical: 14 },
   secondaryText: { fontSize: 15, fontWeight: '700', color: colors.text.secondary },
+  typeRow: { flexDirection: 'row', gap: 8, backgroundColor: colors.neutral, borderRadius: 14, padding: 4 },
+  typeBtn: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', minHeight: 40, borderRadius: 11 },
+  typeBtnOn: { backgroundColor: '#FFFFFF', shadowColor: '#0F172A', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  typeText: { fontSize: 14, fontWeight: '700', color: colors.text.secondary },
+  typeTextOn: { color: colors.text.primary },
+  typeHint: { fontSize: 12, lineHeight: 17, color: colors.text.secondary, marginTop: 10 },
+  pxRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 6 },
+  pxCurrency: { fontSize: 22, fontWeight: '700', color: colors.text.primary, marginRight: 4 },
+  pxInput: { flex: 1, fontSize: 24, fontWeight: '800', color: colors.text.primary, padding: 0 },
+  pxMark: { fontSize: 12, fontWeight: '600', color: colors.text.light },
+  protectHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  protectIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ECFDF5' },
+  protectIconOn: { backgroundColor: colors.primaryDark },
+  protectTitle: { fontSize: 15, fontWeight: '800', color: colors.text.primary },
+  protectSub: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
+  toggle: { width: 44, height: 26, borderRadius: 13, backgroundColor: '#E5E7EB', padding: 3 },
+  toggleOn: { backgroundColor: colors.primary },
+  knob: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFFFFF' },
+  knobOn: { transform: [{ translateX: 18 }] },
+  trigger: { marginTop: 16 },
+  triggerHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  triggerLabel: { flex: 1, fontSize: 13, fontWeight: '800' },
+  triggerResult: { fontSize: 14, fontWeight: '800' },
 });

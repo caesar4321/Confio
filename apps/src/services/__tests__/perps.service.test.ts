@@ -3,7 +3,7 @@
 // else (services/perps.ts verifyIssuedCalls / verifyAction).
 import { RELAY_BSC_DEPOSITORY, deriveIntentId, encodeCall, selector } from '../evmWallet';
 import {
-  HL_USDC_TOKEN, TradeContext, estimateLiquidationPx, pinnedDollars, usdToWei, verifyAction, verifyIssuedCalls,
+  HL_USDC_TOKEN, TradeContext, venuePrice, estimateLiquidationPx, pinnedDollars, usdToWei, verifyAction, verifyIssuedCalls,
 } from '../perps';
 import { wirePrice } from '../emergencyExit/hyperCoreExit';
 
@@ -110,7 +110,7 @@ describe('verifyIssuedCalls', () => {
 
 describe('verifyAction', () => {
   const trade = (over: Partial<TradeContext> = {}): TradeContext => ({
-    stage: 'open', assetId: 110003, dex: 'xyz', side: 'long', leverage: 5, markPx: 100, maxNotionalUsd: 102,
+    stage: 'open', assetId: 110003, dex: 'xyz', side: 'long', leverage: 5, markPx: 100, maxNotionalUsd: 102, szDecimals: 2,
     maxSize: 1, triggers: { tp: null, sl: 90 }, ...over,
   });
   const order = (r: boolean, over: Record<string, unknown> = {}) => ({
@@ -123,6 +123,37 @@ describe('verifyAction', () => {
     expect(() => verifyAction({ ...send, destinationDex: 'flx' }, 'fund_dex', ME, trade())).toThrow();
     expect(() => verifyAction({ ...send, sourceDex: 'xyz', destinationDex: '' }, 'return_dex', ME, trade({ stage: 'return' }))).not.toThrow();
     expect(() => verifyAction({ type: 'withdraw3', destination: OTHER }, 'fund_dex', ME, trade())).toThrow();
+  });
+  it('a limit entry rests at exactly the member\'s price, never a worse one', () => {
+    const limitTrade = trade({ entry: { type: 'limit', limitPx: 95, tp: null, sl: null } });
+    const gtc = (over: Record<string, unknown> = {}) => order(false, { p: '95', t: { limit: { tif: 'Gtc' } }, ...over });
+    expect(() => verifyAction(gtc(), 'open_order', ME, limitTrade)).not.toThrow();
+    expect(() => verifyAction(gtc({ p: '96' }), 'open_order', ME, limitTrade)).toThrow(); // a buy above its limit
+    expect(() => verifyAction(gtc({ p: '94.95' }), 'open_order', ME, limitTrade)).toThrow(); // not the price chosen
+    expect(() => verifyAction(order(false, { p: '95' }), 'open_order', ME, limitTrade)).toThrow(); // Ioc: not what was chosen
+    expect(() => verifyAction(gtc(), 'open_order', ME, trade())).toThrow(); // a resting order the member never asked for
+    // A short resting above the market fills at its limit: exposure judged there (Codex r1).
+    expect(() => verifyAction(order(false, { b: false, p: '150', t: { limit: { tif: 'Gtc' } } }), 'open_order', ME,
+      trade({ side: 'short', entry: { type: 'limit', limitPx: 150, tp: null, sl: null } }))).toThrow();
+    expect(() => verifyAction(gtc({ p: '40' }), 'open_order', ME,
+      trade({ entry: { type: 'limit', limitPx: 40, tp: null, sl: null } }))).toThrow(); // absurdly far from the market
+  });
+  it('protection rides the entry only as chosen: reduce-only, opposite side, the entry\'s size', () => {
+    const entry = { type: 'market' as const, limitPx: null, tp: 120, sl: 90 };
+    const child = (kind: 'tp' | 'sl', px: string, over: Record<string, unknown> = {}) => ({
+      a: 110003, b: false, p: px, s: '1', r: true, t: { trigger: { isMarket: true, triggerPx: px, tpsl: kind } },
+      c: '0x' + (kind === 'tp' ? '7a' : '7b').repeat(16), ...over,
+    });
+    const withKids = (kids: any[]) => ({ ...order(false), orders: [order(false).orders[0], ...kids], grouping: 'normalTpsl' });
+    expect(() => verifyAction(withKids([child('tp', '120'), child('sl', '90')]), 'open_order', ME, trade({ entry }))).not.toThrow();
+    expect(() => verifyAction(withKids([child('tp', '120')]), 'open_order', ME, trade({ entry }))).toThrow(); // stop missing
+    expect(() => verifyAction(withKids([child('tp', '120'), child('sl', '80')]), 'open_order', ME, trade({ entry }))).toThrow();
+    expect(() => verifyAction(withKids([child('tp', '120'), child('sl', '90', { r: false })]), 'open_order', ME,
+      trade({ entry }))).toThrow(); // could open the other way
+    expect(() => verifyAction(withKids([child('tp', '120'), child('sl', '90', { s: '0.1' })]), 'open_order', ME,
+      trade({ entry }))).toThrow(); // a sliver
+    expect(() => verifyAction(order(false), 'open_order', ME, trade({ entry }))).toThrow(); // chosen protection missing
+    expect(() => verifyAction(withKids([child('sl', '90')]), 'open_order', ME, trade())).toThrow(); // none was chosen
   });
   it('trades only the market, side, leverage and size the member chose', () => {
     expect(() => verifyAction(order(false), 'open_order', ME, trade())).not.toThrow();
@@ -191,5 +222,15 @@ describe('the Relay order', () => {
     expect(() => verifyIssuedCalls([exit(), approve(RELAY_BSC_DEPOSITORY), other], ME, dollars, OUT)).toThrow();
     expect(() => verifyIssuedCalls([exit(), approve(RELAY_BSC_DEPOSITORY), deposit()], ME, dollars,
       { ...OUT, relayDeposit: null })).toThrow();
+  });
+});
+
+describe('venuePrice', () => {
+  it('rounds like Hyperliquid: 5 significant figures, decimals by size, integers allowed', () => {
+    expect(venuePrice(95000.37, 5, false)).toBe(95000);
+    expect(venuePrice(101.123, 2, false)).toBe(101.12);
+    expect(venuePrice(101.123, 2, true)).toBe(101.13);
+    expect(venuePrice(0.0012345, 0, false)).toBe(0.001234);
+    expect(venuePrice(123456.7, 5, true)).toBe(123457);
   });
 });

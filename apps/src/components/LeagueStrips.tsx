@@ -9,10 +9,10 @@ import { Text } from './common/AppText';
 import { BylineAvatar } from './PostByline';
 import { TeamBadge } from './TeamBadge';
 import { colors } from '../config/theme';
-import { GET_LEAGUE_TABLE, GET_TEAMS_LOOKING } from '../apollo/queries';
+import { GET_TEAMS_LOOKING } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
-import { formatPctSigned } from '../utils/portfolioFormat';
-import { LeagueRow, TEAM_MIN_RANKED, Team, rankMark } from '../utils/teams';
+import { formatPctSigned, formatUsd } from '../utils/portfolioFormat';
+import { LeagueRow, TEAM_MIN_RANKED, Team, rankMark, queryLeagueTable } from '../utils/teams';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 
@@ -43,9 +43,9 @@ export function LeagueStrips() {
     generation.current += 1;
     const requested = generation.current;
     const [teamTable, investorTable, looking] = await Promise.all([
-      client.query({ query: GET_LEAGUE_TABLE, variables: { kind: 'teams', range: 'month', offset: 0, limit: TOP }, fetchPolicy: 'network-only' })
+      queryLeagueTable(client, { kind: 'teams', range: 'month', offset: 0, limit: TOP })
         .then((r) => r.data?.leagueTable ?? null).catch(() => null),
-      client.query({ query: GET_LEAGUE_TABLE, variables: { kind: 'investors', range: 'month', offset: 0, limit: TOP }, fetchPolicy: 'network-only' })
+      queryLeagueTable(client, { kind: 'investors', range: 'month', offset: 0, limit: TOP })
         .then((r) => r.data?.leagueTable ?? null).catch(() => null),
       client.query({ query: GET_TEAMS_LOOKING, variables: { offset: 0, limit: TOP }, fetchPolicy: 'network-only' })
         .then((r) => (r.data?.teamsLooking ?? null) as Team[] | null).catch(() => null),
@@ -101,13 +101,16 @@ export function LeagueStrips() {
     const { row } = item;
     const team = row.team;
     if (!team) return null;
-    const pct = formatPctSigned(row.pct);
+    // What ranks (dollars per member), else the % (an older server).
+    const shown = formatUsd(row.pnlUsd, { signed: true }) ?? formatPctSigned(row.pct);
+    const down = (row.pnlUsd ?? row.pct).startsWith('-');
     return (
       <Pressable style={styles.card} onPress={() => navigation.navigate('Team', { teamId: team.id })} accessibilityRole="button">
         <Text style={styles.rank}>{rankMark(row.rank)}</Text>
         <TeamBadge emoji={team.emoji} color={team.color} size={44} />
         <Text style={styles.cardName} numberOfLines={1}>{team.name}</Text>
-        <Text style={[styles.pct, row.pct.startsWith('-') ? styles.down : styles.up]}>{pct}</Text>
+        <Text style={[styles.pct, down ? styles.down : styles.up]}>{shown}</Text>
+        {row.pnlUsd != null ? <Text style={styles.pctSmall}>{formatPctSigned(row.pct)}</Text> : null}
       </Pressable>
     );
   };
@@ -115,13 +118,15 @@ export function LeagueStrips() {
   const renderInvestor = ({ item }: { item: LeagueRow }) => {
     if (!item.userId) return null;
     const userId = item.userId;
-    const pct = formatPctSigned(item.pct);
+    const shown = formatUsd(item.pnlUsd, { signed: true }) ?? formatPctSigned(item.pct);
+    const down = (item.pnlUsd ?? item.pct).startsWith('-');
     return (
       <Pressable style={styles.card} onPress={() => navigation.navigate('CommunityMemberProfile', { userId })} accessibilityRole="button">
         <Text style={styles.rank}>{rankMark(item.rank)}</Text>
         <BylineAvatar name={item.username ?? ''} avatarUrl={item.avatarUrl} size={44} />
         <Text style={styles.cardName} numberOfLines={1}>{item.username}</Text>
-        <Text style={[styles.pct, item.pct.startsWith('-') ? styles.down : styles.up]}>{pct}</Text>
+        <Text style={[styles.pct, down ? styles.down : styles.up]}>{shown}</Text>
+        {item.pnlUsd != null ? <Text style={styles.pctSmall}>{formatPctSigned(item.pct)}</Text> : null}
       </Pressable>
     );
   };
@@ -201,6 +206,7 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 13, fontWeight: '600', color: colors.dark, textAlign: 'center' },
   cardMeta: { fontSize: 11, color: colors.textSecondary, textAlign: 'center' },
   pct: { fontSize: 14, fontWeight: '700' },
+  pctSmall: { fontSize: 11, fontWeight: '600', color: colors.textSecondary, marginTop: 1 },
   up: { color: colors.flowIn.textSmall },
   down: { color: colors.error.icon },
   lockNote: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12, backgroundColor: colors.neutralDark },

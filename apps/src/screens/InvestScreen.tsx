@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo } from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Image, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
@@ -23,6 +23,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket } from '../hooks/useCrypto';
 import { usePerpsCapabilities, usePerpsMarkets, usePerpsPositions } from '../hooks/usePerps';
+import { useLiveMids } from '../hooks/useLiveMids';
 import FuturesMark from '../components/svg/FuturesMark';
 import { PerpMarketMark } from '../components/futures/PerpMarketMark';
 import {
@@ -30,6 +31,7 @@ import {
   formatPctSigned,
   formatUsd as formatPerpUsd,
   formatUsdSigned,
+  livePnl,
   pnlColor,
   sideLabel,
   stepLabel,
@@ -80,9 +82,10 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
   // and above $CONFIO (cards ordered by risk); never promoted elsewhere.
   const { capabilities: perps, refetch: refetchPerps } = usePerpsCapabilities(isEmployee);
   const perpsEnabled = Boolean(perps?.enabled) && !isEmployee;
-  const { markets: perpsMarkets } = usePerpsMarkets(perpsEnabled);
+  const { markets: perpsMarkets, refetch: refetchPerpsMarkets } = usePerpsMarkets(perpsEnabled);
   // Always read for owners: a holder whose country was blocked must still reach Cerrar.
-  const { positions: perpsPositions, unknown: perpsUnknown } = usePerpsPositions(!isEmployee, { pollMs: 30_000 });
+  const { positions: perpsPositions, unknown: perpsUnknown, refetch: refetchPerpsPositions } =
+    usePerpsPositions(!isEmployee, { pollMs: 30_000 });
   const { data: presaleData, refetch: refetchPresale } = useQuery(GET_ACTIVE_PRESALE, { fetchPolicy: 'cache-and-network', skip: isEmployee });
   const { data: statusData, refetch: refetchStatus } = useQuery(GET_PRESALE_STATUS, { fetchPolicy: 'cache-and-network', skip: isEmployee });
   // The live curve — the same source ConfioPresaleScreen buys at. The phase
@@ -101,12 +104,24 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
       if (isEmployee) return;
       refetchCrypto().catch(() => {});
       refetchPerps().catch(() => {});
+      refetchPerpsPositions?.().catch(() => {});
       refetchPresale().catch(() => {});
       refetchStatus().catch(() => {});
       refetchCurve().catch(() => {});
       if (claimsOpen) refetchOnchain().catch(() => {});
-    }, [isEmployee, claimsOpen, refetchCrypto, refetchPerps, refetchPresale, refetchStatus, refetchCurve, refetchOnchain]),
+    }, [isEmployee, claimsOpen, refetchCrypto, refetchPerps, refetchPerpsPositions, refetchPresale, refetchStatus,
+      refetchCurve, refetchOnchain]),
   );
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = async () => {
+    if (isEmployee) return;
+    setRefreshing(true);
+    await Promise.all([
+      refetchCrypto(), refetchPerps(), refetchPerpsPositions?.(), refetchPerpsMarkets?.(), refetchPresale(),
+      refetchStatus(), refetchCurve(), claimsOpen ? refetchOnchain() : null,
+    ].map((p) => Promise.resolve(p).catch(() => {})));
+    setRefreshing(false);
+  };
 
   const usd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
@@ -136,6 +151,11 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
     ? Math.max(0, Math.min(100, (raised / goal) * 100))
     : null;
   const presaleLive = Boolean(phase) && !claimsOpen;
+
+  // Live results while the tab is on screen (prices on leverage move fast).
+  // Before any early return: hooks run in the same order every render.
+  const perpsMids = useLiveMids(isFocused && !isEmployee
+    ? (perpsPositions ?? []).filter(p => p.state !== 'done').map(p => p.coin) : []);
 
   if (isEmployee) {
     return (
@@ -180,7 +200,11 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
     <View style={styles.screen}>
       {/* Scoped to focus: the tab stays mounted under the other tabs. */}
       {isFocused && <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />}
-      <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}
+        refreshControl={isEmployee ? undefined : (
+          <RefreshControl refreshing={refreshing} onRefresh={() => { void onRefresh(); }}
+            tintColor={colors.white} colors={[colors.primary]} />
+        )}>
         <View style={styles.hero}>
           <BrandFieldBackground id="investField" ringCx="100%" ringCy="20%" ringR={90} ringWidth={22} />
           <View style={styles.heroInner}>
@@ -376,13 +400,15 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
                 <View style={styles.cryptoRows}>
                   {livePerps.map(p => {
                     const pending = stepLabel(p.nextAction, p.state);
-                    const roe = p.returnOnEquity != null ? p.returnOnEquity * 100 : null;
+                    const pnl = livePnl(p, perpsMids[p.coin]);
+                    const roe = pnl != null && p.marginUsedUsd ? (pnl / p.marginUsedUsd) * 100
+                      : p.returnOnEquity != null ? p.returnOnEquity * 100 : null;
                     return (
                       <Pressable
                         key={p.id}
                         accessibilityRole="button"
                         accessibilityLabel={`${p.ticker} ${sideLabel(p.side)} ${p.leverage}x`}
-                        accessibilityHint={pending || `Ganancia ${formatUsdSigned(p.unrealizedPnlUsd)}`}
+                        accessibilityHint={pending || `Ganancia ${formatUsdSigned(pnl)}`}
                         onPress={() => navigation.navigate('FuturesPosition', { positionId: p.id })}
                         style={({ pressed }) => [styles.cryptoRow, pressed && styles.pressed]}
                       >
@@ -395,8 +421,8 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
                         </View>
                         {!pending && (
                           <View style={styles.cardValue}>
-                            <Text style={[styles.cryptoPrice, { color: pnlColor(p.unrealizedPnlUsd) }]}>
-                              {formatUsdSigned(p.unrealizedPnlUsd)}
+                            <Text style={[styles.cryptoPrice, { color: pnlColor(pnl) }]}>
+                              {formatUsdSigned(pnl)}
                             </Text>
                             <Text style={[styles.delta, { color: pnlColor(roe) }]}>{formatPctSigned(roe)}</Text>
                           </View>
