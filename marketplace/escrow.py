@@ -398,6 +398,11 @@ def submit_action(user, order, action: str, nonce: int, deadline: int,
     if action == 'deposit':
         if order.status != 'draft':
             return {'success': False, 'error': 'order_not_payable'}
+        # Adults-only: checked on the PAYER, not just whoever prepared it.
+        from .checkout import deposit_age_error
+        age_error = deposit_age_error(user, order)
+        if age_error:
+            return {'success': False, 'error': age_error}
         # Confío Face was consumed when this authorization was issued
         # (checkout). Identity holds are re-read by send_sponsored_batch.
     else:

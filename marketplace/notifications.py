@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 _MESSAGES = {
     'funded': [
         ('merchant', 'Nuevo pedido en Comprar',
-         '{buyer} compró {qty} × {title}. Prepáralo y márcalo como enviado.'),
+         '{buyer} compró {qty} × {title}. Prepáralo y márcalo como enviado.{adults}'),
         ('buyer', 'Pago protegido',
          'Tu pago por {title} está protegido hasta que lo recibas.'),
     ],
@@ -33,6 +33,10 @@ _MESSAGES = {
 }
 
 
+# Adults-only orders: the seller hands them over only to an adult.
+ADULTS_NOTE = ' Entrégalo solo a un mayor de 18 que muestre su carnet.'
+
+
 def order_status_changed(order, previous: str) -> None:
     from notifications.models import NotificationType
     from notifications.utils import create_notification
@@ -47,7 +51,8 @@ def order_status_changed(order, previous: str) -> None:
                 title=title,
                 message=message.format(
                     buyer=order.buyer.first_name or 'Un cliente', qty=order.quantity,
-                    title=order.product_title, store=order.store.name),
+                    title=order.product_title, store=order.store.name,
+                    adults=ADULTS_NOTE if order.age_restricted else ''),
                 data={'order_id': str(order.public_id), 'status': order.status,
                       'previous': previous, 'role': role},
                 related_object_type='MarketplaceOrder',

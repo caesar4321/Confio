@@ -12,11 +12,12 @@ import {
   CheckoutStage, DeliveryAddress, GET_CHECKOUT_QUOTE, GET_CITY_CENTER, GET_DELIVERY_ADDRESSES, GET_MARKETPLACE_PRODUCT,
   GET_MARKET_ORDER,
   MarketOutcomeUnknownError, SAVE_DELIVERY_ADDRESS, comprarError, placeMarketOrder,
+  GET_MARKETPLACE_AGE_RULES, type MarketplaceAgeRules,
 } from '../services/comprar';
 import { AddressBookSheet } from '../components/comprar/AddressBookSheet';
 import { LocationPickerModal } from '../components/comprar/LocationPickerModal';
 import { Pin } from '../utils/deliveryLocation';
-import { ComprarFrame, KitButton, KitCard, KitFooter, KitRow, ProductThumb, TrustNote, kitText } from '../components/comprar/kit';
+import { AdultsOnlyNote, ComprarFrame, KitButton, KitCard, KitFooter, KitRow, ProductThumb, TrustNote, kitText } from '../components/comprar/kit';
 import { formatReference, formatUsd } from '../utils/comprarFormat';
 
 /**
@@ -31,6 +32,14 @@ export const MarketCheckoutScreen = () => {
   const route = useRoute<any>();
   const productId = route.params?.productId as string;
   const { data: productData } = useQuery(GET_MARKETPLACE_PRODUCT, { variables: { id: productId } });
+  // Adults-only (alcohol): its own query. Unknown rules never block here;
+  // the server's age check (age_required) is the authority.
+  const { data: ageData } = useQuery<{ marketplaceAgeRules: MarketplaceAgeRules | null }>(GET_MARKETPLACE_AGE_RULES, {
+    // Birthdays count in the store's country (the server's rule).
+    variables: { countryCode: productData?.marketplaceProduct?.store?.countryCode ?? null },
+    fetchPolicy: 'cache-and-network',
+  });
+  const ageRules = ageData?.marketplaceAgeRules ?? null;
   const product = productData?.marketplaceProduct;
   const store = product?.store;
 
@@ -147,7 +156,11 @@ export const MarketCheckoutScreen = () => {
 
   // What still stands between the buyer and Pagar, said on the button's
   // doorstep: the rules match the server's (checkout.prepare_order).
+  const adultsOnly = Boolean(product && ageRules?.categoryKeys.includes(product.category));
   const blocker = useMemo((): string | null => {
+    if (adultsOnly && ageRules && !ageRules.viewerOfAge) {
+      return `Solo mayores de ${ageRules.minimumAge} pueden comprar este producto, según su documento verificado.`;
+    }
     if (mode === 'other' && city.length < 2) return 'Escribe la ciudad de entrega.';
     if (notDelivered) return `Esta tienda solo entrega en ${store?.city ?? 'su ciudad'} y alrededores.`;
     if (!quote) return quoting ? 'Calculando el total…' : 'No pudimos calcular el total.';
@@ -158,7 +171,7 @@ export const MarketCheckoutScreen = () => {
     }
     if (phone.replace(/\D/g, '').length < 7) return 'Escribe un teléfono para el repartidor.';
     return null;
-  }, [quote, quoting, address, phone, notDelivered, mode, store, city, pin, note]);
+  }, [quote, quoting, address, phone, notDelivered, mode, store, city, pin, note, adultsOnly, ageRules]);
   const canPay = !blocker && !paying;
 
   // After a payment (or one whose outcome is unknown: the order opens either
@@ -348,6 +361,7 @@ export const MarketCheckoutScreen = () => {
           <AddressBookSheet visible={bookOpen} selectedId={picked?.id ?? null}
             countryCode={store.countryCode} city={store.city}
             onClose={() => setBookOpen(false)} onSelect={pickAddress} />
+          {adultsOnly && ageRules ? <AdultsOnlyNote minimumAge={ageRules.minimumAge} audience="buyer" /> : null}
           <TrustNote>
             Tu pago queda guardado hasta que confirmes que recibiste el pedido. Si la tienda no lo envía, puedes recuperarlo.
           </TrustNote>

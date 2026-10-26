@@ -17,7 +17,7 @@ from decimal import Decimal
 from django.db import transaction
 
 from . import escrow
-from .models import MarketplaceCity, Order, Product
+from .models import MINIMUM_AGE, MarketplaceCity, Order, Product
 from .permissions import AccountError, account_for
 from .pricing import quote
 
@@ -41,6 +41,55 @@ def jwt_account(user, jwt_ctx):
         return account_for(user, jwt_ctx)
     except AccountError as exc:
         raise CheckoutError(exc.code) from exc
+
+
+def local_today(country_code: str | None):
+    """Today's date where the sale happens (the store's country). An
+    unknown country takes the furthest-west date, so a birthday never
+    arrives early."""
+    from zoneinfo import ZoneInfo
+    from django.utils import timezone
+    from users.cashflow import TIMEZONE_BY_PHONE_COUNTRY
+    name = TIMEZONE_BY_PHONE_COUNTRY.get((country_code or '').upper(), 'Etc/GMT+12')
+    return timezone.now().astimezone(ZoneInfo(name)).date()
+
+
+def buyer_age(user, today):
+    """Whole years since the birth date on the buyer's primary verified
+    document, or None when there is none."""
+    from security.identity_status import current_document
+    doc = current_document(user)
+    born = getattr(doc, 'verified_date_of_birth', None)
+    if born is None:
+        return None
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
+def is_of_age(user, country_code: str | None = None) -> bool:
+    """Adults-only purchases: an unknown age is never an adult."""
+    age = buyer_age(user, local_today(country_code))
+    return age is not None and age >= MINIMUM_AGE
+
+
+def category_is_age_restricted(key: str) -> bool:
+    """Live (uncached) read: payment authorization must never trail an admin flag."""
+    from .models import MarketplaceCategory
+    return MarketplaceCategory.objects.filter(key=key, age_restricted=True).exists()
+
+
+def deposit_age_error(user, order) -> str | None:
+    """'age_required' when this order is adults-only and `user` (whoever
+    fetches or submits the deposit, e.g. another employee of the buying
+    business) is not of age; else None."""
+    needs = order.age_restricted or category_is_age_restricted(order.product.category)
+    if needs and not is_of_age(user, order.store.country_code):
+        return 'age_required'
+    if needs and not order.age_restricted:
+        # Flagged after checkout: the order is adults-only from now on, so
+        # the seller's notice and order view carry the ID handover rule.
+        Order.objects.filter(pk=order.pk).update(age_restricted=True)
+        order.age_restricted = True
+    return None
 
 
 def city_for(country_code: str, city: str):
@@ -225,6 +274,11 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
     # held by the buyer's reusable draft), below.
     if product is None or product.status != 'active' or not product.store.is_open:
         raise CheckoutError('product_unavailable')
+    # Read live, never from the 60s cache: a category flagged a moment ago
+    # must already gate the authorization issued now.
+    age_restricted = category_is_age_restricted(product.category)
+    if age_restricted and not is_of_age(user, product.store.country_code):
+        raise CheckoutError('age_required')
     # A deposit for this purchase is still settling: a second order now is how
     # an uncertain first payment turns into paying twice.
     if Order.objects.filter(buyer_account=account, product=product, status='depositing').exists():
@@ -290,7 +344,8 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
         delivery_currency=terms['currency'],
         delivery_address=delivery_address[:300], delivery_phone=delivery_phone[:20],
         delivery_latitude=pin[0] if pin else None, delivery_longitude=pin[1] if pin else None,
-        delivery_note=(delivery_note or '').strip()[:300])
+        delivery_note=(delivery_note or '').strip()[:300],
+        age_restricted=age_restricted)
 
     # Re-opening checkout with the same terms reuses the open draft: its signed
     # authorization (and stock reservation) is still good. Only what is not
@@ -303,6 +358,9 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
         deposit_deadline__gte=int(time.time()) + REUSE_MIN_REMAINING_S,
     ).order_by('-created_at').first()
     if reusable is not None:
+        # Adults-only never loosens on a reused draft (its stored batch may
+        # already be in a payer's hands).
+        delivery['age_restricted'] = reusable.age_restricted or age_restricted
         try:
             funding = escrow.funding_leg(buyer_addr, int(reusable.amount_wei))
         except escrow.EscrowError as exc:

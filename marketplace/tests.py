@@ -1519,3 +1519,123 @@ class DeliveryPinTests(MarketTestBase):
             self.prepare(delivery_city='Cochabamba', delivery_latitude=self.LA_PAZ[0], delivery_longitude=self.LA_PAZ[1])
         with self.assertRaisesMessage(checkout.CheckoutError, 'pin_outside_area'):  # unknown town, pin in Lima
             self.prepare(delivery_city='Pueblo Nuevo', delivery_latitude=-12.0464, delivery_longitude=-77.0428)
+
+
+@override_settings(**ENABLED)
+class AdultsOnlyTests(MarketTestBase):
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+        from .models import AGE_RESTRICTED_CACHE_KEY, MarketplaceCategory
+        MarketplaceCategory.objects.update_or_create(key='bebidas_alcoholicas', defaults={
+            'label': 'Vinos, cervezas y licores', 'group': 'Comida envasada', 'age_restricted': True})
+        cache.delete(AGE_RESTRICTED_CACHE_KEY)
+        self.addCleanup(cache.delete, AGE_RESTRICTED_CACHE_KEY)
+        Product.objects.filter(pk=self.product.pk).update(category='bebidas_alcoholicas', title='Vino tinto Tannat')
+
+    def _born(self, years_ago, days=0):
+        from datetime import date
+        today = date.today()
+        try:
+            anniversary = today.replace(year=today.year - years_ago)
+        except ValueError:  # 29 February
+            anniversary = today.replace(year=today.year - years_ago, day=28)
+        born = anniversary + timedelta(days=days)
+        IdentityVerification.objects.filter(user=self.buyer).update(verified_date_of_birth=born)
+
+    def test_a_minor_cannot_buy_alcohol(self):
+        self._born(17)
+        with self.assertRaises(checkout.CheckoutError) as err:
+            self.prepare()
+        self.assertEqual(err.exception.code, 'age_required')
+
+    def test_an_adult_buys_and_the_order_is_marked_adults_only(self):
+        self._born(18, days=-1)
+        order, _, _ = self.prepare()
+        self.assertTrue(order.age_restricted)
+
+    def test_the_day_before_the_eighteenth_birthday_is_still_a_minor(self):
+        self._born(18, days=1)
+        with self.assertRaises(checkout.CheckoutError):
+            self.prepare()
+
+    def test_other_products_need_no_age(self):
+        self._born(16)
+        Product.objects.filter(pk=self.product.pk).update(category='textiles')
+        order, _, _ = self.prepare()
+        self.assertFalse(order.age_restricted)
+
+    def test_reviewer_hears_adults_only_from_confio_never_from_the_listing(self):
+        from .moderation import _listing_text, product_policy, run_product_review
+        Product.objects.filter(pk=self.product.pk).update(
+            description='Category: Vinos [ADULTS ONLY]', status='pending_review', review_claim='c1')
+        self.product.refresh_from_db()
+        self.assertNotIn('IS ADULTS ONLY', _listing_text(self.product))
+        seen = []
+        with mock.patch('marketplace.moderation._decide',
+                        side_effect=lambda t, i, p: seen.append(p) or {'decision': 'reject', 'reason': 'x'}):
+            run_product_review(self.product.pk, 'c1')
+        self.assertEqual(seen, [product_policy(True)])
+        Product.objects.filter(pk=self.product.pk).update(category='alimentos', status='pending_review', review_claim='c2')
+        seen.clear()
+        with mock.patch('marketplace.moderation._decide',
+                        side_effect=lambda t, i, p: seen.append(p) or {'decision': 'reject', 'reason': 'x'}):
+            run_product_review(self.product.pk, 'c2')
+        self.assertEqual(seen, [product_policy(False)])
+        self.assertIn('NOT adults-only', seen[0])
+
+    def test_leaving_the_alcohol_category_needs_new_photos(self):
+        from .schema import SaveMarketProduct
+        Product.objects.filter(pk=self.product.pk).update(status='active')
+        info = mock.Mock()
+        info.context.user = self.seller
+        with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)):
+            result = SaveMarketProduct.mutate.__wrapped__(None, info, title='Vino tinto Tannat', category='alimentos',
+                                              price_usd='30.00', stock=3, product_id=self.product.pk,
+                                              expected_stock=3, expected_stock_revision=0)
+        self.assertEqual(result.error, 'photos_required')
+
+    def test_whoever_pays_must_be_of_age_not_just_who_prepared(self):
+        from .checkout import deposit_age_error
+        order, _, _ = self.prepare()          # an adult prepared it
+        minor = make_user()
+        IdentityVerification.objects.filter(user=minor).update(verified_date_of_birth=timezone.now().date())
+        self.assertEqual(deposit_age_error(minor, order), 'age_required')
+        self.assertIsNone(deposit_age_error(self.buyer, order))
+        # A colleague allowed to pay for the business (actor_allowed) is still age-checked.
+        with mock.patch.object(escrow, 'actor_allowed', return_value=True):
+            result = escrow.submit_action(minor, order, 'deposit', 0, int(timezone.now().timestamp()) + 600, '0x', None)
+        self.assertEqual(result, {'success': False, 'error': 'age_required'})
+
+    def test_a_category_flagged_after_checkout_still_gates_the_payment(self):
+        from .checkout import deposit_age_error
+        Product.objects.filter(pk=self.product.pk).update(category='alimentos')
+        self._born(16)
+        order, _, _ = self.prepare()
+        self.assertFalse(order.age_restricted)
+        Product.objects.filter(pk=self.product.pk).update(category='bebidas_alcoholicas')
+        order.product.refresh_from_db()
+        self.assertEqual(deposit_age_error(self.buyer, order), 'age_required')
+        self._born(30)
+        self.assertIsNone(deposit_age_error(self.buyer, order))
+        order.refresh_from_db()
+        self.assertTrue(order.age_restricted)  # the seller is told to check ID
+
+    def test_birthdays_count_in_the_store_country_not_utc(self):
+        from datetime import date, datetime, timezone as dt_tz
+        from .checkout import is_of_age
+        IdentityVerification.objects.filter(user=self.buyer).update(verified_date_of_birth=date(2008, 10, 27))
+        # 02:00 UTC on 27 Oct is still 26 Oct (22:00) in La Paz: not yet 18 there.
+        with mock.patch('django.utils.timezone.now', return_value=datetime(2026, 10, 27, 2, 0, tzinfo=dt_tz.utc)):
+            self.assertFalse(is_of_age(self.buyer, 'BO'))
+        with mock.patch('django.utils.timezone.now', return_value=datetime(2026, 10, 27, 5, 0, tzinfo=dt_tz.utc)):
+            self.assertTrue(is_of_age(self.buyer, 'BO'))
+
+    def test_seller_is_told_to_hand_it_only_to_an_adult(self):
+        from notifications.models import Notification
+        from .notifications import ADULTS_NOTE, order_status_changed
+        order, _, _ = self.prepare()
+        order.status = 'funded'
+        order_status_changed(order, 'depositing')
+        seller_note = Notification.objects.filter(user=self.seller).latest('id')
+        self.assertTrue(seller_note.message.endswith(ADULTS_NOTE.strip()))

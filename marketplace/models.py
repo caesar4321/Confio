@@ -43,6 +43,19 @@ def active_category_keys() -> set:
 
 
 CATEGORY_LABELS_CACHE_KEY = 'comprar:category-labels'
+AGE_RESTRICTED_CACHE_KEY = 'comprar:age-restricted-categories'
+# Legal drinking age everywhere Comprar sells (Bolivia, and LATAM generally).
+MINIMUM_AGE = 18
+
+
+def age_restricted_keys() -> set:
+    """Category keys for adults only (hidden ones too), cached 60s."""
+    from django.core.cache import cache
+    keys = cache.get(AGE_RESTRICTED_CACHE_KEY)
+    if keys is None:
+        keys = set(MarketplaceCategory.objects.filter(age_restricted=True).values_list('key', flat=True))
+        cache.set(AGE_RESTRICTED_CACHE_KEY, keys, 60)
+    return keys
 
 
 def category_label(key: str) -> str:
@@ -67,6 +80,10 @@ class MarketplaceCategory(models.Model):
     sort_order = models.PositiveSmallIntegerField(default=100)
     icon = models.CharField(max_length=30, blank=True, default='tag', help_text='Feather icon name')
     is_active = models.BooleanField(default=True, db_index=True)
+    # Adults only (alcoholic beverages): the reviewer allows alcohol only in
+    # such a category, and only a buyer of verified legal age can check out.
+    age_restricted = models.BooleanField(
+        default=False, help_text='Adults only: buyers must be of legal age (verified ID)')
 
     class Meta:
         verbose_name_plural = 'marketplace categories'
@@ -285,6 +302,9 @@ class Order(models.Model):
     delivery_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     delivery_phone = models.CharField(max_length=20)
     delivery_note = models.CharField(max_length=300, blank=True, default='')
+    # Frozen at checkout from the product's category: an adults-only order
+    # (the seller hands it over only to an adult showing ID).
+    age_restricted = models.BooleanField(default=False)
     tracking_reference = models.CharField(
         max_length=120, blank=True, default='', help_text='Yango Envío tracking id / link')
 

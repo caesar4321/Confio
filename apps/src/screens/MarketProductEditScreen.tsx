@@ -5,13 +5,16 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
 import { Text, TextInput } from '../components/common/AppText';
 import { colors } from '../config/theme';
-import { GET_MY_MARKET_STORE, GET_REFERENCE_RATE, SAVE_MARKET_PRODUCT, comprarError, uploadMarketPhoto } from '../services/comprar';
+import {
+  GET_MARKETPLACE_AGE_RULES, GET_MY_MARKET_STORE, GET_REFERENCE_RATE, SAVE_MARKET_PRODUCT, comprarError,
+  type MarketplaceAgeRules, uploadMarketPhoto,
+} from '../services/comprar';
 import { formatFeeBps, formatLocalPrice, formatUsd } from '../utils/comprarFormat';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import { normalizeAmountInput } from '../utils/numberLocale';
 import { CategoryPicker } from '../components/comprar/CategoryPicker';
 import { pickFromLibrary } from '../services/systemPicker';
-import { ComprarFrame, KitButton, KitCard, KitFooter } from '../components/comprar/kit';
+import { AdultsOnlyNote, ComprarFrame, KitButton, KitCard, KitFooter } from '../components/comprar/kit';
 
 const MAX_PHOTOS = 4;
 // Camera originals at full size can pass the 5 MB upload cap; this keeps them
@@ -29,6 +32,8 @@ export const MarketProductEditScreen = () => {
   const route = useRoute<any>();
   const productId = route.params?.productId as string | undefined;
   const { data } = useQuery(GET_MY_MARKET_STORE);
+  const { data: ageData } = useQuery<{ marketplaceAgeRules: MarketplaceAgeRules | null }>(GET_MARKETPLACE_AGE_RULES);
+  const ageRules = ageData?.marketplaceAgeRules ?? null;
   const existing = (data?.myMarketStoreProducts || []).find((p: any) => String(p.id) === productId);
   // Display-only "≈ Bs" while typing; the price itself is in dollars.
   const storeCountry = data?.myMarketStore?.countryCode;
@@ -171,6 +176,9 @@ export const MarketProductEditScreen = () => {
             selected={category ? [category] : []}
             onToggle={setCategory}
           />
+          {category && ageRules?.categoryKeys.includes(category) ? (
+            <AdultsOnlyNote minimumAge={ageRules.minimumAge} audience="listing" />
+          ) : null}
           </KitCard>
           <KitCard icon="tag" title="Precio y stock">
           <View style={styles.row}>

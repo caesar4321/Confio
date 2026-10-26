@@ -10,17 +10,24 @@ jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: { productId: '7' } }),
 }));
 const mockQuote = { current: null as any };
+const mockAge = { current: null as any, product: null as string | null };
 const mockRequote = jest.fn(() => Promise.resolve());
 const mockBook = { current: [] as any[] };
 const mockSaveAddress = jest.fn(() => Promise.resolve({ data: { saveDeliveryAddress: { success: true } } }));
 jest.mock('@apollo/client', () => {
   const product = { data: { marketplaceProduct: {
-    id: '7', title: 'Samsung Teléfono', stock: 1,
+    id: '7', title: 'Samsung Teléfono', stock: 1, category: 'electronica',
     store: { id: '1', name: 'Tienda', city: 'La Paz', countryCode: 'BO', shipsOutsideCity: false },
   } } };
   return {
     gql: () => ({}),
     useQuery: (_q: any, opts: any) => {
+      if (_q === require('../../services/comprar').GET_MARKETPLACE_AGE_RULES) {
+        return { data: mockAge.current ? { marketplaceAgeRules: mockAge.current } : undefined };
+      }
+      if (mockAge.product && !opts?.variables?.deliveryCity && opts?.variables?.id) {
+        return { data: { marketplaceProduct: { ...product.data.marketplaceProduct, category: mockAge.product } } };
+      }
       if (opts?.variables?.deliveryCity !== undefined) {
         return { data: mockQuote.current ? { marketCheckoutQuote: mockQuote.current } : undefined, loading: false, refetch: mockRequote };
       }
@@ -57,7 +64,7 @@ const blocker = (tree: renderer.ReactTestRenderer) => {
   return node ? String(node.props.children) : null;
 };
 
-beforeEach(() => { mockQuote.current = QUOTE; mockRequote.mockClear(); mockBook.current = []; mockSaveAddress.mockClear(); });
+beforeEach(() => { mockAge.current = null; mockAge.product = null; mockQuote.current = QUOTE; mockRequote.mockClear(); mockBook.current = []; mockSaveAddress.mockClear(); });
 
 it('says what is missing until the form can pay, then enables Pagar', () => {
   const tree = render();
@@ -189,4 +196,25 @@ it('a map pin with a reference replaces the written address, and travels with th
     deliveryAddress: '', deliveryLatitude: -16.4955, deliveryLongitude: -68.1336,
     deliveryNote: 'Puerta verde frente a la tienda Rosa',
   }));
+});
+
+it('blocks Pagar for a buyer under age on an adults-only product', () => {
+  mockAge.current = { minimumAge: 18, categoryKeys: ['bebidas_alcoholicas'], viewerOfAge: false };
+  mockAge.product = 'bebidas_alcoholicas';
+  const tree = render();
+  expect(blocker(tree)).toContain('Solo mayores de 18');
+  expect(byId(tree, 'adults-only-note')).toBeTruthy();
+  act(() => { input(tree, 'Dirección (calle, número, zona)').props.onChangeText('Av. Arce 2345, Sopocachi'); });
+  act(() => { input(tree, 'Teléfono para el repartidor').props.onChangeText('70000000'); });
+  expect(byId(tree, 'checkout-pay').props.disabled).toBe(true);
+});
+
+it('lets an adult buy an adults-only product, with the ID notice', () => {
+  mockAge.current = { minimumAge: 18, categoryKeys: ['bebidas_alcoholicas'], viewerOfAge: true };
+  mockAge.product = 'bebidas_alcoholicas';
+  const tree = render();
+  act(() => { input(tree, 'Dirección (calle, número, zona)').props.onChangeText('Av. Arce 2345, Sopocachi'); });
+  act(() => { input(tree, 'Teléfono para el repartidor').props.onChangeText('70000000'); });
+  expect(blocker(tree)).toBeNull();
+  expect(byId(tree, 'adults-only-note')).toBeTruthy();
 });

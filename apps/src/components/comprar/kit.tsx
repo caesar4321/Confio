@@ -186,6 +186,24 @@ export const ProductThumb = ({ uri, size = 56 }: { uri?: string | null; size?: n
     )
 );
 
+/** Adults-only (alcohol): one notice, worded for whoever reads it. */
+export const AdultsOnlyNote = ({ minimumAge, audience }: {
+  minimumAge: number;
+  audience: 'buyer' | 'seller' | 'listing';
+}) => {
+  const text = audience === 'seller'
+    ? `Solo para mayores de ${minimumAge}: entrégalo únicamente a un adulto que muestre su carnet.`
+    : audience === 'listing'
+      ? `Esta categoría es solo para mayores de ${minimumAge}: solo podrán comprar adultos con su identidad verificada. Vende bebidas selladas y con etiqueta.`
+      : `Solo para mayores de ${minimumAge}. Quien lo reciba debe ser adulto y puede tener que mostrar su carnet.`;
+  return (
+    <View style={styles.adults} testID="adults-only-note">
+      <View style={styles.adultsBadge}><Text style={styles.adultsBadgeText}>+{minimumAge}</Text></View>
+      <Text style={styles.adultsText}>{text}</Text>
+    </View>
+  );
+};
+
 /** The protected-payment promise, said the same way everywhere. */
 export const TrustNote = ({ children }: { children: React.ReactNode }) => (
   <View style={styles.trust}>
@@ -246,4 +264,8 @@ const styles = StyleSheet.create({
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
   trust: { flexDirection: 'row', gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.primaryLight, alignItems: 'flex-start' },
   trustText: { flex: 1, fontSize: 13, color: colors.primaryDeep, lineHeight: 19 },
+  adults: { flexDirection: 'row', gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.warning.background, alignItems: 'center' },
+  adultsBadge: { minWidth: 34, height: 24, paddingHorizontal: 6, borderRadius: 12, backgroundColor: colors.warning.text, alignItems: 'center', justifyContent: 'center' },
+  adultsBadgeText: { fontSize: 12, fontWeight: '700', color: colors.white },
+  adultsText: { flex: 1, fontSize: 13, color: colors.warning.text, lineHeight: 19 },
 });

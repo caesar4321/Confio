@@ -104,6 +104,14 @@ class MarketplaceCategoryType(graphene.ObjectType):
     product_count = graphene.Int(description='Live listings in the given city (when asked)')
 
 
+class MarketplaceAgeRulesType(graphene.ObjectType):
+    minimum_age = graphene.Int(required=True)
+    category_keys = graphene.List(graphene.NonNull(graphene.String), required=True,
+                                  description='Adults-only categories (alcoholic beverages)')
+    viewer_of_age = graphene.Boolean(required=True,
+                                     description="The viewer's verified ID shows legal age")
+
+
 class MarketplaceStoreType(graphene.ObjectType):
     id = graphene.ID()
     name = graphene.String()
@@ -404,6 +412,10 @@ class Query(graphene.ObjectType):
         MarketplaceOrderType, role=graphene.String(description="'buyer' (default) or 'merchant'"),
         limit=graphene.Int(default_value=20), offset=graphene.Int(default_value=0))
     market_order = graphene.Field(MarketplaceOrderType, id=graphene.ID(required=True))
+    # Adults-only rules: their own queries (never fields on the shared types,
+    # which would fail whole shared queries against an older server).
+    marketplace_age_rules = graphene.Field(MarketplaceAgeRulesType, country_code=graphene.String())
+    market_order_adults_only = graphene.Boolean(id=graphene.ID(required=True))
     market_checkout_quote = graphene.Field(
         CheckoutQuoteType, product_id=graphene.ID(required=True), quantity=graphene.Int(required=True),
         delivery_country=graphene.String(required=True), delivery_city=graphene.String(required=True))
@@ -560,6 +572,26 @@ class Query(graphene.ObjectType):
             qs = qs.exclude(status__in=('draft', 'depositing'))
         return [MarketplaceOrderType.from_model(o, user, account)
                 for o in qs.order_by('-created_at')[offset: offset + min(limit, PAGE_MAX)]]
+
+    def resolve_marketplace_age_rules(self, info, country_code=None):
+        from .checkout import is_of_age
+        from .models import MINIMUM_AGE, age_restricted_keys
+        user = _user(info)
+        if not user:
+            return None
+        # Display hint only (the server re-checks at checkout and payment).
+        return MarketplaceAgeRulesType(minimum_age=MINIMUM_AGE, category_keys=sorted(age_restricted_keys()),
+                                       viewer_of_age=is_of_age(user, country_code))
+
+    def resolve_market_order_adults_only(self, info, id):
+        try:
+            _, account = _ctx(info, VIEW_ORDERS)
+        except CheckoutError:
+            return None
+        order = _orders_for(account).filter(public_id=id).first()
+        if order is None or (order.buyer_account_id != account.id and order.status in ('draft', 'depositing')):
+            return None
+        return order.age_restricted
 
     def resolve_market_order(self, info, id):
         try:
@@ -975,6 +1007,12 @@ class SaveMarketProduct(graphene.Mutation):
         unchanged = product.pk is not None and category == product.category
         if not unchanged and category not in active_category_keys():
             return SaveMarketProduct(success=False, error='bad_category')
+        # Leaving an adults-only category: the kept photos were approved as
+        # alcohol, so new ones must be uploaded and reviewed with the new text.
+        from .checkout import category_is_age_restricted
+        if (not unchanged and product.pk is not None and not keys
+                and category_is_age_restricted(product.category) and not category_is_age_restricted(category)):
+            return SaveMarketProduct(success=False, error='photos_required')
         from django.db import transaction
         from django.db.models import F
         from django.db.models.functions import Greatest
@@ -1146,6 +1184,11 @@ class MarketOrderActionCalls(graphene.Mutation):
             return MarketOrderActionCalls(success=False, error='order_not_found')
         if not escrow.enabled():
             return MarketOrderActionCalls(success=False, error='marketplace_disabled')
+        if action == 'deposit':
+            from .checkout import deposit_age_error
+            age_error = deposit_age_error(info.context.user, order)
+            if age_error:
+                return MarketOrderActionCalls(success=False, error=age_error)
         calls = escrow.action_calls(order, action)
         return MarketOrderActionCalls(
             success=True,

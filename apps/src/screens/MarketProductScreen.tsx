@@ -6,10 +6,10 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useQuery } from '@apollo/client';
 import { Text } from '../components/common/AppText';
 import { colors } from '../config/theme';
-import { GET_MARKETPLACE_PRODUCT } from '../services/comprar';
+import { GET_MARKETPLACE_AGE_RULES, GET_MARKETPLACE_PRODUCT, type MarketplaceAgeRules } from '../services/comprar';
 import { formatRating, formatReference, formatUsd } from '../utils/comprarFormat';
 import { formatDecimal } from '../utils/numberLocale';
-import { ComprarFrame, KitButton, KitFooter, TrustNote, kitText } from '../components/comprar/kit';
+import { AdultsOnlyNote, ComprarFrame, KitButton, KitFooter, TrustNote, kitText } from '../components/comprar/kit';
 import { StoreReviews } from '../components/comprar/StoreReviews';
 
 const WIDTH = Dimensions.get('window').width;
@@ -24,6 +24,9 @@ export const MarketProductScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
   const product = data?.marketplaceProduct;
+  // Adults-only categories (alcohol): their own query; unknown = no notice.
+  const { data: ageData } = useQuery<{ marketplaceAgeRules: MarketplaceAgeRules | null }>(GET_MARKETPLACE_AGE_RULES);
+  const ageRules = ageData?.marketplaceAgeRules ?? null;
   const [photo, setPhoto] = useState(0);
 
   if (!product) {
@@ -36,6 +39,7 @@ export const MarketProductScreen = () => {
   }
 
   const photos: (string | null)[] = product.photoUrls?.length ? product.photoUrls : [null];
+  const adultsOnly = Boolean(ageRules?.categoryKeys.includes(product.category));
   const reference = formatReference(product.referenceLocal);
   const store = product.store;
   return (
@@ -71,6 +75,10 @@ export const MarketProductScreen = () => {
               {product.stock > 0 ? `${formatDecimal(product.stock, { decimals: 0 })} disponible${product.stock === 1 ? '' : 's'}` : 'Agotado'}
             </Text>
           </View>
+
+          {adultsOnly && ageRules ? (
+            <View style={styles.section}><AdultsOnlyNote minimumAge={ageRules.minimumAge} audience="buyer" /></View>
+          ) : null}
 
           {product.description ? (
             <View style={styles.section}>

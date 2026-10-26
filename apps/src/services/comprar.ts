@@ -136,6 +136,22 @@ export const DELETE_DELIVERY_ADDRESS = gql`
   }
 `;
 
+// Adults-only rules (alcoholic beverages): their own queries, never fields on
+// the shared product/order fragments (see the address book note above).
+export const GET_MARKETPLACE_AGE_RULES = gql`
+  query MarketplaceAgeRules($countryCode: String) {
+    marketplaceAgeRules(countryCode: $countryCode) { minimumAge categoryKeys viewerOfAge }
+  }
+`;
+
+export const GET_MARKET_ORDER_ADULTS_ONLY = gql`
+  query MarketOrderAdultsOnly($id: ID!) {
+    marketOrderAdultsOnly(id: $id)
+  }
+`;
+
+export type MarketplaceAgeRules = { minimumAge: number; categoryKeys: string[]; viewerOfAge: boolean };
+
 // Reviews: their own query (see the address book note above).
 export const GET_STORE_REVIEWS = gql`
   query MarketplaceStoreReviews($storeId: ID!, $limit: Int, $offset: Int) {
@@ -312,6 +328,8 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   limits_unavailable: 'Comprar no está disponible en este momento. Inténtalo en un momento.',
   marketplace_busy: 'Comprar está muy solicitado ahora. Inténtalo en unos minutos.',
   identity_required: 'Verifica tu identidad para comprar y vender en Confío.',
+  age_required: 'Este producto es solo para mayores de 18, según tu documento verificado.',
+  photos_required: 'Al sacar el producto de Vinos, cervezas y licores, vuelve a subir sus fotos.',
   product_unavailable: 'Este producto ya no está disponible.',
   own_store: 'No puedes comprar en tu propia tienda.',
   city_not_live: 'Esta tienda todavía no vende en Confío.',

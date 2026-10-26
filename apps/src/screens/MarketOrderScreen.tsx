@@ -11,11 +11,13 @@ import { colors } from '../config/theme';
 import {
   CheckoutStage, GET_MARKET_ORDER, RATE_MARKET_ORDER, SET_MARKET_ORDER_TRACKING, comprarError, orderStatusLabel,
   runMarketAction,
+  GET_MARKETPLACE_AGE_RULES, GET_MARKET_ORDER_ADULTS_ONLY, type MarketplaceAgeRules,
 } from '../services/comprar';
 import { formatLocalPrice, formatReference, formatUsd } from '../utils/comprarFormat';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ProcessingHero } from '../components/common/ProcessingHero';
 import {
+  AdultsOnlyNote,
   ComprarFrame, KitButton, KitCard, KitRow, OrderProgress, ProductThumb, StatusPill, kitText,
 } from '../components/comprar/kit';
 
@@ -67,6 +69,14 @@ export const MarketOrderScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
   const order = data?.marketOrder;
+  // Adults-only order (alcohol): its own queries; unknown = no notice.
+  const { data: adultsData } = useQuery<{ marketOrderAdultsOnly: boolean | null }>(GET_MARKET_ORDER_ADULTS_ONLY, {
+    variables: { id: orderId },
+  });
+  const { data: ageData } = useQuery<{ marketplaceAgeRules: MarketplaceAgeRules | null }>(GET_MARKETPLACE_AGE_RULES, {
+    skip: !adultsData?.marketOrderAdultsOnly,
+  });
+  const minimumAge = ageData?.marketplaceAgeRules?.minimumAge ?? 18;
   const [busy, setBusy] = useState<Action | null>(null);
   const [stage, setStage] = useState<CheckoutStage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -179,6 +189,10 @@ export const MarketOrderScreen = () => {
           <OrderProgress status={status} />
           {statusLine[status] ? <Text style={kitText.body}>{statusLine[status]}</Text> : null}
         </KitCard>
+
+        {adultsData?.marketOrderAdultsOnly && !['released', 'refunded'].includes(status) ? (
+          <AdultsOnlyNote minimumAge={minimumAge} audience={merchant ? 'seller' : 'buyer'} />
+        ) : null}
 
         {waitingForStore ? (
           <KitCard icon="list" title="Qué sigue">
