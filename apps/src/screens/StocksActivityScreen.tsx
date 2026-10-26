@@ -24,6 +24,8 @@ import { EmptyState } from '../components/EmptyState';
 import { formatDecimal } from '../utils/numberLocale';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { usePerpsCapabilities } from '../hooks/usePerps';
+import { useCryptoCapabilities } from '../hooks/useCrypto';
+import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
 
 export const GM_TRADING_STATS = gql`
   query GmTradingStats {
@@ -106,6 +108,10 @@ export const StocksActivityScreen = () => {
   // includes everyone's Futuros once Futuros exist (capabilities answered),
   // even for a viewer who can't open one.
   const perpsInTotal = perps != null;
+  // Everyone sees this breakdown (Home's Invertido is shown in every
+  // country); a Bitcoin or gold row opens only where those can be traded.
+  const { capabilities: cryptoCaps } = useCryptoCapabilities();
+  const cryptoEnabled = CRYPTO_TRADING_UI_ENABLED && Boolean(cryptoCaps?.enabled);
   const invest = useQuery(INVEST_TRADING_STATS, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
@@ -252,7 +258,7 @@ export const StocksActivityScreen = () => {
                   key={asset.symbol}
                   // A stock opens only for someone who may see stocks: the
                   // detail would answer "no disponible" to anyone else.
-                  disabled={asset.assetKind === 'perps' ? !perpsEnabled : asset.assetKind !== 'crypto' && !stocksEnabled}
+                  disabled={asset.assetKind === 'perps' ? !perpsEnabled : asset.assetKind === 'crypto' ? !cryptoEnabled : !stocksEnabled}
                   onPress={() => (asset.assetKind === 'perps'
                     ? navigation.navigate('FuturesMarket', { coin: asset.symbol })
                     : asset.assetKind === 'crypto'

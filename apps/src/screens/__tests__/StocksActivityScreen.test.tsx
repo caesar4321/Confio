@@ -34,6 +34,10 @@ let mockPerpsEnabled: boolean | null = null;  // null: a server without Futuros
 jest.mock('../../hooks/usePerps', () => ({
   usePerpsCapabilities: () => ({ capabilities: mockPerpsEnabled === null ? null : { enabled: mockPerpsEnabled } }),
 }));
+let mockCryptoEnabled = true;
+jest.mock('../../hooks/useCrypto', () => ({
+  useCryptoCapabilities: () => ({ capabilities: { enabled: mockCryptoEnabled } }),
+}));
 jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
 jest.mock('../../components/common/BrandFieldBackground', () => ({ BrandFieldBackground: () => null }));
 jest.mock('../../components/EmptyState', () => {

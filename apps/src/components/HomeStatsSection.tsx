@@ -17,9 +17,7 @@ import { formatDecimal } from '../utils/numberLocale';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { useGmHomeTile } from '../hooks/useGmMarket';
-import { useCryptoCapabilities } from '../hooks/useCrypto';
 import { usePerpsCapabilities } from '../hooks/usePerps';
-import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
 
 // Stocks + Bitcoin & gold (+ Futuros at margin) volume, for the Inversiones tile. Own query: a
 // server without the field fails only this, and the tile falls back to the
@@ -131,19 +129,15 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   const {
     assetCount: stockAssetCount, investedUsd: stockInvestedUsd, tradedUsd: stockTradedUsd, refetch: refetchStockTile,
   } = useGmHomeTile();
-  // Bitcoin & gold have their own country policy: someone outside Ondo's
-  // eligibility can still see (and open) the Inversiones tile.
-  const { capabilities: cryptoCaps } = useCryptoCapabilities();
-  const cryptoEnabled = CRYPTO_TRADING_UI_ENABLED && Boolean(cryptoCaps?.enabled);
-  const investEnabled = stocksEnabled || cryptoEnabled;
   // The Invertido total holds everyone's Futuros (at margin) once the server
   // has them: it says so, whoever is looking (same rule as its breakdown).
   const { capabilities: perpsCaps } = usePerpsCapabilities();
   const perpsInTotal = perpsCaps != null;
+  // Invertido is a network fact like Movido, shown in every country (it
+  // also holds Bitcoin & gold and Futuros, each with its own policy).
   const { data: investData, refetch: refetchInvest } = useQuery(INVEST_TRADED_USD, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
-    skip: !investEnabled,
     pollInterval: 300_000,
   });
   const investTradedUsd: number | null = investData?.investTradedUsd ?? null;
@@ -158,8 +152,8 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     refetch().catch(() => {});
     refetchFlow().catch(() => {});
     refetchStockTile().catch(() => {});
-    if (investEnabled) refetchInvest().catch(() => {});
-  }, [refreshNonce, refetch, refetchFlow, refetchStockTile, investEnabled, refetchInvest]);
+    refetchInvest().catch(() => {});
+  }, [refreshNonce, refetch, refetchFlow, refetchStockTile, refetchInvest]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
@@ -172,11 +166,11 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         refetch().catch(() => {});
         refetchFlow().catch(() => {});
         refetchStockTile().catch(() => {});
-        if (investEnabled) refetchInvest().catch(() => {});
+        refetchInvest().catch(() => {});
       }
     });
     return () => subscription.remove();
-  }, [refetch, refetchFlow, refetchStockTile, investEnabled, refetchInvest]);
+  }, [refetch, refetchFlow, refetchStockTile, refetchInvest]);
 
   const s: StatsSummary | undefined = data?.statsSummary;
   const thousandsSeparator = separators.group;
@@ -254,7 +248,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       // Invertido (2026-10-19): stocks + Bitcoin & gold volume, opening
       // Inversiones en movimiento. Without that number (older server), the
       // stock-only Acciones fallbacks below, for stock-eligible users only.
-      const stocks: Tile | null = investEnabled && investTradedUsd != null && investTradedUsd > 0
+      const stocks: Tile | null = investTradedUsd != null && investTradedUsd > 0
         ? {
           key: 'stocks',
           icon: 'trending-up',
@@ -327,7 +321,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         : [users, savings, flow, presale];
     },
     [s?.totalUsers, verified, tvl, backingDescriptor, flowTotalUsd, flowOperations,
-     stockAssetCount, stockInvestedUsd, stockTradedUsd, stocksEnabled, investEnabled, investTradedUsd,
+     stockAssetCount, stockInvestedUsd, stockTradedUsd, stocksEnabled, investTradedUsd,
      perpsInTotal, s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
   );
 

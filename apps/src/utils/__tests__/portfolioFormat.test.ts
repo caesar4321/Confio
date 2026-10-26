@@ -16,6 +16,7 @@ describe('portfolioFormat', () => {
   test('money with thousands separators', () => {
     expect(formatUsd('11658.03')).toBe('$11,658.03');
     expect(formatUsd('1234567.5')).toBe('$1,234,567.50');
+    expect(formatUsd('2.5', { signed: true, usMark: true })).toBe('+US$2.50');
     expect(formatUsd('0.00')).toBe('$0.00');
     expect(formatUsd('-25.10')).toBe('-$25.10');
     expect(formatUsd('7412.11', { signed: true })).toBe('+$7,412.11');

@@ -53,7 +53,7 @@ export type MoneyParts = { sign: '' | '-' | '+'; whole: string; cents: string };
  */
 export const moneyParts = (
   value: string | null | undefined,
-  options: { signed?: boolean; minDecimals?: number } = {},
+  options: { signed?: boolean; minDecimals?: number; usMark?: boolean } = {},
 ): MoneyParts | null => {
   const parsed = parseDecimal(value);
   if (!parsed) return null;
@@ -62,7 +62,8 @@ export const moneyParts = (
   const sign: MoneyParts['sign'] = parsed.negative ? '-' : options.signed && positive ? '+' : '';
   return {
     sign,
-    whole: `${sign}$${groupThousands(parsed.whole)}`,
+    // "US$" where an amount stands alone in text (a bare "$" reads as pesos).
+    whole: `${sign}${options.usMark ? 'US$' : '$'}${groupThousands(parsed.whole)}`,
     cents: fraction ? `${decimalMark()}${fraction}` : '',
   };
 };
@@ -70,7 +71,7 @@ export const moneyParts = (
 /** "$11,658.03"; "+$7,412.11" with `signed`; null when unknown. */
 export const formatUsd = (
   value: string | null | undefined,
-  options: { signed?: boolean; minDecimals?: number } = {},
+  options: { signed?: boolean; minDecimals?: number; usMark?: boolean } = {},
 ): string | null => {
   const parts = moneyParts(value, options);
   return parts ? `${parts.whole}${parts.cents}` : null;

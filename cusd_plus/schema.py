@@ -667,8 +667,9 @@ class Query(graphene.ObjectType):
         return _trading_stats_type(gm_trading_stats.trading_stats())
 
     def resolve_invest_trading_stats(self, info):
+        # The Invertido tile's breakdown: as ungated as the tile (above).
         user = getattr(info.context, 'user', None)
-        if not user or not user.is_authenticated or not _invest_surfaces_enabled(user, info):
+        if not user or not user.is_authenticated:
             return None
         from users.paid_offers import _at_least
 
@@ -682,8 +683,11 @@ class Query(graphene.ObjectType):
         return _trading_stats_type(stats)
 
     def resolve_invest_traded_usd(self, info):
+        # A network fact like Movido or Usuarios, shown whatever the viewer's
+        # country: it also counts Bitcoin & gold and Futuros, each with its
+        # own country policy. Opening a market stays gated where it opens.
         user = getattr(info.context, 'user', None)
-        if not user or not user.is_authenticated or not _invest_surfaces_enabled(user, info):
+        if not user or not user.is_authenticated:
             return None
         from . import gm_volume
 

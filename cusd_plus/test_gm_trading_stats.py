@@ -270,11 +270,13 @@ class InvestFieldsGateTests(TestCase):
         from types import SimpleNamespace
         return SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=True), META={}))
 
-    def test_open_to_stock_or_crypto_users_only(self):
+    def test_open_to_every_country(self):
+        # A network fact like Movido: it also counts Futuros, whose countries
+        # differ from stocks' and crypto's (2026-10-26).
         from .schema import Query
 
         with patch('cusd_plus.gm_volume.traded_usd', return_value=12.5):
-            for stocks, crypto, expected in ((True, False, 12.5), (False, True, 12.5), (False, False, None)):
+            for stocks, crypto, expected in ((True, False, 12.5), (False, True, 12.5), (False, False, 12.5)):
                 with patch('cusd_plus.schema._stock_surfaces_enabled', return_value=stocks), \
                         patch('cusd_plus.crypto_risk.surfaces_enabled', return_value=crypto):
                     self.assertEqual(Query().resolve_invest_traded_usd(self.info()), expected)

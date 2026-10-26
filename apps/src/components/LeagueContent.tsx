@@ -176,7 +176,7 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
 
   const renderItem = ({ item }: { item: LeagueRow }) => {
     const pct = formatPctSigned(item.pct);
-    const pnl = formatUsd(item.pnlUsd, { signed: true });
+    const pnl = formatUsd(item.pnlUsd, { signed: true, usMark: true });
     const up = !(item.pnlUsd ?? item.pct).startsWith('-');
     const risk = [
       item.avgLeverage != null ? `${formatDecimalShort(item.avgLeverage)}x prom.` : null,
@@ -267,7 +267,7 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
             <Text style={styles.name} numberOfLines={1}>{myTeam.name}</Text>
             <Text style={styles.meta}>
               {mine
-                ? `Tu equipo va ${rankMark(mine.rank)} con ${formatUsd(mine.pnl, { signed: true }) ?? formatPctSigned(mine.pct)} por miembro`
+                ? `Tu equipo va ${rankMark(mine.rank)} con ${formatUsd(mine.pnl, { signed: true, usMark: true }) ?? formatPctSigned(mine.pct)} por miembro`
                 : daysToRankLabel(range === 'all' ? daysToRank : null, true) ?? 'Tu equipo aún no clasifica en este periodo'}
             </Text>
           </View>
@@ -280,7 +280,7 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
             <Text style={styles.name}>Tu posición</Text>
             <Text style={styles.meta}>
               {mine
-                ? `${rankMark(mine.rank)} con ${[formatUsd(mine.pnl, { signed: true }), formatPctSigned(mine.pct)].filter(Boolean).join(' · ')}`
+                ? `${rankMark(mine.rank)} con ${[formatUsd(mine.pnl, { signed: true, usMark: true }), formatPctSigned(mine.pct)].filter(Boolean).join(' · ')}`
                 : daysToRankLabel(range === 'all' ? daysToRank : null)
                   ?? `Aún no clasificas en este periodo (mínimo ${legacy ? '$10 invertidos' : '$20 invertidos en promedio'})`}
             </Text>

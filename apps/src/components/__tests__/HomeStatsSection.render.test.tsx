@@ -202,6 +202,16 @@ describe('HomeStatsSection layout', () => {
     mockCryptoEnabled = false;
   });
 
+  it('shows Invertido in every country, like Movido', () => {
+    mockStocksEnabled = false;
+    mockCryptoEnabled = false;
+    mockInvestTraded = 120;
+    expect(tileLabels(render().root).map(l => l.split(':')[0])).toEqual(
+      ['Usuarios', 'Ahorros', 'Movido', 'Invertido', 'Preventa']);
+    mockInvestTraded = null;
+    mockStocksEnabled = true;
+  });
+
   it('shows money moved both ways and opens its breakdown', () => {
     const root = render().root;
     const movido = tileLabels(root)[2];

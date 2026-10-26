@@ -102,7 +102,7 @@ export function LeagueStrips() {
     const team = row.team;
     if (!team) return null;
     // What ranks (dollars per member), else the % (an older server).
-    const shown = formatUsd(row.pnlUsd, { signed: true }) ?? formatPctSigned(row.pct);
+    const shown = formatUsd(row.pnlUsd, { signed: true, usMark: true }) ?? formatPctSigned(row.pct);
     const down = (row.pnlUsd ?? row.pct).startsWith('-');
     return (
       <Pressable style={styles.card} onPress={() => navigation.navigate('Team', { teamId: team.id })} accessibilityRole="button">
@@ -118,7 +118,7 @@ export function LeagueStrips() {
   const renderInvestor = ({ item }: { item: LeagueRow }) => {
     if (!item.userId) return null;
     const userId = item.userId;
-    const shown = formatUsd(item.pnlUsd, { signed: true }) ?? formatPctSigned(item.pct);
+    const shown = formatUsd(item.pnlUsd, { signed: true, usMark: true }) ?? formatPctSigned(item.pct);
     const down = (item.pnlUsd ?? item.pct).startsWith('-');
     return (
       <Pressable style={styles.card} onPress={() => navigation.navigate('CommunityMemberProfile', { userId })} accessibilityRole="button">

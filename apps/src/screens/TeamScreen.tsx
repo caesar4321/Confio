@@ -387,7 +387,7 @@ export const TeamScreen = () => {
     ...(team.isCaptain ? [{ key: 'requests' as Tab, label: `Solicitudes${team.pendingRequests ? ` (${team.pendingRequests})` : ''}` }] : []),
   ];
   const pct = formatPctSigned(team.returnPct);
-  const pnl = formatUsd(team.returnPnlUsd, { signed: true });
+  const pnl = formatUsd(team.returnPnlUsd, { signed: true, usMark: true });
 
   const header = (
     <View>
