@@ -1105,6 +1105,9 @@ def _push_deposit_after_bridge(self, notification_id, bridge_ids):
     if not notice or notice.notification_type != 'SEND_FROM_EXTERNAL' or notice.push_sent:
         return
     wallet = notice.data.get('recipient_address', '')
+    from .perps_flow import return_arrival
+    if return_arrival(notice.data.get('tx_hash', ''), wallet) is not False:
+        return  # a Futuros return (or one Relay can't rule out): never pushed
     if arrival_owned(notice.data.get('tx_hash', ''), wallet):
         for pk in InfiniaJourney.objects.filter(bridge_id__in=bridge_ids).values_list('pk', flat=True):
             sync_activity(pk, notify=False)
@@ -1136,6 +1139,10 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
     from send.models import SendTransaction
     from payment_accounts.activity import arrival_owned
     if arrival_owned(tx_hash, to_addr):
+        return
+    from .perps_flow import return_arrival
+    perps_return = return_arrival(tx_hash, to_addr)
+    if perps_return:
         return
     if (from_addr or '').lower() in _system_addresses() and _source_row_covers(tx_hash, to_addr):
         return
@@ -1229,7 +1236,9 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
         ).exclude(source_tx_hash='').exclude(status__in=['delivered', 'refunded', 'failed'])
             .values_list('pk', flat=True))
         notice = notif_utils.create_notification(
-            send_push=not pending_bridges,
+            # Possibly a Futuros return Relay can't confirm yet: no push (a
+            # push can't be taken back); landing removes the notice if so.
+            send_push=not pending_bridges and perps_return is not None,
             user=account.user,
             account=account,
             business=account.business if is_business else None,
@@ -1266,6 +1275,10 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
                 args=[notice.pk, pending_bridges], countdown=30))
     except Exception:  # noqa: BLE001 — comms failure must not lose the deposit
         logger.exception('deposit notification failed for %s', tx_ref)
+    if perps_return is None and return_arrival(tx_hash, to_addr):
+        # The return landed (and cleaned up) while this was being written.
+        from .perps_flow import hide_return_receipts
+        hide_return_receipts(to_addr, [tx_hash])
 
 
 def mark_saga_delivered_as_usdt(

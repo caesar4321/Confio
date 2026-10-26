@@ -994,3 +994,139 @@ class LimitEdgeTests(TestCase):
             perps_flow._settle_lost_cancel(self.position)
         self.position.refresh_from_db()
         self.assertFalse(perps_flow._pending_claim(self.position, 'return_plan'), 'never blocks opening again')
+
+
+class ReturnArrivalTests(TestCase):
+    """Relay delivering a return is the member's own money coming home, never
+    a "Depósito externo" (it showed as one on prod, 2026-10-26)."""
+
+    def setUp(self):
+        from blockchain.models import PerpPosition
+        from users.models import User
+
+        self.user = User.objects.create(username='perpsback', firebase_uid='perpsback')
+        self.wallet = '0x' + 'b4' * 20
+        self.hash = '0x' + '1d' * 32
+        self.position = PerpPosition.objects.create(
+            user=self.user, wallet=self.wallet, market=_market(), side='long', leverage=5,
+            margin_usd=Decimal('10'), state='returning', relay_back_id='0x' + '17' * 32,
+            flow={'return_pending': {'at': NOW, 'minimum_out': str(9 * WAD)}})
+
+    def _receipt(self, tx_hash):
+        from send.models import SendTransaction
+
+        return SendTransaction.all_objects.create(
+            sender_type='external', recipient_type='user', recipient_user=self.user,
+            sender_display_name='Depósito externo', recipient_display_name='Yo',
+            sender_address='0x' + 'f7' * 20, recipient_address=self.wallet, amount='9.88',
+            token_type='USDT', status='CONFIRMED', transaction_hash=tx_hash,
+            idempotency_key=f'BSC:{tx_hash[2:58]}:0', error_message='')
+
+    def test_in_flight_return_is_recognized_from_relay(self):
+        with mock.patch.object(perps_flow, '_relay_status', return_value={'txHashes': ['0x' + self.hash[2:].upper()]}):
+            self.assertTrue(perps_flow.return_arrival(self.hash, self.wallet.upper()))
+        with mock.patch.object(perps_flow, '_relay_status', return_value={'txHashes': ['0x' + 'ee' * 32]}):
+            self.assertFalse(perps_flow.return_arrival(self.hash, self.wallet))
+        with mock.patch.object(perps_flow, '_relay_status', return_value={}):
+            self.assertFalse(perps_flow.return_arrival(self.hash, self.wallet))
+
+    def test_landed_return_is_recognized_without_relay(self):
+        from blockchain.models import PerpPosition
+
+        PerpPosition.objects.filter(pk=self.position.pk).update(
+            state='done', flow={'landed_hashes': [self.hash]})
+        with mock.patch.object(perps_flow, '_relay_status', side_effect=AssertionError('no Relay read')):
+            self.assertTrue(perps_flow.return_arrival(self.hash, self.wallet))
+            self.assertFalse(perps_flow.return_arrival(self.hash, '0x' + '99' * 20))
+            self.assertFalse(perps_flow.return_arrival('0x' + 'ee' * 32, self.wallet))
+
+    def test_scanner_records_no_deposit_for_a_return(self):
+        from cusd_plus.tasks import _record_deposit_receipt
+        from notifications.models import Notification
+        from send.models import SendTransaction
+
+        with mock.patch.object(perps_flow, '_relay_status', return_value={'txHashes': [self.hash]}):
+            _record_deposit_receipt(
+                account=SimpleNamespace(), is_business=False, to_addr=self.wallet,
+                from_addr='0x' + 'f7' * 20, amount_usd=Decimal('9.88'), tx_ref=self.hash + ':0',
+                tx_hash=self.hash, source='external_deposit', conv=None)
+        self.assertFalse(SendTransaction.all_objects.filter(transaction_hash=self.hash).exists())
+        self.assertFalse(Notification.objects.filter(notification_type='SEND_FROM_EXTERNAL').exists())
+
+    def test_landing_hides_what_the_scanner_saw_first(self):
+        from blockchain.models import PerpPosition
+        from notifications.models import Notification
+        from send.models import SendTransaction
+        from users.models_unified import UnifiedTransactionTable
+
+        receipt = self._receipt(self.hash)
+        other = self._receipt('0x' + 'ee' * 32)
+        UnifiedTransactionTable.objects.update_or_create(send_transaction=receipt, defaults=dict(
+            transaction_type='send', amount='9.88', token_type='USDT', status='CONFIRMED',
+            transaction_hash=self.hash, sender_type='external', counterparty_user=self.user,
+            to_address=self.wallet))
+        Notification.objects.create(
+            user=self.user, notification_type='SEND_FROM_EXTERNAL', title='Depósito recibido', message='USDT',
+            data={'tx_hash': self.hash, 'recipient_address': self.wallet})
+        status = {'status': 'success', 'txHashes': [self.hash]}
+        with mock.patch.object(perps_flow, '_relay_status', return_value=status), \
+                mock.patch.object(perps_flow, '_delivered_usdt', return_value=9 * WAD), \
+                mock.patch.object(perps_flow.time, 'time', return_value=NOW + 30):
+            perps_flow.reconcile_position(self.position)
+        self.position.refresh_from_db()
+        self.assertEqual(self.position.state, 'landed')
+        self.assertEqual(self.position.flow['landed_hashes'], [self.hash])
+        receipt.refresh_from_db()
+        other.refresh_from_db()
+        self.assertIsNotNone(receipt.deleted_at)
+        self.assertIsNone(other.deleted_at, 'an unrelated deposit stays')
+        self.assertFalse(UnifiedTransactionTable.objects.filter(
+            send_transaction=receipt, deleted_at__isnull=True).exists())
+        self.assertFalse(Notification.objects.filter(notification_type='SEND_FROM_EXTERNAL').exists())
+        self.assertTrue(PerpPosition.objects.filter(pk=self.position.pk).exists())
+
+    def test_unconfirmed_return_is_recorded_without_a_push(self):
+        from cusd_plus.tasks import _record_deposit_receipt
+        from send.models import SendTransaction
+
+        from users.models import Account
+
+        account = Account.objects.create(user=self.user, account_type='personal', account_index=0,
+                                         bsc_address=self.wallet)
+        with mock.patch.object(perps_flow, '_relay_status', return_value={'status': 'pending'}):
+            self.assertIsNone(perps_flow.return_arrival(self.hash, self.wallet))
+            with mock.patch('notifications.utils.create_notification') as notify:
+                _record_deposit_receipt(
+                    account=account, is_business=False, to_addr=self.wallet,
+                    from_addr='0x' + 'f7' * 20, amount_usd=Decimal('9.88'), tx_ref=self.hash + ':0',
+                    tx_hash=self.hash, source='external_deposit', conv=None)
+        self.assertTrue(SendTransaction.all_objects.filter(transaction_hash=self.hash).exists())
+        self.assertFalse(notify.call_args.kwargs['send_push'])
+        with mock.patch.object(perps_flow, '_relay_status', return_value={'status': 'success', 'txHashes': []}):
+            self.assertFalse(perps_flow.return_arrival(self.hash, self.wallet), 'a settled return is not it')
+
+    def test_scanner_cleans_up_when_the_return_landed_mid_write(self):
+        from cusd_plus.tasks import _push_deposit_after_bridge, _record_deposit_receipt
+        from notifications.models import Notification
+        from send.models import SendTransaction
+        from users.models import Account
+
+        account = Account.objects.create(user=self.user, account_type='personal', account_index=0,
+                                         bsc_address=self.wallet)
+        with mock.patch.object(perps_flow, 'return_arrival', side_effect=[None, True]), \
+                mock.patch('notifications.fcm_service.send_push_notification') as push:
+            _record_deposit_receipt(
+                account=account, is_business=False, to_addr=self.wallet,
+                from_addr='0x' + 'f7' * 20, amount_usd=Decimal('9.88'), tx_ref=self.hash + ':0',
+                tx_hash=self.hash, source='external_deposit', conv=None)
+        self.assertIsNotNone(SendTransaction.all_objects.get(transaction_hash=self.hash).deleted_at)
+        self.assertFalse(Notification.objects.filter(notification_type='SEND_FROM_EXTERNAL').exists())
+        push.assert_not_called()
+
+        notice = Notification.objects.create(
+            user=self.user, notification_type='SEND_FROM_EXTERNAL', title='Depósito recibido', message='USDT',
+            data={'tx_hash': self.hash, 'recipient_address': self.wallet})
+        with mock.patch.object(perps_flow, 'return_arrival', return_value=None), \
+                mock.patch('notifications.fcm_service.send_push_notification') as push:
+            _push_deposit_after_bridge(notice.pk, [])
+        push.assert_not_called()

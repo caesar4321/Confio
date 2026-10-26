@@ -821,6 +821,9 @@ def sync_history(batch, receipt) -> None:
         direction = 'entry'
     if position is None:
         raise ValueError(f'perps batch {batch.id} has no position')
+    if direction == 'entry':
+        # A scanner write that raced the landing's own cleanup.
+        hide_return_receipts(position.wallet, (position.flow or {}).get('landed_hashes'))
     account = Account.objects.filter(
         bsc_address__iexact=batch.user_bsc_address, deleted_at__isnull=True,
     ).select_related('user', 'business').first()
@@ -2619,8 +2622,10 @@ def reconcile_position(position) -> str:
                 if delivered:
                     flow = dict(position.flow or {})
                     flow['landed_wei'] = str(delivered)
+                    flow['landed_hashes'] = _relay_hashes(status_body)
                     if _transition(PerpPosition, position.pk, ('returning',),
                                    match={'relay_back_id': position.relay_back_id}, state='landed', flow=flow):
+                        hide_return_receipts(position.wallet, flow['landed_hashes'])
                         if landed_for > 120:
                             _notify(PerpPosition.objects.select_related('market').get(pk=position.pk), 'landed')
             elif status == 'refund':
@@ -2700,6 +2705,59 @@ def reconcile_position(position) -> str:
             # Not final: Relay refunds a failed order; keep watching for it.
             PerpMarginChange.objects.filter(pk=change.pk).update(step_error='relay_failure', updated_at=timezone.now())
     return PerpPosition.objects.get(pk=position.pk).state
+
+
+def _relay_hashes(status: dict) -> list[str]:
+    return sorted({h.lower() for h in status.get('txHashes') or []
+                   if isinstance(h, str) and re.fullmatch(r'0x[0-9a-fA-F]{64}', h)})
+
+
+def return_arrival(tx_hash: str, wallet: str) -> bool | None:
+    """Is this BSC transfer Relay delivering a Futuros return to this member?
+
+    The deposit scanner asks before it records an inbound USDT transfer: a
+    return is the member's own money coming home (its row is the position's
+    "Cierre"), never a deposit from an external wallet. None while a return
+    is in flight and Relay can't say yet: the scanner records the transfer
+    without a push, and landing removes it if it was the return."""
+    from blockchain.models import PerpPosition
+
+    tx_hash, wallet = (tx_hash or '').lower(), (wallet or '').lower()
+    if not tx_hash or not wallet:
+        return False
+    positions = PerpPosition.objects.filter(wallet=wallet).exclude(relay_back_id='')
+    # In flight first, landed second: a return landing between the two reads
+    # is then seen by the second.
+    unknown = False
+    for position in positions.filter(state='returning'):
+        status = _relay_status(position.relay_back_id)
+        if tx_hash in _relay_hashes(status):
+            return True
+        if status.get('status') not in ('success', 'refund', 'failure'):
+            unknown = True
+    if positions.filter(flow__landed_hashes__contains=[tx_hash]).exists():
+        return True
+    return None if unknown else False
+
+
+def hide_return_receipts(wallet: str, hashes: list[str]) -> None:
+    """Remove what the deposit scanner wrote for a return it saw first: the
+    "Depósito externo" receipt, its activity row and its notice."""
+    from notifications.models import Notification
+    from send.models import SendTransaction
+    from users.models_unified import UnifiedTransactionTable
+
+    hashes = [h.lower() for h in hashes or []]
+    if not hashes or not wallet:
+        return
+    receipts = SendTransaction.all_objects.filter(
+        transaction_hash__in=hashes, recipient_address__iexact=wallet,
+        sender_type='external', token_type='USDT')
+    UnifiedTransactionTable.objects.filter(send_transaction__in=receipts).update(deleted_at=timezone.now())
+    receipts.filter(deleted_at__isnull=True).update(deleted_at=timezone.now())
+    Notification.objects.filter(
+        notification_type='SEND_FROM_EXTERNAL', data__tx_hash__in=hashes,
+        data__recipient_address__iexact=wallet).delete()
 
 
 def reserved_usdt_wei(wallet: str) -> int:

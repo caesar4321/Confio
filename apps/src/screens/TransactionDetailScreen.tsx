@@ -51,7 +51,7 @@ import { formatTokenLabel, explorerFor, conversionPair, isConversionIncoming, se
 import { phoneKeyToE164, parsePhoneKey } from '../utils/phoneKey';
 import { transactionFriendRoute } from '../utils/transactionFriend';
 import { formatDecimal, formatPercent } from '../utils/numberLocale';
-import { isInvestmentMovement } from '../utils/investmentMovement';
+import { investmentTitle, isInvestmentMovement } from '../utils/investmentMovement';
 import { isMarketplaceMovement } from '../utils/marketplaceMovement';
 import { isTipTransaction } from '../utils/tips';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
@@ -1589,6 +1589,10 @@ export const TransactionDetailScreen = () => {
         ? `Propina de ${displayFromName || 'un inversor'}`
         : `Propina a ${displayToName || 'un inversor'}`;
     }
+    // A trade settles with a venue (Ondo, PancakeSwap, Hyperliquid), not a
+    // person: the same title the activity list shows ("Cierre de TSLA").
+    const tradeTitle = investmentTitle(tx?.description);
+    if (tradeTitle) return tradeTitle;
 
     switch (tx.type) {
       case 'received':
@@ -1841,7 +1845,10 @@ export const TransactionDetailScreen = () => {
     }
 
     items.push({ label: 'Fecha', value: dateTimeDisplay });
-    items.push({ label: 'ID de operación', value: `#${operationIdDisplay}` });
+    // A trade's row is its batch, which has no operation id to show.
+    if (!(isStockMovement && !resolvedInternalId)) {
+      items.push({ label: 'ID de operación', value: `#${operationIdDisplay}` });
+    }
 
     if ((currentTx.type || '').toLowerCase() === 'ramp') {
       const rs = ((currentTx.rampStatus || currentTx.status) || '').toString().toUpperCase();
@@ -2611,7 +2618,8 @@ export const TransactionDetailScreen = () => {
           )}
 
           {/* Supportive footnote — no fee marketing, just the mission line */}
-          {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
+          {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll')
+            && !isStockMovement && (
             <Text style={styles.supportFootnote}>{supportCopy.transferLine}</Text>
           )}
           {currentTx.type === 'payment' && (
@@ -2626,9 +2634,11 @@ export const TransactionDetailScreen = () => {
               account the button names. Rather than pay the wrong account, we
               don't offer the shortcut. */}
           {/* Not for a Propina either: it is between Comunidad pseudonyms (no
-              phone, no account to send to), and a tip goes from the chat. */}
+              phone, no account to send to), and a tip goes from the chat.
+              Nor for a trade: its counterparty is a venue, and the member's
+              own account on the row is what made it look "verified". */}
           {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll')
-            && !counterpartyIsBusiness && counterpartyIdentityVerified && !isTip && !isMarketplaceRow && (
+            && !counterpartyIsBusiness && counterpartyIdentityVerified && !isTip && !isMarketplaceRow && !isStockMovement && (
                 <TouchableOpacity
                   style={styles.primaryAction}
                   onPress={() => {
