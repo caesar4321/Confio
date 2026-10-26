@@ -57,6 +57,18 @@ def excluded_markets() -> frozenset:
     return frozenset(str(m).strip() for m in raw if str(m).strip())
 
 
+CORE_DEX = 'core'
+
+
+def allowed_dexes() -> frozenset:
+    """Dexes members may open on ('' is Hyperliquid's own, written "core")."""
+    raw = getattr(settings, 'PERPS_ALLOWED_DEXES', CORE_DEX) or ''
+    if isinstance(raw, str):
+        raw = raw.split(',')
+    names = {str(d).strip() for d in raw if str(d).strip()}
+    return frozenset('' if d == CORE_DEX else d for d in names)
+
+
 @dataclass(frozen=True)
 class MarketView:
     coin: str
@@ -102,6 +114,7 @@ def is_openable(market) -> bool:
         and market.collateral == TRADABLE_COLLATERAL
         and market.max_leverage >= 1
         and market.coin not in excluded_markets()
+        and market.dex in allowed_dexes()
     )
 
 

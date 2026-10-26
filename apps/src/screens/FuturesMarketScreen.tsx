@@ -75,6 +75,15 @@ export const FuturesMarketScreen = () => {
         {loading ? <ActivityIndicator color={colors.primaryDark} /> : (
           <>
             <Text style={styles.unavailable}>{capabilities?.blockedMessage || 'Este mercado no está disponible.'}</Text>
+            {/* No longer open to new trades (a market or its dex taken off
+                the list), but a position in it is still the member's to
+                manage and close. */}
+            {position && (
+              <Pressable onPress={() => navigation.navigate('FuturesPosition', { positionId: position.id })}
+                style={{ marginTop: 16 }} accessibilityRole="button">
+                <Text style={styles.back}>Ver mi posición</Text>
+              </Pressable>
+            )}
             <Pressable onPress={() => navigation.goBack()} style={{ marginTop: 16 }}>
               <Text style={styles.back}>Volver</Text>
             </Pressable>

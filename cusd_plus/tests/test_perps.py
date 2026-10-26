@@ -9,6 +9,7 @@ from cusd_plus import hyperliquid, perps_catalog
 OPEN_SETTINGS = dict(
     PERPS_ENABLED=True, PERPS_TRADING_ENABLED=True, PERPS_OPEN_ENABLED=True, PERPS_IOS_ENABLED=True,
     PERPS_ALLOWED_USER_IDS='', PERPS_BLOCKED_COUNTRIES='US,CA,GB,BE', PERPS_EXCLUDED_MARKETS='',
+    PERPS_ALLOWED_DEXES='core,xyz',
     CUSD_PLUS_7702_ENABLED=True, CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '7a' * 20,
 )
 
@@ -167,6 +168,19 @@ class SyncTests(TestCase):
         self.assertEqual((views['BTC'].name, views['kPEPE'].asset_class), ('Bitcoin', 'crypto'))
         with override_settings(PERPS_EXCLUDED_MARKETS='kPEPE, xyz:NVDA'):
             self.assertEqual({m.coin for m in perps_catalog.markets()}, {'BTC', 'xyz:GOLD'})
+
+    def test_only_allowed_dexes_open(self):
+        from blockchain.models import PerpMarket
+
+        perps_catalog.sync_markets(session=FakeHyperliquid())
+        with override_settings(PERPS_ALLOWED_DEXES='core'):
+            # A third-party dex is not live until added; its markets stay closeable rows.
+            self.assertEqual({m.coin for m in perps_catalog.markets()}, {'BTC', 'kPEPE'})
+            self.assertTrue(PerpMarket.objects.filter(coin='xyz:NVDA', listed=True).exists())
+        with override_settings(PERPS_ALLOWED_DEXES=' xyz '):
+            self.assertEqual({m.coin for m in perps_catalog.markets()}, {'xyz:GOLD', 'xyz:NVDA'})
+        with override_settings(PERPS_ALLOWED_DEXES=''):
+            self.assertEqual(perps_catalog.markets(), [])
 
     def test_overlay_classes_are_known(self):
         perps_catalog._overlay.cache_clear()
