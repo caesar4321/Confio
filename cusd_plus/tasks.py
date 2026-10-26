@@ -520,6 +520,11 @@ def monitor_bridge_arrivals():
     # also a registered address. Mints (from = 0x0) never match a
     # registered `from`, and redeems burn (to = 0x0) so they never match a
     # registered `to`. Failures here must never disturb the USDT pipeline.
+    # cUSD first: a wrap's mint below is owned only once this pass is past it.
+    try:
+        _scan_cusd_arrivals(registered, latest_block, min_deposit, rewind)
+    except Exception:  # noqa: BLE001
+        logger.exception('cUSD inbound scan failed (USDT pipeline unaffected)')
     try:
         _scan_cusd_plus_arrivals(registered, from_block, latest_block, min_deposit)
     except Exception:  # noqa: BLE001
@@ -613,8 +618,11 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         shares = int(log['data'], 16)
         amount_usd = (Decimal(shares) * Decimal(pps_wad) / Decimal(10 ** 36)).quantize(
             Decimal('0.000001'), rounding=_RD)
-        if is_mint and _wrap_covered(log['transactionHash'], key, int(log.get('blockNumber', '0x0'), 16)):
-            continue  # the member's own cUSD, already in history, wrapped
+        if is_mint and _is_wrap(log['transactionHash'], key):
+            owned = _wrap_owned(log['transactionHash'], key, int(log.get('blockNumber', '0x0'), 16))
+            _note_cusd_clean(key)
+            if owned:
+                continue  # the member's own cUSD, already in history, wrapped
         if amount_usd < min_deposit:
             continue  # dust — strangers must not spam rows/notifications
         # Externally-originated cUSD+ arriving at a registered address is a
@@ -707,79 +715,240 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
             logger.exception('cUSD+ receive notification failed for %s', reference)
 
 
-WRAP_COVERAGE_MAX_BLOCKS = 600_000  # ~3 days of BSC blocks: bounds the log reads
+CUSD_EPOCH_KEY = 'cusd_plus_cusd_epoch'
+CUSD_CURSOR_KEY = 'cusd_plus_cusd_scan_cursor'
+CUSD_CLEAN_KEY = 'cusd_plus_cusd_clean:{}'
+# A cUSD pass further behind than this restarts (a new epoch) instead of
+# reading an unbounded range the public RPCs would refuse.
+CUSD_MAX_LAG_BLOCKS = 5_000
+CUSD_CLEAN_SPANS = 5
 
 
-def _wrap_covered(tx_hash: str, holder: str, wrap_block: int) -> bool:
-    """Is this mint the holder wrapping cUSD whose arrival is already in history?
+def _wrap_owned(tx_hash: str, holder: str, wrap_block: int) -> bool:
+    """Is this mint the holder wrapping cUSD that is already in history?
 
-    The app wraps an eligible holder's cUSD into cUSD+ (wrap_cusd). A Comprar
-    payout or a received send has its own row, so the wrap's mint is the
-    same money again, not a deposit. But nothing scans plain cUSD transfers:
-    cUSD that came with no row of its own has only this mint as a record.
+    The app wraps an eligible holder's cUSD into cUSD+ (wrap_cusd). The cUSD
+    pass records every cUSD that reaches a member from outside Confío; any
+    other cUSD came from a Confío flow with its own record (a Comprar
+    payout, a send, a conversion). So once a holder's cUSD balance was seen
+    at zero, with the pass running without a gap since (one epoch) and past
+    this wrap, everything the wrap converted is already in history: its mint
+    is no deposit and no push. Otherwise (a member's first wrap since, a
+    pass that fell behind) the mint stays the record it has always been."""
+    from django.core.cache import cache
 
-    So the mint is skipped only when, after the holder's previous wrap,
-    every cUSD transfer in is already recorded AND those recorded arrivals,
-    less every cUSD that left, cover what this wrap converted. Older cUSD
-    (a remainder the previous wrap left, recorded or not) is then still
-    unwrapped, and keeps its record when a later wrap fails this test."""
     from blockchain.models import SponsoredBatch
-    from conversion.models import Conversion
 
     try:
         holder = (holder or '').lower()
-        cusd = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
-        batch = SponsoredBatch.objects.filter(
-            kind='wrap_cusd', tx_hash__iexact=tx_hash, user_bsc_address__iexact=holder,
-        ).order_by('-created_at').first()
-        if batch is None or not cusd:
+        epoch = cache.get(CUSD_EPOCH_KEY)
+        clean = cache.get(CUSD_CLEAN_KEY.format(holder))
+        cursor = cache.get(CUSD_CURSOR_KEY)
+        if not epoch or not clean or cursor is None:
             return False
-        previous = SponsoredBatch.objects.filter(
-            kind='wrap_cusd', user_bsc_address__iexact=holder, status='confirmed',
-            created_at__lt=batch.created_at,
-        ).exclude(tx_hash='').order_by('-created_at').first()
-        if previous is None:
-            return False  # no known empty balance to count from
-        receipt = _rpc('eth_getTransactionReceipt', [previous.tx_hash])
-        if not receipt or receipt.get('status') != '0x1':
+        if clean.get('epoch') != epoch.get('id') or wrap_block > int(cursor):
             return False
-        start = int(receipt['blockNumber'], 16)
-        if wrap_block - start > WRAP_COVERAGE_MAX_BLOCKS:
+        # Inside a clean span: after a zero balance, before any arrival the
+        # pass could not record. Spans are kept, so a rescan answers the same.
+        if not any(start < wrap_block and (end is None or wrap_block < end)
+                   for start, end in clean.get('spans') or []):
             return False
-        # After the previous wrap's block: anything in that block counts as
-        # older cUSD, which only makes the test stricter.
-        inbound = _get_logs_chunked(
-            start + 1, wrap_block, [TRANSFER_TOPIC, None, _address_topic(holder)], address=cusd)
-        outbound = _get_logs_chunked(
-            start + 1, wrap_block, [TRANSFER_TOPIC, _address_topic(holder)], address=cusd)
-        escrow = (getattr(settings, 'MARKETPLACE_ESCROW_ADDRESS', '') or '').lower()
-        covered = 0
-        for log in inbound:
-            sender = ('0x' + log['topics'][1][-40:]).lower()
-            arrival = log['transactionHash']
-            if sender == holder:
-                continue
-            # Comprar's escrow pays out only through orders, each with its row.
-            owned = (escrow and sender == escrow) or _source_row_covers(arrival, holder) or \
-                Conversion.objects.filter(
-                    to_transaction_hash__iexact=arrival, user_bsc_address__iexact=holder,
-                    is_deleted=False).exists()
-            if not owned:
-                return False
-            covered += int(log['data'], 16)
-        wrapped = spent = 0
-        for log in outbound:
-            receiver = ('0x' + log['topics'][2][-40:]).lower()
-            if receiver == holder:
-                continue
-            if (log.get('transactionHash') or '').lower() == tx_hash.lower():
-                wrapped += int(log['data'], 16)
-            else:
-                spent += int(log['data'], 16)
-        return wrapped > 0 and covered - spent >= wrapped
+        return SponsoredBatch.objects.filter(
+            kind='wrap_cusd', tx_hash__iexact=tx_hash, user_bsc_address__iexact=holder).exists()
     except Exception:  # noqa: BLE001 — never drop a mint on a lookup error
-        logger.exception('wrap coverage check failed for %s', tx_hash)
+        logger.exception('wrap ownership check failed for %s', tx_hash)
         return False
+
+
+def _is_wrap(tx_hash: str, holder: str) -> bool:
+    from blockchain.models import SponsoredBatch
+
+    try:
+        return SponsoredBatch.objects.filter(
+            kind='wrap_cusd', tx_hash__iexact=tx_hash, user_bsc_address__iexact=holder).exists()
+    except Exception:  # noqa: BLE001
+        logger.exception('wrap lookup failed for %s', tx_hash)
+        return False
+
+
+def _close_cusd_clean(holder: str, block: int) -> None:
+    """An arrival at `block` the pass could not record: the holder's open
+    clean span ends there (earlier wraps stay owned)."""
+    from django.core.cache import cache
+
+    key = CUSD_CLEAN_KEY.format((holder or '').lower())
+    mark = cache.get(key)
+    if not mark or not mark.get('spans'):
+        return
+    start, end = mark['spans'][-1]
+    if start < block and (end is None or block < end):
+        mark['spans'][-1] = [start, block]
+        cache.set(key, mark, None)
+
+
+def _note_cusd_clean(holder: str) -> None:
+    """After a wrap: if the holder's cUSD is now zero, every later cUSD of
+    theirs is recorded (this epoch), so their next wrap is owned."""
+    from django.core.cache import cache
+
+    try:
+        holder = (holder or '').lower()
+        epoch = cache.get(CUSD_EPOCH_KEY)
+        cusd = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+        if not epoch or not cusd:
+            return
+        block = int(_rpc('eth_blockNumber', []), 16)
+        if block < int(epoch['from']):
+            return
+        data = '0x70a08231' + holder.replace('0x', '').rjust(64, '0')
+        balance = int(_rpc('eth_call', [{'to': cusd, 'data': data}, hex(block)]) or '0x0', 16)
+        if balance == 0:
+            # A zero opens a clean span, unless one is already open: moving
+            # its start would disown a wrap already skipped, and a rescan
+            # would then record it twice.
+            key = CUSD_CLEAN_KEY.format(holder)
+            mark = cache.get(key)
+            if not mark or mark.get('epoch') != epoch['id']:
+                mark = {'epoch': epoch['id'], 'spans': []}
+            spans = mark['spans']
+            if not spans or spans[-1][1] is not None:
+                spans.append([block, None])
+                mark['spans'] = spans[-CUSD_CLEAN_SPANS:]
+                cache.set(key, mark, None)
+    except Exception:  # noqa: BLE001 — only means the next wrap keeps its row
+        logger.exception('cUSD clean check failed for %s', holder)
+
+
+def _scan_cusd_arrivals(registered: dict, latest_block: int, min_deposit, rewind: int) -> None:
+    """Universal cUSD from outside Confío: a row and a push, like USDT.
+
+    Nothing recorded these before, so cUSD a stranger sent had no history
+    until a wrap's mint stood in for it (which made every wrap of a Comprar
+    payout or a received send look like a second deposit). Skipped: mints
+    and our own contracts (conversions, vault legs), Comprar's escrow (each
+    payout and refund has its order row), and any transfer a feature already
+    recorded."""
+    import uuid
+
+    from django.core.cache import cache
+
+    from blockchain.models import SponsoredBatch
+    from send.models import SendTransaction
+    from users.models import Account
+    from users.number_format import format_usd
+
+    cusd = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+    if not cusd or not registered:
+        return
+    # Its own cursor, advanced only once a window is fully processed: a
+    # failed pass rescans. A gap it can't read (first run, cache loss, far
+    # behind) starts a new epoch, which voids every holder's clean mark.
+    cursor = cache.get(CUSD_CURSOR_KEY)
+    epoch = cache.get(CUSD_EPOCH_KEY)
+    if cursor is None or not epoch or latest_block - int(cursor) > CUSD_MAX_LAG_BLOCKS:
+        from_block = max(latest_block - rewind, 0)
+        cache.set(CUSD_EPOCH_KEY, {'id': uuid.uuid4().hex, 'from': from_block}, None)
+    else:
+        from_block = max(int(cursor) - rewind, 0)
+    logs: list[dict] = []
+    addrs = sorted(registered)
+    for i in range(0, len(addrs), 800):
+        logs += _get_logs_chunked(
+            from_block, latest_block,
+            [TRANSFER_TOPIC, None, [_address_topic(a) for a in addrs[i:i + 800]]],
+            address=cusd,
+        )
+    internal = _system_addresses() | {'0x' + '0' * 40}
+    escrow = (getattr(settings, 'MARKETPLACE_ESCROW_ADDRESS', '') or '').lower()
+    if escrow:
+        internal.add(escrow)
+    # One row per transaction and holder (transaction_hash is unique): the
+    # transfers a stranger's transaction sends one member are summed.
+    arrivals: dict[tuple, dict] = {}
+    for log in logs:
+        sender = ('0x' + log['topics'][1][-40:]).lower()
+        key = ('0x' + log['topics'][2][-40:]).lower()
+        # A Confío member's wallet sends only through the app's flows, each
+        # writing its own row (whose hash may not be saved yet when the
+        # transfer is mined), so it is never an outside deposit.
+        if registered.get(key) is None or sender in internal or sender in registered:
+            continue
+        group = arrivals.setdefault((log['transactionHash'].lower(), key),
+                                    {'sender': sender, 'units': 0, 'block': int(log.get('blockNumber', '0x0'), 16)})
+        group['units'] += int(log['data'], 16)
+    for (tx_hash, key), group in arrivals.items():
+        sender, account_id = group['sender'], registered[key]
+        if _source_row_covers(tx_hash, key):
+            continue  # recorded: by a feature, or by this pass on a rewound run
+        if SponsoredBatch.objects.filter(tx_hash__iexact=tx_hash).exists():
+            continue  # a Confío flow's own batch: it records what it moves
+        amount_usd = (Decimal(group['units']) / Decimal(10 ** 18)).quantize(
+            Decimal('0.000001'), rounding=ROUND_DOWN)
+        # No row for this one: dust (strangers must not spam rows), or a hash
+        # another recipient's row already holds (it is unique). The holder's
+        # cUSD is then no longer all in history, so their next wrap keeps its
+        # mint row as the record.
+        if amount_usd < min_deposit or SendTransaction.all_objects.filter(
+                transaction_hash__iexact=tx_hash).exists():
+            _close_cusd_clean(key, group['block'])
+            continue
+        account = Account.objects.filter(id=account_id).select_related('user', 'business').first()
+        if account is None:
+            continue
+        reference = f"cu:{tx_hash[2:58]}"
+        row, created = SendTransaction.objects.get_or_create(
+            idempotency_key=reference,
+            defaults={
+                'recipient_user': account.user,
+                'recipient_business': account.business,
+                'recipient_type': 'business' if account.business_id else 'user',
+                'recipient_display_name': (
+                    account.business.name if account.business_id
+                    else (account.user.get_full_name() or account.user.username or '')
+                ),
+                'recipient_address': key,
+                'sender_type': 'external',
+                'sender_display_name': '',
+                'sender_address': sender,
+                'amount': amount_usd,
+                'token_type': 'CUSD_BSC',
+                'status': 'CONFIRMED',
+                'transaction_hash': tx_hash,
+                'memo': '',
+            },
+        )
+        if not created or not account.user_id:
+            continue
+        try:
+            from notifications import utils as notif_utils
+            from notifications.models import NotificationType as NotifType
+
+            notif_utils.create_notification(
+                user=account.user,
+                account=account,
+                business=account.business if account.account_type == 'business' else None,
+                notification_type=NotifType.SEND_RECEIVED,
+                title='Depósito recibido',
+                message=f'Recibiste {format_usd(amount_usd, account.user)} en tu Confío Dollar.',
+                data={
+                    'transaction_type': 'deposit',
+                    'currency': 'CUSD_BSC',
+                    'network': 'BSC',
+                    'amount': str(amount_usd),
+                    'tx_hash': tx_hash,
+                    'is_external_address': True,
+                    'sender_address': sender,
+                    'recipient_address': key,
+                    'internal_id': str(row.internal_id),
+                    'transaction_id': str(row.internal_id),
+                },
+                related_object_type='SendTransaction',
+                related_object_id=str(row.internal_id),
+                action_url=f'confio://transaction/{row.internal_id}',
+            )
+        except Exception:  # noqa: BLE001 — comms failure must not lose the row
+            logger.exception('cUSD receive notification failed for %s', reference)
+    cache.set(CUSD_CURSOR_KEY, latest_block, None)
 
 
 def _system_addresses() -> set:
