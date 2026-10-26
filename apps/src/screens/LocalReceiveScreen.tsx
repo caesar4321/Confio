@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import LocalAccountApplicationScreen from './LocalAccountApplicationScreen';
 import VePagoMovilReceiveScreen from './VePagoMovilReceiveScreen';
+import BoliviaQrReceiveScreen from './BoliviaQrReceiveScreen';
 import {
   ActivityIndicator,
   Alert,
@@ -71,6 +72,7 @@ export default function LocalReceiveScreen() {
   if (methodId === 'cobre_co_breb_receive') return <LocalAccountApplicationScreen />;
   // Venezuela: a per-order Pago Móvil top-up, not a standing account.
   if (methodId === 've_pagomovil_receive') return <VePagoMovilReceiveScreen />;
+  if (methodId === 'bo_qr_receive') return <BoliviaQrReceiveScreen />;
   return <InfiniaLocalReceiveScreen />;
 }
 

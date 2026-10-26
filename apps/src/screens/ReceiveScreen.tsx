@@ -14,6 +14,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCryptoReceiveOptions } from '../hooks/useCryptoReceiveOptions';
 import { useLocalRailOptions } from '../hooks/useLocalRailOptions';
+import { useKoyweReplaced } from '../hooks/useKoyweReplaced';
 import { useRampFlows } from '../hooks/useRampFlows';
 import { MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
@@ -55,6 +56,8 @@ export default function ReceiveScreen() {
   const legacyCusdBalance = parseFloat(balancesData?.myBalances?.cusd || '0');
 
   const { openRechargeFlow, sheets, isRampBlocked } = useRampFlows({ legacyCusdBalance });
+  // QR Bolivia takes over the one-off recharge for Bolivians while it is on.
+  const koyweReplaced = useKoyweReplaced();
   const { receivePrimary, receiveMore } = useLocalRailOptions();
   const cryptoOptions = useCryptoReceiveOptions();
 
@@ -80,7 +83,7 @@ export default function ReceiveScreen() {
 
   // Where no ramp provider operates there is no one-off recharge to offer;
   // the cash row below is the way in.
-  const rechargeRow: RouteOption | null = isRampBlocked ? null : {
+  const rechargeRow: RouteOption | null = isRampBlocked || koyweReplaced.topUp ? null : {
     id: 'recharge_now',
     icon: 'plus-circle',
     title: 'Recargar ahora',

@@ -35,7 +35,7 @@ def can_pay(user, client):
     if not getattr(settings, 'STEREUM_TEST_WRITES_ENABLED', False) or not client.account_id or not client.secret:
         return False
     try:
-        current_identity(user)
+        current_identity(user, scope=client.scope)
     except StereumError:
         return False
     return True
@@ -70,7 +70,7 @@ def pay(user, request_id, decode_request_id, amount):
     client = StereumClient()
     if not can_pay(user, client):
         raise StereumError('El pago de prueba no está habilitado. Revisa la configuración y tu identidad.')
-    identity = current_identity(user)
+    identity = current_identity(user, scope=client.scope)
     return execute(user, 'pay_qr', {'decode_request_id': str(decode_request_id), 'amount': amount,
         'comment': 'Pago QR de prueba', 'sender_name': f'{identity.verified_first_name} {identity.verified_last_name}',
         'sender_document': identity.document_number}, request_id, client=client)

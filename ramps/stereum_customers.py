@@ -32,27 +32,59 @@ def required(data, key, limit):
     return value.strip()
 
 
-def current_identity(user):
+def _personal_documents(user):
+    # all_documents, never the default manager: a foreigner's passport is an
+    # additional document, which the default manager hides.
     from security.models import IdentityVerification
-    identity = IdentityVerification.objects.filter(user=user).filter(
+    return IdentityVerification.all_documents.filter(user=user).filter(
         Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'),
-    ).order_by('-updated_at', '-pk').first()
-    if not identity or identity.status != 'verified':
-        raise StereumError('A current verified personal identity is required.')
+    )
+
+
+def accepts(identity):
+    """A Bolivian CI, or a passport from any country (how foreigners register)."""
+    if identity.document_type == 'passport':
+        return True
+    return identity.document_type == 'national_id' and (identity.document_issuing_country or '').upper() in {'BO', 'BOL'}
+
+
+def current_identity(user, *, scope=None):
+    """The document Stereum knows this person by.
+
+    Once a registration exists for the credential scope, it stays bound to the
+    document it was made with; otherwise the first verified document Stereum
+    accepts, the phone-country document first.
+    """
     today = timezone.localdate(timezone=ZoneInfo('America/La_Paz'))
+    record = StereumCustomer.objects.filter(user=user, credential_scope=scope).first() if scope else None
+    if record:
+        identity = _personal_documents(user).filter(pk=record.source_verification_id).first()
+        if not identity or identity.status != 'verified':
+            raise StereumError('The document used for your Stereum registration is no longer verified.')
+    else:
+        identity = next((row for row in _personal_documents(user).filter(status='verified')
+                         .order_by('is_additional_document', '-verified_at', '-pk')
+                         if accepts(row) and not (row.document_expiry_date and row.document_expiry_date < today)), None)
+        if not identity:
+            raise StereumError('A verified Bolivian CI or a valid passport is required.')
     if identity.document_expiry_date and identity.document_expiry_date < today:
         raise StereumError('Your verified identity document has expired.')
     return identity
 
 
+def needs_document(user, scope):
+    """No document Stereum accepts yet: the app asks for a passport."""
+    try:
+        current_identity(user, scope=scope)
+    except StereumError:
+        return True
+    return False
+
+
 def identity_data(identity):
-    document_type = {'national_id': 'CI', 'foreign_id': 'CE', 'passport': 'PASSPORT'}.get(identity.document_type)
-    if not document_type:
-        raise StereumError('Stereum supports national IDs, foreign resident IDs and passports.')
-    if document_type != 'PASSPORT' and identity.document_issuing_country.upper() not in {'BO', 'BOL'}:
-        raise StereumError('SEGIP requires a Bolivian-issued CI or CE.')
-    if identity.verified_country.upper() not in {'BO', 'BOL'}:
-        raise StereumError('This Stereum integration currently supports residents of Bolivia.')
+    if not accepts(identity):
+        raise StereumError('Stereum accepts a Bolivian CI or a passport.')
+    document_type = 'PASSPORT' if identity.document_type == 'passport' else 'CI'
     dob = identity.verified_date_of_birth
     if not dob or dob >= timezone.localdate(timezone=ZoneInfo('America/La_Paz')):
         raise StereumError('A valid verified date of birth is required.')
@@ -108,7 +140,7 @@ def quote_customer(user, *, client=None):
     customer = onboarding_status(user, client=client)
     if not customer or customer.status != 'registered':
         raise StereumError('Complete Stereum customer registration before requesting an end-user quote.')
-    identity = current_identity(user)
+    identity = current_identity(user, scope=client.scope)
     if customer.identity_fingerprint != fingerprint(identity):
         raise StereumError('Your verified identity changed; Stereum registration requires reconciliation.')
     # Stereum documents externalUserId as our registration idempotency_key,
@@ -128,7 +160,7 @@ def onboard(user, extra, *, consent=False, client=None):
     with transaction.atomic(durable=True):
         locked_user = type(user).objects.select_for_update().get(pk=user.pk)
         access(locked_user)
-        identity = current_identity(user)
+        identity = current_identity(user, scope=client.scope)
         payload = snapshot(identity, extra)
         record = StereumCustomer.objects.filter(user=user, credential_scope=client.scope).first()
         if record:

@@ -174,6 +174,9 @@ def public_provider_name(ramp) -> str:
     """The provider label shown to users for any ramp."""
     if ramp.provider in TOPUP_ADAPTERS or ramp.provider in SEND_ADAPTERS:
         return PUBLIC_NAME
+    from ramps import bolivia_qr
+    if bolivia_qr.is_bolivia_qr(ramp):
+        return bolivia_qr.PUBLIC_NAME
     return ramp.get_provider_display()
 
 

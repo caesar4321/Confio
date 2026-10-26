@@ -206,6 +206,26 @@ def poll_ve_pagomovil():
     return f'Polled {checked} VE Pago Móvil orders, updated {changed}'
 
 
+@shared_task(name='ramps.tasks.poll_bolivia_qr_receives')
+def poll_bolivia_qr_receives():
+    """Advance QR Bolivia receives: payment, the provider's deposit on
+    Polygon, then Relay's delivery to the person's BSC wallet. Sends ride
+    poll_ve_pagomovil (the shared send core)."""
+    from ramps import bolivia_qr_receive
+    checked = changed = 0
+    for ramp_tx in bolivia_qr_receive.open_orders().iterator():
+        checked += 1
+        before = (ramp_tx.status, ramp_tx.status_detail)
+        try:
+            ramp_tx = bolivia_qr_receive.sync(ramp_tx)
+        except Exception:
+            logger.exception('QR Bolivia receive poll failed for %s', ramp_tx.pk)
+            continue
+        if (ramp_tx.status, ramp_tx.status_detail) != before:
+            changed += 1
+    return f'Polled {checked} QR Bolivia receives, updated {changed}'
+
+
 @shared_task(name='ramps.tasks.sync_ve_pagomovil_order')
 def sync_ve_pagomovil_order(ramp_id: int):
     """A provider webhook's hint: re-read one order now."""

@@ -27,7 +27,7 @@ const QR_RAILS: Record<string, string> = {
   br_qr: 'Pix',
   co_qr: 'Bre-B',
   ar_qr: 'QR Argentina',
-  bo_qr: 'QR Bolivia · prueba',
+  bo_qr: 'QR Bolivia',
 };
 
 export const ScanScreen = () => {
@@ -552,9 +552,6 @@ export const ScanScreen = () => {
               Tu saldo se convierte a moneda local al pagar. Ves el tipo de cambio final antes de confirmar.
             </Text>
             <Text style={styles.sheetNote}>También lee los QR de cobro de Confío.</Text>
-            {qrRails.some(method => method.id === 'bo_qr') && <Text style={styles.sheetNote}>
-              QR Bolivia está en modo de prueba y no descuenta de tu saldo.
-            </Text>}
           </View>
         </TouchableOpacity>
       </Modal>

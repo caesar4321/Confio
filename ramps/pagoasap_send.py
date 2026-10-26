@@ -32,6 +32,7 @@ SHARED_DEPOSIT_TARGET = True
 TARGET_AT_CLAIM = True
 SOURCE, DESTINATION = 'BSC:USDT', 'POL:USDC'
 PENDING_STALE = timedelta(hours=2)
+COUNTRY, FIAT, LIMIT_PREFIX = 'VE', 'VES', 'VE_PAGOMOVIL_SEND'
 MIN_PAYOUT_VES = Decimal('10')
 PAYABLE_MARGIN = Decimal('1.5')
 UNAVAILABLE = 'Los envíos en bolívares no están disponibles por ahora.'

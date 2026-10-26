@@ -107,8 +107,8 @@ def customer_console(request):
     try:
         permitted(request.user)
         access(request.user)
-        identity = current_identity(request.user)
         record = onboarding_status(request.user)
+        identity = current_identity(request.user, scope=StereumClient().scope)
     except StereumError as exc:
         return JsonResponse({'error': str(exc)}, status=403)
     initial = {}

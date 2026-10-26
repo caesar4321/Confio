@@ -63,6 +63,8 @@ class PayStereumQr(graphene.Mutation):
 class Query(graphene.ObjectType):
     stereum_qr_availability = graphene.Field(QrAvailability, required=True)
     stereum_qr_payment = graphene.Field(QrPayment, request_id=graphene.UUID(required=True))
+    # Its own field so an older server failing on it never breaks availability.
+    stereum_qr_needs_document = graphene.Boolean(required=True)
 
     @staticmethod
     def resolve_stereum_qr_availability(root, info):
@@ -74,6 +76,15 @@ class Query(graphene.ObjectType):
         existing = stereum_qr.pending(user, client)
         return QrAvailability(enabled=True, can_pay=stereum_qr.can_pay(user, client),
             pending_request_id=existing.request_id if existing else None)
+
+    @staticmethod
+    def resolve_stereum_qr_needs_document(root, info):
+        from .stereum_customers import needs_document
+        try:
+            user = stereum_qr.require_operator(info)
+        except StereumError:
+            return False
+        return needs_document(user, StereumClient().scope)
 
     @staticmethod
     def resolve_stereum_qr_payment(root, info, request_id):

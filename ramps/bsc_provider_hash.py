@@ -28,7 +28,7 @@ USDT_BSC = '0x55d398326f99059ff775485246999027b3197955'
 UNITS = Decimal('0.000001')
 TOLERANCE = Decimal('0.05')  # same as ramps.signals.attribute_bsc_ramp_arrival
 # Providers that report their BSC delivery hash.
-PROOF_PROVIDERS = ('koywe', 'vexpay')
+PROOF_PROVIDERS = ('koywe', 'vexpay', 'stereum', 'mesadepagos')
 NO_RECEIPT = object()
 
 

@@ -30,15 +30,19 @@ def send_console(request, admin_site):
     for ramp in ve_send._sends().filter(status='PROCESSING').order_by('created_at'):
         section = ve_send._section(ramp)
         rows.append({
+            'country': ramp.country_code,
             'ramp': ramp,
             'phase': ve_send._phase(ramp),
             'usdt': (Decimal(str(section.get('funded_wei') or section.get('deposit_wei') or '0'))
                      / Decimal(10 ** 18)).quantize(ve_send.MICRO),
             'section': section,
-            'bank_name': ve_pagomovil.BANK_NAMES.get((section.get('beneficiary') or {}).get('bank_code') or '', ''),
+            # Venezuelan sends name a SUDEBAN bank; QR Bolivia sends carry the
+            # bank the provider read from the QR.
+            'bank_name': (ve_pagomovil.BANK_NAMES.get((section.get('beneficiary') or {}).get('bank_code') or '', '')
+                          if ramp.country_code == 'VE' else (section.get('beneficiary') or {}).get('bank_name', '')),
         })
     return render(request, 'admin/ramps/ve_send_console.html', {
-        **admin_site.each_context(request), 'title': 'Envíos en bolívares (Pago Móvil)', 'rows': rows,
+        **admin_site.each_context(request), 'title': 'Envíos locales (Pago Móvil y QR Bolivia)', 'rows': rows,
     })
 
 
@@ -66,6 +70,9 @@ def _act(request) -> None:
                                  confirmed_unpaid=True)
             _sync_now(ramp)
         elif action == 'beneficiary':
+            if ramp.country_code != 'VE':
+                # A QR's recipient comes only from the provider's decode.
+                raise VePagoMovilError('El destinatario de un pago con QR no se puede cambiar.')
             beneficiary = {
                 'cedula': ve_pagomovil.normalize_cedula(request.POST.get('cedula', '')),
                 'phone': ve_pagomovil.normalize_phone(request.POST.get('phone', '')),

@@ -171,6 +171,8 @@ class RampTransaction(models.Model):
         ('coinbase', 'Coinbase'),
         ('vexpay', 'VEXPay'),
         ('pagoasap', 'Pago ASAP'),
+        ('stereum', 'Stereum'),
+        ('mesadepagos', 'Mesa de pagos'),
     ]
 
     DIRECTION_CHOICES = [

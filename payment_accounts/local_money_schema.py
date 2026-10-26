@@ -171,12 +171,24 @@ class LocalMoneyQuery(graphene.ObjectType):
         if direction not in {'send', 'receive'}:
             raise GraphQLError('Invalid direction')
         rows = local_money.methods(owner, _identity(owner, required=False), direction)
-        if direction == 'send':
-            from ramps.stereum_qr import available
-            if available(info.context.user, personal=owner.account_type == 'personal' and owner.user_id == info.context.user.pk):
-                rows.append(dict(method=local_money.Method('bo_qr', 'send', 'BOL', 'BO', 'BOB',
-                    'QR Bolivia · prueba', 'Escanea o importa un QR bancario boliviano'),
-                    status='live', reason='sandbox', requirement=None, account_status='active'))
+        # QR Bolivia (provider-neutral, ramps.bolivia_qr): pay any Bolivian QR /
+        # get paid with one. Owner-only, personal accounts; each order asks for
+        # Face. Builds below the floor never get the rows (an older build would
+        # open the retired sandbox screen).
+        from ramps import bolivia_qr
+        if _personal_owner(owner, info):
+            qr_direction = bolivia_qr.SEND if direction == 'send' else bolivia_qr.RECEIVE
+            if bolivia_qr.offered(qr_direction, info.context.META, info.context.user):
+                identity = _identity(owner, required=False)
+                method_id = 'bo_qr' if direction == 'send' else 'bo_qr_receive'
+                title, subtitle = (('QR Bolivia', 'Paga cualquier QR de bancos y billeteras en Bolivia')
+                                   if direction == 'send' else
+                                   ('QR Bolivia', 'Crea un QR y recibe bolivianos de cualquier banco'))
+                rows.append(dict(method=local_money.Method(method_id, direction, 'BOL', 'BO', 'BOB', title, subtitle,
+                                                           instruction_kind='per_order'),
+                                 status='live' if identity else 'needs_verification',
+                                 reason='' if identity else 'identity_required',
+                                 requirement=None, account_status='active'))
         if direction == 'send':
             # Venezuelan Pago Móvil send (provider-neutral, ramps.ve_pagomovil):
             # to the user's own account or anyone's. Owner-only, personal

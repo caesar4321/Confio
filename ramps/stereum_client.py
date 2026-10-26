@@ -63,10 +63,12 @@ def validate_response(data, *, writes=False):
 
 class StereumClient:
     BASE_URL = 'https://api.stereum.tech'
+    # The test console only ever talks to the sandbox (see StereumLiveClient).
+    ENVIRONMENTS = frozenset({'sandbox'})
 
     def __init__(self, *, session=None):
         self.environment = getattr(settings, 'STEREUM_ENV', 'sandbox')
-        if self.environment != 'sandbox':
+        if self.environment not in self.ENVIRONMENTS:
             raise StereumError('Stereum production settlement is not enabled.')
         self.api_key = getattr(settings, 'STEREUM_API_KEY', '')
         self.secret = getattr(settings, 'STEREUM_SECRET_KEY', '')
@@ -82,7 +84,7 @@ class StereumClient:
     def request(self, method, path, *, payload=None, signed=False, writes=False, timeout=25):
         if not self.api_key:
             raise StereumError('Stereum test API key is not configured.')
-        if writes and (not getattr(settings, 'STEREUM_TEST_ENABLED', False) or not getattr(settings, 'STEREUM_TEST_WRITES_ENABLED', False)):
+        if writes and not self.writes_enabled():
             raise StereumError('Stereum test mutations are disabled.')
         try:
             raw = json.dumps(payload, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode() if payload is not None else None
@@ -115,6 +117,13 @@ class StereumClient:
                 f'Stereum rejected the request (HTTP {response.status_code}{": " + code if code else ""}).',
                 code=code, ambiguous=writes and (300 <= response.status_code < 400 or response.status_code >= 500 or response.status_code in {408, 409}),
             )
+        return self.check(data, writes=writes)
+
+    def writes_enabled(self) -> bool:
+        return bool(getattr(settings, 'STEREUM_TEST_ENABLED', False)
+                    and getattr(settings, 'STEREUM_TEST_WRITES_ENABLED', False))
+
+    def check(self, data, *, writes=False):
         return validate_response(data, writes=writes)
 
     def banks(self):
@@ -175,3 +184,37 @@ class StereumClient:
             return False
         expected = hmac.new(self.secret.encode(), raw, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature.lower())
+
+
+class StereumLiveClient(StereumClient):
+    """QR Bolivia's client (ramps/bolivia_qr_stereum.py). Production only when
+    STEREUM_ENV is explicitly 'production'; each environment refuses the
+    other's resources: the sandbox rejects mainnet answers, production rejects
+    test-network ones (a test credential must never move real orders)."""
+    ENVIRONMENTS = frozenset({'sandbox', 'production'})
+
+    def writes_enabled(self) -> bool:
+        return True
+
+    def check(self, data, *, writes=False):
+        if self.environment == 'sandbox':
+            return validate_response(data, writes=writes)
+        pending = [data]
+        while pending:
+            item = pending.pop()
+            if isinstance(item, dict):
+                for key in ('on_main_net', 'onMainNet'):
+                    if key in item and str(item[key]).lower() in ('false', '0'):
+                        raise StereumError('Test resource returned to the production integration.', ambiguous=writes)
+                pending.extend(item.values())
+            elif isinstance(item, list):
+                pending.extend(item)
+        return data
+
+    def otc_quote(self, *, side, input_amount, input_currency, output_currency, customer='SELF'):
+        return self.request('POST', '/api/v1/otc/quotes', payload={
+            'externalUserId': customer, 'side': side, 'inputAmount': float(input_amount),
+            'inputCurrency': input_currency, 'outputCurrency': output_currency, 'country': 'BO',
+            'inputNetwork': 'CSL' if input_currency == 'BOB' else 'POLYGON',
+            'outputNetwork': 'POLYGON' if side == 'BUY' else 'CSL',
+        })

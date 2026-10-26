@@ -24,6 +24,7 @@ import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
 import { useLocalRailOptions } from '../hooks/useLocalRailOptions';
+import { useKoyweReplaced } from '../hooks/useKoyweReplaced';
 import { useRampFlows } from '../hooks/useRampFlows';
 import {
   COMING_SOON_NOTE,
@@ -734,6 +735,8 @@ export const TransferScreen = () => {
   const { openWithdrawFlow, sheets: rampSheets, isRampBlocked } = useRampFlows({
     legacyCusdBalance: parseFloat(legacyBalancesData?.myBalances?.cusd || '0'),
   });
+  // QR Bolivia takes over the own-account withdrawal for Bolivians while it is on.
+  const koyweReplaced = useKoyweReplaced();
 
 
 
@@ -1262,7 +1265,7 @@ export const TransferScreen = () => {
                   // Mirrors Recibir: the own-money row (the old Retirar)
                   // always leads, then rails to other people. Hidden where no
                   // ramp provider operates — the cash card is the way out.
-                  leading={isRampBlocked ? [] : [{
+                  leading={isRampBlocked || koyweReplaced.withdraw ? [] : [{
                     id: 'own_account',
                     icon: 'download',
                     title: 'A mi propia cuenta',
@@ -1293,7 +1296,7 @@ export const TransferScreen = () => {
     );
 
     return HeaderContent;
-  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, cryptoSendOptions, handleRefresh, isBusinessAccount, isPersonalAccount, sendPrimary, sendMore, openWithdrawFlow, isRampBlocked, activeAccount?.isEmployee, navigation]);
+  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, cryptoSendOptions, handleRefresh, isBusinessAccount, isPersonalAccount, sendPrimary, sendMore, openWithdrawFlow, isRampBlocked, koyweReplaced.withdraw, activeAccount?.isEmployee, navigation]);
 
   const ListEmptyComponent = useCallback(() => {
     // For business accounts

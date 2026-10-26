@@ -1,8 +1,9 @@
-"""Venezuelan bolívar sends (Enviar por Pago Móvil): the provider-agnostic core.
+"""Local-currency sends funded from the wallet: the provider-agnostic core.
 
-One `RampTransaction(direction='off_ramp', destination='cusd_plus')` per
-send; `provider` names the adapter (ramps.ve_pagomovil.SEND_ADAPTERS) that
-does the provider-specific steps. Phases (metadata.ve_send.phase), each move
+Used by Venezuelan Pago Móvil (ramps.ve_pagomovil) and QR Bolivia
+(ramps.bolivia_qr). One `RampTransaction(direction='off_ramp',
+destination='cusd_plus')` per send; `provider` names the adapter (from either
+registry; names are unique) that does the provider-specific steps. Phases (metadata.ve_send.phase), each move
 made under the row lock:
 
   preparing         order saved, deposit target not ready yet
@@ -34,6 +35,8 @@ the attempt that sent it.
 
 Adapter contract (module attributes/functions):
   PROVIDER, SHARED_DEPOSIT_TARGET, PENDING_STALE, replay_window()
+  COUNTRY, FIAT, LIMIT_PREFIX (settings <prefix>_{MIN,MAX,USER_DAILY,GLOBAL_DAILY}_USD)
+  beneficiary_view(beneficiary) -> dict  (optional; Venezuelan fields otherwise)
   TARGET_AT_CLAIM: the deposit target is made when the funding is claimed
     (funding_target(ramp) -> dict), else at creation (deposit_target(ramp))
   settle(ramp) -> Settlement   (optional: funded -> settled; else immediate)
@@ -127,9 +130,21 @@ class Settlement:
     reason: str = ''
 
 
+def _providers() -> list[str]:
+    from ramps import bolivia_qr
+    return list(ve_pagomovil.SEND_ADAPTERS) + list(bolivia_qr.SEND_ADAPTERS)
+
+
 def adapter(ramp_or_provider):
     provider = getattr(ramp_or_provider, 'provider', ramp_or_provider)
-    return ve_pagomovil.send_adapter(provider)
+    if provider in ve_pagomovil.SEND_ADAPTERS:
+        return ve_pagomovil.send_adapter(provider)
+    from ramps import bolivia_qr
+    return bolivia_qr.adapter(bolivia_qr.SEND, provider)
+
+
+def _country(provider) -> str:
+    return getattr(adapter(provider), 'COUNTRY', 'VE')
 
 
 # ------------------------------------------------------------------ amounts
@@ -168,36 +183,40 @@ def counted_usd(ramp: RampTransaction) -> Decimal:
 
 
 def _sends():
-    return RampTransaction.objects.filter(
-        provider__in=list(ve_pagomovil.SEND_ADAPTERS), direction=DIRECTION, country_code='VE')
+    return RampTransaction.objects.filter(provider__in=_providers(), direction=DIRECTION)
 
 
-def check_limits(user, gross_usd: Decimal) -> None:
+def check_limits(user, gross_usd: Decimal, provider: str = 'pagoasap') -> None:
     from django.db.models import Q
     # No caps by default: the quote shows what a small send delivers, the
     # bridge refuses amounts too small to cross, and the recipient's bank
     # enforces its Pago Móvil limit. The settings stay as an emergency lever.
-    limit = ve_pagomovil.optional_limit
-    minimum, maximum = limit('VE_PAGOMOVIL_SEND_MIN_USD'), limit('VE_PAGOMOVIL_SEND_MAX_USD')
+    prefix = getattr(adapter(provider), 'LIMIT_PREFIX', 'VE_PAGOMOVIL_SEND')
+    country = _country(provider)
+
+    def limit(suffix):
+        return ve_pagomovil.optional_limit(f'{prefix}_{suffix}')
+
+    minimum, maximum = limit('MIN_USD'), limit('MAX_USD')
     if minimum is not None and gross_usd < minimum:
         raise VeSendError(f'El monto mínimo es ${minimum}.')
     if maximum is not None and gross_usd > maximum:
         raise VeSendError(f'El monto máximo por envío es ${maximum}.')
-    user_cap = limit('VE_PAGOMOVIL_SEND_USER_DAILY_USD')
-    global_cap = limit('VE_PAGOMOVIL_SEND_GLOBAL_DAILY_USD')
+    user_cap = limit('USER_DAILY_USD')
+    global_cap = limit('GLOBAL_DAILY_USD')
     if user_cap is None and global_cap is None:
         return
     since = timezone.now() - timedelta(hours=24)
     # Every send not definitely unfunded counts, by when money can move.
-    recent = list(_sends().filter(
+    recent = list(_sends().filter(country_code=country).filter(
         Q(created_at__gte=since) | Q(status__in=OPEN_STATUSES) | Q(completed_at__gte=since),
     ).exclude(status='FAILED'))
     user_total = sum((counted_usd(r) for r in recent if r.actor_user_id == user.pk), Decimal('0'))
     if user_cap is not None and user_total + gross_usd > user_cap:
-        raise VeSendError('Alcanzaste el límite diario de envíos en bolívares. Intenta mañana.')
+        raise VeSendError('Alcanzaste tu límite diario de envíos. Intenta mañana.')
     global_total = sum((counted_usd(r) for r in recent), Decimal('0'))
     if global_cap is not None and global_total + gross_usd > global_cap:
-        raise VeSendError('Los envíos en bolívares alcanzaron su cupo de hoy. Intenta más tarde.')
+        raise VeSendError('Los envíos alcanzaron su cupo de hoy. Intenta más tarde.')
 
 
 def _advisory_lock(name: str) -> None:
@@ -296,9 +315,10 @@ def reserve(*, provider: str, user, account, gross_usd: Decimal, beneficiary: di
     address = (getattr(locked, 'bsc_address', '') or '').strip().lower()
     if not locked or not address or address != (account.bsc_address or '').strip().lower():
         raise VeSendError('Tu billetera cambió. Vuelve a intentarlo.')
-    if _sends().filter(actor_user=user, status='PENDING').exists():
-        raise VeSendError('Ya tienes un envío en bolívares pendiente. Termínalo o cancélalo.')
-    check_limits(user, gross_usd)
+    country = _country(provider)
+    if _sends().filter(actor_user=user, status='PENDING', country_code=country).exists():
+        raise VeSendError('Ya tienes un envío pendiente. Termínalo o cancélalo.')
+    check_limits(user, gross_usd, provider)
     if adapter(provider).SHARED_DEPOSIT_TARGET:
         # One deposit address for every send: a per-sender tag in the last
         # micro-units keeps each send's transfer distinguishable.
@@ -313,19 +333,21 @@ def reserve(*, provider: str, user, account, gross_usd: Decimal, beneficiary: di
     if deposit_wei <= 0:
         raise VeSendError('El monto es muy bajo.')
     usdt = (Decimal(deposit_wei) / Decimal(10 ** 18)).quantize(MICRO, rounding=ROUND_DOWN)
-    estimated_ves = Decimal(str(estimate.get('estimated_ves') or '0'))
+    # What the recipient should get in local currency (VE adapters name it
+    # estimated_ves; others estimated_fiat).
+    estimated_ves = Decimal(str(estimate.get('estimated_fiat') or estimate.get('estimated_ves') or '0'))
     ramp = RampTransaction(
         provider=provider,
         direction=DIRECTION,
         status='PENDING',
-        country_code='VE',
+        country_code=country,
         actor_user=user,
         actor_type='user',
         actor_display_name=account.display_name or user.get_full_name() or user.username or '',
         # The wallet the funding transfer must come from.
         actor_address=address,
         destination='cusd_plus',
-        fiat_currency='VES',
+        fiat_currency=getattr(adapter(provider), 'FIAT', 'VES'),
         fiat_amount=estimated_ves or None,
         crypto_currency='USDT',
         crypto_amount_estimated=usdt,
@@ -345,6 +367,7 @@ def reserve(*, provider: str, user, account, gross_usd: Decimal, beneficiary: di
         'beneficiary_revision': 0,
         'estimate': {k: str(v) for k, v in estimate.items()},
         'estimated_ves': format(estimated_ves, 'f'),
+        'estimated_fiat': format(estimated_ves, 'f'),
         'created_block': created_block,
         'payout_attempt': 0,
     }}
@@ -675,7 +698,7 @@ def _alert(ramp: RampTransaction, reason: str) -> None:
     try:
         from config.ops_alerts import send_ops_alert
         sent = send_ops_alert(
-            f'⚠️ Envío VE ({ramp.provider}) {ramp.internal_id} requiere revisión: {reason}.',
+            f'⚠️ Envío {ramp.country_code} ({ramp.provider}) {ramp.internal_id} requiere revisión: {reason}.',
             dedupe_key=f've_send:{ramp.pk}:{reason}', dedupe_seconds=86400,
         )
     except Exception:  # noqa: BLE001
@@ -775,11 +798,13 @@ def mark_paid_manually(ramp: RampTransaction, reference: str, *, operator: str, 
 
 # ------------------------------------------------------------------ payout
 
-def _inflight(exclude_pk: int) -> list[RampTransaction]:
-    """Other sends whose payout left (or may have) and is not settled."""
+def _inflight(ramp: RampTransaction) -> list[RampTransaction]:
+    """Other sends of the same provider (one balance) whose payout left, or
+    may have, and is not settled."""
     return list(_sends().filter(
-        status='PROCESSING', **{f'metadata__{SECTION}__phase__in': ['paying', 'payout_pending', 'payout_review']},
-    ).exclude(pk=exclude_pk))
+        provider=ramp.provider, status='PROCESSING',
+        **{f'metadata__{SECTION}__phase__in': ['paying', 'payout_pending', 'payout_review']},
+    ).exclude(pk=ramp.pk))
 
 
 def _claim_payout(ramp: RampTransaction) -> dict | None:
@@ -792,7 +817,7 @@ def _claim_payout(ramp: RampTransaction) -> dict | None:
         section = _section(current)
         if current.status != 'PROCESSING' or _phase(current) != 'settled':
             return None
-        terms = adapter(current).payout_terms(current, _inflight(current.pk))
+        terms = adapter(current).payout_terms(current, _inflight(current))
         if terms and terms.get('review'):
             # Definitely not sent, and not payable as priced: ops decides.
             metadata = dict(current.metadata or {})
@@ -1094,8 +1119,20 @@ def due_for_sync(ramp: RampTransaction) -> bool:
 
 def active_order(user, provider: str) -> RampTransaction | None:
     return RampTransaction.objects.filter(
-        provider=provider, direction=DIRECTION, country_code='VE', actor_user=user, status__in=OPEN_STATUSES,
+        provider=provider, direction=DIRECTION, country_code=_country(provider), actor_user=user,
+        status__in=OPEN_STATUSES,
     ).order_by('-created_at').first()
+
+
+def _beneficiary_view(ramp: RampTransaction, beneficiary: dict) -> dict:
+    custom = getattr(adapter(ramp), 'beneficiary_view', None)
+    if custom:
+        return custom(beneficiary)
+    return {
+        'cedula': beneficiary.get('cedula'), 'phone': beneficiary.get('phone'),
+        'bank_code': beneficiary.get('bank_code'),
+        'bank_name': ve_pagomovil.BANK_NAMES.get(beneficiary.get('bank_code') or '', ''),
+    }
 
 
 def view(ramp: RampTransaction, *, with_funding: bool = False) -> dict:
@@ -1108,11 +1145,9 @@ def view(ramp: RampTransaction, *, with_funding: bool = False) -> dict:
         'estimated_ves': section.get('estimated_ves'),
         'ves_amount': section.get('delivered_ves') or section.get('payout_ves') or None,
         'rate': (section.get('estimate') or {}).get('rate'),
-        'beneficiary': {
-            'cedula': beneficiary.get('cedula'), 'phone': beneficiary.get('phone'),
-            'bank_code': beneficiary.get('bank_code'),
-            'bank_name': ve_pagomovil.BANK_NAMES.get(beneficiary.get('bank_code') or '', ''),
-        } if beneficiary else None,
+        'estimated_fiat': section.get('estimated_fiat') or section.get('estimated_ves'),
+        'fiat_amount': section.get('delivered_fiat') or section.get('delivered_ves') or section.get('payout_ves'),
+        'beneficiary': _beneficiary_view(ramp, beneficiary) if beneficiary else None,
         'funding': funding_details(ramp) if with_funding else None,
         'funding_tx_hash': section.get('funding_tx_hash'),
         'bank_reference': section.get('bank_reference'),
