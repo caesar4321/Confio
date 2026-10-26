@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.7.0',
-    'last_updated': '2026-10-25',
+    'version': '1.8.0',
+    'last_updated': '2026-10-26',
     'is_legally_binding': True,
     'sections': [
         {
@@ -23,7 +23,7 @@ TERMS = {
                 {'term': 'cUSD (Confío Dollar)', 'definition': 'Token emitido por Duende Limited sobre BNB Chain, respaldado 1:1 por USDT y convertible únicamente en USDT conforme a la sección 5. No es dinero de curso legal ni otorga derecho a recibir dólares estadounidenses.'},
                 {'term': 'a-cUSD (Antiguo Confío Dollar)', 'definition': 'Versión anterior de cUSD sobre Algorand, respaldada 1:1 por USDC y convertible únicamente en USDC a través de su contrato inteligente.'},
                 {'term': 'cUSD+', 'definition': 'Token que representa cUSD depositado en la función de ahorro con rendimiento, respaldado 1:1 por USDY de Ondo Finance.'},
-                {'term': 'USDT', 'definition': 'Stablecoin emitida por Tether, un tercero ajeno a Confío. Las recargas hacia la función de ahorro se acreditan primero en USDT sobre BNB Chain y se convierten a cUSD+ solo si usted es elegible conforme a la sección 10.'},
+                {'term': 'USDT', 'definition': 'Stablecoin emitida por Tether, un tercero ajeno a Confío. Las recargas hacia la función de ahorro se acreditan primero en USDT sobre BNB Chain y se convierten a cUSD+ solo si usted es elegible conforme a la sección 12.'},
                 {'term': 'Acciones tokenizadas', 'definition': 'Tokens emitidos por terceros que representan exposición 1:1 a acciones reales de empresas de los Estados Unidos.'}
             ]
         },
@@ -78,7 +78,7 @@ TERMS = {
                 'La conversión entre cUSD y cUSD+ depende de contratos inteligentes y de emisores o proveedores terceros; en condiciones excepcionales de mercado o técnicas, los retiros podrían demorarse o verse afectados.',
                 'Existen riesgos técnicos y de terceros, incluyendo errores en contratos inteligentes, cambios regulatorios y riesgo del emisor del activo de respaldo. En casos extremos puede perder parte o la totalidad del valor depositado.',
                 'Las tasas mostradas ya descuentan la comisión de Confío; cualquier costo adicional de una operación se muestra antes de confirmarla.',
-                'Si usted no es elegible para el ahorro con rendimiento conforme a la sección 10, su recarga permanece en USDT: se muestra dentro de su cuenta de ahorro y puede enviarla, gastarla o retirarla en cualquier momento, pero no genera rendimiento ni está respaldada por USDY. En ese caso aplican los riesgos del emisor de USDT (Tether) y no los de Ondo Finance.',
+                'Si usted no es elegible para el ahorro con rendimiento conforme a la sección 12, su recarga permanece en USDT: se muestra dentro de su cuenta de ahorro y puede enviarla, gastarla o retirarla en cualquier momento, pero no genera rendimiento ni está respaldada por USDY. En ese caso aplican los riesgos del emisor de USDT (Tether) y no los de Ondo Finance.',
                 'Los retiros y las conversiones de salida no están sujetos a restricciones geográficas: no ser elegible no le impide retirar sus fondos. Los retiros siguen sujetos a los riesgos técnicos, de mercado y de terceros descritos en esta sección y a las pausas descritas en la sección 5.'
             ]
         },
@@ -94,18 +94,45 @@ TERMS = {
             ]
         },
         {
-            'title': '9. Limitaciones de Responsabilidad',
+            'title': '9. Oro y Bitcoin',
+            'content': [
+                'La función Oro y Bitcoin le permite comprar y vender tokens que siguen el precio del oro y de Bitcoin, emitidos por terceros. Las operaciones se ejecutan en PancakeSwap, un exchange descentralizado de terceros, independiente de Confío.',
+                'Los tokens quedan en su propia cuenta, firmada con su llave. Confío no los custodia.',
+                'El precio sube y baja a cualquier hora, también de noche y en fines de semana. Puede perder parte o la totalidad de lo invertido.',
+                'Cada compra y cada venta pagan la comisión de conversión de Confío Dollar, que se muestra antes de confirmar.',
+                'Confío no ofrece asesoría financiera.'
+            ]
+        },
+        {
+            'title': '10. Futuros (Contratos Perpetuos)',
+            'content': [
+                'Futuros le permite abrir posiciones largas o cortas, con apalancamiento, sobre el precio de un activo (criptomonedas, acciones, índices, materias primas y divisas). Las posiciones se abren en Hyperliquid, un exchange descentralizado de terceros, independiente de Confío.',
+                'Confío no es un exchange, un bróker ni la contraparte de sus operaciones. Las órdenes se ejecutan en Hyperliquid, en una cuenta a su nombre. Confío prepara las órdenes y transferencias que usted elige y las envía con su firma; usted firma cada operación con su propia llave, y Confío no puede mover su posición sin su firma.',
+                'Al abrir una posición o agregar margen, el monto sale de su Confío Dollar y cruza a su cuenta de Hyperliquid mediante Relay, un servicio de terceros para transferir entre redes. Al cerrar, el dinero vuelve por la misma vía a su Confío Dollar. Si al cerrar quedan menos de US$2 en su cuenta de Hyperliquid, ese saldo no se trae de vuelta y permanece a su nombre en Hyperliquid.',
+                'Cada salida y cada entrada pagan la comisión de conversión de Confío Dollar (0,9 %). La transferencia entre redes y las comisiones de Hyperliquid tienen su propio costo, y la primera vez Hyperliquid cobra un cargo de activación de su cuenta. Antes de abrir una posición se muestran todos los costos; al agregar margen o al cerrar se muestra la comisión de conversión, y los costos de la transferencia y de Hyperliquid se descuentan del monto transferido.',
+                'Con apalancamiento, una variación pequeña del precio puede hacerle perder todo el margen de una posición. Si el precio llega al nivel de liquidación, Hyperliquid cierra la posición; en una liquidación de respaldo se pierde todo el margen de esa posición. Las posiciones abiertas pagan o reciben financiamiento periódicamente, y los precios se mueven las 24 horas.',
+                'Una orden «a mi precio» (límite) puede no ejecutarse nunca, o ejecutarse solo en parte. Mientras espera, su margen permanece en su cuenta de Hyperliquid y usted puede cancelarla.',
+                'Los niveles de «tomar ganancia» y «limitar pérdida» son órdenes de Hyperliquid que se ejecutan al precio de mercado cuando se alcanzan, por lo que el precio final puede ser distinto del nivel elegido. La protección elegida junto con una orden límite se activa cuando esa orden se ejecuta por completo.',
+                'Hyperliquid y Relay son operados por terceros. Pueden pausarse, fallar o cambiar sus reglas, comisiones y mercados, y Confío no puede revertir sus operaciones. Si Confío deja de operar, la Salida de Emergencia de la app le permite retirar sus fondos de Hyperliquid con su propia llave, una vez transcurrido el plazo sin actividad de Confío que la app indica.',
+                'Cerrar posiciones y traer su dinero de vuelta nunca está limitado por país. Solo abrir posiciones o agregar margen puede estarlo (sección 12).',
+                'Confío no ofrece asesoría financiera ni recomendaciones. Usted decide qué, cuándo y con cuánto apalancamiento operar.'
+            ]
+        },
+        {
+            'title': '11. Limitaciones de Responsabilidad',
             'content': [
                 'Pérdidas debido a errores del usuario',
                 'Problemas de conectividad',
                 'Fluctuaciones en el valor de las monedas',
                 'Variaciones de rendimiento o de precio en cUSD+, USDY o acciones tokenizadas',
                 'Actos u omisiones de emisores o proveedores terceros de los activos subyacentes',
+                'Liquidaciones, financiamiento y variaciones de precio en Futuros',
+                'Interrupciones, fallas o cambios de Hyperliquid, Relay o PancakeSwap',
                 'Acciones de terceros'
             ]
         },
         {
-            'title': '10. Restricciones Geográficas',
+            'title': '12. Restricciones Geográficas',
             'content': {
                 'preventa_de_$confio': [
                     'La participación en la preventa de monedas y ciertos servicios financieros de Confío está estrictamente prohibida para:',
@@ -119,11 +146,17 @@ TERMS = {
                     'La lista de jurisdicciones del emisor puede cambiar; la versión vigente está publicada en docs.ondo.finance. Podemos bloquear, limitar o suspender estas funciones para cumplir con esos requisitos.',
                     'Si usted no es elegible, puede seguir usando el resto de Confío con normalidad: recibir, enviar, pagar y retirar dólares digitales. Lo que no está disponible es la conversión a cUSD+ y la compra de acciones tokenizadas. La emisión de nuevo cUSD puede limitarse por jurisdicción conforme a la sección 5.',
                     'Para aplicar estas reglas usamos el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP.'
+                ],
+                'futuros': [
+                    'Futuros no está disponible para personas ubicadas o residentes en Estados Unidos, Canadá, Reino Unido, Bélgica, Cuba, Irán, Corea del Norte y Siria, ni donde la ley local lo prohíba.',
+                    'Para aplicar estas reglas usamos el país de su número de teléfono verificado y el país estimado a partir de su dirección IP.',
+                    'Podemos ampliar o reducir la lista de países, o limitar Futuros, para cumplir con las reglas de los proveedores o la ley.',
+                    'Estas restricciones solo afectan la apertura de posiciones y el margen adicional. Cerrar posiciones y retirar su dinero sigue disponible.'
                 ]
             }
         },
         {
-            'title': '11. Cumplimiento del Usuario',
+            'title': '13. Cumplimiento del Usuario',
             'content': [
                 'Usted es responsable de verificar que el uso de Confío, la compra de $CONFIO y el uso de las funciones de ahorro e inversión estén permitidos en su jurisdicción.',
                 'Podemos rechazar, limitar o cancelar acceso a servicios, a la preventa o a las funciones de ahorro e inversión si detectamos restricciones regulatorias, sanciones, fraude, suplantación o incumplimiento de estos términos.',
@@ -131,10 +164,11 @@ TERMS = {
             ]
         },
         {
-            'title': '12. Normas de la Comunidad',
+            'title': '14. Normas de la Comunidad',
             'content': [
-                'Comunidad, dentro de Descubrir, permite a personas con identidad verificada publicar textos y fotos, compartir sus propios movimientos (compras y ventas de acciones, recargas, retiros y envíos entre usuarios de Confío) con su monto y resultado, comentar, reaccionar, seguir a otros miembros y usar una foto de perfil. Nada de lo que usted mueve se publica sin que usted lo comparta. Su contenido se muestra a otros miembros con su nombre de usuario de Confío, o con un seudónimo si no eligió uno, nunca con su nombre real; las fotos publicadas y la foto de perfil también pueden verse con su enlace.',
+                'Comunidad, dentro de Descubrir, permite a personas con identidad verificada publicar textos y fotos, compartir sus propios movimientos (compras y ventas de acciones, de oro y bitcoin y de futuros con su margen y resultado, recargas, retiros y envíos entre usuarios de Confío) con su monto y resultado, comentar, reaccionar, seguir a otros miembros y usar una foto de perfil. Nada de lo que usted mueve se publica sin que usted lo comparta. Su contenido se muestra a otros miembros con su nombre de usuario de Confío, o con un seudónimo si no eligió uno, nunca con su nombre real; las fotos publicadas y la foto de perfil también pueden verse con su enlace.',
                 'Cada miembro verificado tiene un perfil de inversor visible para otros miembros con su nombre de usuario o seudónimo: el valor de sus dólares en Confío, sus acciones con su resultado, sus posiciones cerradas, los CONFIO comprados en la preventa y sus estadísticas de operación. Usted puede ocultar su perfil de inversor en cualquier momento desde su perfil.',
+                'La Liga ordena a los inversores según su ganancia en dólares en el periodo, contando lo vendido y lo que aún tienen, y a los equipos según el promedio de esa ganancia por miembro. Junto a cada resultado se muestra su porcentaje y, para quien opera futuros, su apalancamiento promedio y sus liquidaciones. En Futuros cuenta el margen, nunca el tamaño apalancado. Para aparecer, su perfil de inversor debe estar visible y debe cumplir los mínimos de inversión que la app indica. La Liga otorga solo insignias, sin premios en dinero.',
                 'Tenemos tolerancia cero con el contenido ofensivo y con los usuarios abusivos. No está permitido publicar estafas o fraudes; promesas de ganancias o invitaciones a invertir; pedidos de dinero o la compra y venta de dólares o criptomonedas fuera de la app; datos de contacto o enlaces para continuar en privado; datos personales propios o de terceros; suplantación de Confío, de bancos o de autoridades; spam; odio, acoso o amenazas; contenido sexual; violencia; ni contenido ilegal.',
                 'Revisamos con sistemas automáticos, incluido un proveedor de inteligencia artificial (ver la Política de Privacidad), todo el contenido antes de publicarlo y podemos rechazarlo. Usted puede reportar contenido y bloquear a otros miembros desde la app. Revisamos los reportes y podemos retirar contenido en cualquier momento.',
                 'Si incumple estas normas podemos retirar su contenido y suspender o cancelar su acceso a Comunidad o a su cuenta.',
@@ -143,11 +177,11 @@ TERMS = {
             ]
         },
         {
-            'title': '13. Modificaciones',
+            'title': '15. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '14. Contacto',
+            'title': '16. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'
