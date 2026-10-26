@@ -1710,6 +1710,11 @@ def submit_return(user, position_id, mapping_signature: dict, send_signature: di
     return {'position': PerpPosition.objects.get(pk=position.pk)}
 
 
+# Same slack as the app's own Confío Dollar+ mint (cusdPlusVault.ts).
+ENTRY_MIN_OUT_BPS = 9_950
+ENTRY_REISSUE_S = 120
+
+
 def entry_plan(user, meta, position_id) -> dict:
     """The ordinary entry for USDT that came home: exact calls, a durable
     request id the relay recognizes as this position's return."""
@@ -1731,6 +1736,10 @@ def entry_plan(user, meta, position_id) -> dict:
     if existing and existing.get('dollar') == DOLLAR_PLUS and not check_savings_mint_eligibility(user, meta or {}):
         # Unsent and no longer sponsorable as Confío Dollar+: issue it again.
         stale_request_id, existing = existing.get('request_id'), None
+    elif existing and time.time() - float(existing.get('issued_at') or 0) > ENTRY_REISSUE_S:
+        # Unsent (no batch linked): its minimum is from prices that have moved
+        # since. Issued again from the vault as it is now.
+        stale_request_id, existing = existing.get('request_id'), None
     if existing:
         return {'position': position, **existing}
     on_hand = vault.usdt_balance_raw(position.wallet, fresh=True)
@@ -1747,10 +1756,15 @@ def entry_plan(user, meta, position_id) -> dict:
         oracle = vault.current_oracle_price_wad(fresh=True)
         if pps <= 0 or oracle <= 0:
             raise FlowError('price_unavailable')
-        usdy = amount * WAD // oracle
-        min_shares = (usdy * oracle // pps) * (BPS - 100) // BPS
+        # subscribeAndMint(usdtAmount, minUsdyOut, recipient): the floor is in
+        # USDY after the conversion fee (the app's own savings mint does the
+        # same), never in cUSD+ shares: USDY is worth more than a dollar, so a
+        # share-denominated floor sits above anything the mint can deliver.
+        from .cusd_vault import preview_mint_wei
+        net = preview_mint_wei(amount).net_wei
+        min_usdy = (net * WAD // oracle) * ENTRY_MIN_OUT_BPS // BPS
         data = '0x' + sponsor_7702.SEL_SUBSCRIBE_AND_MINT + abi_encode(
-            ['uint256', 'uint256', 'address'], [amount, min_shares, wallet]).hex()
+            ['uint256', 'uint256', 'address'], [amount, min_usdy, wallet]).hex()
     else:
         target = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
         from .cusd_vault import preview_mint_wei
@@ -1759,7 +1773,8 @@ def entry_plan(user, meta, position_id) -> dict:
             ['uint256', 'uint256', 'address'], [amount, net, wallet]).hex()
     calls = [_approve_call(target.lower(), amount), {'to': target.lower(), 'value': '0', 'data': data}]
     entry = {'calls': calls, 'request_id': _request_id('perps-ret'), 'dollar': dollar,
-             'amount_wei': str(amount), 'kind': 'subscribe' if dollar == DOLLAR_PLUS else 'mint_cusd'}
+             'amount_wei': str(amount), 'kind': 'subscribe' if dollar == DOLLAR_PLUS else 'mint_cusd',
+             'issued_at': time.time()}
     with transaction.atomic():
         locked = PerpPosition.objects.select_for_update().get(pk=position.pk)
         if locked.state != 'landed' or locked.return_batch_id is not None:

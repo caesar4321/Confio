@@ -519,6 +519,42 @@ class HyperliquidActionTests(TestCase):
             perps_flow.return_kind('mint_cusd', entry['calls'][:1], entry['request_id'], self.user)
         self.assertEqual(perps_flow.return_kind('mint_cusd', entry['calls'], '', self.user), 'mint_cusd')
 
+    def test_dollar_plus_entry_floor_is_usdy_after_the_fee(self):
+        # Prod 2026-10-26: the floor was in cUSD+ shares (above any possible
+        # USDY out) and the vault reverted every entry.
+        from cusd_plus.crypto_policy import DOLLAR_PLUS
+        self.position.state = 'landed'
+        self.position.flow = {**self.position.flow, 'landed_wei': str(int(Decimal('10.6178') * WAD))}
+        self.position.save()
+        oracle, net = int(Decimal('1.12') * WAD), int(Decimal('10.522') * WAD)
+        with mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=11 * WAD), \
+                mock.patch('cusd_plus.eligibility.check_savings_mint_eligibility', return_value=True), \
+                mock.patch('cusd_plus.vault.is_safe_mint_amount', return_value=True), \
+                mock.patch('cusd_plus.vault.vault_address', return_value='0x' + '3c' * 20), \
+                mock.patch('cusd_plus.vault.p_plus_wad', return_value=int(Decimal('1.02') * WAD)), \
+                mock.patch('cusd_plus.vault.current_oracle_price_wad', return_value=oracle), \
+                mock.patch('cusd_plus.cusd_vault.preview_mint_wei', return_value=SimpleNamespace(net_wei=net)):
+            entry = perps_flow.entry_plan(self.user, {}, self.position.id)
+        self.assertEqual(entry['dollar'], DOLLAR_PLUS)
+        floor = int(entry['calls'][1]['data'][10 + 64:10 + 128], 16)
+        self.assertEqual(floor, (net * WAD // oracle) * 9950 // 10000)
+        self.assertLess(floor, net * WAD // oracle, 'always below what the mint delivers')
+
+    def test_an_unsent_entry_is_reissued_once_its_prices_are_old(self):
+        self.position.state = 'landed'
+        self.position.flow = {**self.position.flow, 'landed_wei': str(19 * WAD),
+                              'entry': {'calls': [], 'request_id': 'perps-ret-old', 'dollar': 0}}
+        self.position.save()
+        with mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=19 * WAD), \
+                mock.patch('cusd_plus.eligibility.check_savings_mint_eligibility', return_value=False), \
+                mock.patch('cusd_plus.cusd_vault.preview_mint_wei',
+                           return_value=SimpleNamespace(net_wei=int(Decimal('18.829') * WAD))):
+            entry = perps_flow.entry_plan(self.user, {}, self.position.id)
+            again = perps_flow.entry_plan(self.user, {}, self.position.id)
+        self.assertNotEqual(entry['request_id'], 'perps-ret-old')
+        self.assertEqual(again['request_id'], entry['request_id'], 'fresh: kept while its prices hold')
+
+
 
     @mock.patch('cusd_plus.perps_relay.time.time', return_value=NOW)
     @mock.patch('cusd_plus.perps_flow.time.time', return_value=NOW)
