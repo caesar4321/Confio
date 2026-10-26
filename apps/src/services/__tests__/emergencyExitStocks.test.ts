@@ -1,3 +1,6 @@
+// The crypto & metals list has its own tests (emergencyExitTokens.test.ts).
+jest.mock('../../config/cryptoTokens.generated', () => ({ BUNDLED_CRYPTO_TOKENS: [] }));
+
 const word = (value: bigint | number) => BigInt(value).toString(16).padStart(64, '0');
 
 /** ABI result for Multicall3.tryAggregate: (bool,bytes)[] */
@@ -127,7 +130,7 @@ describe('Emergency Exit Ondo Stocks', () => {
   it('discovers only positive balances from the bundled allowlist', async () => {
     const { mod } = load();
     await expect(mod.readBundledOndoStockHoldings(WALLET.address)).resolves.toEqual([
-      { symbol: 'AAAon', address: STOCK_A, balanceWei: 5n },
+      { symbol: 'AAAon', address: STOCK_A, balanceWei: 5n, kind: 'ondo' },
     ]);
   });
 

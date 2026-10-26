@@ -1,3 +1,6 @@
+// The crypto & metals list has its own tests (emergencyExitTokens.test.ts).
+jest.mock('../../config/cryptoTokens.generated', () => ({ BUNDLED_CRYPTO_TOKENS: [] }));
+
 // Coverage for the BSC emergency exit engine and its local plumbing:
 // receipt accounting, checkpoints, ban signal, account roster. The heartbeat
 // gate (gatedTx.ts / heartbeat.ts) has its own suite.

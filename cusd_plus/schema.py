@@ -436,6 +436,15 @@ class GmHoldingType(graphene.ObjectType):
     day_change_pct = graphene.Float()
 
 
+class ExitHeldTokenType(graphene.ObjectType):
+    """A token the account holds, for the app's Emergency Exit memory: the
+    exit's compiled lists miss tokens listed after the app's build, so the
+    app remembers the address of everything it sees held."""
+    symbol = graphene.String(required=True)
+    address = graphene.String(required=True)
+    kind = graphene.String(required=True, description="'ondo' or 'crypto'")
+
+
 class GmCommunityAssetType(graphene.ObjectType):
     """Privacy-safe aggregate position. Wallets and per-asset holder counts
     stay on the staff dashboard, not in the client API."""
@@ -584,6 +593,10 @@ class Query(graphene.ObjectType):
         side=graphene.String(required=True),
         notional_value=graphene.String(required=True),
         duration=graphene.String(default_value='short'),
+    )
+    exit_held_tokens = graphene.List(
+        graphene.NonNull(ExitHeldTokenType),
+        description="Ondo and crypto tokens the JWT account holds, for the Emergency Exit (null: unknown)",
     )
     gm_holdings = graphene.List(
         graphene.NonNull(GmHoldingType),
@@ -817,6 +830,34 @@ class Query(graphene.ObjectType):
             return GmTradeQuoteType(**_normalize_gm_quote(data, request, binding=False))
         except Exception as exc:  # noqa: BLE001
             return _gm_quote_error(exc)
+
+    def resolve_exit_held_tokens(self, info):
+        # Not country-gated: a member who can no longer trade still holds
+        # their tokens, and the exit must be able to move every one.
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        account = _active_account(info)
+        if account is None or not account.bsc_address:
+            return []
+        from . import crypto_catalog
+        from .crypto_holdings import holdings_units as crypto_units
+        from .gm_holdings import holdings_units as gm_units, registry
+
+        out = []
+        ondo = gm_units(account.bsc_address)
+        tokens = registry() or {}
+        for symbol in sorted(ondo or {}):
+            address = str((tokens.get(symbol) or {}).get('address') or '')
+            if address:
+                out.append(ExitHeldTokenType(symbol=symbol, address=address.lower(), kind='ondo'))
+        crypto = crypto_units(account.bsc_address) or {}
+        for token in crypto_catalog.tokens(include_unlisted=True):
+            if crypto.get(token.symbol):
+                out.append(ExitHeldTokenType(symbol=token.symbol, address=token.address.lower(), kind='crypto'))
+        if ondo is None and not out:
+            return None  # unknown, not empty: the app keeps what it has
+        return out
 
     def resolve_gm_holdings(self, info):
         user = getattr(info.context, 'user', None)

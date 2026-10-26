@@ -46,6 +46,7 @@ import { AddressScannerModal } from '../components/AddressScannerModal';
 import { evmAccountKey, getEvmAddressForDisplay, getActiveEvmWallet } from '../services/secureDeterministicWallet';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { emergencyStore } from '../services/emergencyExit/store';
+import { loadHeldTokens } from '../services/emergencyExit/heldTokens';
 import { wrongNetworkMessage } from '../utils/addressNetwork';
 import {
   RosterAccount, rosterAccountKey, getAccountRoster, exitableAccounts,
@@ -88,7 +89,16 @@ const STEP_NAMES: Record<string, string> = {
   transferConfio: 'Enviar CONFIO',
 };
 const stockSymbolFromStep = (id: string): string | null =>
-  id.startsWith('ondoStock:') ? (id.split(':')[1] || 'Ondo Stock') : null;
+  id.startsWith('ondoStock:') ? (id.split(':')[1] || 'Ondo Stock')
+    : id.startsWith('cryptoToken:') ? (id.split(':')[1] || 'token') : null;
+// What else moved besides dollars, in words: ' y tus acciones Ondo', ' y tu oro y bitcoin'…
+const tokensSentPhrase = (steps: readonly string[] | undefined, joiner: string): string => {
+  const stocks = (steps ?? []).some((step) => step.startsWith('ondoStock:'));
+  const crypto = (steps ?? []).some((step) => step.startsWith('cryptoToken:'));
+  const what = [stocks ? 'tus acciones Ondo' : null, crypto ? 'tus criptomonedas y oro' : null]
+    .filter(Boolean).join(' y ');
+  return what ? `${joiner}${what}` : '';
+};
 const stepName = (id: string): string => {
   const symbol = stockSymbolFromStep(id);
   return symbol ? `Enviar ${symbol}` : STEP_NAMES[id] ?? id;
@@ -220,7 +230,8 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
     setGasChecking(true);
     const restore = installEmergencyBscTransport();
     try {
-      const plan = await planBscExit(addr, BUNDLED_VAULT_ADDRESS, BUNDLED_CUSD_ADDRESS);
+      const plan = await planBscExit(addr, BUNDLED_VAULT_ADDRESS, BUNDLED_CUSD_ADDRESS,
+        await loadHeldTokens(emergencyStore));
       // A late reply for a since-abandoned account must not overwrite the
       // current one's status.
       if (gasAddrRef.current !== addr) return;
@@ -586,19 +597,18 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
         // '0' means this run proved no amount (resumed run, or the chain
         // didn't log a credit) — say what moved without inventing a number.
         const wei = bscResult?.usdtToDest ?? '0';
-        const stocksSent = bscResult?.sentNow.some((step) => step.startsWith('ondoStock:'));
-        const stocks = stocksSent ? ' y tus acciones Ondo' : '';
+        const stocks = tokensSentPhrase(bscResult?.sentNow, ' y ');
         return wei !== '0'
           ? `Enviamos $${fmtUsdt(wei)} USDT${stocks} a ${to}. Puede tardar un minuto en aparecer en tu billetera.`
           : `Enviamos tu saldo${stocks} a ${to}. Puede tardar un minuto en aparecer en tu billetera.`;
       }
       case 'degraded': {
-        const stocksSent = bscResult?.sentNow.some((step) => step.startsWith('ondoStock:'));
+        const tokensSent = tokensSentPhrase(bscResult?.sentNow, ' junto con ');
         const plus = bscResult?.degraded.includes('redeemCusdPlus');
         const cusd = bscResult?.degraded.includes('redeemCusd');
         const raw = plus && cusd ? 'cUSD+ y cUSD' : plus ? 'cUSD+' : 'cUSD';
         const reason = plus ? 'el canje no respondió' : 'el contrato no permitió el canje';
-        return `Tus dólares no pudieron canjearse por USDT (${reason}), así que enviamos ${raw} sin canjear${stocksSent ? ' junto con tus acciones Ondo' : ''} a ${to}. Son tuyos: para canjearlos necesitarás una herramienta externa.`;
+        return `Tus dólares no pudieron canjearse por USDT (${reason}), así que enviamos ${raw} sin canjear${tokensSent} a ${to}. Son tuyos: para canjearlos necesitarás una herramienta externa.`;
       }
       case 'partial':
         return `Enviamos todo lo que la red permitió, pero ${bscResult?.unresolved.join(', ')} sigue en esta cuenta. Reintenta: los envíos ya confirmados no se repetirán.`;

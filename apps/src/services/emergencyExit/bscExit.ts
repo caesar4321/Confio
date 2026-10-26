@@ -16,7 +16,11 @@
 // store; re-running skips completed steps and re-reads live balances so
 // a crash mid-exit never double-spends or strands a leg.
 
+import { keccak_256 } from '@noble/hashes/sha3';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 import {
+  bscGetCode,
+  bscGetStorageAt,
   bscBnbBalance,
   bscGasPrice,
   bscEthCall,
@@ -34,6 +38,9 @@ import { BUNDLED_HEARTBEAT, assertExitOpen, isConfioAlive } from './heartbeat';
 import { AUTH_GAS_OVERHEAD, GATE_GAS_OVERHEAD, sendGatedCall } from './gatedTx';
 import type { KVStore } from './kvStore';
 import { BUNDLED_ONDO_STOCK_TOKENS } from '../../config/ondoStockTokens.generated';
+import { BUNDLED_CRYPTO_TOKENS } from '../../config/cryptoTokens.generated';
+import { loadHeldTokens, type HeldToken, type HeldTokenKind } from './heldTokens';
+import { ONDO_GM_BEACONS, ONDO_GM_PROXY_CODE_HASHES } from '../../config/ondoBeacons';
 import { CUSD_BSC_VAULT_ADDRESS } from '../../config/env';
 
 // Bundled chain wiring (design doc: "token addresses/ABIs ship in the app
@@ -133,7 +140,44 @@ export interface OndoStockHolding {
   symbol: string;
   address: string;
   balanceWei: bigint;
+  /** Ondo stock, or a crypto/metal token (Bitcoin, gold…). */
+  kind?: HeldTokenKind;
+  /** Admitted from this device's memory (its transfer gets a fixed gas cap). */
+  remembered?: boolean;
 }
+
+export interface ExitToken {
+  readonly symbol: string;
+  readonly address: string;
+  readonly kind: HeldTokenKind;
+  /** Only remembered on this device: a read that fails skips it, never the exit. */
+  readonly remembered?: boolean;
+}
+
+/** Every token the exit sends as is: the Ondo and crypto lists compiled into
+ * this release, plus what this device saw the member hold (heldTokens.ts).
+ * Deduplicated by address (a compiled entry wins); never the assets the exit
+ * handles on its own (USDT, CONFIO, cUSD+, cUSD). */
+export const exitTokenUniverse = (
+  remembered: readonly HeldToken[] = [],
+  cusdAddress: string = BUNDLED_CUSD_ADDRESS,
+  vaultAddress: string = BUNDLED_VAULT_ADDRESS,
+): ExitToken[] => {
+  const own = new Set([USDT_BSC, BUNDLED_CONFIO_ADDRESS, vaultAddress, cusdAddress]
+    .filter(Boolean).map((a) => a.toLowerCase()));
+  const byAddress = new Map<string, ExitToken>();
+  const add = (symbol: string, address: string, kind: HeldTokenKind, fromDevice: boolean) => {
+    const key = address.toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(key) || own.has(key) || byAddress.has(key)) return;
+    byAddress.set(key, fromDevice ? { symbol, address: key, kind, remembered: true } : { symbol, address: key, kind });
+  };
+  BUNDLED_ONDO_STOCK_TOKENS.forEach((t) => add(t.symbol, t.address, 'ondo', false));
+  BUNDLED_CRYPTO_TOKENS.forEach((t) => add(t.symbol, t.address, 'crypto', false));
+  // Only Ondo stocks: the crypto catalog is compiled in full, and a
+  // remembered stock is admitted at read time by its on-chain beacon.
+  remembered.filter((t) => t.kind === 'ondo').forEach((t) => add(t.symbol, t.address, t.kind, true));
+  return [...byAddress.values()];
+};
 
 const word = (value: bigint | number): string => BigInt(value).toString(16).padStart(64, '0');
 
@@ -188,17 +232,59 @@ export const decodeStockBalanceMulticall = (result: string, expected: number): b
   return balances;
 };
 
-/** Read the entire bundled Ondo universe in two eth_call requests today.
- * Contract addresses—not symbols or token metadata—are the allowlist. */
-export const readBundledOndoStockHoldings = async (owner: string): Promise<OndoStockHolding[]> => {
+/** Gas cap for one remembered token's transfer: the same per-token figure
+ * the gas budget counts (estimateBscExitGasWei), so a member who tops up what
+ * the screen asks always has enough. A real Ondo GM transfer with its
+ * compliance hooks uses ~112k (AAPLon on BSC, 2026-10-26). */
+export const TOKEN_TRANSFER_GAS = 200_000n;
+const REMEMBERED_TRANSFER_GAS = TOKEN_TRANSFER_GAS;
+
+/** EIP-1967 beacon slot: Ondo's GM tokens are beacon proxies. */
+const BEACON_SLOT = '0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50';
+
+/** Read every exit token's balance. Compiled addresses (the trust boundary)
+ * in a few Multicall3 calls, where a failed read fails the whole read (never
+ * counted as zero). Remembered ones apart, one by one and only after: each is
+ * admitted only when its beacon is one of Ondo's (so its code is Ondo's
+ * token, not anything a server could name), and any failure skips that
+ * token alone. Contract addresses—not symbols or metadata—are the allowlist. */
+export const readBundledOndoStockHoldings = async (
+  owner: string,
+  universe: readonly ExitToken[] = exitTokenUniverse(),
+): Promise<OndoStockHolding[]> => {
   const holdings: OndoStockHolding[] = [];
-  for (let start = 0; start < BUNDLED_ONDO_STOCK_TOKENS.length; start += ONDO_BALANCE_CHUNK) {
-    const tokens = BUNDLED_ONDO_STOCK_TOKENS.slice(start, start + ONDO_BALANCE_CHUNK);
+  const compiled = universe.filter((t) => !t.remembered);
+  for (let start = 0; start < compiled.length; start += ONDO_BALANCE_CHUNK) {
+    const tokens = compiled.slice(start, start + ONDO_BALANCE_CHUNK);
     const result = await bscEthCall(MULTICALL3, encodeStockBalanceMulticall(owner, tokens));
     const balances = decodeStockBalanceMulticall(result, tokens.length);
     balances.forEach((balanceWei, index) => {
-      if (balanceWei > 0n) holdings.push({ ...tokens[index], balanceWei });
+      if (balanceWei > 0n) {
+        const { symbol, address, kind } = tokens[index];
+        holdings.push({ symbol, address, kind, balanceWei });
+      }
     });
+  }
+  for (const token of universe.filter((t) => t.remembered)) {
+    try {
+      // Ondo's own proxy code (by hash) pointing at Ondo's beacon: then the
+      // token's logic is Ondo's, whatever a server said about the address.
+      const code = await bscGetCode(token.address);
+      const codeHex = code.startsWith('0x') ? code.slice(2) : code;
+      if (!codeHex || codeHex.length % 2) continue;
+      if (!ONDO_GM_PROXY_CODE_HASHES.includes('0x' + bytesToHex(keccak_256(hexToBytes(codeHex))))) continue;
+      const beacon = '0x' + (await bscGetStorageAt(token.address, BEACON_SLOT)).slice(-40).toLowerCase();
+      if (!ONDO_GM_BEACONS.includes(beacon)) continue;
+      const ret = await bscEthCall(token.address, selector('balanceOf(address)') + encodeAddress(owner));
+      const hex = ret.startsWith('0x') ? ret.slice(2) : ret;
+      if (hex.length !== 64) continue;
+      const balanceWei = BigInt('0x' + hex);
+      if (balanceWei > 0n) {
+        holdings.push({ symbol: token.symbol, address: token.address, kind: token.kind, balanceWei, remembered: true });
+      }
+    } catch {
+      continue; // a remembered token never blocks the exit
+    }
   }
   return holdings;
 };
@@ -217,6 +303,8 @@ export const planBscExit = async (
   address: string,
   vaultAddress: string,
   cusdAddress: string = BUNDLED_CUSD_ADDRESS,
+  /** Tokens this device saw the member hold (loadHeldTokens). */
+  remembered: readonly HeldToken[] = [],
 ): Promise<BscExitPlan> => {
   const hasCusd = /^0x[0-9a-fA-F]{40}$/.test(cusdAddress);
   const [cusdPlusShares, cusdWei, usdtWei, confioWei, bnbWei, ondoStocks] = await Promise.all([
@@ -225,7 +313,7 @@ export const planBscExit = async (
     erc20Balance(USDT_BSC, address),
     erc20Balance(BUNDLED_CONFIO_ADDRESS, address),
     bscBnbBalance(address),
-    readBundledOndoStockHoldings(address),
+    readBundledOndoStockHoldings(address, exitTokenUniverse(remembered, cusdAddress, vaultAddress)),
   ]);
   const steps: BscExitPlan['steps'] = [];
   if (cusdPlusShares > 0n) steps.push('redeemCusdPlus');
@@ -257,9 +345,10 @@ export const estimateBscExitGasWei = async (plan: BscExitPlan): Promise<bigint> 
   if (plan.steps.includes('redeemCusd')) units += 260_000n;
   if (plan.steps.includes('transferUsdt')) units += 80_000n;
   if (plan.steps.includes('transferConfio')) units += 80_000n;
-  // Ondo tokens can execute compliance hooks. Budget conservatively; the
-  // actual send uses eth_estimateGas rather than a brittle fixed ceiling.
-  units += BigInt(plan.ondoStocks.length) * 200_000n;
+  // Ondo tokens can execute compliance hooks. Budget conservatively; a
+  // compiled token's send uses eth_estimateGas, a remembered one is capped
+  // at exactly this figure.
+  units += BigInt(plan.ondoStocks.length) * TOKEN_TRANSFER_GAS;
   // Every send is execute([assertSilent(), leg]); the first one may also
   // carry the 7702 authorization for a never-delegated account.
   const sends = BigInt(plan.steps.filter((s) => s !== 'transferOndoStocks').length + plan.ondoStocks.length);
@@ -298,10 +387,11 @@ export type BscExitStep =
   | 'redeemCusd'
   | 'transferUsdt'
   | 'transferConfio'
-  | `ondoStock:${string}:${string}`;
+  | `ondoStock:${string}:${string}`
+  | `cryptoToken:${string}:${string}`;
 
-const stockStep = ({ symbol, address }: OndoStockHolding): BscExitStep =>
-  `ondoStock:${symbol}:${address.toLowerCase()}`;
+const stockStep = ({ symbol, address, kind }: OndoStockHolding): BscExitStep =>
+  `${kind === 'crypto' ? 'cryptoToken' : 'ondoStock'}:${symbol}:${address.toLowerCase()}`;
 
 // v2 key: v1 checkpoints were written WITHOUT a timestamp and were never
 // cleared, so a completed exit left a permanent "already done" record. A
@@ -602,10 +692,12 @@ export const executeBscExit = async (params: {
       }
     }
 
-    // 5. Every official Ondo Stock known to this app release. The registry
-    // is compiled into the client; symbols are labels only and arbitrary
-    // wallet tokens are never inspected or transferred.
-    const stocks = await readBundledOndoStockHoldings(wallet.address);
+    // 5. Every Ondo stock and crypto/metal token known to this release, plus
+    // the ones this device saw the member hold. The lists are compiled into
+    // the client; symbols are labels only and arbitrary wallet tokens are
+    // never inspected or transferred.
+    const stocks = await readBundledOndoStockHoldings(
+      wallet.address, exitTokenUniverse(await loadHeldTokens(store), cusdAddress, vaultAddress));
     for (const stock of stocks) {
       const step = stockStep(stock);
       if (ck[step]) continue;
@@ -618,6 +710,9 @@ export const executeBscExit = async (params: {
           wallet, heartbeatAddress,
           to: stock.address,
           data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(stock.balanceWei),
+          // A remembered token's send is capped: whatever it costs, it can
+          // never drain the gas the rest of the exit needs.
+          ...(stock.remembered ? { gasLimit: REMEMBERED_TRANSFER_GAS } : {}),
         });
       } catch (e) {
         // Do not advance to another nonce while a broadcast transaction can

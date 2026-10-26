@@ -27,6 +27,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import InvestMark from '../components/svg/InvestMark';
+import { useRememberExitTokens } from '../hooks/useRememberExitTokens';
 import { useInvestmentsSummary } from '../hooks/useInvestmentsSummary';
 import { colors } from '../config/theme';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
@@ -229,6 +230,9 @@ export const HomeScreen = () => {
   const savingsPortfolio = useSavingsPortfolio();
   // Stocks + Bitcoin + gold: one row, one term in the total.
   const investments = useInvestmentsSummary();
+  // The Emergency Exit remembers every token seen held here (covers stocks
+  // listed after this build).
+  useRememberExitTokens();
   // Cuenta inteligente probe row (waitlist only): the server decides who sees
   // it (flag on, never employees, this build or newer).
   const smartAccountRow = usePaidOffers().smart_account?.rowVisible === true;
