@@ -1699,13 +1699,8 @@ class Query(graphene.ObjectType):
         summary = cache.get('stats_summary_v14') or {}
         registered_users = summary.get('total_users')
         if registered_users is None:
-            from users.models import User
-            registered_users = (
-                User.objects
-                .exclude(phone_number__isnull=True)
-                .exclude(phone_number='')
-                .count()
-            )
+            from users.analytics import get_real_users_queryset
+            registered_users = get_real_users_queryset().count()
 
         data = {
             'deposited_volume_usd': float(deposited),

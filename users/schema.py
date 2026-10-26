@@ -1619,10 +1619,14 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		last_30d = now - timedelta(days=30)
 		# Reuse the exact predicate as total_users so the two diverge only via
 		# the phone_country filter + COUNTRY_DISPLAY_MIN threshold below.
-		verified_qs = User.objects.exclude(phone_number__isnull=True).exclude(phone_number='')
+		# The admin's definition (users.analytics): Google Play pre-launch
+		# robots are not users, so the app and the admin show one number.
+		from users.analytics import get_real_users_queryset
+		verified_qs = get_real_users_queryset()
 		total_users = verified_qs.count()
 		users_new_7d = verified_qs.filter(date_joined__gte=last_7d).count()
-		active_users_30d = User.objects.filter(last_activity_at__gte=last_30d).count()
+		active_users_30d = User.objects.exclude(is_platform_test_account=True).filter(
+			last_activity_at__gte=last_30d).count()
 
 		from security.models import IdentityVerification
 		from security.identity_status import verified_user_ids

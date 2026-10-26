@@ -80,3 +80,28 @@ class LandingStatsTests(SimpleTestCase):
         self.assertEqual(result.data['fundFlowStats']['totalUsd'], 3.0)
         self.assertIsNone(result.data['fundFlowStats']['medianWithdrawalMinutes'])
         self.assertEqual(result.data['fundFlowStats']['countries'], [{'countryIso': 'MX', 'operationCount': 2}])
+
+
+from django.test import TestCase
+
+
+class LandingRegisteredUsersTests(TestCase):
+    def tearDown(self):
+        cache.delete('landing_stats_v3')
+        cache.delete('stats_summary_v14')
+
+    def test_registered_users_exclude_play_store_test_accounts(self):
+        # Same definition as the admin's "Phone-complete users".
+        from users.analytics import get_real_users_queryset
+        from users.models import User
+
+        User.objects.create(username='real-user', firebase_uid='landing-real', phone_number='70000001', phone_country='BO')
+        User.objects.create(username='play-robot', firebase_uid='landing-robot', phone_number='70000002', phone_country='US',
+                            is_platform_test_account=True)
+        cache.delete('landing_stats_v3')
+        cache.delete('stats_summary_v14')
+        with patch('ramps.metrics.deposited_volume_by_provider', return_value={}), \
+                patch('presale.models.PresalePhase.objects.all', return_value=[]):
+            result = Query().resolve_landing_stats(None)
+        self.assertEqual(result.registered_users, get_real_users_queryset().count())
+        self.assertFalse(get_real_users_queryset().filter(username='play-robot').exists())
