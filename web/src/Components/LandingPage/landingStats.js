@@ -50,6 +50,40 @@ export const toStatValue = (raw) => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
+// Reserves backing every Confío dollar — the app's Ahorros tile, summed
+// the same way (legacy cUSD/USDC + cUSD/USDT + cUSD+/USDY). Its own query.
+export const RESERVE_STATS = gql`
+  query ReserveStats {
+    statsSummary {
+      totalValueLocked
+      protectedSavings
+      cusdBscReserve
+      usdyReserve
+      statsSource
+    }
+  }
+`;
+
+// One unknown part makes the total unknown, never a smaller number. The
+// legacy reserve is live only when read from the Algorand app; any other
+// source (database_fallback during an outage) is an estimate, not collateral.
+export const reserveTotal = (summary) => {
+  if (!summary || summary.statsSource !== 'algorand') return null;
+  const legacy = summary.totalValueLocked ?? summary.protectedSavings;
+  const parts = [legacy, summary.cusdBscReserve, summary.usdyReserve];
+  return parts.every((v) => v != null && Number.isFinite(Number(v)))
+    ? parts.reduce((sum, v) => sum + Number(v), 0)
+    : null;
+};
+
+// All-time volume traded in stocks, gold, Bitcoin and futures — the app's
+// Invertido tile. Null below the privacy floor. Its own query.
+export const INVEST_TRADED_USD = gql`
+  query InvestTradedUsd {
+    investTradedUsd
+  }
+`;
+
 // Confío's own fees, server-quoted (DESIGN.md: no hardcoded fees in copy).
 // Its own query, like FUND_FLOW_STATS, so a server without it fails alone.
 export const PUBLIC_FEES = gql`

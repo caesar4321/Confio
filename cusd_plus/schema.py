@@ -713,9 +713,8 @@ class Query(graphene.ObjectType):
         # A network fact like Movido or Usuarios, shown whatever the viewer's
         # country: it also counts Bitcoin & gold and Futuros, each with its
         # own country policy. Opening a market stays gated where it opens.
-        user = getattr(info.context, 'user', None)
-        if not user or not user.is_authenticated:
-            return None
+        # Public like Movido (the website shows it): one cached, single-
+        # builder snapshot, and null below the privacy floor.
         from . import gm_volume
 
         return gm_volume.traded_usd('all')

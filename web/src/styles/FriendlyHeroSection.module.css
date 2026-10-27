@@ -86,9 +86,9 @@
 
 /* ---------- live traction, styled like app balances ---------- */
 .statRow {
-  display: flex;
-  gap: 40px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px 28px;
   border-top: 1px solid var(--border-light);
   padding-top: 26px;
 }
@@ -118,7 +118,8 @@
 
 .statLabel {
   font-size: 0.85rem;
-  color: var(--text-muted);
+  line-height: 1.35;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -170,7 +171,8 @@
   }
 
   .statRow {
-    gap: 24px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 20px;
   }
 
   .statValue {

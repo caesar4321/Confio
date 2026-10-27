@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, act } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing';
 import FriendlyHeroSection from './FriendlyHeroSection';
-import { FUND_FLOW_STATS, LANDING_STATS } from './landingStats';
+import { FUND_FLOW_STATS, INVEST_TRADED_USD, LANDING_STATS, RESERVE_STATS } from './landingStats';
 import { LanguageProvider } from '../../contexts/LanguageContext';
 import { createMatchMedia } from '../../setupTests';
 
@@ -25,6 +25,16 @@ const statsMock = (landingStats) => ({
 const flowMock = (totalUsd) => ({
   request: { query: FUND_FLOW_STATS },
   result: { data: { fundFlowStats: totalUsd == null ? null : { totalUsd, operationCount: 501 } } },
+});
+
+const reserveMock = (statsSummary) => ({
+  request: { query: RESERVE_STATS },
+  result: { data: { statsSummary } },
+});
+
+const investMock = (investTradedUsd) => ({
+  request: { query: INVEST_TRADED_USD },
+  result: { data: { investTradedUsd } },
 });
 
 const flushQuery = async () => {
@@ -83,6 +93,47 @@ describe('FriendlyHeroSection stats', () => {
 
     expect(await screen.findByText('US$3,597')).toBeInTheDocument();
     expect(screen.queryByText('moved in deposits and withdrawals')).not.toBeInTheDocument();
+  });
+
+  it('renders reserves and traded volume, the app Home tiles', async () => {
+    renderHero([
+      statsMock(null),
+      flowMock(null),
+      reserveMock({ totalValueLocked: 5830.9, protectedSavings: 5830.9, cusdBscReserve: 256.01, usdyReserve: 2170.59, statsSource: 'algorand' }),
+      investMock(4690.4),
+    ]);
+    await flushQuery();
+
+    expect(await screen.findByText('US$8,257')).toBeInTheDocument();
+    expect(screen.getByText('in reserves backing Confío dollars')).toBeInTheDocument();
+    expect(screen.getByText('US$4,690')).toBeInTheDocument();
+    expect(screen.getByText('traded in stocks, gold, bitcoin and futures')).toBeInTheDocument();
+  });
+
+  it('never shows a partial reserve total or a private traded figure', async () => {
+    renderHero([
+      statsMock(null),
+      flowMock(null),
+      reserveMock({ totalValueLocked: 5830.9, protectedSavings: 5830.9, cusdBscReserve: null, usdyReserve: 2170.59, statsSource: 'algorand' }),
+      investMock(null),
+    ]);
+    await flushQuery();
+
+    expect(screen.queryByText('in reserves backing Confío dollars')).not.toBeInTheDocument();
+    expect(screen.queryByText('traded in stocks, gold, bitcoin and futures')).not.toBeInTheDocument();
+  });
+
+  it('hides reserves while the legacy figure is a database estimate', async () => {
+    renderHero([
+      statsMock(null),
+      flowMock(null),
+      reserveMock({ totalValueLocked: 0, protectedSavings: 0, cusdBscReserve: 256.01, usdyReserve: 2170.59, statsSource: 'database_fallback' }),
+      investMock(null),
+    ]);
+    await flushQuery();
+
+    expect(screen.queryByText('in reserves backing Confío dollars')).not.toBeInTheDocument();
+    expect(screen.queryByText('US$2,426')).not.toBeInTheDocument();
   });
 
   it('hides the whole stat row when a custom title is passed', async () => {

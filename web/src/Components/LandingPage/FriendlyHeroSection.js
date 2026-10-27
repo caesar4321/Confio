@@ -4,7 +4,9 @@ import { useQuery } from '@apollo/client';
 import styles from '../../styles/FriendlyHeroSection.module.css';
 import confioHomeDemo from '../../images/screens/home.jpg';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { FUND_FLOW_STATS, LANDING_STATS, toStatValue } from './landingStats';
+import {
+  FUND_FLOW_STATS, INVEST_TRADED_USD, LANDING_STATS, RESERVE_STATS, reserveTotal, toStatValue,
+} from './landingStats';
 import TickerNumber from './TickerNumber';
 
 // «Radicalmente Normal» hero (DESIGN.md): calm declarative headline,
@@ -14,6 +16,8 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
 
   const { data: statsData } = useQuery(LANDING_STATS, { fetchPolicy: 'cache-and-network' });
   const { data: flowData } = useQuery(FUND_FLOW_STATS, { fetchPolicy: 'cache-and-network' });
+  const { data: reserveData } = useQuery(RESERVE_STATS, { fetchPolicy: 'cache-and-network' });
+  const { data: investData } = useQuery(INVEST_TRADED_USD, { fetchPolicy: 'cache-and-network' });
   const live = statsData?.landingStats;
   // Live values only — no hardcoded fallbacks (DESIGN.md: real numbers or
   // nothing). Whole dollars only (floored, never rounded up): decimals
@@ -22,6 +26,8 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
   // Deposits AND withdrawals: money that gets out is the proof LATAM users
   // look for, and the figure no longer shrinks when a large holder leaves.
   const moved = toStatValue(flowData?.fundFlowStats?.totalUsd);
+  const reserves = toStatValue(reserveTotal(reserveData?.statsSummary));
+  const traded = toStatValue(investData?.investTradedUsd);
   const presale = toStatValue(live?.presaleRaisedUsd);
   const registeredUsers = toStatValue(live?.registeredUsers);
 
@@ -108,7 +114,7 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
             )}
 
             {/* Live traction — real numbers styled like app balances */}
-            {!title && (moved != null || presale != null || registeredUsers != null) && (
+            {!title && [moved, reserves, traded, presale, registeredUsers].some((v) => v != null) && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -120,6 +126,22 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
                     <TickerNumber value={moved} className={styles.statValue} />
                     <span className={styles.statLabel}>
                       {t('movidos en depósitos y retiros', 'moved in deposits and withdrawals', '입출금 총액')}
+                    </span>
+                  </div>
+                )}
+                {reserves != null && (
+                  <div className={styles.statBlock}>
+                    <TickerNumber value={reserves} className={styles.statValue} />
+                    <span className={styles.statLabel}>
+                      {t('en reservas de los dólares de Confío', 'in reserves backing Confío dollars', 'Confío 달러 준비금')}
+                    </span>
+                  </div>
+                )}
+                {traded != null && (
+                  <div className={styles.statBlock}>
+                    <TickerNumber value={traded} className={styles.statValue} />
+                    <span className={styles.statLabel}>
+                      {t('operados en acciones, oro, bitcoin y futuros', 'traded in stocks, gold, bitcoin and futures', '주식·금·비트코인·선물 거래액')}
                     </span>
                   </div>
                 )}

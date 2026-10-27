@@ -280,3 +280,13 @@ class InvestFieldsGateTests(TestCase):
                 with patch('cusd_plus.schema._stock_surfaces_enabled', return_value=stocks), \
                         patch('cusd_plus.crypto_risk.surfaces_enabled', return_value=crypto):
                     self.assertEqual(Query().resolve_invest_traded_usd(self.info()), expected)
+
+    def test_public_for_the_website(self):
+        from types import SimpleNamespace
+        from .schema import Query
+
+        anonymous = SimpleNamespace(context=SimpleNamespace(user=None, META={}))
+        with patch('cusd_plus.gm_volume.traded_usd', return_value=4690.0):
+            self.assertEqual(Query().resolve_invest_traded_usd(anonymous), 4690.0)
+        with patch('cusd_plus.gm_volume.traded_usd', return_value=None):
+            self.assertIsNone(Query().resolve_invest_traded_usd(anonymous))
