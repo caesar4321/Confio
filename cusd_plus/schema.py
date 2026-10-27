@@ -392,6 +392,16 @@ class StockFeePolicyType(graphene.ObjectType):
     )
 
 
+class PublicFeesType(graphene.ObjectType):
+    """Confío's own fees, for the website's fee section."""
+
+    conversion_fee_bps = graphene.Int(
+        description="Fee to convert into or out of Confío dollars, read from the cUSD vault; "
+        "0 while the fee is switched off; null when the chain is unreadable",
+    )
+    pay_fee_bps = graphene.Int(required=True, description="Confío Pay fee per payment")
+
+
 class GmMarketType(graphene.ObjectType):
     session = graphene.String(description="core | extended | off-hours | closed")
     assets = graphene.List(graphene.NonNull(GmAssetType))
@@ -569,6 +579,10 @@ class Query(graphene.ObjectType):
     # Isolated on purpose: queried alone by current builds so older servers
     # that lack it never fail a shared query.
     stock_fee_policy = graphene.Field(StockFeePolicyType)
+    public_fees = graphene.Field(
+        PublicFeesType,
+        description='Public, unauthenticated; cached 10 min. Queried alone by the website.',
+    )
     gm_community = graphene.Field(
         GmCommunityType,
         description="Marked-to-market aggregate holdings for eligible users; never settlement volume",
@@ -759,6 +773,39 @@ class Query(graphene.ObjectType):
             return None
         fee_bps, mode = policy
         return StockFeePolicyType(fee_bps=fee_bps, mode=mode)
+
+    def resolve_public_fees(self, info):
+        from django.conf import settings
+        from django.core.cache import cache
+        from payments.bsc_flow import FEE_BPS as pay_fee_bps
+
+        if not getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+            return PublicFeesType(conversion_fee_bps=0, pay_fee_bps=pay_fee_bps)
+
+        from .cusd_vault import current_fee_bps, vault_address
+
+        # Anonymous endpoint: at most one chain read per 5 min per vault.
+        # The lease is never released — it outlives the RPC retry cascade
+        # and expires on its own, so refreshes can't overlap and no request
+        # can drop another's lease. Unknown is null, never 0: the site hides
+        # the figure rather than advertise a free conversion.
+        key = f'public_conversion_fee_bps_v2:{vault_address()}'
+        cached = cache.get(key)
+        if cached is not None:
+            return PublicFeesType(
+                conversion_fee_bps=None if cached == 'unavailable' else cached,
+                pay_fee_bps=pay_fee_bps,
+            )
+        if not cache.add(f'{key}:lease', 1, 300):
+            return PublicFeesType(conversion_fee_bps=None, pay_fee_bps=pay_fee_bps)
+        try:
+            conversion_fee_bps = int(current_fee_bps())
+        except Exception:  # noqa: BLE001
+            logger.warning('publicFees: cUSD vault fee unreadable')
+            cache.set(key, 'unavailable', 60)
+            return PublicFeesType(conversion_fee_bps=None, pay_fee_bps=pay_fee_bps)
+        cache.set(key, conversion_fee_bps, 600)
+        return PublicFeesType(conversion_fee_bps=conversion_fee_bps, pay_fee_bps=pay_fee_bps)
 
     def resolve_gm_market(self, info):
         user = getattr(info.context, 'user', None)

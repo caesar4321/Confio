@@ -1,15 +1,68 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
+import { useQuery } from '@apollo/client';
 import styles from '../../styles/FriendlyFeeStructure.module.css';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { PUBLIC_FEES, fmtBpsPct, fmtCents, toBps } from './landingStats';
+
+const EXAMPLE_USD = 100;
 
 const FriendlyFeeStructure = () => {
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1
   });
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+
+  // Server-quoted only (DESIGN.md). Without live data the figures and
+  // examples don't render; the rules around them still read correctly.
+  const { data } = useQuery(PUBLIC_FEES, { fetchPolicy: 'cache-and-network' });
+  const conversionBps = toBps(data?.publicFees?.conversionFeeBps);
+  const payBps = toBps(data?.publicFees?.payFeeBps);
+  const decimal = language === 'es' ? ',' : '.';
+  const conversion = conversionBps != null ? fmtBpsPct(conversionBps, decimal) : null;
+  const pay = payBps != null ? fmtBpsPct(payBps, decimal) : null;
+  const exampleFee = conversionBps != null ? (EXAMPLE_USD * conversionBps) / 10000 : null;
+
+  const price = conversion && (
+    <div className={styles.price}>
+      <span className={styles.priceAmount}>{conversion}</span>
+      <span className={styles.pricePeriod}>{t('una sola vez al convertir', 'once when converting', '전환할 때 한 번')}</span>
+    </div>
+  );
+
+  const example = exampleFee != null && (
+    <div className={styles.example}>
+      <span>{t('Convertís', 'You convert', '전환 금액')} US${EXAMPLE_USD}</span>
+      <span>{t('Comisión de Confío', 'Confío fee', 'Confío 수수료')} {fmtCents(exampleFee, decimal)}</span>
+      <strong>{t('Recibís', 'You receive', '수령')} {fmtCents(EXAMPLE_USD - exampleFee, decimal)}</strong>
+    </div>
+  );
+
+  const summary = conversion && pay
+    ? t(
+        `Personas y negocios pagan lo mismo: ${conversion} al entrar y ${conversion} al salir del sistema de dólares de Confío. Enviar entre usuarios cuesta 0%. Los pagos con Confío Pay tienen una comisión de ${pay}, mostrada antes de confirmar.`,
+        `People and businesses pay the same: ${conversion} when entering and ${conversion} when leaving the Confío dollar system. Sending between users costs 0%. Confío Pay payments carry a ${pay} fee, shown before confirmation.`,
+        `개인과 비즈니스 모두 동일하게 Confío 달러 시스템에 들어올 때 ${conversion}, 나갈 때 ${conversion}를 지불합니다. 사용자 간 송금은 0%입니다. Confío Pay 결제에는 확인 전에 표시되는 ${pay} 수수료가 적용됩니다.`
+      )
+    : t(
+        'Personas y negocios pagan la misma comisión al entrar y al salir del sistema de dólares de Confío. Enviar entre usuarios cuesta 0%. Los pagos con Confío Pay tienen su propia comisión, mostrada antes de confirmar.',
+        'People and businesses pay the same fee when entering and leaving the Confío dollar system. Sending between users costs 0%. Confío Pay payments carry their own fee, shown before confirmation.',
+        '개인과 비즈니스 모두 Confío 달러 시스템에 들어오고 나갈 때 같은 수수료를 지불합니다. 사용자 간 송금은 0%입니다. Confío Pay 결제에는 확인 전에 표시되는 별도 수수료가 적용됩니다.'
+      );
+
+  const providerNote = conversion
+    ? t(
+        `El ${conversion} es la comisión de Confío. El tipo de cambio y cualquier cargo de un proveedor externo, si aplica, se muestran por separado antes de confirmar.`,
+        `The ${conversion} is Confío’s fee. The exchange rate and any third-party provider charge, if applicable, are shown separately before confirmation.`,
+        `${conversion}는 Confío의 수수료입니다. 환율과 제3자 제공업체의 수수료가 있는 경우 확인 전에 별도로 표시됩니다.`
+      )
+    : t(
+        'La comisión de Confío, el tipo de cambio y cualquier cargo de un proveedor externo, si aplica, se muestran por separado antes de confirmar.',
+        'Confío’s fee, the exchange rate and any third-party provider charge, if applicable, are shown separately before confirmation.',
+        'Confío의 수수료, 환율, 제3자 제공업체의 수수료가 있는 경우 확인 전에 별도로 표시됩니다.'
+      );
 
   return (
     <section className={styles.feeStructure} ref={ref} id="tarifas">
@@ -48,19 +101,12 @@ const FriendlyFeeStructure = () => {
           >
             <div className={styles.cardHeader}>
               <span className={styles.stepLabel}>{t('ENTRAR', 'ENTER', '들어오기')}</span>
-              <div className={styles.price}>
-                <span className={styles.priceAmount}>{t('0,9%', '0.9%', '0.9%')}</span>
-                <span className={styles.pricePeriod}>{t('una sola vez al convertir', 'once when converting', '전환할 때 한 번')}</span>
-              </div>
+              {price}
             </div>
             <div className={styles.cardBody}>
               <h3 className={styles.cardTitle}>{t('Convertí a dólares de Confío', 'Convert into Confío dollars', 'Confío 달러로 전환')}</h3>
               <p className={styles.cardText}>{t('Aplica al entrar desde moneda local o desde USDT, tanto para personas como para negocios.', 'Applies when entering from local currency or USDT, for both people and businesses.', '현지 통화 또는 USDT로 들어올 때 개인과 비즈니스 모두에게 적용됩니다.')}</p>
-              <div className={styles.example}>
-                <span>{t('Convertís', 'You convert', '전환 금액')} US$100</span>
-                <span>{t('Comisión de Confío US$0,90', 'Confío fee US$0.90', 'Confío 수수료 US$0.90')}</span>
-                <strong>{t('Recibís US$99,10', 'You receive US$99.10', 'US$99.10 수령')}</strong>
-              </div>
+              {example}
             </div>
           </motion.div>
 
@@ -100,19 +146,12 @@ const FriendlyFeeStructure = () => {
           >
             <div className={styles.cardHeader}>
               <span className={styles.stepLabel}>{t('SALIR', 'EXIT', '나가기')}</span>
-              <div className={styles.price}>
-                <span className={styles.priceAmount}>{t('0,9%', '0.9%', '0.9%')}</span>
-                <span className={styles.pricePeriod}>{t('una sola vez al convertir', 'once when converting', '전환할 때 한 번')}</span>
-              </div>
+              {price}
             </div>
             <div className={styles.cardBody}>
               <h3 className={styles.cardTitle}>{t('Convertí de vuelta a USDT', 'Convert back to USDT', 'USDT로 다시 전환')}</h3>
               <p className={styles.cardText}>{t('Aplica al retirar a moneda local o enviar USDT a una billetera externa. Siempre ves el monto final antes de confirmar.', 'Applies when withdrawing to local currency or sending USDT to an external wallet. You always see the final amount before confirming.', '현지 통화로 출금하거나 외부 지갑으로 USDT를 보낼 때 적용됩니다. 확인 전에 항상 최종 금액을 볼 수 있습니다.')}</p>
-              <div className={styles.example}>
-                <span>{t('Convertís', 'You convert', '전환 금액')} US$100</span>
-                <span>{t('Comisión de Confío US$0,90', 'Confío fee US$0.90', 'Confío 수수료 US$0.90')}</span>
-                <strong>{t('Recibís US$99,10', 'You receive US$99.10', 'US$99.10 수령')}</strong>
-              </div>
+              {example}
             </div>
           </motion.div>
         </div>
@@ -127,12 +166,8 @@ const FriendlyFeeStructure = () => {
             <span className={styles.footerIcon} aria-hidden="true">💡</span>
             <div>
               <h4 className={styles.footerTitle}>{t('Una regla simple, sin planes ni membresías', 'One simple rule—no plans or memberships', '요금제나 멤버십 없는 하나의 간단한 규칙')}</h4>
-              <p className={styles.footerText}>
-                {t('Personas y negocios pagan lo mismo: 0,9% al entrar y 0,9% al salir del sistema de dólares de Confío. Enviar entre usuarios cuesta 0%. Los pagos con Confío Pay tienen una comisión de 0,9%, mostrada antes de confirmar.', 'People and businesses pay the same: 0.9% when entering and 0.9% when leaving the Confío dollar system. Sending between users costs 0%. Confío Pay payments carry a 0.9% fee, shown before confirmation.', '개인과 비즈니스 모두 동일하게 Confío 달러 시스템에 들어올 때 0.9%, 나갈 때 0.9%를 지불합니다. 사용자 간 송금은 0%입니다. Confío Pay 결제에는 확인 전에 표시되는 0.9% 수수료가 적용됩니다.')}
-              </p>
-              <p className={styles.providerNote}>
-                {t('El 0,9% es la comisión de Confío. El tipo de cambio y cualquier cargo de un proveedor externo, si aplica, se muestran por separado antes de confirmar.', 'The 0.9% is Confío’s fee. The exchange rate and any third-party provider charge, if applicable, are shown separately before confirmation.', '0.9%는 Confío의 수수료입니다. 환율과 제3자 제공업체의 수수료가 있는 경우 확인 전에 별도로 표시됩니다.')}
-              </p>
+              <p className={styles.footerText}>{summary}</p>
+              <p className={styles.providerNote}>{providerNote}</p>
             </div>
           </div>
         </motion.div>

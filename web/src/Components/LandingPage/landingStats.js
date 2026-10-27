@@ -49,3 +49,24 @@ export const toStatValue = (raw) => {
   const n = Math.floor(Number(raw));
   return Number.isFinite(n) && n > 0 ? n : null;
 };
+
+// Confío's own fees, server-quoted (DESIGN.md: no hardcoded fees in copy).
+// Its own query, like FUND_FLOW_STATS, so a server without it fails alone.
+export const PUBLIC_FEES = gql`
+  query PublicFees {
+    publicFees {
+      conversionFeeBps
+      payFeeBps
+    }
+  }
+`;
+
+// Basis points from the server, or null when absent/invalid (render nothing).
+export const toBps = (raw) => (Number.isInteger(raw) && raw >= 0 && raw <= 10000 ? raw : null);
+
+// 90 -> "0,9%" (es) / "0.9%" (en, ko); 75 -> "0,75%"; 100 -> "1%".
+export const fmtBpsPct = (bps, decimal = '.') =>
+  `${String(Number((bps / 100).toFixed(2))).replace('.', decimal)}%`;
+
+// Exact cents for the fee examples (US$100 at 90 bps -> "US$0,90").
+export const fmtCents = (usd, decimal = '.') => `US$${usd.toFixed(2).replace('.', decimal)}`;
