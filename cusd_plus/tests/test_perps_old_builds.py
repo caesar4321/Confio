@@ -168,3 +168,54 @@ class SweepDeadlineTests(SimpleTestCase):
         with mock.patch.object(hyperliquid, 'ledger_updates', side_effect=hyperliquid.SweepDeadline()):
             with self.assertRaises(hyperliquid.SweepDeadline):
                 perps_flow._hl_credit('0xabc', {'txHashes': ['0x' + '1' * 64]}, 0)
+
+
+class ClosedPositionsPageTests(TestCase):
+    """perpsPositions(doneLimit): the Futuros list pages closed positions; a
+    read without it (position screen, resume flows) still gets them all."""
+
+    def setUp(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from blockchain.models import PerpMarket, PerpPosition, SponsoredBatch
+        from users.models import User
+
+        self.user = User.objects.create(username='perpspage', firebase_uid='perpspage')
+        self.wallet = '0x' + '66' * 20
+        market = PerpMarket.objects.create(coin='BTC', dex='', asset_id=0, sz_decimals=5, max_leverage=40,
+                                           collateral='USDC', synced_at=timezone.now())
+        batch = SponsoredBatch.objects.create(user=self.user, user_bsc_address=self.wallet, kind='perps_open',
+                                              calls_json='[]', num_calls=3, tx_hash='0x' + '02' * 32,
+                                              status='confirmed', gas_limit=1, max_fee_wei=1, block_number=10)
+        now = timezone.now()
+
+        def make(state, days_ago=0, **kw):
+            return PerpPosition.objects.create(user=self.user, wallet=self.wallet, market=market, side='long',
+                                               leverage=5, margin_usd=Decimal('20'), state=state, **kw).id
+
+        self.closed = [make('done', open_batch=batch, returned_usd=Decimal('21'),
+                            done_at=now - timedelta(days=d)) for d in (3, 1, 2)]
+        self.refunded = make('done', returned_usd=Decimal('20'), done_at=now)  # never opened
+        self.failed = make('failed')
+        self.live = make('funded')
+
+    def _ids(self, **kw):
+        from cusd_plus import perps_schema
+
+        with mock.patch.object(perps_schema, '_user', return_value=self.user), \
+                mock.patch.object(perps_schema, '_personal_wallet', return_value=self.wallet), \
+                mock.patch('cusd_plus.hyperliquid.clearinghouse_state',
+                           return_value={'withdrawable': '0', 'assetPositions': []}), \
+                mock.patch('cusd_plus.perps_market_data.all_contexts', return_value={}), \
+                mock.patch.object(perps_schema, '_position_type', side_effect=lambda p, *a, **k: p.id):
+            return perps_schema.Query.resolve_perps_positions(None, SimpleNamespace(), **kw)
+
+    def test_limit_keeps_live_and_the_newest_real_results(self):
+        self.assertEqual(self._ids(include_done=True, done_limit=2), [self.live, self.closed[1], self.closed[2]])
+
+    def test_without_a_limit_every_row_still_comes_back(self):
+        self.assertEqual(set(self._ids(include_done=True)),
+                         {*self.closed, self.refunded, self.failed, self.live})
+        self.assertEqual(self._ids(), [self.live])

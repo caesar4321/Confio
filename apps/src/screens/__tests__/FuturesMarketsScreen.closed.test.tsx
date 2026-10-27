@@ -44,10 +44,23 @@ const byTestId = (tree: renderer.ReactTestRenderer, id: string) =>
 describe('FuturesMarketsScreen closed positions', () => {
   beforeEach(() => { mockNavigate.mockClear(); mockUsePositions.mockClear(); });
 
-  it('asks for closed positions too', () => {
+  it('asks for live positions and one more closed one than it shows', () => {
     mockPositions = [];
     render();
-    expect(mockUsePositions).toHaveBeenCalledWith(true, { includeDone: true });
+    expect(mockUsePositions).toHaveBeenCalledWith(true, { doneLimit: 11 });
+  });
+
+  it('shows ten closed positions, then ten more on Ver más', () => {
+    mockPositions = Array.from({ length: 11 }, (_, i) =>
+      position({ id: `p${i}`, doneAt: `2026-10-${String(20 - i).padStart(2, '0')}T12:00:00Z` }));
+    const tree = render();
+    act(() => { byTestId(tree, 'futures-closed-toggle')[0].props.onPress(); });
+    expect(byTestId(tree, 'futures-closed-p9').length).toBeGreaterThan(0);
+    expect(byTestId(tree, 'futures-closed-p10')).toHaveLength(0);
+    act(() => { byTestId(tree, 'futures-closed-more')[0].props.onPress(); });
+    expect(mockUsePositions).toHaveBeenLastCalledWith(true, { doneLimit: 21 });
+    expect(byTestId(tree, 'futures-closed-p10').length).toBeGreaterThan(0);
+    expect(byTestId(tree, 'futures-closed-more')).toHaveLength(0);
   });
 
   it('lists only real results, newest first, behind a toggle that opens the position', () => {
@@ -70,6 +83,18 @@ describe('FuturesMarketsScreen closed positions', () => {
     expect(tree.root.findAll((n) => n.props.ticker === 'XRP')).toHaveLength(0);
     act(() => { rows[0].props.onPress(); });
     expect(mockNavigate).toHaveBeenCalledWith('FuturesPosition', { positionId: 'new' });
+  });
+
+  it('says so when the server cap is reached instead of offering more', () => {
+    mockPositions = Array.from({ length: 200 }, (_, i) => position({ id: `c${i}` }));
+    const tree = render();
+    act(() => { byTestId(tree, 'futures-closed-toggle')[0].props.onPress(); });
+    for (let i = 0; i < 19; i += 1) act(() => { byTestId(tree, 'futures-closed-more')[0].props.onPress(); });
+    expect(mockUsePositions).toHaveBeenLastCalledWith(true, { doneLimit: 200 });
+    expect(byTestId(tree, 'futures-closed-more')).toHaveLength(0);
+    const said = tree.root.findAll((n) => n.type === 'Text' || typeof n.props.children !== 'undefined')
+      .some((n) => [].concat(n.props.children).join('') === 'Mostramos tus 200 posiciones cerradas más recientes.');
+    expect(said).toBe(true);
   });
 
   it('shows no section without a closed result', () => {

@@ -16,10 +16,14 @@ from decimal import Decimal
 
 import graphene
 from django.conf import settings
+from django.db.models import F
 
 from .crypto_schema import _meta, _user
 
 logger = logging.getLogger(__name__)
+
+# Most closed positions one perpsPositions(doneLimit) read returns.
+MAX_DONE_LIMIT = 200
 
 
 def _personal_wallet(info) -> str | None:
@@ -336,6 +340,9 @@ class Query(graphene.ObjectType):
     perps_positions = graphene.List(
         graphene.NonNull(PerpPositionType),
         include_done=graphene.Boolean(default_value=False),
+        done_limit=graphene.Int(description=(
+            'With include_done: only the N most recently closed positions that '
+            'have a result (failed and refunded opens left out); live ones always.')),
         description='Null = unknown (Hyperliquid unreadable); [] = none',
     )
 
@@ -418,7 +425,7 @@ class Query(graphene.ObjectType):
             return None
         return [PerpCandleType(timestamp=float(r['timestamp']), close=r['close']) for r in rows]
 
-    def resolve_perps_positions(self, info, include_done=False):
+    def resolve_perps_positions(self, info, include_done=False, done_limit=None):
         from blockchain.models import PerpPosition
 
         from . import hyperliquid, perps_flow, perps_market_data
@@ -427,13 +434,22 @@ class Query(graphene.ObjectType):
         wallet = _personal_wallet(info) if user else None
         if user is None or wallet is None:
             return []
-        rows = list(PerpPosition.objects.filter(user=user, wallet=wallet)
-                    # A quote is not a position yet (an unsigned one left by a killed
-                    # app is replaced by the next quote, or lapses).
-                    .exclude(state__in=('cancelled', 'quoted')).select_related('market')
-                    .prefetch_related('margin_changes').order_by('-created_at'))
+        positions = (PerpPosition.objects.filter(user=user, wallet=wallet)
+                     # A quote is not a position yet (an unsigned one left by a killed
+                     # app is replaced by the next quote, or lapses).
+                     .exclude(state__in=('cancelled', 'quoted')).select_related('market')
+                     .prefetch_related('margin_changes').order_by('-created_at'))
         if not include_done:
-            rows = [p for p in rows if p.state not in PerpPosition.TERMINAL_STATES]
+            rows = list(positions.exclude(state__in=PerpPosition.TERMINAL_STATES))
+        elif done_limit is None:
+            rows = list(positions)
+        else:
+            # The Futuros list pages its closed positions; everything else
+            # (the position screen, the app's resume flows) asks for them all.
+            limit = max(1, min(int(done_limit), MAX_DONE_LIMIT))
+            rows = list(positions.exclude(state__in=PerpPosition.TERMINAL_STATES))
+            rows += list(positions.filter(state='done', open_batch__isnull=False, returned_usd__isnull=False)
+                         .order_by(F('done_at').desc(nulls_last=True), '-created_at')[:limit])
         live_by_coin, free_by_dex = {}, {}
         dexes = {p.market.dex for p in rows if p.state in ('open', 'funded', 'bridging', 'closed', 'liquidated')}
         try:

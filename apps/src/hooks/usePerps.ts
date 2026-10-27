@@ -12,6 +12,7 @@ import {
   GET_PERPS_CAPABILITIES,
   GET_PERPS_MARKETS,
   GET_PERPS_POSITIONS,
+  GET_PERPS_RECENT_POSITIONS,
   PerpMarket,
   PerpPosition,
   PerpsCapabilities,
@@ -54,15 +55,20 @@ export const usePerpsMarkets = (enabled: boolean) => {
 };
 
 /** `positions` is null while unknown (not loaded, Hyperliquid unreadable). */
-export const usePerpsPositions = (enabled: boolean, { includeDone = false, pollMs = 10_000 } = {}) => {
+export const usePerpsPositions = (enabled: boolean, { includeDone = false, pollMs = 10_000, doneLimit }:
+  { includeDone?: boolean; pollMs?: number; doneLimit?: number } = {}) => {
   const authReady = useAuthReady();
-  const { data, loading, error, refetch } = useQuery(GET_PERPS_POSITIONS, {
-    variables: { includeDone },
+  // doneLimit: closed positions too, only the N most recent.
+  const { data: current, previousData, loading, error, refetch } = useQuery(
+    doneLimit != null ? GET_PERPS_RECENT_POSITIONS : GET_PERPS_POSITIONS, {
+    variables: doneLimit != null ? { doneLimit } : { includeDone },
     fetchPolicy: 'cache-and-network',
     pollInterval: enabled ? pollMs : 0,
     skip: !enabled || !authReady,
   });
   useRefetchOnForeground(refetch, enabled && authReady);
+  // A longer page keeps showing the shorter one until it lands.
+  const data = current ?? (loading ? previousData : undefined);
   const positions: PerpPosition[] | null = data ? data.perpsPositions ?? null : null;
   // Asked and not answered (Hyperliquid unreadable, or the query failed):
   // "we don't know", never "you have nothing".

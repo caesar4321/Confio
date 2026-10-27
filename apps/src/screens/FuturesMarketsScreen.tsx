@@ -42,16 +42,22 @@ type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Tab = 'all' | AssetClass;
 type Sort = 'volume' | 'gainers' | 'losers';
 const ROW_HEIGHT = 68;
+const CLOSED_PAGE = 10;
+// The server's cap on closed positions per read (MAX_DONE_LIMIT, perps_schema.py).
+const CLOSED_MAX = 200;
 
 export const FuturesMarketsScreen = () => {
   const navigation = useNavigation<Nav>();
   const { capabilities, loading: capsLoading } = usePerpsCapabilities();
   const enabled = Boolean(capabilities?.enabled);
   const { markets, loading, refetch: refetchMarkets } = usePerpsMarkets(enabled);
-  // Closed ones too: a closed position stays the member's to look back on and share.
-  const { positions, unknown: positionsUnknown, refetch: refetchPositions } =
-    usePerpsPositions(true, { includeDone: true });
+  // Closed ones too: a closed position stays the member's to look back on and
+  // share. Only the most recent few, a page at a time (one more than shown
+  // tells whether there are more).
   const [showClosed, setShowClosed] = useState(false);
+  const [closedShown, setClosedShown] = useState(CLOSED_PAGE);
+  const { positions, unknown: positionsUnknown, refetch: refetchPositions } =
+    usePerpsPositions(true, { doneLimit: Math.min(closedShown + 1, CLOSED_MAX) });
   // Hyperliquid's live prices while this screen is open (the server's poll otherwise).
   const mids = useLiveMids(useMemo(() => markets.map((m) => m.coin), [markets]));
   const [refreshing, setRefreshing] = useState(false);
@@ -157,11 +163,20 @@ export const FuturesMarketsScreen = () => {
           <Pressable style={styles.closedHead} onPress={() => setShowClosed((v) => !v)} accessibilityRole="button"
             accessibilityState={{ expanded: showClosed }} testID="futures-closed-toggle">
             <Text style={styles.closedTitle}>Posiciones cerradas</Text>
-            <Text style={styles.closedCount}>{closed.length}</Text>
             <Icon name={showClosed ? 'chevron-up' : 'chevron-down'} size={18} color={colors.text.light} />
           </Pressable>
-          {showClosed && closed.map((p) => <ClosedRow key={p.id} position={p} logoUrl={logos.get(p.ticker.toUpperCase())}
+          {showClosed && closed.slice(0, closedShown).map((p) => <ClosedRow key={p.id} position={p}
+            logoUrl={logos.get(p.ticker.toUpperCase())}
             onPress={() => navigation.navigate('FuturesPosition', { positionId: p.id })} />)}
+          {showClosed && closed.length > closedShown && closedShown < CLOSED_MAX && (
+            <Pressable style={styles.closedMore} onPress={() => setClosedShown((n) => n + CLOSED_PAGE)}
+              accessibilityRole="button" testID="futures-closed-more">
+              <Text style={styles.closedMoreText}>Ver más</Text>
+            </Pressable>
+          )}
+          {showClosed && closedShown >= CLOSED_MAX && closed.length >= CLOSED_MAX && (
+            <Text style={styles.closedCap}>Mostramos tus {CLOSED_MAX} posiciones cerradas más recientes.</Text>
+          )}
         </View>
       )}
 
@@ -333,7 +348,11 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border },
   closedHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, minHeight: 48 },
   closedTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.text.primary },
-  closedCount: { fontSize: 13, fontWeight: '700', color: colors.text.secondary },
+  closedMore: { alignItems: 'center', justifyContent: 'center', minHeight: 44,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  closedMoreText: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },
+  closedCap: { fontSize: 12, color: colors.text.light, textAlign: 'center', paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   closedRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   closedResult: { fontSize: 15, fontWeight: '800' },

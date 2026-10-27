@@ -110,6 +110,15 @@ export const GET_PERPS_POSITIONS = gql`
   }
 `;
 
+/** Live positions plus only the N most recently closed (the Futuros list). Its
+ *  own document: the argument must never reach a query that older servers or
+ *  the position screen rely on. */
+export const GET_PERPS_RECENT_POSITIONS = gql`
+  query PerpsRecentPositions($doneLimit: Int!) {
+    perpsPositions(includeDone: true, doneLimit: $doneLimit) { ${POSITION_FIELDS} }
+  }
+`;
+
 const ACKNOWLEDGE = gql`
   mutation AcknowledgePerpsRisk($version: Int!) {
     acknowledgePerpsRisk(version: $version) { success error }
