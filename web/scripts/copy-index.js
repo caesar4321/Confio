@@ -3,7 +3,7 @@ const path = require('path');
 
 // Paths
 const buildIndexPath = path.join(__dirname, '../build/index.html');
-const djangoTemplatePath = path.join(__dirname, '../../config/templates/index.html');
+const djangoTemplatePath = path.join(__dirname, '../../templates/index.html');
 
 // Read the build index.html
 const indexContent = fs.readFileSync(buildIndexPath, 'utf8');

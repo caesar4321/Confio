@@ -15,7 +15,7 @@
 /* Header */
 .header {
   text-align: center;
-  margin-bottom: 80px;
+  margin-bottom: 56px;
 }
 
 .badge {
@@ -48,35 +48,21 @@
   margin: 0 auto;
 }
 
-/* Content */
-.content {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 80px;
-  align-items: center;
-}
-
 /* Steps */
 .stepsContainer {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 24px;
 }
 
 .step {
   display: flex;
-  gap: 20px;
-  padding: 20px;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px;
   background: white;
   border-radius: 16px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s ease;
-  cursor: pointer;
-}
-
-.step:hover {
-  transform: translateX(10px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-light);
 }
 
 .stepNumber {
@@ -110,38 +96,16 @@
   line-height: 1.6;
 }
 
-/* Real app screen in a device frame (DESIGN.md: product is the proof) */
-.mockupContainer {
-  position: relative;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.phoneFrame {
-  width: min(300px, 80%);
-  background: var(--text-primary);
-  border-radius: 44px;
-  padding: 11px;
-  box-shadow: 0 30px 70px rgba(15, 23, 42, 0.22);
-}
-
-.mockup {
-  width: 100%;
-  height: auto;
-  display: block;
-  border-radius: 34px;
-}
-
 /* Responsive */
 @media (max-width: 968px) {
-  .content {
+  .stepsContainer {
     grid-template-columns: 1fr;
-    gap: 60px;
+    gap: 16px;
   }
 
-  .mockupContainer {
-    order: -1;
+  .step {
+    flex-direction: row;
+    padding: 20px;
   }
 }
 
@@ -150,16 +114,11 @@
     padding: 60px 0;
   }
 
+  .container {
+    padding: 0 16px;
+  }
+
   .header {
     margin-bottom: 40px;
-  }
-
-  .step {
-    flex-direction: column;
-    text-align: center;
-  }
-
-  .stepNumber {
-    margin: 0 auto;
   }
 }

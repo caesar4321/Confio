@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@apollo/client';
 import styles from '../../styles/FriendlyHeroSection.module.css';
-import confioHomeDemo from '../../images/ConfioHomeDemo.jpeg';
+import confioHomeDemo from '../../images/screens/home.jpg';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { FUND_FLOW_STATS, LANDING_STATS, toStatValue } from './landingStats';
 import TickerNumber from './TickerNumber';
@@ -27,16 +27,16 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
 
   const defaultTitle = (
     <>
-      {t('Dólares.', 'Dollars.', '달러를,')}
+      {t('Enviá, invertí y pagá', 'Send, invest and pay', '보내고, 투자하고, 결제하세요')}
       <br />
-      <span className={styles.highlight}>{t('Así de simple.', 'This simple.', '이렇게 간단하게.')}</span>
+      <span className={styles.highlight}>{t('con dólares.', 'with dollars.', '달러로.')}</span>
     </>
   );
 
   const defaultSubtitle = t(
-    'Envía, paga, ahorra e invierte dólares digitales desde tu celular. Sin banco, con tarifas claras y sin complicaciones.',
-    'Send, pay, save and invest digital dollars from your phone. No bank, clear fees, no complications.',
-    '휴대폰으로 디지털 달러를 보내고, 결제하고, 저축하고, 투자하세요. 은행 없이, 명확한 수수료로, 복잡함 없이.'
+    'Tus dólares digitales, siempre a tu nombre. Y desde ellos, acciones de EE.UU., oro, Bitcoin y futuros, en una sola app.',
+    'Your digital dollars, always in your name. And from them, U.S. stocks, gold, Bitcoin and futures, in one app.',
+    '디지털 달러는 언제나 당신 명의로. 그 달러로 미국 주식, 금, 비트코인, 선물까지 하나의 앱에서.'
   );
 
   return (
@@ -45,6 +45,16 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
         <div className={styles.heroContent}>
           {/* Left — the calm claim */}
           <div className={styles.contentSide}>
+            {!title && (
+              <motion.p
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className={styles.kicker}
+              >
+                {t('Confío en vos.', 'We trust you.', '당신을 믿습니다.')}
+              </motion.p>
+            )}
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -145,13 +155,13 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
               <img
                 src={confioHomeDemo}
                 alt={t(
-                  'App Confío — pantalla de inicio real',
-                  'Confío app — real home screen',
-                  'Confío 앱 — 실제 홈 화면'
+                  'App Confío — pantalla de inicio',
+                  'Confío app — home screen',
+                  'Confío 앱 — 홈 화면'
                 )}
                 className={styles.phoneShot}
-                width={576}
-                height={1280}
+                width={600}
+                height={1206}
                 fetchpriority="high"
               />
             </div>

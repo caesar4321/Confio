@@ -20,9 +20,9 @@ const FriendlyAssets = () => {
       symbol: '$cUSD+',
       color: '#10b981',
       details: [
-        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Tu ahorro en dólares que crece cada día, respaldado por USDY de Ondo Finance.', 'Your dollar savings growing every day, backed by Ondo Finance\'s USDY.', '매일 성장하는 달러 저축으로, Ondo Finance의 USDY로 담보됩니다.') },
+        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Tu saldo en dólares, que rinde cada día, respaldado por USDY de Ondo Finance.', 'Your dollar balance, earning every day, backed by Ondo Finance\'s USDY.', '매일 수익이 쌓이는 달러 잔액으로, Ondo Finance의 USDY로 담보됩니다.') },
         { label: t('Respaldado por', 'Backed by', '지원'), value: t('100% USDY de Ondo Finance, respaldado por bonos del Tesoro de EE. UU.', '100% Ondo Finance USDY, backed by U.S. Treasury bonds', '100% Ondo Finance USDY (미국 국채로 담보)') },
-        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Ahorro con rendimiento dentro de Confío.', 'Yield-bearing savings inside Confío.', 'Confío 안의 수익형 저축입니다.') },
+        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Tus dólares dentro de Confío, con rendimiento diario. La tasa es anual y variable.', 'Your dollars inside Confío, with daily yield. The rate is annual and variable.', 'Confío 안의 달러로, 매일 수익이 쌓입니다. 연이율이며 변동됩니다.') },
         { label: t('Valor', 'Value', '가치'), value: t('Acumulativo — crece con el rendimiento', 'Accumulating — grows with the yield', '누적형 — 수익과 함께 성장') },
         { label: t('Red', 'Network', '네트워크'), value: 'BNB Smart Chain' },
         {
@@ -44,7 +44,7 @@ const FriendlyAssets = () => {
       ],
       highlight: {
         icon: '🌱',
-        text: t('Confío Dollar+($cUSD+): ahorro respaldado por bonos del Tesoro de EE.UU., con reservas verificables en cadena.', 'Confío Dollar+($cUSD+): savings backed by U.S. Treasury bonds, with on-chain verifiable reserves.', 'Confío Dollar+($cUSD+): 미국 국채로 담보된 저축, 체인에서 검증 가능한 준비금.')
+        text: t('Confío Dollar+($cUSD+): dólares respaldados por bonos del Tesoro de EE.UU., con reservas verificables en cadena.', 'Confío Dollar+($cUSD+): dollars backed by U.S. Treasury bonds, with on-chain verifiable reserves.', 'Confío Dollar+($cUSD+): 미국 국채로 담보된 달러, 체인에서 검증 가능한 준비금.')
       }
     },
     {
@@ -94,10 +94,10 @@ const FriendlyAssets = () => {
         >
           <span className={styles.badge}>{t('NUESTROS ACTIVOS', 'OUR ASSETS', '우리의 자산')}</span>
           <h2 className={styles.title}>
-            {t('Tu ahorro', 'Your savings', '당신의 저축')} <span className={styles.highlight}>Confío Dollar+($cUSD+)</span> {t('y la moneda de la comunidad', 'and the community token', '그리고 커뮤니티 토큰')} <span className={styles.highlight2}>Confío($CONFIO)</span>
+            {t('Tus dólares que rinden', 'Your dollars that earn', '수익이 쌓이는 달러')} <span className={styles.highlight}>Confío Dollar+($cUSD+)</span> {t('y la moneda de la comunidad', 'and the community token', '그리고 커뮤니티 토큰')} <span className={styles.highlight2}>Confío($CONFIO)</span>
           </h2>
           <p className={styles.subtitle}>
-            {t('Un instrumento de ahorro y una moneda de comunidad, unidos por la misma misión', 'A savings instrument and a community token, united by the same mission', '하나의 저축 상품과 하나의 커뮤니티 토큰, 같은 사명으로 하나됨')}
+            {t('Un saldo en dólares que rinde y una moneda de comunidad, unidos por la misma misión', 'A dollar balance that earns and a community token, united by the same mission', '수익이 쌓이는 달러 잔액과 커뮤니티 토큰, 같은 사명으로 하나됨')}
           </p>
         </motion.div>
 

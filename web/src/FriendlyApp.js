@@ -7,12 +7,11 @@ import { LanguageProvider } from './contexts/LanguageContext';
 // Friendly Fintech Components
 import FriendlyHeader from './Components/LandingPage/FriendlyHeader';
 import FriendlyHeroSection from './Components/LandingPage/FriendlyHeroSection';
-import FriendlyFeatures from './Components/LandingPage/FriendlyFeatures';
+import FriendlyProducts from './Components/LandingPage/FriendlyProducts';
 import FriendlyHowItWorks from './Components/LandingPage/FriendlyHowItWorks';
 import FriendlyAssets from './Components/LandingPage/FriendlyAssets';
 import FriendlyVision from './Components/LandingPage/FriendlyVision';
 import FriendlyFeeStructure from './Components/LandingPage/FriendlyFeeStructure';
-import FriendlyTestimonials from './Components/LandingPage/FriendlyTestimonials';
 import FriendlyFounder from './Components/LandingPage/FriendlyFounder';
 import FriendlyFooter from './Components/LandingPage/FriendlyFooter';
 
@@ -30,10 +29,10 @@ function FriendlyApp() {
   useEffect(() => {
     // Set page title based on user language
     const titles = {
-      es: 'Confío: PayPal de América Latina',
-      en: 'Confío: PayPal of Latin America',
-      ko: 'Confío: 라틴 아메리카의 PayPal',
-      default: 'Confío: PayPal de América Latina'
+      es: 'Confío: enviá, invertí y pagá con dólares',
+      en: 'Confío: send, invest and pay with dollars',
+      ko: 'Confío: 달러로 보내고, 투자하고, 결제하세요',
+      default: 'Confío: enviá, invertí y pagá con dólares'
     };
 
     const lang = (navigator.language || navigator.userLanguage).slice(0, 2);
@@ -87,12 +86,11 @@ function FriendlyApp() {
                   <FriendlyHeader />
                   <main>
                     <FriendlyHeroSection />
-                    <FriendlyFeatures />
+                    <FriendlyProducts />
                     <FriendlyHowItWorks />
                     <FriendlyVision />
                     <FriendlyAssets />
                     <FriendlyFeeStructure />
-                    <FriendlyTestimonials />
                     <FriendlyFounder />
                   </main>
                   <FriendlyFooter />

@@ -28,6 +28,18 @@
   padding: 48px 0 64px;
 }
 
+.kicker {
+  display: inline-block;
+  background: var(--bg-mint);
+  color: #065f46;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  padding: 6px 16px;
+  border-radius: var(--radius-full);
+  margin-bottom: 18px;
+}
+
 .title {
   font-family: var(--font-display);
   font-size: clamp(2.8rem, 5.6vw, 4.5rem);
@@ -39,7 +51,7 @@
 }
 
 .highlight {
-  color: var(--primary-green-dark);
+  color: #059669;
 }
 
 .subtitle {

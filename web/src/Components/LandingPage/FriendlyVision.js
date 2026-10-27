@@ -20,7 +20,7 @@ const FriendlyVision = () => {
       title: t('Dinero', 'Money', '돈'),
       line: t('Lo tuyo, tuyo.', 'Yours is yours.', '당신의 것은 당신의 것.'),
       body: t(
-        'Tus claves se crean y se usan en tu teléfono. Confío no guarda una llave maestra capaz de mover tu dinero por ti.',
+        'Tus claves se crean y se usan en tu teléfono. Confío no guarda una llave maestra capaz de mover tu dinero por vos.',
         'Your keys are created and used on your phone. Confío keeps no master key that could move your money for you.',
         '키는 휴대폰에서 만들어지고 사용됩니다. Confío는 당신의 돈을 대신 움직일 수 있는 마스터 키를 보관하지 않습니다.'
       ),
@@ -30,9 +30,9 @@ const FriendlyVision = () => {
       stage: 'next',
       stageLabel: t('Lo que sigue', 'What comes next', '다음 단계'),
       title: t('Reputación', 'Reputation', '평판'),
-      line: t('La confianza que construiste viaja contigo.', 'The trust you built travels with you.', '쌓아 온 신뢰가 당신과 함께 이동합니다.'),
+      line: t('La confianza que construiste viaja con vos.', 'The trust you built travels with you.', '쌓아 온 신뢰가 당신과 함께 이동합니다.'),
       body: t(
-        'No queremos decidir cuánto vales. Queremos ayudarte a demostrar lo que ya construiste, aunque cambies de país o de plataforma.',
+        'No queremos decidir cuánto valés. Queremos ayudarte a demostrar lo que ya construiste, aunque cambies de país o de plataforma.',
         'We don’t want to decide what you’re worth. We want to help you show what you’ve already built, even when you change country or platform.',
         '당신의 가치를 우리가 정하려는 것이 아닙니다. 나라나 플랫폼이 바뀌어도 이미 쌓아 온 것을 증명할 수 있도록 돕고 싶습니다.'
       ),
@@ -71,7 +71,7 @@ const FriendlyVision = () => {
           </p>
           <p className={styles.emphasis}>
             {t(
-              'Confío no quiere crearla desde cero. Quiere que se mueva contigo.',
+              'Confío no quiere crearla desde cero. Quiere que se mueva con vos.',
               'Confío doesn’t want to create it from scratch. It wants it to move with you.',
               'Confío는 신뢰를 처음부터 만들려는 것이 아닙니다. 그 신뢰가 당신과 함께 움직이게 하려는 것입니다.'
             )}

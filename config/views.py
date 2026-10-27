@@ -330,39 +330,39 @@ def _resolve_main_assets():
 
 
 def index(request):
-	path = request.path.lower()
-	lang = get_language_from_request(request)
-	
-	# Check for Korean language specifically
-	if 'ko' in lang.lower():
-		lang = 'ko'
-	elif 'es' in lang.lower():
+	# Link-preview crawlers (WhatsApp, Facebook, Telegram) usually send no
+	# Accept-Language; those previews must come out in Spanish, not English.
+	if not request.META.get('HTTP_ACCEPT_LANGUAGE'):
 		lang = 'es'
 	else:
-		lang = 'en'  # Default to English for all other languages
-	
+		lang = get_language_from_request(request).lower()
+		if 'ko' in lang:
+			lang = 'ko'
+		elif 'es' in lang:
+			lang = 'es'
+		else:
+			lang = 'en'
+
 	titles = {
-		'es': 'Confío: PayPal de América Latina',
-		'en': 'Confío: PayPal of Latin America',
-		'ko': 'Confío: 라틴 아메리카의 PayPal',
-		'default': 'Confío: PayPal de América Latina'
+		'es': 'Confío: enviá, invertí y pagá con dólares',
+		'en': 'Confío: send, invest and pay with dollars',
+		'ko': 'Confío: 달러로 보내고, 투자하고, 결제하세요',
 	}
-	
-	title = titles.get(lang, titles['default'])
 	og_description = {
-		'es': 'Envía y recibe dólares digitales sin comisiones con una billetera no custodial. Protege tu dinero de la inflación en Venezuela, Argentina y Bolivia.',
-		'en': 'Send and receive digital dollars with no fees using a non-custodial wallet. Protect your money from inflation in Venezuela, Argentina and Bolivia.',
-		'ko': '비수탁형 지갑으로 수수료 없이 디지털 달러를 보내고 받으세요. 베네수엘라, 아르헨티나, 볼리비아의 인플레이션으로부터 돈을 보호하세요.',
-		'default': 'Confío: Digital payments for Latin America'
+		'es': 'Tus dólares digitales, siempre a tu nombre. Y desde ellos, acciones de EE.UU., oro, Bitcoin y futuros, en una sola app. Confío en vos.',
+		'en': 'Your digital dollars, always in your name. And from them, U.S. stocks, gold, Bitcoin and futures, in one app.',
+		'ko': '디지털 달러는 언제나 당신 명의로. 그 달러로 미국 주식, 금, 비트코인, 선물까지 하나의 앱에서.',
 	}
-	og_image = "https://confio.lat/images/ConfioApp.png"
+	og_locale = {'es': 'es_LA', 'en': 'en_US', 'ko': 'ko_KR'}
+	og_image = "https://confio.lat/images/og_confio_2026_10.png"
 
 	main_js_url, main_css_url = _resolve_main_assets()
-	
+
 	return render(request, 'index.html', {
 		'lang': lang,
-		'title': title or titles['default'],
-		'ogDescription': og_description.get(lang, og_description['default']) or og_description['default'],
+		'title': titles[lang],
+		'ogDescription': og_description[lang],
+		'ogLocale': og_locale[lang],
 		'ogImage': og_image,
 		'main_js_url': main_js_url,
 		'main_css_url': main_css_url,

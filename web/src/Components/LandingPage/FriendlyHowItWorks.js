@@ -2,7 +2,6 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
 import styles from '../../styles/FriendlyHowItWorks.module.css';
-import confioAhorrosDemo from '../../images/ConfioAhorrosDemo.jpeg';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyHowItWorks = () => {
@@ -15,18 +14,18 @@ const FriendlyHowItWorks = () => {
   const steps = [
     {
       number: '1',
-      title: t('Regístrate con Google o Apple', 'Sign up with Google or Apple', '구글 또는 애플로 가입'),
-      description: t('Un solo click y ya tienes tu cuenta. Sin formularios largos.', 'One click and you have your account. No long forms.', '한 번의 클릭으로 계정 생성. 긴 양식 없음.'),
+      title: t('Registrate con Google o Apple', 'Sign up with Google or Apple', '구글 또는 애플로 가입'),
+      description: t('Un toque y ya tenés tu cuenta. Sin formularios largos.', 'One tap and you have your account. No long forms.', '한 번의 탭으로 계정 생성. 긴 양식 없음.'),
     },
     {
       number: '2',
-      title: t('Compra tus dólares', 'Buy your dollars', '달러 구매'),
-      description: t('Paga con tu método preferido y recibe dólares digitales al instante.', 'Pay with your preferred method and receive digital dollars instantly.', '선호하는 방법으로 결제하고 즉시 디지털 달러 받기.'),
+      title: t('Recargá tus dólares', 'Top up your dollars', '달러 충전'),
+      description: t('Desde tu banco o billetera, con el método de tu país. Antes de confirmar, ves cuánto recibís.', 'From your bank or wallet, with your country’s method. Before confirming, you see how much you receive.', '내 나라의 방법으로 은행이나 지갑에서 충전하세요. 확인 전에 받을 금액을 볼 수 있습니다.'),
     },
     {
       number: '3',
-      title: t('¡Usa tus dólares!', 'Use your dollars!', '달러 사용하기!'),
-      description: t('Envía gratis a familia y amigos con su número de teléfono. Antes de convertir o pagar, siempre ves la comisión exacta.', 'Send free to family and friends with their phone number. Before converting or paying, you always see the exact fee.', '전화번호만으로 가족과 친구에게 무료로 보내세요. 전환하거나 결제하기 전에 정확한 수수료를 항상 확인할 수 있습니다.'),
+      title: t('Usalos como quieras', 'Use them your way', '원하는 대로 사용'),
+      description: t('Enviá gratis a otros usuarios con su número de teléfono, invertí o comprá. Siempre ves la comisión exacta antes de confirmar.', 'Send free to other users with their phone number, invest or shop. You always see the exact fee before confirming.', '전화번호로 다른 사용자에게 무료로 보내고, 투자하거나 구매하세요. 확인 전에 항상 정확한 수수료를 볼 수 있습니다.'),
     }
   ];
 
@@ -41,62 +40,32 @@ const FriendlyHowItWorks = () => {
         >
           <span className={styles.badge}>{t('ASÍ FUNCIONA', 'HOW IT WORKS', '작동 방식')}</span>
           <h2 className={styles.title}>
-            {t('Empieza a usar Confío en', 'Start using Confío in', 'Confío 사용 시작')}
-            <span className={styles.highlight}> {t('minutos', 'minutes', '분 만에')}</span>
+            {t('Empezá en', 'Start in', '시작은')}
+            <span className={styles.highlight}> {t('minutos', 'minutes', '몇 분이면')}</span>
           </h2>
           <p className={styles.subtitle}>
             {t('Sin papeleos, sin sucursales, sin complicaciones bancarias', 'No paperwork, no branches, no banking complications', '서류 작업 없음, 지점 방문 없음, 은행 복잡함 없음')}
           </p>
         </motion.div>
 
-        <div className={styles.content}>
-          <motion.div
-            initial={{ opacity: 0, x: -50 }}
-            animate={inView ? { opacity: 1, x: 0 } : {}}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className={styles.stepsContainer}
-          >
-            {steps.map((step, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, x: -30 }}
-                animate={inView ? { opacity: 1, x: 0 } : {}}
-                transition={{ duration: 0.5, delay: 0.1 * index }}
-                className={styles.step}
-              >
-                <div className={styles.stepNumber}>
-                  {step.number}
-                </div>
-                <div className={styles.stepContent}>
-                  <h3 className={styles.stepTitle}>{step.title}</h3>
-                  <p className={styles.stepDescription}>{step.description}</p>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, x: 50 }}
-            animate={inView ? { opacity: 1, x: 0 } : {}}
-            transition={{ duration: 0.6, delay: 0.3 }}
-            className={styles.mockupContainer}
-          >
-            <div className={styles.phoneFrame}>
-              <img
-                src={confioAhorrosDemo}
-                alt={t(
-                  'App Confío — Acciones de EE. UU. (pantalla real)',
-                  'Confío app — U.S. stocks (real screen)',
-                  'Confío 앱 — 미국 주식 (실제 화면)'
-                )}
-                className={styles.mockup}
-                width={576}
-                height={1280}
-                loading="lazy"
-                decoding="async"
-              />
-            </div>
-          </motion.div>
+        <div className={styles.stepsContainer}>
+          {steps.map((step, index) => (
+            <motion.div
+              key={step.number}
+              initial={{ opacity: 0, y: 24 }}
+              animate={inView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.5, delay: 0.1 * index }}
+              className={styles.step}
+            >
+              <div className={styles.stepNumber}>
+                {step.number}
+              </div>
+              <div className={styles.stepContent}>
+                <h3 className={styles.stepTitle}>{step.title}</h3>
+                <p className={styles.stepDescription}>{step.description}</p>
+              </div>
+            </motion.div>
+          ))}
         </div>
       </div>
     </section>

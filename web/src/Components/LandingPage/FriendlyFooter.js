@@ -13,7 +13,7 @@ const FriendlyFooter = () => {
           <div className={styles.brand}>
             <h3 className={styles.logo}>Confío</h3>
             <p className={styles.tagline}>
-              {t('Tu dinero digital, simple y seguro', 'Your digital money, simple and secure', '당신의 디지털 머니, 간단하고 안전하게')}
+              {t('Confío en vos.', 'We trust you.', '당신을 믿습니다.')}
             </p>
           </div>
           
