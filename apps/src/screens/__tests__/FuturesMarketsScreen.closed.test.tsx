@@ -92,7 +92,7 @@ describe('FuturesMarketsScreen closed positions', () => {
     for (let i = 0; i < 19; i += 1) act(() => { byTestId(tree, 'futures-closed-more')[0].props.onPress(); });
     expect(mockUsePositions).toHaveBeenLastCalledWith(true, { doneLimit: 200 });
     expect(byTestId(tree, 'futures-closed-more')).toHaveLength(0);
-    const said = tree.root.findAll((n) => n.type === 'Text' || typeof n.props.children !== 'undefined')
+    const said = tree.root.findAll((n) => typeof n.props.children !== 'undefined')
       .some((n) => [].concat(n.props.children).join('') === 'Mostramos tus 200 posiciones cerradas más recientes.');
     expect(said).toBe(true);
   });

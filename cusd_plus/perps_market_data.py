@@ -15,6 +15,13 @@ logger = logging.getLogger(__name__)
 
 CTX_TTL_S = 15
 CANDLE_TTL_S = 60
+# Candlestick intervals (Hyperliquid's own) -> seconds, for traders who time
+# an entry on 1-5 minute candles.
+OHLC_INTERVALS = {'1m': 60, '3m': 180, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400}
+OHLC_CANDLES = 150
+# Short candles go stale fast; the app streams the live one on top.
+OHLC_TTL_S = {'1m': 10, '3m': 10, '5m': 15}
+
 RANGES = {
     # range -> (interval, lookback seconds)
     '1D': ('15m', 24 * 3600),
@@ -92,4 +99,28 @@ def candles(coin: str, range_: str) -> list[dict]:
             continue
         out.append({'timestamp': start, 'close': float(close)})
     cache.set(key, out, CANDLE_TTL_S)
+    return out
+
+
+def ohlc(coin: str, interval: str) -> list[dict]:
+    """The latest OHLC_CANDLES candles: {t (ms), o, h, l, c, v}. Display only."""
+    if interval not in OHLC_INTERVALS:
+        raise ValueError('bad_interval')
+    key = f'perps_ohlc:{coin}:{interval}'
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    end = int(time.time() * 1000)
+    rows = hyperliquid.candles(coin, interval, end - OHLC_CANDLES * OHLC_INTERVALS[interval] * 1000, end)
+    out = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get('t'), int):
+            continue
+        o, h, l, c = (_dec(row.get(k)) for k in ('o', 'h', 'l', 'c'))
+        if None in (o, h, l, c) or min(o, h, l, c) <= 0:
+            continue
+        v = _dec(row.get('v'))
+        out.append({'t': row['t'], 'o': float(o), 'h': float(h), 'l': float(l), 'c': float(c),
+                    'v': float(v) if v is not None else 0.0})
+    cache.set(key, out, OHLC_TTL_S.get(interval, CANDLE_TTL_S))
     return out

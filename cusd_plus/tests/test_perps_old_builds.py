@@ -219,3 +219,58 @@ class ClosedPositionsPageTests(TestCase):
         self.assertEqual(set(self._ids(include_done=True)),
                          {*self.closed, self.refunded, self.failed, self.live})
         self.assertEqual(self._ids(), [self.live])
+
+
+class OhlcTests(SimpleTestCase):
+    """Candlesticks for traders: Hyperliquid's own candles, bad rows dropped."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_parses_candles_and_drops_bad_rows(self):
+        from cusd_plus import perps_market_data
+
+        rows = [
+            {'t': 1000, 'o': '10', 'h': '12', 'l': '9', 'c': '11', 'v': '3.5'},
+            {'t': 2000, 'o': '11', 'h': 'x', 'l': '9', 'c': '10', 'v': '1'},   # bad high
+            {'t': '3000', 'o': '1', 'h': '1', 'l': '1', 'c': '1', 'v': '1'},   # bad time
+            {'t': 4000, 'o': '0', 'h': '1', 'l': '0', 'c': '1', 'v': '1'},     # zero price
+            {'t': 5000, 'o': '11', 'h': '11', 'l': '10', 'c': '10.5'},          # no volume
+        ]
+        with mock.patch('cusd_plus.hyperliquid.candles', return_value=rows) as upstream:
+            out = perps_market_data.ohlc('xyz:GOLD', '1m')
+        self.assertEqual(out, [
+            {'t': 1000, 'o': 10.0, 'h': 12.0, 'l': 9.0, 'c': 11.0, 'v': 3.5},
+            {'t': 5000, 'o': 11.0, 'h': 11.0, 'l': 10.0, 'c': 10.5, 'v': 0.0},
+        ])
+        coin, interval, start, end = upstream.call_args.args
+        self.assertEqual((coin, interval, end - start), ('xyz:GOLD', '1m', 150 * 60 * 1000))
+
+    def test_unknown_interval_is_refused(self):
+        from cusd_plus import perps_market_data
+
+        with self.assertRaises(ValueError):
+            perps_market_data.ohlc('BTC', '2m')
+
+    def test_resolver_keeps_unknown_coins_and_intervals_out(self):
+        from cusd_plus import perps_schema
+
+        with mock.patch.object(perps_schema, '_user', return_value=object()), \
+                mock.patch('cusd_plus.perps_catalog.by_coin', side_effect=lambda c: object() if c == 'BTC' else None), \
+                mock.patch('cusd_plus.perps_market_data.ohlc', return_value=[
+                    {'t': 1000, 'o': 1.0, 'h': 2.0, 'l': 0.5, 'c': 1.5, 'v': 7.0}]) as ohlc:
+            self.assertEqual(perps_schema.Query.resolve_perps_ohlc(None, None, 'DOGE', '1m'), [])
+            self.assertEqual(perps_schema.Query.resolve_perps_ohlc(None, None, 'BTC', '2m'), [])
+            got = perps_schema.Query.resolve_perps_ohlc(None, None, 'BTC', '1m')
+        self.assertEqual([(c.time, c.open, c.high, c.low, c.close, c.volume) for c in got],
+                         [(1000.0, 1.0, 2.0, 0.5, 1.5, 7.0)])
+        ohlc.assert_called_once_with('BTC', '1m')
+
+    def test_upstream_failure_reads_as_unknown(self):
+        from cusd_plus import hyperliquid, perps_schema
+
+        with mock.patch.object(perps_schema, '_user', return_value=object()), \
+                mock.patch('cusd_plus.perps_catalog.by_coin', return_value=object()), \
+                mock.patch('cusd_plus.perps_market_data.ohlc', side_effect=hyperliquid.HyperliquidError('x')):
+            self.assertIsNone(perps_schema.Query.resolve_perps_ohlc(None, None, 'BTC', '5m'))

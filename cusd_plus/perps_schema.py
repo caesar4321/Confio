@@ -90,6 +90,15 @@ class PerpCandleType(graphene.ObjectType):
     close = graphene.Float(required=True)
 
 
+class PerpOhlcType(graphene.ObjectType):
+    time = graphene.Float(required=True, description='candle open, ms epoch')
+    open = graphene.Float(required=True)
+    high = graphene.Float(required=True)
+    low = graphene.Float(required=True)
+    close = graphene.Float(required=True)
+    volume = graphene.Float(required=True, description='in the asset, not dollars')
+
+
 class PerpCostsType(graphene.ObjectType):
     margin_usd = graphene.Float()
     exit_fee_usd = graphene.Float()
@@ -337,6 +346,11 @@ class Query(graphene.ObjectType):
         range=graphene.String(default_value='1D', description='1D | 1W | 1M | 3M | 1Y'),
         description='Display-only price history; null = upstream failed',
     )
+    perps_ohlc = graphene.List(
+        graphene.NonNull(PerpOhlcType), coin=graphene.String(required=True),
+        interval=graphene.String(default_value='5m', description='1m | 3m | 5m | 15m | 1h | 4h | 1d'),
+        description='Display-only candlesticks, oldest first; null = upstream failed',
+    )
     perps_positions = graphene.List(
         graphene.NonNull(PerpPositionType),
         include_done=graphene.Boolean(default_value=False),
@@ -424,6 +438,20 @@ class Query(graphene.ObjectType):
             logger.warning('perps candles upstream failed for %s', coin)
             return None
         return [PerpCandleType(timestamp=float(r['timestamp']), close=r['close']) for r in rows]
+
+    def resolve_perps_ohlc(self, info, coin, interval='5m'):
+        from . import hyperliquid, perps_catalog, perps_market_data
+
+        user = _user(info)
+        if user is None or interval not in perps_market_data.OHLC_INTERVALS or perps_catalog.by_coin(coin) is None:
+            return []
+        try:
+            rows = perps_market_data.ohlc(coin, interval)
+        except hyperliquid.HyperliquidError:
+            logger.warning('perps ohlc upstream failed for %s %s', coin, interval)
+            return None
+        return [PerpOhlcType(time=float(r['t']), open=r['o'], high=r['h'], low=r['l'], close=r['c'], volume=r['v'])
+                for r in rows]
 
     def resolve_perps_positions(self, info, include_done=False, done_limit=None):
         from blockchain.models import PerpPosition

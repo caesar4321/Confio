@@ -12,15 +12,20 @@ import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { VenueAttribution } from '../components/VenueAttribution';
 import { AreaChart } from '../components/futures/AreaChart';
+import { CandleChart } from '../components/futures/CandleChart';
 import { PerpMarketMark } from '../components/futures/PerpMarketMark';
 import { colors } from '../config/theme';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { useLiveMid } from '../hooks/useLiveMids';
+import { mergeLive, useMarketStream } from '../hooks/useMarketStream';
 import {
+  OHLC_INTERVALS,
+  OhlcInterval,
   PERPS_RANGES,
   PERPS_RANGE_LABELS,
   PerpsRange,
   usePerpsCandles,
+  usePerpsOhlc,
   usePerpsCapabilities,
   usePerpsMarkets,
   usePerpsPositions,
@@ -43,6 +48,14 @@ import {
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type R = RouteProp<MainStackParamList, 'FuturesMarket'>;
+type ChartMode = 'line' | 'candles';
+
+// The chart a member last picked, for the next market they open (this app session).
+let lastChartMode: ChartMode = 'line';
+let lastInterval: OhlcInterval = '5m';
+const INTERVAL_LABELS: Record<OhlcInterval, string> = {
+  '1m': '1 minuto', '3m': '3 minutos', '5m': '5 minutos', '15m': '15 minutos', '1h': '1 hora', '4h': '4 horas', '1d': '1 día',
+};
 
 export const FuturesMarketScreen = () => {
   const navigation = useNavigation<Nav>();
@@ -63,6 +76,14 @@ export const FuturesMarketScreen = () => {
   const position = (positions ?? []).find((p) => p.coin === coin && p.state !== 'done');
   const [range, setRange] = useState<PerpsRange>('1D');
   const { closes, loading: chartLoading, failed } = usePerpsCandles(coin, range);
+  const [mode, setModeState] = useState<ChartMode>(lastChartMode);
+  const [interval, setIntervalState] = useState<OhlcInterval>(lastInterval);
+  const setMode = (m: ChartMode) => { lastChartMode = m; setModeState(m); };
+  const setInterval_ = (i: OhlcInterval) => { lastInterval = i; setIntervalState(i); };
+  const candleMode = mode === 'candles';
+  const ohlc = usePerpsOhlc(coin, interval, candleMode);
+  const stream = useMarketStream(coin, interval, candleMode);
+  const candles = useMemo(() => mergeLive(ohlc.candles, stream.live), [ohlc.candles, stream.live]);
   const { stocks } = useGmMarket(true);
   const logoUrl = useMemo(
     () => stocks.find((s) => s.ticker.toUpperCase() === (market?.ticker || '').toUpperCase())?.logoUrl,
@@ -124,23 +145,76 @@ export const FuturesMarketScreen = () => {
               </Text>
             </View>
           </View>
-          <View style={styles.chart}>
-            <AreaChart
-              values={closes}
-              color={chartUp ? UP : DOWN}
-              guides={guides}
-              emptyText={chartLoading ? 'Cargando gráfico…' : failed ? 'No se pudo cargar el gráfico' : 'Aún no hay suficientes datos'}
-              testID="perps-chart"
-            />
-          </View>
-          <View style={styles.ranges}>
-            {PERPS_RANGES.map((r) => (
-              <Pressable key={r} onPress={() => setRange(r)} style={[styles.range, range === r && styles.rangeActive]}
-                accessibilityRole="button" accessibilityLabel={PERPS_RANGE_LABELS[r]} accessibilityState={{ selected: range === r }}>
-                <Text style={[styles.rangeText, range === r && styles.rangeTextActive]}>{r}</Text>
+          <View style={styles.modes}>
+            {([['line', 'Línea'], ['candles', 'Velas']] as [ChartMode, string][]).map(([m, label]) => (
+              <Pressable key={m} onPress={() => setMode(m)} style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
+                accessibilityRole="button" accessibilityState={{ selected: mode === m }} testID={`perps-chart-mode-${m}`}>
+                <Text style={[styles.modeText, mode === m && styles.modeTextActive]}>{label}</Text>
               </Pressable>
             ))}
           </View>
+          {candleMode ? (
+            <>
+              <View style={styles.chart}>
+                <CandleChart
+                  key={`${coin}:${interval}`}
+                  candles={candles}
+                  daily={interval === '1d'}
+                  guides={guides.map((g) => ({ value: g.value, color: g.color, label: g.label }))}
+                  emptyText={ohlc.loading ? 'Cargando velas…' : ohlc.failed ? 'No se pudo cargar el gráfico' : 'Aún no hay suficientes datos'}
+                  testID="perps-candles"
+                />
+              </View>
+              <View style={styles.ranges}>
+                {OHLC_INTERVALS.map((i) => (
+                  <Pressable key={i} onPress={() => setInterval_(i)} style={[styles.range, interval === i && styles.rangeActive]}
+                    accessibilityRole="button" accessibilityLabel={`Velas de ${INTERVAL_LABELS[i]}`}
+                    accessibilityState={{ selected: interval === i }} testID={`perps-interval-${i}`}>
+                    <Text style={[styles.rangeText, interval === i && styles.rangeTextActive]}>{i === '1d' ? '1D' : i}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.book} testID="perps-bbo">
+                <View style={styles.bookCell}>
+                  <Text style={styles.bookLabel}>Bid · vendes a</Text>
+                  <Text style={[styles.bookValue, { color: DOWN }]}>{formatPerpPrice(stream.bbo?.bid)}</Text>
+                </View>
+                <View style={styles.bookCell}>
+                  <Text style={styles.bookLabel}>Ask · compras a</Text>
+                  <Text style={[styles.bookValue, { color: UP }]}>{formatPerpPrice(stream.bbo?.ask)}</Text>
+                </View>
+                <View style={styles.bookCell}>
+                  <Text style={styles.bookLabel}>Spread</Text>
+                  <Text style={styles.bookValue}>
+                    {stream.bbo ? `${formatPctSigned(((stream.bbo.ask - stream.bbo.bid) / stream.bbo.bid) * 100, 3).replace('+', '')}` : '—'}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.bookNote}>
+                Velas, bid y ask salen del mismo libro de órdenes de Hyperliquid donde se ejecuta tu orden.
+              </Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.chart}>
+                <AreaChart
+                  values={closes}
+                  color={chartUp ? UP : DOWN}
+                  guides={guides}
+                  emptyText={chartLoading ? 'Cargando gráfico…' : failed ? 'No se pudo cargar el gráfico' : 'Aún no hay suficientes datos'}
+                  testID="perps-chart"
+                />
+              </View>
+              <View style={styles.ranges}>
+                {PERPS_RANGES.map((r) => (
+                  <Pressable key={r} onPress={() => setRange(r)} style={[styles.range, range === r && styles.rangeActive]}
+                    accessibilityRole="button" accessibilityLabel={PERPS_RANGE_LABELS[r]} accessibilityState={{ selected: range === r }}>
+                    <Text style={[styles.rangeText, range === r && styles.rangeTextActive]}>{r}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          )}
           <View style={styles.live}><View style={styles.liveDot} /><Text style={styles.liveText}>Opera 24/7 en Hyperliquid</Text></View>
         </View>
 
@@ -263,6 +337,16 @@ const styles = StyleSheet.create({
   change: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
   changeText: { fontSize: 13, fontWeight: '800' },
   chart: { marginTop: 14 },
+  modes: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: '#F3F4F6', borderRadius: 10, padding: 3, marginTop: 12 },
+  modeBtn: { paddingHorizontal: 14, minHeight: 32, justifyContent: 'center', borderRadius: 8 },
+  modeBtnActive: { backgroundColor: '#FFFFFF' },
+  modeText: { fontSize: 13, fontWeight: '700', color: colors.text.secondary },
+  modeTextActive: { color: colors.text.primary },
+  book: { flexDirection: 'row', marginTop: 12, backgroundColor: '#F9FAFB', borderRadius: 12, paddingVertical: 10 },
+  bookCell: { flex: 1, alignItems: 'center' },
+  bookLabel: { fontSize: 11, color: colors.text.secondary, fontWeight: '600' },
+  bookValue: { fontSize: 14, fontWeight: '800', color: colors.text.primary, marginTop: 2 },
+  bookNote: { fontSize: 11, color: colors.text.light, marginTop: 8, lineHeight: 15 },
   ranges: { flexDirection: 'row', gap: 6, marginTop: 10 },
   range: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
   rangeActive: { backgroundColor: colors.primaryLight },

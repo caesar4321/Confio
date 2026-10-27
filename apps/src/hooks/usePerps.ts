@@ -13,7 +13,9 @@ import {
   GET_PERPS_MARKETS,
   GET_PERPS_POSITIONS,
   GET_PERPS_RECENT_POSITIONS,
+  GET_PERPS_OHLC,
   PerpMarket,
+  PerpOhlc,
   PerpPosition,
   PerpsCapabilities,
 } from '../services/perps';
@@ -88,6 +90,28 @@ export type PerpsRange = '1D' | '1W' | '1M' | '3M' | '1Y';
 export const PERPS_RANGES: PerpsRange[] = ['1D', '1W', '1M', '3M', '1Y'];
 export const PERPS_RANGE_LABELS: Record<PerpsRange, string> = {
   '1D': '1 día', '1W': '1 semana', '1M': '1 mes', '3M': '3 meses', '1Y': '1 año',
+};
+
+export type OhlcInterval = '1m' | '3m' | '5m' | '15m' | '1h' | '4h' | '1d';
+export const OHLC_INTERVALS: OhlcInterval[] = ['1m', '3m', '5m', '15m', '1h', '4h', '1d'];
+export const OHLC_INTERVAL_MS: Record<OhlcInterval, number> = {
+  '1m': 60_000, '3m': 180_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000,
+};
+
+/** Candlestick history from the server; the live candle streams on top (useMarketStream). */
+export const usePerpsOhlc = (coin: string | undefined, interval: OhlcInterval, enabled = true) => {
+  const authReady = useAuthReady();
+  const { data, loading, error, refetch } = useQuery(GET_PERPS_OHLC, {
+    variables: { coin, interval },
+    skip: !coin || !authReady || !enabled,
+    fetchPolicy: 'cache-and-network',
+    pollInterval: enabled ? 60_000 : 0,
+  });
+  return useMemo(() => {
+    // Another interval's candles never stand in: a switch shows loading.
+    const rows: PerpOhlc[] | null | undefined = data?.perpsOhlc;
+    return { candles: rows ?? [], loading: loading && !data, failed: Boolean(error) || rows === null, refetch };
+  }, [data, loading, error, refetch]);
 };
 
 export const usePerpsCandles = (coin: string | undefined, range: PerpsRange) => {

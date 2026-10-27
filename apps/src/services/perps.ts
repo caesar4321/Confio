@@ -86,6 +86,22 @@ export const GET_PERPS_MARKETS = gql`
   }
 `;
 
+/** Candlesticks (its own document: older servers lack the field). */
+export const GET_PERPS_OHLC = gql`
+  query PerpsOhlc($coin: String!, $interval: String) {
+    perpsOhlc(coin: $coin, interval: $interval) { time open high low close volume }
+  }
+`;
+
+export interface PerpOhlc {
+  time: number; // candle open, ms
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 export const GET_PERPS_CANDLES = gql`
   query PerpsCandles($coin: String!, $range: String) {
     perpsCandles(coin: $coin, range: $range) {
