@@ -19,6 +19,7 @@ import { AreaChart } from '../components/futures/AreaChart';
 import { FuturesProgress, ProgressKind } from '../components/futures/FuturesProgress';
 import { LiquidationGauge } from '../components/futures/LiquidationGauge';
 import { PerpMarketMark } from '../components/futures/PerpMarketMark';
+import { FuturesShareSheet } from '../components/futures/FuturesShareSheet';
 import { colors } from '../config/theme';
 import { usePerpsCandles, usePerpsCapabilities, usePerpsMarkets, usePerpsPositions } from '../hooks/usePerps';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
@@ -72,6 +73,8 @@ export const FuturesPositionScreen = () => {
   const [step, setStep] = useState<PerpsStep | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<'margin' | 'tpsl' | null>(null);
+  // The member's own share card (their position, or what it made once closed).
+  const [sharing, setSharing] = useState(false);
   const [finished, setFinished] = useState<PerpPosition | null>(null);
 
   useFocusEffect(useCallback(() => { refetch().catch(() => {}); }, [refetch]));
@@ -134,7 +137,14 @@ export const FuturesPositionScreen = () => {
           <Pressable style={styles.successCta} onPress={() => navigation.goBack()}>
             <Text style={styles.successCtaText}>Listo</Text>
           </Pressable>
+          {result != null && (
+            <Pressable style={styles.shareLink} onPress={() => setSharing(true)} testID="perps-share-result">
+              <Icon name="share-2" size={16} color={colors.primaryDark} />
+              <Text style={styles.shareLinkText}>Compartir mi resultado</Text>
+            </Pressable>
+          )}
         </StockTradeSuccessContent>
+        <FuturesShareSheet visible={sharing} onClose={() => setSharing(false)} position={finished} kind="result" />
       </View>
     );
   }
@@ -297,10 +307,23 @@ export const FuturesPositionScreen = () => {
             </View>
           </>
         )}
+        {(isOpen || (done && position.resultUsd != null)) && (
+          <Pressable style={styles.shareLink} onPress={() => setSharing(true)} disabled={Boolean(busy)}
+            testID="perps-share">
+            <Icon name="share-2" size={16} color={colors.primaryDark} />
+            <Text style={styles.shareLinkText}>{isOpen ? 'Compartir mi posición' : 'Compartir mi resultado'}</Text>
+          </Pressable>
+        )}
         <Text style={styles.disclaimer}>
           Tu posición vive en Hyperliquid, en una cuenta a tu nombre. Confío no puede moverla sin tu firma.
         </Text>
       </ScrollView>
+
+      {(isOpen || done) && (
+        <FuturesShareSheet visible={sharing} onClose={() => setSharing(false)} position={position}
+          kind={isOpen ? 'position' : 'result'} liveMid={isOpen ? liveMid : null}
+          shownPx={isOpen ? market?.markPx ?? null : null} />
+      )}
 
       <MarginSheet visible={sheet === 'margin'} onClose={() => setSheet(null)}
         liquidationPx={position.liquidationPx}
@@ -559,6 +582,8 @@ const styles = StyleSheet.create({
   // A success screen centers its column: the CTA carries its own width, like the Oro y Bitcoin twin.
   successCta: { backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 40, marginTop: 32 },
   successCtaText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  shareLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, marginTop: 8 },
+  shareLinkText: { fontSize: 15, fontWeight: '700', color: colors.primaryDark },
   container: { flex: 1, backgroundColor: colors.neutral },
   center: { alignItems: 'center', justifyContent: 'center', padding: 32 },
   muted: { color: colors.text.secondary, textAlign: 'center' },
