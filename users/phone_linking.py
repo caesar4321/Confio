@@ -10,10 +10,9 @@ from django.utils import timezone
 from django.utils.crypto import salted_hmac
 
 from .models import User
-from .country_codes import COUNTRY_CODES
 from .masking import mask_email
 from .phone_utils import normalize_phone, phone_lookup_key
-from .review_numbers import is_review_test_phone_key
+from .review_numbers import is_review_test_phone_key, review_number_for_key
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +54,14 @@ def link_verified_phone(user, verification, country_code, confirmation_token=Non
     phone_key = phone_lookup_key(verification.phone_number)
     if not phone_key:
         raise PhoneLinkError('El número verificado no es válido.')
-    if normalize_phone(verification.phone_number, country_code) != phone_key:
-        # The configured reviewer number deliberately tolerates a wrong country
-        # selection. Persist its actual calling code, never the caller's guess.
-        if not is_review_test_phone_key(phone_key):
-            raise PhoneLinkError('El país no coincide con el número verificado.')
-        calling_code = '+' + phone_key.split(':', 1)[0]
-        country_code = next(row[2] for row in COUNTRY_CODES if row[1] == calling_code)
+    reviewer = review_number_for_key(phone_key)
+    if reviewer is not None:
+        # Reviewer numbers deliberately tolerate a wrong country selection.
+        # Persist the country the number stands for (its geo rules depend on
+        # it), never the caller's guess: +1 alone could be Canada or Samoa.
+        country_code = reviewer.country
+    elif normalize_phone(verification.phone_number, country_code) != phone_key:
+        raise PhoneLinkError('El país no coincide con el número verificado.')
     with transaction.atomic():
         # Serialize ownership changes even when the phone has no current owner.
         # A row lock alone cannot lock an absent phone or a newly changed owner.

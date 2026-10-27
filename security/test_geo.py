@@ -113,7 +113,7 @@ class PresalePolicyTests(SimpleTestCase):
                 self.policy.evaluate(_user('VE'))
 
     def test_review_account_bypasses_everything(self):
-        with mock.patch('users.review_numbers.is_review_test_phone_key',
+        with mock.patch('users.review_numbers.is_geo_exempt_reviewer',
                         return_value=True), _no_ip('US'):
             self.assertTrue(self.policy.evaluate(_user('US', 'k')).allowed)
 

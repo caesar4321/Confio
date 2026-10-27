@@ -1,29 +1,86 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Iterable, List, Tuple
 
 from django.conf import settings
 
+from .country_codes import COUNTRY_CODES
 from .phone_utils import normalize_any_phone
+
+
+# Calling codes shared by several countries: the country a reviewer number
+# stands for. COUNTRY_CODES lists +1 under American Samoa first.
+_HOME_COUNTRY = {'+1': 'US', '+44': 'GB', '+7': 'RU'}
+
+
+@dataclass(frozen=True)
+class ReviewNumber:
+	phone: str        # E.164
+	code: str
+	country: str      # ISO-2 stored as the account's phone country
+	geo_exempt: bool  # bypasses every phone-country and IP block
+
+
+def _country_of(phone: str) -> str | None:
+	normalized = normalize_any_phone(phone)
+	if not normalized:
+		return None
+	calling_code = '+' + normalized.split(':', 1)[0]
+	if calling_code in _HOME_COUNTRY:
+		return _HOME_COUNTRY[calling_code]
+	return next((row[2] for row in COUNTRY_CODES if row[1] == calling_code), None)
+
+
+def review_numbers() -> List[ReviewNumber]:
+	"""Every configured reviewer number, one store's code each.
+
+	Code 1 is Apple's, code 2 Google Play's. REVIEW_TEST_PHONE_E164[_2] are
+	the geo-exempt numbers (Argentina): a reviewer sees every feature from
+	anywhere. REVIEW_TEST_GEO_BLOCKED_PHONES_E164[_2] are numbers in blocked
+	countries (US, UK) with no bypass at all, so a reviewer who signs up with
+	one, or switches to it, sees the blocks a real user there gets.
+	"""
+	if not getattr(settings, 'REVIEW_TEST_ENABLED', False):
+		return []
+
+	numbers: List[ReviewNumber] = []
+	for suffix in ('', '_2'):
+		code = getattr(settings, f'REVIEW_TEST_CODE{suffix}', None)
+		if not code:
+			continue
+		code = str(code).strip()
+		phones = [(getattr(settings, f'REVIEW_TEST_PHONE_E164{suffix}', None), True)]
+		blocked = getattr(settings, f'REVIEW_TEST_GEO_BLOCKED_PHONES_E164{suffix}', None) or ()
+		if isinstance(blocked, str):
+			blocked = blocked.split(',')
+		phones += [(phone, False) for phone in blocked]
+		for phone, geo_exempt in phones:
+			phone = (phone or '').strip()
+			country = _country_of(phone) if phone else None
+			if country:
+				numbers.append(ReviewNumber(phone, code, country, geo_exempt))
+	return numbers
 
 
 def review_test_pairs() -> List[Tuple[str, str]]:
 	"""Return (phone_e164, code) tuples for configured reviewer phones."""
-	if not getattr(settings, 'REVIEW_TEST_ENABLED', False):
-		return []
+	return [(number.phone, number.code) for number in review_numbers()]
 
-	pairs: List[Tuple[str, str]] = []
-	config = (
-		('REVIEW_TEST_PHONE_E164', 'REVIEW_TEST_CODE'),
-		('REVIEW_TEST_PHONE_E164_2', 'REVIEW_TEST_CODE_2'),
-	)
-	for phone_attr, code_attr in config:
-		phone = getattr(settings, phone_attr, None)
-		code = getattr(settings, code_attr, None)
-		if phone and code:
-			pairs.append((phone.strip(), str(code).strip()))
-	return pairs
+
+def review_number_for_key(phone_key: str | None) -> ReviewNumber | None:
+	"""The configured reviewer number behind a canonical phone key."""
+	if not phone_key:
+		return None
+	return next((number for number in review_numbers()
+	             if normalize_any_phone(number.phone) == phone_key), None)
+
+
+def is_geo_exempt_reviewer(user) -> bool:
+	"""True for accounts on a geo-exempt reviewer number (see review_numbers)."""
+	number = review_number_for_key(getattr(user, 'phone_key', None))
+	return bool(number and number.geo_exempt)
 
 
 def get_review_test_code_for_phone(phone_e164: str | None) -> str | None:
@@ -128,18 +185,21 @@ def find_matching_review_number(phone_input: str) -> str | None:
 	if not input_digits:
 		return None
 		
+	suffix_matches = []
 	for review_phone, _ in review_test_pairs():
 		# review_phone is expected to be E.164 (e.g. +12025550123)
 		review_digits = re.sub(r'\D', '', review_phone)
-		
+
 		# 1. Exact digit match
 		if input_digits == review_digits:
 			return review_phone
-			
+
 		# 2. Suffix match (Input is missing country code, but reviewer entered the full national number)
 		# We require at least 10 digits to avoid false positives.
 		# The test number is 12025550123 (11 digits).
 		if len(input_digits) >= 10 and review_digits.endswith(input_digits):
-			return review_phone
-			
-	return None
+			suffix_matches.append(review_phone)
+
+	# Several reviewer numbers share a national number only by misconfiguration;
+	# never guess which country (and which geo rules) the reviewer meant.
+	return suffix_matches[0] if len(set(suffix_matches)) == 1 else None

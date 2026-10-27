@@ -224,6 +224,18 @@ class GeoDecision:
         return self.allowed
 
 
+def store_review_exempt(user) -> bool:
+    """Accounts on a geo-exempt store-review number (Argentina) pass every
+    policy, phone and IP alike. Reviewer numbers in blocked countries (US,
+    UK) are NOT exempt: they exist to show the blocks. Fails closed."""
+    try:
+        from users.review_numbers import is_geo_exempt_reviewer
+        return is_geo_exempt_reviewer(user)
+    except Exception:  # noqa: BLE001
+        logger.exception('[GEO] reviewer exemption check failed')
+        return False
+
+
 @dataclass(frozen=True)
 class GeoPolicy:
     """One feature's geo rules. The mechanism above is shared; this is not."""
@@ -236,7 +248,8 @@ class GeoPolicy:
     phone_blocked: frozenset | Callable[[], object]
     #: Default refusal copy, shown to the user.
     message: str
-    #: Per-country copy overrides (presale says something different for KR).
+    #: Per-country copy overrides, for a phone or an IP in that country
+    #: (presale says something different for KR).
     #: Read-only: frozen=True protects the ATTRIBUTE, not a dict behind it,
     #: and these are module-level legal-control policies.
     phone_messages: Mapping[str, str] = field(
@@ -312,5 +325,6 @@ class GeoPolicy:
             logger.warning(
                 '[GEO][%s] blocked by IP country=%s user_id=%s',
                 self.name, ip_country, getattr(user, 'id', None))
-            return GeoDecision(False, self.message, 'ip')
+            return GeoDecision(
+                False, self.phone_messages.get(ip_country, self.message), 'ip')
         return GeoDecision(True)

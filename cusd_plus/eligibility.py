@@ -34,7 +34,7 @@ ONDO_BLOCKED = ONDO_PROHIBITED | ONDO_QUALIFIED_ONLY
 
 from django.conf import settings
 
-from security.geo import GeoPolicy
+from security.geo import GeoPolicy, store_review_exempt
 
 # Shown to blocked users by the app; also returned from gated mutations.
 INELIGIBLE_MESSAGE = (
@@ -57,6 +57,7 @@ CUSD_BSC_LEGACY_UPDATE_MESSAGE = (
 # value means we cannot attest a jurisdiction.
 ONDO_POLICY = GeoPolicy(
     name='ondo',
+    bypass=store_review_exempt,
     phone_blocked=ONDO_BLOCKED,
     message=INELIGIBLE_MESSAGE,
     allow_missing_phone=False,
@@ -95,6 +96,7 @@ STOCK_BUY_BLOCKED_MESSAGE = (
 
 CONFIO_STOCK_BUY_POLICY = GeoPolicy(
     name='confio_stock_buy',
+    bypass=store_review_exempt,
     phone_blocked=_confio_stock_buy_blocked_countries,
     message=STOCK_BUY_BLOCKED_MESSAGE,
     allow_missing_phone=False,
@@ -107,7 +109,8 @@ CONFIO_STOCK_BUY_POLICY = GeoPolicy(
 # Not an Ondo product: Ondo's issuer lists do not apply (Venezuela, Brazil,
 # the EEA… may trade). The hard baseline is the comprehensively sanctioned
 # jurisdictions, which Tether's terms (XAUt) also prohibit; operations can
-# add any ISO-2 code through CRYPTO_BLOCKED_COUNTRIES without a deploy.
+# add any ISO-2 code through CRYPTO_BLOCKED_COUNTRIES without a deploy (its
+# default adds the US and the UK). Only buys are refused; holders still sell.
 CRYPTO_SANCTIONED = frozenset({'KP', 'CU', 'IR', 'SY'})
 
 CRYPTO_INELIGIBLE_MESSAGE = (
@@ -127,6 +130,7 @@ def _crypto_blocked_countries():
 
 CRYPTO_POLICY = GeoPolicy(
     name='crypto',
+    bypass=store_review_exempt,
     phone_blocked=_crypto_blocked_countries,
     message=CRYPTO_INELIGIBLE_MESSAGE,
     allow_missing_phone=False,
@@ -163,6 +167,7 @@ def _perps_blocked_countries():
 
 PERPS_POLICY = GeoPolicy(
     name='perps',
+    bypass=store_review_exempt,
     phone_blocked=_perps_blocked_countries,
     message=PERPS_INELIGIBLE_MESSAGE,
     allow_missing_phone=False,

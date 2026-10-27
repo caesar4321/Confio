@@ -359,6 +359,10 @@ export const ConfioPresaleParticipateScreen = () => {
       Alert.alert('Restricción', 'Lo sentimos, la preventa no está disponible en tu país.');
       return;
     }
+    if (iso === 'GB') {
+      Alert.alert('Restricción', 'Lo sentimos, los residentes del Reino Unido no pueden participar en la preventa.');
+      return;
+    }
 
     if (!isValidAmount) {
       Alert.alert('Error', `Monto debe estar entre $${minAmount} y $${formatWithLocale(maxAmount)}`);

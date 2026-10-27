@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.8.0',
-    'last_updated': '2026-10-26',
+    'version': '1.8.1',
+    'last_updated': '2026-10-27',
     'is_legally_binding': True,
     'sections': [
         {
@@ -100,6 +100,7 @@ TERMS = {
                 'Los tokens quedan en su propia cuenta, firmada con su llave. Confío no los custodia.',
                 'El precio sube y baja a cualquier hora, también de noche y en fines de semana. Puede perder parte o la totalidad de lo invertido.',
                 'Cada compra y cada venta pagan la comisión de conversión de Confío Dollar, que se muestra antes de confirmar.',
+                'La compra no está disponible en algunos países (sección 12).',
                 'Confío no ofrece asesoría financiera.'
             ]
         },
@@ -137,7 +138,8 @@ TERMS = {
                 'preventa_de_$confio': [
                     'La participación en la preventa de monedas y ciertos servicios financieros de Confío está estrictamente prohibida para:',
                     'Residentes o ciudadanos de los Estados Unidos de América (US)',
-                    'Residentes o ciudadanos de Corea del Sur (KR)'
+                    'Residentes o ciudadanos de Corea del Sur (KR)',
+                    'Residentes del Reino Unido (GB)'
                 ],
                 'ahorro_con_rendimiento_y_acciones': [
                     'cUSD+ (USDY) y las acciones tokenizadas son emitidos por Ondo Finance y están sujetos, además, a las reglas de elegibilidad del emisor.',
@@ -146,6 +148,12 @@ TERMS = {
                     'La lista de jurisdicciones del emisor puede cambiar; la versión vigente está publicada en docs.ondo.finance. Podemos bloquear, limitar o suspender estas funciones para cumplir con esos requisitos.',
                     'Si usted no es elegible, puede seguir usando el resto de Confío con normalidad: recibir, enviar, pagar y retirar dólares digitales. Lo que no está disponible es la conversión a cUSD+ y la compra de acciones tokenizadas. La emisión de nuevo cUSD puede limitarse por jurisdicción conforme a la sección 5.',
                     'Para aplicar estas reglas usamos el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP.'
+                ],
+                'oro_y_bitcoin': [
+                    'La compra de oro y bitcoin no está disponible para personas ubicadas o residentes en Estados Unidos, Reino Unido, Cuba, Irán, Corea del Norte y Siria.',
+                    'Para aplicar estas reglas usamos el país de su número de teléfono verificado y el país estimado a partir de su dirección IP.',
+                    'Podemos ampliar o reducir la lista de países para cumplir con las reglas de los proveedores o la ley.',
+                    'Estas restricciones solo afectan las compras. Si ya tiene tokens, puede venderlos cuando quiera.'
                 ],
                 'futuros': [
                     'Futuros no está disponible para personas ubicadas o residentes en Estados Unidos, Canadá, Reino Unido, Bélgica, Cuba, Irán, Corea del Norte y Siria, ni donde la ley local lo prohíba.',
