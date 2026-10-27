@@ -63,16 +63,64 @@ describe('CandleChart', () => {
     expect(texts).toEqual(expect.arrayContaining([axisPrice(138.5), axisPrice(140), axisPrice(138), axisPrice(139)]));
   });
 
-  it('zooms between the bounds', () => {
+  const rects = (tree: renderer.ReactTestRenderer) => tree.root.findAll((n) => n.type === 'Rect' as any).length;
+  const button = (tree: renderer.ReactTestRenderer, id: string) =>
+    tree.root.findAll((n) => n.props.testID === id && n.props.onPress)[0];
+  const plot = (tree: renderer.ReactTestRenderer) => tree.root.findAll((n) => typeof n.props.onTouchStart === 'function')[0];
+  // A touch at (x, y) inside the plot, which sits at the page's top-left here.
+  const at = (x: number, y: number, touches = 1) => ({ nativeEvent: { pageX: x, pageY: y, locationX: x, locationY: y,
+    touches: Array.from({ length: touches }, () => ({ pageX: x, pageY: y })) } });
+
+  it('zooms between the bounds with the buttons', () => {
     const tree = render(series(200));
-    const rects = () => tree.root.findAll((n) => n.type === 'Rect' as any).length;
-    const button = (id: string) => tree.root.findAll((n) => n.props.testID === id && n.props.onPress)[0];
-    expect(rects()).toBe(50 * 2 + 1);
-    act(() => { button('perps-candle-zoom-in').props.onPress(); });
-    expect(rects()).toBe(30 * 2 + 1);
-    expect(button('perps-candle-zoom-in').props.disabled).toBe(true);
-    act(() => { button('perps-candle-zoom-out').props.onPress(); button('perps-candle-zoom-out').props.onPress(); });
-    expect(rects()).toBe(80 * 2 + 1);
+    expect(rects(tree)).toBe(50 * 2 + 1);
+    act(() => { button(tree, 'perps-candle-zoom-in').props.onPress(); });
+    expect(rects(tree)).toBe(33 * 2 + 1);
+    act(() => { button(tree, 'perps-candle-zoom-in').props.onPress(); button(tree, 'perps-candle-zoom-in').props.onPress(); });
+    expect(rects(tree)).toBe(20 * 2 + 1);
+    expect(button(tree, 'perps-candle-zoom-in').props.disabled).toBe(true);
+    for (let i = 0; i < 6; i += 1) act(() => { button(tree, 'perps-candle-zoom-out').props.onPress(); });
+    expect(rects(tree)).toBe(150 * 2 + 1);
+    expect(button(tree, 'perps-candle-zoom-out').props.disabled).toBe(true);
+  });
+
+  it('holds for a crosshair that stays after lifting and goes away with a tap', () => {
+    jest.useFakeTimers();
+    try {
+      const tree = render(series(40));
+      const crosshair = () => tree.root.findAll((n) => n.props.testID === 'perps-candle-crosshair').length > 0;
+      act(() => { plot(tree).props.onTouchStart(at(200, 100)); });
+      act(() => { jest.advanceTimersByTime(300); });
+      expect(crosshair()).toBe(true);
+      // Its price tag: the price at the finger's height, in the market's precision.
+      act(() => { plot(tree).props.onTouchEnd({ nativeEvent: { pageX: 200, pageY: 100, touches: [] } }); });
+      expect(crosshair()).toBe(true);
+      act(() => { plot(tree).props.onTouchStart(at(50, 50)); });
+      act(() => { plot(tree).props.onTouchEnd({ nativeEvent: { pageX: 50, pageY: 50, touches: [] } }); });
+      expect(crosshair()).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a quick tap never opens a crosshair, and a double tap goes back to the latest', () => {
+    jest.useFakeTimers();
+    try {
+      const tree = render(series(200));
+      act(() => { button(tree, 'perps-candle-zoom-in').props.onPress(); });
+      expect(rects(tree)).toBe(33 * 2 + 1);
+      const tap = () => {
+        act(() => { plot(tree).props.onTouchStart(at(100, 100)); });
+        act(() => { jest.advanceTimersByTime(80); });
+        act(() => { plot(tree).props.onTouchEnd({ nativeEvent: { pageX: 100, pageY: 100, touches: [] } }); });
+      };
+      tap();
+      expect(tree.root.findAll((n) => n.props.testID === 'perps-candle-crosshair')).toHaveLength(0);
+      tap();
+      expect(rects(tree)).toBe(50 * 2 + 1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('says it is loading until there are candles', () => {
