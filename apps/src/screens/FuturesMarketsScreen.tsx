@@ -20,6 +20,7 @@ import { useGmMarket } from '../hooks/useGmMarket';
 import { usePerpsCapabilities, usePerpsMarkets, usePerpsPositions } from '../hooks/usePerps';
 import { useLiveMids } from '../hooks/useLiveMids';
 import { livePnl } from '../utils/perpsPresentation';
+import { formatShortDate } from '../utils/portfolioFormat';
 import type { AssetClass, PerpMarket, PerpPosition } from '../services/perps';
 import { MainStackParamList } from '../types/navigation';
 import {
@@ -47,7 +48,10 @@ export const FuturesMarketsScreen = () => {
   const { capabilities, loading: capsLoading } = usePerpsCapabilities();
   const enabled = Boolean(capabilities?.enabled);
   const { markets, loading, refetch: refetchMarkets } = usePerpsMarkets(enabled);
-  const { positions, unknown: positionsUnknown, refetch: refetchPositions } = usePerpsPositions(true);
+  // Closed ones too: a closed position stays the member's to look back on and share.
+  const { positions, unknown: positionsUnknown, refetch: refetchPositions } =
+    usePerpsPositions(true, { includeDone: true });
+  const [showClosed, setShowClosed] = useState(false);
   // Hyperliquid's live prices while this screen is open (the server's poll otherwise).
   const mids = useLiveMids(useMemo(() => markets.map((m) => m.coin), [markets]));
   const [refreshing, setRefreshing] = useState(false);
@@ -81,7 +85,11 @@ export const FuturesMarketsScreen = () => {
       : sort === 'gainers' ? byChange(b) - byChange(a) : byChange(a) - byChange(b)));
   }, [markets, tab, sort, query]);
 
-  const live = (positions ?? []).filter((p) => p.state !== 'done');
+  const live = (positions ?? []).filter((p) => p.state !== 'done' && p.state !== 'failed');
+  // Only positions that really opened have a result (a refunded open has none).
+  const closed = useMemo(() => (positions ?? [])
+    .filter((p) => p.state === 'done' && p.resultUsd != null)
+    .sort((a, b) => (b.doneAt ?? '').localeCompare(a.doneAt ?? '')), [positions]);
   const equity = live.reduce((sum, p) => sum + positionValueUsd(p), 0);
   const unrealized = live.reduce((sum, p) => sum + (livePnl(p, mids[p.coin]) ?? 0), 0);
 
@@ -142,6 +150,18 @@ export const FuturesMarketsScreen = () => {
             {live.map((p) => <PositionChip key={p.id} position={p} logoUrl={logos.get(p.ticker.toUpperCase())} mid={mids[p.coin]}
               onPress={() => navigation.navigate('FuturesPosition', { positionId: p.id })} />)}
           </ScrollView>
+        </View>
+      )}
+      {closed.length > 0 && (
+        <View style={styles.closed}>
+          <Pressable style={styles.closedHead} onPress={() => setShowClosed((v) => !v)} accessibilityRole="button"
+            accessibilityState={{ expanded: showClosed }} testID="futures-closed-toggle">
+            <Text style={styles.closedTitle}>Posiciones cerradas</Text>
+            <Text style={styles.closedCount}>{closed.length}</Text>
+            <Icon name={showClosed ? 'chevron-up' : 'chevron-down'} size={18} color={colors.text.light} />
+          </Pressable>
+          {showClosed && closed.map((p) => <ClosedRow key={p.id} position={p} logoUrl={logos.get(p.ticker.toUpperCase())}
+            onPress={() => navigation.navigate('FuturesPosition', { positionId: p.id })} />)}
         </View>
       )}
 
@@ -276,7 +296,48 @@ function PositionChip({ position, logoUrl, onPress, mid }: {
   );
 }
 
+/** "2 mar" in the member's own day (doneAt is UTC). */
+const closedOn = (iso: string | null) => {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return formatShortDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+};
+
+function ClosedRow({ position, logoUrl, onPress }: { position: PerpPosition; logoUrl?: string; onPress: () => void }) {
+  const putIn = position.putInUsd ?? position.marginUsd;
+  const pct = position.resultUsd != null && putIn ? (position.resultUsd / putIn) * 100 : null;
+  const when = position.liquidation ? 'Liquidada' : closedOn(position.doneAt);
+  const line = `${sideLabel(position.side)} ${position.leverage}x${when ? ` · ${when}` : ''}`;
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.closedRow, pressed && styles.pressed]}
+      accessibilityRole="button" testID={`futures-closed-${position.id}`}
+      accessibilityLabel={`${position.ticker}, ${line}, resultado ${formatUsdSigned(position.resultUsd)}`}>
+      <PerpMarketMark ticker={position.ticker} logoUrl={logoUrl} size={32} leverage={position.leverage}
+        badgeColor={SIDE_COLORS[position.side].solid} />
+      <View style={styles.marketText}>
+        <Text style={styles.marketName} numberOfLines={1}>{position.ticker}</Text>
+        <Text style={styles.marketTicker} numberOfLines={1}>{line}</Text>
+      </View>
+      <View style={styles.marketRight}>
+        <Text style={[styles.closedResult, { color: pnlColor(position.resultUsd) }]}>{formatUsdSigned(position.resultUsd)}</Text>
+        <Text style={[styles.closedPct, { color: pnlColor(pct) }]}>{formatPctSigned(pct)}</Text>
+      </View>
+      <Icon name="chevron-right" size={18} color={colors.text.light} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  closed: { marginHorizontal: 16, marginTop: 10, backgroundColor: '#FFFFFF', borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1, borderColor: colors.border },
+  closedHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, minHeight: 48 },
+  closedTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  closedCount: { fontSize: 13, fontWeight: '700', color: colors.text.secondary },
+  closedRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  closedResult: { fontSize: 15, fontWeight: '800' },
+  closedPct: { fontSize: 12, fontWeight: '700' },
   unknownBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFFBEB', borderRadius: 14,
     paddingHorizontal: 14, paddingVertical: 12, marginBottom: 12, borderWidth: 1, borderColor: '#FDE68A',
