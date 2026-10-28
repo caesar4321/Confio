@@ -140,7 +140,7 @@ export function InvestorReturnsCard({ userId, refreshKey = 0 }: Props) {
                   `${gain ?? ''}${current?.since ? ` desde ${formatMemberSince(current.since)}` : ''}`,
                   current?.investedUsd ? `sobre ${formatUsd(current.investedUsd)} invertidos` : null,
                 ].filter(Boolean).join(' · ')
-                : range === '24h' ? `${gain ?? ''} hoy` : `${gain ?? ''} en ${rangeLabel}`}
+                : `${gain ?? ''} en ${rangeLabel}`}
           </Text>
           {range === 'all' ? null : (
             <View

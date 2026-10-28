@@ -64,7 +64,7 @@ class PortfolioPositionTests(SimpleTestCase):
         with mock.patch.object(schema, '_portfolio_target', return_value=target), \
                 mock.patch.object(schema.member_portfolio, 'build_portfolio', return_value=portfolio), \
                 mock.patch.object(schema.community, 'portfolio_hidden', return_value=False), \
-                mock.patch.object(schema, '_today_gain', return_value=None):
+                mock.patch.object(schema, '_rolling_gain', return_value=None):
             result = schema.build_member_portfolio(target, 1)
         perp, coin = result.open_positions
         self.assertEqual((perp.symbol, perp.units, perp.value_usd), ('', '', '21.00'))

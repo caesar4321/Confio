@@ -236,6 +236,15 @@ def snapshot_portfolio_returns_task(self):
     return sync_all(budget_seconds=40 * 60)
 
 
+@shared_task(bind=True, max_retries=0, soft_time_limit=8 * 60, time_limit=9 * 60)
+def snapshot_portfolio_values_task(self):
+    """Every investing wallet's sleeve valued now: what the rolling 24 h
+    starts from a day later."""
+    from .rolling_returns import snapshot_all
+
+    return snapshot_all(budget_seconds=7 * 60)
+
+
 @shared_task(bind=True, max_retries=COMMUNITY_REVIEW_MAX_RETRIES)
 def review_direct_message_task(self, message_id: int):
     """Mensajes: a message reaches the other person only once approved."""

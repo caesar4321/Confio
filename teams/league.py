@@ -24,6 +24,11 @@ or guessed number:
   their one personal wallet (no gaps, no guessed flat days), they held on
   average at least MIN_AVG_SLEEVE_USD over it, and held something on at
   least MIN_HOLDING_DAYS of its days: a dust trade never tops the table.
+- 24 h ('24h') is the last 24 hours, not a UTC day (Bitcoin, gold and
+  Futuros never close): each member's rolling result from the value
+  snapshots taken every 10 minutes (inbox/rolling_returns.py), rebuilt
+  every 10 minutes. The same floors apply to the money at work over those
+  hours; a team's 24 h is the mean of members who were on it all along.
 - All time ('all') is each one's current unbroken run of proven days
   ending yesterday (a missing or unproven day restarts it: nothing is ever
   guessed across a gap), ranked only from MIN_ALL_TIME_DAYS days, so two
@@ -61,6 +66,9 @@ MIN_ALL_TIME_DAYS = 30
 # Warmed by the nightly task; who appears is filtered on every read anyway.
 CACHE_SECONDS = 2 * 60 * 60
 COMPUTE_DAYS = 31
+# The 24 h tables: rebuilt every 10 minutes, kept long enough that one
+# missed run never empties them.
+ROLLING_SECONDS = 35 * 60
 
 
 def utc_today() -> date:
@@ -267,7 +275,7 @@ def compute_team_day(team, day: date) -> bool:
 
 
 def invalidate_team_tables() -> None:
-    cache.delete_many([_key('teams', window(r), r) for r in RANGES])
+    cache.delete_many([_key('teams', window(r), r) for r in RANGES] + [_rolling_key('teams')])
 
 
 def recompute_member_history(user) -> int:
@@ -371,8 +379,112 @@ def warm() -> None:
     """Rebuild every cached table (nightly, after the team days)."""
     for kind in ('teams', 'investors'):
         for range_key in RANGES:
+            if range_key == '24h':
+                continue                       # warm_rolling, every 10 minutes
             days = window(range_key)
             cache.set(_key(kind, days, range_key), _build(kind, range_key, days), CACHE_SECONDS)
+
+
+# ── 24 h ─────────────────────────────────────────────────────────────────────
+
+def _rolling_key(name: str) -> str:
+    return f'league:v3:rolling:{name}'
+
+
+def rolling_results(force: bool = False) -> dict:
+    """{user_id: (gain, pct, capital)}: every investor's last 24 hours on
+    their one personal wallet, None-free (unknown results are left out)."""
+    from inbox.models import PortfolioValueSnapshot
+    from inbox.portfolio_returns import CachedBlockTimes
+    from inbox.rolling_returns import START_TOLERANCE, WINDOW, rolling
+
+    from .eligibility import canonical_wallets
+
+    if not force:
+        cached = cache.get(_rolling_key('results'))
+        if cached is not None:
+            return cached
+        # Never every wallet inside a request: the warmer builds it.
+        from .tasks import warm_rolling_league_task
+
+        try:
+            warm_rolling_league_task.delay()
+        except Exception:  # noqa: BLE001
+            logger.warning('league: could not queue the 24 h warm', exc_info=True)
+        return {}
+    now = timezone.now()
+    ids = set(PortfolioValueSnapshot.objects.filter(at__gte=now - WINDOW - START_TOLERANCE)
+              .values_list('user_id', flat=True).distinct())
+    prices = CachedBlockTimes()
+    out = {}
+    for user_id, wallet in canonical_wallets(ids).items():
+        try:
+            result = rolling(wallet, now, prices)
+        except Exception:  # noqa: BLE001 — one wallet never empties the table
+            logger.exception('league: rolling 24 h failed for %s', wallet)
+            continue
+        if result is not None:
+            out[user_id] = (result.gain, result.pct, result.capital)
+    cache.set(_rolling_key('results'), out, ROLLING_SECONDS)
+    return out
+
+
+def _rolling_investor_table(results: dict) -> list[Row]:
+    eligible = _eligible_user_ids(list(results))
+    rows = sorted(((gain, pct, user_id) for user_id, (gain, pct, capital) in results.items()
+                   if user_id in eligible and capital >= MIN_AVG_SLEEVE_USD),
+                  key=lambda r: (-r[0], -r[1], r[2]))
+    return [Row(rank=i + 1, pct=pct, pnl=pnl, user_id=user_id, people=frozenset([user_id]))
+            for i, (pnl, pct, user_id) in enumerate(rows)]
+
+
+def _rolling_teams(results: dict, team_ids=None) -> dict:
+    """{team_id: (pct, dollars per member, qualifying, people)} for teams
+    with at least MIN_SHOWN_MEMBERS members qualifying: on the team for the
+    whole 24 h, shown, a known result with MIN_SLEEVE_USD at work."""
+    from inbox.rolling_returns import WINDOW
+
+    from .models import TeamMembership
+
+    members = TeamMembership.objects.filter(team__archived_at__isnull=True, left_at__isnull=True,
+                                            joined_at__lte=timezone.now() - WINDOW)
+    if team_ids is not None:
+        members = members.filter(team_id__in=list(team_ids))
+    by_team: dict = {}
+    for team_id, user_id in members.values_list('team_id', 'user_id'):
+        by_team.setdefault(team_id, []).append(user_id)
+    eligible = _eligible_user_ids({u for ids in by_team.values() for u in ids})
+    out = {}
+    for team_id, ids in by_team.items():
+        qualifying = [u for u in ids if u in eligible and u in results and results[u][2] >= MIN_SLEEVE_USD]
+        if len(qualifying) < MIN_SHOWN_MEMBERS:
+            continue
+        pnl = sum((results[u][0] for u in qualifying), Decimal('0')) / len(qualifying)
+        capital = sum((results[u][2] for u in qualifying), Decimal('0')) / len(qualifying)
+        out[team_id] = (_gain_pct(pnl, capital, Decimal('0')), pnl, len(qualifying), frozenset(qualifying))
+    return out
+
+
+def _rolling_team_table(results: dict) -> list[Row]:
+    from .models import Team
+
+    teams = {t: r for t, r in _rolling_teams(results).items() if r[2] >= MIN_TEAM_MEMBERS}
+    created = dict(Team.objects.filter(id__in=teams).values_list('id', 'created_at'))
+    rows = sorted(teams.items(), key=lambda kv: (-kv[1][1], -kv[1][2], created.get(kv[0]) or timezone.now()))
+    return [Row(rank=i + 1, pct=pct, pnl=pnl, team_id=team_id, members=q, people=people)
+            for i, (team_id, (pct, pnl, q, people)) in enumerate(rows)]
+
+
+def _rolling_table(kind: str, results: dict) -> list[Row]:
+    return _rolling_team_table(results) if kind == 'teams' else _rolling_investor_table(results)
+
+
+def warm_rolling() -> dict:
+    """Every 10 minutes, after the value snapshots: the 24 h results and tables."""
+    results = rolling_results(force=True)
+    for kind in ('teams', 'investors'):
+        cache.set(_rolling_key(kind), _rolling_table(kind, results), ROLLING_SECONDS)
+    return {'investors': len(results)}
 
 
 # ── tables ───────────────────────────────────────────────────────────────────
@@ -549,6 +661,8 @@ def counted_days(team_id, range_key: str) -> list[date]:
     from .models import TeamDailyReturn
 
     days = window(range_key)
+    if range_key == '24h':
+        return []                              # not made of days: _rolling_teams
     if range_key != 'all':
         return days
     quals = dict(TeamDailyReturn.objects.filter(team_id=team_id, day__in=days).values_list('day', 'qualifying_members'))
@@ -558,6 +672,9 @@ def counted_days(team_id, range_key: str) -> list[date]:
 
 def counted_contributors(team_id, range_key: str) -> set:
     """Who a team's result in this range is made of."""
+    if range_key == '24h':
+        result = _rolling_teams(rolling_results(), [int(team_id)]).get(int(team_id))
+        return set(result[3]) if result else set()
     return contributors([team_id], counted_days(team_id, range_key)).get(int(team_id), set())
 
 
@@ -567,12 +684,20 @@ def table(kind: str, range_key: str) -> list[Row]:
     renumbered over what is shown."""
     from .models import Team
 
-    days = window(range_key)
-    key = _key(kind, days, range_key)
-    rows = cache.get(key)
-    if rows is None:
-        rows = _build(kind, range_key, days)
-        cache.set(key, rows, CACHE_SECONDS)
+    if range_key == '24h':
+        rows = cache.get(_rolling_key(kind))
+        if rows is None:
+            results = rolling_results()
+            rows = _rolling_table(kind, results)
+            if results:
+                cache.set(_rolling_key(kind), rows, ROLLING_SECONDS)
+    else:
+        days = window(range_key)
+        key = _key(kind, days, range_key)
+        rows = cache.get(key)
+        if rows is None:
+            rows = _build(kind, range_key, days)
+            cache.set(key, rows, CACHE_SECONDS)
     if kind == 'investors':
         allowed = _eligible_user_ids([r.user_id for r in rows])
         rows = [r for r in rows if r.user_id in allowed]
@@ -599,6 +724,10 @@ def team_result(team_id, range_key: str) -> tuple[Decimal | None, Decimal | None
     in range; dollars None while a day has none yet, rank only in the table."""
     from .models import TeamDailyReturn
 
+    if range_key == '24h':
+        rank = next((row.rank for row in table('teams', range_key) if row.team_id == int(team_id)), None)
+        result = _rolling_teams(rolling_results(), [int(team_id)]).get(int(team_id))
+        return (result[0], result[1], rank) if result else (None, None, rank)
     days = counted_days(team_id, range_key)
     rows = list(TeamDailyReturn.objects.filter(team_id=team_id, day__in=days).values_list(
         'daily_return', 'qualifying_members', 'mean_gain_usd', 'mean_capital_usd'))
@@ -653,13 +782,20 @@ def futures_risk(user_ids, days) -> dict:
     the period: the margin-weighted leverage of positions open at any point
     in it, and how many of them Hyperliquid liquidated in it. Shown beside a
     result so a lucky leveraged bet reads for what it is."""
-    from blockchain.models import PerpPosition
-
-    ids = [u for u in user_ids if u]
-    if not ids or not days:
+    if not days:
         return {}
     start, _ = _day_bounds(days[0])
     _, end = _day_bounds(days[-1])
+    return futures_risk_between(user_ids, start, end)
+
+
+def futures_risk_between(user_ids, start, end) -> dict:
+    """futures_risk over [start, end) (the 24 h table's own hours)."""
+    from blockchain.models import PerpPosition
+
+    ids = [u for u in user_ids if u]
+    if not ids:
+        return {}
     out: dict = {}
     rows = (PerpPosition.objects.filter(user_id__in=ids, opened_at__isnull=False, opened_at__lt=end)
             .exclude(closed_at__lt=start).values_list('user_id', 'leverage', 'margin_usd', 'liquidation', 'closed_at'))

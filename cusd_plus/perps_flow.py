@@ -2480,9 +2480,10 @@ COST_EVENT_EVERY_S = 3600
 
 def _cost_events(position) -> list:
     """Venue fees and funding, dated by the venue (each fill, each funding
-    payment), cumulative: a past day is valued with the costs it really had.
-    One event per UTC day (the day's last): Liga values past midnights, and
-    the history never needs a cap that would rewrite old days' signatures."""
+    payment), cumulative: any past moment is valued with the costs it
+    really had (Liga's midnights, and the rolling 24 h's snapshots every 10
+    minutes). One event per venue timestamp, never a cap that would rewrite
+    old days' signatures."""
     since = int(position.created_at.timestamp() * 1000)
     coin = position.market.coin
     rows = [(int(f.get('time') or 0), _d(f.get('fee', '0')), Decimal(0))
@@ -2491,14 +2492,14 @@ def _cost_events(position) -> list:
     rows += [(int(e.get('time') or 0), Decimal(0), -_d((e.get('delta') or {}).get('usdc', '0')))  # + = paid
              for e in hyperliquid.user_funding(position.wallet, since)
              if (e.get('delta') or {}).get('coin') == coin]
-    by_day, fees, paid = {}, Decimal(0), Decimal(0)
+    by_time, fees, paid = {}, Decimal(0), Decimal(0)
     for ms, fee, funding in sorted(rows, key=lambda r: r[0]):
         fees += fee
         paid += funding
-        by_day[ms // 86_400_000] = {
+        by_time[ms] = {
             'at': datetime.fromtimestamp(ms / 1000, tz=dt_timezone.utc).isoformat(),
             'funding_paid': str(paid), 'fees': str(fees)}
-    return list(by_day.values())
+    return list(by_time.values())
 
 
 def _track_costs(position, live: dict) -> None:

@@ -104,15 +104,17 @@ class PortfolioVisibilityTests(CommunityTestBase):
         with patch.object(member_portfolio, 'build_portfolio', return_value=empty):
             return Query().resolve_community_member_portfolio(MockInfo(viewer), str(member.id))
 
-    def test_hoy_is_the_members_own_day_not_the_markets(self):
+    def test_the_24h_line_is_the_members_own_result_not_the_markets(self):
+        from types import SimpleNamespace
+
         member, viewer = self.published_member(), make_user()
         built = member_portfolio.Portfolio(None, None, None, Decimal('14.70'), None, None, 0, None, None)
         with patch.object(member_portfolio, 'build_portfolio', return_value=built), \
                 patch.object(member_portfolio, 'personal_wallet', return_value='0xabc'), \
-                patch('inbox.portfolio_returns.today_gain', return_value=Decimal('-17.354')) as today:
+                patch('inbox.rolling_returns.rolling', return_value=SimpleNamespace(gain=Decimal('-17.354'))) as rolling:
             result = Query().resolve_community_member_portfolio(MockInfo(viewer), str(member.id))
         self.assertEqual(result.stocks_change_24h_usd, '-17.35')
-        today.assert_called_once_with('0xabc')
+        rolling.assert_called_once_with('0xabc')
 
     def test_public_by_default_and_hidden_by_the_members_own_switch(self):
         member = self.published_member()

@@ -20,6 +20,7 @@ from .models import (
     CommunityFollow,
     CommunityProfileSettings,
     PortfolioDailySnapshot,
+    PortfolioValueSnapshot,
     DirectConversation,
     DirectMessage,
     DirectMessageReport,
@@ -1280,6 +1281,21 @@ class TipAdmin(ReadOnlyAdmin):
     list_filter = ('status',)
     search_fields = ('sender__username', 'recipient__username', 'send_key')
     list_select_related = ('sender', 'recipient', 'send_transaction')
+
+
+@admin.register(PortfolioValueSnapshot)
+class PortfolioValueSnapshotAdmin(admin.ModelAdmin):
+    list_display = ('wallet', 'user', 'at', 'value_usd')
+    search_fields = ('wallet', 'user__username')
+    list_select_related = ('user',)
+    date_hierarchy = 'at'
+    readonly_fields = [f.name for f in PortfolioValueSnapshot._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(PortfolioDailySnapshot)

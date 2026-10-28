@@ -923,6 +923,35 @@ class PortfolioDailySnapshot(models.Model):
         return f'{self.wallet} {self.day} {self.daily_return if self.ledger_trusted else self.untrusted_reason}'
 
 
+class PortfolioValueSnapshot(models.Model):
+    """A member's investment sleeve valued live every few minutes (see
+    inbox/rolling_returns.py): what the rolling 24 h result starts from.
+    Written only when the ledger explains the chain and nothing is on the
+    wire; kept a couple of days."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='portfolio_value_snapshots')
+    wallet = models.CharField(max_length=42)
+    at = models.DateTimeField()
+    value_usd = models.DecimalField(max_digits=20, decimal_places=6)
+    # Stocks + Bitcoin & gold, and the Futuros marks: a read re-values the
+    # Futuros part on the episodes as they stand then (costs sync late).
+    other_usd = models.DecimalField(max_digits=20, decimal_places=6)
+    perps_marks = models.JSONField(default=dict, blank=True)
+    # The money moved before `at` (rolling_returns.flow_signature): a trade
+    # confirmed or re-settled later changes it, and the snapshot is no
+    # longer used.
+    ledger_sig = models.CharField(max_length=40)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['wallet', 'at'], name='portfolio_value_wallet_at'),
+            models.Index(fields=['at'], name='portfolio_value_at'),
+        ]
+
+    def __str__(self):
+        return f'{self.wallet} {self.at.isoformat()} {self.value_usd}'
+
+
 class DirectConversationStatus(models.TextChoices):
     # First contact from someone the recipient doesn't follow: in their
     # Solicitudes until they accept it (or reply).

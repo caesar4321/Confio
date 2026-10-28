@@ -86,9 +86,12 @@ def _returns(user_ids, days) -> dict:
 def members(team, range_key='7d'):
     """[(membership, pct or None)] ordered captain first, then by return.
     Returns only for members who may be shown."""
-    days = league.window(range_key)
     visible = {m.user_id for m in _visible(team)}
-    returns = _returns(visible, days)
+    if range_key == '24h':
+        results = league.rolling_results()
+        returns = {u: results[u][1] for u in visible if u in results}
+    else:
+        returns = _returns(visible, league.window(range_key))
     out = [(m, returns.get(m.user_id)) for m in _members(team)]
     out.sort(key=lambda pair: (pair[0].role != 'captain', -(pair[1] if pair[1] is not None else Decimal('-1e9'))))
     return out

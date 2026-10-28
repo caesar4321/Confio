@@ -1204,15 +1204,16 @@ def _portfolio_target(viewer, user_id):
     return target
 
 
-def _today_gain(target):
-    from . import portfolio_returns
+def _rolling_gain(target):
+    from .rolling_returns import rolling
 
     try:
         wallet = member_portfolio.personal_wallet(target)
-        return portfolio_returns.today_gain(wallet) if wallet else None
-    except Exception:  # noqa: BLE001 — "hoy" unknown, never the whole profile
-        logger.warning('portfolio: today gain failed', exc_info=True)
+        result = rolling(wallet) if wallet else None
+    except Exception:  # noqa: BLE001 — the 24 h line unknown, never the whole profile
+        logger.warning('portfolio: rolling 24 h failed', exc_info=True)
         return None
+    return result.gain if result is not None else None
 
 
 def build_member_portfolio(viewer, user_id):
@@ -1229,10 +1230,10 @@ def build_member_portfolio(viewer, user_id):
         total_usd=_money(portfolio.total_usd),
         dollars_usd=_money(portfolio.dollars_usd),
         stocks_usd=_money(portfolio.stocks_usd),
-        # The member's own day (Rentabilidad > Hoy), not the market's 24 h
-        # move on what is held now: that credited moves before a same-day
-        # buy and missed same-day sales.
-        stocks_change_24h_usd=_money(_today_gain(target)),
+        # The member's own last 24 h (Rentabilidad > 24 h), not the market's
+        # move on what is held now: that credited moves before a buy and
+        # missed sales.
+        stocks_change_24h_usd=_money(_rolling_gain(target)),
         presale_confio=_money(portfolio.presale_confio),
         presale_invested_usd=_money(portfolio.presale_invested_usd),
         trade_count=portfolio.trade_count,

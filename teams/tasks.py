@@ -14,6 +14,14 @@ def compute_league_task(self):
     return counts
 
 
+@shared_task(bind=True, max_retries=0, soft_time_limit=8 * 60, time_limit=9 * 60)
+def warm_rolling_league_task(self):
+    """The 24 h tables, right after the value snapshots."""
+    from .league import warm_rolling
+
+    return warm_rolling()
+
+
 @shared_task(bind=True, max_retries=0)
 def award_month_task(self):
     """Monthly champion for the month that just ended (written once)."""

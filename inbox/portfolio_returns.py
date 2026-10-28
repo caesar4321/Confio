@@ -616,36 +616,6 @@ def today_partial(wallet: str, now: datetime, prices: PriceBook | None = None) -
                daily_return=ret)
 
 
-def today_gain(wallet: str, now: datetime | None = None, prices: PriceBook | None = None) -> Decimal | None:
-    """today_partial's gain without re-pricing last night: the value at
-    00:00 UTC is yesterday's stored value_end (the same closes, already
-    proven), so no candle is fetched, and block times come from the cache
-    only. None when that day isn't stored and shown on this very ledger, or
-    anything else is unknown."""
-    from .models import PortfolioDailySnapshot
-
-    now = now or datetime.now(dt_timezone.utc)
-    prices = prices or CachedBlockTimes()
-    try:
-        ledger = trusted_ledger(wallet, prices)
-        if not ledger.all:
-            return None
-        start = day_start(utc_today(now))
-        if any(t.when < start for t in ledger.all):
-            row = PortfolioDailySnapshot.objects.filter(wallet=wallet, day=(start - DAY).date()).first()
-            if not _is_shown(row, ledger) or row.value_end_usd is None:
-                return None
-            value_start = row.value_end_usd
-        else:
-            value_start = Decimal('0')      # first trade today
-        value_end = live_value(ledger, now)
-        flow = _flows(ledger, start, now)
-    except (Retry, Untrusted) as exc:
-        logger.info('returns: no today gain for %s: %s', wallet, exc)
-        return None
-    return value_end - value_start - flow
-
-
 # --- storage ----------------------------------------------------------------
 
 def _row_values(day: Day | None, sig: str, reason: str = '') -> dict:
@@ -822,6 +792,15 @@ def period_return(user, range_key: str, now: datetime | None = None) -> PeriodRe
     if not wallet:
         return None
     unknown = PeriodReturn(range_key=range_key, pct=None, gain_usd=None, as_of=None)
+    if range_key == '24h':
+        # The last 24 hours, not a UTC day: Bitcoin, gold and Futuros never close.
+        from .rolling_returns import rolling
+
+        result = rolling(wallet, now, with_points=True)
+        if result is None:
+            return unknown
+        return PeriodReturn(range_key=range_key, pct=result.pct, gain_usd=result.gain, as_of=result.as_of,
+                            points=result.points)
     prices = PriceBook()
     try:
         ledger = load_ledger(wallet, prices)

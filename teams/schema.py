@@ -9,6 +9,7 @@ name, size and their lock reason (and the top 3 of the league).
 from decimal import Decimal
 
 import graphene
+from django.utils import timezone
 from graphql_jwt.decorators import login_required
 
 from inbox import community, profile_pictures
@@ -370,7 +371,15 @@ class TeamsQuery(graphene.ObjectType):
             users = {u.id: u for u in User.objects.filter(id__in=[r.user_id for r in page])}
             avatars = profile_pictures.picture_urls(list(users))
             open_access = access == community.ACCESS_OPEN
-            risk = league.futures_risk_for_rows(page, league.window(range_key)) if open_access else {}
+            if not open_access:
+                risk = {}
+            elif range_key == '24h':
+                from inbox.rolling_returns import WINDOW
+
+                now = timezone.now()
+                risk = league.futures_risk_between([r.user_id for r in page], now - WINDOW, now)
+            else:
+                risk = league.futures_risk_for_rows(page, league.window(range_key))
             for r in page:
                 user = users.get(r.user_id)
                 if user is not None:

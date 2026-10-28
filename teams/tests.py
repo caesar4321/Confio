@@ -249,7 +249,7 @@ class LeagueTests(TeamTestBase):
         for i, u in enumerate(users):
             self.snap(u, self.DAY, f'0.0{i}')
         with patch('teams.league.window', return_value=[self.DAY]):
-            result = TeamsQuery().resolve_league_table(MockInfo(viewer), 'investors', '24h')
+            result = TeamsQuery().resolve_league_table(MockInfo(viewer), 'investors', '7d')
         self.assertEqual((len(result.rows), result.access, result.has_more), (3, 'viewer_hidden', False))
 
     def test_the_month_award_is_written_once(self):
@@ -334,7 +334,7 @@ class ProtectionTests(LeagueTests):
         for u in users[:3]:
             CommunityBlock.objects.create(blocker=viewer, blocked=u)
         with patch('teams.league.window', return_value=[self.DAY]):
-            result = TeamsQuery().resolve_league_table(MockInfo(viewer), 'investors', '24h')
+            result = TeamsQuery().resolve_league_table(MockInfo(viewer), 'investors', '7d')
         self.assertEqual(result.rows, [])
 
     def test_a_hidden_investor_disappears_from_a_cached_table(self):
@@ -342,9 +342,9 @@ class ProtectionTests(LeagueTests):
         for u in users:
             self.snap(u, self.DAY, '0.01')
         with patch('teams.league.window', return_value=[self.DAY]):
-            self.assertEqual(len(league.table('investors', '24h')), 2)
+            self.assertEqual(len(league.table('investors', '7d')), 2)
             SetCommunityPortfolioHidden.mutate(None, MockInfo(users[0]), hidden=True)
-            self.assertEqual([r.user_id for r in league.table('investors', '24h')], [users[1].id])
+            self.assertEqual([r.user_id for r in league.table('investors', '7d')], [users[1].id])
 
     def test_the_goal_is_for_members_only_and_never_with_a_block(self):
         from inbox.models import CommunityBlock
@@ -405,7 +405,7 @@ class Pass3Tests(LeagueTests):
         team, members = self.team_with(2)
         TeamDailyReturn.objects.create(team=team, day=self.DAY, daily_return=Decimal('0.1'), qualifying_members=2)
         with patch('teams.league.window', return_value=[self.DAY]):
-            self.assertEqual(league.team_return(team.id, '24h')[0], None)
+            self.assertEqual(league.team_return(team.id, '7d')[0], None)
 
     def test_hiding_after_leaving_still_clears_the_old_team_days(self):
         team, members = self.team_with(3)
@@ -432,7 +432,7 @@ class ContributorTests(LeagueTests):
         CommunityBlock.objects.create(blocker=viewer, blocked=members[3])
         rules.leave_team(members[3])
         with patch('teams.league.window', return_value=[self.DAY]):
-            self.assertTrue(blocked_team(viewer, team.id, '24h'))
+            self.assertTrue(blocked_team(viewer, team.id, '7d'))
 
     def test_a_contributor_who_lost_eligibility_suppresses_the_team(self):
         team, members = self.team_with(3)
@@ -837,3 +837,53 @@ class ProvisionalAwardTests(LeagueTests):
         self.assertTrue(league.month_complete(days))
         PortfolioDailySnapshot.objects.filter(day=days[-2]).update(ledger_sig='a' * 39 + 'p')
         self.assertFalse(league.month_complete(days))
+
+
+class RollingLeagueTests(TeamTestBase):
+    """24 h: the last 24 hours from each member's rolling result."""
+    setUp = LeagueTests.setUp
+    team_with = LeagueTests.team_with
+
+    def results(self, values):
+        return patch.object(league, 'rolling_results', return_value=values)
+
+    def test_investors_rank_by_dollars_over_24_hours_with_the_floor(self):
+        a, b, small = make_user(), make_user(), make_user()
+        with self.results({a.id: (Decimal('5'), Decimal('1'), Decimal('500')),
+                           b.id: (Decimal('9'), Decimal('30'), Decimal('30')),
+                           small.id: (Decimal('50'), Decimal('500'), Decimal('10'))}):   # under $20 at work
+            rows = league.table('investors', '24h')
+        self.assertEqual([r.user_id for r in rows], [b.id, a.id])
+
+    def test_a_team_is_the_mean_of_members_there_all_24_hours(self):
+        team, members = self.team_with(5)
+        late = members[4]
+        TeamMembership.objects.filter(user=late).update(joined_at=timezone.now() - timedelta(hours=2))
+        values = {m.id: (Decimal('10'), Decimal('10'), Decimal('100')) for m in members[:4]}
+        values[late.id] = (Decimal('-90'), Decimal('-90'), Decimal('100'))
+        with self.results(values):
+            pct, pnl, rank = league.team_result(team.id, '24h')
+            self.assertEqual((pct, pnl), (Decimal('10'), Decimal('10')))       # the late joiner doesn't count
+            self.assertEqual(league.counted_contributors(team.id, '24h'), {m.id for m in members[:4]})
+            self.assertIsNone(rank)                                            # 4 qualifying: not in the table
+            self.assertEqual(league.table('teams', '24h'), [])
+
+    def test_a_team_with_five_qualifying_ranks(self):
+        team, members = self.team_with(5)
+        with self.results({m.id: (Decimal('2'), Decimal('2'), Decimal('100')) for m in members}):
+            [row] = league.table('teams', '24h')
+        self.assertEqual((row.team_id, row.pnl, row.members), (team.id, Decimal('2'), 5))
+
+    def test_a_cold_cache_queues_the_warm_instead_of_computing_inline(self):
+        with patch('teams.tasks.warm_rolling_league_task.delay') as warm, \
+                patch('inbox.rolling_returns.rolling') as rolling:
+            self.assertEqual(league.table('investors', '24h'), [])
+        warm.assert_called_once()
+        rolling.assert_not_called()
+
+    def test_a_hidden_investor_disappears_from_the_cached_24h_table(self):
+        users = [make_user() for _ in range(2)]
+        with self.results({u.id: (Decimal('1'), Decimal('1'), Decimal('100')) for u in users}):
+            self.assertEqual(len(league.table('investors', '24h')), 2)
+            SetCommunityPortfolioHidden.mutate(None, MockInfo(users[0]), hidden=True)
+            self.assertEqual([r.user_id for r in league.table('investors', '24h')], [users[1].id])

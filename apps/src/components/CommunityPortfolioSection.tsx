@@ -171,13 +171,13 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
             </Text>
             {dayChange ? (
               <Text style={[styles.dayChange, { color: toneOf(portfolio.stocksChange24hUsd) }]}>
-                {`${dayChange} hoy`}
+                {`${dayChange} en 24 h`}
               </Text>
             ) : null}
           </View>
         ) : dayChange ? (
           <Text style={[styles.dayChange, styles.dayChangeAlone, { color: toneOf(portfolio.stocksChange24hUsd) }]}>
-            {`${dayChange} hoy`}
+            {`${dayChange} en 24 h`}
           </Text>
         ) : null}
 

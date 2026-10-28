@@ -284,59 +284,7 @@ class LoadLedgerTests(CommunityTestBase):
             self.load([trade('stock_buy', '0', None, at(D20), symbol='?9')])
 
 
-class TodayGainTests(CommunityTestBase):
-    """Hoy = value now - yesterday's stored close - money put in today."""
-    OLD = trade('stock_buy', '1', '100', at(D20, 10))
-
-    def gain(self, stocks, value_now, chain=None, times=None):
-        with patch('cusd_plus.stock_month.confirmed_trades', return_value=stocks), \
-                patch('cusd_plus.crypto_month.confirmed_trades', return_value=[]), \
-                patch.object(pr, 'in_flight', return_value=False), \
-                patch.object(pr, 'check_chain', side_effect=chain), \
-                patch.object(pr, 'live_value', return_value=Decimal(value_now)):
-            return pr.today_gain(WALLET, now=NOW, prices=TablePrices({}, times))
-
-    def stored(self, stocks, value_end, trusted=True, provisional=False):
-        sig = pr.Ledger(stocks=stocks, crypto=[]).signature(pr.day_start(D22))
-        PortfolioDailySnapshot.objects.create(
-            user=make_user(), wallet=WALLET, day=D21, value_end_usd=None if value_end is None else Decimal(value_end),
-            ledger_trusted=trusted, ledger_sig=pr.provisional_sig(sig) if provisional else sig)
-
-    def test_a_same_day_buy_is_money_put_in_not_a_gain(self):
-        stocks = [self.OLD, trade('stock_buy', '1', '12', at(D22, 10), symbol='TSLAon')]
-        self.stored([self.OLD], '110')
-        # 125 now - 110 at last night's close - 12 put in today.
-        self.assertEqual(self.gain(stocks, '125'), Decimal('3'))
-
-    def test_a_same_day_sale_is_money_taken_out(self):
-        stocks = [self.OLD, trade('stock_sell', '1', '108', at(D22, 10))]
-        self.stored([self.OLD], '110')
-        self.assertEqual(self.gain(stocks, '0'), Decimal('-2'))
-
-    def test_a_provisional_weekend_close_is_shown(self):
-        self.stored([self.OLD], '110', provisional=True)
-        self.assertEqual(self.gain([self.OLD], '111'), Decimal('1'))
-
-    def test_a_first_trade_today_starts_from_zero(self):
-        self.assertEqual(self.gain([trade('stock_buy', '1', '100', at(D22, 10))], '104'), Decimal('4'))
-
-    def test_no_stored_close_or_an_untrusted_one_is_unknown(self):
-        self.assertIsNone(self.gain([self.OLD], '111'))
-        self.stored([self.OLD], None, trusted=False)
-        self.assertIsNone(self.gain([self.OLD], '111'))
-
-    def test_a_close_stored_on_another_ledger_is_unknown(self):
-        # A trade confirmed after the night's run: the stored close missed it.
-        self.stored([self.OLD], '110')
-        late = trade('stock_buy', '1', '50', at(D21, 9), symbol='TSLAon')
-        self.assertIsNone(self.gain([self.OLD, late], '170'))
-
-    def test_a_trade_before_midnight_counts_on_its_blocks_day(self):
-        late = trade('stock_buy', '1', '20', at(D21, 23, 50), block=7)
-        self.stored([self.OLD], '110')                          # the night's run saw it land after midnight
-        self.assertEqual(self.gain([self.OLD, late], '135', times={7: at(D22, 0, 2)}), Decimal('5'))
-        self.assertIsNone(self.gain([self.OLD, late], '135'))   # block time unknown: no guess
-
+class BlockTimeCacheTests(CommunityTestBase):
     def test_a_block_time_is_read_once_then_cached(self):
         landed = at(D22, 0, 2)
         with patch('cusd_plus.fee_ledger.block_time', return_value=landed) as rpc:
@@ -348,14 +296,6 @@ class TodayGainTests(CommunityTestBase):
         with patch('cusd_plus.fee_ledger.block_time') as rpc:
             self.assertIsNone(pr.CachedBlockTimes().block_time(987654322))
         rpc.assert_not_called()
-
-    def test_units_from_outside_are_unknown(self):
-        self.stored([self.OLD], '110')
-
-        def outside(wallet, ledger):
-            raise pr.Untrusted(pr.OUTSIDE_UNITS)
-
-        self.assertIsNone(self.gain([self.OLD], '300', chain=outside))
 
 
 class SyncWalletTests(CommunityTestBase):
@@ -541,19 +481,25 @@ class PeriodReturnTests(CommunityTestBase):
         self.assertEqual(p.pct, (Decimal('1.1') ** 2 - 1) * 100)
 
     def test_no_investments_is_unknown(self):
-        self.assertIsNone(self.period(make_user(), '24h', self.partial('0'), ledger=pr.Ledger([], [])).pct)
+        self.assertIsNone(self.period(make_user(), '7d', self.partial('0'), ledger=pr.Ledger([], [])).pct)
 
-    def test_without_a_live_day_24h_is_unknown_and_7d_stops_at_midnight(self):
+    def test_without_a_live_day_7d_stops_at_midnight(self):
         user = make_user()
         for n in range(7, 0, -1):
             self.row(user, D22 - timedelta(days=n), '0')
-        self.assertIsNone(self.period(user, '24h').pct)
         p = self.period(user, '7d')
         self.assertEqual((p.pct, p.as_of), (Decimal('0'), pr.day_start(D22)))
 
-    def test_24h_is_today_so_far(self):
-        p = self.period(make_user(), '24h', self.partial('0.05', gain='5'))
-        self.assertEqual((p.pct, p.gain_usd), (Decimal('5.00'), Decimal('5')))
+    def test_24h_is_the_rolling_last_24_hours(self):
+        from . import rolling_returns
+
+        result = rolling_returns.Rolling(gain=Decimal('5'), pct=Decimal('5'), capital=Decimal('100'),
+                                         value_start=Decimal('100'), start_at=NOW - timedelta(hours=24), as_of=NOW,
+                                         points=[(NOW, Decimal('5'))])
+        with patch.object(rolling_returns, 'rolling', return_value=result) as rolling:
+            p = self.period(make_user(), '24h', self.partial('0.50', gain='50'))
+        self.assertEqual((p.pct, p.gain_usd, p.points), (Decimal('5'), Decimal('5'), [(NOW, Decimal('5'))]))
+        self.assertTrue(rolling.call_args.kwargs['with_points'])
 
 
 class InvestorReturnsQueryTests(CommunityTestBase):

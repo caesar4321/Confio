@@ -48,7 +48,7 @@ test('renders totals, stats and open positions; hides a zero CONFIO row', () => 
   expect(text).toContain('7h 53m de media por posición');
   expect(text).toContain('Se unió en oct 2026');
   expect(text).toContain('$11,658');
-  expect(text).toContain('-$12.50 hoy');
+  expect(text).toContain('-$12.50 en 24 h');
   expect(text).toContain('$10,658.03');
   expect(text).not.toContain('CONFIO (preventa)');
   expect(text).toContain('Abiertas (2)');

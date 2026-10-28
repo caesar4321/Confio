@@ -139,6 +139,17 @@ app.conf.beat_schedule.setdefault('inbox-snapshot-portfolio-returns', {
     'schedule': crontab(hour='0-6', minute=40),
 })
 
+# Liga / profile rolling 24 h: each investing wallet valued every 10 min,
+# then the 24 h tables rebuilt from them.
+app.conf.beat_schedule.setdefault('inbox-snapshot-portfolio-values', {
+    'task': 'inbox.tasks.snapshot_portfolio_values_task',
+    'schedule': crontab(minute='*/10'),
+})
+app.conf.beat_schedule.setdefault('teams-warm-rolling-league', {
+    'task': 'teams.tasks.warm_rolling_league_task',
+    'schedule': crontab(minute='3-59/10'),
+})
+
 # Liga Confío: team days from the returns snapshots (which run at :40).
 app.conf.beat_schedule.setdefault('teams-compute-league', {
     'task': 'teams.tasks.compute_league_task',
