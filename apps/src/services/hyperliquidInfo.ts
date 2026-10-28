@@ -44,13 +44,16 @@ export const dexOf = (coin: string) => (coin.includes(':') ? coin.split(':')[0] 
  *  100000 + dex position × 10000 + index for a builder (HIP-3) dex. */
 export const venueMarket = async (coin: string, fetcher: typeof fetch = fetch): Promise<VenueMarket> => {
   const dex = dexOf(coin);
+  // Both read at once (a builder dex needs its position in the dex list too).
+  const metaRead = hlInfo(dex ? { type: 'metaAndAssetCtxs', dex } : { type: 'metaAndAssetCtxs' }, fetcher);
+  metaRead.catch(() => {}); // judged below, after the dex list
   let position = 0;
   if (dex) {
     const dexs: any[] = await hlInfo({ type: 'perpDexs' }, fetcher);
     position = Array.isArray(dexs) ? dexs.findIndex((d) => d?.name === dex) : -1;
     if (position <= 0) throw new Error(`Hyperliquid no lista el mercado ${coin}`);
   }
-  const metaCtx = await hlInfo(dex ? { type: 'metaAndAssetCtxs', dex } : { type: 'metaAndAssetCtxs' }, fetcher);
+  const metaCtx = await metaRead;
   const universe: any[] = metaCtx?.[0]?.universe;
   if (!Array.isArray(universe)) throw new Error('Hyperliquid respondió sin mercados');
   const index = universe.findIndex((u) => u?.name === coin);

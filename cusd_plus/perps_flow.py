@@ -19,6 +19,7 @@ import logging
 import re
 import secrets
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone as dt_timezone
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
@@ -1081,6 +1082,63 @@ def _pending_claim_index(position, name: str) -> int | None:
     return None
 
 
+# One shared, bounded pool for open-plan reads: a burst of plans queues here
+# instead of each request starting threads of its own (threads start on first use).
+_READ_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix='perps-open-reads')
+
+
+class _OpenReads:
+    """Every Hyperliquid read an open plan may need, sent together (one
+    round trip instead of eight in a row). Each answer, or its error, is
+    taken only where the plan uses it, so an early exit is unchanged."""
+
+    def __init__(self, position):
+        import contextvars
+
+        wallet, market = position.wallet, position.market
+        calls = {
+            'abstraction': lambda: hyperliquid.user_abstraction(wallet),
+            'dex_state': lambda: hyperliquid.clearinghouse_state(wallet, market.dex),
+            'orders': lambda: hyperliquid.frontend_open_orders(wallet, market.dex),
+            'leverage': lambda: hyperliquid.info({'type': 'activeAssetData', 'user': wallet, 'coin': market.coin}),
+            'book': lambda: hyperliquid.l2_book(market.coin),
+            'ctxs': lambda: hyperliquid.meta_and_asset_ctxs(market.dex),
+        }
+        if market.dex:
+            calls['core_state'] = lambda: hyperliquid.clearinghouse_state(wallet, '')
+        for cloid in _open_cloids(position):
+            calls[f'cloid:{cloid}'] = lambda c=cloid: _order_status(wallet, c)
+        pool = _READ_POOL
+        # Each read runs in this request's context (its read deadline, if any).
+        self._futures = {k: pool.submit(contextvars.copy_context().run, fn) for k, fn in calls.items()}
+
+    def get(self, key):
+        return self._futures[key].result()
+
+    def close(self):
+        # Reads an early exit never needed: dropped if not started yet; a
+        # running one ends within the client timeout, and nothing waits for it.
+        for future in self._futures.values():
+            future.cancel()
+
+    def filled_cloid(self) -> bool:
+        return any(_had_fill(self.get(k)) for k in self._futures if k.startswith('cloid:'))
+
+    def live_position(self, market) -> dict | None:
+        for entry in self.get('dex_state')['assetPositions']:
+            pos = entry.get('position') or {}
+            if pos.get('coin') == market.coin and _d(pos.get('szi', '0')) != 0:
+                return pos
+        return None
+
+    def open_orders(self, market) -> list:
+        return [o for o in self.get('orders') if o.get('coin') == market.coin and o.get('oid') is not None]
+
+    def withdrawable(self, dex: str) -> Decimal:
+        return _d(self.get('dex_state' if dex else ('core_state' if 'core_state' in self._futures else 'dex_state'))
+                  ['withdrawable'])
+
+
 def _open_policy(user, meta, market) -> None:
     """Opening is checked against the policy as it is now (switches, country,
     the market itself), not as it was when the money left: the return path
@@ -1113,18 +1171,19 @@ def open_plan(user, position_id, meta=None, drop_protection: bool = False) -> di
     if credited <= 0:
         raise FlowError('not_funded')
     steps = []
+    reads = _OpenReads(position)
     try:
         # An order sent before may have filled with its answer lost.
-        if _filled_cloid(position):
+        if reads.filled_cloid():
             reconcile_position(position)
             raise FlowError('already_open')
-        if _live_position(wallet, market) is not None:
+        if reads.live_position(market) is not None:
             reconcile_position(position)
             raise FlowError('already_open')
-        if open_orders(position):
+        if reads.open_orders(market):
             # A limit entry is waiting on the book: cancel it (return) first.
             raise FlowError('order_resting')
-        if (hyperliquid.user_abstraction(wallet) != 'disabled'
+        if (reads.get('abstraction') != 'disabled'
                 and not (position.flow or {}).get('done_abstraction')):
             # Standard mode first: separate core and per-dex balances, the
             # model this flow is built on (unified mode waits for a canary).
@@ -1135,16 +1194,16 @@ def open_plan(user, position_id, meta=None, drop_protection: bool = False) -> di
                     'impact_warn': False, 'avg_px': None, 'size': None, 'liquidation_px': None}
         if market.dex:
             # What is already on the dex counts (a transfer whose answer was lost).
-            need = credited - _withdrawable(wallet, market.dex)
+            need = credited - reads.withdrawable(market.dex)
             if need > Decimal('0.000001'):
-                core = _withdrawable(wallet, '')
+                core = reads.withdrawable('')
                 if core < need * Decimal('0.999'):
                     raise FlowError('not_funded')
                 steps.append({'purpose': 'fund_dex', 'action': _send_asset(wallet, '', market.dex, min(need, core))})
         else:
-            if _withdrawable(wallet, '') < credited * Decimal('0.999'):
+            if reads.withdrawable('') < credited * Decimal('0.999'):
                 raise FlowError('not_funded')
-        setting = (hyperliquid.info({'type': 'activeAssetData', 'user': wallet, 'coin': market.coin}) or {}).get('leverage')
+        setting = (reads.get('leverage') or {}).get('leverage')
         if not isinstance(setting, dict):
             raise FlowError('hyperliquid_unavailable')
         if not (setting.get('type') == 'isolated' and int(setting.get('value') or 0) == position.leverage):
@@ -1155,12 +1214,12 @@ def open_plan(user, position_id, meta=None, drop_protection: bool = False) -> di
         is_buy = position.side == 'long'
         intent = (position.flow or {}).get('order') or {'type': 'market'}
         limit = _d(intent['limit_px']) if intent.get('type') == 'limit' and intent.get('limit_px') else None
-        book = hyperliquid.l2_book(market.coin)
+        book = reads.get('book')
         _, mid, _ = walk_book(book, is_buy, Decimal('0.00000001'))
         # Hyperliquid margins the order at its MARK price and takes the taker
         # fee from the same balance: size so both fit what was credited, at
         # the dearest of mid, mark and the limit plus the slippage it may pay.
-        meta, ctxs = hyperliquid.meta_and_asset_ctxs(market.dex)
+        meta, ctxs = reads.get('ctxs')
         index = next((i for i, u in enumerate(meta.get('universe') or []) if u.get('name') == market.coin), None)
         mark = _d((ctxs[index] or {}).get('markPx') or '0') if index is not None and index < len(ctxs) else Decimal(0)
         if mark <= 0:
@@ -1179,6 +1238,8 @@ def open_plan(user, position_id, meta=None, drop_protection: bool = False) -> di
             order = _plan_limit_order(market, book, mid, is_buy, size, limit, cloid)
     except hyperliquid.HyperliquidError as exc:
         raise FlowError('hyperliquid_unavailable') from exc
+    finally:
+        reads.close()
     if order['impact_blocked']:
         raise FlowError('impact_too_high')
     # The entry price the protection is judged from: the limit, or the expected fill.

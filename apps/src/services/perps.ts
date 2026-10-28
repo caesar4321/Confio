@@ -1524,14 +1524,17 @@ const runPlan = async (
       if (step.purpose === 'open_order') {
         // The venue itself must show isolated margin at the reviewed leverage,
         // and no exposure yet: an order whose answer was lost may have filled.
-        const [setting, existing] = await Promise.all([
-          venueLeverage(wallet.address, position.coin), venuePosition(wallet.address, position.coin),
-        ]).catch(() => [null, undefined] as const);
+        // Read together (one round trip to Hyperliquid, not two in a row),
+        // judged in the same order as before.
+        const [setting, existing, waiting] = await Promise.all([
+          venueLeverage(wallet.address, position.coin).catch(() => null),
+          venuePosition(wallet.address, position.coin).catch(() => undefined),
+          venueOpenOrders(wallet.address, position.coin).catch(() => null),
+        ]);
         if (!setting || existing === undefined) throw coded('hyperliquid_unavailable');
         if (existing) throw coded('already_open');
         // Never a second entry beside one already waiting on the book (its
         // nonce record may be gone; the order is not).
-        const waiting = await venueOpenOrders(wallet.address, position.coin).catch(() => null);
         if (!waiting) throw coded('hyperliquid_unavailable');
         if (waiting.some((o) => !o.reduceOnly && !o.isTrigger)) throw coded('order_resting');
         if (setting.type !== 'isolated' || setting.value !== trade.leverage) throw coded('unsafe_plan');

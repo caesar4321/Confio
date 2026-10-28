@@ -400,6 +400,34 @@ class HyperliquidActionTests(TestCase):
         self.assertEqual(plan['steps'][0]['action'], {'type': 'updateLeverage', 'asset': 0, 'isCross': False,
                                                       'leverage': 5})
 
+    def test_open_plan_reads_hyperliquid_at_once(self):
+        # Each read takes 0.2 s: one after another the plan would take over a second.
+        def slow(value):
+            def read(*_a, **_k):
+                time.sleep(0.2)
+                return value
+            return read
+        with mock.patch('cusd_plus.hyperliquid.user_abstraction', side_effect=slow('disabled')), \
+                mock.patch('cusd_plus.hyperliquid.clearinghouse_state', side_effect=slow(_ch_state())), \
+                mock.patch('cusd_plus.hyperliquid.frontend_open_orders', side_effect=slow([])), \
+                mock.patch('cusd_plus.hyperliquid.l2_book', side_effect=slow(BOOK)):
+            started = time.monotonic()
+            plan = perps_flow.open_plan(self.user, self.position.id)
+            elapsed = time.monotonic() - started
+        self.assertEqual([s['purpose'] for s in plan['steps']], ['leverage', 'open_order'])
+        self.assertLess(elapsed, 0.6)
+
+    def test_open_plan_early_exit_ignores_reads_it_never_needed(self):
+        # A live position ends the plan before the book matters: a dead book read is not the answer.
+        live = {**_ch_state(), 'assetPositions': [{'position': {'coin': 'BTC', 'szi': '0.001'}}]}
+        with mock.patch('cusd_plus.hyperliquid.user_abstraction', return_value='disabled'), \
+                mock.patch('cusd_plus.hyperliquid.clearinghouse_state', return_value=live), \
+                mock.patch('cusd_plus.hyperliquid.l2_book', side_effect=perps_flow.hyperliquid.HyperliquidError('x')), \
+                mock.patch('cusd_plus.perps_flow.reconcile_position'), \
+                self.assertRaises(perps_flow.FlowError) as ctx:
+            perps_flow.open_plan(self.user, self.position.id)
+        self.assertEqual(ctx.exception.code, 'already_open')
+
     def test_abstraction_first_then_replan(self):
         with mock.patch('cusd_plus.hyperliquid.user_abstraction', return_value='default'):
             self.position.flow = {}
