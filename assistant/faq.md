@@ -123,7 +123,15 @@
 - Confío Dollar+ (cUSD+): el dólar para ahorrar, respaldado por USDY de Ondo (bonos del Tesoro de EE.UU.). Genera rendimiento diario con una tasa variable que ves en la app; no está garantizado.
 - Acciones de EE.UU.: acciones digitales emitidas por Ondo.
 - Monto mínimo: desde US$1,01 para comprar cualquier acción o ETF de la lista (igual para todas) y US$1 para vender. Ese mínimo es de acciones; para empezar a ahorrar en Confío Dollar+ el mínimo es el de la recarga, que muestra la app.
-- Bitcoin: en Confío no se compra BTC directamente, pero la lista de acciones puede incluir ETF ligados a Bitcoin (por ejemplo IBIT, iShares Bitcoin Trust). Búscalo con `get_stock_quote` antes de decir que no está.
+
+## Oro y Bitcoin
+- En Invertir → "Oro y Bitcoin" puedes comprar Bitcoin (BTC, respaldado 1:1 por Binance en BNB Chain) y oro (XAUt de Tether: 1 XAUt = 1 onza troy de oro físico custodiado por Tether), a cualquier hora. Si no lo ves, que actualice Confío.
+- Compras con tu saldo en dólares (Confío Dollar+ si lo tienes, si no Confío Dollar) y al vender el dinero vuelve a tus dólares. Queda en tu cuenta, no en Confío; tú confirmas cada operación. Por ahora no se puede enviar ese Bitcoin u oro fuera de Confío: solo vender.
+- Mínimo de compra US$1. Costos: 0,9% de Confío al comprar y 0,9% al vender, más el costo de mercado de PancakeSwap, que la app muestra antes de confirmar.
+- Riesgo: el precio sube y baja, también de noche y en fines de semana; puedes perder parte o todo lo que inviertas. Antes de la primera compra ves un aviso de riesgos. Confío no emite estos activos.
+- No disponible para comprar en Estados Unidos, Reino Unido, Cuba, Irán, Corea del Norte y Siria (si ya tienes, puedes vender).
+- Otras criptomonedas (Ethereum, Solana…) por ahora no están. Si preguntan por un ETF de Bitcoin (IBIT), también existe en la lista de acciones.
+- Nunca digas si conviene comprar Bitcoin u oro ni cuándo; explica cómo funciona y sus riesgos.
 
 ## Futuros
 - Están en Invertir → Futuros (desde la versión 5.2.9 de la app; si no los ve, que actualice Confío). Abres una posición en largo (ganas si el precio sube) o en corto (ganas si baja), con apalancamiento, en cripto, acciones, índices, materias primas y divisas, las 24 horas. No son contratos de opciones.
