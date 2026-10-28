@@ -1271,6 +1271,21 @@ _NOT_NOW = re.compile(r'\?|\b(si|cuando|cuanto|una vez que|despu[eé]s|luego|ma�
 _ANY_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _SCREEN_WORDS))
 
 
+def _ve_topup(viewer, country):
+    """'live' (Pago Móvil top-up on this build), 'update' (on, but this build
+    predates it), or None (off, or not Venezuela)."""
+    if (country or '').upper() != 'VE':
+        return None
+    try:
+        from ramps import ve_pagomovil
+        if not ve_pagomovil.enabled(ve_pagomovil.TOPUP):
+            return None
+        return 'live' if ve_pagomovil.client_supports(ve_pagomovil.TOPUP, viewer.request_meta) else 'update'
+    except Exception:  # noqa: BLE001 - unknown: the cautious "not yet" note
+        logger.warning('Confio Assistant: VE Pago Móvil state unavailable', exc_info=True)
+        return None
+
+
 def _identity_status(viewer):
     """verified / pending / rejected / unverified for this person, or None
     (employees: the owner's identity is not theirs to act on)."""
@@ -1379,6 +1394,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         ia_plus_bundled=('cuenta_inteligente' in belt.destinations and paid_offers.ia_plus_bundled(
             meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
         identity=_identity_status(viewer),
+        ve_topup=_ve_topup(viewer, country),
     )
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE

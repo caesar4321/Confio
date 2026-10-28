@@ -156,6 +156,15 @@ BO_RAILS_NOTE = ('En Bolivia hoy no se puede retirar a bolivianos ni pagar QR lo
 VE_RAMP_NOTE = ('En Venezuela hoy no hay Recargar ni Retirar en la app: no le digas que puede recargar o retirar con '
                 'medios locales. Si lo mencionas, agrega que recargar y retirar con Pago Móvil llegará muy pronto '
                 '(sin fecha).\n')
+# Since 2026-10-24 a Venezuelan can top up with Pago Móvil on builds at
+# VE_PAGOMOVIL_TOPUP_MIN_APP_VERSION; withdrawing with it is still to come.
+VE_TOPUP_LIVE_NOTE = ('En Venezuela ya se puede recargar con Pago Móvil: en Recibir, toca Pago Móvil (en "Desde un banco '
+                      'o billetera"); necesita tener su identidad verificada. Retirar con Pago Móvil todavía no está '
+                      'disponible: llegará muy pronto, sin fecha.\n')
+VE_TOPUP_UPDATE_NOTE = ('En Venezuela ya se puede recargar con Pago Móvil, pero su versión de la app todavía no lo muestra: '
+                        'si quiere recargar, dile que actualice Confío desde la tienda y que después lo encuentra en '
+                        'Recibir → Pago Móvil (con su identidad verificada). Retirar con Pago Móvil todavía no está '
+                        'disponible: llegará muy pronto, sin fecha.\n')
 NO_RAMP_NOTE = ('En su país hoy no hay Recargar ni Retirar en la app: no le digas que puede recargar o retirar con '
                 'medios locales.\n')
 
@@ -178,7 +187,7 @@ IDENTITY_NOTES = {
 
 
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
-                        ia_plus_bundled=False, identity=None):
+                        ia_plus_bundled=False, identity=None, ve_topup=None):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
     prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text())
               + _paid_offer_sections(destinations, ia_plus_bundled)
@@ -195,8 +204,11 @@ def build_system_prompt(*, first_name, account_label, country, screen, local_now
         identity_line=f'Identidad: {IDENTITY_ES.get(identity, "desconocida")}.\n' if identity else '',
         # Where there is no Recargar (Venezuela…), "verify, then top up" would
         # contradict the rails note.
-        identity_note=('' if (country or '').upper() in NO_RAMP_COUNTRIES else IDENTITY_NOTES.get(identity, '')),
-        rails_note=(VE_RAMP_NOTE if (country or '').upper() == 'VE'
+        identity_note=('' if (country or '').upper() in NO_RAMP_COUNTRIES and not ve_topup
+                       else IDENTITY_NOTES.get(identity, '')),
+        rails_note=(VE_TOPUP_LIVE_NOTE if (country or '').upper() == 'VE' and ve_topup == 'live'
+                    else VE_TOPUP_UPDATE_NOTE if (country or '').upper() == 'VE' and ve_topup == 'update'
+                    else VE_RAMP_NOTE if (country or '').upper() == 'VE'
                     else BO_RAILS_NOTE if (country or '').upper() == 'BO'
                     else NO_RAMP_NOTE if (country or '').upper() in NO_RAMP_COUNTRIES else ''),
     )

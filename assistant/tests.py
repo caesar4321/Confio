@@ -991,6 +991,13 @@ class IdentityInPromptTests(TestCase):
         venezuela = build_system_prompt(identity='unverified', **{**common, 'country': 'VE'})
         self.assertIn('Identidad: sin verificar.', venezuela)
         self.assertNotIn('y que después recargue', venezuela)  # no Recargar there: no contradiction
+        ve_live = build_system_prompt(identity='unverified', ve_topup='live', **{**common, 'country': 'VE'})
+        self.assertIn('ya se puede recargar con Pago Móvil', ve_live)
+        self.assertIn('y que después recargue', ve_live)  # verification gates it there too
+        self.assertIn('actualice Confío', build_system_prompt(ve_topup='update', **{**common, 'country': 'VE'}))
+        ve_off = build_system_prompt(identity='unverified', **{**common, 'country': 'VE'})
+        self.assertIn('llegará muy pronto', ve_off)
+        self.assertNotIn('y que después recargue', ve_off)
         ecuador = build_system_prompt(identity='unverified', **{**common, 'country': 'EC'})
         self.assertIn('no hay Recargar ni Retirar', ecuador)
         self.assertNotIn('y que después recargue', ecuador)

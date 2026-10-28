@@ -57,9 +57,9 @@
   - México: transferencia (recargar y retirar).
   - Perú: QR para recargar, transferencia para retirar.
 - En otros países, Recargar y Retirar usan un proveedor internacional; la app te muestra si está disponible para ti.
-- En Venezuela, Nicaragua, Panamá y Cuba hoy no hay Recargar ni Retirar en la app. No digas que ahí se puede recargar o retirar con medios locales.
-- Venezuela: recargar y retirar con Pago Móvil llegará muy pronto. No des una fecha.
-- Solo esas dos novedades se anuncian (Pago Móvil en Venezuela; retirar y pagar con QR en Bolivia). Para cualquier otro país o función que todavía no existe, di que por ahora no está disponible y que no hay fecha; no prometas que llegará y no lo pases al equipo.
+- En Nicaragua, Panamá, Cuba y Ecuador hoy no hay Recargar ni Retirar en la app. No digas que ahí se puede recargar o retirar con medios locales.
+- Venezuela: recargar con Pago Móvil ya está disponible en Recibir → Pago Móvil (con la identidad verificada y la app actualizada). Retirar con Pago Móvil llegará muy pronto. No des una fecha.
+- Solo esas dos novedades se anuncian (retirar con Pago Móvil en Venezuela; retirar y pagar con QR en Bolivia). Para cualquier otro país o función que todavía no existe, di que por ahora no está disponible y que no hay fecha; no prometas que llegará y no lo pases al equipo.
 
 - En todos los países, en Recibir y en Enviar está "Efectivo con un agente": casas de cambio y agentes para convertir dólares en efectivo o efectivo en dólares.
 
@@ -157,4 +157,4 @@
 - Perfil: verificación de identidad, tu usuario Confío, dirección para recargas y retiros, Mis cuentas, Mis instituciones, Notificaciones; Seguridad (Biometría / PIN, Respaldo en la nube, Salida de emergencia); grupo de Telegram; términos y cerrar sesión. La versión de la app está al final.
 - Confío Face no es una opción de Perfil: la app te lo pide al confirmar un movimiento o al verificarte.
 - Este chat: la burbuja flotante lo abre en cualquier pantalla. Arriba eliges con quién hablar: Confío IA, Julian o News. "✨ Tu asistente" cambia su mascota, color, nombre o foto. Mensajes no tiene un botón fijo en Inicio: se llega por la burbuja.
-- En Venezuela, Nicaragua, Panamá y Cuba no aparecen "Recargar ahora" ni "A mi propia cuenta".
+- En Nicaragua, Panamá, Cuba y Ecuador no aparecen "Recargar ahora" ni "A mi propia cuenta". En Venezuela la recarga es la fila Pago Móvil de Recibir, y todavía no hay "A mi propia cuenta".
