@@ -1218,7 +1218,11 @@ def build_member_portfolio(viewer, user_id):
         total_usd=_money(portfolio.total_usd),
         dollars_usd=_money(portfolio.dollars_usd),
         stocks_usd=_money(portfolio.stocks_usd),
-        stocks_change_24h_usd=_money(portfolio.stocks_change_24h_usd),
+        # Retired: the market's 24 h move on what is held now credited moves
+        # before a same-day buy and missed same-day sales, so it could even
+        # disagree in sign with the member's real day. The app shows
+        # Rentabilidad > Hoy's result instead (its own query, off this path).
+        stocks_change_24h_usd=None,
         presale_confio=_money(portfolio.presale_confio),
         presale_invested_usd=_money(portfolio.presale_invested_usd),
         trade_count=portfolio.trade_count,

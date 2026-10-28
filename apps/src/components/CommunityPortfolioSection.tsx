@@ -94,10 +94,12 @@ type Props = {
   portfolio: CommunityMemberPortfolio;
   onToggleHidden?: (hidden: boolean) => void;
   hiddenBusy?: boolean;
+  /** Today's result in dollars (from Rentabilidad > Hoy); hidden when unknown. */
+  todayGainUsd?: string | null;
 };
 
 /** A member's anonymous asset profile: totals, breakdown and positions. */
-export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBusy }: Props) => {
+export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBusy, todayGainUsd }: Props) => {
   const navigation = useNavigation<any>();
   const { activeAccount } = useAccount();
   const isEmployee = Boolean((activeAccount as { isEmployee?: boolean } | null)?.isEmployee);
@@ -108,7 +110,8 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
   const holdTime = formatHoldTime(portfolio.avgHoldSeconds);
   const memberSince = formatMemberSince(portfolio.memberSince);
   const total = moneyParts(portfolio.totalUsd);
-  const dayChange = formatUsd(portfolio.stocksChange24hUsd, { signed: true });
+  // The member's real result today (Rentabilidad > Hoy), never the market's move on today's holdings.
+  const dayChange = formatUsd(todayGainUsd, { signed: true });
   const dollars = formatUsd(portfolio.dollarsUsd);
   const stocks = formatUsd(portfolio.stocksUsd);
   // A zero row would read as "holds some": shown only when something is held.
@@ -170,13 +173,13 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
               <Text style={styles.totalCents}>{total.cents}</Text>
             </Text>
             {dayChange ? (
-              <Text style={[styles.dayChange, { color: toneOf(portfolio.stocksChange24hUsd) }]}>
+              <Text style={[styles.dayChange, { color: toneOf(todayGainUsd) }]}>
                 {`${dayChange} hoy`}
               </Text>
             ) : null}
           </View>
         ) : dayChange ? (
-          <Text style={[styles.dayChange, styles.dayChangeAlone, { color: toneOf(portfolio.stocksChange24hUsd) }]}>
+          <Text style={[styles.dayChange, styles.dayChangeAlone, { color: toneOf(todayGainUsd) }]}>
             {`${dayChange} hoy`}
           </Text>
         ) : null}

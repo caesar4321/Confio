@@ -104,6 +104,13 @@ class PortfolioVisibilityTests(CommunityTestBase):
         with patch.object(member_portfolio, 'build_portfolio', return_value=empty):
             return Query().resolve_community_member_portfolio(MockInfo(viewer), str(member.id))
 
+    def test_the_market_based_hoy_is_no_longer_sent(self):
+        member, viewer = self.published_member(), make_user()
+        empty = member_portfolio.Portfolio(None, None, None, Decimal('14.70'), None, None, 0, None, None)
+        with patch.object(member_portfolio, 'build_portfolio', return_value=empty):
+            result = Query().resolve_community_member_portfolio(MockInfo(viewer), str(member.id))
+        self.assertIsNone(result.stocks_change_24h_usd)
+
     def test_public_by_default_and_hidden_by_the_members_own_switch(self):
         member = self.published_member()
         viewer = make_user()

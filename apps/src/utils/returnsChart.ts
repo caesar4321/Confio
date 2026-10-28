@@ -29,7 +29,8 @@ export const returnsPath = (points: ReturnPoint[], width: number, height: number
 };
 
 export const RETURN_RANGES = [
-  { key: '24h', label: '24 h' },
+  // Since 00:00 UTC (the server's day), not a rolling 24 hours.
+  { key: '24h', label: 'Hoy' },
   { key: '7d', label: '7 d' },
   { key: '30d', label: '30 d' },
   // All time, from the trade record (investorTotalReturn), not the daily chain.

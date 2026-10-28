@@ -149,6 +149,9 @@ export const CommunityMemberProfileScreen = () => {
   const [investor, setInvestor] = useState<InvestorProfile | null>(null);
   const [bioOpen, setBioOpen] = useState(false);
   const [returnsRefresh, setReturnsRefresh] = useState(0);
+  // Hoy's result, shared by the returns card and the portfolio's "hoy" line.
+  // Kept with its member: never shown on another member's profile.
+  const [todayGain, setTodayGain] = useState<{ userId: string; gain: string | null } | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const investorGeneration = useRef(0);
   const loadInvestor = useCallback(async () => {
@@ -618,7 +621,7 @@ export const CommunityMemberProfileScreen = () => {
           onVerify={() => navigation.navigate('Verification' as never)}
         />
       ) : investor ? (
-        <InvestorReturnsCard key={`returns-${userId}`} userId={userId} refreshKey={returnsRefresh} />
+        <InvestorReturnsCard key={`returns-${userId}`} userId={userId} refreshKey={returnsRefresh} onToday={(gain) => setTodayGain({ userId, gain })} />
       ) : null}
       {visiblePortfolio && !locked ? (
         <CommunityPortfolioSection
@@ -626,6 +629,7 @@ export const CommunityMemberProfileScreen = () => {
           portfolio={visiblePortfolio}
           onToggleHidden={visiblePortfolio.isSelf ? (value) => void toggleHidden(value) : undefined}
           hiddenBusy={hiddenBusy}
+          todayGainUsd={todayGain?.userId === userId ? todayGain.gain : null}
         />
       ) : null}
       <Text style={styles.sectionTitle}>Publicaciones</Text>

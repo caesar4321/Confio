@@ -42,7 +42,8 @@ const textOf = (tree: renderer.ReactTestRenderer) =>
 
 test('renders totals, stats and open positions; hides a zero CONFIO row', () => {
   let tree!: renderer.ReactTestRenderer;
-  act(() => { tree = renderer.create(<CommunityPortfolioSection portfolio={base} />); });
+  // "hoy" is the member's real result today (Rentabilidad > Hoy), passed in.
+  act(() => { tree = renderer.create(<CommunityPortfolioSection portfolio={base} todayGainUsd="-12.50" />); });
   const text = textOf(tree);
   expect(text).toContain('3 trades');
   expect(text).toContain('7h 53m de media por posición');
