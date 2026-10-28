@@ -24,11 +24,13 @@ or guessed number:
   their one personal wallet (no gaps, no guessed flat days), they held on
   average at least MIN_AVG_SLEEVE_USD over it, and held something on at
   least MIN_HOLDING_DAYS of its days: a dust trade never tops the table.
-- 24 h ('24h') is the last 24 hours, not a UTC day (Bitcoin, gold and
-  Futuros never close): each member's rolling result from the value
-  snapshots taken every 10 minutes (inbox/rolling_returns.py), rebuilt
-  every 10 minutes. The same floors apply to the money at work over those
-  hours; a team's 24 h is the mean of members who were on it all along.
+- Investors' 24 h, 7 d, Mes and Total are LIVE, the very numbers their
+  profile's Rentabilidad shows (inbox/rolling_returns.py; Total = all time
+  from the first trade), rebuilt every 10 minutes: 24 h and 7 d
+  are the last 24 / 168 hours (Bitcoin, gold and Futuros never close),
+  every range runs up to now. Teams' 24 h and 7 d are the mean of members
+  on the team for the whole range; their Mes and Total, and the monthly
+  champions, stay on the proven days below.
 - All time ('all') is each one's current unbroken run of proven days
   ending yesterday (a missing or unproven day restarts it: nothing is ever
   guessed across a gap), ranked only from MIN_ALL_TIME_DAYS days, so two
@@ -275,7 +277,8 @@ def compute_team_day(team, day: date) -> bool:
 
 
 def invalidate_team_tables() -> None:
-    cache.delete_many([_key('teams', window(r), r) for r in RANGES] + [_rolling_key('teams')])
+    cache.delete_many([_key('teams', window(r), r) for r in RANGES]
+                      + [_table_key('teams', r) for r in LIVE_TEAM_RANGES])
 
 
 def recompute_member_history(user) -> int:
@@ -379,24 +382,42 @@ def warm() -> None:
     """Rebuild every cached table (nightly, after the team days)."""
     for kind in ('teams', 'investors'):
         for range_key in RANGES:
-            if range_key == '24h':
+            if is_live(kind, range_key):
                 continue                       # warm_rolling, every 10 minutes
             days = window(range_key)
             cache.set(_key(kind, days, range_key), _build(kind, range_key, days), CACHE_SECONDS)
 
 
-# ── 24 h ─────────────────────────────────────────────────────────────────────
+# ── live ranges ──────────────────────────────────────────────────────────────
+
+# Investors: the same live results the profile's Rentabilidad shows
+# (inbox/rolling_returns.py).
+LIVE_INVESTOR_RANGES = ('24h', '7d', 'month', 'all')
+# Teams: the mean of members there for the whole range; a month or all time
+# of changing rosters stays on the proven days.
+LIVE_TEAM_RANGES = ('24h', '7d')
+
+
+def is_live(kind: str, range_key: str) -> bool:
+    return range_key in (LIVE_TEAM_RANGES if kind == 'teams' else LIVE_INVESTOR_RANGES)
+
 
 def _rolling_key(name: str) -> str:
-    return f'league:v3:rolling:{name}'
+    return f'league:v4:live:{name}'
+
+
+def _month_key(today=None) -> str:
+    return (today or utc_today()).strftime('%Y-%m')
 
 
 def rolling_results(force: bool = False) -> dict:
-    """{user_id: (gain, pct, capital)}: every investor's last 24 hours on
-    their one personal wallet, None-free (unknown results are left out)."""
+    """{range: {user_id: (gain, pct, capital, start_at, as_of)}} for 24 h,
+    7 d, Mes and all time ('all': capital = everything bought), plus
+    '_month': the month Mes was computed for. Every investor's live results
+    on their one personal wallet (unknown results are left out)."""
     from inbox.models import PortfolioValueSnapshot
     from inbox.portfolio_returns import CachedBlockTimes
-    from inbox.rolling_returns import START_TOLERANCE, WINDOW, rolling
+    from inbox.rolling_returns import KEEP, LIVE_RANGES, results
 
     from .eligibility import canonical_wallets
 
@@ -410,81 +431,112 @@ def rolling_results(force: bool = False) -> dict:
         try:
             warm_rolling_league_task.delay()
         except Exception:  # noqa: BLE001
-            logger.warning('league: could not queue the 24 h warm', exc_info=True)
+            logger.warning('league: could not queue the live warm', exc_info=True)
         return {}
     now = timezone.now()
-    ids = set(PortfolioValueSnapshot.objects.filter(at__gte=now - WINDOW - START_TOLERANCE)
-              .values_list('user_id', flat=True).distinct())
+    ids = set(PortfolioValueSnapshot.objects.filter(at__gte=now - KEEP).values_list('user_id', flat=True).distinct())
     prices = CachedBlockTimes()
-    out = {}
+    out: dict = {r: {} for r in LIVE_RANGES}
+    out['_month'] = _month_key(now.date())
     for user_id, wallet in canonical_wallets(ids).items():
         try:
-            result = rolling(wallet, now, prices)
+            per = results(wallet, LIVE_RANGES, now, prices)
         except Exception:  # noqa: BLE001 — one wallet never empties the table
-            logger.exception('league: rolling 24 h failed for %s', wallet)
+            logger.exception('league: live results failed for %s', wallet)
             continue
-        if result is not None:
-            out[user_id] = (result.gain, result.pct, result.capital)
+        for range_key, result in per.items():
+            if result is not None:
+                out[range_key][user_id] = (result.gain, result.pct, result.capital, result.start_at, result.as_of)
     cache.set(_rolling_key('results'), out, ROLLING_SECONDS)
     return out
 
 
-def _rolling_investor_table(results: dict) -> list[Row]:
-    eligible = _eligible_user_ids(list(results))
-    rows = sorted(((gain, pct, user_id) for user_id, (gain, pct, capital) in results.items()
-                   if user_id in eligible and capital >= MIN_AVG_SLEEVE_USD),
-                  key=lambda r: (-r[0], -r[1], r[2]))
-    return [Row(rank=i + 1, pct=pct, pnl=pnl, user_id=user_id, people=frozenset([user_id]))
-            for i, (pnl, pct, user_id) in enumerate(rows)]
+def _range_results(range_key: str, results: dict) -> dict:
+    """One range's results; Mes only for the month it was computed in."""
+    if range_key == 'month' and results.get('_month') != _month_key():
+        return {}
+    return results.get(range_key, {})
 
 
-def _rolling_teams(results: dict, team_ids=None) -> dict:
+def _live_investor_table(range_key: str, results: dict) -> list[Row]:
+    per = _range_results(range_key, results)
+    eligible = _eligible_user_ids(list(per))
+    rows = []
+    for user_id, (gain, pct, money, start_at, as_of) in per.items():
+        if user_id not in eligible or money < MIN_AVG_SLEEVE_USD:
+            continue
+        # All time ranks from MIN_ALL_TIME_DAYS after the first trade: two
+        # lucky days never top a year of steady returns.
+        if range_key == 'all' and (as_of.date() - start_at.date()).days < MIN_ALL_TIME_DAYS:
+            continue
+        rows.append((gain, pct, user_id, start_at, as_of))
+    rows.sort(key=lambda r: (-r[0], -r[1], r[2]))
+    return [Row(rank=i + 1, pct=pct, pnl=pnl, user_id=user_id, people=frozenset([user_id]),
+                since=start_at.date() if range_key == 'all' else None, start_at=start_at, as_of=as_of)
+            for i, (pnl, pct, user_id, start_at, as_of) in enumerate(rows)]
+
+
+def _live_teams(range_key: str, results: dict, team_ids=None) -> dict:
     """{team_id: (pct, dollars per member, qualifying, people)} for teams
     with at least MIN_SHOWN_MEMBERS members qualifying: on the team for the
-    whole 24 h, shown, a known result with MIN_SLEEVE_USD at work."""
-    from inbox.rolling_returns import WINDOW
+    whole range, shown, a known result with MIN_SLEEVE_USD at work."""
+    from inbox.rolling_returns import WINDOWS
 
     from .models import TeamMembership
 
+    per = _range_results(range_key, results)
     members = TeamMembership.objects.filter(team__archived_at__isnull=True, left_at__isnull=True,
-                                            joined_at__lte=timezone.now() - WINDOW)
+                                            joined_at__lte=timezone.now() - WINDOWS[range_key])
     if team_ids is not None:
         members = members.filter(team_id__in=list(team_ids))
     by_team: dict = {}
-    for team_id, user_id in members.values_list('team_id', 'user_id'):
+    joined: dict = {}
+    for team_id, user_id, joined_at in members.values_list('team_id', 'user_id', 'joined_at'):
         by_team.setdefault(team_id, []).append(user_id)
+        joined[(team_id, user_id)] = joined_at
     eligible = _eligible_user_ids({u for ids in by_team.values() for u in ids})
     out = {}
     for team_id, ids in by_team.items():
-        qualifying = [u for u in ids if u in eligible and u in results and results[u][2] >= MIN_SLEEVE_USD]
+        # On the team since the member's own result began (7 d may start at
+        # the midnight before its window while snapshots are young).
+        qualifying = [u for u in ids if u in eligible and u in per and per[u][2] >= MIN_SLEEVE_USD
+                      and joined[(team_id, u)] <= per[u][3]]
         if len(qualifying) < MIN_SHOWN_MEMBERS:
             continue
-        pnl = sum((results[u][0] for u in qualifying), Decimal('0')) / len(qualifying)
-        capital = sum((results[u][2] for u in qualifying), Decimal('0')) / len(qualifying)
+        pnl = sum((per[u][0] for u in qualifying), Decimal('0')) / len(qualifying)
+        capital = sum((per[u][2] for u in qualifying), Decimal('0')) / len(qualifying)
         out[team_id] = (_gain_pct(pnl, capital, Decimal('0')), pnl, len(qualifying), frozenset(qualifying))
     return out
 
 
-def _rolling_team_table(results: dict) -> list[Row]:
+def _live_team_table(range_key: str, results: dict) -> list[Row]:
     from .models import Team
 
-    teams = {t: r for t, r in _rolling_teams(results).items() if r[2] >= MIN_TEAM_MEMBERS}
+    teams = {t: r for t, r in _live_teams(range_key, results).items() if r[2] >= MIN_TEAM_MEMBERS}
     created = dict(Team.objects.filter(id__in=teams).values_list('id', 'created_at'))
     rows = sorted(teams.items(), key=lambda kv: (-kv[1][1], -kv[1][2], created.get(kv[0]) or timezone.now()))
     return [Row(rank=i + 1, pct=pct, pnl=pnl, team_id=team_id, members=q, people=people)
             for i, (team_id, (pct, pnl, q, people)) in enumerate(rows)]
 
 
-def _rolling_table(kind: str, results: dict) -> list[Row]:
-    return _rolling_team_table(results) if kind == 'teams' else _rolling_investor_table(results)
+def _live_table(kind: str, range_key: str, results: dict) -> list[Row]:
+    return (_live_team_table(range_key, results) if kind == 'teams'
+            else _live_investor_table(range_key, results))
+
+
+def _table_key(kind: str, range_key: str) -> str:
+    # Mes is bound to its month: a table never outlives the period it ranks.
+    return _rolling_key(f'{kind}:{range_key}' + (f':{_month_key()}' if range_key == 'month' else ''))
 
 
 def warm_rolling() -> dict:
-    """Every 10 minutes, after the value snapshots: the 24 h results and tables."""
+    """Every 10 minutes, after the value snapshots: the live results and tables."""
     results = rolling_results(force=True)
     for kind in ('teams', 'investors'):
-        cache.set(_rolling_key(kind), _rolling_table(kind, results), ROLLING_SECONDS)
-    return {'investors': len(results)}
+        for range_key in RANGES:
+            if is_live(kind, range_key):
+                cache.set(_table_key(kind, range_key), _live_table(kind, range_key, results), ROLLING_SECONDS)
+    return {r: len(v) for r, v in results.items() if not r.startswith('_')}
 
 
 # ── tables ───────────────────────────────────────────────────────────────────
@@ -503,6 +555,9 @@ class Row:
     # Everyone this result is made of (a team's contributors over the days),
     # cached with it so a read always checks exactly these people.
     people: frozenset = frozenset()
+    # A live investor result: the exact span it covers.
+    start_at: object = None
+    as_of: object = None
 
 
 def _average(values) -> Decimal | None:
@@ -661,8 +716,8 @@ def counted_days(team_id, range_key: str) -> list[date]:
     from .models import TeamDailyReturn
 
     days = window(range_key)
-    if range_key == '24h':
-        return []                              # not made of days: _rolling_teams
+    if range_key in LIVE_TEAM_RANGES:
+        return []                              # not made of days: _live_teams
     if range_key != 'all':
         return days
     quals = dict(TeamDailyReturn.objects.filter(team_id=team_id, day__in=days).values_list('day', 'qualifying_members'))
@@ -672,8 +727,8 @@ def counted_days(team_id, range_key: str) -> list[date]:
 
 def counted_contributors(team_id, range_key: str) -> set:
     """Who a team's result in this range is made of."""
-    if range_key == '24h':
-        result = _rolling_teams(rolling_results(), [int(team_id)]).get(int(team_id))
+    if range_key in LIVE_TEAM_RANGES:
+        result = _live_teams(range_key, rolling_results(), [int(team_id)]).get(int(team_id))
         return set(result[3]) if result else set()
     return contributors([team_id], counted_days(team_id, range_key)).get(int(team_id), set())
 
@@ -684,13 +739,12 @@ def table(kind: str, range_key: str) -> list[Row]:
     renumbered over what is shown."""
     from .models import Team
 
-    if range_key == '24h':
-        rows = cache.get(_rolling_key(kind))
+    if is_live(kind, range_key):
+        rows = cache.get(_table_key(kind, range_key))
         if rows is None:
-            results = rolling_results()
-            rows = _rolling_table(kind, results)
-            if results:
-                cache.set(_rolling_key(kind), rows, ROLLING_SECONDS)
+            # From the cached results, never cached again: a table never
+            # outlives the results it was made of.
+            rows = _live_table(kind, range_key, rolling_results())
     else:
         days = window(range_key)
         key = _key(kind, days, range_key)
@@ -708,7 +762,8 @@ def table(kind: str, range_key: str) -> list[Row]:
         allowed = _eligible_user_ids(set().union(*(r.people for r in rows)) if rows else set())
         rows = [r for r in rows if r.team_id in live and r.people <= allowed]
     return [Row(rank=i + 1, pct=r.pct, pnl=r.pnl, team_id=r.team_id, user_id=r.user_id, members=r.members,
-                people=r.people, since=getattr(r, 'since', None))
+                people=r.people, since=getattr(r, 'since', None), start_at=getattr(r, 'start_at', None),
+                as_of=getattr(r, 'as_of', None))
             for i, r in enumerate(rows)]
 
 
@@ -724,9 +779,9 @@ def team_result(team_id, range_key: str) -> tuple[Decimal | None, Decimal | None
     in range; dollars None while a day has none yet, rank only in the table."""
     from .models import TeamDailyReturn
 
-    if range_key == '24h':
+    if range_key in LIVE_TEAM_RANGES:
         rank = next((row.rank for row in table('teams', range_key) if row.team_id == int(team_id)), None)
-        result = _rolling_teams(rolling_results(), [int(team_id)]).get(int(team_id))
+        result = _live_teams(range_key, rolling_results(), [int(team_id)]).get(int(team_id))
         return (result[0], result[1], rank) if result else (None, None, rank)
     days = counted_days(team_id, range_key)
     rows = list(TeamDailyReturn.objects.filter(team_id=team_id, day__in=days).values_list(
@@ -896,31 +951,26 @@ def badges(*, team_id=None, user_id=None) -> list[str]:
 
 
 def days_to_rank_all_time(kind: str, user) -> int | None:
-    """How many more proven days the viewer (or the viewer's team) needs to
-    rank all time; 0 when the run is long enough, None when there is no run."""
-    from inbox.models import PortfolioDailySnapshot
-
+    """How many more days the viewer (or the viewer's team) needs to rank
+    all time; 0 when long enough, None when there is nothing to count."""
     from . import rules
-    from .eligibility import canonical_wallets
     from .models import TeamDailyReturn
 
+    if kind != 'teams':
+        # Investors rank all time from MIN_ALL_TIME_DAYS after their first trade.
+        total = rolling_results().get('all', {}).get(user.id)
+        if total is None:
+            return None
+        return max(MIN_ALL_TIME_DAYS - (utc_today() - total[3].date()).days, 0)
     days = window('all')
     if not days:
         return None
-    if kind == 'teams':
-        membership = rules.active_membership(user)
-        if membership is None:
-            return None
-        quals = dict(TeamDailyReturn.objects.filter(team_id=membership.team_id, day__in=days)
-                     .values_list('day', 'qualifying_members'))
-        run = _trailing_run(days, lambda d: quals.get(d, 0) >= MIN_SHOWN_MEMBERS)
-    else:
-        wallet = canonical_wallets([user.id]).get(user.id)
-        if not wallet:
-            return None
-        proven = set(PortfolioDailySnapshot.objects.filter(
-            wallet=wallet, day__in=days, ledger_trusted=True, daily_return__isnull=False).values_list('day', flat=True))
-        run = _trailing_run(days, lambda d: d in proven)
+    membership = rules.active_membership(user)
+    if membership is None:
+        return None
+    quals = dict(TeamDailyReturn.objects.filter(team_id=membership.team_id, day__in=days)
+                 .values_list('day', 'qualifying_members'))
+    run = _trailing_run(days, lambda d: quals.get(d, 0) >= MIN_SHOWN_MEMBERS)
     if not run:
         return None
     return max(MIN_ALL_TIME_DAYS - len(run), 0)

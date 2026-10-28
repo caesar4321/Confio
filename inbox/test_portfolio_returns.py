@@ -443,34 +443,34 @@ class PeriodReturnTests(CommunityTestBase):
         return pr.Day(day=D22, value_start=Decimal('0'), value_end=Decimal('0'), net_flow=Decimal('0'),
                       gain=Decimal(gain), daily_return=Decimal(ret))
 
-    def test_seven_days_chain_link_with_today(self):
+    def test_thirty_days_chain_link_with_today(self):
         user = make_user()
-        for n in range(7, 0, -1):
+        for n in range(30, 0, -1):
             self.row(user, D22 - timedelta(days=n), '0.01')
-        p = self.period(user, '7d', self.partial('0.02'))
-        self.assertEqual(p.pct, (Decimal('1.01') ** 7 * Decimal('1.02') - 1) * 100)
-        self.assertEqual(p.gain_usd, Decimal('9'))
-        self.assertEqual(len(p.points), 9)
+        p = self.period(user, '30d', self.partial('0.02'))
+        self.assertAlmostEqual(p.pct, (Decimal('1.01') ** 30 * Decimal('1.02') - 1) * 100, places=12)
+        self.assertEqual(p.gain_usd, Decimal('32'))
+        self.assertEqual(len(p.points), 32)
         self.assertEqual(p.as_of, NOW)
 
     def test_one_unknown_day_makes_the_range_unknown(self):
         user = make_user()
-        for n in range(7, 0, -1):
+        for n in range(30, 0, -1):
             self.row(user, D22 - timedelta(days=n), '0.01', trusted=n != 3)
-        self.assertIsNone(self.period(user, '7d', self.partial('0')).pct)
+        self.assertIsNone(self.period(user, '30d', self.partial('0')).pct)
 
     def test_a_day_never_snapshotted_is_unknown_not_flat(self):
         user = make_user()
         self.row(user, D22 - timedelta(days=1), '0.01')
-        self.assertIsNone(self.period(user, '7d', self.partial('0')).pct)
-        self.assertIsNone(self.period(make_user(), '7d', self.partial('0')).pct)
+        self.assertIsNone(self.period(user, '30d', self.partial('0')).pct)
+        self.assertIsNone(self.period(make_user(), '30d', self.partial('0')).pct)
 
     def test_a_stale_row_is_unknown(self):
         user = make_user()
-        for n in range(7, 0, -1):
+        for n in range(30, 0, -1):
             self.row(user, D22 - timedelta(days=n), '0.01')
         changed = pr.Ledger(stocks=self.LEDGER.stocks + [trade('stock_buy', '1', '5', at(D20))], crypto=[])
-        self.assertIsNone(self.period(user, '7d', self.partial('0'), ledger=changed).pct)
+        self.assertIsNone(self.period(user, '30d', self.partial('0'), ledger=changed).pct)
 
     def test_days_before_the_first_trade_are_flat(self):
         user = make_user()
@@ -481,13 +481,13 @@ class PeriodReturnTests(CommunityTestBase):
         self.assertEqual(p.pct, (Decimal('1.1') ** 2 - 1) * 100)
 
     def test_no_investments_is_unknown(self):
-        self.assertIsNone(self.period(make_user(), '7d', self.partial('0'), ledger=pr.Ledger([], [])).pct)
+        self.assertIsNone(self.period(make_user(), '30d', self.partial('0'), ledger=pr.Ledger([], [])).pct)
 
-    def test_without_a_live_day_7d_stops_at_midnight(self):
+    def test_without_a_live_day_30d_stops_at_midnight(self):
         user = make_user()
-        for n in range(7, 0, -1):
+        for n in range(30, 0, -1):
             self.row(user, D22 - timedelta(days=n), '0')
-        p = self.period(user, '7d')
+        p = self.period(user, '30d')
         self.assertEqual((p.pct, p.as_of), (Decimal('0'), pr.day_start(D22)))
 
     def test_24h_is_the_rolling_last_24_hours(self):

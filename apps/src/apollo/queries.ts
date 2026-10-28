@@ -5064,7 +5064,7 @@ export const GET_INVESTOR_PROFILE = gql`
   }
 `;
 
-// Investment-sleeve return for one range ('24h' | '7d' | '30d').
+// Investment-sleeve return for one range ('24h' | '7d' | 'month'; '30d' for older builds).
 export const GET_INVESTOR_RETURNS = gql`
   query GetInvestorReturns($userId: ID!, $range: String!) {
     investorReturns(userId: $userId, range: $range) {

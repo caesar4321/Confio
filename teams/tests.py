@@ -249,7 +249,7 @@ class LeagueTests(TeamTestBase):
         for i, u in enumerate(users):
             self.snap(u, self.DAY, f'0.0{i}')
         with patch('teams.league.window', return_value=[self.DAY]):
-            result = TeamsQuery().resolve_league_table(MockInfo(viewer), 'investors', '7d')
+            result = TeamsQuery().resolve_league_table(MockInfo(viewer), 'investors', '30d')
         self.assertEqual((len(result.rows), result.access, result.has_more), (3, 'viewer_hidden', False))
 
     def test_the_month_award_is_written_once(self):
@@ -334,7 +334,7 @@ class ProtectionTests(LeagueTests):
         for u in users[:3]:
             CommunityBlock.objects.create(blocker=viewer, blocked=u)
         with patch('teams.league.window', return_value=[self.DAY]):
-            result = TeamsQuery().resolve_league_table(MockInfo(viewer), 'investors', '7d')
+            result = TeamsQuery().resolve_league_table(MockInfo(viewer), 'investors', '30d')
         self.assertEqual(result.rows, [])
 
     def test_a_hidden_investor_disappears_from_a_cached_table(self):
@@ -342,9 +342,9 @@ class ProtectionTests(LeagueTests):
         for u in users:
             self.snap(u, self.DAY, '0.01')
         with patch('teams.league.window', return_value=[self.DAY]):
-            self.assertEqual(len(league.table('investors', '7d')), 2)
+            self.assertEqual(len(league.table('investors', '30d')), 2)
             SetCommunityPortfolioHidden.mutate(None, MockInfo(users[0]), hidden=True)
-            self.assertEqual([r.user_id for r in league.table('investors', '7d')], [users[1].id])
+            self.assertEqual([r.user_id for r in league.table('investors', '30d')], [users[1].id])
 
     def test_the_goal_is_for_members_only_and_never_with_a_block(self):
         from inbox.models import CommunityBlock
@@ -405,7 +405,7 @@ class Pass3Tests(LeagueTests):
         team, members = self.team_with(2)
         TeamDailyReturn.objects.create(team=team, day=self.DAY, daily_return=Decimal('0.1'), qualifying_members=2)
         with patch('teams.league.window', return_value=[self.DAY]):
-            self.assertEqual(league.team_return(team.id, '7d')[0], None)
+            self.assertEqual(league.team_return(team.id, '30d')[0], None)
 
     def test_hiding_after_leaving_still_clears_the_old_team_days(self):
         team, members = self.team_with(3)
@@ -432,7 +432,7 @@ class ContributorTests(LeagueTests):
         CommunityBlock.objects.create(blocker=viewer, blocked=members[3])
         rules.leave_team(members[3])
         with patch('teams.league.window', return_value=[self.DAY]):
-            self.assertTrue(blocked_team(viewer, team.id, '7d'))
+            self.assertTrue(blocked_team(viewer, team.id, '30d'))
 
     def test_a_contributor_who_lost_eligibility_suppresses_the_team(self):
         team, members = self.team_with(3)
@@ -623,33 +623,20 @@ class AllTimeTests(LeagueTests):
     def days_back(self, n):
         return [self.TODAY - timedelta(days=k) for k in range(n, 0, -1)]
 
-    def test_investors_rank_on_their_unbroken_run_from_thirty_days(self):
-        steady, newcomer, broken = make_user(), make_user(), make_user()
-        for day in self.days_back(40):
-            self.snap(steady, day, '0.001')
-        for day in self.days_back(20):
-            self.snap(newcomer, day, '0.05')                 # lucky, but too new to rank
-        for i, day in enumerate(self.days_back(45)):
-            # A gap 10 days ago restarts the run: only the last 9 count.
-            self.snap(broken, day, '0.002', trusted=(i != 35))
-        with patch('teams.league.utc_today', return_value=self.TODAY):
+    def test_investors_rank_all_time_from_thirty_days_after_their_first_trade(self):
+        steady, newcomer = make_user(), make_user()
+        def total(gain, days):
+            first = league.day_end(self.TODAY - timedelta(days=days + 1))
+            return (Decimal(gain), Decimal(gain), Decimal('100'), first, league.day_end(self.TODAY))
+
+        totals = {'all': {steady.id: total('4', 40), newcomer.id: total('50', 20)}}
+        with patch('teams.league.utc_today', return_value=self.TODAY), \
+                patch.object(league, 'rolling_results', return_value=totals):
             rows = league.table('investors', 'all')
-            self.assertEqual([r.user_id for r in rows], [steady.id])
-            # Dollars over the money at work: $0.10 a day on $100, forty days.
-            self.assertAlmostEqual(float(rows[0].pct), 4.0, places=4)
-            # A day with an unknown flow has no known capital: the chained %.
-            from inbox.models import PortfolioDailySnapshot
-            PortfolioDailySnapshot.objects.filter(user=steady, day=self.days_back(40)[5]).update(net_flow_usd=None)
-            from django.core.cache import cache
-            cache.delete(league._key('investors', league.window('all'), 'all'))
-            rows = league.table('investors', 'all')
-            self.assertAlmostEqual(float(rows[0].pct), (1.001 ** 40 - 1) * 100, places=4)
+            self.assertEqual([(r.user_id, r.since) for r in rows], [(steady.id, self.TODAY - timedelta(days=40))])
             self.assertEqual(league.days_to_rank_all_time('investors', newcomer), 10)
-            self.assertEqual(league.days_to_rank_all_time('investors', broken), 21)
             self.assertEqual(league.days_to_rank_all_time('investors', steady), 0)
-            # Thirty days and all time never share a cached table.
-            self.assertNotEqual(league._key('investors', league.window('30d'), '30d'),
-                                league._key('investors', league.window('all'), 'all'))
+            self.assertIsNone(league.days_to_rank_all_time('investors', make_user()))
 
     def test_the_percent_always_has_the_sign_of_the_dollars(self):
         # angelconfio's week on prod (2026-10-19..25): +US$0.07, but the
@@ -839,6 +826,11 @@ class ProvisionalAwardTests(LeagueTests):
         self.assertFalse(league.month_complete(days))
 
 
+def live(gain, pct, capital):
+    now = timezone.now()
+    return (Decimal(str(gain)), Decimal(str(pct)), Decimal(str(capital)), now - timedelta(hours=24), now)
+
+
 class RollingLeagueTests(TeamTestBase):
     """24 h: the last 24 hours from each member's rolling result."""
     setUp = LeagueTests.setUp
@@ -849,9 +841,9 @@ class RollingLeagueTests(TeamTestBase):
 
     def test_investors_rank_by_dollars_over_24_hours_with_the_floor(self):
         a, b, small = make_user(), make_user(), make_user()
-        with self.results({a.id: (Decimal('5'), Decimal('1'), Decimal('500')),
-                           b.id: (Decimal('9'), Decimal('30'), Decimal('30')),
-                           small.id: (Decimal('50'), Decimal('500'), Decimal('10'))}):   # under $20 at work
+        with self.results({'24h': {a.id: live(5, 1, 500),
+                                   b.id: live(9, 30, 30),
+                                   small.id: live(50, 500, 10)}}):   # under $20
             rows = league.table('investors', '24h')
         self.assertEqual([r.user_id for r in rows], [b.id, a.id])
 
@@ -859,9 +851,9 @@ class RollingLeagueTests(TeamTestBase):
         team, members = self.team_with(5)
         late = members[4]
         TeamMembership.objects.filter(user=late).update(joined_at=timezone.now() - timedelta(hours=2))
-        values = {m.id: (Decimal('10'), Decimal('10'), Decimal('100')) for m in members[:4]}
-        values[late.id] = (Decimal('-90'), Decimal('-90'), Decimal('100'))
-        with self.results(values):
+        values = {m.id: live(10, 10, 100) for m in members[:4]}
+        values[late.id] = live(-90, -90, 100)
+        with self.results({'24h': values}):
             pct, pnl, rank = league.team_result(team.id, '24h')
             self.assertEqual((pct, pnl), (Decimal('10'), Decimal('10')))       # the late joiner doesn't count
             self.assertEqual(league.counted_contributors(team.id, '24h'), {m.id for m in members[:4]})
@@ -870,7 +862,7 @@ class RollingLeagueTests(TeamTestBase):
 
     def test_a_team_with_five_qualifying_ranks(self):
         team, members = self.team_with(5)
-        with self.results({m.id: (Decimal('2'), Decimal('2'), Decimal('100')) for m in members}):
+        with self.results({'24h': {m.id: live(2, 2, 100) for m in members}}):
             [row] = league.table('teams', '24h')
         self.assertEqual((row.team_id, row.pnl, row.members), (team.id, Decimal('2'), 5))
 
@@ -881,9 +873,27 @@ class RollingLeagueTests(TeamTestBase):
         warm.assert_called_once()
         rolling.assert_not_called()
 
+    def test_a_member_counts_only_from_their_own_results_start(self):
+        team, members = self.team_with(5)
+        now = timezone.now()
+        TeamMembership.objects.filter(user=members[4]).update(joined_at=now - timedelta(days=7, hours=6))
+        # 7 d starting at the midnight before its window: 7 d 12 h ago.
+        values = {m.id: (Decimal('1'), Decimal('1'), Decimal('100'), now - timedelta(days=7, hours=12), now)
+                  for m in members}
+        with self.results({'7d': values}):
+            self.assertEqual(league.counted_contributors(team.id, '7d'), {m.id for m in members[:4]})
+
+    def test_mes_never_shows_last_months_results(self):
+        a = make_user()
+        stale = {'_month': '2000-01', 'month': {a.id: live(5, 5, 100)}}
+        with self.results(stale):
+            self.assertEqual(league.table('investors', 'month'), [])
+        with self.results({'_month': league._month_key(), 'month': {a.id: live(5, 5, 100)}}):
+            self.assertEqual([r.user_id for r in league.table('investors', 'month')], [a.id])
+
     def test_a_hidden_investor_disappears_from_the_cached_24h_table(self):
         users = [make_user() for _ in range(2)]
-        with self.results({u.id: (Decimal('1'), Decimal('1'), Decimal('100')) for u in users}):
+        with self.results({'24h': {u.id: live(1, 1, 100) for u in users}}):
             self.assertEqual(len(league.table('investors', '24h')), 2)
             SetCommunityPortfolioHidden.mutate(None, MockInfo(users[0]), hidden=True)
             self.assertEqual([r.user_id for r in league.table('investors', '24h')], [users[1].id])

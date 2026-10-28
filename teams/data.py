@@ -87,8 +87,8 @@ def members(team, range_key='7d'):
     """[(membership, pct or None)] ordered captain first, then by return.
     Returns only for members who may be shown."""
     visible = {m.user_id for m in _visible(team)}
-    if range_key == '24h':
-        results = league.rolling_results()
+    if league.is_live('teams', range_key):
+        results = league._range_results(range_key, league.rolling_results())
         returns = {u: results[u][1] for u in visible if u in results}
     else:
         returns = _returns(visible, league.window(range_key))

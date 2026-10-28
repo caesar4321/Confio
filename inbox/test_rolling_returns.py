@@ -4,12 +4,14 @@ from unittest.mock import patch
 
 from . import portfolio_returns as pr
 from . import rolling_returns as rr
-from .models import PortfolioValueSnapshot
+from .models import PortfolioDailySnapshot, PortfolioValueSnapshot
 from .test_community import CommunityTestBase, make_user
 from .test_portfolio_returns import NOW, WALLET, trade
 
 START = NOW - timedelta(hours=24)
 OLD = trade('stock_buy', '1', '100', NOW - timedelta(days=3))
+# Before any 7 d or Mes window.
+OLDER = trade('stock_buy', '1', '100', NOW - timedelta(days=60))
 
 
 def ledger(*stocks):
@@ -26,10 +28,55 @@ class RollingTests(CommunityTestBase):
                                               other_usd=Decimal(value), perps_marks=marks or {},
                                               ledger_sig=rr.flow_signature(on or ledger(OLD), at))
 
-    def rolling(self, stocks, value_now, with_points=False, raises=None):
+    def rolling(self, stocks, value_now, with_points=False, raises=None, range_key='24h'):
         with patch.object(rr, 'trusted_ledger', return_value=ledger(*stocks), side_effect=raises), \
                 patch.object(rr, 'live_value', return_value=Decimal(value_now)):
-            return rr.rolling(WALLET, NOW, with_points=with_points)
+            return rr.rolling(WALLET, NOW, with_points=with_points, range_key=range_key)
+
+    def close(self, day, value_end, on=None):
+        PortfolioDailySnapshot.objects.create(
+            user=self.user, wallet=WALLET, day=day, value_start_usd=Decimal(value_end),
+            value_end_usd=Decimal(value_end), net_flow_usd=Decimal('0'), gain_usd=Decimal('0'),
+            daily_return=Decimal('0'), ledger_trusted=True,
+            ledger_sig=(on or ledger(OLD)).signature(pr.day_start(day + timedelta(days=1))))
+
+    def test_7d_starts_at_the_snapshot_a_week_ago(self):
+        self.snap(NOW - timedelta(days=7), '90', on=ledger(OLDER))
+        self.assertEqual(self.rolling([OLDER], '99', range_key='7d').gain, Decimal('9'))
+
+    def test_7d_falls_back_to_the_midnight_before_while_snapshots_are_young(self):
+        week_ago = pr.utc_today(NOW - timedelta(days=7))
+        self.close(week_ago - timedelta(days=1), '80', on=ledger(OLDER))
+        r = self.rolling([OLDER], '99', range_key='7d')
+        self.assertEqual((r.start_at, r.gain), (pr.day_start(week_ago), Decimal('19')))
+
+    def test_month_starts_at_the_proven_close_of_its_eve(self):
+        first = pr.utc_today(NOW).replace(day=1)
+        self.close(first - timedelta(days=1), '70', on=ledger(OLDER))
+        buy = trade('stock_buy', '1', '20', NOW - timedelta(hours=1), symbol='TSLAon')
+        r = self.rolling([OLDER, buy], '99', range_key='month')
+        self.assertEqual((r.start_at, r.gain, r.capital), (pr.day_start(first), Decimal('9'), Decimal('80')))
+
+    def test_total_is_value_plus_sold_minus_bought_over_bought(self):
+        sale = trade('stock_sell', '1', '30', NOW - timedelta(days=1), symbol='TSLAon')
+        buy = trade('stock_buy', '1', '20', NOW - timedelta(days=2), symbol='TSLAon')
+        r = self.rolling([OLDER, buy, sale], '110', range_key='all')
+        self.assertEqual((r.gain, r.capital, r.start_at), (Decimal('20'), Decimal('120'), OLDER.when))
+        self.assertEqual(r.pct, Decimal('20') / Decimal('120') * 100)
+
+    def test_month_without_its_eve_proven_is_unknown(self):
+        self.assertIsNone(self.rolling([OLDER], '99', range_key='month'))
+
+    def test_month_points_are_its_midnights_then_today(self):
+        today = pr.utc_today(NOW)
+        first = today.replace(day=1)
+        self.close(first - timedelta(days=1), '100', on=ledger(OLDER))
+        if today - timedelta(days=1) >= first:
+            self.close(today - timedelta(days=1), '110', on=ledger(OLDER))
+        self.snap(NOW - timedelta(minutes=30), '105', on=ledger(OLDER))
+        r = self.rolling([OLDER], '120', with_points=True, range_key='month')
+        pcts = [p for _, p in r.points]
+        self.assertEqual((pcts[0], pcts[-2], pcts[-1]), (Decimal('0'), Decimal('5'), Decimal('20')))
 
     def test_a_buy_in_the_last_24_hours_is_money_put_in_not_a_gain(self):
         self.snap(START - timedelta(minutes=4), '110')
@@ -58,6 +105,20 @@ class RollingTests(CommunityTestBase):
         self.snap(START, '110')
         late = trade('stock_buy', '1', '50', START - timedelta(hours=1), symbol='TSLAon')
         self.assertIsNone(self.rolling([OLD, late], '170'))
+
+    def test_futuros_proceeds_landing_are_unknown_until_they_enter(self):
+        from types import SimpleNamespace
+
+        self.snap(START, '110')
+        landing = pr.Ledger(stocks=[OLD], crypto=[], perps=[SimpleNamespace(state='landed')])
+        with patch.object(rr, 'trusted_ledger', return_value=landing), \
+                patch.object(rr, 'live_value', return_value=Decimal('111')):
+            self.assertIsNone(rr.rolling(WALLET, NOW))
+            self.assertIsNone(rr.rolling(WALLET, NOW, range_key='all'))
+        refunded = pr.Ledger(stocks=[OLD], crypto=[], perps=[SimpleNamespace(state='refunded', returned=None)])
+        with patch.object(rr, 'trusted_ledger', return_value=refunded), \
+                patch.object(rr, 'live_value', return_value=Decimal('111')):
+            self.assertIsNone(rr.rolling(WALLET, NOW))
 
     def test_anything_unknown_is_unknown(self):
         self.snap(START, '110')
@@ -107,7 +168,7 @@ class SnapshotTests(CommunityTestBase):
         from django.utils import timezone
 
         user = make_user()
-        old = PortfolioValueSnapshot.objects.create(user=user, wallet=WALLET, at=timezone.now() - timedelta(days=4),
+        old = PortfolioValueSnapshot.objects.create(user=user, wallet=WALLET, at=timezone.now() - timedelta(days=9),
                                                     value_usd=Decimal('1'), other_usd=Decimal('1'), ledger_sig='x')
         with patch.object(rr, 'wallets_to_snapshot', return_value=[]):
             rr.snapshot_all(budget_seconds=60)

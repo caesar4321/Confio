@@ -29,10 +29,12 @@ export const returnsPath = (points: ReturnPoint[], width: number, height: number
 };
 
 export const RETURN_RANGES = [
-  // The last 24 hours (Bitcoin, gold and Futuros never close), as the Liga.
+  // The Liga's own ranges and numbers: 24 h and 7 d are the last 24 / 168
+  // hours (Bitcoin, gold and Futuros never close), Mes this calendar month,
+  // all up to now.
   { key: '24h', label: '24 h' },
   { key: '7d', label: '7 d' },
-  { key: '30d', label: '30 d' },
+  { key: 'month', label: 'Mes' },
   // All time, from the trade record (investorTotalReturn), not the daily chain.
   { key: 'all', label: 'Total' },
 ] as const;

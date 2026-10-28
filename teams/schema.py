@@ -9,7 +9,6 @@ name, size and their lock reason (and the top 3 of the league).
 from decimal import Decimal
 
 import graphene
-from django.utils import timezone
 from graphql_jwt.decorators import login_required
 
 from inbox import community, profile_pictures
@@ -373,11 +372,12 @@ class TeamsQuery(graphene.ObjectType):
             open_access = access == community.ACCESS_OPEN
             if not open_access:
                 risk = {}
-            elif range_key == '24h':
-                from inbox.rolling_returns import WINDOW
-
-                now = timezone.now()
-                risk = league.futures_risk_between([r.user_id for r in page], now - WINDOW, now)
+            elif league.is_live('investors', range_key):
+                # Over exactly the span each result covers.
+                risk = {}
+                for r in page:
+                    if r.start_at is not None and r.as_of is not None:
+                        risk.update(league.futures_risk_between([r.user_id], r.start_at, r.as_of))
             else:
                 risk = league.futures_risk_for_rows(page, league.window(range_key))
             for r in page:

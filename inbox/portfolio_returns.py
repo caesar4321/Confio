@@ -54,7 +54,8 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-RANGES = {'24h': 0, '7d': 7, '30d': 30}
+# '30d' stays for older app builds; current ones show 'month' (Mes).
+RANGES = {'24h': 0, '7d': 7, '30d': 30, 'month': None}
 BACKFILL_DAYS = 30
 MIN_BASE_USD = Decimal('1')
 # Relative to the units a symbol's trades moved: a buy's quote and the
@@ -792,11 +793,11 @@ def period_return(user, range_key: str, now: datetime | None = None) -> PeriodRe
     if not wallet:
         return None
     unknown = PeriodReturn(range_key=range_key, pct=None, gain_usd=None, as_of=None)
-    if range_key == '24h':
-        # The last 24 hours, not a UTC day: Bitcoin, gold and Futuros never close.
+    if range_key in ('24h', '7d', 'month'):
+        # Live, the Liga's own numbers (inbox/rolling_returns.py).
         from .rolling_returns import rolling
 
-        result = rolling(wallet, now, with_points=True)
+        result = rolling(wallet, now, with_points=True, range_key=range_key)
         if result is None:
             return unknown
         return PeriodReturn(range_key=range_key, pct=result.pct, gain_usd=result.gain, as_of=result.as_of,

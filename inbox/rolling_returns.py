@@ -1,21 +1,28 @@
-"""The rolling 24 h result: Liga's "24 h", the profile's line beside the
-total and Rentabilidad > 24 h. Bitcoin, gold and Futuros trade around the
-clock, so this is the last 24 hours, never a UTC day.
+"""Live results for the Liga and Rentabilidad, one engine for both: 24 h,
+7 d and Mes (the profile's line beside the total is the 24 h). Bitcoin,
+gold and Futuros trade around the clock, so 24 h and 7 d are the last
+24 / 168 hours, never UTC days, and every range runs up to now.
 
 Every SNAPSHOT_EVERY each investing wallet's sleeve is valued live and
 stored (PortfolioValueSnapshot) when the ledger explains the chain and
 nothing is on the wire. The result now is
 
-    gain = value now - value at the snapshot 24 h ago - money put in since
+    gain = value now - value at the range's start - money put in since
 
 (buys minus sells, Futuros margin out minus proceeds in), and the % is that
 over the money at work: the value it started with plus half of what came in
 (the league's convention, so the % always has the dollars' sign).
 
-Unknown is never a number: no snapshot near 24 h ago, one taken when the
-money moved before it differs from what the ledger says now (a trade
-confirmed or re-settled later), or anything the live value can't state
-makes it None.
+The start: the snapshot taken 24 h / 7 d ago (7 d falls back to the proven
+midnight before it while snapshots don't go back that far yet), or for Mes
+the proven close of the month's eve (PortfolioDailySnapshot). Total starts
+from nothing before the first trade: value now + everything sold -
+everything bought, its % over everything bought.
+
+Unknown is never a number: no snapshot or proven close at the start, one
+taken when the money moved before it differs from what the ledger says now
+(a trade confirmed or re-settled later), or anything the live value can't
+state makes it None.
 """
 from __future__ import annotations
 
@@ -29,17 +36,20 @@ from decimal import Decimal
 
 from django.utils import timezone
 
-from .portfolio_returns import (MIN_BASE_USD, CachedBlockTimes, PriceBook, Retry, Untrusted, _flows, live_value,
-                                trusted_ledger, wallets_to_snapshot)
+from .portfolio_returns import (DAY, MIN_BASE_USD, CachedBlockTimes, PriceBook, Retry, Untrusted, _flows, _is_shown,
+                                day_start, live_value, trusted_ledger, utc_today, wallets_to_snapshot)
 
 logger = logging.getLogger(__name__)
 
 WINDOW = timedelta(hours=24)
+WINDOWS = {'24h': WINDOW, '7d': timedelta(days=7)}
+# The ranges this engine states.
+LIVE_RANGES = ('24h', '7d', 'month', 'all')
 SNAPSHOT_EVERY = timedelta(minutes=10)
 # The starting snapshot may be this much older than 24 h ago (a run that
 # skipped a wallet): a little over 24 h, never a guess.
 START_TOLERANCE = timedelta(minutes=30)
-KEEP = timedelta(days=3)
+KEEP = timedelta(days=8)       # a 7 d start, with room
 Q6 = Decimal('0.000001')
 
 
@@ -103,6 +113,17 @@ def _perps_value(ledger, at: datetime, marks: dict) -> Decimal:
     return sum((equity_at(e, at, mark) for e in ledger.perps), Decimal('0'))
 
 
+def _check_landing(ledger) -> None:
+    """Futuros money back as dollars but not entered yet (proceeds landed,
+    or a refunded opening): the ledger still values it at what left or the
+    venue settled, not what arrived. Unknown until it enters, never the
+    wrong number."""
+    for ep in ledger.perps:
+        state = getattr(ep, 'state', None)
+        if state == 'landed' or (state == 'refunded' and getattr(ep, 'returned', None) is None):
+            raise Retry('Futuros money landing')
+
+
 def _snapshot_value(snap, ledger) -> Decimal:
     """What the sleeve was worth at the snapshot, Futuros re-valued on the
     episodes as the ledger has them now."""
@@ -120,6 +141,7 @@ def snapshot_wallet(user, wallet: str, now: datetime, prices: PriceBook) -> bool
         ledger = trusted_ledger(wallet, prices)
         if not ledger.all:
             return False
+        _check_landing(ledger)
         other, marks = _live_parts(ledger, now)
         value = other + _perps_value(ledger, now, marks)
     except (Retry, Untrusted) as exc:
@@ -154,48 +176,114 @@ def snapshot_all(*, budget_seconds: float) -> dict:
 
 # --- the result ----------------------------------------------------------------
 
-def rolling(wallet: str, now: datetime | None = None, prices: PriceBook | None = None,
-            with_points: bool = False) -> Rolling | None:
-    """The last 24 hours, or None when it can't be stated exactly. Block
-    times come from the cache only (a miss is unknown, never an RPC wait)."""
-    from .models import PortfolioValueSnapshot
+def _window_start(wallet: str, ledger, range_key: str, now: datetime) -> tuple[datetime, Decimal]:
+    """(start instant, sleeve value then) for a range. Raises Retry when it
+    can't be stated."""
+    from .models import PortfolioDailySnapshot, PortfolioValueSnapshot
 
+    today = utc_today(now)
+    if range_key in WINDOWS:
+        cutoff = now - WINDOWS[range_key]
+        if all(t.when >= cutoff for t in ledger.all):
+            return cutoff, Decimal('0')            # first trade inside the window
+        base = (PortfolioValueSnapshot.objects
+                .filter(wallet=wallet, at__lte=cutoff, at__gte=cutoff - START_TOLERANCE)
+                .order_by('-at').first())
+        if base is not None and base.ledger_sig == flow_signature(ledger, base.at):
+            return base.at, _snapshot_value(base, ledger)
+        if range_key == '24h':
+            raise Retry('no snapshot 24 h ago')
+        # Until snapshots go back far enough: from the midnight before.
+        start = day_start(utc_today(cutoff))
+    elif range_key == 'month':
+        start = day_start(today.replace(day=1))
+    else:
+        raise ValueError(range_key)
+    if all(t.when >= start for t in ledger.all):
+        return start, Decimal('0')
+    row = PortfolioDailySnapshot.objects.filter(wallet=wallet, day=start.date() - DAY).first()
+    if not _is_shown(row, ledger) or row.value_end_usd is None:
+        raise Retry(f'no proven close at {start.isoformat()}')
+    return start, row.value_end_usd
+
+
+def _points(wallet: str, ledger, range_key: str, start_at: datetime, value_start: Decimal, now: datetime) -> list:
+    """(instant, cumulative %) through the range: every proven midnight in
+    it, then the snapshots since (all of them over 24 h)."""
+    from .models import PortfolioDailySnapshot, PortfolioValueSnapshot
+
+    values = []
+    since = start_at
+    if range_key != '24h':
+        for row in PortfolioDailySnapshot.objects.filter(
+                wallet=wallet, day__gte=start_at.date(), day__lt=utc_today(now)).order_by('day'):
+            end = day_start(row.day + DAY)
+            if start_at < end < now and row.value_end_usd is not None and _is_shown(row, ledger):
+                values.append((end, row.value_end_usd))
+        since = max(start_at, day_start(utc_today(now)))
+    for snap in PortfolioValueSnapshot.objects.filter(wallet=wallet, at__gt=since, at__lt=now).order_by('at'):
+        if snap.ledger_sig == flow_signature(ledger, snap.at):
+            values.append((snap.at, _snapshot_value(snap, ledger)))
+    points = [(start_at, Decimal('0'))]
+    for at, value in values:
+        flow = _flows(ledger, start_at, at)
+        points.append((at, _pct(value - value_start - flow, _capital(value_start, flow))))
+    return points
+
+
+def results(wallet: str, ranges, now: datetime | None = None, prices: PriceBook | None = None,
+            with_points: bool = False) -> dict:
+    """{range: Rolling or None} for one wallet, read once. Block times come
+    from the cache only (a miss is unknown, never an RPC wait)."""
     now = now or timezone.now()
     prices = prices or CachedBlockTimes()
-    cutoff = now - WINDOW
+    out = {r: None for r in ranges}
     try:
         ledger = trusted_ledger(wallet, prices)
         if not ledger.all:
-            return None
-        if all(t.when >= cutoff for t in ledger.all):
-            # First trade inside the window: it started from nothing.
-            start_at, value_start = cutoff, Decimal('0')
-        else:
-            base = (PortfolioValueSnapshot.objects
-                    .filter(wallet=wallet, at__lte=cutoff, at__gte=cutoff - START_TOLERANCE)
-                    .order_by('-at').first())
-            if base is None or base.ledger_sig != flow_signature(ledger, base.at):
-                return None
-            start_at, value_start = base.at, _snapshot_value(base, ledger)
+            return out
+        _check_landing(ledger)
         value_end = live_value(ledger, now)
-        flow = _flows(ledger, start_at, now)
-        points = []
-        if with_points:
-            points.append((start_at, Decimal('0')))
-            for snap in (PortfolioValueSnapshot.objects.filter(wallet=wallet, at__gt=start_at, at__lt=now)
-                         .order_by('at')):
-                if snap.ledger_sig != flow_signature(ledger, snap.at):
-                    continue
-                flow_then = _flows(ledger, start_at, snap.at)
-                points.append((snap.at, _pct(_snapshot_value(snap, ledger) - value_start - flow_then,
-                                             _capital(value_start, flow_then))))
     except (Retry, Untrusted) as exc:
-        logger.info('rolling: no 24 h for %s: %s', wallet, exc)
+        logger.info('rolling: no result for %s: %s', wallet, exc)
+        return out
+    for range_key in ranges:
+        if range_key == 'all':
+            out['all'] = _total(ledger, value_end, now)
+            continue
+        try:
+            start_at, value_start = _window_start(wallet, ledger, range_key, now)
+            flow = _flows(ledger, start_at, now)
+            points = _points(wallet, ledger, range_key, start_at, value_start, now) if with_points else []
+        except (Retry, Untrusted) as exc:
+            logger.info('rolling: no %s for %s: %s', range_key, wallet, exc)
+            continue
+        gain = value_end - value_start - flow
+        capital = _capital(value_start, flow)
+        pct = _pct(gain, capital)
+        if with_points:
+            points.append((now, pct))
+        out[range_key] = Rolling(gain=gain, pct=pct, capital=capital, value_start=value_start, start_at=start_at,
+                                 as_of=now, points=points)
+    return out
+
+
+def _total(ledger, value_end: Decimal, now: datetime) -> Rolling | None:
+    """All time: nothing held before the first trade."""
+    first = min(t.when for t in ledger.all)
+    try:
+        flow = _flows(ledger, first, now)
+    except Untrusted:
         return None
-    gain = value_end - value_start - flow
-    capital = _capital(value_start, flow)
-    pct = _pct(gain, capital)
-    if with_points:
-        points.append((now, pct))
-    return Rolling(gain=gain, pct=pct, capital=capital, value_start=value_start, start_at=start_at, as_of=now,
-                   points=points)
+    bought = sum((t.usd for t in ledger.all if t.kind.endswith('_buy') and t.when < now), Decimal('0'))
+    gain = value_end - flow
+    pct = gain / bought * 100 if bought >= MIN_BASE_USD else Decimal('0')
+    return Rolling(gain=gain, pct=pct, capital=bought, value_start=Decimal('0'), start_at=first, as_of=now,
+                   points=[(first, Decimal('0')), (now, pct)])
+
+
+def rolling(wallet: str, now: datetime | None = None, prices: PriceBook | None = None,
+            with_points: bool = False, range_key: str = '24h') -> Rolling | None:
+    """One range (the last 24 hours by default), or None when it can't be
+    stated exactly."""
+    return results(wallet, [range_key], now, prices, with_points)[range_key]

@@ -1166,11 +1166,15 @@ def build_investor_total_return(viewer, user_id):
     target = _portfolio_target(viewer, user_id)
     if target is None:
         return None
-    result = member_portfolio.total_return(target)
+    from .rolling_returns import rolling
+
+    # The Liga's own Total (inbox/rolling_returns.py).
+    wallet = member_portfolio.personal_wallet(target)
+    result = rolling(wallet, range_key='all') if wallet else None
     if result is None:
         return InvestorTotalReturnType()
-    return InvestorTotalReturnType(pct=_pct(result.pct), gain_usd=_money(result.gain_usd),
-                                   invested_usd=_money(result.invested_usd), since=result.since)
+    return InvestorTotalReturnType(pct=_pct(result.pct), gain_usd=_money(result.gain),
+                                   invested_usd=_money(result.capital), since=result.start_at.date())
 
 
 def build_investor_returns(viewer, user_id, range_key):
