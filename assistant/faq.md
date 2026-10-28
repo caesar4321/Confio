@@ -124,6 +124,16 @@
 - Acciones de EE.UU.: acciones digitales emitidas por Ondo.
 - Monto mínimo: desde US$1,01 para comprar cualquier acción o ETF de la lista (igual para todas) y US$1 para vender. Ese mínimo es de acciones; para empezar a ahorrar en Confío Dollar+ el mínimo es el de la recarga, que muestra la app.
 - Bitcoin: en Confío no se compra BTC directamente, pero la lista de acciones puede incluir ETF ligados a Bitcoin (por ejemplo IBIT, iShares Bitcoin Trust). Búscalo con `get_stock_quote` antes de decir que no está.
+
+## Futuros
+- Están en Invertir → Futuros (desde la versión 5.2.9 de la app; si no los ve, que actualice Confío). Abres una posición en largo (ganas si el precio sube) o en corto (ganas si baja), con apalancamiento, en cripto, acciones, índices, materias primas y divisas, las 24 horas. No son contratos de opciones.
+- Se opera en Hyperliquid, con tu propia llave: Confío no firma por ti ni guarda tu dinero. Una posición abierta a la vez.
+- Margen mínimo US$10 (US$12 la primera vez). El apalancamiento llega hasta el máximo de cada mercado; la app empieza en 2x.
+- Costos: 0,9% de Confío cuando el margen sale de tus dólares y 0,9% cuando vuelve, un costo pequeño de transferencia entre redes, la comisión de Hyperliquid, y US$1,20 una sola vez para activar tu cuenta de Hyperliquid. El financiamiento se paga o se cobra cada hora.
+- Riesgo: si el precio llega al nivel de liquidación, Hyperliquid cierra tu posición y pierdes el margen. Puedes perder todo lo que pongas. Antes de la primera operación ves un aviso de riesgos.
+- No disponible en Estados Unidos, Canadá, Reino Unido, Bélgica, Cuba, Irán, Corea del Norte y Siria. Cerrar una posición siempre se puede.
+- Al cerrar, el dinero vuelve a tus dólares cuando confirmas en la app.
+- Nunca recomiendes abrir una posición, un mercado o un apalancamiento; explica cómo funciona y sus riesgos.
 - Ahorrar e invertir son distintos: Confío Dollar+ es ahorro (rendimiento diario variable, el saldo no sube y baja como una acción); las acciones y ETF son inversión (su precio sube y baja y puedes perder). La app no tiene un botón para pasar Confío Dollar a Confío Dollar+: se ahorra en Confío Dollar+ al recargar con "Para ahorrar e invertir" (o al recibir USDT por BNB Smart Chain) si está disponible para ti. Si Confío Dollar+ está disponible para ti, todo lo que recargas llega como Confío Dollar+: no se elige recibir Confío Dollar.
 - Antiguo Confío Dollar (cUSD): no se convierte al nuevo. Para usar ese dinero, retíralo a tu cuenta (Enviar → A mi propia cuenta → "Desde mi cUSD") y vuelve a recargar (Recibir → Recargar ahora → "Para ahorrar e invertir"). Si lo que tienes es menos que el mínimo para retirar, complétalo con Recibir → Recargar ahora → "Al antiguo Confío Dollar". En Bolivia todavía no se puede retirar a bolivianos.
 
