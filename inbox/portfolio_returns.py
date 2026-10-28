@@ -320,10 +320,45 @@ class PriceBook:
         return vouched
 
     def block_time(self, block: int) -> datetime | None:
+        from django.core.cache import cache
+
         from cusd_plus.fee_ledger import block_time
         from cusd_plus.tasks import _rpc
 
-        return block_time(_rpc, block, self._block_times)
+        when = _cached_block_time(block)
+        if when is not None:
+            return when
+        when = block_time(_rpc, block, self._block_times)
+        if when is not None:
+            try:
+                cache.set(_block_time_key(block), when.timestamp(), timeout=None)
+            except Exception:  # noqa: BLE001
+                pass
+        return when
+
+
+class CachedBlockTimes(PriceBook):
+    """Block times from the cache only (a miss is unknown, never an RPC
+    wait): for reads inside a request."""
+
+    def block_time(self, block: int) -> datetime | None:
+        return _cached_block_time(block)
+
+
+# A block's time never changes: once read (every nightly run reads each
+# near-midnight trade's), a profile view needs no RPC for it.
+def _block_time_key(block: int) -> str:
+    return f'returns:block_time:{block}'
+
+
+def _cached_block_time(block: int) -> datetime | None:
+    from django.core.cache import cache
+
+    try:
+        stamp = cache.get(_block_time_key(block))
+    except Exception:  # noqa: BLE001
+        return None
+    return None if stamp is None else datetime.fromtimestamp(stamp, tz=dt_timezone.utc)
 
 
 # --- ledger and trust -------------------------------------------------------
@@ -579,6 +614,36 @@ def today_partial(wallet: str, now: datetime, prices: PriceBook | None = None) -
     gain, ret = dietz(value_start, value_end, flow)
     return Day(day=start.date(), value_start=value_start, value_end=value_end, net_flow=flow, gain=gain,
                daily_return=ret)
+
+
+def today_gain(wallet: str, now: datetime | None = None, prices: PriceBook | None = None) -> Decimal | None:
+    """today_partial's gain without re-pricing last night: the value at
+    00:00 UTC is yesterday's stored value_end (the same closes, already
+    proven), so no candle is fetched, and block times come from the cache
+    only. None when that day isn't stored and shown on this very ledger, or
+    anything else is unknown."""
+    from .models import PortfolioDailySnapshot
+
+    now = now or datetime.now(dt_timezone.utc)
+    prices = prices or CachedBlockTimes()
+    try:
+        ledger = trusted_ledger(wallet, prices)
+        if not ledger.all:
+            return None
+        start = day_start(utc_today(now))
+        if any(t.when < start for t in ledger.all):
+            row = PortfolioDailySnapshot.objects.filter(wallet=wallet, day=(start - DAY).date()).first()
+            if not _is_shown(row, ledger) or row.value_end_usd is None:
+                return None
+            value_start = row.value_end_usd
+        else:
+            value_start = Decimal('0')      # first trade today
+        value_end = live_value(ledger, now)
+        flow = _flows(ledger, start, now)
+    except (Retry, Untrusted) as exc:
+        logger.info('returns: no today gain for %s: %s', wallet, exc)
+        return None
+    return value_end - value_start - flow
 
 
 # --- storage ----------------------------------------------------------------

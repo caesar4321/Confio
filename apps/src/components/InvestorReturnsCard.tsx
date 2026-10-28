@@ -19,12 +19,7 @@ const CHART_HEIGHT = 120;
 const GAIN = colors.successText;
 const LOSS = colors.error.icon;
 
-type Props = {
-  userId: string;
-  refreshKey?: number;
-  /** Today's result in dollars (Hoy), for the portfolio's "hoy" line: null when unknown. */
-  onToday?: (gainUsd: string | null) => void;
-};
+type Props = { userId: string; refreshKey?: number };
 
 /**
  * "Rentabilidad": the member's return on what they invested (stocks, Bitcoin
@@ -32,7 +27,7 @@ type Props = {
  * under it and a line. Unknown is "--", never 0. Renders nothing when the
  * server doesn't answer (older server, not visible to this viewer).
  */
-export function InvestorReturnsCard({ userId, refreshKey = 0, onToday }: Props) {
+export function InvestorReturnsCard({ userId, refreshKey = 0 }: Props) {
   const client = useApolloClient();
   const [range, setRange] = useState<ReturnRange>('7d');
   const [byRange, setByRange] = useState<Partial<Record<ReturnRange, Returns | null>>>({});
@@ -73,7 +68,6 @@ export function InvestorReturnsCard({ userId, refreshKey = 0, onToday }: Props) 
         });
         if (generation.current !== requested) return;
         const value = (data?.investorReturns ?? null) as Returns | null;
-        if (key === '24h') reportToday(value);
         // null = not visible to this viewer (or no wallet): no card at all.
         if (value === null) setHidden(true);
         setByRange((current) => ({ ...current, [key]: value }));
@@ -94,38 +88,6 @@ export function InvestorReturnsCard({ userId, refreshKey = 0, onToday }: Props) 
     setHidden(false);
     void load(range);
     // Only a new member or an explicit refresh resets every range.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, refreshKey]);
-
-  // Hoy for the portfolio's "hoy" line: its own read, whatever tab is shown,
-  // so the profile states one result for today.
-  const todayGeneration = useRef(0);
-  // One Hoy result for both displays: whichever read is newest wins.
-  const reportToday = (value: Returns | null) => {
-    if (!onToday) return;
-    todayGeneration.current += 1;
-    onToday(value && value.pct !== null && value.pct !== undefined ? value.gainUsd ?? null : null);
-  };
-  useEffect(() => {
-    if (!onToday) return undefined;
-    todayGeneration.current += 1;
-    const requested = todayGeneration.current;
-    onToday(null);
-    client.query({
-      query: GET_INVESTOR_RETURNS,
-      variables: { userId, range: '24h' },
-      fetchPolicy: 'network-only',
-      context: { queryDeduplication: false },
-    })
-      .then(({ data }) => {
-        if (todayGeneration.current !== requested) return;
-        const today = (data?.investorReturns ?? null) as Returns | null;
-        reportToday(today);
-        // The Hoy tab shows the very same result until it is read again.
-        if (today) setByRange((current) => (current['24h'] === undefined ? { ...current, '24h': today } : current));
-      })
-      .catch(() => { if (todayGeneration.current === requested) onToday(null); });
-    return () => { todayGeneration.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, refreshKey]);
 

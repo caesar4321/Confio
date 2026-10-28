@@ -1204,6 +1204,17 @@ def _portfolio_target(viewer, user_id):
     return target
 
 
+def _today_gain(target):
+    from . import portfolio_returns
+
+    try:
+        wallet = member_portfolio.personal_wallet(target)
+        return portfolio_returns.today_gain(wallet) if wallet else None
+    except Exception:  # noqa: BLE001 — "hoy" unknown, never the whole profile
+        logger.warning('portfolio: today gain failed', exc_info=True)
+        return None
+
+
 def build_member_portfolio(viewer, user_id):
     target = _portfolio_target(viewer, user_id)
     if target is None:
@@ -1218,11 +1229,10 @@ def build_member_portfolio(viewer, user_id):
         total_usd=_money(portfolio.total_usd),
         dollars_usd=_money(portfolio.dollars_usd),
         stocks_usd=_money(portfolio.stocks_usd),
-        # Retired: the market's 24 h move on what is held now credited moves
-        # before a same-day buy and missed same-day sales, so it could even
-        # disagree in sign with the member's real day. The app shows
-        # Rentabilidad > Hoy's result instead (its own query, off this path).
-        stocks_change_24h_usd=None,
+        # The member's own day (Rentabilidad > Hoy), not the market's 24 h
+        # move on what is held now: that credited moves before a same-day
+        # buy and missed same-day sales.
+        stocks_change_24h_usd=_money(_today_gain(target)),
         presale_confio=_money(portfolio.presale_confio),
         presale_invested_usd=_money(portfolio.presale_invested_usd),
         trade_count=portfolio.trade_count,
