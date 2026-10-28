@@ -1304,7 +1304,8 @@ def _identity_status(viewer):
 
 
 _PROMISED_CHECK = re.compile(
-    r'\b(necesito|tengo que|voy a|debo|primero|d[eé]jame|antes)\s+(revisar|reviso|ver|consultar|mirar|revise)\b'
+    r'(\b(necesito|tengo que|voy a|debo|primero|d[eé]jame|antes)\s+(revisar|reviso|ver|consultar|mirar|revise)\b'
+    r'|\b(revisar[eé]|consultar[eé]|mirar[eé]|ver[eé])\b)'
     r'[^.]*\b(portafolio|cartera|saldo|cuenta|n[uú]meros|gastos)', re.I)
 RETRY_NOTE = ('\n# Revisa antes de contestar\nLlama get_portfolio antes de responder (si no lo llamaste ya) y '
               'contesta con sus datos. Nunca digas que vas a revisar algo: revísalo con la herramienta y contesta.\n')

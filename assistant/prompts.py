@@ -173,6 +173,10 @@ NO_RAMP_NOTE = ('En su país hoy no hay Recargar ni Retirar en la app: no le dig
 # unverified and kept hearing "Recibir → Recargar ahora" (2026-10-21).
 IDENTITY_ES = {'verified': 'verificada', 'other_country': 'verificada con un documento de otro país',
                'pending': 'iniciada, sin aprobar todavía', 'rejected': 'rechazada', 'unverified': 'sin verificar'}
+# Receiving USDT on Recibir → Avanzado has no identity gate; "verify first" there
+# turned away people who already hold USDT.
+USDT_NO_KYC_NOTE = ('Recibir USDT desde Binance u otra billetera (Recibir → Avanzado) no necesita verificación: '
+                    'no se la pidas para eso.\n')
 IDENTITY_NOTES = {
     'unverified': ('Para recargar necesita verificar su identidad. Si pregunta cómo recargar o poner sus primeros '
                    'dólares, dile primero que verifique su identidad en Perfil → Verificación y que después '
@@ -205,7 +209,7 @@ def build_system_prompt(*, first_name, account_label, country, screen, local_now
         # Where there is no Recargar (Venezuela…), "verify, then top up" would
         # contradict the rails note.
         identity_note=('' if (country or '').upper() in NO_RAMP_COUNTRIES and not ve_topup
-                       else IDENTITY_NOTES.get(identity, '')),
+                       else IDENTITY_NOTES.get(identity, '') and IDENTITY_NOTES[identity] + USDT_NO_KYC_NOTE),
         rails_note=(VE_TOPUP_LIVE_NOTE if (country or '').upper() == 'VE' and ve_topup == 'live'
                     else VE_TOPUP_UPDATE_NOTE if (country or '').upper() == 'VE' and ve_topup == 'update'
                     else VE_RAMP_NOTE if (country or '').upper() == 'VE'

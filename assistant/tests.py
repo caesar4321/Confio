@@ -972,6 +972,8 @@ class PromisedCheckRetryTests(TestCase):
         checked = TurnResult(reply='Necesito revisar tu portafolio.', tools=[{'name': 'get_portfolio', 'ok': True}])
         self.assertFalse(_promised_unchecked_portfolio(belt, checked))
         self.assertFalse(_promised_unchecked_portfolio(belt, TurnResult(reply='Confío Dollar+ rinde 3,18% anual.')))
+        future = TurnResult(reply='Para orientarte según lo que ya tienes, revisaré tu cartera.')
+        self.assertTrue(_promised_unchecked_portfolio(belt, future))
         belt.force_tool = 'get_portfolio'  # never a second retry
         self.assertFalse(_promised_unchecked_portfolio(belt, promised))
 
@@ -984,6 +986,8 @@ class IdentityInPromptTests(TestCase):
         unverified = build_system_prompt(identity='unverified', **common)
         self.assertIn('Identidad: sin verificar.', unverified)
         self.assertIn('Perfil → Verificación', unverified)
+        self.assertIn('Recibir USDT', unverified)  # Avanzado has no identity gate
+        self.assertNotIn('Recibir USDT', build_system_prompt(identity='verified', **common))
         verified = build_system_prompt(identity='verified', **common)
         self.assertIn('Identidad: verificada.', verified)
         self.assertNotIn('necesita verificar su identidad', verified)
