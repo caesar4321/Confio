@@ -14,7 +14,7 @@ from django.db.models.functions import Coalesce
 from datetime import timedelta
 from decimal import Decimal
 
-from .models_analytics import DailyMetrics, CountryMetrics, FunnelEvent, FunnelDailyRollup
+from .models_analytics import DailyMetrics, CountryMetrics, FunnelEvent, FunnelDailyRollup, UserActivityDay
 from .models import User
 from .analytics import count_all_signups_for_date
 
@@ -502,3 +502,20 @@ class LocalRailWaitlistEntryAdmin(admin.ModelAdmin):
     ordering = ('-created_at',)
     raw_id_fields = ('user',)
     readonly_fields = ('created_at',)
+
+
+class UserActivityDayAdmin(admin.ModelAdmin):
+    list_display = ('day', 'user', 'first_seen_at')
+    list_filter = ('day',)
+    search_fields = ('user__username', 'user__phone_number')
+    date_hierarchy = 'day'
+    ordering = ('-day', '-first_seen_at')
+    raw_id_fields = ('user',)
+    readonly_fields = ('user', 'day', 'first_seen_at')
+    list_select_related = ('user',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

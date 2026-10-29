@@ -1,8 +1,9 @@
 """
-GraphQL middleware to automatically track user activity on mutations
+GraphQL middleware to automatically track user activity
 
-This middleware automatically calls touch_last_activity() for all authenticated mutations,
-ensuring comprehensive activity tracking without manual calls in every mutation.
+This middleware calls touch_last_activity() for every authenticated query and
+mutation, so opening the app counts as activity (the usual DAU/MAU definition),
+not only actions that change something.
 """
 
 from graphql import GraphQLResolveInfo, OperationType
@@ -11,30 +12,28 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+TRACKED_OPERATIONS = (OperationType.QUERY, OperationType.MUTATION)
+
 
 class ActivityTrackingMiddleware:
     """
-    Middleware that tracks user activity on GraphQL mutations.
+    Middleware that tracks user activity on authenticated GraphQL requests.
 
-    This automatically updates last_activity_at for all authenticated mutations,
-    providing comprehensive DAU/MAU tracking without requiring manual calls
-    in every mutation resolver.
-
-    Important: Only mutations are tracked, not queries.
-    This ensures we track meaningful user actions, not just data fetching.
+    Queries count too: a member who opens the app and only reads a balance is
+    an active user. Subscriptions do not, since a held-open socket is not a
+    visit. touch_last_activity() keeps a per-user cooldown, so this costs at
+    most one write per user every few minutes.
     """
 
     def resolve(self, next, root, info: GraphQLResolveInfo, **args):
         # Get the result first
         result = next(root, info, **args)
 
-        # Only track on mutations (not queries). graphql-core 3 gives an
-        # OperationType enum here; comparing it to the string 'mutation' was
-        # never equal, so no mutation ever touched last_activity_at.
-        if info.operation.operation != OperationType.MUTATION:
+        # graphql-core 3 gives an OperationType enum here, not a string.
+        if info.operation.operation not in TRACKED_OPERATIONS:
             return result
 
-        # Middleware runs for every field; touch once per root mutation field,
+        # Middleware runs for every field; touch once per root field,
         # not once per nested field of its payload.
         if info.path.prev is not None:
             return result
@@ -43,12 +42,16 @@ class ActivityTrackingMiddleware:
         context = info.context
         user = getattr(context, 'user', None)
 
+        # A request with several root fields touches once.
+        if getattr(context, '_activity_tracked', False) is True:
+            return result
+
         if user and user.is_authenticated:
-            # Track activity asynchronously to avoid blocking the mutation
             try:
+                context._activity_tracked = True
                 touch_last_activity(user)
             except Exception as e:
-                # Log error but don't fail the mutation
+                # Log error but don't fail the request
                 logger.error(f"Failed to track activity for user {user.id}: {e}")
 
         return result

@@ -1030,12 +1030,13 @@ confio_admin_site.register(CusdPlusHoldingSnapshot, CusdPlusHoldingSnapshotAdmin
 confio_admin_site.register(UnifiedUSDCTransactionTable, UnifiedUSDCTransactionAdmin)
 
 # Analytics models
-from users.models_analytics import DailyMetrics, CountryMetrics, FunnelEvent, FunnelDailyRollup
-from users.admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin, FunnelEventAdmin, FunnelDailyRollupAdmin
+from users.models_analytics import DailyMetrics, CountryMetrics, FunnelEvent, FunnelDailyRollup, UserActivityDay
+from users.admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin, FunnelEventAdmin, FunnelDailyRollupAdmin, UserActivityDayAdmin
 confio_admin_site.register(DailyMetrics, DailyMetricsAdmin)
 confio_admin_site.register(CountryMetrics, CountryMetricsAdmin)
 confio_admin_site.register(FunnelEvent, FunnelEventAdmin)
 confio_admin_site.register(FunnelDailyRollup, FunnelDailyRollupAdmin)
+confio_admin_site.register(UserActivityDay, UserActivityDayAdmin)
 from users.models_rail_waitlist import LocalRailWaitlistEntry
 from users.admin_analytics import LocalRailWaitlistEntryAdmin
 confio_admin_site.register(LocalRailWaitlistEntry, LocalRailWaitlistEntryAdmin)

@@ -9,7 +9,11 @@ Activity Definition (what counts as "active"):
 - Financial actions (send, payment, conversion, P2P trade)
 - P2P interactions (messages, trade confirmations)
 - Achievement earnings
-- Any other meaningful app interaction
+- Any authenticated GraphQL query or mutation (opening the app counts)
+
+Each touch also records a UserActivityDay row (one per member per day), which
+is what D1/D7 retention is measured from; last_activity_at only keeps the
+latest visit.
 
 This unified approach ensures:
 1. Consistent DAU/MAU/WAU calculations across all dashboards
@@ -21,6 +25,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.core.cache import cache
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,6 +33,53 @@ logger = logging.getLogger(__name__)
 
 # Minimum interval between updates (prevents excessive DB writes)
 ACTIVITY_UPDATE_COOLDOWN = timedelta(minutes=5)
+
+# Calendar day used for UserActivityDay. Most members live in UTC-3..-6, so a
+# fixed UTC-4 day keeps a LATAM evening on one day instead of splitting at
+# 8 p.m. Bolivia time, as a UTC day would.
+ACTIVITY_DAY_TZ = ZoneInfo('America/La_Paz')
+ACTIVITY_DAY_CACHE_TTL = int(timedelta(hours=26).total_seconds())
+
+
+def activity_day(ts):
+    return timezone.localtime(ts, ACTIVITY_DAY_TZ).date()
+
+
+def record_activity_day(user_id, ts=None):
+    """Insert the member's UserActivityDay row for ts's day, once per day.
+
+    Never raises: activity tracking must not break the request or the
+    transaction that triggered it (the insert runs in its own savepoint).
+    The cache marker is set only once the row is committed, so a rolled-back
+    caller or a failed insert leaves the day free to be recorded again.
+    """
+    from users.models_analytics import UserActivityDay
+
+    if not user_id:
+        return False
+    ts = ts or timezone.now()
+    day = activity_day(ts)
+    cache_key = f"activity_day:{user_id}:{day.isoformat()}"
+    try:
+        if cache.get(cache_key):
+            return False
+        with transaction.atomic():
+            UserActivityDay.objects.bulk_create(
+                [UserActivityDay(user_id=user_id, day=day, first_seen_at=ts)],
+                ignore_conflicts=True,
+            )
+        transaction.on_commit(lambda: _mark_activity_day(cache_key))
+        return True
+    except Exception as e:
+        logger.error(f"Failed to record activity day for user {user_id}: {e}")
+        return False
+
+
+def _mark_activity_day(cache_key):
+    try:
+        cache.set(cache_key, True, timeout=ACTIVITY_DAY_CACHE_TTL)
+    except Exception as e:
+        logger.error(f"Failed to cache activity day {cache_key}: {e}")
 
 
 def touch_last_activity(user, ts=None, force=False):
@@ -66,18 +118,17 @@ def touch_last_activity(user, ts=None, force=False):
     # Use provided timestamp or current time
     ts = ts or timezone.now()
 
-    # Cooldown check to prevent excessive updates
-    # Uses cache to track recent updates without hitting DB
-    if not force:
-        cache_key = f"last_activity_touch:{user_id}"
-        last_touch = cache.get(cache_key)
+    # The day row has its own once-a-day marker, so it runs outside the
+    # cooldown: a visit at 23:59 must not hide one at 00:01.
+    record_activity_day(user_id, ts)
 
-        if last_touch:
+    # Cooldown check to prevent excessive updates. cache.add is an atomic
+    # claim, so concurrent requests from one member write at most once.
+    cache_key = f"last_activity_touch:{user_id}"
+    if not force:
+        if not cache.add(cache_key, True, timeout=int(ACTIVITY_UPDATE_COOLDOWN.total_seconds())):
             # Already updated recently, skip
             return False
-
-        # Set cache for cooldown period
-        cache.set(cache_key, True, timeout=int(ACTIVITY_UPDATE_COOLDOWN.total_seconds()))
 
     # Update last_activity_at
     # Using update() instead of save() to avoid:
@@ -96,6 +147,9 @@ def touch_last_activity(user, ts=None, force=False):
 
     except Exception as e:
         logger.error(f"Failed to update last_activity_at for user {user_id}: {e}")
+        # Free the cooldown so the next request retries the write.
+        if not force:
+            cache.delete(cache_key)
         return False
 
 
@@ -183,7 +237,7 @@ The following actions should call touch_last_activity():
 1. Authentication & Sessions
    - Login (Firebase Auth)
    - Session recovery with valid JWT
-   - Any authenticated GraphQL mutation
+   - Any authenticated GraphQL query or mutation
 
 2. Financial Actions (Critical - always track)
    - Send transaction created/completed
@@ -208,6 +262,6 @@ The following actions should call touch_last_activity():
    - Employee invitation sent/accepted
    - Payroll run created
 
-Note: Pure read operations (queries) should NOT update activity,
-only mutations that represent meaningful user engagement.
+Note: authenticated queries count as activity (an app open is a visit).
+Subscriptions do not.
 """

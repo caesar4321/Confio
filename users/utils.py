@@ -14,5 +14,7 @@ def touch_user_activity(user_id, when=None):
             User.objects.filter(id=user_id).update(last_activity_at=when)
     except (ProgrammingError, OperationalError):
         # Column may not exist yet if migrations aren't applied
-        pass
+        return
+    from .activity_tracking import record_activity_day
+    record_activity_day(user_id, when)
 

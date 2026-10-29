@@ -1296,6 +1296,7 @@ from .models_analytics import (  # noqa: F401
     CountryMetrics,
     FunnelEvent,
     FunnelDailyRollup,
+    UserActivityDay,
 )
 
 # Waitlist behind the "Próximamente" local rail rows

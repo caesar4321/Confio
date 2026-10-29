@@ -417,3 +417,31 @@ class FunnelDailyRollup(models.Model):
             f"{self.source_type or '??'}/{self.channel or '??'}/{self.cohort or '??'}"
         )
         return f"{self.date} · {self.event_name} · {seg} · {self.count}"
+
+
+class UserActivityDay(models.Model):
+    """One row per member per day they used the app (D1/D7 retention).
+
+    User.last_activity_at only keeps the latest visit, so a D7 return erases
+    whether the member came back on D1. Written by users.activity_tracking
+    alongside last_activity_at. `day` is the calendar day in
+    ACTIVITY_DAY_TZ (America/La_Paz, UTC-4), so a LATAM evening is not split
+    across two UTC days.
+    """
+
+    user = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='activity_days',
+    )
+    day = models.DateField(db_index=True)
+    first_seen_at = models.DateTimeField(help_text="First activity of the day.")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'day'], name='unique_user_activity_day'),
+        ]
+        ordering = ['-day']
+
+    def __str__(self):
+        return f"{self.user_id} @ {self.day}"
