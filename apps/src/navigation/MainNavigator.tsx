@@ -66,6 +66,7 @@ import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
 import { EmergencyExitScreen } from '../screens/EmergencyExitScreen';
 import { BlockedAccountScreen } from '../screens/BlockedAccountScreen';
 import { SendToFriendScreen } from '../screens/SendToFriendScreen';
+import { LinkClaimScreen } from '../screens/LinkClaimScreen';
 import { FriendDetailScreen } from '../screens/FriendDetailScreen';
 import { EmployeeDetailScreen } from '../screens/EmployeeDetailScreen';
 import { EmployeeEditScreen } from '../screens/EmployeeEditScreen';
@@ -628,6 +629,11 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="SendToFriend"
           component={SendToFriendScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="LinkClaim"
+          component={LinkClaimScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen

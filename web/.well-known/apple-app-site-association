@@ -7,7 +7,8 @@
         "paths": [
           "/verify/*",
           "/pay/*",
-          "/invite/*"
+          "/invite/*",
+          "/r/*"
         ]
       }
     ]

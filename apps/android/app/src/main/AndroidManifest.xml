@@ -111,6 +111,7 @@
             <data android:scheme="http" android:host="confio.lat" android:pathPrefix="/pay" />
             <data android:scheme="https" android:host="confio.lat" android:pathPrefix="/invite" />
             <data android:scheme="http" android:host="confio.lat" android:pathPrefix="/invite" />
+            <data android:scheme="https" android:host="confio.lat" android:pathPrefix="/r/" />
         </intent-filter>
       </activity>
     </application>

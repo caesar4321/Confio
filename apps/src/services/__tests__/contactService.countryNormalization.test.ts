@@ -14,6 +14,14 @@ jest.mock('react-native-keychain', () => ({
   setInternetCredentials: (...args: any[]) => mockSetInternetCredentials(...args),
 }));
 
+// The old discovery path loaded this module lazily to query the server. Record
+// any load so the test can prove the sync never reaches for it again.
+const mockDiscoveryQueriesLoaded = jest.fn();
+jest.mock('../../apollo/queries', () => {
+  mockDiscoveryQueriesLoaded();
+  return { CHECK_USERS_BY_PHONES: {} };
+});
+
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
   PermissionsAndroid: {
@@ -47,18 +55,16 @@ describe('contact country normalization', () => {
   });
 
   it('does not guess a country before the verified user region is available', async () => {
-    const apolloClient = { query: jest.fn() };
-
-    await expect(contactService.syncContacts(apolloClient)).resolves.toBe(false);
+    await expect(contactService.syncContacts()).resolves.toBe(false);
     expect(mockGetAll).not.toHaveBeenCalled();
-    expect(apolloClient.query).not.toHaveBeenCalled();
+    expect(mockSetInternetCredentials).not.toHaveBeenCalled();
   });
 
   it('rejects an unsupported two-letter region instead of accepting it as a country', async () => {
     setDefaultPhoneRegion('XX');
 
     expect(hasDefaultPhoneRegion()).toBe(false);
-    await expect(contactService.syncContacts({ query: jest.fn() })).resolves.toBe(false);
+    await expect(contactService.syncContacts()).resolves.toBe(false);
     expect(mockGetAll).not.toHaveBeenCalled();
   });
 
@@ -68,10 +74,9 @@ describe('contact country normalization', () => {
       setDefaultPhoneRegion('VE');
       return [];
     });
-    const query = jest.fn();
 
-    await expect(contactService.syncContacts({ query })).resolves.toBe(false);
-    expect(query).not.toHaveBeenCalled();
+    await expect(contactService.syncContacts()).resolves.toBe(false);
+    expect(mockSetInternetCredentials).not.toHaveBeenCalled();
   });
 
   it('uses the user country for national numbers and preserves explicit international numbers', async () => {
@@ -92,39 +97,19 @@ describe('contact country normalization', () => {
         hasThumbnail: false,
       },
     ]);
-    const query = jest.fn().mockImplementation(({ variables }) => Promise.resolve({
-      data: {
-        checkUsersByPhones: variables.phoneNumbers.map((phoneNumber: string, index: number) => ({
-          phoneNumber,
-          userId: `user-${index}`,
-          username: `user${index}`,
-          firstName: index === 0 ? 'Cuenta local' : 'Cuenta extranjera',
-          lastName: '',
-          isOnConfio: true,
-          activeAccountAlgorandAddress: `address-${index}`,
-        })),
-      },
-    }));
 
-    await expect(contactService.syncContacts({ query })).resolves.toBe(true);
+    await expect(contactService.syncContacts()).resolves.toBe(true);
 
-    expect(query).toHaveBeenCalledWith(expect.objectContaining({
-      variables: { phoneNumbers: ['+573132587634', '+584121234567'] },
-    }));
     const stored = await contactService.getAllContacts();
-    expect(stored.find(contact => contact.id === 'local')).toEqual(expect.objectContaining({
-      confioMatchedPhone: '+573132587634',
-      confioMatchWasInferred: true,
-      confioFirstName: 'Cuenta local',
-    }));
-    expect(stored.find(contact => contact.id === 'international')).toEqual(expect.objectContaining({
-      confioMatchedPhone: '+584121234567',
-      confioMatchWasInferred: false,
-      confioFirstName: 'Cuenta extranjera',
-    }));
+    const local = stored.find(contact => contact.id === 'local');
+    const international = stored.find(contact => contact.id === 'international');
+    expect(local?.normalizedPhones).toContain('+573132587634');
+    expect(local?.inferredE164Phones).toEqual(['+573132587634']);
+    expect(international?.normalizedPhones).toContain('+584121234567');
+    expect(international?.inferredE164Phones).toEqual([]);
   });
 
-  it('does not upload a countryless number that parses into a different calling plan', async () => {
+  it('does not store a countryless number that parses into a different calling plan as a full number', async () => {
     setDefaultPhoneRegion('CO');
     mockGetAll.mockResolvedValue([{
       recordID: 'ambiguous-idd',
@@ -133,11 +118,9 @@ describe('contact country normalization', () => {
       phoneNumbers: [{ number: '0058 412 123 4567' }],
       hasThumbnail: false,
     }]);
-    const query = jest.fn();
 
-    await expect(contactService.syncContacts({ query })).resolves.toBe(true);
+    await expect(contactService.syncContacts()).resolves.toBe(true);
 
-    expect(query).not.toHaveBeenCalled();
     const stored = await contactService.getAllContacts();
     expect(stored).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -146,42 +129,8 @@ describe('contact country normalization', () => {
       }),
     ]));
     expect(stored[0].normalizedPhones).not.toContain('+84121234567');
-  });
-
-  it('separates one device contact whose phone numbers belong to different Confío users', async () => {
-    setDefaultPhoneRegion('CO');
-    mockGetAll.mockResolvedValue([{
-      recordID: 'shared',
-      givenName: 'Familia',
-      familyName: 'Pérez',
-      phoneNumbers: [{ number: '313 258 7634' }, { number: '+58 412 123 4567' }],
-      hasThumbnail: false,
-    }]);
-    const query = jest.fn().mockImplementation(({ variables }) => Promise.resolve({
-      data: {
-        checkUsersByPhones: variables.phoneNumbers.map((phoneNumber: string, index: number) => ({
-          phoneNumber,
-          userId: `recipient-${index}`,
-          username: `recipient${index}`,
-          firstName: `Recipient ${index}`,
-          lastName: '',
-          isOnConfio: true,
-        })),
-      },
-    }));
-
-    await expect(contactService.syncContacts({ query })).resolves.toBe(true);
-
-    const stored = await contactService.getAllContacts();
-    expect(stored).toHaveLength(2);
-    expect(stored.map(contact => contact.confioUserId).sort()).toEqual(['recipient-0', 'recipient-1']);
-    expect(stored.map(contact => contact.confioMatchedPhone).sort()).toEqual([
-      '+573132587634',
-      '+584121234567',
-    ]);
-    expect(stored.every(contact => contact.normalizedPhones.includes(contact.confioMatchedPhone!))).toBe(true);
-    expect(stored.find(contact => contact.confioMatchedPhone === '+573132587634')?.confioMatchWasInferred).toBe(true);
-    expect(stored.find(contact => contact.confioMatchedPhone === '+584121234567')?.confioMatchWasInferred).toBe(false);
+    expect(stored[0].normalizedPhones.some(phone => phone.startsWith('+'))).toBe(false);
+    expect(stored[0].inferredE164Phones).toEqual([]);
   });
 
   it('does not expose cached recipient mappings after the authenticated user changes', async () => {
@@ -228,22 +177,21 @@ describe('contact country normalization', () => {
     expect(mockGetInternetCredentials).toHaveBeenCalledWith('com.confio.contacts.sender-1.VE_array');
   });
 
-  it('abandons a sync before storage if the authenticated user changes during lookup', async () => {
+  it('abandons a sync before storage if the authenticated user changes while contacts are loading', async () => {
     setDefaultPhoneRegion('CO');
-    mockGetAll.mockResolvedValue([{
-      recordID: 'local',
-      givenName: 'Local',
-      familyName: '',
-      phoneNumbers: [{ number: '313 258 7634' }],
-      hasThumbnail: false,
-    }]);
-    const query = jest.fn().mockImplementation(async () => {
+    mockGetAll.mockImplementation(async () => {
       await contactService.setContactOwner('sender-2', 'CO');
-      return { data: { checkUsersByPhones: [] } };
+      return [{
+        recordID: 'local',
+        givenName: 'Local',
+        familyName: '',
+        phoneNumbers: [{ number: '313 258 7634' }],
+        hasThumbnail: false,
+      }];
     });
     mockSetInternetCredentials.mockClear();
 
-    await expect(contactService.syncContacts({ query })).resolves.toBe(false);
+    await expect(contactService.syncContacts()).resolves.toBe(false);
     expect(mockSetInternetCredentials).not.toHaveBeenCalled();
   });
 
@@ -285,77 +233,47 @@ describe('contact country normalization', () => {
     expect(stored.map(contact => contact.id)).toEqual(['fresh']);
   });
 
-  it('preserves the last good cache when server discovery fails', async () => {
-    setDefaultPhoneRegion('CO');
-    mockGetAll.mockResolvedValue([{
-      recordID: 'known-good',
-      givenName: 'Conocido',
-      familyName: '',
-      phoneNumbers: [{ number: '313 258 7634' }],
-      hasThumbnail: false,
-    }]);
-    const successfulQuery = jest.fn().mockResolvedValue({
-      data: {
-        checkUsersByPhones: [{
-          phoneNumber: '+573132587634',
-          userId: 'recipient-1',
-          username: 'recipient1',
-          firstName: 'Recipient',
-          lastName: 'One',
-          isOnConfio: true,
-        }],
-      },
-    });
-    await expect(contactService.syncContacts({ query: successfulQuery })).resolves.toBe(true);
-
-    mockGetAll.mockResolvedValue([{
-      recordID: 'new-device-contact',
-      givenName: 'Nuevo',
-      familyName: '',
-      phoneNumbers: [{ number: '300 111 2233' }],
-      hasThumbnail: false,
-    }]);
-    await expect(contactService.syncContacts({
-      query: jest.fn().mockRejectedValue(new Error('network unavailable')),
-    })).resolves.toBe(false);
-
-    const stored = await contactService.getAllContacts();
-    expect(stored).toHaveLength(1);
-    expect(stored[0]).toEqual(expect.objectContaining({
-      id: 'known-good',
-      confioUserId: 'recipient-1',
-    }));
-  });
-
-  it('rejects an incomplete discovery response instead of treating omissions as non-users', async () => {
+  it('keeps contacts on the phone: nothing is sent to Confío and no one is marked as a user', async () => {
     setDefaultPhoneRegion('CO');
     mockGetAll.mockResolvedValue([
       {
-        recordID: 'one',
-        givenName: 'Uno',
+        recordID: 'local',
+        givenName: 'Local',
         familyName: '',
         phoneNumbers: [{ number: '313 258 7634' }],
         hasThumbnail: false,
       },
       {
-        recordID: 'two',
-        givenName: 'Dos',
+        recordID: 'international',
+        givenName: 'Extranjero',
         familyName: '',
-        phoneNumbers: [{ number: '300 111 2233' }],
+        phoneNumbers: [{ number: '+58 412 123 4567' }],
         hasThumbnail: false,
       },
     ]);
-    const query = jest.fn().mockResolvedValue({
-      data: {
-        checkUsersByPhones: [{
-          phoneNumber: '+573132587634',
-          userId: null,
-          isOnConfio: false,
-        }],
-      },
-    });
+    const originalFetch = (globalThis as any).fetch;
+    const fetchSpy = jest.fn();
+    (globalThis as any).fetch = fetchSpy;
 
-    await expect(contactService.syncContacts({ query })).resolves.toBe(false);
+    try {
+      await expect(contactService.syncContacts()).resolves.toBe(true);
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+
+    expect(mockDiscoveryQueriesLoaded).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const stored = await contactService.getAllContacts();
+    expect(stored).toHaveLength(2);
+    stored.forEach(contact => {
+      expect(contact.isOnConfio).toBe(false);
+      expect(contact.confioUserId).toBeUndefined();
+      expect(contact.confioMatchedPhone).toBeUndefined();
+    });
+    // The only writes are this owner's on-device secure cache.
+    mockSetInternetCredentials.mock.calls.forEach(([service]) => {
+      expect(service).toMatch(/^com\.confio\.contacts\.sender-1\.CO(_array)?$/);
+    });
   });
 
   it('replaces a previous cache when the device address book becomes empty', async () => {

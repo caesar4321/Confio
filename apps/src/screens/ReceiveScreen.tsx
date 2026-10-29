@@ -1,7 +1,9 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, Share } from 'react-native';
+import { Alert, View, StyleSheet, ScrollView, Share } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { Text } from '../components/common/AppText';
 import { buildInviteLink } from '../utils/inviteLinks';
+import { parseLinkUrl } from '../services/linkSend';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -91,6 +93,20 @@ export default function ReceiveScreen() {
       }
   ) : null;
 
+  // A link send opened outside the app (or before installing it) can be
+  // pasted here: the claim screen takes it from the clipboard.
+  const pasteLinkRow: RouteOption = {
+    id: 'paste_send_link',
+    icon: 'link',
+    title: 'Tengo un link de envío',
+    subtitle: 'Copia el link que te llegó por WhatsApp y toca aquí',
+    onPress: async () => {
+      const link = parseLinkUrl(await Clipboard.getString().catch(() => ''));
+      if (link) navigation.navigate('LinkClaim', link);
+      else Alert.alert('No encontramos el link', 'Copia el link completo que te llegó por WhatsApp y vuelve a tocar aquí.');
+    },
+  };
+
   // Where no ramp provider operates there is no one-off recharge to offer;
   // the cash row below is the way in.
   const rechargeRow: RouteOption | null = isRampBlocked || koyweReplaced.topUp ? null : {
@@ -150,6 +166,7 @@ export default function ReceiveScreen() {
           ) : usernameRow ? (
             <RouteCard label="DE ALGUIEN EN CONFÍO">
               <RouteOptionRow first option={usernameRow} />
+              <RouteOptionRow option={pasteLinkRow} />
             </RouteCard>
           ) : null}
 

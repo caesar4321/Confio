@@ -38,15 +38,6 @@ const buildContacts = (count: number) => Array.from({ length: count }, (_, index
   hasThumbnail: false,
 }));
 
-const noMatchesQuery = jest.fn().mockImplementation(({ variables }) => Promise.resolve({
-  data: {
-    checkUsersByPhones: variables.phoneNumbers.map((phoneNumber: string) => ({
-      phoneNumber,
-      isOnConfio: false,
-    })),
-  },
-}));
-
 describe('contact sync progress', () => {
   let consoleErrorSpy: jest.SpyInstance;
 
@@ -72,7 +63,7 @@ describe('contact sync progress', () => {
     const events: ContactSyncProgress[] = [];
 
     await expect(
-      contactService.syncContacts({ query: noMatchesQuery }, progress => events.push(progress)),
+      contactService.syncContacts(progress => events.push(progress)),
     ).resolves.toBe(true);
 
     expect(events[0]).toEqual({ phase: 'reading', processed: 0, total: 0 });
@@ -82,10 +73,8 @@ describe('contact sync progress', () => {
     // Two intermediate reports at the 150-contact chunk boundaries.
     expect(normalizing.map(event => event.processed)).toEqual([0, 150, 300]);
 
-    const matching = events.filter(event => event.phase === 'matching');
-    // 320 unique numbers queried 50 at a time: start plus one report per batch.
-    expect(matching.map(event => event.processed)).toEqual([0, 50, 100, 150, 200, 250, 300, 320]);
-    expect(matching.every(event => event.total === 320)).toBe(true);
+    // Contacts never leave the phone, so there is no server-matching phase.
+    expect(events.some(event => event.phase === 'matching')).toBe(false);
 
     expect(events[events.length - 1]).toEqual({ phase: 'saving', processed: 0, total: 0 });
   });
@@ -94,7 +83,7 @@ describe('contact sync progress', () => {
     mockGetAll.mockResolvedValue(buildContacts(75));
     const events: ContactSyncProgress[] = [];
 
-    await contactService.syncContacts({ query: noMatchesQuery }, progress => events.push(progress));
+    await contactService.syncContacts(progress => events.push(progress));
 
     events.forEach(event => {
       if (event.total > 0) expect(event.processed).toBeLessThanOrEqual(event.total);
@@ -105,10 +94,7 @@ describe('contact sync progress', () => {
     mockGetAll.mockResolvedValue(buildContacts(400));
     const events: ContactSyncProgress[] = [];
 
-    const stalePromise = contactService.syncContacts(
-      { query: noMatchesQuery },
-      progress => events.push(progress),
-    );
+    const stalePromise = contactService.syncContacts(progress => events.push(progress));
     // A sign-out mid-sync: the abandoned run must not drive the UI any further.
     await contactService.setContactOwner(null);
 
@@ -122,6 +108,6 @@ describe('contact sync progress', () => {
   it('syncs without a progress listener', async () => {
     mockGetAll.mockResolvedValue(buildContacts(10));
 
-    await expect(contactService.syncContacts({ query: noMatchesQuery })).resolves.toBe(true);
+    await expect(contactService.syncContacts()).resolves.toBe(true);
   });
 });

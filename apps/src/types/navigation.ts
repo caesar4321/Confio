@@ -58,6 +58,7 @@ export type MainStackParamList = {
   RampAddress: undefined;
   ConfioAddress: undefined;
   Notification: undefined;
+  LinkClaim: { publicRef: string; keyHex: string };
   HomeMessages: {
     initialChannelId?: 'julian' | 'confio' | 'soporte';
   } | undefined;

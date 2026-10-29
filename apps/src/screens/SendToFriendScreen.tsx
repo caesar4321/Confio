@@ -18,10 +18,9 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { inviteSendService } from '../services/inviteSendService';
-import { contactService } from '../services/contactService';
+import { LINK_MAX_USD, LINK_SEND_ERRORS, ResolvedRecipient, forgetRecipient, resolveRecipientForPhone, saveRecipient } from '../services/linkSend';
 import {
   formatRecipientPhoneForDisplay,
-  inferredRecipientDiscoveryChanged,
   isVerifiedInternationalRecipientPhone,
   recipientConfirmationService,
   recipientNeedsConfirmation,
@@ -101,7 +100,56 @@ export const SendToFriendScreen = () => {
   const { userProfile } = useAuth();
   const supportCopy = getSupportCopy(userCountryIso(userProfile));
 
-  const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
+  const routeFriend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
+  const routePhone = routeFriend.confioMatchedPhone
+    || routeFriend.normalizedPhones?.find(p => p.startsWith('+'))
+    || (routeFriend.phone?.startsWith('+') ? routeFriend.phone : '');
+
+  // A contact is not "on Confío" by itself: this sender reaches an account
+  // through a number only once they paid it by link and confirmed it (SAVED)
+  // or while it is a phone-verified account from before phone-less signup
+  // (LEGACY). Asked live, one number at a time; the address book never
+  // leaves the phone (send/link_invite.py).
+  // Any recipient picked by number is resolved, whatever an old cached match
+  // says; only an account picked by @usuario (no phone) skips it.
+  const needsResolution = Boolean(routePhone);
+  const [resolution, setResolution] = useState<ResolvedRecipient | null>(null);
+  const [resolutionError, setResolutionError] = useState(false);
+  const [resolveAttempt, setResolveAttempt] = useState(0);
+  useEffect(() => {
+    if (!needsResolution) return;
+    let alive = true;
+    setResolutionError(false);
+    resolveRecipientForPhone(routePhone)
+      .then((r) => { if (alive) setResolution(r); })
+      .catch(() => { if (alive) setResolutionError(true); });
+    return () => { alive = false; };
+  }, [needsResolution, routePhone, resolveAttempt]);
+  const resolving = needsResolution && !resolution && !resolutionError;
+
+  const friend: Friend = React.useMemo(() => {
+    const user = resolution?.user;
+    // CLAIMED is not an answer yet: until the sender confirms who opened
+    // their link, money to this number still goes by link.
+    if (!needsResolution) return routeFriend;
+    if (!user || resolution?.kind === 'NONE' || resolution?.kind === 'CLAIMED') {
+      // No account for this sender behind the number: never a stale user id.
+      return { ...routeFriend, isOnConfio: false, userId: undefined, id: undefined,
+        confioUsername: undefined, confioFirstName: undefined, confioLastName: undefined };
+    }
+    const [first, ...rest] = (user.displayName || '').split(' ');
+    return {
+      ...routeFriend,
+      isOnConfio: true,
+      userId: user.userId,
+      confioUsername: user.username,
+      confioFirstName: first || undefined,
+      confioLastName: rest.join(' ') || undefined,
+      confioMatchedPhone: routePhone,
+    };
+  }, [needsResolution, resolution, routeFriend, routePhone]);
+  const receivesByQrOnly = Boolean(resolution?.user?.receivesByQrOnly);
+  const recipientSource = needsResolution ? resolution?.kind : undefined;
 
   // The server identifies a recipient by the FULL number, so always hand it
   // the international form when we have one. A bare local number resolves to
@@ -134,16 +182,6 @@ export const SendToFriendScreen = () => {
       Alert.alert(
         'No pudimos verificar el destinatario',
         'Faltan datos de la cuenta Confío vinculada a este contacto. Actualiza tus contactos e inténtalo de nuevo.',
-      );
-      return false;
-    }
-
-    const liveMatches = await contactService.checkConfioUsers([matchedPhone], apolloClient);
-    const liveMatch = liveMatches.get(matchedPhone);
-    if (inferredRecipientDiscoveryChanged(friend.isOnConfio, recipientId, liveMatch?.userId)) {
-      Alert.alert(
-        'El destinatario cambió',
-        'La cuenta vinculada a este número cambió desde la última sincronización. Actualiza tus contactos antes de enviar dinero.',
       );
       return false;
     }
@@ -186,6 +224,35 @@ export const SendToFriendScreen = () => {
   // an Algorand ASA. This drives the balance source, the preflight, and
   // whether a send to a non-user goes to the BSC escrow or the Algorand one.
   const isBscToken = tokenType === 'cusd_plus' || tokenType === 'confio';
+  const isLinkSend = needsResolution && (resolution?.kind === 'NONE' || resolution?.kind === 'CLAIMED');
+  const [recipientBusy, setRecipientBusy] = useState(false);
+  const decideClaimed = async (confirm: boolean) => {
+    if (recipientBusy) return;
+    setRecipientBusy(true);
+    try {
+      const out = confirm && resolution?.publicRef
+        ? await saveRecipient({ publicRef: resolution.publicRef })
+        : await forgetRecipient(routePhone);
+      if (!out?.success) throw new Error(out?.error || 'failed');
+      setResolution(null);
+      setResolveAttempt((n) => n + 1);
+    } catch {
+      setErrorMessage('No pudimos guardar tu respuesta. Inténtalo de nuevo.');
+      setShowError(true);
+    } finally {
+      setRecipientBusy(false);
+    }
+  };
+  const forgetAccount = () => {
+    Alert.alert(
+      'Olvidar esta cuenta',
+      `Tus próximos envíos a ${routeFriend.name} irán por link de WhatsApp hasta que lo abra.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Olvidar', style: 'destructive', onPress: () => { void decideClaimed(false); } },
+      ],
+    );
+  };
   // The escrow must be told exactly which token it holds. A SEND must not be:
   // leaving bscTokenType unset for cUSD+ is what keeps it a dollar-value send,
   // where the server picks the funding leg (vault shares vs wallet USDT).
@@ -314,6 +381,30 @@ export const SendToFriendScreen = () => {
       return;
     }
 
+    if (resolving) return;
+    if (resolutionError) {
+      setErrorMessage('No pudimos revisar este contacto. Revisa tu conexión e inténtalo de nuevo.');
+      setShowError(true);
+      setResolveAttempt((n) => n + 1);
+      return;
+    }
+    if (receivesByQrOnly) {
+      setErrorMessage(LINK_SEND_ERRORS.recipient_receives_by_qr_only.replace('Tu cuenta', 'Esta cuenta')
+        + ' Pídele su código de Cobrar para pagarle.');
+      setShowError(true);
+      return;
+    }
+    if (isLinkSend && tokenType !== 'cusd_plus') {
+      setErrorMessage(LINK_SEND_ERRORS.link_token_not_supported);
+      setShowError(true);
+      return;
+    }
+    if (isLinkSend && amountValue > LINK_MAX_USD) {
+      setErrorMessage(LINK_SEND_ERRORS.link_amount_over_limit);
+      setShowError(true);
+      return;
+    }
+
     if (!amount || amountValue < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
       setShowError(true);
@@ -391,6 +482,12 @@ export const SendToFriendScreen = () => {
           bscInvite: isBscInvite,
           bscTokenType,
           bscInviteToken: isBscInvite ? bscEscrowToken : undefined,
+          // A first send to a contact (resolve said NONE): escrow under a
+          // one-time key and hand the link over WhatsApp (linkSend.ts).
+          linkSend: isBscInvite && isLinkSend,
+          // Paid through a pre-phone-less account: after the send, the
+          // sender's choice is saved so later sends keep going direct.
+          recipientSource,
           amount: amountCanonical,
           currency: config.name,
           recipient: friend.name,
@@ -539,13 +636,51 @@ export const SendToFriendScreen = () => {
             </View>
           </View>
 
+          {resolution?.kind === 'CLAIMED' && resolution.user ? (
+            <View style={styles.claimedCard}>
+              <Text style={styles.claimedText}>
+                {routeFriend.name} abrió tu link como {resolution.user.displayName}
+                {resolution.user.identityVerified ? ' ✓' : ''} (@{resolution.user.username}). ¿Es esta persona?
+              </Text>
+              <Text style={styles.claimedHint}>Si dices que sí, tus próximos envíos le llegan directo y sin límite de link.</Text>
+              <View style={styles.claimedButtons}>
+                <TouchableOpacity style={styles.claimedNo} disabled={recipientBusy}
+                  onPress={() => { void decideClaimed(false); }} accessibilityRole="button">
+                  <Text style={styles.claimedNoText}>No es</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.claimedYes} disabled={recipientBusy}
+                  onPress={() => { void decideClaimed(true); }} accessibilityRole="button">
+                  <Text style={styles.claimedYesText}>Sí, es esta persona</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+
+          {(resolution?.kind === 'SAVED' || resolution?.kind === 'LEGACY') ? (
+            <TouchableOpacity onPress={forgetAccount} disabled={recipientBusy} accessibilityRole="button"
+              style={{ alignSelf: 'flex-start', marginBottom: 12 }}>
+              <Text style={styles.forgetText}>¿No es esta persona? Olvidar esta cuenta</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {isLinkSend ? (
+            <View style={styles.linkNotice}>
+              <Icon name="link" size={14} color={colors.text.secondary} style={{ marginTop: 2 }} />
+              <Text style={styles.linkNoticeText}>
+                Primera vez: te abrimos WhatsApp con un link para que {friend.name} lo reciba en Confío.
+                Máximo US${LINK_MAX_USD} esta vez. Si no lo abre en 7 días, vuelve a tu saldo.
+              </Text>
+            </View>
+          ) : null}
+
           <Button
-            title={!balanceReady ? 'Cargando saldo…' :
+            title={resolving ? 'Revisando contacto…' :
+              !balanceReady ? 'Cargando saldo…' :
               amountValue > availableBalance ? 'Saldo insuficiente' :
-                `Enviar a ${friend.name}`}
+                isLinkSend ? 'Enviar por WhatsApp' : `Enviar a ${friend.name}`}
             onPress={handleSend}
             loading={isProcessing}
-            disabled={!balanceReady || !amount || amountValue < config.minSend || amountValue > availableBalance}
+            disabled={resolving || !balanceReady || !amount || amountValue < config.minSend || amountValue > availableBalance}
             accessibilityLabel={`Enviar ${amount || ''} a ${friend.name}`}
             style={{ backgroundColor: config.color }}
           />
@@ -568,6 +703,20 @@ export const SendToFriendScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  linkNotice: {
+    flexDirection: 'row', gap: 8, padding: 12, marginBottom: 12, borderRadius: 12,
+    backgroundColor: colors.neutral,
+  },
+  linkNoticeText: { flex: 1, fontSize: 13, lineHeight: 18, color: colors.text.secondary },
+  claimedCard: { padding: 14, gap: 8, marginBottom: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.primaryLight },
+  claimedText: { fontSize: 14, lineHeight: 20, color: colors.text.primary, fontWeight: '600' },
+  claimedHint: { fontSize: 12, lineHeight: 17, color: colors.text.secondary },
+  claimedButtons: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  claimedNo: { flex: 1, paddingVertical: 10, borderRadius: 20, alignItems: 'center', backgroundColor: colors.neutralDark },
+  claimedNoText: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+  claimedYes: { flex: 2, paddingVertical: 10, borderRadius: 20, alignItems: 'center', backgroundColor: colors.primaryDark },
+  claimedYesText: { fontSize: 14, fontWeight: '700', color: colors.white },
+  forgetText: { fontSize: 13, color: colors.text.secondary, textDecorationLine: 'underline' },
   container: {
     flex: 1,
     backgroundColor: colors.background,

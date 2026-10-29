@@ -430,13 +430,6 @@ export const TransferScreen = () => {
         }
 
         // No automatic sync - users will use pull-to-refresh or sync button
-        // iOS: if permission exists but explicit upload consent hasn't been granted yet, show consent modal
-        if (Platform.OS === 'ios') {
-          const consent = await contactService.hasUploadConsent();
-          if (!consent) {
-            setShowPermissionModal(true);
-          }
-        }
       } else {
         // Explicitly reflect denied status in state so UI can react properly
         setHasContactPermission(false);
@@ -545,7 +538,7 @@ export const TransferScreen = () => {
     setIsLoadingContacts(true);
     setSyncProgress(null);
     try {
-      const success = await contactService.syncContacts(apolloClient, setSyncProgress);
+      const success = await contactService.syncContacts(setSyncProgress);
 
       if (success) {
         // Get all contacts from device
@@ -567,10 +560,6 @@ export const TransferScreen = () => {
   // Handle permission allow
   const handlePermissionAllow = async () => {
     setShowPermissionModal(false);
-    // Record explicit upload consent for iOS before requesting OS permission
-    if (Platform.OS === 'ios') {
-      await contactService.setUploadConsent(true);
-    }
     const granted = await contactService.requestContactPermission();
 
     if (granted) {
@@ -593,9 +582,6 @@ export const TransferScreen = () => {
     if (!hasContactPermission) {
       setHasContactPermission(false);
       await contactService.storePermissionStatus('denied');
-    }
-    if (Platform.OS === 'ios') {
-      await contactService.setUploadConsent(false);
     }
   };
 
@@ -632,18 +618,8 @@ export const TransferScreen = () => {
     setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
 
     if (hasContactPermission) {
-      // On iOS, ensure we have explicit upload consent before triggering a sync that may upload data
-      if (Platform.OS === 'ios') {
-        const consent = await contactService.hasUploadConsent();
-        if (!consent) {
-          setRefreshing(false);
-          setIsLoadingContacts(false);
-          setShowPermissionModal(true);
-          return;
-        }
-      }
       // Manual refresh - always sync
-      const success = await contactService.syncContacts(apolloClient, setSyncProgress);
+      const success = await contactService.syncContacts(setSyncProgress);
       if (success) {
         const allContacts = await contactService.getAllContacts();
         await displayContacts(allContacts);
@@ -655,7 +631,7 @@ export const TransferScreen = () => {
       const granted = await contactService.requestContactPermission();
       if (granted) {
         setHasContactPermission(true);
-        const success = await contactService.syncContacts(apolloClient, setSyncProgress);
+        const success = await contactService.syncContacts(setSyncProgress);
         if (success) {
           const allContacts = await contactService.getAllContacts();
           await displayContacts(allContacts);
@@ -1259,24 +1235,6 @@ export const TransferScreen = () => {
                   mutation is owner_only server-side, CreateRampOrder refuses
                   employees), so an employee with sendFunds gets the cash
                   directory and crypto only. */}
-              {!activeAccount?.isEmployee && (
-                <LocalRailsCard
-                  label="A UN BANCO O BILLETERA"
-                  primary={sendPrimary}
-                  more={sendMore}
-                  moreTitle="¿A dónde quieres enviar?"
-                  // Mirrors Recibir: the own-money row (the old Retirar)
-                  // always leads, then rails to other people. Hidden where no
-                  // ramp provider operates — the cash card is the way out.
-                  leading={isRampBlocked || koyweReplaced.withdraw ? [] : [{
-                    id: 'own_account',
-                    icon: 'download',
-                    title: 'A mi propia cuenta',
-                    subtitle: 'Retira a tu banco o billetera',
-                    onPress: openWithdrawFlow,
-                  }]}
-                />
-              )}
               <RouteCard label="A ALGUIEN EN CONFÍO">
                 <RouteOptionRow
                   first
@@ -1297,6 +1255,24 @@ export const TransferScreen = () => {
                   handleSendToFriend(friend);
                 }}
               />
+              {!activeAccount?.isEmployee && (
+                <LocalRailsCard
+                  label="A UN BANCO O BILLETERA"
+                  primary={sendPrimary}
+                  more={sendMore}
+                  moreTitle="¿A dónde quieres enviar?"
+                  // Mirrors Recibir: the own-money row (the old Retirar)
+                  // always leads, then rails to other people. Hidden where no
+                  // ramp provider operates — the cash card is the way out.
+                  leading={isRampBlocked || koyweReplaced.withdraw ? [] : [{
+                    id: 'own_account',
+                    icon: 'download',
+                    title: 'A mi propia cuenta',
+                    subtitle: 'Retira a tu banco o billetera',
+                    onPress: openWithdrawFlow,
+                  }]}
+                />
+              )}
               <RouteCard label="EN EFECTIVO">
                 <RouteOptionRow
                   first

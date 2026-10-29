@@ -171,6 +171,23 @@ const settle = async (txHash: string, address: string, execNonce: bigint): Promi
 
 export const createBscInvite = async (params: BscInviteParams): Promise<BscInviteResult> => {
   const { apolloClient } = await import('../apollo/client');
+  return fundInvite(async () => (await apolloClient.mutate({
+    mutation: PREPARE_INVITE,
+    variables: {
+      phone: params.phone,
+      phoneCountry: params.phoneCountry || null,
+      amount: String(params.amount),
+      tokenType: params.tokenType,
+    },
+  })).data?.prepareBscInvite);
+};
+
+/** Prepare (server builds the batch), sign, submit, settle. Shared by phone
+ *  invites and link sends (linkSend.ts), which differ only in the prepare. */
+export const fundInvite = async (
+  prepare: () => Promise<any>,
+): Promise<BscInviteResult & { prep: any }> => {
+  const { apolloClient } = await import('../apollo/client');
   const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
 
   const sponsored = await fetchSponsored7702Params();
@@ -181,15 +198,6 @@ export const createBscInvite = async (params: BscInviteParams): Promise<BscInvit
 
   const { ensureFaceCheck, FACE_STEP_UP_MESSAGE, FaceCheckError, isFaceStepUpRequired } =
     await import('./faceStepUp');
-  const prepare = async () => (await apolloClient.mutate({
-    mutation: PREPARE_INVITE,
-    variables: {
-      phone: params.phone,
-      phoneCountry: params.phoneCountry || null,
-      amount: String(params.amount),
-      tokenType: params.tokenType,
-    },
-  })).data?.prepareBscInvite;
   let prep = await prepare();
   if (!prep?.success && isFaceStepUpRequired(prep?.error)) {
     // An invite is a send: Confío Face, then once more.
@@ -233,7 +241,7 @@ export const createBscInvite = async (params: BscInviteParams): Promise<BscInvit
     }
 
     const { pending } = await settle(sub.transactionHash as string, wallet.address, execNonce);
-    return { txHash: sub.transactionHash, inviteId: prep.inviteId, pending };
+    return { txHash: sub.transactionHash, inviteId: prep.inviteId, pending, prep };
   }
   throw new Error(lastError);
 };

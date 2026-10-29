@@ -107,6 +107,8 @@ def _claim_if_recipient_already_joined(invite) -> None:
 
     from .invite_bsc_flow import claim_for_recipient
 
+    if invite.kind == 'link':
+        return  # claimed with the link's key, never by owning the number
     try:
         # EXACTLY one, never .first(). phone_key has no unique index in any
         # migration, so on a duplicate .first() would pick an arbitrary account

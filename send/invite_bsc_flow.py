@@ -29,6 +29,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 from eth_abi import encode as abi_encode
 from eth_utils import keccak, to_checksum_address
 
@@ -90,6 +91,12 @@ def invite_id_bytes32(phone_key: str, inviter_addr: str) -> str:
     PhoneInvite rows by phone_key and reads the id off the row.
     """
     return '0x' + keccak(text=f'{phone_key}:{inviter_addr.lower()}').hex()
+
+
+def link_invite_id_bytes32(claim_key_address: str, inviter_addr: str) -> str:
+    """Invite id for a link send: bound to the one-time claim key, so every
+    link is its own escrow slot (send/link_invite.py)."""
+    return '0x' + keccak(text=f'link:{claim_key_address.lower()}:{inviter_addr.lower()}').hex()
 
 
 def _enabled() -> bool:
@@ -173,7 +180,7 @@ def _claim_min_amount_out(phone_invite, recipient_eligible: bool) -> int:
 
 
 def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
-                   phone_display: str = '') -> dict:
+                   phone_display: str = '', link_claim_address: str | None = None) -> dict:
     """Build + store the create batch on a PhoneInvite row."""
     from cusd_plus import sponsor_7702
     from users.models import Account
@@ -234,7 +241,8 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
     except ValueError:
         return {'success': False, 'error': 'invalid_share_price'}
 
-    invite_id32 = invite_id_bytes32(phone_key, inviter_addr)
+    invite_id32 = (link_invite_id_bytes32(link_claim_address, inviter_addr) if link_claim_address
+                   else invite_id_bytes32(phone_key, inviter_addr))
     digits = ''.join(ch for ch in (phone_display or '') if ch.isdigit())
 
     # The invite id is deterministic in (phone, inviter) and the escrow never
@@ -254,6 +262,11 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
     existing = PhoneInvite.objects.filter(
         rail='bsc', invitation_id=invite_id32[2:],
         deleted_at__isnull=True).select_related('send_transaction').first()
+    if existing is not None and link_claim_address:
+        # A link's terms are fixed at its one prepare: the app makes a fresh
+        # key every time, so a second prepare under the same key could only
+        # rewrite a draft that a submit may already be broadcasting.
+        return {'success': False, 'error': 'invite_already_pending'}
     if existing is not None and existing.status not in ('draft', 'failed'):
         if existing.status in ('claimed', 'reclaimed'):
             # The slot is spent on-chain and the id cannot be reused. Say so
@@ -331,6 +344,11 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
             idempotency_key=invite_id32[2:],
             bsc_calls_json=stored_batch,
         )
+        link_fields = {}
+        if link_claim_address:
+            import uuid as _uuid
+            link_fields = {'kind': 'link', 'claim_key_address': link_claim_address.lower(),
+                           'public_ref': _uuid.uuid4()}
         invite = PhoneInvite.objects.create(
             rail='bsc',
             invitation_id=invite_id32[2:],  # 64-hex, fits the field
@@ -342,6 +360,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
             amount=amount_usd,
             token_type=token_type.upper(),
             status='draft',
+            **link_fields,
         )
     invite.blockchain_calls = stored_batch
     # blockchain_calls is a transient attr the mutation reads; the row's
@@ -353,6 +372,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
         'inviter': inviter_addr,
         'phone_invite_pk': invite.pk,
         'intent_id': sponsor_7702.intent_id_hex('invite_create', invite.pk),
+        'public_ref': str(invite.public_ref) if invite.public_ref else None,
     }
 
 
@@ -381,6 +401,14 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
 
     if phone_invite.inviter_user_id != user.id or phone_invite.status != 'draft':
         return {'success': False, 'error': 'invite_not_pending'}
+    if phone_invite.kind == 'link':
+        # A link prepared long ago stops counting toward the sender's daily
+        # link limit, so it cannot be funded later either (send/link_invite.py).
+        from .link_invite import stale_link_prepare
+        if stale_link_prepare(phone_invite):
+            from .models import PhoneInvite as _PI
+            _PI.objects.filter(pk=phone_invite.pk, status='draft').update(status='failed')
+            return {'success': False, 'error': 'link_prepare_expired'}
     from users.jwt_context import business_permission_is_current
     business_id = getattr(phone_invite.send_transaction, 'sender_business_id', None)
     if business_id and not business_permission_is_current(user, business_id, 'send_funds'):
@@ -446,8 +474,24 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
                             action_key=face_action, consume=True, **face_terms)
     if step_up:
         return {'success': False, 'error': step_up}
-    won = PhoneInvite.objects.filter(pk=phone_invite.pk, status='draft').update(
-        status='creating')
+    takeable = PhoneInvite.objects.filter(pk=phone_invite.pk, status='draft')
+    if phone_invite.kind == 'link':
+        # Freshness is rechecked IN the take: a draft that went stale while
+        # this submit was validating has already stopped counting toward the
+        # sender's daily link limit (send/link_invite.py), so it must not fund.
+        # Taken under the sender lock prepare_link uses, so two drafts to one
+        # contact cannot both fund.
+        from .link_invite import STALE_PREPARE
+        with transaction.atomic():
+            type(user).objects.select_for_update().filter(pk=user.pk).first()
+            if PhoneInvite.objects.filter(
+                    inviter_user=user, kind='link', phone_key=phone_invite.phone_key, deleted_at__isnull=True,
+                    status__in=('creating', 'pending', 'claiming')).exclude(pk=phone_invite.pk).exists():
+                PhoneInvite.objects.filter(pk=phone_invite.pk, status='draft').update(status='failed')
+                return {'success': False, 'error': 'link_already_pending'}
+            won = takeable.filter(created_at__gte=timezone.now() - STALE_PREPARE).update(status='creating')
+    else:
+        won = takeable.update(status='creating')
     if not won:
         return {'success': False, 'error': 'invite_not_pending'}
     phone_invite.status = 'creating'
@@ -541,9 +585,14 @@ def _release_create(phone_invite, only_if_no_batch: bool = False) -> None:
 
 # ── Claim (sponsor, plain KMS tx) ────────────────────────────────────────
 
-def claim_for_recipient(phone_invite, recipient_user) -> dict:
+def claim_for_recipient(phone_invite, recipient_user, via_link: bool = False,
+                        expected_recipient_address: str | None = None) -> dict:
     """Called when the invitee joins (verified). The KMS sponsor releases
-    the escrow to their bsc_address."""
+    the escrow to their bsc_address.
+
+    via_link: the caller proved possession of the link's one-time key
+    (send/link_invite.py) instead of owning the invited phone number; only a
+    'link' invite can be claimed that way, and never by phone ownership."""
     from cusd_plus.sponsor_7702 import (
         _rpc, acquire_sponsor_nonce_lock, release_sponsor_nonce_lock,
     )
@@ -555,6 +604,11 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
         return {'success': False, 'error': 'bsc_invite_disabled'}
     if phone_invite.status != 'pending':
         return {'success': False, 'error': 'invite_not_pending'}
+    if via_link != (phone_invite.kind == 'link'):
+        return {'success': False, 'error': 'invite_wrong_proof'}
+    from users import direct_receive
+    if direct_receive.is_blocked(recipient_user):
+        return {'success': False, 'error': direct_receive.BLOCKED_ERROR}
 
     # The escrow keys funds by (inviter, inviteId). Re-deriving the inviter
     # from their personal account would look up a slot that was never funded
@@ -564,7 +618,7 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     # Reject an already mismatched recipient early. A matching in-memory user
     # may still be stale; current ownership is locked and checked again when
     # reserving the claim below.
-    if (getattr(recipient_user, 'phone_key', None) or '') != phone_invite.phone_key:
+    if not via_link and (getattr(recipient_user, 'phone_key', None) or '') != phone_invite.phone_key:
         return {'success': False, 'error': 'recipient_phone_changed'}
 
     rec_acct = recipient_user.accounts.filter(
@@ -572,6 +626,10 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     recipient_addr = ((getattr(rec_acct, 'bsc_address', None) or '') or '').lower()
     if not inviter_addr or not recipient_addr:
         return {'success': False, 'error': 'missing_bsc_address'}
+    # A link claim is signed for one address: release only to that one (the
+    # locked recheck below then holds the account to it as well).
+    if expected_recipient_address is not None and recipient_addr != expected_recipient_address.lower():
+        return {'success': False, 'error': 'recipient_address_changed'}
     if recipient_addr == inviter_addr:
         return {'success': False, 'error': 'recipient_is_inviter'}
 
@@ -619,7 +677,7 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
         locked_user = User.objects.select_for_update().filter(
             pk=recipient_user.pk, is_active=True,
         ).first()
-        if not locked_user or locked_user.phone_key != phone_invite.phone_key:
+        if not locked_user or (not via_link and locked_user.phone_key != phone_invite.phone_key):
             return {'success': False, 'error': 'recipient_phone_changed'}
 
         locked_recipient = Account.objects.select_for_update().filter(
@@ -712,8 +770,9 @@ def claim_pending_bsc_invites(recipient_user, phone_key: str) -> int:
     # (CONFIO exists on both rails). inviter_address stays in the filter as a
     # second, independent condition: a row has to satisfy both to be handed to
     # the BSC sponsor, so a single mislabelled field cannot misroute money.
+    # Link invites are claimed by the link's key, never by owning the number.
     pending = PhoneInvite.objects.filter(
-        rail='bsc', phone_key=phone_key, status='pending',
+        rail='bsc', phone_key=phone_key, status='pending', kind='phone',
         token_type__in=('CUSD_PLUS', 'CUSD', 'CONFIO'), deleted_at__isnull=True,
     ).exclude(inviter_address='')
     for inv in pending:

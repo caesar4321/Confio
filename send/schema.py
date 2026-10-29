@@ -635,6 +635,165 @@ class ReclaimInviteCalls(graphene.Mutation):
             intent_id=sponsor_7702.intent_id_hex('invite_reclaim', invite.pk))
 
 
+class LinkRecipientUserType(graphene.ObjectType):
+    user_id = graphene.ID()
+    username = graphene.String()
+    display_name = graphene.String()
+    identity_verified = graphene.Boolean()
+    receives_by_qr_only = graphene.Boolean()
+
+
+class RecipientForPhoneType(graphene.ObjectType):
+    # SAVED: confirmed earlier for this sender; LEGACY: an OTP-verified holder;
+    # NONE: send a link (send/link_invite.py).
+    kind = graphene.String()
+    user = graphene.Field(LinkRecipientUserType)
+    # CLAIMED: the link this sender should confirm (saveRecipient(publicRef)).
+    public_ref = graphene.String()
+
+
+class LinkInviteType(graphene.ObjectType):
+    sender_username = graphene.String()
+    sender_name = graphene.String()
+    sender_verified = graphene.Boolean()
+    amount = graphene.Decimal()
+    token_type = graphene.String()
+    status = graphene.String()
+    expires_at = graphene.DateTime()
+    is_mine = graphene.Boolean()
+    # What the link key signs to send the money to the viewer's own personal
+    # account; empty when the viewer cannot claim (own link, no BSC address).
+    claim_message = graphene.String()
+
+
+def _link_user(user):
+    if user is None:
+        return None
+    from security.identity_status import is_identity_verified
+    from users.direct_receive import is_blocked
+    from .link_invite import short_name
+    return LinkRecipientUserType(
+        user_id=user.pk, username=user.username, display_name=short_name(user) or f'@{user.username}',
+        identity_verified=is_identity_verified(user), receives_by_qr_only=is_blocked(user))
+
+
+class LinkInviteQuery(graphene.ObjectType):
+    resolve_recipient_for_phone = graphene.Field(RecipientForPhoneType, phone=graphene.String(required=True))
+    link_invite = graphene.Field(LinkInviteType, public_ref=graphene.String(required=True))
+
+    @login_required
+    def resolve_resolve_recipient_for_phone(self, info, phone):
+        from .link_invite import resolve
+        result = resolve(info.context.user, phone)
+        return RecipientForPhoneType(kind=result['kind'], user=_link_user(result['user']),
+                                     public_ref=result.get('public_ref'))
+
+    @login_required
+    def resolve_link_invite(self, info, public_ref):
+        from .link_invite import link_summary
+        summary = link_summary(public_ref, viewer=info.context.user)
+        return LinkInviteType(**summary) if summary else None
+
+
+class PrepareLinkInvite(graphene.Mutation):
+    """First send to a contact: escrow under a one-time key (send/link_invite.py).
+    Submitted with submitBscInvite, like any invite."""
+
+    class Arguments:
+        phone = graphene.String(required=True)
+        amount = graphene.Decimal(required=True)
+        token_type = graphene.String(required=True)
+        claim_key_address = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    invite_id = graphene.String()
+    public_ref = graphene.String()
+    calls = graphene.List(BscSendCallType)
+    intent_id = graphene.String()
+
+    @login_required
+    def mutate(self, info, phone, amount, token_type, claim_key_address):
+        from django.conf import settings as dj_settings
+        from users.jwt_context import get_jwt_business_context_with_validation
+        from .link_invite import prepare_link
+
+        if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return PrepareLinkInvite(success=False, error='disabled')
+        jwt_ctx = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+        if not jwt_ctx:
+            return PrepareLinkInvite(success=False, error='permission_denied')
+        result = prepare_link(info.context.user, jwt_ctx, phone, amount, token_type, claim_key_address)
+        if not result.get('success'):
+            return PrepareLinkInvite(success=False, error=result.get('error'), public_ref=result.get('public_ref'))
+        return PrepareLinkInvite(
+            success=True, invite_id=result['invite_id'], public_ref=result.get('public_ref'),
+            calls=[BscSendCallType(to=c['to'], value_wei=c['value'], data=c['data']) for c in result['calls']],
+            intent_id=result['intent_id'])
+
+
+class ClaimLinkInvite(graphene.Mutation):
+    """Receive a link: the money goes to the caller's own personal account
+    (from the JWT), proven by the link key's signature."""
+
+    class Arguments:
+        public_ref = graphene.String(required=True)
+        signature = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    status = graphene.String()
+    transaction_hash = graphene.String()
+
+    @login_required
+    def mutate(self, info, public_ref, signature):
+        from .link_invite import claim_link
+        result = claim_link(info.context.user, public_ref, signature)
+        return ClaimLinkInvite(success=result.get('success'), error=result.get('error'),
+                               status=result.get('status'), transaction_hash=result.get('transaction_hash'))
+
+
+class SaveRecipient(graphene.Mutation):
+    """Remember a contact's account: from a claimed link (public_ref) or after
+    a first direct send to a legacy verified number (phone)."""
+
+    class Arguments:
+        public_ref = graphene.String(required=False)
+        phone = graphene.String(required=False)
+        # With phone: the account the send went to (save_legacy refuses another).
+        recipient_user_id = graphene.ID(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @login_required
+    def mutate(self, info, public_ref=None, phone=None, recipient_user_id=None):
+        from .link_invite import save_from_link, save_legacy
+        if public_ref:
+            result = save_from_link(info.context.user, public_ref)
+        elif phone:
+            result = save_legacy(info.context.user, phone, recipient_user_id)
+        else:
+            result = {'success': False, 'error': 'nothing_to_save'}
+        return SaveRecipient(success=result['success'], error=result.get('error'))
+
+
+class ForgetRecipient(graphene.Mutation):
+    """'Olvidar esta cuenta': the next send to this number goes by link again."""
+
+    class Arguments:
+        phone = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @login_required
+    def mutate(self, info, phone):
+        from .link_invite import forget
+        result = forget(info.context.user, phone)
+        return ForgetRecipient(success=result['success'], error=result.get('error'))
+
+
 class Mutation(graphene.ObjectType):
     """GraphQL mutations for send transactions"""
     # Algorand sends live in blockchain/mutations.py; BSC sends (Phase 2,
@@ -643,5 +802,9 @@ class Mutation(graphene.ObjectType):
     submit_bsc_send = SubmitBscSend.Field()
     prepare_bsc_invite = PrepareBscInvite.Field()
     submit_bsc_invite = SubmitBscInvite.Field()
+    prepare_link_invite = PrepareLinkInvite.Field()
+    claim_link_invite = ClaimLinkInvite.Field()
+    save_recipient = SaveRecipient.Field()
+    forget_recipient = ForgetRecipient.Field()
     reclaim_invite_calls = ReclaimInviteCalls.Field()
     submit_bsc_reclaim_invite = SubmitBscReclaimInvite.Field()

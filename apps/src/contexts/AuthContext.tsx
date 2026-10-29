@@ -15,6 +15,12 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import { contactService, setDefaultPhoneRegion } from '../services/contactService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { applyReviewLink, setReviewLinkApplier, takePendingReviewLink } from '../services/reviewLink';
+import { setLinkOpener, takePendingLink } from '../services/linkSend';
+import { navigate as rootNavigate } from '../navigation/RootNavigation';
+
+const openLinkClaim = (link: { publicRef: string; keyHex: string }) => {
+  rootNavigate('Main', { screen: 'LinkClaim', params: link });
+};
 import { userCountryIso } from '../utils/userCountry';
 
 // Simple auth readiness gate to coordinate token-dependent queries
@@ -333,6 +339,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             deepLinkHandler.checkDeferredLinks().catch(error => {
               console.error('[AuthContext] Failed to process deferred deep link:', error);
             });
+            // A link send opened before sign-in (new users install from it).
+            takePendingLink()
+              .then(link => (link ? openLinkClaim(link) : undefined))
+              .catch(() => {});
             // A store-review link opened before sign-in.
             takePendingReviewLink()
               .then(link => (link ? applyReviewLink(apolloClient, link, refreshActiveProfile) : undefined))
@@ -420,6 +430,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     setReviewLinkApplier(isAuthenticated ? link => applyReviewLink(apolloClient, link, refreshActiveProfile) : null);
     return () => setReviewLinkApplier(null);
   }, [apolloClient, isAuthenticated, refreshActiveProfile]);
+  useEffect(() => {
+    setLinkOpener(isAuthenticated ? openLinkClaim : null);
+    return () => setLinkOpener(null);
+  }, [isAuthenticated]);
 
   // Fetch appropriate profile based on current account type
   useEffect(() => {

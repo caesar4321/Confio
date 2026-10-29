@@ -7,6 +7,7 @@ import 'react-native-url-polyfill/auto';
 import { setPendingTeamInvite } from '../services/teamInviteLinks';
 import { teamTokenFromCode } from './teams';
 import { parseReviewLink, receiveReviewLink } from '../services/reviewLink';
+import { parseLinkUrl, receiveLink } from '../services/linkSend';
 
 const DEFERRED_LINK_KEY = 'confio_deferred_link';
 const AUTH_TOKEN_KEY = 'confio_auth_token';
@@ -303,6 +304,13 @@ export class DeepLinkHandler {
     try {
       const parsedUrl = new URL(url);
       const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+
+      // Link send: confio.lat/r/<ref>#<key> carries money for whoever opens it.
+      const sendLink = parseLinkUrl(url);
+      if (sendLink) {
+        await receiveLink(sendLink);
+        return;
+      }
 
       // Store-review link: switches the reviewer's own account to a country.
       const reviewLink = parseReviewLink(parsedUrl);

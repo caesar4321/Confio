@@ -353,6 +353,18 @@ class PhoneInvite(SoftDeleteModel):
 
     expires_at = models.DateTimeField(null=True, blank=True)
 
+    # How the invitee proves they are the invitee. 'phone': an OTP-verified
+    # number (the auto-claim at phone verification). 'link': possession of a
+    # one-time key the sender sent through their own WhatsApp — its address is
+    # stored here, the private key never reaches the server (send/link_invite.py).
+    KIND_CHOICES = [('phone', 'Phone (verified number)'), ('link', 'Link (one-time key)')]
+    # db_default: rows written by code that predates these columns (between
+    # migrate and restart) still insert.
+    kind = models.CharField(max_length=8, choices=KIND_CHOICES, default='phone', db_default='phone', db_index=True)
+    claim_key_address = models.CharField(max_length=42, blank=True, default='', db_default='')
+    # Public handle in the link URL (confio.lat/r/<public_ref>#<key>).
+    public_ref = models.UUIDField(null=True, blank=True, unique=True)
+
     class Meta:
         indexes = [
             models.Index(fields=['phone_key', 'status']),
@@ -364,3 +376,43 @@ class PhoneInvite(SoftDeleteModel):
 
     def __str__(self):
         return f"Invite {self.invitation_id} to {self.phone_key} {self.amount} {self.token_type} ({self.status})"
+
+
+class SavedRecipient(SoftDeleteModel):
+    """A sender's contact number → the Confío account it reaches, confirmed by
+    the sender (a link to that number was claimed by this account) or known
+    from a legacy OTP-verified phone. Per sender only: nobody else's
+    address book learns anything from it (send/link_invite.py)."""
+    SOURCE_CHOICES = [('link_claim', 'Link claimed'), ('legacy_phone', 'Legacy verified phone')]
+
+    sender_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                    related_name='saved_recipients')
+    phone_key = models.CharField(max_length=32)
+    recipient_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                       related_name='saved_as_recipient')
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES)
+    # Claim time (link) or first direct send (legacy): the newest wins.
+    basis_at = models.DateTimeField()
+    confirmed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['sender_user', 'phone_key'], condition=models.Q(deleted_at__isnull=True),
+            name='uniq_saved_recipient')]
+
+    def __str__(self):
+        return f'{self.sender_user_id}:{self.phone_key} → {self.recipient_user_id} ({self.source})'
+
+
+class RecipientRevocation(models.Model):
+    """'Olvidar esta cuenta': this number goes back to the link flow for this
+    sender, even when a legacy verified holder exists."""
+    sender_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                    related_name='recipient_revocations')
+    phone_key = models.CharField(max_length=32)
+    revoked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['sender_user', 'phone_key'],
+                                               name='uniq_recipient_revocation')]
+

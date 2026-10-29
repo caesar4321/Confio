@@ -470,7 +470,7 @@ class SubmitDoesNotStrandTheRowTests(SimpleTestCase):
 
     def _invite(self, status):
         return SimpleNamespace(
-            pk=3, inviter_user_id=1, status=status,
+            pk=3, inviter_user_id=1, status=status, kind='phone',
             inviter_address=INVITER, invitation_id='ab' * 32,
             amount=Decimal('5'), token_type='CUSD_PLUS',
             send_transaction=SimpleNamespace(
@@ -553,7 +553,7 @@ class ClaimRevalidatesPhoneOwnershipTests(SimpleTestCase):
 
     def test_changed_phone_is_refused(self):
         from send import invite_bsc_flow as flow
-        invite = SimpleNamespace(pk=3, status='pending', phone_key='58:412555',
+        invite = SimpleNamespace(pk=3, status='pending', phone_key='58:412555', kind='phone',
                                  inviter_address=INVITER, invitation_id='ab' * 32)
         recipient = SimpleNamespace(pk=9, phone_key='58:999999')
         with mock.patch.object(flow, '_enabled', return_value=True):

@@ -826,6 +826,17 @@ export const TransactionProcessingScreen = () => {
         (transactionData as any).feeAmount = res?.feeAmount;
         (transactionData as any).netAmount = res?.netAmount;
         (transactionData as any).feeBps = res?.feeBps;
+        // Paid a pre-phone-less account through its number: keep that
+        // choice, so later sends to this contact stay direct even after the
+        // legacy match stops counting (send/link_invite.py save_legacy).
+        if ((transactionData as any).recipientSource === 'LEGACY' && transactionData.recipientPhone) {
+          import('../services/linkSend')
+            .then(({ saveRecipient }) => saveRecipient({
+              phone: transactionData.recipientPhone as string,
+              recipientUserId: String(transactionData.recipientUserId || ''),
+            }))
+            .catch(() => {});
+        }
         // ALWAYS 'SUBMITTED', never CONFIRMED from here. Holding a receipt is
         // not the same as the transaction being final: on BSC a block is only
         // committed once the validator set has voted on it, and until then a
@@ -859,14 +870,27 @@ export const TransactionProcessingScreen = () => {
       // never a public node.
       const { installBscServerTransport } = await import('../services/bscServerRpc');
       installBscServerTransport();
+      const linkSend = Boolean((transactionData as any).linkSend);
+      const { createLinkSend, LINK_SEND_ERRORS, linkMessage, openWhatsAppChat } = await import('../services/linkSend');
       try {
         setCurrentStep(1);
-        const res = await createBscInvite({
+        const params = {
           phone: transactionData.recipientPhone as string,
           amount: transactionData.amount,
           tokenType: (transactionData as any).bscInviteToken || 'CUSD_PLUS',
-        });
+        };
+        const res = linkSend ? await createLinkSend(params) : await createBscInvite(params);
         setCurrentStep(2);
+        if (linkSend && 'url' in res && 'publicRef' in res) {
+          (transactionData as any).linkUrl = res.url;
+          (transactionData as any).linkPublicRef = res.publicRef;
+          // The money is escrowed; the link is how it reaches the contact.
+          // If WhatsApp does not open, the success screen shares it again.
+          openWhatsAppChat(
+            transactionData.recipientPhone as string,
+            linkMessage(`US$${transactionData.amount}`, (res as any).url),
+          ).catch(() => {});
+        }
         (transactionData as any).transactionHash = res.txHash;
         (transactionData as any).transactionId = res.txHash;
         // The server's invite id is the stable retry key AND what the reclaim
@@ -882,7 +906,8 @@ export const TransactionProcessingScreen = () => {
       } catch (e: any) {
         const code = e?.message || '';
         setTransactionError(
-          BSC_INVITE_ERRORS[code]
+          (linkSend ? LINK_SEND_ERRORS[code] : '')
+          || BSC_INVITE_ERRORS[code]
           // Confío Face declined or not passed: say so, not "check your connection".
           || (code === FACE_STEP_UP_MESSAGE ? code : '')
           || 'No se pudo enviar la invitación. Revisa tu conexión e inténtalo de nuevo.',

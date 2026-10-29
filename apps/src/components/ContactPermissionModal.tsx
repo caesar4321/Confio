@@ -94,17 +94,17 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
               <BenefitItem
                 icon="shield"
                 title="Privacidad primero"
-                description="Con tu consentimiento, subimos solo los números para verificar quién usa Confío — nunca nombres ni otros datos"
+                description="Tus contactos se quedan en tu teléfono: no los subimos a Confío"
               />
               <BenefitItem
                 icon="zap"
                 title="Envíos rápidos"
-                description="Encuentra y envía dinero a tus amigos más rápidamente"
+                description="Elige a un amigo de tu lista en lugar de escribir su número"
               />
               <BenefitItem
                 icon="gift"
                 title="Invita amigos"
-                description="Identifica quiénes de tus contactos aún no usan Confío"
+                description="Envíale dólares por WhatsApp aunque todavía no use Confío"
               />
             </View>
 
@@ -112,9 +112,8 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
             <View style={styles.privacyNotice}>
               <Icon name="lock" size={16} color="#10b981" style={styles.privacyIcon} />
               <Text style={styles.privacyText}>
-                Tu privacidad es nuestra prioridad. Para identificar qué contactos usan Confío, si aceptas, subimos
-                únicamente los números de teléfono a nuestros servidores para realizar la comprobación. Nunca
-                subimos nombres ni otra información de tus contactos, y no compartimos estos datos con terceros.
+                Tu lista de contactos nunca sale de tu teléfono. Solo cuando eliges a alguien para enviarle,
+                consultamos ese único número para saber si ya le enviaste antes por Confío.
               </Text>
             </View>
 
@@ -127,9 +126,9 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
                   <Text style={styles.stepNumberText}>1</Text>
                 </View>
                 <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Solo subimos números</Text>
+                  <Text style={styles.stepTitle}>Eliges a un contacto</Text>
                   <Text style={styles.stepDescription}>
-                    Con tu permiso, enviamos únicamente los números de teléfono a nuestros servidores para verificar quién usa Confío. No subimos nombres ni otros datos.
+                    Leemos tus contactos en tu teléfono para que elijas a quién enviar. No subimos la lista.
                   </Text>
                 </View>
               </View>
@@ -139,9 +138,9 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
                   <Text style={styles.stepNumberText}>2</Text>
                 </View>
                 <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Procesamiento seguro</Text>
+                  <Text style={styles.stepTitle}>Le llega por WhatsApp</Text>
                   <Text style={styles.stepDescription}>
-                    Los números se transmiten de forma segura y solo se usan para comprobar coincidencias; nombres y demás datos nunca salen de tu teléfono.
+                    La primera vez, le mandas un link por WhatsApp y lo abre en Confío para recibir tu envío.
                   </Text>
                 </View>
               </View>
@@ -151,9 +150,9 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
                   <Text style={styles.stepNumberText}>3</Text>
                 </View>
                 <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Coincidencia</Text>
+                  <Text style={styles.stepTitle}>La próxima vez, directo</Text>
                   <Text style={styles.stepDescription}>
-                    Con las coincidencias, te mostramos quién ya usa Confío y completamos los nombres en tus operaciones. Nombres y otros datos no se comparten ni almacenan en servidores.
+                    Cuando confirmas su cuenta, tus siguientes envíos a ese contacto llegan directo.
                   </Text>
                 </View>
               </View>

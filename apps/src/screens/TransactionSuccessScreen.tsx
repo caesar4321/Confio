@@ -218,7 +218,12 @@ export const TransactionSuccessScreen = () => {
         invitationId,
       });
 
-      const message = buildSendAndInviteShareMessage({ amount, currency, inviteLink });
+      // A link send carries the money in its link (linkSend.ts): share that
+      // one, not the generic invite.
+      const linkUrl = (transactionData as any).linkUrl as string | undefined;
+      const message = linkUrl
+        ? (await import('../services/linkSend')).linkMessage(`US$${amount}`, linkUrl)
+        : buildSendAndInviteShareMessage({ amount, currency, inviteLink });
       const encodedMessage = encodeURIComponent(message);
 
       if (Platform.OS === 'android') {
@@ -527,11 +532,14 @@ export const TransactionSuccessScreen = () => {
           <View style={styles.invitationCard}>
             <View style={styles.invitationHeader}>
               <Icon name="alert-circle" size={20} color={colors.danger} />
-              <Text style={styles.invitationTitle}>Tu amigo aún no está en Confío</Text>
+              <Text style={styles.invitationTitle}>
+                {(transactionData as any).linkUrl ? 'Tu envío va en el link' : 'Tu amigo aún no está en Confío'}
+              </Text>
             </View>
             <Text style={styles.invitationText}>
-              Tiene 7 días para crear su cuenta y reclamar el dinero — avísale ahora
-              para que no se pierda.
+              {(transactionData as any).linkUrl
+                ? 'Mándale el link por WhatsApp. Tiene 7 días para abrirlo en Confío; si no, el dinero vuelve a tu saldo.'
+                : 'Tiene 7 días para crear su cuenta y reclamar el dinero — avísale ahora para que no se pierda.'}
             </Text>
             <TouchableOpacity
               style={styles.shareButton}
@@ -540,7 +548,9 @@ export const TransactionSuccessScreen = () => {
               accessibilityLabel="Compartir invitación por WhatsApp"
             >
               <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
-              <Text style={styles.shareButtonText}>Avisar por WhatsApp</Text>
+              <Text style={styles.shareButtonText}>
+                {(transactionData as any).linkUrl ? 'Enviar link por WhatsApp' : 'Avisar por WhatsApp'}
+              </Text>
             </TouchableOpacity>
           </View>
         )}

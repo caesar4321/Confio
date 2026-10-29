@@ -58,6 +58,19 @@ export type ContactSyncProgressListener = (progress: ContactSyncProgress) => voi
 const NORMALIZE_CHUNK_SIZE = 150;
 const yieldToUiThread = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0));
 
+// Caches written before contacts stopped leaving the phone carry server
+// matches (which account a number belonged to then). They are dropped on
+// read: who a number reaches is asked live, per send (linkSend.ts).
+const DISCOVERY_FIELDS = new Set([
+  'confioUserId', 'confioUsername', 'confioFirstName', 'confioLastName', 'confioAlgorandAddress',
+  'confioMatchedPhone', 'confioMatchWasInferred', 'statusTier', 'isReferralVerified',
+]);
+const withoutDiscovery = (key: string, value: unknown) => {
+  if (DISCOVERY_FIELDS.has(key)) return undefined;
+  if (key === 'isOnConfio') return false;
+  return value;
+};
+
 const CONTACTS_KEYCHAIN_SERVICE = 'com.confio.contacts';
 const CONTACTS_KEYCHAIN_KEY = 'user_contacts';
 const CONTACT_PERMISSION_STATUS_KEY = 'contact_permission_status';
@@ -90,8 +103,6 @@ export const hasDefaultPhoneRegion = (): boolean => defaultPhoneRegion !== null;
 const getDefaultPhoneRegion = (): CountryCode | undefined => defaultPhoneRegion || undefined;
 const CONTACTS_PRIVACY_SERVICE = 'com.confio.contacts_privacy';
 // Use a dedicated keychain service for upload consent to avoid overwriting permission status
-const CONTACTS_CONSENT_SERVICE = 'com.confio.contacts_upload_consent';
-const CONTACTS_UPLOAD_CONSENT_KEY = 'contacts_upload_consent';
 
 export class ContactService {
   private static instance: ContactService;
@@ -128,7 +139,7 @@ export class ContactService {
       );
       if (hasUsableInternetCredentials(arrayCredentials) && arrayCredentials.username === CONTACTS_KEYCHAIN_KEY) {
         const parseStart = Date.now();
-        const contactsArray = JSON.parse(arrayCredentials.password);
+        const contactsArray = JSON.parse(arrayCredentials.password, withoutDiscovery);
         if (Array.isArray(contactsArray)
           && this.contactOwnerUserId === expectedOwnerUserId
           && this.contactOwnerRegion === expectedPhoneRegion
@@ -258,101 +269,11 @@ export class ContactService {
     }
   }
 
-  /**
-   * Store and check explicit upload consent (iOS requirement)
-   */
-  async setUploadConsent(consented: boolean): Promise<void> {
-    try {
-      await Keychain.setInternetCredentials(
-        CONTACTS_CONSENT_SERVICE,
-        CONTACTS_UPLOAD_CONSENT_KEY,
-        consented ? 'true' : 'false'
-      );
-    } catch (error) {
-      console.error('Error storing upload consent:', error);
-    }
-  }
-
-  async hasUploadConsent(): Promise<boolean> {
-    try {
-      const credentials = await Keychain.getInternetCredentials(CONTACTS_CONSENT_SERVICE);
-      if (hasUsableInternetCredentials(credentials) && credentials.username === CONTACTS_UPLOAD_CONSENT_KEY) {
-        return credentials.password === 'true';
-      }
-      return false;
-    } catch (error) {
-      console.error('Error reading upload consent:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Check which phone numbers are Confío users
-   */
-  async checkConfioUsers(
-    phoneNumbers: string[],
-    apolloClient?: any,
-    onBatchDone?: (processed: number, total: number) => void,
-  ): Promise<Map<string, any>> {
-    const confioUsersMap = new Map<string, any>();
-
-    if (!apolloClient || phoneNumbers.length === 0) {
-      return confioUsersMap;
-    }
-
-    // Import the query dynamically to avoid circular dependencies
-    const { CHECK_USERS_BY_PHONES } = await import('../apollo/queries');
-
-    // Query the server in batches of 50 phone numbers
-    const batchSize = 50;
-    for (let i = 0; i < phoneNumbers.length; i += batchSize) {
-      const batch = phoneNumbers.slice(i, i + batchSize);
-      const result = await apolloClient.query({
-        query: CHECK_USERS_BY_PHONES,
-        variables: { phoneNumbers: batch },
-        fetchPolicy: 'network-only'
-      });
-
-      const users = result.data?.checkUsersByPhones;
-      if (!Array.isArray(users)) {
-        throw new Error('Contact discovery returned an invalid response');
-      }
-      const requestedPhones = new Set(batch);
-      const returnedPhones = new Set<string>();
-      users.forEach((userInfo: any) => {
-        if (!userInfo?.phoneNumber || !requestedPhones.has(userInfo.phoneNumber)) {
-          throw new Error('Contact discovery returned an unexpected phone number');
-        }
-        returnedPhones.add(userInfo.phoneNumber);
-        if (userInfo?.isOnConfio) {
-          if (!userInfo.userId) {
-            throw new Error('Contact discovery returned an incomplete recipient');
-          }
-          confioUsersMap.set(userInfo.phoneNumber, {
-            userId: userInfo.userId,
-            username: userInfo.username,
-            firstName: userInfo.firstName,
-            lastName: userInfo.lastName,
-            algorandAddress: userInfo.activeAccountAlgorandAddress,
-            statusTier: userInfo.statusTier || null,
-            isReferralVerified: userInfo.isReferralVerified || false,
-          });
-        }
-      });
-      if (returnedPhones.size !== requestedPhones.size) {
-        throw new Error('Contact discovery omitted one or more phone numbers');
-      }
-      onBatchDone?.(Math.min(i + batchSize, phoneNumbers.length), phoneNumbers.length);
-    }
-
-    return confioUsersMap;
-  }
 
   /**
    * Sync contacts from device and store in keychain
-   * @param apolloClient - Apollo client for GraphQL queries
    */
-  async syncContacts(apolloClient?: any, onProgress?: ContactSyncProgressListener): Promise<boolean> {
+  async syncContacts(onProgress?: ContactSyncProgressListener): Promise<boolean> {
     const syncGeneration = ++this.cacheGeneration;
     this.activeSyncGeneration = syncGeneration;
     try {
@@ -492,121 +413,9 @@ export class ContactService {
         }
       }
 
-      // Check which contacts are Confío users
-      let canUpload = true;
-      if (Platform.OS === 'ios') {
-        canUpload = await this.hasUploadConsent();
-        if (!syncContextIsCurrent()) return false;
-        if (!canUpload) {        }
-      }
-
-      if (apolloClient && allPhoneNumbers.length > 0 && canUpload) {
-        const startCheck = Date.now();
-        const uniquePhoneNumbers = Array.from(new Set(allPhoneNumbers));
-        report('matching', 0, uniquePhoneNumbers.length);
-        const confioUsersMap = await this.checkConfioUsers(
-          uniquePhoneNumbers,
-          apolloClient,
-          (processed, total) => report('matching', processed, total),
-        );
-        if (!syncContextIsCurrent()) return false;
-
-        type ContactMatch = { phoneNumber: string; userInfo: any };
-        const matchesByContact = new Map<StoredContact, ContactMatch[]>();
-        confioUsersMap.forEach((userInfo, phoneNumber) => {
-          const contact = contactMap[phoneNumber];
-          if (!contact) return;
-          const matches = matchesByContact.get(contact) || [];
-          matches.push({ phoneNumber, userInfo });
-          matchesByContact.set(contact, matches);
-        });
-
-        const applyMatch = (contact: StoredContact, match: ContactMatch) => {
-          contact.isOnConfio = true;
-          contact.confioUserId = match.userInfo.userId;
-          contact.confioUsername = match.userInfo.username;
-          contact.confioFirstName = match.userInfo.firstName || undefined;
-          contact.confioLastName = match.userInfo.lastName || undefined;
-          contact.confioAlgorandAddress = match.userInfo.algorandAddress;
-          contact.confioMatchedPhone = match.phoneNumber;
-          contact.confioMatchWasInferred = Boolean(contact.inferredE164Phones?.includes(match.phoneNumber));
-          contact.statusTier = match.userInfo.statusTier || null;
-          contact.isReferralVerified = match.userInfo.isReferralVerified || false;
-        };
-
-        matchesByContact.forEach((matches, contact) => {
-          const matchesByUser = new Map<string, ContactMatch[]>();
-          matches.forEach(match => {
-            const userMatches = matchesByUser.get(match.userInfo.userId) || [];
-            userMatches.push(match);
-            matchesByUser.set(match.userInfo.userId, userMatches);
-          });
-
-          if (matchesByUser.size === 1) {
-            const userMatches = Array.from(matchesByUser.values())[0];
-            const preferred = userMatches.find(match => !contact.inferredE164Phones?.includes(match.phoneNumber))
-              || userMatches[0];
-            applyMatch(contact, preferred);
-            return;
-          }
-
-          // One address-book record can contain numbers owned by different
-          // people (shared office/family cards). Never let server result order
-          // choose which account receives money: split it into one recipient
-          // per Confío account and keep any unmatched numbers as an invite.
-          const matchedPhones = new Set(matches.map(match => match.phoneNumber));
-          const originallyInferredPhones = new Set(contact.inferredE164Phones || []);
-          const rawPhoneToE164 = new Map<string, string>();
-          contact.phoneNumbers.forEach(rawPhone => {
-            try {
-              const parsed = parsePhoneNumber(rawPhone, phoneRegion);
-              if (parsed?.isValid()) rawPhoneToE164.set(rawPhone, parsed.format('E.164'));
-            } catch {}
-          });
-
-          Object.keys(contactMap).forEach(key => {
-            if (contactMap[key] === contact) delete contactMap[key];
-          });
-
-          const unmatchedRawPhones = contact.phoneNumbers.filter(rawPhone => {
-            const e164 = rawPhoneToE164.get(rawPhone);
-            return !e164 || !matchedPhones.has(e164);
-          });
-          const unmatchedNormalizedPhones = contact.normalizedPhones.filter(phone => {
-            const e164 = phone.startsWith('+') ? phone : `+${phone}`;
-            return !matchedPhones.has(e164);
-          });
-          if (unmatchedRawPhones.length > 0 && unmatchedNormalizedPhones.length > 0) {
-            contact.phoneNumbers = unmatchedRawPhones;
-            contact.normalizedPhones = unmatchedNormalizedPhones;
-            contact.inferredE164Phones = Array.from(originallyInferredPhones)
-              .filter(phone => !matchedPhones.has(phone));
-            unmatchedNormalizedPhones.forEach(phone => { contactMap[phone] = contact; });
-          }
-
-          matchesByUser.forEach(userMatches => {
-            const phones = Array.from(new Set(userMatches.map(match => match.phoneNumber)));
-            const preferred = userMatches.find(match => !originallyInferredPhones.has(match.phoneNumber))
-              || userMatches[0];
-            const recipientContact: StoredContact = {
-              ...contact,
-              phoneNumbers: contact.phoneNumbers.length > 0
-                ? Array.from(rawPhoneToE164.entries())
-                  .filter(([, e164]) => phones.includes(e164))
-                  .map(([rawPhone]) => rawPhone)
-                : phones,
-              normalizedPhones: phones.flatMap(phone => [phone, phone.substring(1)]),
-              inferredE164Phones: phones.filter(phone => originallyInferredPhones.has(phone)),
-              isOnConfio: false,
-            };
-            if (recipientContact.phoneNumbers.length === 0) recipientContact.phoneNumbers = phones;
-            applyMatch(recipientContact, preferred);
-            phones.forEach(phone => {
-              contactMap[phone] = recipientContact;
-              contactMap[phone.substring(1)] = recipientContact;
-            });
-          });
-        });      }
+      // Contacts stay on this phone: nothing is sent to Confío. Who a
+      // number reaches is asked one number at a time, when the person picks
+      // a contact to pay (resolveRecipientForPhone).
 
       if (!syncContextIsCurrent()) return false;
 
@@ -671,7 +480,7 @@ export class ContactService {
         || this.contactOwnerRegion !== expectedPhoneRegion
         || this.cacheGeneration !== expectedGeneration) return null;
       if (hasUsableInternetCredentials(credentials) && credentials.username === CONTACTS_KEYCHAIN_KEY) {
-        const contactMap = JSON.parse(credentials.password) as ContactMap;
+        const contactMap = JSON.parse(credentials.password, withoutDiscovery) as ContactMap;
         this.contactsCache = contactMap;
         return contactMap;
       }
@@ -721,7 +530,7 @@ export class ContactService {
           contactsServiceForOwner(expectedOwnerUserId, expectedPhoneRegion, true),
         );
         if (hasUsableInternetCredentials(arrayCredentials) && arrayCredentials.username === CONTACTS_KEYCHAIN_KEY) {
-          const contactsArray = JSON.parse(arrayCredentials.password);
+          const contactsArray = JSON.parse(arrayCredentials.password, withoutDiscovery);
           if (Array.isArray(contactsArray)
             && this.contactOwnerUserId === expectedOwnerUserId
             && this.contactOwnerRegion === expectedPhoneRegion
@@ -746,7 +555,7 @@ export class ContactService {
         return;
       }
 
-      const contactsData = JSON.parse(credentials.password);
+      const contactsData = JSON.parse(credentials.password, withoutDiscovery);
 
       // Old format: convert map to array
       if (contactsData && typeof contactsData === 'object') {

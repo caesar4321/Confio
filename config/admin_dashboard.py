@@ -1420,3 +1420,30 @@ class ReviewAccessAdmin(admin.ModelAdmin):
 
 
 confio_admin_site.register(ReviewAccess, ReviewAccessAdmin)
+
+# Link sends (send/link_invite.py): which account a sender's contact number
+# reaches, and numbers a sender told Confío to forget. Read-only.
+from send.models import RecipientRevocation, SavedRecipient  # noqa: E402
+
+
+class SavedRecipientAdmin(admin.ModelAdmin):
+    list_display = ('sender_user', 'phone_key', 'recipient_user', 'source', 'basis_at', 'deleted_at')
+    list_filter = ('source',)
+    search_fields = ('sender_user__username', 'recipient_user__username', 'phone_key')
+    readonly_fields = [field.name for field in SavedRecipient._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+
+class RecipientRevocationAdmin(admin.ModelAdmin):
+    list_display = ('sender_user', 'phone_key', 'revoked_at')
+    search_fields = ('sender_user__username', 'phone_key')
+    readonly_fields = [field.name for field in RecipientRevocation._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+
+confio_admin_site.register(SavedRecipient, SavedRecipientAdmin)
+confio_admin_site.register(RecipientRevocation, RecipientRevocationAdmin)
