@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 REVIEW_COUNTRIES = {'AR': True, 'US': False, 'GB': False}  # country → geo_exempt
 ACCESS_DAYS = 14
 FAILED_ATTEMPTS_PER_HOUR = 5
+REPEAT_WINDOW = timedelta(minutes=1)
 
 
 def _token() -> str:
@@ -66,6 +67,14 @@ def apply_review_access(user, country: str, token: str, meta=None) -> tuple[bool
 
     now = timezone.now()
     with transaction.atomic():
+        type(user).objects.select_for_update().filter(pk=user.pk).first()
+        # The same link delivered twice (cold start and the link listener, or
+        # a double tap) is one grant: a second row would count twice toward
+        # the monthly cap.
+        if ReviewAccess.objects.filter(
+                user_id=user.pk, country=country, superseded_at__isnull=True,
+                created_at__gte=now - REPEAT_WINDOW).exists():
+            return True, None
         if geo_exempt:
             if connection.vendor == 'postgresql':
                 with connection.cursor() as cursor:
@@ -74,7 +83,6 @@ def apply_review_access(user, country: str, token: str, meta=None) -> tuple[bool
             granted = ReviewAccess.objects.filter(geo_exempt=True, created_at__gte=month_start).count()
             if granted >= int(getattr(settings, 'REVIEW_LINK_MONTHLY_CAP', 10)):
                 return False, 'Este enlace ya no está disponible este mes.'
-        type(user).objects.select_for_update().filter(pk=user.pk).first()
         user.refresh_from_db(fields=['country', 'country_source'])
         previous = ReviewAccess.objects.filter(user_id=user.pk).order_by('-created_at').first()
         if previous and user.country_source == user.COUNTRY_SOURCE_REVIEW:

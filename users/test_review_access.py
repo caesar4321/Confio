@@ -43,12 +43,21 @@ class ReviewAccessTests(TestCase):
         # protects=a leaked AR link opens at most CAP exempt grants a month; fails_when=re-applies dodge the count; no_claim=month boundaries
         other = User.objects.create_user(username='reviewer-2', firebase_uid='reviewer-2')
         self.assertTrue(apply_review_access(self.user, 'AR', TOKEN)[0])
+        ReviewAccess.objects.filter(user=self.user).update(created_at=timezone.now() - timedelta(minutes=5))
         self.assertTrue(apply_review_access(self.user, 'AR', TOKEN)[0])
         self.assertEqual(ReviewAccess.objects.filter(user=self.user).count(), 2)
         self.assertEqual(ReviewAccess.objects.filter(user=self.user, superseded_at__isnull=True).count(), 1)
         ok, error = apply_review_access(other, 'AR', TOKEN)
         self.assertFalse(ok)
         self.assertIn('ya no está disponible', error)
+
+    def test_the_same_link_delivered_twice_is_one_grant(self, _alert):
+        # protects=a double delivery (cold start + listener) counts once toward the cap; fails_when=two rows 15 ms apart; no_claim=a deliberate re-open later (counts, see above)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(apply_review_access(self.user, 'AR', TOKEN), (True, None))
+            self.assertEqual(apply_review_access(self.user, 'AR', TOKEN), (True, None))
+        self.assertEqual(ReviewAccess.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(_alert.call_count, 1)
 
     def test_clearing_the_token_ends_every_grant(self, _alert):
         # protects=one setting switches all grants off; fails_when=grants outlive the token; no_claim=none beyond protects
