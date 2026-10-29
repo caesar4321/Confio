@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ReferralSuccessModal } from './ReferralSuccessModal';
 import {
   View,
@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  FlatList,
   Alert,
   ScrollView,
 } from 'react-native';
@@ -16,13 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, TextInput } from './common/AppText';
 import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
-import Icon from 'react-native-vector-icons/Feather';
-import { countries, Country } from '../utils/countries';
-import { useAuth } from '../contexts/AuthContext';
 import { colors } from '../config/theme';
 import { Button } from './common/Button';
-import { CountryFlag, FlagLabel } from './CountryFlag';
-import { userCountryIso } from '../utils/userCountry';
 
 const CHECK_REFERRAL_STATUS = gql`
   mutation CheckReferralStatus {
@@ -56,25 +50,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const [referrerInput, setReferrerInput] = useState('');
-  const [inputType, setInputType] = useState<'friend' | 'phone'>('friend');
   const [showSuccess, setShowSuccess] = useState(false);
-  const { userProfile } = useAuth();
-  const defaultCountry = useMemo<Country>(() => {
-    const home = userCountryIso(userProfile);
-    if (home) {
-      const match = countries.find((c) => c[2] === home);
-      if (match) return match;
-    }
-    return countries.find((c) => c[2] === 'VE') || countries[0];
-  }, [userProfile?.country, userProfile?.phoneCountry]);
-
-  const [selectedCountry, setSelectedCountry] = useState<Country>(defaultCountry);
-
-  useEffect(() => {
-    setSelectedCountry(defaultCountry);
-  }, [defaultCountry]);
-  const [showCountryPicker, setShowCountryPicker] = useState(false);
-
   const [checkStatus] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrer, { loading }] = useMutation(SET_REFERRER);
 
@@ -123,27 +99,22 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
 
   const handleSubmit = async () => {
     if (!referrerInput.trim()) {
-      setError('Por favor ingresa un @usuario o número de teléfono');
+      setError('Escribe el @usuario de quien te invitó');
       return;
     }
 
     let finalIdentifier = referrerInput.trim();
 
     // Add @ prefix for usernames if not present
-    if (inputType === 'friend' && !finalIdentifier.startsWith('@')) {
+    if (!finalIdentifier.startsWith('@')) {
       finalIdentifier = '@' + finalIdentifier;
-    }
-
-    // Add country code for phone numbers
-    if (inputType === 'phone') {
-      finalIdentifier = selectedCountry[1] + finalIdentifier.replace(/[^0-9]/g, '');
     }
 
     try {
       const { data, errors } = await setReferrer({
         variables: {
           referrerIdentifier: finalIdentifier,
-          referralType: inputType === 'phone' ? 'friend' : 'friend',
+          referralType: 'friend',
         },
       });
 
@@ -217,87 +188,25 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
           {canSetReferrer ? (
             <>
               <Text style={styles.subtitle}>
-                Ingresa el @usuario o número de teléfono de la persona que te invitó. Puedes registrarlo en cualquier momento.
+                Escribe el @usuario de la persona que te invitó. Lo encuentras en su perfil de Confío. Puedes registrarlo en cualquier momento.
               </Text>
 
-              <View style={styles.inputTypeSelector}>
-                <TouchableOpacity
-                  style={[
-                    styles.typeButton,
-                    inputType === 'friend' && styles.typeButtonActive,
-                  ]}
-                  onPress={() => setInputType('friend')}
-                >
-                  <Text
-                    style={[
-                      styles.typeButtonText,
-                      inputType === 'friend' && styles.typeButtonTextActive,
-                    ]}
-                  >
-                    @Usuario
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.typeButton,
-                    inputType === 'phone' && styles.typeButtonActive,
-                  ]}
-                  onPress={() => setInputType('phone')}
-                >
-                  <Text
-                    style={[
-                      styles.typeButtonText,
-                      inputType === 'phone' && styles.typeButtonTextActive,
-                    ]}
-                  >
-                    Teléfono
-                  </Text>
-                </TouchableOpacity>
+              <View style={styles.usernameInputContainer}>
+                <Text style={styles.atPrefix}>@</Text>
+                <TextInput
+                  style={styles.usernameInput}
+                  value={referrerInput}
+                  onChangeText={(text) => {
+                    // Remove @ if user types it
+                    setReferrerInput(text.replace('@', ''));
+                    setError('');
+                  }}
+                  placeholder="usuario de Confío"
+                  placeholderTextColor="#9CA3AF"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
               </View>
-
-              {inputType === 'phone' ? (
-                <View style={styles.phoneInputContainer}>
-                  <TouchableOpacity
-                    style={styles.countryCodeButton}
-                    onPress={() => setShowCountryPicker(true)}
-                  >
-                    <FlagLabel iso={selectedCountry[2]} textStyle={styles.countryCodeText}>
-                      {selectedCountry[1]}
-                    </FlagLabel>
-                    <Icon name="chevron-down" size={16} color="#6B7280" />
-                  </TouchableOpacity>
-                  <TextInput
-                    style={styles.phoneInput}
-                    value={referrerInput}
-                    onChangeText={(text) => {
-                      setReferrerInput(text.replace(/[^0-9]/g, ''));
-                      setError('');
-                    }}
-                    placeholder="412 345 6789"
-                    placeholderTextColor="#9CA3AF"
-                    keyboardType="phone-pad"
-                    maxLength={15}
-                  />
-                </View>
-              ) : (
-                <View style={styles.usernameInputContainer}>
-                  <Text style={styles.atPrefix}>@</Text>
-                  <TextInput
-                    style={styles.usernameInput}
-                    value={referrerInput}
-                    onChangeText={(text) => {
-                      // Remove @ if user types it
-                      setReferrerInput(text.replace('@', ''));
-                      setError('');
-                    }}
-                    placeholder="username de Confío"
-                    placeholderTextColor="#9CA3AF"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </View>
-              )}
 
               {error ? (
                 <Text style={styles.errorText}>{error}</Text>
@@ -341,61 +250,6 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
-
-      {/* Country Code Picker Modal */}
-      <Modal
-        visible={showCountryPicker}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowCountryPicker(false)}
-      >
-        <View style={styles.pickerOverlay}>
-          <View style={styles.pickerContent}>
-            <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Selecciona tu país</Text>
-              <TouchableOpacity
-                style={styles.pickerCloseButton}
-                onPress={() => setShowCountryPicker(false)}
-               accessibilityRole="button" accessibilityLabel="Cerrar">
-                <Icon name="x" size={24} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-            <FlatList
-              data={countries}
-              keyExtractor={(item) => item[1] + item[2]}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.countryItem,
-                    selectedCountry[2] === item[2] && styles.countryItemSelected,
-                  ]}
-                  onPress={() => {
-                    setSelectedCountry(item);
-                    setShowCountryPicker(false);
-                  }}
-                >
-                  <View style={styles.countryFlag}>
-                    <CountryFlag iso={item[2]} size={24} />
-                  </View>
-                  <Text style={styles.countryName} numberOfLines={1}>{item[0]}</Text>
-                  <Text style={styles.countryCode}>{item[1]}</Text>
-                  {selectedCountry[2] === item[2] && (
-                    <Icon name="check" size={20} color={colors.primaryDark} />
-                  )}
-                </TouchableOpacity>
-              )}
-              initialNumToRender={20}
-              maxToRenderPerBatch={10}
-              windowSize={21}
-              getItemLayout={(data, index) => ({
-                length: 65,
-                offset: 65 * index,
-                index,
-              })}
-            />
-          </View>
-        </View>
-      </Modal>
     </Modal>
   );
 };

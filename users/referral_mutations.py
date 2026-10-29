@@ -5,7 +5,6 @@ import graphene
 from decimal import Decimal
 from django.db import transaction as db_transaction
 from .models import User, Account
-from .phone_utils import find_user_by_phone
 from achievements.models import UserReferral, UserAchievement, AchievementType
 from .decorators import rate_limit, check_suspicious_activity
 from .jwt_context import get_jwt_business_context_with_validation
@@ -16,7 +15,7 @@ _logger = logging.getLogger(__name__)
 
 
 class SetReferrer(graphene.Mutation):
-    """Registers who invited the current user (username or phone)."""
+    """Registers who invited the current user, by @usuario."""
     class Arguments:
         referrer_identifier = graphene.String(required=True)
         referral_type = graphene.String()  # kept for backward compatibility
@@ -70,24 +69,14 @@ class SetReferrer(graphene.Mutation):
             referrer_identifier = identifier
 
             if is_phone:
-                # Only a FULL number identifies a person. Prepending '+' to
-                # bare digits used to invent a country: "3132587634" (a
-                # Colombian mobile) became "+31 32587634", a Netherlands
-                # number, and credited that stranger as the referrer.
-                typed = identifier.replace(' ', '')
-                if not typed.startswith('+'):
-                    return SetReferrer(
-                        success=False,
-                        error="Incluye el código de país, por ejemplo +57 313 258 7634."
-                    )
-                clean_phone = '+' + ''.join(filter(str.isdigit, typed))
-                referrer_user = find_user_by_phone(clean_phone)
-                if not referrer_user:
-                    return SetReferrer(
-                        success=False,
-                        error=f"No se encontró ningún usuario con el número {clean_phone}."
-                    )
-                referrer_identifier = referrer_user.username or clean_phone
+                # By @usuario only. A number lookup told anyone whether a
+                # number has an account and which @usuario holds it, and a
+                # verified number never connects to a person
+                # (users/name_visibility.py). Older apps still send numbers.
+                return SetReferrer(
+                    success=False,
+                    error="Escribe el @usuario de quien te invitó. Lo encuentras en su perfil de Confío."
+                )
             else:
                 if not re.match(r'^[a-zA-Z0-9_]{3,20}$', identifier):
                     return SetReferrer(
