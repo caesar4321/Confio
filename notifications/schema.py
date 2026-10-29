@@ -125,6 +125,23 @@ class NotificationType(DjangoObjectType):
             'push_sent', 'push_sent_at'
         ]
     
+    def resolve_data(self, info):
+        """Notification data as stored, minus phone numbers. Older rows
+        carried both parties' verified numbers; the only number that may
+        travel is the sender's own label on their own notification
+        (send/tasks.py, flagged recipient_phone_from_sender)."""
+        data = self.data
+        if not isinstance(data, dict):
+            return data
+        keep_label = data.get('recipient_phone_from_sender') is True
+        clean = {}
+        for key, value in data.items():
+            lowered = str(key).lower()
+            if 'phone' in lowered and not (keep_label and key in ('recipient_phone', 'recipient_phone_from_sender')):
+                continue
+            clean[key] = value
+        return clean
+
     def resolve_is_read(self, info):
         """Check if notification is read in current account context"""
         if hasattr(info.context, 'user') and info.context.user.is_authenticated:

@@ -815,14 +815,18 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         return {'success': False, 'error': 'tip_fee_not_allowed'}
 
     recipient_display = 'Confío · Apertura de cuenta' if activation_payment is not None else ''
-    recipient_phone_val = ''
+    # Numbers on a send are the sender's own label (the contact they picked
+    # or the number they typed), never an account's verified number: the
+    # link to a person is their account, and Confío's number graph is never
+    # shown to anyone.
+    recipient_phone_val = (recipient_phone or '').strip()[:30] if recipient_user is not None else ''
     if recipient_business is not None:
         recipient_display = recipient_business.name
+        recipient_phone_val = ''
     elif recipient_user is not None:
         recipient_display = _display_name(recipient_user)
-        recipient_phone_val = recipient_user.phone_number or ''
     sender_display = sender_business.name if sender_business else _display_name(user)
-    sender_phone_val = user.phone_number or ''
+    sender_phone_val = ''
     if tip is not None:
         # Comunidad is pseudonymous: a tip carries Comunidad names and no
         # phone numbers on either side (send rows, history, notifications).
@@ -855,6 +859,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 'user' if recipient_user else 'external'),
             recipient_display_name=recipient_display,
             recipient_phone=recipient_phone_val,
+            recipient_phone_from_sender=bool(recipient_phone_val),
             sender_address=sender_addr,
             recipient_address=recipient_addr,
             amount=amount_usd,

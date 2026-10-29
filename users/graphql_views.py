@@ -473,6 +473,21 @@ class UnifiedTransactionType(DjangoObjectType):
         return (tip_safe_user(self.send_transaction, self.counterparty_user, info)
                 if self.send_transaction_id else self.counterparty_user)
 
+    def resolve_counterparty_phone(self, info):
+        """Only the number the viewer typed on their own send (their contact
+        or what they entered). Never an account's verified number: older
+        rows copied it here, and Confío's number graph is never shown."""
+        viewer = getattr(info.context, 'user', None)
+        send = getattr(self, 'send_transaction', None)
+        if (self.transaction_type == 'send' and send is not None and viewer is not None
+                and send.sender_user_id == getattr(viewer, 'pk', None)
+                and (send.recipient_phone_from_sender or send.is_invitation)):
+            return send.recipient_phone
+        return ''
+
+    def resolve_sender_phone(self, info):
+        return ''
+
     def _send_name(self, info, user, business, stored):
         """A send row is written at prepare, before money moves: until it is
         CONFIRMED, a person's stored name shows only where the name rule
@@ -1126,9 +1141,12 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             )
         
         if friend_phone:
-            # Filter by friend phone number
+            # Only numbers the viewer typed on their own sends: matching
+            # stored verified numbers would tell them who holds a number.
             friend_conditions |= Q(
-                Q(sender_phone=friend_phone) | Q(counterparty_phone=friend_phone)
+                Q(transaction_type='send', send_transaction__sender_user=user,
+                  send_transaction__recipient_phone=friend_phone)
+                & (Q(send_transaction__recipient_phone_from_sender=True) | Q(send_transaction__is_invitation=True))
             )
         
         # Apply friend filter

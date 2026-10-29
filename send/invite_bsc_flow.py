@@ -291,6 +291,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
         send_tx.token_type = token_type.upper()
         send_tx.recipient_display_name = phone_display or phone_key
         send_tx.recipient_phone = phone_display or ''
+        send_tx.recipient_phone_from_sender = bool(phone_display)
         send_tx.sender_address = inviter_addr
         send_tx.recipient_address = _escrow()
         send_tx.sender_business = sender_business
@@ -299,7 +300,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
         send_tx.sender_display_name = (
             sender_business.name if sender_business else (user.get_full_name() or user.username))
         send_tx.save(update_fields=[
-            'amount', 'token_type', 'recipient_display_name', 'recipient_phone',
+            'amount', 'token_type', 'recipient_display_name', 'recipient_phone', 'recipient_phone_from_sender',
             'sender_address', 'recipient_address', 'sender_business',
             'sender_type', 'sender_display_name', 'bsc_calls_json', 'updated_at'])
         invite.amount = amount_usd
@@ -329,10 +330,11 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
             sender_display_name=(
                 sender_business.name if sender_business
                 else (user.get_full_name() or user.username)),
-            sender_phone=user.phone_number or '',
+            sender_phone='',
             recipient_type='external',
             recipient_display_name=phone_display or phone_key,
             recipient_phone=phone_display or '',
+            recipient_phone_from_sender=bool(phone_display),
             sender_address=inviter_addr,
             recipient_address=_escrow(),
             amount=amount_usd,

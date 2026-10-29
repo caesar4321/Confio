@@ -523,10 +523,13 @@ class Web3AuthUserType(DjangoObjectType):
         return bool(self.phone_number)
 
     def resolve_phone_key(self, info):
-        try:
-            return getattr(self, 'phone_key', None)
-        except Exception:
+        # Own account only: Graphene resolves some user links (a send's sender
+        # and recipient) through this type, and an account's verified number
+        # never reaches another person.
+        viewer = getattr(info.context, 'user', None)
+        if viewer is None or not getattr(viewer, 'is_authenticated', False) or viewer.pk != self.pk:
             return None
+        return getattr(self, 'phone_key', None)
 
 
 class Web3AuthLoginMutation(graphene.Mutation):

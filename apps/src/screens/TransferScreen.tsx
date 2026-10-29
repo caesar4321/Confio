@@ -262,6 +262,9 @@ const typedNumberE164 = (text: string): string => {
   }
 };
 
+// Last silent address-book read (module-level: survives remounts).
+let lastSilentContactSync = 0;
+
 // Create isolated SearchInput component to prevent keyboard issues
 const SearchInput = React.memo(({
   onSearchChange,
@@ -466,7 +469,7 @@ export const TransferScreen = () => {
           setIsInitialLoad(false);
         }
 
-        // No automatic sync - users will use pull-to-refresh or sync button
+        // A silent refresh follows on focus (silentSyncContacts).
       } else {
         // Explicitly reflect denied status in state so UI can react properly
         setHasContactPermission(false);
@@ -684,12 +687,28 @@ export const TransferScreen = () => {
     setSyncProgress(null);
   };
 
-  // Use focus effect to refresh contacts when screen comes into focus
+  // Contacts stay on the phone, so reading the address book is cheap: it
+  // refreshes on its own when Enviar opens (at most every 10 minutes),
+  // silently. No refresh button and no pull-to-refresh any more: those were
+  // for the old server matching. A failed read keeps the last list quietly.
+  const silentSyncContacts = useCallback(async () => {
+    if (!isPersonalAccount || !hasContactPermission || !hasDefaultPhoneRegion()) return;
+    if (Date.now() - lastSilentContactSync < 10 * 60 * 1000) return;
+    lastSilentContactSync = Date.now();
+    try {
+      if (await contactService.syncContacts()) {
+        await displayContacts(await contactService.getAllContacts());
+      }
+    } catch {
+      // The cached list stays.
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPersonalAccount, hasContactPermission]);
+
   useFocusEffect(
     useCallback(() => {
-      // Don't auto-sync on focus, just use cached data
-      // Users can manually refresh if needed
-    }, [hasContactPermission])
+      silentSyncContacts();
+    }, [silentSyncContacts])
   );
 
   // The USDT send option is an EXIT and stays visible whenever the user
@@ -838,18 +857,16 @@ export const TransferScreen = () => {
       Alert.alert('Cobra con QR', `${person.displayName} cobra con QR. Pídele su código de Cobrar para pagarle.`);
       return;
     }
-    handleSendToFriend({
-      id: String(person.userId),
-      userId: String(person.userId),
-      name: person.displayName,
-      avatar: (person.displayName || person.username || '?').replace(/^@/, '').charAt(0).toUpperCase(),
+    // The person first: your history together, then Enviar from there.
+    navigation.navigate('FriendDetail', {
+      friendId: String(person.userId),
+      friendName: person.displayName,
+      friendAvatar: (person.displayName || person.username || '?').replace(/^@/, '').charAt(0).toUpperCase(),
       isOnConfio: true,
-      phone: '',
-      confioUsername: person.username,
-      confioFirstName: person.displayName,
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      friendConfioUsername: person.username,
+      friendConfioFirstName: person.displayName,
+    } as any);
+  }, [navigation]);
 
   const handleNumberPress = useCallback((e164: string) => {
     handleSendToFriend({
@@ -1616,7 +1633,10 @@ export const TransferScreen = () => {
               />
             </View>
 
-            {/* Manual sync button - always visible */}
+            {/* Business: refresh the employee list. Personal: only the
+                permission shield when contacts are off (contacts refresh on
+                their own). */}
+            {(isBusinessAccount || hasContactPermission === false) && (
             <TouchableOpacity
               style={styles.syncButton}
               onPress={async () => {
@@ -1661,6 +1681,7 @@ export const TransferScreen = () => {
                 color={isLoadingContacts || refreshing ? colors.text.light : colors.primary}
               />
             </TouchableOpacity>
+            )}
           </View>
 
           {/* Test user creation button removed */}
@@ -1688,13 +1709,13 @@ export const TransferScreen = () => {
           )}
           stickySectionHeadersEnabled={false}
           contentContainerStyle={{ paddingBottom: 24 }}
-          refreshControl={
+          refreshControl={isBusinessAccount ? (
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
               tintColor={colors.primary}
             />
-          }
+          ) : undefined}
           onEndReached={isBusinessAccount ? loadMoreEmployees : undefined}
           onEndReachedThreshold={0.1}
           ListFooterComponent={isBusinessAccount && employeesState.loading ? (

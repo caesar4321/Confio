@@ -81,6 +81,11 @@ class PaymentTransactionType(DjangoObjectType):
         )
 
     # Return ephemeral override when present to include transactions in mutation response
+    def resolve_payer_phone(self, info):
+        # Older rows copied the payer's verified number: it never reaches the
+        # merchant or their employees.
+        return ''
+
     def resolve_blockchain_data(self, info):
         try:
             # 1) If the instance already has the response-time dict with transactions, return it
@@ -647,7 +652,8 @@ class PayInvoice(graphene.Mutation):
                 # Fallback to username if no first/last name
                 if not payer_display_name:
                     payer_display_name = user.username or f"User {user.id}"
-                payer_phone = f"{user.phone_country}{user.phone_number}" if user.phone_country and user.phone_number else ""
+                # Never the payer's verified number: it would reach the merchant.
+                payer_phone = ""
                 
                 if payer_account.account_type == 'business' and payer_account.business:
                     payer_business = payer_account.business

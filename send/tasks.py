@@ -45,18 +45,20 @@ def _notify_send_parties(s) -> None:
 
     token = token_label(s.token_type)
     amount_str = f'{s.amount:.2f}'.rstrip('0').rstrip('.')
-    # The stored columns hold LOCAL digits; a client can neither display nor
-    # re-send to those. Send the full international number.
-    sender_phone = to_international(s.sender_phone, s.sender_user if s.sender_user_id else None)
-    recipient_phone = to_international(
-        s.recipient_phone, s.recipient_user if s.recipient_user_id else None)
+    # Numbers: only the sender's own label (the contact they picked or the
+    # number they typed), and only to the sender. Never an account's verified
+    # number (to_international with a user would prefer it), never the
+    # sender's number to the recipient.
+    sender_label = ''
+    if s.recipient_phone and (getattr(s, 'recipient_phone_from_sender', False) or s.is_invitation):
+        sender_label = to_international(s.recipient_phone, None) or s.recipient_phone
     if str(getattr(s, 'idempotency_key', '') or '').startswith('tip-'):
         _notify_tip_parties(s, amount_str)
         return
     sender_name = s.sender_display_name or 'Contacto'
     recipient_name = (
         s.recipient_display_name
-        or (recipient_phone if recipient_phone else None)
+        or (sender_label if sender_label else None)
         or (s.recipient_address[:6] + '...' + s.recipient_address[-4:]
             if s.recipient_address else 'Contacto')
     )
@@ -104,15 +106,15 @@ def _notify_send_parties(s) -> None:
         'transaction_type': 'send',
     }
 
-    def payload(business):
+    def payload(business, for_sender=False):
         """A notification attached to a business is pushed to EVERY employee
         (notifications/fcm_service.py) and its whole `data` blob is readable
-        by all of them. Personal phone numbers are not business data, so they
-        travel only on the personal notifications."""
+        by all of them. The only number that travels is the sender's own
+        label, on the sender's personal notification."""
         data = dict(common)
-        if business is None:
-            data['sender_phone'] = sender_phone
-            data['recipient_phone'] = recipient_phone
+        if business is None and for_sender and sender_label:
+            data['recipient_phone'] = sender_label
+            data['recipient_phone_from_sender'] = True
         return data
 
     try:
@@ -137,7 +139,7 @@ def _notify_send_parties(s) -> None:
                 notification_type=NotifType.SEND_SENT,
                 title='Dinero enviado',
                 message=f'Enviaste {format_amount(s.amount, s.sender_user)} {token} a {recipient_name}',
-                data=payload(s.sender_business),
+                data=payload(s.sender_business, for_sender=True),
                 related_object_type='SendTransaction',
                 related_object_id=str(s.internal_id),
                 action_url=f'confio://send/{s.internal_id}',

@@ -64,6 +64,7 @@ class SendTransactionType(DjangoObjectType):
     fee_bps = graphene.Int()
     net_amount = graphene.String()
     to_token = graphene.String()
+    link_public_ref = graphene.String(description='Link sends only, to their sender: the /r/ reference')
 
     class Meta:
         model = SendTransaction
@@ -99,6 +100,29 @@ class SendTransactionType(DjangoObjectType):
 
     def resolve_sender_user(self, info):
         return tip_safe_user(self, self.sender_user, info)
+
+    # Numbers: only the label the viewer typed on their own send. Never an
+    # account's verified number (older rows stored it), never the sender's
+    # number to the recipient.
+    def resolve_recipient_phone(self, info):
+        viewer = getattr(info.context, 'user', None)
+        if (viewer is not None and self.sender_user_id == getattr(viewer, 'pk', None)
+                and (self.recipient_phone_from_sender or self.is_invitation)):
+            return self.recipient_phone
+        return ''
+
+    def resolve_sender_phone(self, info):
+        return ''
+
+    def resolve_link_public_ref(self, info):
+        """The /r/ reference of a link send, for its sender only (their phone
+        holds the key and rebuilds the link: apps/src/services/linkSend.ts)."""
+        viewer = getattr(info.context, 'user', None)
+        if viewer is None or self.sender_user_id != getattr(viewer, 'pk', None) or not self.is_invitation:
+            return None
+        from .models import PhoneInvite
+        invite = PhoneInvite.objects.filter(send_transaction=self, kind='link', deleted_at__isnull=True).first()
+        return str(invite.public_ref) if invite and invite.public_ref else None
 
     # The stored display names are written at prepare, before any money
     # moves: an unsigned send to a stranger must not turn a username into a
@@ -337,10 +361,11 @@ class Query(graphene.ObjectType):
                 return []
                 
         elif friend_phone:
-            # Find transactions with phone number
+            # Only numbers the viewer typed on their own sends: matching an
+            # account's stored verified number would tell them who holds it.
             transactions = SendTransaction.objects.filter(
-                Q(sender_account=account, recipient_phone=friend_phone) |
-                Q(sender_phone=friend_phone, recipient_account=account)
+                Q(recipient_phone_from_sender=True) | Q(is_invitation=True),
+                sender_account=account, recipient_phone=friend_phone,
             ).order_by('-created_at')
         else:
             return []

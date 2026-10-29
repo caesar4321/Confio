@@ -8,6 +8,7 @@ describe('link send URLs', () => {
     // protects=the receiver gets exactly the key the sender escrowed under; fails_when=the https or confio:// form loses the key; no_claim=signing
     expect(parseLinkUrl(buildLinkUrl(REF, KEY))).toEqual({ publicRef: REF, keyHex: KEY });
     expect(parseLinkUrl(`confio://r/${REF}#${KEY}`)).toEqual({ publicRef: REF, keyHex: KEY });
+    expect(parseLinkUrl(`confio://r/${REF}?k=${KEY}`)).toEqual({ publicRef: REF, keyHex: KEY });
   });
 
   it('refuses a link whose key was cut off or that points elsewhere', () => {

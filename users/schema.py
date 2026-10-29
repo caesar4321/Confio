@@ -1496,7 +1496,8 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				timestamp=payroll.executed_at or payroll.created_at,
 				sender_name=business_name,
 				recipient_name_masked=format_name(user),
-				recipient_phone_masked=f"******{user.phone_number[-4:]}" if user and user.phone_number else "",
+				# Never any digits of a verified number on a receipt.
+				recipient_phone_masked="",
 				verification_message="Pago de nómina verificado exitosamente.",
 				transaction_type="PAYROLL",
 				metadata=json.dumps({"referenceId": str(payroll.run.id) if payroll.run else "", "memo": "Nómina"})
@@ -1532,7 +1533,8 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				sender_name = f"Externo ({addr[:4]}...{addr[-4:]})" if len(addr) > 8 else "Billetera Externa"
 
 			recipient_name = format_name(transfer.recipient_user) if transfer.recipient_user else "Externo"
-			recipient_phone_masked = f"******{transfer.recipient_user.phone_number[-4:]}" if transfer.recipient_user and transfer.recipient_user.phone_number else ""
+			# Never any digits of a verified number on a receipt.
+			recipient_phone_masked = ""
 			if transfer.status != 'CONFIRMED':
 				# A receipt for money that has not moved (an unsigned send is
 				# enough to get an id) names nobody: handles only

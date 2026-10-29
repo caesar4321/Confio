@@ -177,3 +177,57 @@ class NameVisibilityTests(TestCase):
         release = SimpleNamespace(volunteer_application=SimpleNamespace(user=self.stranger))
         info = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
         self.assertEqual(HumanitarianReleaseType.resolve_volunteer_name(release, info), '@nv-stranger')
+
+
+class CounterpartyNumberTests(TestCase):
+    def setUp(self):
+        self.sender = User.objects.create_user(username='num-sender', firebase_uid='num-sender')
+        self.holder = User.objects.create_user(username='num-holder', firebase_uid='num-holder',
+                                               phone_number='3132587634', phone_country='VE')
+
+    def send(self, **fields):
+        from send.models import SendTransaction
+        return SendTransaction.objects.create(
+            sender_user=self.sender, recipient_user=self.holder, sender_type='user', recipient_type='user',
+            amount=1, token_type='CUSD', status='CONFIRMED', sender_address='0x' + '1' * 40,
+            recipient_address='0x' + '2' * 40, **fields)
+
+    def test_an_accounts_verified_number_is_never_shown(self):
+        # protects=Confío's number graph never reaches a sender or recipient; fails_when=an old row's stored verified number is returned; no_claim=the app's own contact lookup
+        from send.schema import SendTransactionType
+        old = self.send(recipient_phone='+58 3132587634', sender_phone='+57 3000000000')
+        as_sender = SimpleNamespace(context=SimpleNamespace(user=self.sender))
+        as_holder = SimpleNamespace(context=SimpleNamespace(user=self.holder))
+        self.assertEqual(SendTransactionType.resolve_recipient_phone(old, as_sender), '')
+        self.assertEqual(SendTransactionType.resolve_sender_phone(old, as_holder), '')
+
+    def test_the_senders_own_label_comes_back_to_them_alone(self):
+        # protects=the sender sees the number from their own contact; fails_when=the recipient sees it or the sender loses it; no_claim=label correctness (it is whatever they picked)
+        from send.schema import SendTransactionType
+        mine = self.send(recipient_phone='+573001234567', recipient_phone_from_sender=True)
+        self.assertEqual(SendTransactionType.resolve_recipient_phone(
+            mine, SimpleNamespace(context=SimpleNamespace(user=self.sender))), '+573001234567')
+        self.assertEqual(SendTransactionType.resolve_recipient_phone(
+            mine, SimpleNamespace(context=SimpleNamespace(user=self.holder))), '')
+
+    def test_notification_data_never_carries_numbers_except_the_senders_label(self):
+        # protects=old notifications with both verified numbers stop showing them; the sender's own label survives on new ones; fails_when=sender_phone or an unflagged recipient_phone is returned; no_claim=already-delivered pushes
+        from notifications.schema import NotificationType
+        old = SimpleNamespace(data={'amount': '1', 'sender_phone': '+57300', 'recipient_phone': '+58313',
+                                    'recipient_phone_country': 'VE'})
+        self.assertEqual(NotificationType.resolve_data(old, None), {'amount': '1'})
+        new = SimpleNamespace(data={'amount': '1', 'recipient_phone': '+573001234567', 'recipient_phone_from_sender': True})
+        self.assertEqual(NotificationType.resolve_data(new, None)['recipient_phone'], '+573001234567')
+
+    def test_phone_key_is_never_anyone_elses(self):
+        # protects=a send's sender/recipient (resolved through Web3AuthUserType) never exposes their verified number; fails_when=phoneKey resolves for another viewer; no_claim=UserType fields
+        from users.web3auth_schema import Web3AuthUserType
+        self.holder.refresh_from_db()
+        self.assertIsNone(Web3AuthUserType.resolve_phone_key(self.holder, SimpleNamespace(context=SimpleNamespace(user=self.sender))))
+        self.assertEqual(Web3AuthUserType.resolve_phone_key(self.holder, SimpleNamespace(context=SimpleNamespace(user=self.holder))),
+                         self.holder.phone_key)
+
+    def test_a_payers_number_never_reaches_the_merchant(self):
+        # protects=merchants and their employees never see a payer's verified number; fails_when=payerPhone returns a stored number; no_claim=payment flow
+        from payments.schema import PaymentTransactionType
+        self.assertEqual(PaymentTransactionType.resolve_payer_phone(SimpleNamespace(payer_phone='+58313'), None), '')

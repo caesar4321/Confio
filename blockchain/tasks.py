@@ -1519,24 +1519,16 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             return nm or None
                         except Exception:
                             return None
-                    # Stored phone columns hold LOCAL digits; a client can
-                    # neither display nor re-send to those. Use the full
-                    # international number everywhere it leaves the server.
-                    from users.phone_utils import to_international
-                    sender_phone_intl = to_international(
-                        getattr(s, 'sender_phone', ''), s.sender_user if s.sender_user_id else None)
-                    recipient_phone_intl = to_international(
-                        getattr(s, 'recipient_phone', ''), s.recipient_user if s.recipient_user_id else None)
+                    # Names, never numbers: an account's verified number
+                    # never names anyone to the other side.
                     sender_name = (
                         s.sender_display_name
                         or (full_name_user(s.sender_user) if s.sender_user_id else None)
-                        or (sender_phone_intl or None)
                         or (s.sender_address[:6] + '...' + s.sender_address[-4:] if s.sender_address else 'Usuario')
                     )
                     recipient_name = (
                         s.recipient_display_name
                         or (full_name_user(s.recipient_user) if s.recipient_user_id else None)
-                        or (recipient_phone_intl or None)
                         or (s.recipient_address[:6] + '...' + s.recipient_address[-4:] if s.recipient_address else 'Contacto')
                     )
                     # Only the external side's address ships — see the same
@@ -1580,10 +1572,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                 # notifications: a business notification is
                                 # pushed to every employee and its whole data
                                 # blob is readable by all of them.
-                                **({} if s.recipient_business else {
-                                    'sender_phone': sender_phone_intl,
-                                    'recipient_phone': recipient_phone_intl,
-                                }),
+                                # No numbers to the recipient: an account's
+                                # verified number never reaches another person.
                                 **external_addr_fields,
                                 'memo': s.memo or '',
                                 'transaction_type': 'send',
@@ -1609,9 +1599,13 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                 'token_type': token,
                                 'sender_name': sender_name,
                                 'recipient_name': recipient_name,
-                                **({} if s.sender_business else {
-                                    'sender_phone': sender_phone_intl,
-                                    'recipient_phone': recipient_phone_intl,
+                                # Only the sender's own label (the contact
+                                # they picked), on their personal notification.
+                                **({} if s.sender_business or not (
+                                    s.recipient_phone and (getattr(s, 'recipient_phone_from_sender', False)
+                                                           or getattr(s, 'is_invitation', False))) else {
+                                    'recipient_phone': s.recipient_phone,
+                                    'recipient_phone_from_sender': True,
                                 }),
                                 **external_addr_fields,
                                 'memo': s.memo or '',

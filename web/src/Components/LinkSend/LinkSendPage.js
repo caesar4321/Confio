@@ -14,6 +14,25 @@ const KEY_RE = /^#[0-9a-fA-F]{64}$/;
  * and the page shows no amount or sender: it only gets the person into the
  * app, or tells them how to bring the link along after installing.
  */
+// Chrome opens Confío when installed, else Google Play: no guessing. The key
+// rides as ?k= (an intent's data cannot hold a '#'); it goes to the app on
+// this phone only, never to a server.
+const androidIntent = (ref, key) => `intent://r/${ref}?k=${key}#Intent;scheme=confio;package=com.Confio.Confio;`
+  + `S.browser_fallback_url=${encodeURIComponent(PLAY_STORE)};end`;
+
+// iOS has no fallback in the link itself: try Confío, and if the page is
+// still in front after a moment, it is not installed: the App Store.
+const tryAppThenStore = (appLink, storeUrl) => {
+  let left = false;
+  const onHide = () => { left = true; };
+  document.addEventListener('visibilitychange', onHide, { once: true });
+  window.addEventListener('pagehide', onHide, { once: true });
+  window.location.href = appLink;
+  setTimeout(() => {
+    if (!left && document.visibilityState === 'visible') window.location.href = storeUrl;
+  }, 1600);
+};
+
 const LinkSendPage = () => {
   const { ref } = useParams();
   const { hash } = useLocation();
@@ -23,9 +42,40 @@ const LinkSendPage = () => {
   const isAndroid = /Android/i.test(navigator.userAgent);
   const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
+  // On a phone this page is not a destination: open Confío, else the store.
+  // (Once the installed build lists /r/, the https link opens the app before
+  // this page ever loads.) Browsers allow a clipboard copy only after a tap,
+  // so after installing, tapping the WhatsApp link again opens it in Confío.
   useEffect(() => {
-    if (appLink && (isAndroid || isIos)) window.location.href = appLink;
-  }, [appLink, isAndroid, isIos]);
+    if (!appLink) return;
+    if (isAndroid) {
+      window.location.href = androidIntent(ref, (hash || '').slice(1));
+    } else if (isIos) {
+      tryAppThenStore(appLink, APP_STORE);
+    }
+  }, [appLink, isAndroid, isIos, ref, hash]);
+
+  // The app link does nothing when Confío is not installed: copy the link
+  // first (it survives the install: Recibir → «Tengo un link de envío»),
+  // try the app, and if the page is still in front after a moment, go to
+  // the store. The key never travels through the store's referrer.
+  const openApp = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+    } catch {
+      // Clipboard blocked: the steps below still say how to bring the link.
+    }
+    if (isAndroid) {
+      window.location.href = androidIntent(ref, (hash || '').slice(1));
+      return;
+    }
+    if (isIos) {
+      tryAppThenStore(appLink, APP_STORE);
+      return;
+    }
+    window.location.href = appLink;
+  };
 
   const copy = async () => {
     try {
@@ -59,15 +109,17 @@ const LinkSendPage = () => {
             <h1>Te enviaron dólares por Confío</h1>
             <p className="verification-message">Ábrelo en la app de Confío para recibirlo.</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '20px' }}>
-              <a href={appLink} style={primary}>Abrir en Confío</a>
+              <button type="button" onClick={openApp} style={{ ...primary, border: 'none', fontSize: '16px', cursor: 'pointer' }}>
+                Abrir en Confío
+              </button>
               <button type="button" onClick={copy} style={secondary}>
                 {copied ? 'Link copiado' : 'Copiar link'}
               </button>
             </div>
             <ol style={{ textAlign: 'left', fontSize: '14px', color: '#374151', lineHeight: 1.6, marginTop: '24px' }}>
-              <li>¿No tienes Confío? Copia el link y descarga la app.</li>
-              <li>Crea tu cuenta.</li>
-              <li>En Recibir, toca «Tengo un link de envío».</li>
+              <li>Descarga Confío y crea tu cuenta.</li>
+              <li>Vuelve a WhatsApp y toca el link otra vez: se abre en Confío.</li>
+              <li>O copia el link y, en Recibir, toca «Tengo un link de envío».</li>
             </ol>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '8px' }}>
               {!isAndroid && <a href={APP_STORE} style={store}>App Store</a>}

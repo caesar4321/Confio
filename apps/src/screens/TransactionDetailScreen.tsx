@@ -973,6 +973,8 @@ export const TransactionDetailScreen = () => {
       avatar: (resolvedType === 'sent' ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
       isInvitedFriend: isInvite,
       invitationId: tx.idempotencyKey || (transactionData as any)?.invitationId || (transactionData as any)?.invitation_id,
+      // A link send's /r/ reference (this phone holds its key: linkSend.ts).
+      linkPublicRef: tx.linkPublicRef || (transactionData as any)?.linkPublicRef || null,
       idempotencyKey: tx.idempotencyKey,
       invitationExpiresAt: tx.invitationExpiresAt,
       invitationClaimed: isInvite ? (tx.invitationClaimed || claimedFromRoute) : false,
@@ -1276,17 +1278,34 @@ export const TransactionDetailScreen = () => {
   // A Propina is between two Comunidad members: never an external wallet,
   // and no addresses or explorer link (one side could trace the other).
   const isTip = isTipTransaction(currentTx) || isTipTransaction(transactionData);
+  // A Confío counterparty is known by its account (user, business or party
+  // type), never by a phone number: numbers are no longer sent for other
+  // people, so "an address and no phone" would call every user external.
+  const routeTx = (transactionData || {}) as any;
+  const isConfioParty = (side: 'sender' | 'recipient'): boolean => {
+    const tx = (currentTx || {}) as any;
+    const type = String(side === 'sender'
+      ? (tx.senderType || tx.sender_type || routeTx.senderType || routeTx.sender_type || '')
+      : (tx.counterpartyType || tx.counterparty_type || tx.recipientType || tx.recipient_type
+        || routeTx.counterpartyType || routeTx.counterparty_type || '')).toLowerCase();
+    if (type === 'user' || type === 'business') return true;
+    return side === 'sender'
+      ? Boolean(tx.senderUserId || tx.senderUser?.id || tx.senderBusiness || routeTx.senderUser?.id || routeTx.senderBusiness)
+      : Boolean(tx.recipientUserId || tx.recipientUser?.id || tx.recipientBusiness
+        || routeTx.counterpartyUser?.id || routeTx.recipientUser?.id || routeTx.counterpartyBusiness);
+  };
   const statedExternal: boolean | undefined = isTip ? false
     : readStatedFlag(currentTx?.is_external_address) ?? readStatedFlag(currentTx?.isExternalDeposit);
   const isExternalSender = ((currentTx?.type === 'received' || currentTx?.type === 'deposit') && (
     statedExternal !== undefined
       ? statedExternal
-      : (currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone))
+      : (currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone && !isConfioParty('sender')))
   )) as boolean;
   const isExternalRecipient = ((currentTx?.type === 'send' || currentTx?.type === 'sent' || currentTx?.type === 'withdrawal') && (
     statedExternal !== undefined
       ? statedExternal
-      : (currentTx?.destinationAddress || ((currentTx?.toAddress || currentTx?.recipient_address) && !recipientPhone))
+      : (currentTx?.destinationAddress || ((currentTx?.toAddress || currentTx?.recipient_address) && !recipientPhone
+        && !isConfioParty('recipient')))
   )) as boolean;
 
   // The counterparty address of an inbound external transfer lands in a
@@ -2310,7 +2329,7 @@ export const TransactionDetailScreen = () => {
                         // Stated flag first, heuristic only when nothing was stated.
                         const isExternalHeuristic = statedExternal !== undefined
                           ? statedExternal
-                          : !!(addressVal && !currentTx.recipient_phone);
+                          : !!(addressVal && !currentTx.recipient_phone && !isConfioParty('recipient'));
                         const line = getPreferredSecondaryLine({
                           phone: phoneVal,
                           address: addressVal,
@@ -2456,15 +2475,31 @@ export const TransactionDetailScreen = () => {
 
               <View style={[styles.invitationInfoBox, { backgroundColor: colors.white, borderColor: colors.warning.border }]}>
                 <Text style={[styles.invitationInfoTitle, { color: colors.warning.text }]}>Avísale ahora mismo</Text>
-                <View style={styles.invitationInfoRow}>
-                  <Text style={styles.invitationInfoText}>1. Envíale un mensaje con el link de invitación</Text>
-                </View>
-                <View style={styles.invitationInfoRow}>
-                  <Text style={styles.invitationInfoText}>2. Ayúdale a crear su cuenta en Confío</Text>
-                </View>
-                <View style={styles.invitationInfoRow}>
-                  <Text style={styles.invitationInfoText}>3. Una vez registrado, recibirá el dinero al instante</Text>
-                </View>
+                {(currentTx as any).linkPublicRef ? (
+                  <>
+                    <View style={styles.invitationInfoRow}>
+                      <Text style={styles.invitationInfoText}>1. Envíale el link por WhatsApp</Text>
+                    </View>
+                    <View style={styles.invitationInfoRow}>
+                      <Text style={styles.invitationInfoText}>2. Lo abre en Confío y recibe el dinero</Text>
+                    </View>
+                    <View style={styles.invitationInfoRow}>
+                      <Text style={styles.invitationInfoText}>3. Si no lo abre en 7 días, vuelve a tu saldo</Text>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.invitationInfoRow}>
+                      <Text style={styles.invitationInfoText}>1. Envíale un mensaje con el link de invitación</Text>
+                    </View>
+                    <View style={styles.invitationInfoRow}>
+                      <Text style={styles.invitationInfoText}>2. Ayúdale a crear su cuenta en Confío</Text>
+                    </View>
+                    <View style={styles.invitationInfoRow}>
+                      <Text style={styles.invitationInfoText}>3. Una vez registrado, recibirá el dinero al instante</Text>
+                    </View>
+                  </>
+                )}
               </View>
 
               <TouchableOpacity
@@ -2483,13 +2518,42 @@ export const TransactionDetailScreen = () => {
                       || (transactionData as any)?.idempotencyKey
                       || '';
 
-                    const inviteLink = buildInviteLink({
-                      username: userProfile?.username,
-                      source: 'whatsapp',
-                      invitationId,
-                    });
-
-                    const message = buildSendAndInviteShareMessage({ amount, currency, inviteLink });
+                    // A link send carries the money in its /r/ link: share that,
+                    // rebuilt from the key this phone stored when sending. The
+                    // referral link is only for a send the server confirmed is
+                    // not a link (asked here when the detail has not loaded).
+                    let message: string;
+                    let linkRef = (currentTx as any).linkPublicRef as string | null;
+                    if (!linkRef && !sendData?.sendTransaction) {
+                      const sendId = (currentTx as any).internalId || transactionId;
+                      try {
+                        const { apolloClient } = await import('../apollo/client');
+                        const { data } = await apolloClient.query({
+                          query: GET_SEND_TRANSACTION_BY_ID, variables: { id: sendId }, fetchPolicy: 'network-only',
+                        });
+                        if (!data?.sendTransaction) throw new Error('not_loaded');
+                        linkRef = data.sendTransaction.linkPublicRef || null;
+                      } catch {
+                        setBanner({ variant: 'error', message: 'No pudimos cargar el envío. Revisa tu conexión e inténtalo de nuevo.' });
+                        return;
+                      }
+                    }
+                    if (linkRef) {
+                      const { storedLinkKey, buildLinkUrl, linkMessage } = await import('../services/linkSend');
+                      const key = await storedLinkKey(linkRef);
+                      if (!key) {
+                        setBanner({ variant: 'error', message: 'Este link se envió desde otro teléfono. Compártelo desde ese teléfono.' });
+                        return;
+                      }
+                      message = linkMessage(`${amount} ${currency}`, buildLinkUrl(linkRef, key));
+                    } else {
+                      const inviteLink = buildInviteLink({
+                        username: userProfile?.username,
+                        source: 'whatsapp',
+                        invitationId,
+                      });
+                      message = buildSendAndInviteShareMessage({ amount, currency, inviteLink });
+                    }
                     const encodedMessage = encodeURIComponent(message);
 
                     if (Platform.OS === 'android') {
@@ -2560,6 +2624,12 @@ export const TransactionDetailScreen = () => {
                       await Share.share({ message });
                     }
                   } catch (error) {
+                    // A link send (or one not yet known not to be) never falls
+                    // back to the referral link.
+                    if ((currentTx as any).linkPublicRef || !sendData?.sendTransaction) {
+                      setBanner({ variant: 'error', message: 'No se pudo abrir WhatsApp.' });
+                      return;
+                    }
                     try {
                       const invitationId = (currentTx as any).invitationId
                         || (currentTx as any).invitation_id

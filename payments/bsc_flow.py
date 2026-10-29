@@ -683,7 +683,8 @@ def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '
             'payer_display_name': (
                 payer_business.name if payer_business
                 else (user.get_full_name() or user.username or '')),
-            'payer_phone': user.phone_number or '',
+            # Never the payer's verified number: it would reach the merchant.
+            'payer_phone': '',
             'merchant_account_user': invoice.created_by_user,
             'merchant_business': invoice.merchant_business,
             'merchant_type': invoice.merchant_type,

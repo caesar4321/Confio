@@ -15,7 +15,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import { contactService, setDefaultPhoneRegion } from '../services/contactService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { applyReviewLink, setReviewLinkApplier, takePendingReviewLink } from '../services/reviewLink';
-import { setLinkOpener, takePendingLink } from '../services/linkSend';
+import { setLinkOpener, takeClipboardLink, takePendingLink } from '../services/linkSend';
 
 const MARK_ONBOARDED = gql`
   mutation MarkOnboarded {
@@ -384,9 +384,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             import('../services/location')
               .then(({ reportResidenceLocation }) => reportResidenceLocation(apolloClient))
               .catch(() => {});
-            // A link send opened before sign-in (new users install from it).
+            // A link send opened before sign-in (new users install from it),
+            // else one the web page copied before the app was installed.
             takePendingLink()
-              .then(link => (link ? openLinkClaim(link) : undefined))
+              .then(async link => {
+                const found = link || await takeClipboardLink();
+                if (found) openLinkClaim(found);
+              })
               .catch(() => {});
             // A store-review link opened before sign-in.
             takePendingReviewLink()

@@ -116,6 +116,10 @@ class SendTransaction(SoftDeleteModel):
         blank=True,
         help_text='Recipient phone number at transaction time'
     )
+    # recipient_phone is the number the SENDER typed or picked from their
+    # own contacts (a label only they see), never the recipient account's
+    # verified number. Older rows hold the latter: they are never shown.
+    recipient_phone_from_sender = models.BooleanField(default=False, db_default=False)
 
     # Blockchain addresses
     sender_address = models.CharField(max_length=66)  # Algorand addresses are 58 chars; 66 kept for legacy rows

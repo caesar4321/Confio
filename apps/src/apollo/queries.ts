@@ -3255,6 +3255,7 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
         id
         name
       }
+      linkPublicRef
       senderDisplayName
       recipientDisplayName
       senderPhone

@@ -793,9 +793,10 @@ export const TransactionProcessingScreen = () => {
         const res = await sendBscDollar({
           amount: transactionData.amount,
           recipientUserId: transactionData.recipientUserId,
-          recipientPhone: transactionData.recipientUserId
-            ? undefined
-            : transactionData.recipientPhone,
+          // With a user id the number is only the sender's own label (the
+          // contact they picked): the server finds the person by id and
+          // shows the number back to this sender alone.
+          recipientPhone: transactionData.recipientPhone || undefined,
           recipientAddress: (transactionData as any).recipientAddress,
           memo: transactionData.memo || '',
           idempotencyKey: transactionData.idempotencyKey,

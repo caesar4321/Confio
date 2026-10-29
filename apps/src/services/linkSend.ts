@@ -141,7 +141,11 @@ export const buildLinkUrl = (publicRef: string, keyHex: string) => `${LINK_HOST}
 /** confio.lat/r/<uuid>#<64 hex> (or confio://r/…, which the web page opens
  *  when the universal link did not) → its parts; anything else → null. */
 export const parseLinkUrl = (url: string): { publicRef: string; keyHex: string } | null => {
-  const match = /^(?:https?:\/\/(?:www\.)?confio\.lat\/r\/|confio:\/\/r\/)([0-9a-fA-F-]{36})#([0-9a-fA-F]{64})\s*$/.exec((url || '').trim());
+  const text = (url || '').trim();
+  const match = /^(?:https?:\/\/(?:www\.)?confio\.lat\/r\/|confio:\/\/r\/)([0-9a-fA-F-]{36})#([0-9a-fA-F]{64})\s*$/.exec(text)
+    // Android's intent from the web page carries the key as ?k= (an
+    // intent's data cannot hold a '#'): confio://r/<ref>?k=<key>.
+    || /^confio:\/\/r\/([0-9a-fA-F-]{36})\?k=([0-9a-fA-F]{64})\s*$/.exec(text);
   return match ? { publicRef: match[1].toLowerCase(), keyHex: match[2].toLowerCase() } : null;
 };
 
@@ -294,6 +298,34 @@ export const takePendingLink = async (): Promise<ReceivedLink | null> => {
     await Keychain.resetGenericPassword({ service: PENDING_SERVICE });
     const link = JSON.parse(stored.password);
     return link?.publicRef && link?.keyHex ? link : null;
+  } catch {
+    return null;
+  }
+};
+
+// ── A link copied before installing ─────────────────────────────────────
+// The web page copies the link when Confío is not installed yet; the first
+// launch after the install finds it here and opens the claim. Each link is
+// offered once (the keychain remembers which), and on iOS the clipboard is
+// read only when it holds a URL (no paste prompt otherwise).
+
+const OFFERED_SERVICE = 'com.confio.link_send_offered';
+
+export const takeClipboardLink = async (): Promise<ReceivedLink | null> => {
+  try {
+    const { Platform } = await import('react-native');
+    const Clipboard = (await import('@react-native-clipboard/clipboard')).default;
+    if (Platform.OS === 'ios' && typeof (Clipboard as any).hasURL === 'function' && !(await (Clipboard as any).hasURL())) {
+      return null;
+    }
+    const link = parseLinkUrl(await Clipboard.getString());
+    if (!link) return null;
+    const stored = await Keychain.getGenericPassword({ service: OFFERED_SERVICE }).catch(() => false as const);
+    const offered: string[] = stored && typeof stored === 'object' ? JSON.parse(stored.password || '[]') : [];
+    if (offered.includes(link.publicRef)) return null;
+    await Keychain.setGenericPassword('links', JSON.stringify([...offered, link.publicRef].slice(-20)),
+      { service: OFFERED_SERVICE });
+    return link;
   } catch {
     return null;
   }
