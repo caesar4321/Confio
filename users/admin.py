@@ -27,11 +27,32 @@ class UserAdmin(admin.ModelAdmin):
         'confio_rating_prompted_at', 'confio_rating_star_count',
         'confio_rating_action', 'confio_rating_feedback_text',
     )
-    actions = ('soft_delete_selected',)
+    actions = ('soft_delete_selected', 'block_direct_receive', 'unblock_direct_receive', 'exempt_direct_receive')
+
+    @admin.action(description='Block direct receiving (paid by QR only)')
+    def block_direct_receive(self, request, queryset):
+        from django.utils import timezone
+        n = queryset.filter(direct_receive_blocked_at__isnull=True).update(
+            direct_receive_blocked_at=timezone.now(), direct_receive_block_reason='admin')
+        self.message_user(request, f'Blocked direct receiving for {n} account(s).')
+
+    @admin.action(description='Unblock direct receiving')
+    def unblock_direct_receive(self, request, queryset):
+        n = queryset.update(direct_receive_blocked_at=None, direct_receive_block_reason='')
+        self.message_user(request, f'Unblocked {n} account(s).')
+
+    @admin.action(description='Exempt from automatic direct-receive block')
+    def exempt_direct_receive(self, request, queryset):
+        n = queryset.update(direct_receive_exempt=True)
+        self.message_user(request, f'Exempted {n} account(s).')
 
     fieldsets = (
         ('Basic Information', {
             'fields': ('username', 'email', 'first_name', 'last_name', 'firebase_uid')
+        }),
+        ('Direct receiving (users/direct_receive.py)', {
+            'fields': ('direct_receive_nudged_at', 'direct_receive_blocked_at',
+                       'direct_receive_block_reason', 'direct_receive_exempt'),
         }),
         ('Contact Information', {
             'fields': ('phone_country', 'phone_number', 'phone_key', 'country', 'country_source', 'country_updated_at', 'preferred_rail_country')

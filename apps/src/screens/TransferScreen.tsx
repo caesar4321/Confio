@@ -7,6 +7,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { RouteSheet, RouteOptionRow, type RouteOption } from '../components/RouteSheet';
 import { AdvancedCard, LocalRailsCard, RouteCard } from '../components/RouteCard';
+import { UsernameRecipientModal } from '../components/UsernameRecipientModal';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import USDTLogo from '../assets/png/USDT.png';
@@ -744,6 +745,8 @@ export const TransferScreen = () => {
     navigation.navigate('SendWithAddress', { tokenType });
   }
 
+  const [usernameModalVisible, setUsernameModalVisible] = useState(false);
+
   const handleSendToFriend = (friend: any) => {
     // Include Algorand address if available
     const friendWithAddress = {
@@ -1274,6 +1277,26 @@ export const TransferScreen = () => {
                   }]}
                 />
               )}
+              <RouteCard label="A ALGUIEN EN CONFÍO">
+                <RouteOptionRow
+                  first
+                  option={{
+                    id: 'send_to_username',
+                    icon: 'at-sign',
+                    title: 'Enviar a un @usuario',
+                    subtitle: 'Escribe su usuario de Confío',
+                    onPress: () => setUsernameModalVisible(true),
+                  }}
+                />
+              </RouteCard>
+              <UsernameRecipientModal
+                visible={usernameModalVisible}
+                onClose={() => setUsernameModalVisible(false)}
+                onFound={friend => {
+                  setUsernameModalVisible(false);
+                  handleSendToFriend(friend);
+                }}
+              />
               <RouteCard label="EN EFECTIVO">
                 <RouteOptionRow
                   first

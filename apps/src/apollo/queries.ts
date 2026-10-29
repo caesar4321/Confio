@@ -86,6 +86,7 @@ export const GET_ME = gql`
       phoneCountry
       phoneNumber
       country
+      directReceiveStatus
       isIdentityVerified
       lastVerifiedDate
       verificationStatus

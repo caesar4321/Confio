@@ -73,6 +73,8 @@ interface UserProfile {
   phoneNumber?: string;
   // Where the user lives (server residence); phoneCountry is the phone's.
   country?: string;
+  // ok | nudge | blocked: direct sends to this account (users/direct_receive.py).
+  directReceiveStatus?: string;
   isIdentityVerified?: boolean;
   lastVerifiedDate?: string;
   verificationStatus?: string;

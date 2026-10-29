@@ -496,6 +496,7 @@ class UserType(DjangoObjectType):
 	phone_number = graphene.String()
 	email = graphene.String()
 	country = graphene.String(description="ISO-2 country the viewer lives in (residence). Own account only; phoneCountry is the phone number's country.")
+	direct_receive_status = graphene.String(description="ok | nudge | blocked: direct personal sends to this account (users/direct_receive.py). Own account only.")
 
 	class Meta:
 		model = User
@@ -515,6 +516,13 @@ class UserType(DjangoObjectType):
 			return self.phone_number
 		# Otherwise hide it
 		return None
+
+	def resolve_direct_receive_status(self, info):
+		user = info.context.user
+		if not user.is_authenticated or str(user.id) != str(self.id):
+			return None
+		from users.direct_receive import status
+		return status(self)
 
 	def resolve_country(self, info):
 		"""Own account only: where someone lives is not for other viewers."""
@@ -1299,6 +1307,17 @@ class UserByPhoneType(graphene.ObjectType):
 	status_tier = graphene.String(description="Referral status tier of this contact")
 	is_referral_verified = graphene.Boolean(description="Verified Badge for this contact")
 
+class SendRecipientType(graphene.ObjectType):
+	user_id = graphene.ID()
+	username = graphene.String()
+	# First name and last initial: enough to recognise a friend, not a dossier.
+	display_name = graphene.String()
+	identity_verified = graphene.Boolean()
+	# Paid through Cobrar only (users/direct_receive.py): sending would be refused.
+	receives_by_qr_only = graphene.Boolean()
+	is_self = graphene.Boolean()
+
+
 class VerifiedTransactionType(graphene.ObjectType):
 	is_valid = graphene.Boolean()
 	status = graphene.String()
@@ -1350,6 +1369,8 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 	# Contact sync queries
 	check_users_by_phones = graphene.List(UserByPhoneType, phone_numbers=graphene.List(graphene.String, required=True))
 	check_users_by_usernames = graphene.List(UserByPhoneType, usernames=graphene.List(graphene.String, required=True))
+	send_recipient_by_username = graphene.Field(lambda: SendRecipientType, username=graphene.String(required=True),
+		description="Who '@username' is, for Enviar a @usuario: confirm by name before sending.")
 	
 	# Achievement system queries
 	achievement_types = graphene.List(AchievementTypeType, category=graphene.String())
@@ -2326,6 +2347,35 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				))
 		
 		return results
+
+	def resolve_send_recipient_by_username(self, info, username):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+		from django.core.cache import cache
+		key = f'send_recipient_lookup:{user.pk}'
+		count = cache.get(key, 0)
+		if count >= 30:  # per minute: looking a friend up, not enumerating usernames
+			from graphql import GraphQLError
+			raise GraphQLError('Demasiadas búsquedas. Probá de nuevo en un minuto.')
+		cache.set(key, count + 1, 60)
+		cleaned = (username or '').strip().lstrip('@')
+		if not cleaned:
+			return None
+		target = User.objects.filter(username__iexact=cleaned, is_active=True).first()
+		if target is None or getattr(target, 'is_platform_test_account', False):
+			return None
+		from security.identity_status import current_document, is_identity_verified
+		from users.direct_receive import is_blocked
+		doc = current_document(target)
+		first = ((getattr(doc, 'verified_first_name', '') if doc else '') or target.first_name or '').strip().split(' ')[0]
+		last = ((getattr(doc, 'verified_last_name', '') if doc else '') or target.last_name or '').strip()
+		display = (f'{first} {last[:1]}.' if first and last else first).strip() or f'@{target.username}'
+		return SendRecipientType(
+			user_id=target.pk, username=target.username, display_name=display,
+			identity_verified=is_identity_verified(target),
+			receives_by_qr_only=is_blocked(target), is_self=target.pk == user.pk,
+		)
 
 	def resolve_check_users_by_usernames(self, info, usernames):
 		"""Check which usernames belong to Confío users"""

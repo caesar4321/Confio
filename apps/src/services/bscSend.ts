@@ -93,6 +93,8 @@ export interface BscSendResult {
 
 /** Stable error codes the UI maps to Spanish copy. */
 export const BSC_SEND_ERRORS: Record<string, string> = {
+  // users/direct_receive.py: the recipient is paid through Cobrar only.
+  recipient_receives_by_qr_only: 'Esta cuenta cobra con QR. Pedile su código de Cobrar para pagarle.',
   recipient_no_bsc_address:
     'Tu contacto aún no puede recibir dólares — le avisamos para que abra la app y active su cuenta.',
   recipient_not_on_confio:

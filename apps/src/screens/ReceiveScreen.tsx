@@ -1,6 +1,7 @@
-import React, { useCallback, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Share } from 'react-native';
+import React from 'react';
+import { View, StyleSheet, ScrollView, Share } from 'react-native';
 import { Text } from '../components/common/AppText';
+import { buildInviteLink } from '../utils/inviteLinks';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -17,7 +18,6 @@ import { useLocalRailOptions } from '../hooks/useLocalRailOptions';
 import { useKoyweReplaced } from '../hooks/useKoyweReplaced';
 import { useRampFlows } from '../hooks/useRampFlows';
 import { MainStackParamList } from '../types/navigation';
-import { buildInviteLink } from '../utils/inviteLinks';
 import { QrShowIcon } from '../components/QrPayIcon';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -60,20 +60,36 @@ export default function ReceiveScreen() {
   const { receivePrimary, receiveMore } = useLocalRailOptions();
   const cryptoOptions = useCryptoReceiveOptions();
 
-  // Friends send to a username now; the phone number is not an address.
-  const usernameDisplay = userProfile?.username ? `@${userProfile.username}` : null;
 
-  // The share doubles as an invite: the payer may not have Confío yet, and
-  // the link carries this user's referral so the install is credited.
-  const handleShareUsername = useCallback(() => {
-    if (!usernameDisplay || !userProfile?.username) return;
-    const lines = [
-      `Envíame dólares por Confío a mi usuario ${usernameDisplay}.`,
-      '',
-      `¿Aún no tienes Confío? ${buildInviteLink({ username: userProfile.username, source: 'receive' })}`,
-    ];
-    Share.share({ message: lines.join('\n') }).catch(() => {});
-  }, [usernameDisplay, userProfile?.username]);
+  // Friends pay a @usuario (Enviar a un @usuario). A seller paid by many
+  // people is nudged, then blocked, toward Cobrar (users/direct_receive.py).
+  const directStatus = (userProfile?.directReceiveStatus || 'ok') as string;
+  const usernameRow: RouteOption | null = userProfile?.username ? (
+    directStatus === 'blocked'
+      ? {
+        id: 'username_blocked',
+        icon: 'at-sign',
+        title: `@${userProfile.username}`,
+        subtitle: 'Tu cuenta cobra con QR: los envíos a tu usuario están pausados',
+        onPress: () => navigation.navigate('Charge'),
+      }
+      : {
+        id: 'username_share',
+        icon: 'at-sign',
+        title: `@${userProfile.username}`,
+        subtitle: directStatus === 'nudge'
+          ? '¿Vendés? Cobrá con QR. Tus amigos te envían a tu usuario'
+          : 'Tus amigos te envían dólares a tu usuario · Compartir',
+        onPress: () => {
+          const lines = [
+            `Envíame dólares por Confío a mi usuario @${userProfile.username}.`,
+            '',
+            `¿Aún no tienes Confío? ${buildInviteLink({ username: userProfile.username, source: 'receive' })}`,
+          ];
+          Share.share({ message: lines.join('\n') }).catch(() => {});
+        },
+      }
+  ) : null;
 
   // Where no ramp provider operates there is no one-off recharge to offer;
   // the cash row below is the way in.
@@ -131,26 +147,9 @@ export default function ReceiveScreen() {
                 }}
               />
             </RouteCard>
-          ) : usernameDisplay ? (
+          ) : usernameRow ? (
             <RouteCard label="DE ALGUIEN EN CONFÍO">
-              <View style={styles.phoneRow}>
-                <View style={styles.phoneIcon}>
-                  <Icon name="at-sign" size={20} color={colors.primaryDark} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.phoneNumber}>{usernameDisplay}</Text>
-                  <Text style={styles.phoneHint}>Te envían dólares a tu usuario</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.shareButton}
-                  onPress={handleShareUsername}
-                  accessibilityRole="button"
-                  accessibilityLabel="Compartir mi usuario"
-                >
-                  <Icon name="share-2" size={16} color={colors.white} />
-                  <Text style={styles.shareButtonText}>Compartir</Text>
-                </TouchableOpacity>
-              </View>
+              <RouteOptionRow first option={usernameRow} />
             </RouteCard>
           ) : null}
 
@@ -213,42 +212,9 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     gap: 14,
   },
-  phoneRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 8,
-  },
-  phoneIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  phoneNumber: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
   phoneHint: {
     fontSize: 13,
     color: colors.text.secondary,
     marginTop: 2,
-  },
-  shareButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.primaryDark,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  shareButtonText: {
-    color: colors.white,
-    fontSize: 13,
-    fontWeight: '700',
   },
 });

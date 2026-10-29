@@ -565,3 +565,14 @@ def refresh_residence_countries(batch_size=500):
             logger.exception('[RESIDENCE] refresh failed user_id=%s', user.id)
     logger.info('Residence refresh: checked=%s moved=%s', checked, moved)
     return {'checked': checked, 'moved': moved}
+
+
+@shared_task(name='users.refresh_direct_receive_flags')
+@ensure_db_connection_closed
+def refresh_direct_receive_flags():
+    """Daily: nudge or block direct personal receiving by distinct payers
+    (users/direct_receive.py)."""
+    from users.direct_receive import refresh_flags
+    result = refresh_flags()
+    logger.info('Direct-receive flags: %s', result)
+    return result

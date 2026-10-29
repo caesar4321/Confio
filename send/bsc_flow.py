@@ -359,6 +359,12 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         return {'success': False, 'error': err}
     if recipient_user is not None and recipient_user.id == user.id and not recipient_business:
         return {'success': False, 'error': 'self_send_not_allowed'}
+    # A seller blocked from direct receiving gets paid through Cobrar (QR);
+    # buyers can address them by @usuario, phone, saved recipient or raw
+    # address, so the refusal sits here where every one of those resolves.
+    from users import direct_receive
+    if recipient_user is not None and not recipient_business and direct_receive.is_blocked(recipient_user):
+        return {'success': False, 'error': direct_receive.BLOCKED_ERROR}
     if not recipient_addr:
         # Internal recipient without a registered address: BLOCK + nudge
         # (locked decision — no dual-rail, no escrow).
@@ -1105,6 +1111,15 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
         return {'success': False, 'error': 'sender_not_authorized'}
     if send_tx.status != 'PENDING' or not send_tx.bsc_calls_json:
         return {'success': False, 'error': 'send_not_pending'}
+    # The recipient may have been blocked from direct receiving after this
+    # send was prepared: check again before anything is signed or broadcast.
+    from users import direct_receive
+    if send_tx.recipient_user_id and not send_tx.recipient_business_id:
+        from django.contrib.auth import get_user_model
+        recipient = get_user_model().objects.filter(pk=send_tx.recipient_user_id).only(
+            'id', 'direct_receive_blocked_at').first()
+        if direct_receive.is_blocked(recipient):
+            return {'success': False, 'error': direct_receive.BLOCKED_ERROR}
     if (send_tx.idempotency_key or '').startswith('tip-'):
         # A Propina must be signed within its window: a bound send left
         # unsigned can't outlive the daily limit it was counted against.

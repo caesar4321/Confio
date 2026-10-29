@@ -138,6 +138,14 @@ class User(AbstractUser, SoftDeleteModel):
     country_updated_at = models.DateTimeField(null=True, blank=True)
     # The country the user last picked in the Recibir/Enviar rail list.
     preferred_rail_country = models.CharField(max_length=2, blank=True, null=True)
+    # Direct personal sends (@usuario, contacts, saved recipients, links) to
+    # this account: nudged toward Cobrar, or refused (users/direct_receive.py).
+    direct_receive_nudged_at = models.DateTimeField(null=True, blank=True)
+    direct_receive_blocked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    direct_receive_block_reason = models.CharField(
+        max_length=8, blank=True, default='', choices=[('auto', 'Automatic'), ('admin', 'Admin')])
+    direct_receive_exempt = models.BooleanField(
+        default=False, help_text='Never auto-block direct receiving (e.g. family remittances)')
     
     # Backup Tracking Fields (Added for KPI & Safety Monitoring)
     backup_provider = models.CharField(
