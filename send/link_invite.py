@@ -133,9 +133,15 @@ def link_summary(public_ref, viewer=None) -> dict | None:
     sender = invite.inviter_user
     is_mine = viewer is not None and viewer.pk == invite.inviter_user_id
     recipient_address = _personal_address(viewer) if viewer is not None and not is_mine else ''
+    try:
+        from inbox.profile_pictures import picture_urls
+        avatar = picture_urls([sender.pk]).get(sender.pk) or ''
+    except Exception:  # noqa: BLE001 — the initial stands in
+        avatar = ''
     return {
         'sender_username': sender.username, 'sender_name': short_name(sender),
         'sender_verified': is_identity_verified(sender),
+        'sender_user_id': sender.pk, 'sender_avatar_url': avatar,
         'amount': invite.amount, 'token_type': invite.token_type,
         'status': invite.status, 'expires_at': invite.expires_at,
         'is_mine': is_mine,

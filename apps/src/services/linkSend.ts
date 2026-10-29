@@ -56,6 +56,17 @@ export const LINK_INVITE = gql`
   }
 `;
 
+// Its own query: an older server without these fields must not fail the
+// claim screen's main lookup (LINK_INVITE).
+export const LINK_INVITE_SENDER = gql`
+  query LinkInviteSender($publicRef: String!) {
+    linkInvite(publicRef: $publicRef) {
+      senderUserId
+      senderAvatarUrl
+    }
+  }
+`;
+
 const PREPARE_LINK_INVITE = gql`
   mutation PrepareLinkInvite($phone: String!, $amount: Decimal!, $tokenType: String!, $claimKeyAddress: String!) {
     prepareLinkInvite(phone: $phone, amount: $amount, tokenType: $tokenType, claimKeyAddress: $claimKeyAddress) {

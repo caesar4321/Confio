@@ -700,6 +700,10 @@ class LinkInviteType(graphene.ObjectType):
     sender_username = graphene.String()
     sender_name = graphene.String()
     sender_verified = graphene.Boolean()
+    # Public profile facts (a username is public): for the claim screen's
+    # photo and its "historial con …" link.
+    sender_user_id = graphene.ID()
+    sender_avatar_url = graphene.String()
     amount = graphene.Decimal()
     token_type = graphene.String()
     status = graphene.String()
