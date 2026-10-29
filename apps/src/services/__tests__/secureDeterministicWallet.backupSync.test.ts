@@ -2093,6 +2093,10 @@ describe('backup writer never adds a second manifest', () => {
     await backUp();
 
     expect(manifests()).toHaveLength(1);
+    // And one payload: re-backing up the SAME wallet updates its file in
+    // place. A new file per backup would walk this Drive into the duplicate
+    // bound and lock the user out of their own account.
+    expect([...files.values()].filter(file => /^confio_wallet_v2_.+\.enc$/.test(file.name))).toHaveLength(1);
   });
 
   it('updates an existing manifest in place', async () => {
@@ -2135,6 +2139,139 @@ describe('backup writer never adds a second manifest', () => {
 
     expect(files.get('payload-w1')!.content).toBe(otherBody);
     expect([...files.values()].filter(file => /^confio_wallet_v2_.+\.enc$/.test(file.name))).toHaveLength(2);
+  });
+
+  // BSC-only is the shape every account created since the Algorand phase-out
+  // has: no Algorand address at all, one BSC anchor. A rule that quietly
+  // required an Algorand anchor would break exactly those users.
+  it.each([
+    ['an Algorand anchor', () => ({ expectedAddress })],
+    ['a BSC-only anchor', () => ({
+      expectedEvmAddress: deriveEvmKeyFromMasterSecret(MASTER_SECRET, { accountType: 'personal', accountIndex: 0 }).address,
+    })],
+  ])('backs up a verified wallet with %s even when the Drive holds other Confío wallets', async (_label, anchors) => {
+    // Julian's test account, 2026-10-29: a fresh signup whose Google Drive
+    // still held backups from earlier accounts. Every candidate failed the
+    // anchor filter, the scan reported 'mismatch', and the user could not
+    // back up a wallet the server had just verified.
+    const AES = require('crypto-js/aes');
+    const encrypt = (secret: Uint8Array) =>
+      AES.encrypt(bytesToBase64(secret), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    // AES here is randomized, so keep the exact bytes to compare against.
+    const strangerBody = encrypt(new Uint8Array(32).fill(19));
+    files.set('manifest-other', { name: MANIFEST, content: JSON.stringify({ wallets: [{ id: 'other' }] }), modifiedTime: '2026-09-01T00:00:00Z' });
+    files.set('payload-other', { name: 'confio_wallet_v2_other.enc', content: strangerBody, modifiedTime: '2026-09-01T00:00:00Z' });
+
+    await expect(getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google', requireCloudSync: true, ...anchors(),
+    })).resolves.toEqual(MASTER_SECRET);
+
+    // Our own wallet is now on the Drive, and the stranger's is untouched.
+    expect(encBackupUploads()).toHaveLength(1);
+    expect(files.get('payload-other')!.content).toBe(strangerBody);
+  });
+
+  it.each([['no primary pointer yet', false], ['an existing primary pointer', true]])(
+    'refuses to overwrite a payload that holds a different secret, with %s', async (_label, seedPointer) => {
+    // The overwrite that cost user 2785 their key: this device's wallet id
+    // names a file another device has since rewritten. Updating it in place
+    // destroys that wallet's only current copy.
+    const AES = require('crypto-js/aes');
+    const strangerBody = AES.encrypt(bytesToBase64(new Uint8Array(32).fill(19)), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    const localId = '11111111-2222-4333-8444-555555555555';
+    files.set('manifest', { name: MANIFEST, content: JSON.stringify({ wallets: [{ id: localId }] }), modifiedTime: '2026-10-13T00:00:00Z' });
+    files.set('payload-local', { name: `confio_wallet_v2_${localId}.enc`, content: strangerBody, modifiedTime: '2026-10-13T00:00:00Z' });
+    if (seedPointer) {
+      files.set('pointer', {
+        name: 'confio_wallet_primary.json',
+        content: JSON.stringify({ primary_wallet_id: localId }),
+        modifiedTime: '2026-10-13T00:00:00Z',
+      });
+    }
+
+    await backUp();
+
+    expect(files.get('payload-local')!.content).toBe(strangerBody);
+    // Ours went to a new file, and every record names THAT id: the manifest,
+    // the primary pointer and this device's own wallet-id slot. A fresh id
+    // that only some of them know is a wallet the next sign-in cannot find.
+    const uploads = encBackupUploads().map(([, name]) => name);
+    expect(uploads).toHaveLength(1);
+    const writtenId = /^confio_wallet_v2_(.+)\.enc$/.exec(uploads[0])![1];
+    expect(writtenId).not.toBe(localId);
+    expect(JSON.parse(files.get('manifest')!.content).wallets.map((w: any) => w.id)).toEqual([writtenId]);
+    const pointer = [...files.values()].find(file => file.name === 'confio_wallet_primary.json');
+    expect(pointer && JSON.parse(pointer.content).primary_wallet_id).toBe(writtenId);
+    const { credentialStorage } = require('../credentialStorage');
+    const storedIds = (credentialStorage.storeSecret as jest.Mock).mock.calls
+      .filter(([key]: [string]) => key.startsWith('confio_wallet_id_v2_'))
+      .map(([, value]: [string, Uint8Array]) => new TextDecoder().decode(value));
+    expect(storedIds[storedIds.length - 1]).toBe(writtenId);
+  });
+
+  it('fails the backup rather than overwriting when the pre-overwrite read cannot be made', async () => {
+    // The read that proves the file is ours must FAIL CLOSED. Treating a
+    // network error as "unreadable, overwrite it" would destroy another
+    // wallet's only copy on a flaky connection.
+    const AES = require('crypto-js/aes');
+    const strangerBody = AES.encrypt(bytesToBase64(new Uint8Array(32).fill(19)), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    const localId = '11111111-2222-4333-8444-555555555555';
+    files.set('manifest', { name: MANIFEST, content: JSON.stringify({ wallets: [{ id: localId }] }), modifiedTime: '2026-10-13T00:00:00Z' });
+    files.set('payload-local', { name: `confio_wallet_v2_${localId}.enc`, content: strangerBody, modifiedTime: '2026-10-13T00:00:00Z' });
+    // Let the whole restore scan succeed and fail only the writer's own
+    // pre-overwrite read. Section 4 re-reads the manifest before it touches
+    // the payload, so the second manifest read marks the writer's start.
+    let manifestReads = 0;
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_t: string, id: string) => {
+      if (id === 'manifest') manifestReads += 1;
+      if (id === 'payload-local' && manifestReads >= 2) throw new Error('Drive read failed');
+      return files.get(id)!.content;
+    });
+    const onCloudSyncResult = jest.fn();
+
+    await expect(getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google', requireCloudSync: true, expectedAddress, onCloudSyncResult,
+    })).rejects.toThrow();
+
+    expect(files.get('payload-local')!.content).toBe(strangerBody);
+    expect(encBackupUploads()).toHaveLength(0);
+    expect(onCloudSyncResult).not.toHaveBeenCalledWith(true);
+  });
+
+  it('backs up a wallet recovered from the address-bound alias, not just the subject one', async () => {
+    // The subject alias holds some other secret; the right one survives under
+    // the address-bound alias. Deciding "do we already hold this wallet" in
+    // the subject-alias branch alone made this case refuse on the first try.
+    const AES = require('crypto-js/aes');
+    const strangerBody = AES.encrypt(bytesToBase64(new Uint8Array(32).fill(19)), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    mockMemoryStore.set(subjectAlias(), new Uint8Array(32).fill(7));
+    mockMemoryStore.set(`confio_master_secret_v2_address_${expectedAddress}`, MASTER_SECRET);
+    files.set('manifest-other', { name: MANIFEST, content: JSON.stringify({ wallets: [{ id: 'other' }] }), modifiedTime: '2026-09-01T00:00:00Z' });
+    files.set('payload-other', { name: 'confio_wallet_v2_other.enc', content: strangerBody, modifiedTime: '2026-09-01T00:00:00Z' });
+
+    await expect(backUp()).resolves.toEqual(MASTER_SECRET);
+
+    expect(encBackupUploads()).toHaveLength(1);
+    expect(files.get('payload-other')!.content).toBe(strangerBody);
+  });
+
+  it('backs up a secret that matches only one anchor the old way, not through the new exception', async () => {
+    // anchorVerdict tolerates a stale record on one chain, so the local
+    // secret can satisfy the Algorand anchor while contradicting the BSC
+    // one. That is not "we already hold the account's wallet", so an
+    // unrelated Drive must still refuse rather than upload.
+    const AES = require('crypto-js/aes');
+    files.set('manifest-other', { name: MANIFEST, content: JSON.stringify({ wallets: [{ id: 'other' }] }), modifiedTime: '2026-09-01T00:00:00Z' });
+    files.set('payload-other', {
+      name: 'confio_wallet_v2_other.enc',
+      content: AES.encrypt(bytesToBase64(new Uint8Array(32).fill(19)), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString(),
+      modifiedTime: '2026-09-01T00:00:00Z',
+    });
+
+    await expect(getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google', requireCloudSync: true, expectedAddress,
+      expectedEvmAddress: '0x' + 'dd'.repeat(20),
+    })).rejects.toMatchObject({ code: 'mismatch' });
   });
 
   it('never reuses this device\'s id for a history-found key when that id\'s file now holds another', async () => {

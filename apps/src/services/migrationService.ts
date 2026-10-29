@@ -202,6 +202,35 @@ class WalletMigrationService {
     }
 
     /**
+     * The Algorand address the server has for this context.
+     *
+     * `undefined` means we could not tell (no row, or the read failed), which
+     * is never the same as "none": an anonymous request returns an empty list,
+     * and treating that as "no legacy wallet" would skip a real migration.
+     */
+    private async serverAlgorandAddress(
+        accountIndex: number,
+        businessId?: string,
+    ): Promise<string | null | undefined> {
+        try {
+            const { data } = await apolloClient.query({
+                query: GET_MY_MIGRATION_STATUS,
+                fetchPolicy: 'network-only',
+            });
+            const accounts = data?.userAccounts;
+            if (!Array.isArray(accounts)) return undefined;
+            const contextRow = accounts.find((a: any) => (businessId
+                ? a?.accountType?.toLowerCase() === 'business' && String(a?.business?.id) === String(businessId)
+                : a?.accountType?.toLowerCase() === 'personal' && (a?.accountIndex ?? 0) === accountIndex));
+            if (!contextRow) return undefined;
+            return contextRow.algorandAddress || null;
+        } catch (e) {
+            console.warn('[MigrationService] Could not read the registered Algorand address; status unknown.', e);
+            return undefined;
+        }
+    }
+
+    /**
      * Check if the current user needs to migrate from V1 to V2.
      * Logic:
      * 1. If V2 secret exists AND V1 wallet is empty/closed -> False (Done).
@@ -296,6 +325,22 @@ class WalletMigrationService {
                 // - zombie states where backend missed migration completion
                 // - users already operating on a V2 address with only zero-balance opt-ins
                 // - fresh V2/native users whose legacy V1 derivation is empty
+                // Only an account the server already knows on Algorand can be
+                // healed INTO a V2 Algorand address. Without that, there is no
+                // legacy registration to repair and nothing to drain, and
+                // "healing" would register a brand-new account onto the
+                // deprecated chain: it put an Algorand address, and no BSC
+                // address, on a BSC-only account created minutes earlier
+                // (2026-10-29). Algorand is unsupported; the app must stop
+                // asking rather than enrol anyone new.
+                const serverAlgorandAddress = await this.serverAlgorandAddress(accountIndex, businessId);
+                if (serverAlgorandAddress === undefined) {
+                    return { needsMigration: false, statusUnknown: true };
+                }
+                if (!serverAlgorandAddress) {
+                    console.log('[MigrationService] No registered Algorand address; nothing to heal (BSC-only account).');
+                    return { needsMigration: false };
+                }
                 if (v2Secret) {
                     try {
                         const v2Wallet = deriveWalletV2(v2Secret, {

@@ -680,6 +680,26 @@ function anchorVerdict(
   return algoMatches === true || evmMatches === true ? 'match' : 'mismatch';
 }
 
+/**
+ * True when EVERY supplied anchor matches.
+ *
+ * matchesAnchors below is deliberately tolerant: it accepts a secret that
+ * satisfies one anchor while the other server record is stale. That is right
+ * for adopting a candidate, and wrong for deciding we already hold the
+ * account's wallet and may skip looking for a better one.
+ */
+function matchesEveryAnchor(
+  secret: Uint8Array,
+  options: { expectedAddress?: string | null; expectedEvmAddress?: string | null } | undefined
+): boolean {
+  const wantAlgo = options?.expectedAddress || null;
+  const wantEvm = options?.expectedEvmAddress ? options.expectedEvmAddress.toLowerCase() : null;
+  if (!wantAlgo && !wantEvm) return false;
+  if (wantAlgo && derivePersonalV2Address(secret) !== wantAlgo) return false;
+  if (wantEvm && derivePersonalEvmAddress(secret) !== wantEvm) return false;
+  return true;
+}
+
 /** True unless the secret contradicts every anchor the caller supplied. */
 function matchesAnchors(
   secret: Uint8Array,
@@ -2813,6 +2833,8 @@ export async function getOrCreateMasterSecret(
     }
     let localWalletIdBytes = await credentialStorage.retrieveSecret(walletIdKey);
     let localWalletId = localWalletIdBytes ? decodeUtf8(localWalletIdBytes) : null;
+    // Set once the local secret is proven to match every server anchor.
+    let localMatchesAnchors = false;
 
     if (localSecret && (options?.expectedAddress || options?.expectedEvmAddress)) {
       // EVERY supplied anchor must hold, not just the Algorand one. Google
@@ -2888,6 +2910,12 @@ export async function getOrCreateMasterSecret(
         console.log('[MasterSecret] Local secret matches every server anchor but cloud sync is required. Continuing to Drive backup.');
       }
     }
+
+    // Whatever local recovery settled on - the subject alias or the
+    // address-bound one - decides whether the Drive still has anything to
+    // teach us. Strict here on purpose: one matching anchor beside a stale
+    // record is not proof we hold the account's wallet.
+    localMatchesAnchors = !!localSecret && matchesEveryAnchor(localSecret, options);
 
     // (The separate EVM-only anchored check that used to live here is gone: the
     // unified matchesAnchors block above covers it, and having two partial
@@ -3083,12 +3111,20 @@ export async function getOrCreateMasterSecret(
           }
         }
       } else if (restore.foundAny) {
-        if ((options?.expectedAddress || options?.expectedEvmAddress) && restore.foundDecryptable) {
+        // We already hold the wallet every anchor names, so "no candidate
+        // matched" means this Drive holds OTHER Confío wallets - an older
+        // account on the same Google identity, typically. That is not a
+        // reason to refuse the backup of a wallet verified correct above;
+        // refusing left those users unable to back up at all.
+        if (localMatchesAnchors && localSecret) {
+          console.log('[MasterSecret] Drive holds other Confío wallets; backing up this account\'s own wallet beside them.');
+        } else if ((options?.expectedAddress || options?.expectedEvmAddress) && restore.foundDecryptable) {
           recordRestoreEvidence(restore);
           throw new WalletRecoveryError('mismatch');
+        } else {
+          recordRestoreEvidence(restore);
+          throw new WalletRecoveryError('unreadable');
         }
-        recordRestoreEvidence(restore);
-        throw new WalletRecoveryError('unreadable');
       }
     }
 
@@ -3239,9 +3275,29 @@ export async function getOrCreateMasterSecret(
 
         // Always overwrite/update the specific file for *this* wallet ID
         // (Safe because ID is unique to this wallet lineage)
+        // NEVER overwrite a payload that holds a DIFFERENT secret. A wallet
+        // id is unique per wallet in theory; in practice this device's id can
+        // name a file another device has since rewritten, and updating it in
+        // place destroys that wallet's only current copy - the overwrite that
+        // cost user 2785 their key. When that happens, write a new file under
+        // a fresh id and let the manifest point at it.
+        let writeId = finalId;
+        let writeFilename = filename;
         const fileList = await googleDriveStorage.listFiles(accessToken, filename);
         if (fileList.length > 0) {
-          await googleDriveStorage.updateFile(accessToken, fileList[0].id, finalContent);
+          const existingBody = await googleDriveStorage.downloadFile(accessToken, fileList[0].id);
+          const existing = decryptBackupDetailed(existingBody, AES, APP_BACKUP_KEY, Utf8).secret;
+          // Unreadable is not "a different wallet": a corrupt or truncated
+          // body is exactly what this backup should replace.
+          if (existing && !secretsEqual(existing, finalSecret)) {
+            writeId = generateUUID();
+            writeFilename = `confio_wallet_v2_${writeId}.enc`;
+            console.warn('[MasterSecret] This wallet id names a file holding another secret; backing up under a fresh id instead of overwriting it.');
+            await googleDriveStorage.createFile(accessToken, writeFilename, finalContent);
+            await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(writeId));
+          } else {
+            await googleDriveStorage.updateFile(accessToken, fileList[0].id, finalContent);
+          }
         } else {
           await googleDriveStorage.createFile(accessToken, filename, finalContent);
         }
@@ -3251,10 +3307,11 @@ export async function getOrCreateMasterSecret(
 
         const currentDeviceHint = `${deviceName} (${Platform.OS})`; // e.g. "Pixel 8 (android)"
 
-        const existingEntry = existingEntryIndex >= 0 ? manifest.wallets[existingEntryIndex] : null;
+        const existingEntry = writeId === finalId && existingEntryIndex >= 0
+          ? manifest.wallets[existingEntryIndex] : null;
 
         const entry: WalletEntry = {
-          id: finalId,
+          id: writeId,
           createdAt: existingEntry?.createdAt || now,
           lastBackupAt: now,
           deviceHint: currentDeviceHint,
@@ -3265,16 +3322,16 @@ export async function getOrCreateMasterSecret(
         try {
           const primaryFiles = await googleDriveStorage.listFiles(accessToken, PRIMARY_POINTER_FILENAME);
           if (primaryFiles.length === 0) {
-            console.log('[MasterSecret] No Primary Pointer found. Setting THIS wallet as Primary:', finalId);
+            console.log('[MasterSecret] No Primary Pointer found. Setting THIS wallet as Primary:', writeId);
             const primaryContent = JSON.stringify({
-              primary_wallet_id: finalId,
+              primary_wallet_id: writeId,
               created_at: now,
               device_hint: currentDeviceHint
             });
             await googleDriveStorage.createFile(accessToken, PRIMARY_POINTER_FILENAME, primaryContent);
           } else {
             const primaryContent = JSON.stringify({
-              primary_wallet_id: finalId,
+              primary_wallet_id: writeId,
               updated_at: now,
               device_hint: currentDeviceHint
             });
@@ -3290,7 +3347,7 @@ export async function getOrCreateMasterSecret(
         manifest.wallets = [entry];
 
         await saveManifest(googleDriveStorage, accessToken, manifest);
-        console.log(`[MasterSecret] Encrypted Backup Synced (ID: ${finalId})`);
+        console.log(`[MasterSecret] Encrypted Backup Synced (ID: ${writeId})`);
         options?.onCloudSyncResult?.(true);
 
         // Drive Backup Report

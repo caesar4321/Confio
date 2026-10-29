@@ -248,7 +248,8 @@ type BscRegistrationOutcome = 'done' | 'token_rotated';
  * a missing claim), and a value that is not an identity must never establish
  * sameness.
  */
-function sameTokenSubject(a: string, b: string): boolean {
+/** The token's user id, or null when it carries none we can trust. */
+function jwtUserId(token: string): string | null {
   const canonicalId = (v: unknown): string | null => {
     // Numbers get the safe-integer check because Django uses BigAutoField and
     // serializes user_id numerically: 9007199254740992 and ...93 decode to the
@@ -264,12 +265,15 @@ function sameTokenSubject(a: string, b: string): boolean {
     return null;
   };
   try {
-    const ua = canonicalId(jwtDecode<CustomJwtPayload>(a)?.user_id);
-    const ub = canonicalId(jwtDecode<CustomJwtPayload>(b)?.user_id);
-    return ua !== null && ua === ub;
+    return canonicalId(jwtDecode<CustomJwtPayload>(token)?.user_id);
   } catch {
-    return false;
+    return null;
   }
+}
+
+function sameTokenSubject(a: string, b: string): boolean {
+  const ua = jwtUserId(a);
+  return ua !== null && ua === jwtUserId(b);
 }
 
 async function attemptBscRegistration(addressOverride?: string): Promise<BscRegistrationOutcome> {
@@ -308,9 +312,19 @@ async function attemptBscRegistration(addressOverride?: string): Promise<BscRegi
       console.log('[AuthService] Skipping BSC registration: caller address does not match the derived wallet');
       return 'done';
     }
-    const markerService = `confio_bsc_registered_v1_${address.toLowerCase()}`;
+    // Keyed by the USER too, not the address alone. One Google identity
+    // derives the same address forever, so after deleting an account and
+    // signing up again on this device the stale marker said "already
+    // registered" and the NEW account never got its BSC address at all -
+    // an account with no wallet the server knows about.
+    const registeredUserId = jwtUserId(tokenAtStart);
+    if (!registeredUserId) {
+      console.log('[AuthService] Skipping BSC registration: token carries no user id');
+      return 'done';
+    }
+    const markerService = `confio_bsc_registered_v2_${registeredUserId}_${address.toLowerCase()}`;
     const marker = await Keychain.getGenericPassword({ service: markerService }).catch(() => null);
-    if (marker) return 'done'; // already registered from this device
+    if (marker) return 'done'; // already registered for THIS account from this device
     const { UPDATE_ACCOUNT_BSC_ADDRESS } = await import('../apollo/queries');
     const { apolloClient } = await import('../apollo/client');
     // Re-check BOTH halves immediately before sending. The gate above and this

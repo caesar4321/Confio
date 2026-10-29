@@ -90,6 +90,49 @@ const registered = (algorandAddress: string | null, isKeylessMigrated: boolean) 
 beforeEach(() => {
   mockAccountInformation.mockReset();
   mockQuery.mockReset();
+  require('../authService').registerAlgorandAddressChecked.mockClear();
+});
+
+describe('a BSC-only account is never enrolled onto Algorand', () => {
+  // 2026-10-29: a signup minutes old, registered on BSC with no Algorand
+  // address, reached the self-heal branch. Its empty legacy V1 derivation
+  // looked like a "zombie" to repair, so the app registered a V2 ALGORAND
+  // address for it and marked it migrated. Algorand is deprecated: with no
+  // legacy registration there is nothing to heal and nobody to enrol.
+  const { registerAlgorandAddressChecked } = require('../authService');
+  // No opt-ins and nothing to sweep: the only shape that reaches self-heal.
+  const emptyV1 = { amount: BigInt(0), minBalance: BigInt(0), assets: [] };
+
+  it('registers nothing when the server has no Algorand address for the account', async () => {
+    mockAccountInformation.mockResolvedValue(emptyV1);
+    mockQuery.mockResolvedValue(registered(null, true));
+
+    const state = await check();
+
+    expect(state.needsMigration).toBe(false);
+    expect(state.v2Address).toBeUndefined();
+    expect(registerAlgorandAddressChecked).not.toHaveBeenCalled();
+  });
+
+  it('does not guess when the account row cannot be read', async () => {
+    mockAccountInformation.mockResolvedValue(emptyV1);
+    mockQuery.mockResolvedValue({ data: { userAccounts: [] } });
+
+    const state = await check();
+
+    expect(state.statusUnknown).toBe(true);
+    expect(registerAlgorandAddressChecked).not.toHaveBeenCalled();
+  });
+
+  it('still heals a real legacy account whose V1 is empty', async () => {
+    mockAccountInformation.mockResolvedValue(emptyV1);
+    mockQuery.mockResolvedValue(registered('V1ADDR', true));
+
+    const state = await check();
+
+    expect(state.needsMigration).toBe(false);
+    expect(registerAlgorandAddressChecked).toHaveBeenCalled();
+  });
 });
 
 describe('checkNeedsMigration only asks for sweeps the server will sponsor', () => {
