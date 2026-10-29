@@ -1016,6 +1016,21 @@ def _source_row_covers(tx_hash: str, recipient: str) -> bool:
             transaction_hash__iexact=tx_hash, to_address__iexact=r).exists():
         return True
     try:
+        # An invite claim: the escrow pays the claimer under the claim's own
+        # hash, recorded on the invite (claimed_txid) from broadcast on. Its
+        # ledger line is the inviter's send, which names the claimer once it
+        # settles (send/invite_tasks.py), never an "external deposit".
+        from send.models import PhoneInvite
+        from users.models import Account
+        claimer_ids = PhoneInvite.objects.filter(
+            rail='bsc', claimed_txid__iexact=tx_hash, claimed_by__isnull=False,
+        ).values_list('claimed_by_id', flat=True)
+        if claimer_ids and Account.objects.filter(
+                user_id__in=list(claimer_ids), bsc_address__iexact=r).exists():
+            return True
+    except Exception:  # noqa: BLE001
+        logger.exception('invite claim ownership check failed for %s', tx_hash)
+    try:
         from presale.models import PresalePurchase
         if PresalePurchase.objects.filter(
                 transaction_hash__iexact=tx_hash, from_address__iexact=r).exists():

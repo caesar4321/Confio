@@ -283,6 +283,9 @@ class CreateConfirmTests(SimpleTestCase):
 
 
 class ClaimConfirmTests(SimpleTestCase):
+    # Settlement writes the invite and its history in one transaction.
+    databases = {'default'}
+
     """confirm_bsc_invite_claim settles a claim from its RECEIPT. A claim is a
     plain KMS tx with no SponsoredBatch, so the receipt is the only evidence —
     and booking 'claimed' off the broadcast is how a dropped claim leaves the
@@ -653,6 +656,9 @@ class _Sliceable(list):
 
 
 class ClaimFinalityTests(SimpleTestCase):
+    # Settlement writes the invite and its history in one transaction.
+    databases = {'default'}
+
     """A receipt is not a settlement. Booking 'claimed' before finality lets a
     reorg leave the DB paid while the escrow is still funded."""
 

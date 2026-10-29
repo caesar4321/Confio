@@ -239,3 +239,43 @@ class SendPeopleTests(TestCase):
                 token_type='CUSD', status=status, sender_address='0x' + '1' * 40, recipient_address='0x' + '2' * 40)
         SendTransaction.objects.filter(recipient_user=old_friend).update(created_at=timezone.now() - timedelta(days=3))
         self.assertEqual([u.username for u in link_invite.recent_people(me)], ['new-friend', 'old-friend'])
+
+
+class ClaimSettlementTests(TestCase):
+    def setUp(self):
+        self.sender = make_user('settle-sender', '0x' + '1' * 40)
+        self.claimer = make_user('settle-claimer', '0x' + '3' * 40)
+        self.invite = link_invite_row(self.sender, EthAccount.create().address, status='claiming')
+        PhoneInvite.objects.filter(pk=self.invite.pk).update(claimed_by=self.claimer, claimed_txid='0x' + 'c' * 64)
+        self.invite.refresh_from_db()
+
+    def test_the_escrow_payout_is_never_an_external_deposit(self):
+        # protects=the claimer's money is not booked as "Billetera externa"; fails_when=the scanner finds no owner for the claim hash; no_claim=scanner cursor logic
+        from cusd_plus.tasks import _source_row_covers
+        self.assertTrue(_source_row_covers('0x' + 'C' * 64, '0x' + '3' * 40))
+        self.assertFalse(_source_row_covers('0x' + 'c' * 64, '0x' + '9' * 40))
+
+    def test_a_settled_claim_becomes_a_send_to_the_claimer(self):
+        # protects=both sides see who sent and who received; fails_when=the send still names nobody after the claim settles; no_claim=finality rules (separately tested)
+        from send import invite_tasks
+        receipt = {'status': '0x1', 'blockNumber': '0x10', 'blockHash': '0xabc', 'logs': []}
+        def rpc(method, params):
+            return {'eth_getTransactionReceipt': receipt, 'eth_getBlockByNumber': {'hash': '0xabc'}}.get(method)
+        with mock.patch('cusd_plus.sponsor_7702._rpc', side_effect=rpc), \
+             mock.patch('cusd_plus.tasks._finalized_block_number', return_value=100), \
+             mock.patch('cusd_plus.tasks._mark_receipt_balances_stale'), \
+             mock.patch('notifications.utils.create_notification') as notify, \
+             self.captureOnCommitCallbacks(execute=True):
+            invite_tasks.confirm_bsc_invite_claim.run(self.invite.pk, '0x' + 'c' * 64)
+        stx = SendTransaction.objects.get(pk=self.invite.send_transaction_id)
+        self.assertEqual((stx.recipient_user_id, stx.recipient_type, stx.invitation_claimed), (self.claimer.pk, 'user', True))
+        self.assertEqual(notify.call_args.kwargs['user'], self.claimer)
+
+    def test_the_claimer_is_told_the_token_they_received(self):
+        # protects=a claim across the cUSD/cUSD+ line names what landed; fails_when=the notification repeats the sender's token; no_claim=conversion amounts
+        from send import invite_tasks
+        vault = '0x' + 'e' * 40
+        log = {'address': vault, 'topics': [invite_tasks._TRANSFER_TOPIC, '0x' + '0' * 64, '0x' + '0' * 24 + '3' * 40]}
+        with self.settings(CUSD_PLUS_VAULT_ADDRESS=vault):
+            self.assertEqual(invite_tasks._received_token({'logs': [log]}, self.claimer), 'CUSD_PLUS')
+            self.assertEqual(invite_tasks._received_token({'logs': []}, self.claimer), '')

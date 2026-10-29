@@ -271,17 +271,35 @@ def confirm_bsc_invite_claim(self, invite_id: int, tx_hash: str):
         # again and settles the new block, or finds it orphaned.
         raise self.retry(countdown=_retry_countdown(self.request.retries))
 
+    from django.db import transaction
     from django.utils import timezone
-    if not PhoneInvite.objects.filter(pk=invite.pk, status='claiming').update(
-            status='claimed', claimed_at=timezone.now(), claimed_txid=tx_hash):
-        return
-    # Mirror onto the history row, or the inviter keeps seeing an expiry
-    # warning and a reclaim button for money that is already the invitee's.
-    # save() so the unified-row post_save signal fires.
-    stx = invite.send_transaction
-    if stx is not None:
-        stx.invitation_claimed = True
-        stx.save(update_fields=['invitation_claimed', 'updated_at'])
+    # One transaction: the invite never reads 'claimed' without its history
+    # naming the claimer (a retry exits once it is claimed, and the scanner no
+    # longer books the payout as a deposit, so nothing else would repair it).
+    claimer = getattr(invite, 'claimed_by', None)
+    with transaction.atomic():
+        if not PhoneInvite.objects.filter(pk=invite.pk, status='claiming').update(
+                status='claimed', claimed_at=timezone.now(), claimed_txid=tx_hash):
+            return
+        # Mirror onto the history row, or the inviter keeps seeing an expiry
+        # warning and a reclaim button for money that is already the invitee's.
+        # save() so the unified-row post_save signal fires.
+        stx = invite.send_transaction
+        if stx is not None:
+            stx.invitation_claimed = True
+            fields = ['invitation_claimed', 'updated_at']
+            if claimer is not None and getattr(stx, 'recipient_user_id', None) is None:
+                # From here on it is a send to the person who claimed it: the
+                # inviter's history names them, and the claimer's history shows
+                # it as received from the inviter (one row, both sides).
+                stx.recipient_user = claimer
+                stx.recipient_type = 'user'
+                stx.recipient_display_name = (claimer.get_full_name() or claimer.username or '')[:255]
+                fields += ['recipient_user', 'recipient_type', 'recipient_display_name']
+            stx.save(update_fields=fields)
+            if claimer is not None:
+                received = _received_token(receipt, claimer) or stx.token_type
+                transaction.on_commit(lambda: _notify_claimer(stx, claimer, received))
     # A KMS claim, not a sponsored batch: the receipt hook never sees it.
     # The invitee's stored balance (from the receipt's Transfer) is stale.
     from cusd_plus.tasks import _mark_receipt_balances_stale
@@ -438,3 +456,60 @@ def _release_stuck(invite, status: str) -> None:
             # save() so the unified history row follows.
             stx.status = 'PENDING'
             stx.save(update_fields=['status', 'updated_at'])
+
+
+_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
+
+
+def _received_token(receipt, claimer) -> str:
+    """The token the claim paid the claimer, read from its Transfer: a claim
+    across the cUSD/cUSD+ line converts, so it can differ from what was sent.
+    '' when the receipt does not say."""
+    from users.models import Account
+    from .invite_bsc_flow import _token_address
+    try:
+        addrs = {a.lower() for a in Account.objects.filter(
+            user=claimer, deleted_at__isnull=True).exclude(bsc_address__isnull=True)
+            .exclude(bsc_address='').values_list('bsc_address', flat=True)}
+        by_contract = {_token_address(t): t for t in ('CUSD_PLUS', 'CUSD', 'CONFIO')}
+        by_contract.pop('', None)
+        for log in receipt.get('logs') or []:
+            topics = [str(t).lower() for t in (log.get('topics') or [])]
+            if len(topics) < 3 or topics[0] != _TRANSFER_TOPIC:
+                continue
+            token = by_contract.get(str(log.get('address') or '').lower())
+            if token and '0x' + topics[2][-40:] in addrs:
+                return token
+    except Exception:  # noqa: BLE001
+        logger.exception('[INVITE][BSC] received token read failed')
+    return ''
+
+
+def _notify_claimer(stx, claimer, token_type: str) -> None:
+    """'Recibiste…' for the person who claimed: the escrow's payout is not a
+    deposit, and the inviter already had their 'Enviaste…' at create. The
+    token is the one received (a claim across the cUSD/cUSD+ line converts at
+    value, so the dollar amount is the sent one)."""
+    try:
+        from notifications import utils as notif_utils
+        from notifications.models import NotificationType as NotifType
+        from users.number_format import format_amount
+        from notifications.token_display import token_label
+        sender_name = stx.sender_display_name or 'Contacto'
+        notif_utils.create_notification(
+            user=claimer, account=None, business=None,
+            notification_type=NotifType.SEND_RECEIVED,
+            title='Dinero recibido',
+            message=f'Recibiste {format_amount(stx.amount, claimer)} {token_label(token_type)} de {sender_name}',
+            data={
+                'transaction_id': str(stx.internal_id), 'internal_id': str(stx.internal_id),
+                'transaction_hash': stx.transaction_hash, 'amount': f'{stx.amount:.2f}'.rstrip('0').rstrip('.'),
+                'token_type': token_type, 'sender_name': sender_name,
+                'recipient_name': stx.recipient_display_name or '', 'is_external_address': False,
+                'transaction_type': 'send',
+            },
+            related_object_type='SendTransaction', related_object_id=str(stx.internal_id),
+            action_url=f'confio://send/{stx.internal_id}',
+        )
+    except Exception:  # noqa: BLE001 — the claim is settled whatever the notification does
+        logger.exception('[INVITE][BSC] claimer notification failed for send %s', stx.pk)
