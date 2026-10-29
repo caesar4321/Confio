@@ -5,6 +5,7 @@ import { FaceCheckProvider } from '../FaceCheckProvider';
 import { registerFaceCheckPresenter, runFaceCapture } from '../../services/faceStepUp';
 
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 jest.mock('../../services/faceStepUp', () => ({
   registerFaceCheckPresenter: jest.fn(),
   runFaceCapture: jest.fn(),

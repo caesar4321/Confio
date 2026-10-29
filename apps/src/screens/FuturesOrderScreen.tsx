@@ -16,10 +16,11 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { confirmImpact } from '../components/futures/confirmImpact';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -668,11 +669,15 @@ function ReviewSheet({
   const entry = limit ?? markPx;
   const liq = entry ? estimateLiquidationPx(entry, credited * leverage, credited, side, maxLeverage) : null;
   const sideColors = SIDE_COLORS[side];
+  // Large system fonts outgrow the screen: the review scrolls, the buttons stay.
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
       <Pressable style={styles.sheetBackdrop} onPress={onCancel} />
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, { maxHeight: height - Math.max(insets.top, 16) - 24 }]}>
         <View style={styles.grabber} />
+        <ScrollView style={styles.sheetScroll} bounces={false} showsVerticalScrollIndicator>
         <Text style={styles.sheetTitle}>{sideLabel(side)} {leverage}x en {ticker}</Text>
         <Text style={styles.sheetSub}>Revisa antes de firmar</Text>
         <View style={styles.sheetCard}>
@@ -694,6 +699,7 @@ function ReviewSheet({
             ? `Firmas una sola vez con tu llave. El margen cruza a tu cuenta en Hyperliquid y tu orden espera hasta que ${ticker} llegue a ${formatPerpPrice(limit)}. Puedes cancelarla cuando quieras. Puedes perder todo el margen.`
             : 'Firmas una sola vez con tu llave. El margen cruza a tu cuenta en Hyperliquid y la orden se abre al mejor precio del momento. Puedes perder todo el margen.'}
         </Text>
+        </ScrollView>
         <Pressable style={[styles.primary, { backgroundColor: sideColors.solid }]} onPress={onConfirm} testID="perps-confirm">
           <Text style={styles.primaryText}>{limit ? 'Confirmar orden' : 'Confirmar y abrir'}</Text>
         </Pressable>
@@ -750,6 +756,7 @@ const styles = StyleSheet.create({
   footnote: { fontSize: 11, color: colors.text.light, textAlign: 'center', marginTop: 10, lineHeight: 15 },
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)' },
   sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 20, paddingBottom: 34 },
+  sheetScroll: { flexShrink: 1 },
   grabber: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#E5E7EB', marginBottom: 14 },
   sheetTitle: { fontSize: 20, fontWeight: '800', color: colors.text.primary },
   sheetSub: { fontSize: 13, color: colors.text.secondary, marginTop: 2, marginBottom: 14 },

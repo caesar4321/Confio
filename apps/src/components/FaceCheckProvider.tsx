@@ -14,9 +14,12 @@ import {
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from './common/AppText';
 import Svg, { Circle, Path } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Feather';
@@ -188,6 +191,12 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   }, [purpose, close]);
 
   const busy = stage === 'capturing' || stage === 'grading' || stage === 'passed';
+  // Large system fonts make the sheet taller than the screen: cap it, scroll
+  // the copy, and keep the buttons pinned so the check can always be answered.
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(320, height - Math.max(insets.top, 16) - 16);
+  const settledStage = stage === 'failed' || stage === 'unavailable';
 
   return (
     <>
@@ -215,7 +224,13 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
           </SafeAreaView>
         ) : (
         <View style={styles.backdrop}>
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={[styles.sheetBody, busy && { paddingBottom: insets.bottom + 40 }]}
+              bounces={false}
+              showsVerticalScrollIndicator
+            >
             {stage === 'passed' ? (
               <View style={styles.center}>
                 <View style={[styles.resultBadge, { backgroundColor: EMERALD }]}>
@@ -232,14 +247,6 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
                   {stage === 'failed' ? 'No pudimos confirmar que eres tú' : 'Verificación no disponible'}
                 </Text>
                 {!!message && <Text style={styles.body}>{message}</Text>}
-                {stage === 'failed' && (
-                  <Pressable style={styles.primary} onPress={start}>
-                    <Text style={styles.primaryText}>Intentar de nuevo</Text>
-                  </Pressable>
-                )}
-                <Pressable style={styles.secondary} onPress={() => close(false)}>
-                  <Text style={styles.secondaryText}>{stage === 'failed' ? 'Cancelar' : 'Entendido'}</Text>
-                </Pressable>
               </View>
             ) : (
               <View style={styles.center}>
@@ -270,15 +277,28 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
                         Política de privacidad
                       </Text>
                     </Text>
-                    <Pressable style={styles.primary} onPress={start}>
-                      <Text style={styles.primaryText}>Confirmar con mi rostro</Text>
-                    </Pressable>
-                    <Pressable style={styles.secondary} onPress={() => close(false)}>
-                      <Text style={styles.secondaryText}>Ahora no</Text>
-                    </Pressable>
                   </>
                 )}
                 {busy && <ActivityIndicator color={EMERALD} style={{ marginTop: 12 }} />}
+              </View>
+            )}
+            </ScrollView>
+            {!busy && (
+              <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 0) + 24 }]}>
+                {stage === 'failed' ? (
+                  <Pressable style={styles.primary} onPress={start}>
+                    <Text style={styles.primaryText}>Intentar de nuevo</Text>
+                  </Pressable>
+                ) : !settledStage && (
+                  <Pressable style={styles.primary} onPress={start}>
+                    <Text style={styles.primaryText}>Confirmar con mi rostro</Text>
+                  </Pressable>
+                )}
+                <Pressable style={styles.secondary} onPress={() => close(false)}>
+                  <Text style={styles.secondaryText}>
+                    {stage === 'failed' ? 'Cancelar' : stage === 'unavailable' ? 'Entendido' : 'Ahora no'}
+                  </Text>
+                </Pressable>
               </View>
             )}
           </View>
@@ -307,9 +327,11 @@ const styles = StyleSheet.create({
   policyBackText: { fontSize: 15, color: INK, marginLeft: 2 },
   policyTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: INK },
   sheet: {
-    backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    paddingHorizontal: 24, paddingTop: 28, paddingBottom: 40,
+    backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden',
   },
+  sheetScroll: { flexShrink: 1 },
+  sheetBody: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 12 },
+  footer: { paddingHorizontal: 24, paddingTop: 4 },
   center: { alignItems: 'center', justifyContent: 'center' },
   glyphWrap: { width: 132, height: 132, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   halo: {

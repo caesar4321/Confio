@@ -5,9 +5,11 @@ import {
   Modal,
   ActivityIndicator,
   Platform,
+  ScrollView,
   TouchableOpacity,
 } from 'react-native';
 import { Text } from './common/AppText';
+import { useModalCardLayout } from '../hooks/useModalCardLayout';
 
 interface AutoSwapModalProps {
     visible: boolean;
@@ -26,6 +28,15 @@ const AutoSwapModal: React.FC<AutoSwapModalProps> = ({
     onClose
 }) => {
     const needsRecovery = mode === 'wallet_recovery_required';
+    const layout = useModalCardLayout();
+
+    const footer = needsRecovery && onClose ? (
+        <View style={styles.footer} onLayout={layout.onFooterLayout}>
+            <TouchableOpacity style={styles.primaryButton} onPress={onClose}>
+                <Text style={styles.primaryButtonText}>Entendido</Text>
+            </TouchableOpacity>
+        </View>
+    ) : null;
 
     return (
         <Modal
@@ -34,8 +45,14 @@ const AutoSwapModal: React.FC<AutoSwapModalProps> = ({
             animationType="fade"
             statusBarTranslucent
         >
-            <View style={styles.overlay}>
-                <View style={styles.modalContainer}>
+            <View style={[styles.overlay, { paddingTop: layout.paddingTop, paddingBottom: layout.paddingBottom }]}>
+                <View style={[styles.modalContainer, { maxHeight: layout.maxHeight }]}>
+                    <ScrollView
+                        style={styles.scrollView}
+                        contentContainerStyle={styles.content}
+                        bounces={false}
+                        showsVerticalScrollIndicator
+                    >
                     <View style={styles.animationContainer}>
                         {needsRecovery ? (
                             <Text style={styles.iconText}>!</Text>
@@ -68,11 +85,9 @@ const AutoSwapModal: React.FC<AutoSwapModalProps> = ({
                             : 'Este proceso es automático y tomará unos segundos.'}
                     </Text>
 
-                    {needsRecovery && onClose ? (
-                        <TouchableOpacity style={styles.primaryButton} onPress={onClose}>
-                            <Text style={styles.primaryButtonText}>Entendido</Text>
-                        </TouchableOpacity>
-                    ) : null}
+                    {layout.inlineFooter && footer}
+                    </ScrollView>
+                    {!layout.inlineFooter && footer}
                 </View>
             </View>
         </Modal>
@@ -85,15 +100,13 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 24,
+        paddingHorizontal: 24,
     },
     modalContainer: {
         backgroundColor: '#fff',
         borderRadius: 24,
-        padding: 32,
         width: '100%',
         maxWidth: 340,
-        alignItems: 'center',
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
@@ -105,6 +118,17 @@ const styles = StyleSheet.create({
                 elevation: 8,
             },
         }),
+    },
+    scrollView: {
+        flexShrink: 1,
+    },
+    content: {
+        padding: 32,
+        alignItems: 'center',
+    },
+    footer: {
+        paddingHorizontal: 32,
+        paddingBottom: 32,
     },
     animationContainer: {
         width: 80,
@@ -142,7 +166,6 @@ const styles = StyleSheet.create({
         lineHeight: 40,
     },
     primaryButton: {
-        marginTop: 22,
         backgroundColor: '#34D399',
         borderRadius: 8,
         minHeight: 44,

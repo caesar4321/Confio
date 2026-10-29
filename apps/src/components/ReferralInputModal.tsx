@@ -10,7 +10,9 @@ import {
   Platform,
   FlatList,
   Alert,
+  ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, TextInput } from './common/AppText';
 import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
@@ -51,6 +53,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const insets = useSafeAreaInsets();
   const [referrerInput, setReferrerInput] = useState('');
   const [inputType, setInputType] = useState<'friend' | 'phone'>('friend');
   const [showSuccess, setShowSuccess] = useState(false);
@@ -193,7 +196,10 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.modalOverlay}
+        style={[
+          styles.modalOverlay,
+          { paddingTop: Math.max(insets.top, 20), paddingBottom: Math.max(insets.bottom, 20) },
+        ]}
       >
         <View style={styles.modalContent}>
           <View style={styles.header}>
@@ -203,6 +209,9 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
             </TouchableOpacity>
           </View>
 
+          {/* Large system fonts (or the keyboard) outgrow the card: the body
+              scrolls so Registrar/Saltar stay reachable. */}
+          <ScrollView style={styles.body} bounces={false} keyboardShouldPersistTaps="handled">
           {canSetReferrer ? (
             <>
               <Text style={styles.subtitle}>
@@ -327,6 +336,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
               </TouchableOpacity>
             </View>
           )}
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
 
@@ -401,7 +411,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     width: '100%',
     maxWidth: 400,
+    maxHeight: '100%',
     padding: 24,
+  },
+  body: {
+    flexShrink: 1,
   },
   header: {
     flexDirection: 'row',

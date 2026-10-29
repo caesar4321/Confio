@@ -8,6 +8,7 @@ import {
   Linking,
   Platform,
   Keyboard,
+  ScrollView,
   useWindowDimensions,
 } from 'react-native';
 import { Text, TextInput } from './common/AppText';
@@ -150,6 +151,14 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                 ]}
             >
                 <View style={[styles.card, { maxHeight: modalMaxHeight }]}>
+                    {/* flexShrink (never flex: 1) inside the capped card: large
+                        system fonts scroll to the buttons instead of clipping them. */}
+                    <ScrollView
+                        style={styles.scroll}
+                        bounces={false}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator
+                    >
                     {step === 'stars' && (
                         <View style={styles.body}>
                             <Text style={styles.title}>¿Cómo ha sido tu experiencia con Confío hasta ahora?</Text>
@@ -254,6 +263,7 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                             </View>
                         </View>
                     )}
+                    </ScrollView>
                 </View>
             </View>
         </Modal>
@@ -275,6 +285,7 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         overflow: 'hidden',
     },
+    scroll: { flexShrink: 1 },
     body: { padding: 24 },
     title: {
         fontSize: 18,

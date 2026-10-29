@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Platform,
+  ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
@@ -78,7 +79,13 @@ export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }:
 
   return (
     <View style={styles.container}>
-      <View style={styles.content}>
+      {/* Scrolls so large system fonts never push Desbloquear off-screen. */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+      >
         <Image
           source={require('../assets/png/CONFIO.png')}
           style={styles.logo}
@@ -96,7 +103,7 @@ export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }:
             No pudimos verificar tu identidad. Inténtalo de nuevo.
           </Text>
         )}
-      </View>
+      </ScrollView>
 
       <View style={styles.actions}>
         {exitOpen && (
@@ -137,7 +144,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 96,
     paddingBottom: 48,
-    justifyContent: 'space-between',
+  },
+  scroll: {
+    flex: 1,
+    marginBottom: 16,
   },
   content: {
     alignItems: 'center',
