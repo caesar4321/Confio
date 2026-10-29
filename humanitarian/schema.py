@@ -42,7 +42,12 @@ class HumanitarianReleaseType(DjangoObjectType):
         if not self.volunteer_application:
             return 'Voluntario Confio'
         user = self.volunteer_application.user
-        return user.get_full_name() or user.username or 'Voluntario Confio'
+        # Campaign pages are public: the volunteer's name only where
+        # users/name_visibility allows, the @usuario otherwise.
+        from users.name_visibility import can_see_name
+        if can_see_name(info, user):
+            return user.get_full_name() or user.username or 'Voluntario Confio'
+        return f'@{user.username}' if user.username else 'Voluntario Confio'
 
 
 class HumanitarianDonationType(DjangoObjectType):
@@ -58,6 +63,20 @@ class HumanitarianDonationType(DjangoObjectType):
             'transaction_hash',
             'donated_at',
         )
+
+    def resolve_donor_display_name(self, info):
+        # The donor wall is public (anonymous readers too): a donor's stored
+        # name only where users/name_visibility allows, the @usuario
+        # otherwise. Only the app's donation flow stores a name (from the
+        # donor's account), so a row without a user is an orphaned internal
+        # donation (donor_user is SET_NULL): never its stored name.
+        user = self.donor_user
+        if user is None:
+            return 'Donante Confío'
+        from users.name_visibility import can_see_name
+        if can_see_name(info, user):
+            return self.donor_display_name
+        return f'@{user.username}' if user.username else 'Donante Confío'
 
     def resolve_donor_country_code(self, info):
         # Public donor wall: the phone's country, as before. Where a donor

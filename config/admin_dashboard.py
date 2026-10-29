@@ -43,6 +43,17 @@ class ConfioAdminSite(AdminSiteOTPRequired):
     site_header = 'Confío Admin Panel'
     site_title = 'Confío Admin'
     index_title = 'Welcome to Confío Administration'
+
+    def register(self, model_or_iterable, admin_class=None, **options):
+        # Every list that shows a person gets a "Country" column and filter
+        # (User.country, residence), wherever the admin is defined.
+        super().register(model_or_iterable, admin_class, **options)
+        from config.admin_country import add_country_column
+        models = model_or_iterable if isinstance(model_or_iterable, (list, tuple)) else [model_or_iterable]
+        for model in models:
+            model_admin = self._registry.get(model)
+            if model_admin is not None:
+                add_country_column(model, model_admin)
     
     def get_urls(self):
         urls = super().get_urls()

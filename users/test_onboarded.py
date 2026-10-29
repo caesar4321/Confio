@@ -163,3 +163,17 @@ class NameVisibilityTests(TestCase):
         SendTransaction.objects.filter(pk=tip.pk).update(status='CONFIRMED')
         self.assertEqual(display_name_for(self.viewer, self.stranger), '@nv-stranger')
         self.assertEqual(link_invite.recent_people(self.viewer), [])
+
+    def test_donor_wall_and_volunteers_show_handles_to_strangers(self):
+        # protects=the public campaign page never names a donor or volunteer to a stranger or anonymous reader; fails_when=donorDisplayName or volunteerName returns the stored full name; no_claim=external-wallet donor labels
+        from humanitarian.schema import HumanitarianDonationType, HumanitarianReleaseType
+        donation = SimpleNamespace(donor_user=self.stranger, donor_display_name='Rosa Díaz')
+        anon = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=False)))
+        self.assertEqual(HumanitarianDonationType.resolve_donor_display_name(donation, anon), '@nv-stranger')
+        own = SimpleNamespace(context=SimpleNamespace(user=self.stranger))
+        self.assertEqual(HumanitarianDonationType.resolve_donor_display_name(donation, own), 'Rosa Díaz')
+        orphaned = SimpleNamespace(donor_user=None, donor_display_name='Rosa Díaz')
+        self.assertEqual(HumanitarianDonationType.resolve_donor_display_name(orphaned, anon), 'Donante Confío')
+        release = SimpleNamespace(volunteer_application=SimpleNamespace(user=self.stranger))
+        info = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
+        self.assertEqual(HumanitarianReleaseType.resolve_volunteer_name(release, info), '@nv-stranger')

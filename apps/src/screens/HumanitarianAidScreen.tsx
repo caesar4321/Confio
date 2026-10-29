@@ -80,7 +80,8 @@ function timeAgo(iso?: string | null) {
 }
 
 function initials(name?: string | null) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  // Names show as @usuario to people who have not moved money with them.
+  const parts = String(name || '').trim().replace(/^@/, '').split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '❤';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
