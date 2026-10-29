@@ -635,6 +635,15 @@ class VexPayRampTests(TestCase):
         self.assertEqual((ramp.status, ramp.status_detail), ('PROCESSING', 'bank_confirming'))
         self.assertFalse(vexpay.can_confirm(ramp))
 
+    def test_c2p_refused_by_the_bank_fails_with_guidance(self):
+        ramp = self._ramp()
+        client = mock.Mock()
+        client.c2p_execute.return_value = dict(_payment('FAILED'), failureCode='XX')
+        with self.assertRaisesMessage(vexpay.VexPayRampError, 'monto menor'):
+            vexpay.execute_c2p(ramp, '123456', client)
+        ramp.refresh_from_db()
+        self.assertEqual((ramp.status, ramp.status_detail), ('FAILED', 'payment_failed:XX'))
+
     def test_late_ambiguity_never_reopens_a_completed_order(self):
         ramp = vexpay.apply_payment(self._ramp(), _payment('COMPLETED', 'completed'))
         ramp = vexpay._mark_ambiguous(ramp, 'c2p_execute_ambiguous')
@@ -824,3 +833,20 @@ class ClientSupportTests(SimpleTestCase):
     def test_unset_floor_shows_nobody(self):
         with override_settings(VE_PAGOMOVIL_TOPUP_MIN_APP_VERSION=''):
             self.assertFalse(ve_pagomovil.client_supports(ve_pagomovil.TOPUP, {'HTTP_X_CONFIO_VERSION': '9.9.9'}))
+
+
+class RefusalGuidanceTests(TestCase):
+    def test_movement_not_found_names_what_to_check(self):
+        from ramps.vexpay import movement_not_found_message
+        text = movement_not_found_message({
+            'payer': {'phone': '584221766767'}, 'expected_ves': '101405',
+            'receiving_account': {'phone': '04149333844', 'bank_name': 'R4 Conecta'}})
+        self.assertIn('desde el 04221766767', text)
+        self.assertIn('al 04149333844 (R4 Conecta)', text)
+        self.assertIn('Bs 101.405,00', text)
+        self.assertTrue(movement_not_found_message({}).startswith('Todavía no vemos tu Pago Móvil. Verifica que la referencia'))
+
+    def test_generic_debit_refusal_suggests_a_smaller_amount(self):
+        from ramps.vexpay import C2P_REFUSED, VexPayError, bank_message
+        self.assertEqual(bank_message(VexPayError('VEXPay returned HTTP 422'), C2P_REFUSED), C2P_REFUSED)
+        self.assertIn('monto menor', C2P_REFUSED)

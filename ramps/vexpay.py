@@ -683,20 +683,29 @@ def execute_c2p(ramp: RampTransaction, token: str, client: VexPayClient) -> Ramp
                 sync_vexpay_ramp(ramp, client)
             except VexPayError:
                 pass
-            raise VexPayRampError(bank_message(exc))
+            raise VexPayRampError(bank_message(exc, C2P_REFUSED))
         return _mark_ambiguous(ramp, 'c2p_execute_ambiguous')
     _submitted(ramp)
-    return apply_payment(ramp, payment, direct=True)
+    ramp = apply_payment(ramp, payment, direct=True)
+    if ramp.status == 'FAILED':
+        # The bank refused the debit (VEXPay answers FAILED, often with only
+        # a generic code): say what usually causes it.
+        raise VexPayRampError(C2P_REFUSED)
+    return ramp
 
 
-def bank_message(exc: VexPayError) -> str:
+C2P_REFUSED = ('Tu banco rechazó el débito. Suele pasar si el monto supera tu límite de pagos con clave, '
+               'si la clave venció o si no hay saldo suficiente. Prueba con un monto menor y una clave nueva.')
+
+
+def bank_message(exc: VexPayError, fallback: str = 'El banco no pudo procesar el pago. Verifica tus datos e intenta de nuevo.') -> str:
     """The bank's own Spanish reason without VEXPay's code prefix
     ('ECBG14Es posible…' → 'Es posible…', 'ECBG56000000Tarjeta…' → 'Tarjeta…')."""
     text = re.sub(r'^[A-Z]{2,8}\d+', '', str(exc or '').strip()).strip()
     # Only the bank's own words: our client's transport/HTTP texts name the
     # provider, which users must never see.
     if not text or len(text) > 200 or 'vexpay' in text.lower() or 'http' in text.lower():
-        return 'El banco no pudo procesar el pago. Verifica tus datos e intenta de nuevo.'
+        return fallback
     return f'El banco respondió: {text}'
 
 
@@ -798,10 +807,33 @@ def verify_pago_movil(ramp: RampTransaction, reference: str, client: VexPayClien
             if code == 'AMOUNT_MISMATCH':
                 raise VexPayRampError('El monto recibido no coincide con el que te indicamos. Revisa el monto que enviaste.')
             if code == 'MOVEMENT_NOT_FOUND' or exc.status == 404:
-                raise VexPayRampError('Todavía no vemos tu pago. Revisa la referencia y la fecha, y vuelve a intentarlo en un minuto.')
+                raise VexPayRampError(movement_not_found_message(section))
             raise VexPayRampError('No pudimos confirmar el pago con esos datos. Revisa la referencia.')
     _submitted(ramp)
     return apply_payment(ramp, payment, direct=True)
+
+
+def movement_not_found_message(section: dict) -> str:
+    """What to check when the bank has no matching Pago Móvil: the transfer is
+    matched by the paying phone, the receiving account and the exact amount."""
+    receiving = section.get('receiving_account') or {}
+    phone = str((section.get('payer') or {}).get('phone') or '')
+    payer = f'0{phone[2:]}' if phone.startswith('58') else phone
+    parts = []
+    if payer:
+        parts.append(f'desde el {payer}')
+    if receiving.get('phone'):
+        parts.append(f"al {receiving['phone']} ({receiving.get('bank_name') or 'banco receptor'})")
+    try:
+        ves = Decimal(str(section.get('expected_ves') or '0'))
+    except InvalidOperation:
+        ves = Decimal('0')
+    if ves > 0:
+        amount = f'{ves:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
+        parts.append(f'por exactamente Bs {amount}')
+    sent = f"Verifica que lo enviaste {', '.join(parts)}, y " if parts else 'Verifica '
+    return (f'Todavía no vemos tu Pago Móvil. {sent}que la referencia y la fecha sean las de tu comprobante. '
+            'Si acabas de pagar, intenta de nuevo en un minuto.')
 
 
 def verify_usd_amount(section: dict, client: VexPayClient) -> Decimal:
