@@ -53,7 +53,16 @@ const FriendlyFooter = () => {
         
         <div className={styles.bottom}>
           <p className={styles.copyright}>
-            © {new Date().getFullYear()} Confío. {t('Todos los derechos reservados', 'All rights reserved', '모든 권리 보유')}
+            {t(
+              'Confío es un servicio de Duende Limited, sociedad constituida en la República de Seychelles.',
+              'Confío is a service of Duende Limited, a company incorporated in the Republic of Seychelles.',
+              'Confío는 세이셸 공화국에 설립된 Duende Limited의 서비스입니다.'
+            )}
+            <br />
+            Suite 102 Aarti Chambers, Mont Fleuri, Victoria, Mahé, Seychelles
+          </p>
+          <p className={styles.copyright}>
+            © {new Date().getFullYear()} Duende Limited. {t('Todos los derechos reservados', 'All rights reserved', '모든 권리 보유')}
           </p>
         </div>
       </div>

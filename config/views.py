@@ -1,4 +1,5 @@
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.utils.translation import get_language_from_request
 from django.views.generic import TemplateView
 from django.http import HttpResponse, JsonResponse
@@ -56,6 +57,16 @@ CONFIO_ORGANIZATION = {
             'icon': '/images/$CONFIO.png',
         },
     ],
+}
+
+# The operator named in the binding Terms (users/legal/documents.py). The SPA
+# shell prints it before JS runs, so reviewers that do not execute JavaScript
+# (Meta's business review) still see who runs the site.
+CONFIO_LEGAL_ENTITY = {
+    'name': 'Duende Limited',
+    'jurisdiction': 'República de Seychelles',
+    'address': 'Suite 102 Aarti Chambers, Mont Fleuri, Victoria, Mahé, Seychelles',
+    'email': 'support@confio.lat',
 }
 
 JULIAN_MOON_PERSON = {
@@ -367,6 +378,8 @@ def index(request):
 		'main_js_url': main_js_url,
 		'main_css_url': main_css_url,
         'organization_schema': CONFIO_ORGANIZATION,
+		'legal_entity': CONFIO_LEGAL_ENTITY,
+		'year': timezone.now().year,
 	})
 
 
