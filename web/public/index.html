@@ -65,7 +65,7 @@
         <p style="font-size:18px;margin:0 0 16px">Confío es una app de dólares digitales para Latinoamérica. Con ella podés enviar dinero a otras personas, pagar con QR en tu país, recargar y retirar en moneda local, e invertir en acciones de EE.UU. y oro.</p>
         <p style="margin:0 0 24px">Descargala en el <a href="https://apps.apple.com/app/id6472662314" style="color:#047857">App Store</a> o en <a href="https://play.google.com/store/apps/details?id=com.Confio.Confio" style="color:#047857">Google Play</a>.</p>
         <h2 style="font-size:18px;margin:0 0 8px">Empresa</h2>
-        <p style="margin:0 0 24px">Confío es un servicio de {{ legal_entity.name }}, sociedad constituida en la {{ legal_entity.jurisdiction }}.{% if legal_entity.address %} Domicilio: {{ legal_entity.address }}.{% endif %}<br />Contacto: <a href="mailto:{{ legal_entity.email }}" style="color:#047857">{{ legal_entity.email }}</a></p>
+        <p style="margin:0 0 24px">Confío es un servicio de {{ legal_entity.name }}, sociedad constituida en la {{ legal_entity.jurisdiction }}.{% if legal_entity.address %} Domicilio: {{ legal_entity.address }}.{% endif %}<br />Contacto: {{ email_off|safe }}<a href="mailto:{{ legal_entity.email }}" style="color:#047857">{{ legal_entity.email }}</a>{{ email_off_end|safe }}</p>
         <h2 style="font-size:18px;margin:0 0 8px">Legal</h2>
         <ul style="margin:0 0 24px;padding-left:20px">
           <li><a href="/terms" style="color:#047857">Términos de Servicio</a></li>

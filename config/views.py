@@ -379,6 +379,11 @@ def index(request):
 		'main_css_url': main_css_url,
         'organization_schema': CONFIO_ORGANIZATION,
 		'legal_entity': CONFIO_LEGAL_ENTITY,
+		# Cloudflare rewrites addresses to "[email protected]" for clients
+		# without JS unless wrapped in these markers; CRA's minifier strips
+		# HTML comments from the template, so they come from here.
+		'email_off': '<!--email_off-->',
+		'email_off_end': '<!--/email_off-->',
 		'year': timezone.now().year,
 	})
 
