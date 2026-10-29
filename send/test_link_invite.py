@@ -269,7 +269,9 @@ class ClaimSettlementTests(TestCase):
             invite_tasks.confirm_bsc_invite_claim.run(self.invite.pk, '0x' + 'c' * 64)
         stx = SendTransaction.objects.get(pk=self.invite.send_transaction_id)
         self.assertEqual((stx.recipient_user_id, stx.recipient_type, stx.invitation_claimed), (self.claimer.pk, 'user', True))
-        self.assertEqual(notify.call_args.kwargs['user'], self.claimer)
+        self.assertEqual({c.kwargs['user'] for c in notify.call_args_list}, {self.claimer, self.sender})
+        told = next(c.kwargs for c in notify.call_args_list if c.kwargs['user'] == self.sender)
+        self.assertIn('@settle-claimer', told['message'])
 
     def test_the_claimer_is_told_the_token_they_received(self):
         # protects=a claim across the cUSD/cUSD+ line names what landed; fails_when=the notification repeats the sender's token; no_claim=conversion amounts

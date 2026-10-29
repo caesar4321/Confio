@@ -300,6 +300,7 @@ def confirm_bsc_invite_claim(self, invite_id: int, tx_hash: str):
             if claimer is not None:
                 received = _received_token(receipt, claimer) or stx.token_type
                 transaction.on_commit(lambda: _notify_claimer(stx, claimer, received))
+                transaction.on_commit(lambda: _notify_inviter(stx, claimer))
     # A KMS claim, not a sponsored batch: the receipt hook never sees it.
     # The invitee's stored balance (from the receipt's Transfer) is stale.
     from cusd_plus.tasks import _mark_receipt_balances_stale
@@ -513,3 +514,34 @@ def _notify_claimer(stx, claimer, token_type: str) -> None:
         )
     except Exception:  # noqa: BLE001 — the claim is settled whatever the notification does
         logger.exception('[INVITE][BSC] claimer notification failed for send %s', stx.pk)
+
+
+def _notify_inviter(stx, claimer) -> None:
+    """The inviter learns their send arrived: until now they only had the
+    'Enviaste…' from create and an invitation card waiting on the claim."""
+    inviter = getattr(stx, 'sender_user', None)
+    if inviter is None:
+        return
+    try:
+        from notifications import utils as notif_utils
+        from notifications.models import NotificationType as NotifType
+        from notifications.token_display import token_label
+        from users.name_visibility import display_name_for
+        from users.number_format import format_amount
+        who = display_name_for(inviter, claimer)
+        notif_utils.create_notification(
+            user=inviter, account=None, business=None,
+            notification_type=NotifType.SEND_INVITATION_CLAIMED,
+            title='Recibieron tu envío',
+            message=f'{who} recibió tus {format_amount(stx.amount, inviter)} {token_label(stx.token_type)}',
+            data={
+                'transaction_id': str(stx.internal_id), 'internal_id': str(stx.internal_id),
+                'transaction_hash': stx.transaction_hash, 'amount': f'-{stx.amount:.2f}'.rstrip('0').rstrip('.'),
+                'token_type': stx.token_type, 'recipient_name': who, 'is_external_address': False,
+                'transaction_type': 'send', 'status': 'confirmed',
+            },
+            related_object_type='SendTransaction', related_object_id=str(stx.internal_id),
+            action_url=f'confio://send/{stx.internal_id}',
+        )
+    except Exception:  # noqa: BLE001 — the claim is settled whatever the notification does
+        logger.exception('[INVITE][BSC] inviter notification failed for send %s', stx.pk)
