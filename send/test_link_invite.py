@@ -24,14 +24,14 @@ def make_user(name, address=None, **fields):
     return user
 
 
-def link_invite_row(inviter, key_address, *, status='pending', amount='5', created_at=None, phone_key='57:3001112233'):
+def link_invite_row(inviter, key_address, *, status='pending', amount='5', created_at=None, phone_key='57:3001234567'):
     import uuid
     tx = SendTransaction.objects.create(
         sender_user=inviter, sender_type='user', recipient_type='external', amount=Decimal(amount),
         token_type='CUSD', status='PENDING', sender_address='0x' + '1' * 40, recipient_address=ESCROW,
         is_invitation=True)
     invite = PhoneInvite.objects.create(
-        rail='bsc', invitation_id=uuid.uuid4().hex + uuid.uuid4().hex, phone_key=phone_key, phone_number='3001112233',
+        rail='bsc', invitation_id=uuid.uuid4().hex + uuid.uuid4().hex, phone_key=phone_key, phone_number='3001234567',
         inviter_user=inviter, inviter_address='0x' + '1' * 40, send_transaction=tx, amount=Decimal(amount),
         token_type='CUSD', status=status, kind='link', claim_key_address=key_address.lower(),
         public_ref=uuid.uuid4(), expires_at=timezone.now() + timedelta(days=7))
@@ -50,12 +50,12 @@ class PrepareLimitTests(TestCase):
     @mock.patch('send.invite_bsc_flow.prepare_create', return_value={'success': True})
     def test_ten_dollars_a_link(self, prepare):
         # protects=a link (bearer money) is small; fails_when=an $11 link is prepared; no_claim=escrow amounts
-        out = link_invite.prepare_link(self.sender, {}, '+573001112233', '11', 'CUSD', self.key)
+        out = link_invite.prepare_link(self.sender, {}, '+573001234567', '11', 'CUSD', self.key)
         self.assertEqual(out['error'], 'link_amount_over_limit')
         prepare.assert_not_called()
-        link_invite.prepare_link(self.sender, {}, '+573001112233', '10', 'CUSD', self.key)
+        link_invite.prepare_link(self.sender, {}, '+573001234567', '10', 'CUSD', self.key)
         self.assertEqual(prepare.call_args.kwargs['link_claim_address'], self.key)
-        self.assertEqual(link_invite.prepare_link(self.sender, {}, '+573001112233', '5', 'CONFIO', self.key)['error'],
+        self.assertEqual(link_invite.prepare_link(self.sender, {}, '+573001234567', '5', 'CONFIO', self.key)['error'],
                          'link_token_not_supported')
 
     @mock.patch('send.invite_bsc_flow.prepare_create', return_value={'success': True})
@@ -65,9 +65,9 @@ class PrepareLimitTests(TestCase):
             link_invite_row(self.sender, EthAccount.create().address, amount='10', phone_key=f'57:30000000{i}')
         link_invite_row(self.sender, EthAccount.create().address, status='draft', amount='10',
                         created_at=timezone.now() - timedelta(hours=1), phone_key='57:300000099')
-        self.assertTrue(link_invite.prepare_link(self.sender, {}, '+573001112233', '10', 'CUSD', self.key)['success'])
+        self.assertTrue(link_invite.prepare_link(self.sender, {}, '+573001234567', '10', 'CUSD', self.key)['success'])
         link_invite_row(self.sender, EthAccount.create().address, amount='10', phone_key='57:300000098')
-        self.assertEqual(link_invite.prepare_link(self.sender, {}, '+573001112233', '1', 'CUSD', self.key)['error'],
+        self.assertEqual(link_invite.prepare_link(self.sender, {}, '+573001234567', '1', 'CUSD', self.key)['error'],
                          'link_daily_limit')
 
     def test_stale_prepares_cannot_be_submitted(self):
@@ -135,23 +135,23 @@ class ClaimTests(TestCase):
 class ResolveAndSaveTests(TestCase):
     def setUp(self):
         self.sender = make_user('resolver')
-        self.friend = make_user('friend', phone_number='3001112233', phone_country='CO')
+        self.friend = make_user('friend', phone_number='3001234567', phone_country='CO')
         User.objects.filter(pk=self.friend.pk).update(last_activity_at=timezone.now())
 
     def test_saved_then_legacy_then_none(self):
         # protects=the documented order and the 180-day recycle rule; fails_when=an inactive or revoked number still sends direct; no_claim=send execution
-        self.assertEqual(link_invite.resolve(self.sender, '+573001112233')['kind'], 'LEGACY')
+        self.assertEqual(link_invite.resolve(self.sender, '+573001234567')['kind'], 'LEGACY')
         User.objects.filter(pk=self.friend.pk).update(last_activity_at=timezone.now() - timedelta(days=200))
-        self.assertEqual(link_invite.resolve(self.sender, '+573001112233')['kind'], 'NONE')
-        SavedRecipient.objects.create(sender_user=self.sender, phone_key='57:3001112233', recipient_user=self.friend,
+        self.assertEqual(link_invite.resolve(self.sender, '+573001234567')['kind'], 'NONE')
+        SavedRecipient.objects.create(sender_user=self.sender, phone_key='57:3001234567', recipient_user=self.friend,
                                       source='link_claim', basis_at=timezone.now())
-        self.assertEqual(link_invite.resolve(self.sender, '+573001112233')['kind'], 'SAVED')
+        self.assertEqual(link_invite.resolve(self.sender, '+573001234567')['kind'], 'SAVED')
 
     def test_forget_sends_the_next_one_by_link_even_for_a_legacy_holder(self):
         # protects=forgetting really goes back to links; fails_when=the legacy holder still resolves; no_claim=none beyond protects
-        link_invite.forget(self.sender, '+573001112233')
+        link_invite.forget(self.sender, '+573001234567')
         self.assertTrue(RecipientRevocation.objects.filter(sender_user=self.sender).exists())
-        self.assertEqual(link_invite.resolve(self.sender, '+573001112233')['kind'], 'NONE')
+        self.assertEqual(link_invite.resolve(self.sender, '+573001234567')['kind'], 'NONE')
 
     def test_the_newest_claim_wins_whatever_order_saves_arrive_in(self):
         # protects=an older claim cannot overwrite a newer saved recipient; fails_when=save order decides; no_claim=none beyond protects
@@ -188,13 +188,13 @@ class ClaimedLinkTests(TestCase):
         opener = make_user('claimed-opener')
         invite = link_invite_row(sender, EthAccount.create().address, status='claimed')
         PhoneInvite.objects.filter(pk=invite.pk).update(claimed_by=opener, claimed_at=timezone.now() - timedelta(hours=1))
-        out = link_invite.resolve(sender, '+573001112233')
+        out = link_invite.resolve(sender, '+573001234567')
         self.assertEqual((out['kind'], out['user'], out['public_ref']), ('CLAIMED', opener, str(invite.public_ref)))
-        link_invite.forget(sender, '+573001112233')
-        self.assertEqual(link_invite.resolve(sender, '+573001112233')['kind'], 'NONE')
+        link_invite.forget(sender, '+573001234567')
+        self.assertEqual(link_invite.resolve(sender, '+573001234567')['kind'], 'NONE')
         # A late save for the forgotten claim cannot undo the forget.
         self.assertEqual(link_invite.save_from_link(sender, str(invite.public_ref))['error'], 'forgotten')
-        self.assertEqual(link_invite.resolve(sender, '+573001112233')['kind'], 'NONE')
+        self.assertEqual(link_invite.resolve(sender, '+573001234567')['kind'], 'NONE')
 
 
 @override_settings(LINK_INVITE_ENABLED=True)
@@ -206,7 +206,7 @@ class AuditFollowUpTests(TestCase):
     def test_a_retry_after_a_lost_answer_reshares_the_open_link(self, prepare):
         # protects=a lost submit answer never leads to a second escrow for the same contact; fails_when=prepare escrows again while one is creating/pending; no_claim=the client re-share
         open_link = link_invite_row(self.sender, EthAccount.create().address, status='creating')
-        out = link_invite.prepare_link(self.sender, {}, '+573001112233', '5', 'CUSD', EthAccount.create().address)
+        out = link_invite.prepare_link(self.sender, {}, '+573001234567', '5', 'CUSD', EthAccount.create().address)
         self.assertEqual((out['error'], out['public_ref']), ('link_already_pending', str(open_link.public_ref)))
         prepare.assert_not_called()
 
@@ -218,11 +218,11 @@ class AuditFollowUpTests(TestCase):
 
     def test_legacy_save_refuses_an_account_other_than_the_one_paid(self):
         # protects=saving after a legacy send keeps the paid account, never a new holder of the number; fails_when=the number moved and the new holder is saved; no_claim=none beyond protects
-        holder = make_user('legacy-holder', phone_number='3001112233', phone_country='CO')
+        holder = make_user('legacy-holder', phone_number='3001234567', phone_country='CO')
         User.objects.filter(pk=holder.pk).update(last_activity_at=timezone.now())
-        self.assertEqual(link_invite.save_legacy(self.sender, '+573001112233', recipient_user_id=999999)['error'],
+        self.assertEqual(link_invite.save_legacy(self.sender, '+573001234567', recipient_user_id=999999)['error'],
                          'recipient_changed')
-        self.assertTrue(link_invite.save_legacy(self.sender, '+573001112233', recipient_user_id=holder.pk)['success'])
+        self.assertTrue(link_invite.save_legacy(self.sender, '+573001234567', recipient_user_id=holder.pk)['success'])
         # A second (late) legacy save never replaces the one already saved.
-        self.assertEqual(link_invite.save_legacy(self.sender, '+573001112233', recipient_user_id=holder.pk)['error'],
+        self.assertEqual(link_invite.save_legacy(self.sender, '+573001234567', recipient_user_id=holder.pk)['error'],
                          'already_saved')
