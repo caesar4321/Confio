@@ -494,6 +494,7 @@ class UserType(DjangoObjectType):
 
 	# Explicitly define sensitive fields to enforce security
 	phone_number = graphene.String()
+	phone_key = graphene.String(description="Own account only")
 	email = graphene.String()
 	country = graphene.String(description="ISO-2 country the viewer lives in (residence). Own account only; phoneCountry is the phone number's country.")
 	direct_receive_status = graphene.String(description="ok | nudge | blocked: direct personal sends to this account (users/direct_receive.py). Own account only.")
@@ -502,6 +503,15 @@ class UserType(DjangoObjectType):
 		model = User
 		# Include all fields, but our explicit definitions above take precedence
 		fields = ('id', 'username', 'email', 'first_name', 'last_name', 'phone_country', 'phone_number', 'backup_provider', 'created_at')
+
+	def resolve_phone_key(self, info):
+		# Own account only, like phone_number: a send names its sender and
+		# recipient through this type, and an account's verified number never
+		# reaches another person.
+		viewer = getattr(info.context, 'user', None)
+		if viewer is None or not getattr(viewer, 'is_authenticated', False) or viewer.pk != self.pk:
+			return None
+		return getattr(self, 'phone_key', None)
 
 	def resolve_phone_number(self, info):
 		"""

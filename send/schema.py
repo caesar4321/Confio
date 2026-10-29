@@ -49,6 +49,11 @@ def is_tip_send(send) -> bool:
     return str(getattr(send, 'idempotency_key', '') or '').startswith('tip-')
 
 
+def _user_type():
+    from users.schema import UserType
+    return UserType
+
+
 def tip_safe_user(send, user, info):
     """A Propina is between Comunidad pseudonyms: the other party's account
     (real name, email, phone) is never exposed through it; only your own."""
@@ -65,6 +70,12 @@ class SendTransactionType(DjangoObjectType):
     net_amount = graphene.String()
     to_token = graphene.String()
     link_public_ref = graphene.String(description='Link sends only, to their sender: the /r/ reference')
+    # Named, not left to the registry: two types are registered for User
+    # (UserType, Web3AuthUserType) and the last import wins. The app asks for
+    # UserType's fields here (statusTier, isReferralVerified); under the other
+    # type the whole send query failed validation.
+    sender_user = graphene.Field(_user_type)
+    recipient_user = graphene.Field(_user_type)
 
     class Meta:
         model = SendTransaction

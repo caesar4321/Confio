@@ -279,3 +279,32 @@ class ClaimSettlementTests(TestCase):
         with self.settings(CUSD_PLUS_VAULT_ADDRESS=vault):
             self.assertEqual(invite_tasks._received_token({'logs': [log]}, self.claimer), 'CUSD_PLUS')
             self.assertEqual(invite_tasks._received_token({'logs': []}, self.claimer), '')
+
+
+class SendDetailQueryTests(TestCase):
+    def test_the_apps_send_detail_query_is_valid_and_hides_the_other_number(self):
+        # protects=TransactionDetail loads a send (its WhatsApp share needs it); fails_when=senderUser resolves through a User type without the fields the app asks for, or the counterparty's phoneKey leaks; no_claim=other screens' queries
+        import re
+        from pathlib import Path
+        from django.conf import settings
+        from django.test import RequestFactory
+        from graphql import parse, validate
+        from config.schema import schema
+        source = (Path(settings.BASE_DIR) / 'apps/src/apollo/queries.ts').read_text()
+        query = re.search(r'GET_SEND_TRANSACTION_BY_ID = gql`(.*?)`', source, re.S).group(1)
+        self.assertEqual(validate(schema.graphql_schema, parse(query)), [])
+        sender = make_user('detail-sender', '0x' + '1' * 40, phone_country='US', phone_number='2025550101')
+        recipient = make_user('detail-recipient', '0x' + '2' * 40, phone_country='US', phone_number='2025550102')
+        recipient.refresh_from_db()
+        self.assertTrue(recipient.phone_key)
+        stx = SendTransaction.objects.create(
+            sender_user=sender, recipient_user=recipient, sender_type='user', recipient_type='user', amount=1,
+            token_type='CUSD', status='CONFIRMED', sender_address='0x' + '1' * 40, recipient_address='0x' + '2' * 40)
+        request = RequestFactory().post('/graphql')
+        request.user = sender
+        result = schema.execute(query, variables={'id': str(stx.pk)}, context_value=request)
+        self.assertIsNone(result.errors)
+        data = result.data['sendTransaction']
+        sender.refresh_from_db()
+        self.assertEqual(data['senderUser']['phoneKey'], sender.phone_key or None)
+        self.assertIsNone(data['recipientUser']['phoneKey'])
