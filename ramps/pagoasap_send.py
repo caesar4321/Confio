@@ -33,6 +33,7 @@ TARGET_AT_CLAIM = True
 SOURCE, DESTINATION = 'BSC:USDT', 'POL:USDC'
 PENDING_STALE = timedelta(hours=2)
 COUNTRY, FIAT, LIMIT_PREFIX = 'VE', 'VES', 'VE_PAGOMOVIL_SEND'
+REFUSALS_403 = ('Partner Limit Exceeded', 'Beneficiary Limit Exceeded', 'Partner IP Not Allowed')
 MIN_PAYOUT_VES = Decimal('10')
 PAYABLE_MARGIN = Decimal('1.5')
 UNAVAILABLE = 'Los envíos en bolívares no están disponibles por ahora.'
@@ -274,6 +275,7 @@ def payout_terms(ramp, inflight) -> dict | None:
         return {'review': 'payout_unpriceable'}
     ves, total = priced
     symbol = str(getattr(settings, 'PAGOASAP_BALANCE_SYMBOL', 'USD')).upper()
+    symbol = 'USD' if symbol == 'USDT' else symbol  # balances() names dollars "USD"
     balance = client.balances().get(symbol, Decimal('0'))
     cost = ves if symbol == 'VES' else total
     if balance - sum((_payout_cost(other) for other in inflight), Decimal('0')) < cost:
@@ -298,8 +300,9 @@ def dispatch(ramp, claim: dict) -> Outcome:
     except PagoAsapAmbiguousError:
         return Outcome('ambiguous')
     except PagoAsapError as exc:
-        if exc.status in (400, 422):
-            # Validation refusal: no intent was created.
+        if exc.status in (400, 422) or (exc.status == 403 and exc.code in REFUSALS_403):
+            # Validation refusal, or a partner/beneficiary limit or IP
+            # allowlist refusal: checked before creation, no intent exists.
             return Outcome('failed', reason=f'refused:{exc.code or exc.status}')
         return Outcome('unknown', reason=f'{exc.status}:{exc.code}')
     return Outcome('pending', operation_id=intent_id)

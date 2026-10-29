@@ -103,7 +103,9 @@ class PagoAsapClient:
             raise PagoAsapAmbiguousError(f'Pago ASAP returned HTTP {response.status_code}',
                                          status=response.status_code, payload=payload)
         if not response.ok or not isinstance(payload, dict) or payload.get('status') == 'error':
-            code = str((payload or {}).get('error') or '')[:120] if isinstance(payload, dict) else ''
+            # The error key moved from `code` to `error` (Pago ASAP, 2026-11-03).
+            code = (str(payload.get('error') or payload.get('code') or '')[:120]
+                    if isinstance(payload, dict) else '')
             raise PagoAsapError(code or f'Pago ASAP returned HTTP {response.status_code}',
                                 status=response.status_code, code=code, payload=payload)
         return payload.get('payload') if 'payload' in payload else payload
@@ -111,10 +113,14 @@ class PagoAsapClient:
     # Reads ------------------------------------------------------------------
 
     def balances(self) -> dict:
-        """{symbol: balance}."""
+        """{symbol: balance}. Their dollar balance is named "USD" from
+        2026-11-03 and "USDT" before; both read as "USD"."""
         payload = self._request('GET', '/balance') or {}
-        return {str(b.get('symbol') or '').upper(): Decimal(str(b.get('balance') or '0'))
-                for b in payload.get('balances') or []}
+        balances = {}
+        for b in payload.get('balances') or []:
+            symbol = str(b.get('symbol') or '').upper()
+            balances['USD' if symbol == 'USDT' else symbol] = Decimal(str(b.get('balance') or '0'))
+        return balances
 
     def rate(self, source: str = 'USD', target: str = 'VES') -> Decimal:
         payload = self._request('GET', '/rate', params={'from': source, 'to': target}) or {}

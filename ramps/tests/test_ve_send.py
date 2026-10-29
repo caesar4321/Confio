@@ -402,6 +402,24 @@ class SendCoreTests(TestCase):
                          idempotency_key(f'{ramp.external_id}:payout:1'))
         self.assertEqual(client.create_payout.call_args.kwargs['phone'], '04241234567')
 
+    def test_limit_and_allowlist_refusals_are_definite(self):
+        for error in pagoasap_send.REFUSALS_403:
+            ramp = self._pay(self._funded(), pagoasap_client(create=PagoAsapError(error, status=403, code=error)))
+            self.assertEqual((ve_send._phase(ramp), ramp.status_detail),
+                             ('payout_failed', f'needs_review:payout_failed:refused:{error}'))
+
+    def test_other_forbidden_answers_stay_unknown(self):
+        ramp = self._pay(self._funded(), pagoasap_client(create=PagoAsapError('x', status=403, code='Forbidden')))
+        self.assertEqual(ve_send._phase(ramp), 'payout_review')
+
+    def test_balance_reads_usd_under_either_symbol(self):
+        from ramps.pagoasap_client import PagoAsapClient
+        for symbol in ('USD', 'USDT'):
+            client = PagoAsapClient.__new__(PagoAsapClient)
+            with mock.patch.object(PagoAsapClient, '_request',
+                                   return_value={'balances': [{'symbol': symbol, 'balance': '12.5'}]}):
+                self.assertEqual(client.balances(), {'USD': Decimal('12.5')})
+
     def test_not_enough_funds_retries_with_a_fresh_key(self):
         ramp = self._pay(self._funded(), pagoasap_client())
         ramp = self._pay(ramp, pagoasap_client(intent={'state': 'failed', 'reason': 'not_enough_funds'}))
