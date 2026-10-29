@@ -666,14 +666,16 @@ class LinkInviteType(graphene.ObjectType):
     claim_message = graphene.String()
 
 
-def _link_user(user):
+def _link_user(user, viewer):
     if user is None:
         return None
     from security.identity_status import is_identity_verified
     from users.direct_receive import is_blocked
-    from .link_invite import short_name
+    from users.name_visibility import display_name_for
+    # A number can be guessed: it shows a name only to someone who has moved
+    # money with that person (users/name_visibility.py).
     return LinkRecipientUserType(
-        user_id=user.pk, username=user.username, display_name=short_name(user) or f'@{user.username}',
+        user_id=user.pk, username=user.username, display_name=display_name_for(viewer, user),
         identity_verified=is_identity_verified(user), receives_by_qr_only=is_blocked(user))
 
 
@@ -683,9 +685,13 @@ class LinkInviteQuery(graphene.ObjectType):
 
     @login_required
     def resolve_resolve_recipient_for_phone(self, info, phone):
+        from graphql import GraphQLError
+        from users.name_visibility import take_lookup_quota
         from .link_invite import resolve
+        if not take_lookup_quota(info.context.user, 'recipient_phone', 1, 30, 60):
+            raise GraphQLError('Demasiadas búsquedas. Probá de nuevo en un minuto.')
         result = resolve(info.context.user, phone)
-        return RecipientForPhoneType(kind=result['kind'], user=_link_user(result['user']),
+        return RecipientForPhoneType(kind=result['kind'], user=_link_user(result['user'], info.context.user),
                                      public_ref=result.get('public_ref'))
 
     @login_required

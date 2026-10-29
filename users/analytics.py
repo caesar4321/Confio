@@ -52,12 +52,12 @@ def get_real_users_queryset():
     """
     Return the canonical "real users" queryset.
 
-    Real users are users who completed phone capture, which is currently the
-    closest proxy to "reached the product" in Confio.
+    Real users finished signup (User.onboarded_at): the phone step on builds
+    that asked for it, first arrival at Home with a wallet on phone-less ones.
+    Phone holders were backfilled at their signup time, so the series is
+    continuous across the switch.
     """
-    from users.models import User
-
-    return _users().exclude(phone_number__isnull=True).exclude(phone_number='')
+    return _users().filter(onboarded_at__isnull=False)
 
 
 def get_argentina_day_bounds(target_date):
@@ -127,7 +127,7 @@ def calculate_dau(target_date=None):
     end_time = end_time_arg.astimezone(UTC_TZ)
     
     dau = _users().filter(
-        phone_number__isnull=False,
+        onboarded_at__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
     ).count()
@@ -169,7 +169,7 @@ def calculate_wau(target_date=None):
     start_time = start_time_arg.astimezone(UTC_TZ)
     
     wau = _users().filter(
-        phone_number__isnull=False,
+        onboarded_at__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
     ).count()
@@ -211,7 +211,7 @@ def calculate_mau(target_date=None):
     start_time = start_time_arg.astimezone(UTC_TZ)
     
     mau = _users().filter(
-        phone_number__isnull=False,
+        onboarded_at__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
     ).count()
@@ -265,7 +265,7 @@ def calculate_country_metrics(target_date=None):
     mau_start = start_arg_mau.astimezone(UTC_TZ)
     
     # Get all countries with users
-    countries = _users().filter(
+    countries = get_real_users_queryset().filter(
         country__isnull=False
     ).values_list('country', flat=True).distinct()
     
@@ -275,7 +275,7 @@ def calculate_country_metrics(target_date=None):
         if not country_code:
             continue
             
-        country_users = _users().filter(country=country_code)
+        country_users = get_real_users_queryset().filter(country=country_code)
         
         # Calculate DAU for this country
         dau = country_users.filter(
@@ -355,7 +355,7 @@ def snapshot_daily_metrics(target_date=None):
     end_time_arg = _localize_arg(naive_end)
     end_time = end_time_arg.astimezone(UTC_TZ)
     
-    total_users = _users().filter(phone_number__isnull=False, created_at__lte=end_time).count()
+    total_users = _users().filter(onboarded_at__isnull=False, created_at__lte=end_time).count()
     
     # Calculate new users on target date
     # start_time is start of target_date in Argentina
@@ -363,7 +363,7 @@ def snapshot_daily_metrics(target_date=None):
     start_time_arg = _localize_arg(naive_start)
     start_time = start_time_arg.astimezone(UTC_TZ)
     new_users_today = _users().filter(
-        phone_number__isnull=False,
+        onboarded_at__isnull=False,
         created_at__gte=start_time,
         created_at__lte=end_time
     ).count()

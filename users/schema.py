@@ -1050,6 +1050,26 @@ class UserAchievementType(DjangoObjectType):
 		return self.reward_amount
 
 
+def _referrer_for_viewer(referrer, info):
+	"""Anyone can name any @usuario or number as their referrer, so being a
+	referee is not a reason to see that person's name: it shows only after the
+	two have moved money (users/name_visibility.py). The referrer's own view,
+	and the referrer's view of who chose them, are unchanged."""
+	if referrer is None:
+		return None
+	viewer = getattr(info.context, 'user', None)
+	from users.name_visibility import paid_each_other
+	if viewer is not None and getattr(viewer, 'is_authenticated', False) and (
+			viewer.pk == referrer.pk or referrer.pk in paid_each_other(viewer, [referrer.pk])):
+		return referrer
+	import copy
+	masked = copy.copy(referrer)
+	masked.first_name = ''
+	masked.last_name = ''
+	masked.save = None  # a display copy, never written back
+	return masked
+
+
 class InfluencerReferralType(DjangoObjectType):
 	influencer_user = graphene.Field(lambda: UserType)
 	viewer_reward_event_id = graphene.ID()
@@ -1066,7 +1086,10 @@ class InfluencerReferralType(DjangoObjectType):
 				 'created_at', 'updated_at')
 
 	def resolve_influencer_user(self, info):
-		return getattr(self, 'referrer_user', None)
+		return _referrer_for_viewer(getattr(self, 'referrer_user', None), info)
+
+	def resolve_referrer_user(self, info):
+		return _referrer_for_viewer(getattr(self, 'referrer_user', None), info)
 
 	def resolve_viewer_reward_event_id(self, info):
 		user = getattr(info.context, 'user', None)
@@ -2255,6 +2278,13 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		results = []
 		if not phone_numbers:
 			return results
+		# Only builds from before phone-less signup still sync address books
+		# here. A day's quota fits a whole address book, not a sweep of
+		# guessed numbers for names.
+		from users.name_visibility import take_lookup_quota
+		if not take_lookup_quota(user, 'phones', len(phone_numbers), 2000, 86400):
+			from graphql import GraphQLError
+			raise GraphQLError('Demasiadas búsquedas. Probá de nuevo mañana.')
 			
 		# Contact discovery hands the app a userId that later sends resolve
 		# DIRECTLY, skipping every phone guard — so a wrong match here pays a
@@ -2311,6 +2341,11 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				'contact discovery refused: phone_key=%r matches multiple active users', key)
 			matched_users_by_key.pop(key, None)
 
+		# A number can be guessed: names only to someone who has moved money
+		# with that person (users/name_visibility.py).
+		from users.name_visibility import paid_each_other
+		named = paid_each_other(user, [u.pk for u in matched_users_by_key.values()])
+
 		for phone in phone_numbers:
 			key = phone_to_key.get(phone)
 			found_user = matched_users_by_key.get(key) if key else None
@@ -2323,8 +2358,8 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 					phone_number=phone,  # Return original phone number for matching
 					user_id=found_user.id,
 					username=found_user.username,
-					first_name=found_user.first_name,
-					last_name=found_user.last_name,
+					first_name=found_user.first_name if found_user.pk in named else None,
+					last_name=found_user.last_name if found_user.pk in named else None,
 					is_on_confio=True,
 					active_account_id=active_account.id if active_account else None,
 					active_account_algorand_address=active_account.algorand_address if active_account else None,
@@ -2352,25 +2387,23 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return None
-		from django.core.cache import cache
-		key = f'send_recipient_lookup:{user.pk}'
-		count = cache.get(key, 0)
-		if count >= 30:  # per minute: looking a friend up, not enumerating usernames
+		from users.name_visibility import take_lookup_quota
+		# Per minute: looking a friend up, not enumerating usernames.
+		if not take_lookup_quota(user, 'send_recipient', 1, 30, 60):
 			from graphql import GraphQLError
 			raise GraphQLError('Demasiadas búsquedas. Probá de nuevo en un minuto.')
-		cache.set(key, count + 1, 60)
 		cleaned = (username or '').strip().lstrip('@')
 		if not cleaned:
 			return None
 		target = User.objects.filter(username__iexact=cleaned, is_active=True).first()
 		if target is None or getattr(target, 'is_platform_test_account', False):
 			return None
-		from security.identity_status import current_document, is_identity_verified
+		from security.identity_status import is_identity_verified
 		from users.direct_receive import is_blocked
-		doc = current_document(target)
-		first = ((getattr(doc, 'verified_first_name', '') if doc else '') or target.first_name or '').strip().split(' ')[0]
-		last = ((getattr(doc, 'verified_last_name', '') if doc else '') or target.last_name or '').strip()
-		display = (f'{first} {last[:1]}.' if first and last else first).strip() or f'@{target.username}'
+		from users.name_visibility import display_name_for
+		# @usuario is public (investor profiles, Liga): it never resolves to a
+		# real name for someone the person has not moved money with.
+		display = display_name_for(user, target)
 		return SendRecipientType(
 			user_id=target.pk, username=target.username, display_name=display,
 			identity_verified=is_identity_verified(target),
@@ -2386,6 +2419,10 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		results = []
 		if not usernames:
 			return results
+		from users.name_visibility import paid_each_other, take_lookup_quota
+		if not take_lookup_quota(user, 'usernames', len(usernames), 60, 60):
+			from graphql import GraphQLError
+			raise GraphQLError('Demasiadas búsquedas. Probá de nuevo en un minuto.')
 
 		cleaned_to_raw = {}
 		for raw in usernames:
@@ -2426,6 +2463,9 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		).prefetch_related(accounts_prefetch)
 
 		matched_users = {u.lower_username: u for u in users}
+		# Names only between people who have moved money with each other
+		# (users/name_visibility.py); the handle alone otherwise.
+		named = paid_each_other(user, [u.pk for u in matched_users.values()])
 
 		for raw in usernames:
 			username = (raw or '').lstrip('@')
@@ -2448,8 +2488,8 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 					phone_number=None,
 					user_id=found_user.id,
 					username=found_user.username,
-					first_name=found_user.first_name,
-					last_name=found_user.last_name,
+					first_name=found_user.first_name if found_user.pk in named else None,
+					last_name=found_user.last_name if found_user.pk in named else None,
 					is_on_confio=True,
 					active_account_id=active_account.id if active_account else None,
 					active_account_algorand_address=active_account.algorand_address if active_account else None,
@@ -6309,6 +6349,29 @@ from users.rail_waitlist_schema import LocalRailWaitlistMutations
 from users.product_waitlist_schema import PaidOfferMutations
 
 
+class MarkOnboarded(graphene.Mutation):
+	"""Phone-less builds call this on first arrival at Home: the end of signup
+	(User.onboarded_at). Counts only once the account has its BSC wallet, the
+	same point the phone step used to mark. Idempotent."""
+
+	success = graphene.Boolean()
+	error = graphene.String()
+
+	@classmethod
+	def mutate(cls, root, info):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return cls(success=False, error='Inicia sesión para continuar')
+		from django.utils import timezone as dj_timezone
+		has_wallet = Account.objects.filter(
+			user=user, account_type='personal', account_index=0, deleted_at__isnull=True,
+		).exclude(bsc_address__isnull=True).exclude(bsc_address='').exists()
+		if not has_wallet:
+			return cls(success=False, error='wallet_not_ready')
+		User.objects.filter(pk=user.pk, onboarded_at__isnull=True).update(onboarded_at=dj_timezone.now())
+		return cls(success=True)
+
+
 class ApplyReviewAccess(graphene.Mutation):
 	"""The store-review deep link (users/review_access.py). The account comes
 	from the JWT; the link carries only the country and the token."""
@@ -6407,6 +6470,7 @@ class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, P
     # Unified referral system mutations
     set_referrer = SetReferrer.Field()
     apply_review_access = ApplyReviewAccess.Field()
+    mark_onboarded = MarkOnboarded.Field()
     check_referral_status = CheckReferralStatus.Field()
     prepare_referral_reward_claim = PrepareReferralRewardClaim.Field()
     submit_referral_reward_claim = SubmitReferralRewardClaim.Field()

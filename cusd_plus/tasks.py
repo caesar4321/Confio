@@ -125,8 +125,9 @@ def refresh_gm_tvl():
 # docs) serves getLogs up to ~5k blocks; 1rpc serves it capped at 50-block
 # ranges (the micro-chunk fallback); dataseed still fine for everything
 # that is not getLogs.
+# Public endpoints only: the keyed endpoint lives in CUSD_PLUS_BSC_RPC_URLS
+# (.env.mainnet, encrypted). A key here would be public and shared.
 _DEFAULT_RPC_POOL = (
-    'https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3',
     'https://bsc-dataseed.bnbchain.org',
     'https://1rpc.io/bnb',
 )

@@ -9,7 +9,9 @@
 // a single-family pool is a single point of failure). The exit only needs
 // basic methods (blocks, balances, nonce, gasPrice, eth_call, storage,
 // sendRawTransaction), which every endpoint below serves keylessly; the
-// NodeReal URL is the public one from the official BNB Chain docs. Ordered
+// NodeReal URL is the public one from the official BNB Chain docs (shared
+// by everyone who copied it; its limits appear to be per caller IP, so one
+// phone is fine where our single-IP server was throttled). Ordered
 // by observed reliability; every consumer iterates in order with failover.
 const BSC_RPCS = [
   'https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3',

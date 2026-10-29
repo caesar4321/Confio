@@ -1732,7 +1732,7 @@ class Query(graphene.ObjectType):
         raised = sum((p.total_raised for p in PresalePhase.objects.all()), Decimal('0'))
 
         # Reuse the canonical admin/$CONFIO summary metric when available.
-        # Its predicate is a completed phone registration—not Didit KYC or MAU.
+        # Its predicate is a finished signup (User.onboarded_at)—not Didit KYC or MAU.
         summary = cache.get('stats_summary_v14') or {}
         registered_users = summary.get('total_users')
         if registered_users is None:

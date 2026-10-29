@@ -127,6 +127,8 @@ def link_verified_phone(user, verification, country_code, confirmation_token=Non
         current.phone_country = country_code
         current.phone_key = phone_key
         current.save(update_fields=['phone_number', 'phone_country', 'phone_key', 'updated_at'])
+        # The phone step ends signup on builds that still ask for it.
+        User.objects.filter(pk=current.pk, onboarded_at__isnull=True).update(onboarded_at=timezone.now())
         # A store-review number stands for its country everywhere: the
         # residence a reviewer's IP gave must not hide the blocks a US/UK
         # number exists to show (users/review_numbers.py).

@@ -203,7 +203,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         start_date_utc = start_date_arg.astimezone(dt_timezone.utc)
         
         daily_signups = User.objects.exclude(is_platform_test_account=True).filter(
-            phone_number__isnull=False,
+            onboarded_at__isnull=False,
             created_at__gte=start_date_utc
         ).annotate(
             day=TruncDate('created_at', tzinfo=tz)
@@ -214,7 +214,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['daily_signups'] = list(daily_signups)
         
         # Verification funnel
-        context['users_total'] = User.objects.exclude(is_platform_test_account=True).filter(phone_number__isnull=False).count()
+        from users.analytics import get_real_users_queryset
+        context['users_total'] = get_real_users_queryset().count()
         from security.identity_status import PERSONAL, verified_user_ids
         context['users_with_verification'] = IdentityVerification.all_documents.filter(PERSONAL).values(
             'user'
@@ -246,7 +247,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         activity_metrics = []
         for label, days in active_ranges:
             cutoff = timezone.now() - timedelta(days=days)
-            count = User.objects.exclude(is_platform_test_account=True).filter(phone_number__isnull=False, last_activity_at__gte=cutoff).count()
+            count = get_real_users_queryset().filter(last_activity_at__gte=cutoff).count()
             activity_metrics.append({
                 'label': label,
                 'count': count,

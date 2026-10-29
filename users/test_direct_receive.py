@@ -90,12 +90,17 @@ class SendRecipientLookupTests(TestCase):
         return Query.resolve_send_recipient_by_username(None, info, username)
 
     def test_finds_a_friend_by_username_case_insensitively(self):
-        # protects=@usuario resolves to the right account with a recognisable name; fails_when=case or @ break it, or the full surname leaks; no_claim=KYC name rendering
+        # protects=@usuario resolves to the right account; fails_when=case or @ break it; no_claim=KYC name rendering
         found = self.lookup('@anap')
         self.assertEqual(str(found.user_id), str(self.friend.pk))
-        self.assertEqual(found.display_name, 'Ana P.')
         self.assertFalse(found.receives_by_qr_only)
         self.assertIsNone(self.lookup('nobody-here'))
+
+    def test_the_name_shows_only_after_money_moved_between_them(self):
+        # protects=a public @usuario (investor profile) never reveals a stranger's real name; fails_when=a lookup with no payment history returns "Ana P."; no_claim=other lookups (see name_visibility tests)
+        self.assertEqual(self.lookup('anap').display_name, '@AnaP')
+        paid(self.viewer, self.friend)
+        self.assertEqual(self.lookup('anap').display_name, 'Ana P.')
 
     def test_lookups_are_rate_limited(self):
         # protects=usernames cannot be enumerated; fails_when=unlimited lookups; no_claim=cache durability

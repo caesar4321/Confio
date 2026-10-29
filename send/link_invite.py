@@ -121,12 +121,8 @@ def _find(public_ref):
 
 
 def short_name(user) -> str:
-    """First name and last initial (verified ones when the person passed KYC)."""
-    from security.identity_status import current_document
-    doc = current_document(user)
-    first = ((getattr(doc, 'verified_first_name', '') if doc else '') or user.first_name or '').strip().split(' ')[0]
-    last = ((getattr(doc, 'verified_last_name', '') if doc else '') or user.last_name or '').strip()
-    return (f'{first} {last[:1]}.' if first and last else first).strip()
+    from users.name_visibility import short_name as _short_name
+    return _short_name(user)
 
 
 def link_summary(public_ref, viewer=None) -> dict | None:

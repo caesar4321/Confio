@@ -106,6 +106,10 @@ class User(AbstractUser, SoftDeleteModel):
     wallet_recovery_drive_ids = models.JSONField(default=list, blank=True)
     # Unified activity timestamp for MAU/WAU/DAU (updated on any user activity)
     last_activity_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Finished signup: the phone OTP on builds that asked for one, first
+    # arrival at Home on phone-less builds (markOnboarded). The "real users"
+    # every metric counts (users/analytics.get_real_users_queryset).
+    onboarded_at = models.DateTimeField(null=True, blank=True, db_index=True)
     # Google Play pre-launch report robots (security/platform_test_accounts.py).
     # Left out of analytics only; never used to block or restrict anything.
     is_platform_test_account = models.BooleanField(default=False, db_index=True)
@@ -273,11 +277,15 @@ class User(AbstractUser, SoftDeleteModel):
                 name not in snapshot or self.__dict__[name] != snapshot[name])
             for name in self._phone_fields
         )
-        if not self._state.adding and update_fields is None and not phone_changed:
+        # onboarded_at is written only by its own conditional UPDATEs
+        # (markOnboarded, phone linking): a full save from a request that
+        # loaded the user before it was set must not write it back to NULL.
+        if not self._state.adding and update_fields is None:
             update_fields = {
                 field.attname for field in self._meta.concrete_fields
                 if not field.primary_key and field.attname in self.__dict__
-                and field.attname not in self._phone_fields
+                and field.attname != 'onboarded_at'
+                and (phone_changed or field.attname not in self._phone_fields)
             }
 
         # Only phone writes should normalize phone values or load deferred fields.

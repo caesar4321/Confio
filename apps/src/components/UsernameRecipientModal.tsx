@@ -31,9 +31,10 @@ export type UsernameFriend = {
 };
 
 /**
- * "Enviar a @usuario": the person is shown by name (first name and last
- * initial, with a check when identity-verified) before any money moves, so
- * a typo or a look-alike username is caught here. An account that is paid
+ * "Enviar a @usuario": the account is shown with its verified check, and by
+ * name (first name and last initial) once the two have paid each other —
+ * @usuario is public, so it never reveals a stranger's name
+ * (users/name_visibility.py). An account that is paid
  * through Cobrar only (users/direct_receive.py) is named as such and cannot
  * be picked.
  */
@@ -105,7 +106,13 @@ export const UsernameRecipientModal = ({
           <Text style={styles.foundName}>
             {found.displayName}{found.identityVerified ? '  ✓' : ''}
           </Text>
-          <Text style={styles.foundUser}>@{found.username}</Text>
+          {/* The name shows only once you have paid each other; until then
+              the server answers with the @usuario itself. */}
+          {String(found.displayName || '').startsWith('@') ? (
+            <Text style={styles.foundUser}>Confirma con tu amigo que es su usuario</Text>
+          ) : (
+            <Text style={styles.foundUser}>@{found.username}</Text>
+          )}
           {found.receivesByQrOnly ? (
             <Text style={styles.problem}>Esta cuenta cobra con QR. Pedile su código de Cobrar para pagarle.</Text>
           ) : null}

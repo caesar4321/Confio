@@ -183,8 +183,8 @@ class UserAdmin(admin.ModelAdmin):
 
     def changelist_view(self, request, extra_context=None):
         try:
-            # Calculate KPIs for Dashboard over the phone-completed user base.
-            phone_complete_users = self.model.objects.filter(is_active=True).exclude(phone_number__isnull=True).exclude(phone_number='')
+            # Calculate KPIs for Dashboard over the onboarded user base.
+            phone_complete_users = self.model.objects.filter(is_active=True, onboarded_at__isnull=False)
             total_active = phone_complete_users.count() or 1
             drive_users = phone_complete_users.filter(backup_provider='google_drive').count()
             migrated_users = phone_complete_users.filter(accounts__is_keyless_migrated=True).distinct().count()

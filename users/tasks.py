@@ -576,3 +576,15 @@ def refresh_direct_receive_flags():
     result = refresh_flags()
     logger.info('Direct-receive flags: %s', result)
     return result
+
+
+@shared_task(name='users.backfill_phone_onboarded')
+@ensure_db_connection_closed
+def backfill_phone_onboarded():
+    """Hourly: a phone linked by a worker still running pre-onboarded_at code
+    (the deploy window), or by any path that skipped phone_linking, still
+    ends signup. Same rule as migration 0058, dated now. Idempotent."""
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    return User.objects.filter(onboarded_at__isnull=True, phone_number__isnull=False).exclude(
+        phone_number='').update(onboarded_at=timezone.now())

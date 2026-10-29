@@ -16,6 +16,43 @@ import { contactService, setDefaultPhoneRegion } from '../services/contactServic
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { applyReviewLink, setReviewLinkApplier, takePendingReviewLink } from '../services/reviewLink';
 import { setLinkOpener, takePendingLink } from '../services/linkSend';
+
+const MARK_ONBOARDED = gql`
+  mutation MarkOnboarded {
+    markOnboarded { success error }
+  }
+`;
+
+// A first session can reach Home before the wallet is registered, or offline:
+// retry a few times now, and again on every return to the foreground until the
+// server has said yes once in this process (it ignores repeats anyway).
+// Per session: a sign-out bumps the generation, so an answer or retry that
+// belongs to the previous account never marks or silences the next one.
+let onboardedMarked = false;
+let onboardingGeneration = 0;
+let onboardingRetry: ReturnType<typeof setTimeout> | null = null;
+const resetOnboardingMark = () => {
+  onboardingGeneration += 1;
+  onboardedMarked = false;
+  if (onboardingRetry) clearTimeout(onboardingRetry);
+  onboardingRetry = null;
+};
+const markOnboarded = (client: { mutate: (options: any) => Promise<any> }, attempt = 0) => {
+  if (onboardedMarked) return;
+  const generation = onboardingGeneration;
+  const retry = () => {
+    if (generation !== onboardingGeneration || attempt >= 5) return;
+    if (onboardingRetry) clearTimeout(onboardingRetry);
+    onboardingRetry = setTimeout(() => markOnboarded(client, attempt + 1), 15000);
+  };
+  client.mutate({ mutation: MARK_ONBOARDED })
+    .then(({ data }) => {
+      if (generation !== onboardingGeneration) return;
+      if (data?.markOnboarded?.success) onboardedMarked = true;
+      else retry();
+    })
+    .catch(retry);
+};
 import { navigate as rootNavigate } from '../navigation/RootNavigation';
 
 const openLinkClaim = (link: { publicRef: string; keyHex: string }) => {
@@ -339,6 +376,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             deepLinkHandler.checkDeferredLinks().catch(error => {
               console.error('[AuthContext] Failed to process deferred deep link:', error);
             });
+            // Arriving at Home ends signup (User.onboarded_at); the server
+            // counts it once the wallet exists and ignores repeats.
+            markOnboarded(apolloClient);
             // A link send opened before sign-in (new users install from it).
             takePendingLink()
               .then(link => (link ? openLinkClaim(link) : undefined))
@@ -434,6 +474,16 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     setLinkOpener(isAuthenticated ? openLinkClaim : null);
     return () => setLinkOpener(null);
   }, [isAuthenticated]);
+  useEffect(() => {
+    if (!isAuthenticated) {
+      resetOnboardingMark();
+      return;
+    }
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') markOnboarded(apolloClient);
+    });
+    return () => sub.remove();
+  }, [apolloClient, isAuthenticated]);
 
   // Fetch appropriate profile based on current account type
   useEffect(() => {
