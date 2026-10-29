@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PermissionsAndroid, Platform } from 'react-native';
-import Geolocation from '@react-native-community/geolocation';
 import { useApolloClient } from '@apollo/client';
 import { useCountry } from '../contexts/CountryContext';
-import { androidCurrentPosition, nativeLocationAvailable } from '../utils/androidLocation';
+import { getDeviceFix } from '../services/location';
 import { GET_MARKETPLACE_CITIES, LOCATE_MARKETPLACE_CITY } from '../services/comprar';
 
 export type ComprarLocation = {
@@ -18,60 +16,23 @@ export type ComprarLocation = {
  *  nothing to show. */
 export type LocateOutcome = 'found' | 'no_city' | 'denied' | 'disabled' | 'unavailable' | 'stale';
 
-// When-in-use only; the library must not reach for "always" just because the
-// plist also carries the Always purpose string. One permission owner per
-// platform: on Android this hook asks (coarse is enough for a city), so the
-// library must not ask again for fine; on iOS the library's own request is
-// the prompt.
-Geolocation.setRNConfiguration({
-  skipPermissionRequests: Platform.OS === 'android',
-  authorizationLevel: 'whenInUse',
-  enableBackgroundLocationUpdates: false,
-  locationProvider: 'auto',
-});
+type Fix = { latitude: number; longitude: number; accuracy: number | null; mocked: boolean | null };
+type FixResult = { fix: Fix } | { error: 'denied' | 'disabled' | 'unavailable' };
 
-const POSITION_TIMEOUT_MS = 15_000;
 // A hard stop over the WHOLE lookup (permission, fix, city match): a call that
 // never answers must never leave the screen waiting forever.
 const HARD_STOP_MS = 25_000;
 
-type Fix = { latitude: number; longitude: number; accuracy: number | null };
-type FixResult = { fix: Fix } | { error: 'denied' | 'disabled' | 'unavailable' };
-
-// A city needs no more than this: a fix from the last half hour within 5 km.
-const CITY_FIX = { precise: false, maxAgeMs: 30 * 60 * 1000, maxAccuracyM: 5000, timeoutMs: 20_000 };
-
-const androidPermission = async (): Promise<boolean> => {
-  const fine = PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
-  const coarse = PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION;
-  if (await PermissionsAndroid.check(coarse)) return true;
-  // Like Bre-B: ask for both at once (the person may still pick approximate,
-  // which is enough for a city) so the delivery pin need not ask again.
-  const granted = await PermissionsAndroid.requestMultiple([fine, coarse]);
-  return granted[coarse] === PermissionsAndroid.RESULTS.GRANTED || granted[fine] === PermissionsAndroid.RESULTS.GRANTED;
-};
-
-/**
- * One position fix. On iOS the request itself shows the permission prompt
- * (requestAuthorization's callbacks are not guaranteed to fire when the
- * status is already decided, which used to leave this hanging).
- */
+/** One city-level fix (services/location.ts owns permission and the fix):
+ *  a fix from the last half hour within 5 km is enough for a city. */
 const getFix = async (): Promise<FixResult> => {
-  if (Platform.OS === 'android' && !(await androidPermission())) return { error: 'denied' };
-  if (nativeLocationAvailable()) {
-    const r = await androidCurrentPosition(CITY_FIX);
-    return 'fix' in r ? { fix: { latitude: r.fix.latitude, longitude: r.fix.longitude, accuracy: r.fix.accuracy } } : r;
-  }
-  return new Promise<FixResult>((resolve) => {
-    Geolocation.getCurrentPosition(
-      (pos) => resolve({ fix: {
-        latitude: pos.coords.latitude, longitude: pos.coords.longitude,
-        accuracy: pos.coords.accuracy ?? null,
-      } }),
-      (err) => resolve({ error: err?.code === 1 ? 'denied' : 'unavailable' }),
-      { enableHighAccuracy: false, timeout: POSITION_TIMEOUT_MS, maximumAge: 5 * 60 * 1000 },
-    );
+  const r = await getDeviceFix({
+    precise: false, maxAgeMs: 30 * 60 * 1000, maxAccuracyM: 5000, timeoutMs: 20_000, hardStopMs: HARD_STOP_MS,
+    prompt: true,
   });
+  return 'fix' in r
+    ? { fix: { latitude: r.fix.latitude, longitude: r.fix.longitude, accuracy: r.fix.accuracy, mocked: r.fix.mocked } }
+    : r;
 };
 
 const withDeadline = <T,>(work: Promise<T>, fallback: T): Promise<T> => {

@@ -1540,3 +1540,38 @@ class FaceCheck(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['user', 'status', 'completed_at'])]
+
+
+class LocationReading(models.Model):
+    """Every device location the app sent, whatever asked for it (Bre-B,
+    Comprar, residence): the coordinates as given, kept as evidence for geo
+    eligibility (partners, regulators) and for residence (users/residence.py).
+    Written only through security/location.record_reading."""
+    PURPOSE_RESIDENCE = 'residence'
+    PURPOSE_BREB = 'breb'
+    PURPOSE_COMPRAR_CITY = 'comprar_city'
+    PURPOSES = [(PURPOSE_RESIDENCE, 'Residence'), (PURPOSE_BREB, 'Bre-B check'),
+                (PURPOSE_COMPRAR_CITY, 'Comprar city')]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='location_readings')
+    purpose = models.CharField(max_length=16, choices=PURPOSES)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    accuracy_m = models.FloatField(null=True, blank=True)
+    # From the time zone the point falls in (one country per IANA zone).
+    country = models.CharField(max_length=2, blank=True, db_index=True)
+    mocked = models.BooleanField(null=True, blank=True, help_text='Device said mock provider; None = not reported')
+    # Device integrity proved the reading (Play Integrity / App Attest).
+    verified = models.BooleanField(default=False)
+    platform = models.CharField(max_length=8, blank=True)
+    provider = models.CharField(max_length=16, blank=True)
+    reading_at = models.DateTimeField(null=True, blank=True, help_text='When the device took the fix')
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    ip_country = models.CharField(max_length=2, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', '-created_at'])]
+
+    def __str__(self):
+        return f'{self.purpose} {self.country or "??"} @ {self.created_at:%Y-%m-%d}'

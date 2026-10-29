@@ -77,7 +77,8 @@ def _pin_review_number(user) -> bool | None:
 
 
 def refresh_residence_country(user) -> bool:
-    """Move the user to their 90-day IP majority country when there is one."""
+    """Move the user to their 90-day device-location majority country, else
+    their IP majority, when there is one."""
     from users.review_access import active_review_access
     if active_review_access(user):
         # A live review-link grant outranks everything, a reviewer number too.
@@ -87,6 +88,12 @@ def refresh_residence_country(user) -> bool:
         return pinned
     if user.country_source == user.COUNTRY_SOURCE_REVIEW:
         return _restore_after_review(user)
+    # The device's own location outranks IP: a VPN moves the IP, not the
+    # phone (security/location.gps_residence_country_for).
+    from security.location import gps_residence_country_for
+    gps_country = gps_residence_country_for(user)
+    if gps_country:
+        return _write(user, gps_country, user.COUNTRY_SOURCE_GPS)
     country = to_iso2(residence_country_for(user))
     if not country:
         return False

@@ -1459,3 +1459,21 @@ class RecipientRevocationAdmin(admin.ModelAdmin):
 
 confio_admin_site.register(SavedRecipient, SavedRecipientAdmin)
 confio_admin_site.register(RecipientRevocation, RecipientRevocationAdmin)
+
+
+# Every device location the app sent (security/location.py). Read-only.
+from security.models import LocationReading  # noqa: E402
+
+
+class LocationReadingAdmin(admin.ModelAdmin):
+    list_display = ('user', 'purpose', 'country', 'ip_country', 'accuracy_m', 'mocked', 'verified', 'created_at')
+    list_filter = ('purpose', 'country', 'ip_country', 'verified', 'mocked', 'platform')
+    search_fields = ('user__username',)
+    readonly_fields = [field.name for field in LocationReading._meta.fields]
+    list_select_related = ('user',)
+
+    def has_add_permission(self, request):
+        return False
+
+
+confio_admin_site.register(LocationReading, LocationReadingAdmin)

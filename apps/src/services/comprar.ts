@@ -56,8 +56,8 @@ export const GET_MARKETPLACE_HOME = gql`
 `;
 
 export const LOCATE_MARKETPLACE_CITY = gql`
-  mutation LocateMarketplaceCity($latitude: Float!, $longitude: Float!, $accuracy: Float) {
-    locateMarketplaceCity(latitude: $latitude, longitude: $longitude, accuracy: $accuracy) {
+  mutation LocateMarketplaceCity($latitude: Float!, $longitude: Float!, $accuracy: Float, $mocked: Boolean) {
+    locateMarketplaceCity(latitude: $latitude, longitude: $longitude, accuracy: $accuracy, mocked: $mocked) {
       city { countryCode city isLive }
     }
   }

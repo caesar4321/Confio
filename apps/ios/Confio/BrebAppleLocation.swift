@@ -55,6 +55,12 @@ class BrebAppleLocation: NSObject, CLLocationManagerDelegate {
   @objc func keyId(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
     resolve(UserDefaults.standard.string(forKey: keyName) ?? "")
   }
+  /// Read-only: "granted" | "reduced" | "undetermined" | "denied". Never
+  /// prompts (services/location.ts takes silent residence readings with it).
+  @objc func permissionStatus(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    DispatchQueue.main.async { resolve(self.permissionState()) }
+  }
+
   @objc func hasPermission(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
     DispatchQueue.main.async {
       if #available(iOS 15.0, *) {

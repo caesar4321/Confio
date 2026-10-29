@@ -218,6 +218,18 @@ def _record(owner, meta, evidence, passed, reason='', strict=False):
             raise
         # The class only: a database error's text can quote the row (coordinates, IP).
         logger.warning('breb_location_record_failed error=%s', type(exc).__name__)
+        return
+    # The central location record too (security/location.py). A pass was
+    # proved by device integrity and refused a mock provider.
+    if evidence.get('latitude') is not None and evidence.get('longitude') is not None:
+        from security.location import record_reading
+        user = getattr(owner, 'user', None)
+        if user is not None:
+            record_reading(
+                user, purpose='breb', latitude=evidence['latitude'], longitude=evidence['longitude'],
+                accuracy_m=evidence.get('accuracy'), mocked=False if passed else evidence.get('mocked'),
+                verified=bool(passed),
+                platform=evidence.get('platform', ''), reading_at_ms=evidence.get('timestamp'), meta=meta)
 
 
 def _submitted(challenge_token, location_json):
@@ -238,6 +250,8 @@ def _submitted(challenge_token, location_json):
             value = location.get(key) if isinstance(location, dict) else None
             if type(value) in (int, float) and math.isfinite(value) and low <= value <= high:
                 evidence[key] = value
+        if isinstance(location, dict) and isinstance(location.get('mocked'), bool):
+            evidence['mocked'] = location['mocked']
     except Exception:
         pass
     return evidence

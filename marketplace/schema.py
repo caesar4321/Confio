@@ -711,11 +711,12 @@ class LocateMarketplaceCity(graphene.Mutation):
         latitude = graphene.Float(required=True)
         longitude = graphene.Float(required=True)
         accuracy = graphene.Float()
+        mocked = graphene.Boolean(description="Device's mock-location flag, when it reports one")
 
     city = graphene.Field(MarketplaceCityType)
 
     @login_required
-    def mutate(self, info, latitude, longitude, accuracy=None):
+    def mutate(self, info, latitude, longitude, accuracy=None, mocked=None):
         from .models import MarketplaceLocationCheck
 
         if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
@@ -746,6 +747,10 @@ class LocateMarketplaceCity(graphene.Mutation):
         except Exception as exc:  # noqa: BLE001 — the record never changes the answer
             # The class only: a database error's text can quote the row (coordinates, IP).
             logger.warning('marketplace_location_record_failed error=%s', type(exc).__name__)
+        # The central location record (security/location.py); never raises.
+        from security.location import record_reading
+        record_reading(user, purpose='comprar_city', latitude=latitude, longitude=longitude,
+                       accuracy_m=accuracy, mocked=mocked, meta=getattr(info.context, 'META', {}) or {})
         return LocateMarketplaceCity(city=Query._city_type(match) if match else None)
 
 

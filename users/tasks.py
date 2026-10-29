@@ -542,8 +542,8 @@ def rollup_funnel_events(target_date_str=None):
 @shared_task(name='users.refresh_residence_countries')
 @ensure_db_connection_closed
 def refresh_residence_countries(batch_size=500):
-    """Daily: move each user seen in the last day to their 90-day IP majority
-    country (users.residence). Users with no new activity keep what they have;
+    """Daily: move each user seen in the last day to their 90-day residence
+    country, device location first, then IP majority (users.residence). Users with no new activity keep what they have;
     the refresh never writes null."""
     from security.models import IPDeviceUser
     from users.residence import refresh_residence_country
@@ -551,12 +551,17 @@ def refresh_residence_countries(batch_size=500):
 
     User = get_user_model()
     since = timezone.now() - timedelta(days=1)
+    from security.models import LocationReading
     user_ids = (IPDeviceUser.objects.filter(last_seen__gte=since)
                 .values_list('user_id', flat=True).distinct())
+    # A device location sent in the last day counts as being seen too.
+    located_ids = (LocationReading.objects.filter(created_at__gte=since)
+                   .values_list('user_id', flat=True).distinct())
     moved = checked = 0
     # Review-link accounts too, active or not: an ended grant must hand the
     # account its country back even if the reviewer never returns.
-    candidates = User.objects.filter(Q(id__in=user_ids) | Q(country_source=User.COUNTRY_SOURCE_REVIEW), is_active=True)
+    candidates = User.objects.filter(
+        Q(id__in=user_ids) | Q(id__in=located_ids) | Q(country_source=User.COUNTRY_SOURCE_REVIEW), is_active=True)
     for user in candidates.iterator(chunk_size=batch_size):
         checked += 1
         try:

@@ -6350,6 +6350,41 @@ from users.rail_waitlist_schema import LocalRailWaitlistMutations
 from users.product_waitlist_schema import PaidOfferMutations
 
 
+class RecordLocation(graphene.Mutation):
+	"""A device location for residence (security/location.py): sent by the app
+	at most daily, only when location permission was already granted. Stored
+	with its coordinates; the country is derived on the server."""
+
+	class Arguments:
+		latitude = graphene.Float(required=True)
+		longitude = graphene.Float(required=True)
+		accuracy = graphene.Float()
+		timestamp = graphene.Float(description='Device time of the fix, ms since epoch')
+		mocked = graphene.Boolean()
+		provider = graphene.String()
+		platform = graphene.String()
+
+	success = graphene.Boolean()
+	error = graphene.String()
+
+	@classmethod
+	def mutate(cls, root, info, latitude, longitude, accuracy=None, timestamp=None, mocked=None,
+			   provider=None, platform=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return cls(success=False, error='Inicia sesión para continuar')
+		from django.core.cache import cache
+		# One residence reading per user per ten minutes is plenty.
+		if not cache.add(f'location_reading:{user.pk}', 1, 600):
+			return cls(success=True)
+		from security.location import record_reading
+		reading = record_reading(
+			user, purpose='residence', latitude=latitude, longitude=longitude, accuracy_m=accuracy,
+			mocked=mocked, platform=platform or '', provider=provider or '', reading_at_ms=timestamp,
+			meta=getattr(info.context, 'META', None))
+		return cls(success=reading is not None, error=None if reading is not None else 'invalid_reading')
+
+
 class MarkOnboarded(graphene.Mutation):
 	"""Phone-less builds call this on first arrival at Home: the end of signup
 	(User.onboarded_at). Counts only once the account has its BSC wallet, the
@@ -6472,6 +6507,7 @@ class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, P
     set_referrer = SetReferrer.Field()
     apply_review_access = ApplyReviewAccess.Field()
     mark_onboarded = MarkOnboarded.Field()
+    record_location = RecordLocation.Field()
     check_referral_status = CheckReferralStatus.Field()
     prepare_referral_reward_claim = PrepareReferralRewardClaim.Field()
     submit_referral_reward_claim = SubmitReferralRewardClaim.Field()

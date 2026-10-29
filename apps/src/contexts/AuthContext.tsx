@@ -379,6 +379,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             // Arriving at Home ends signup (User.onboarded_at); the server
             // counts it once the wallet exists and ignores repeats.
             markOnboarded(apolloClient);
+            // Residence by device location: daily, only with permission
+            // already granted, never a prompt (services/location.ts).
+            import('../services/location')
+              .then(({ reportResidenceLocation }) => reportResidenceLocation(apolloClient))
+              .catch(() => {});
             // A link send opened before sign-in (new users install from it).
             takePendingLink()
               .then(link => (link ? openLinkClaim(link) : undefined))
@@ -480,7 +485,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       return;
     }
     const sub = AppState.addEventListener('change', state => {
-      if (state === 'active') markOnboarded(apolloClient);
+      if (state !== 'active') return;
+      markOnboarded(apolloClient);
+      import('../services/location')
+        .then(({ reportResidenceLocation }) => reportResidenceLocation(apolloClient))
+        .catch(() => {});
     });
     return () => sub.remove();
   }, [apolloClient, isAuthenticated]);

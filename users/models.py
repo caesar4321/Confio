@@ -132,13 +132,15 @@ class User(AbstractUser, SoftDeleteModel):
     COUNTRY_SOURCE_LEGACY_PHONE = 'legacy_phone'
     COUNTRY_SOURCE_SIGNUP_IP = 'signup_ip'
     COUNTRY_SOURCE_REVIEW = 'review'
+    COUNTRY_SOURCE_GPS = 'gps'
     country = models.CharField(
         max_length=2, blank=True, null=True, db_index=True,
         help_text="ISO-2 residence country (IP majority); see security.geo.country_of")
     country_source = models.CharField(
         max_length=16, blank=True, default='',
         choices=[(COUNTRY_SOURCE_RESIDENCE, 'IP residence'), (COUNTRY_SOURCE_LEGACY_PHONE, 'Legacy phone'),
-                 (COUNTRY_SOURCE_SIGNUP_IP, 'Signup IP'), (COUNTRY_SOURCE_REVIEW, 'Store review')])
+                 (COUNTRY_SOURCE_SIGNUP_IP, 'Signup IP'), (COUNTRY_SOURCE_REVIEW, 'Store review'),
+                 (COUNTRY_SOURCE_GPS, 'Device location')])
     country_updated_at = models.DateTimeField(null=True, blank=True)
     # The country the user last picked in the Recibir/Enviar rail list.
     preferred_rail_country = models.CharField(max_length=2, blank=True, null=True)
