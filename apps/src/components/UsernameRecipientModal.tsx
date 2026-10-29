@@ -5,6 +5,7 @@ import { gql, useLazyQuery } from '@apollo/client';
 import { Text, TextInput } from './common/AppText';
 import { Button } from './common/Button';
 import { colors } from '../config/theme';
+import { IdentityStatusLine } from './IdentityStatusLine';
 
 export const SEND_RECIPIENT_BY_USERNAME = gql`
   query SendRecipientByUsername($username: String!) {
@@ -103,9 +104,7 @@ export const UsernameRecipientModal = ({
           <Text style={styles.avatarText}>{(found.displayName || found.username).charAt(0).toUpperCase()}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.foundName}>
-            {found.displayName}{found.identityVerified ? '  ✓' : ''}
-          </Text>
+          <Text style={styles.foundName}>{found.displayName}</Text>
           {/* The name shows only once you have paid each other; until then
               the server answers with the @usuario itself. */}
           {String(found.displayName || '').startsWith('@') ? (
@@ -113,6 +112,9 @@ export const UsernameRecipientModal = ({
           ) : (
             <Text style={styles.foundUser}>@{found.username}</Text>
           )}
+          <View style={{ marginTop: 4 }}>
+            <IdentityStatusLine verified={Boolean(found.identityVerified)} />
+          </View>
           {found.receivesByQrOnly ? (
             <Text style={styles.problem}>Esta cuenta cobra con QR. Pedile su código de Cobrar para pagarle.</Text>
           ) : null}

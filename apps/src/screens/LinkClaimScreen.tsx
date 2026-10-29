@@ -7,6 +7,7 @@ import { useQuery } from '@apollo/client';
 import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
+import { IdentityStatusLine } from '../components/IdentityStatusLine';
 import { LINK_INVITE, LINK_SEND_ERRORS, claimLink } from '../services/linkSend';
 
 /**
@@ -49,7 +50,7 @@ const LinkClaim = ({ publicRef, keyHex }: { publicRef: string; keyHex: string })
   };
 
   const amount = link ? `US$${Number(link.amount).toFixed(2)}` : '';
-  const sender = link ? `${link.senderName || `@${link.senderUsername}`}${link.senderVerified ? ' ✓' : ''}` : '';
+  const sender = link ? (link.senderName || `@${link.senderUsername}`) : '';
   const expired = link?.expiresAt && new Date(link.expiresAt).getTime() <= Date.now();
 
   let body: React.ReactNode;
@@ -75,6 +76,7 @@ const LinkClaim = ({ publicRef, keyHex }: { publicRef: string; keyHex: string })
     body = (
       <>
         <Text style={styles.from}>{sender} te envió</Text>
+        <IdentityStatusLine verified={Boolean(link.senderVerified)} />
         <Text style={styles.amount}>{amount}</Text>
         <Text style={styles.body}>Llega a tu cuenta personal de Confío.</Text>
         {problem ? <Text style={styles.problem}>{problem}</Text> : null}

@@ -240,7 +240,10 @@ def _rpc(method, params, timeout=15):
         try:
             result = _rpc_single(url, method, params, timeout)
             if url != preferred:
-                cache.set('cusd_plus_bsc_rpc_preferred', url, 3600)
+                # Short: a failover from the keyless head of the pool to the
+                # metered key must not stick for long (NodeReal bills ~50 CU
+                # per eth_getLogs, and the scans run every 30 s).
+                cache.set('cusd_plus_bsc_rpc_preferred', url, 300)
             return result
         except Exception as exc:  # noqa: BLE001 — try the next endpoint
             last_exc = exc

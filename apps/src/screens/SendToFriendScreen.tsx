@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
+import { IdentityStatusLine } from '../components/IdentityStatusLine';
 import { Button } from '../components/common/Button';
 import { inviteSendService } from '../services/inviteSendService';
 import { LINK_MAX_USD, LINK_SEND_ERRORS, ResolvedRecipient, forgetRecipient, resolveRecipientForPhone, saveRecipient } from '../services/linkSend';
@@ -639,9 +640,10 @@ export const SendToFriendScreen = () => {
           {resolution?.kind === 'CLAIMED' && resolution.user ? (
             <View style={styles.claimedCard}>
               <Text style={styles.claimedText}>
-                {routeFriend.name} abrió tu link como {resolution.user.displayName}
-                {resolution.user.identityVerified ? ' ✓' : ''} (@{resolution.user.username}). ¿Es esta persona?
+                {routeFriend.name} abrió tu link como {resolution.user.displayName} (@{resolution.user.username}).
+                ¿Es esta persona?
               </Text>
+              <IdentityStatusLine verified={Boolean(resolution.user.identityVerified)} />
               <Text style={styles.claimedHint}>Si dices que sí, tus próximos envíos le llegan directo y sin límite de link.</Text>
               <View style={styles.claimedButtons}>
                 <TouchableOpacity style={styles.claimedNo} disabled={recipientBusy}
