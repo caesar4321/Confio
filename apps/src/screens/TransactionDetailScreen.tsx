@@ -312,6 +312,8 @@ export const TransactionDetailScreen = () => {
   const [copied, setCopied] = useState('');
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);
+  // The share button sits far below the banner: its problems need an alert.
+  const shareFailed = (message: string) => Alert.alert('No se pudo compartir', message);
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
   const [reclaimingInvite, setReclaimingInvite] = useState(false);
   const [reclaimedInviteTxid, setReclaimedInviteTxid] = useState('');
@@ -2534,7 +2536,7 @@ export const TransactionDetailScreen = () => {
                         if (!data?.sendTransaction) throw new Error('not_loaded');
                         linkRef = data.sendTransaction.linkPublicRef || null;
                       } catch {
-                        setBanner({ variant: 'error', message: 'No pudimos cargar el envío. Revisa tu conexión e inténtalo de nuevo.' });
+                        shareFailed('No pudimos cargar el envío. Revisa tu conexión e inténtalo de nuevo.');
                         return;
                       }
                     }
@@ -2542,7 +2544,7 @@ export const TransactionDetailScreen = () => {
                       const { storedLinkKey, buildLinkUrl, linkMessage } = await import('../services/linkSend');
                       const key = await storedLinkKey(linkRef);
                       if (!key) {
-                        setBanner({ variant: 'error', message: 'Este link se envió desde otro teléfono. Compártelo desde ese teléfono.' });
+                        shareFailed('Este link se envió desde otro teléfono. Compártelo desde ese teléfono.');
                         return;
                       }
                       message = linkMessage(`${amount} ${currency}`, buildLinkUrl(linkRef, key));
@@ -2627,7 +2629,7 @@ export const TransactionDetailScreen = () => {
                     // A link send (or one not yet known not to be) never falls
                     // back to the referral link.
                     if ((currentTx as any).linkPublicRef || !sendData?.sendTransaction) {
-                      setBanner({ variant: 'error', message: 'No se pudo abrir WhatsApp.' });
+                      shareFailed('No se pudo abrir WhatsApp.');
                       return;
                     }
                     try {
@@ -2650,7 +2652,7 @@ export const TransactionDetailScreen = () => {
                       });
                       await Share.share({ message: fallbackMessage });
                     } catch (_) { }
-                    setBanner({ variant: 'error', message: 'No se pudo abrir WhatsApp.' });
+                    shareFailed('No se pudo abrir WhatsApp.');
                   }
                 }}
               >
