@@ -1,4 +1,4 @@
-import { Alert, Linking } from 'react-native';
+import { Alert, Linking, Platform } from 'react-native';
 import type { LocateOutcome } from '../hooks/useComprarLocation';
 
 /**
@@ -14,6 +14,23 @@ export const explainLocateOutcome = (outcome: LocateOutcome, onPickCity: () => v
       [
         { text: 'Elegir ciudad', onPress: onPickCity },
         { text: 'Abrir ajustes', onPress: () => { void Linking.openSettings(); } },
+      ],
+    );
+    return;
+  }
+  if (outcome === 'disabled') {
+    Alert.alert(
+      'Tu ubicación está apagada',
+      'Activa la ubicación del teléfono para ver las tiendas de tu ciudad. También puedes elegir tu ciudad.',
+      [
+        { text: 'Elegir ciudad', onPress: onPickCity },
+        { text: 'Activar ubicación', onPress: () => {
+          if (Platform.OS === 'android') {
+            Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => { void Linking.openSettings(); });
+          } else {
+            void Linking.openSettings();
+          }
+        } },
       ],
     );
     return;

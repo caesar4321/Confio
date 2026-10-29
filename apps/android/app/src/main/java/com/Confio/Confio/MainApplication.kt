@@ -33,6 +33,7 @@ class MainApplication : Application(), ReactApplication {
             // Manual: local in-app package (not an npm module)
             add(MediaPickerPackage())
             add(BrebLocationPackage())
+            add(ConfioLocationPackage())
             add(FaceLivenessPackage())
             add(ConfioAudioRoutePackage())
             // Manual: Didit SDK (custom maven repo; excluded from autolinking)

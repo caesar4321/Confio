@@ -3,6 +3,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
 import { useApolloClient } from '@apollo/client';
 import { useCountry } from '../contexts/CountryContext';
+import { androidCurrentPosition, nativeLocationAvailable } from '../utils/androidLocation';
 import { GET_MARKETPLACE_CITIES, LOCATE_MARKETPLACE_CITY } from '../services/comprar';
 
 export type ComprarLocation = {
@@ -15,7 +16,7 @@ export type ComprarLocation = {
 /** What a "Usar mi ubicación" attempt ended in — the UI tells the user.
  *  'stale' = superseded (a manual choice, a newer lookup, or the screen left):
  *  nothing to show. */
-export type LocateOutcome = 'found' | 'no_city' | 'denied' | 'unavailable' | 'stale';
+export type LocateOutcome = 'found' | 'no_city' | 'denied' | 'disabled' | 'unavailable' | 'stale';
 
 // When-in-use only; the library must not reach for "always" just because the
 // plist also carries the Always purpose string. One permission owner per
@@ -35,18 +36,19 @@ const POSITION_TIMEOUT_MS = 15_000;
 const HARD_STOP_MS = 25_000;
 
 type Fix = { latitude: number; longitude: number; accuracy: number | null };
-type FixResult = { fix: Fix } | { error: 'denied' | 'unavailable' };
+type FixResult = { fix: Fix } | { error: 'denied' | 'disabled' | 'unavailable' };
+
+// A city needs no more than this: a fix from the last half hour within 5 km.
+const CITY_FIX = { precise: false, maxAgeMs: 30 * 60 * 1000, maxAccuracyM: 5000, timeoutMs: 20_000 };
 
 const androidPermission = async (): Promise<boolean> => {
+  const fine = PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
   const coarse = PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION;
   if (await PermissionsAndroid.check(coarse)) return true;
-  const granted = await PermissionsAndroid.request(coarse, {
-    title: 'Tu ciudad en Comprar',
-    message: 'Usamos tu ubicación para mostrarte tiendas y envíos de tu ciudad.',
-    buttonPositive: 'Permitir',
-    buttonNegative: 'Ahora no',
-  });
-  return granted === PermissionsAndroid.RESULTS.GRANTED;
+  // Like Bre-B: ask for both at once (the person may still pick approximate,
+  // which is enough for a city) so the delivery pin need not ask again.
+  const granted = await PermissionsAndroid.requestMultiple([fine, coarse]);
+  return granted[coarse] === PermissionsAndroid.RESULTS.GRANTED || granted[fine] === PermissionsAndroid.RESULTS.GRANTED;
 };
 
 /**
@@ -56,6 +58,10 @@ const androidPermission = async (): Promise<boolean> => {
  */
 const getFix = async (): Promise<FixResult> => {
   if (Platform.OS === 'android' && !(await androidPermission())) return { error: 'denied' };
+  if (nativeLocationAvailable()) {
+    const r = await androidCurrentPosition(CITY_FIX);
+    return 'fix' in r ? { fix: { latitude: r.fix.latitude, longitude: r.fix.longitude, accuracy: r.fix.accuracy } } : r;
+  }
   return new Promise<FixResult>((resolve) => {
     Geolocation.getCurrentPosition(
       (pos) => resolve({ fix: {

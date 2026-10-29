@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import MapView, { Region } from 'react-native-maps';
 import Icon from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +17,20 @@ type Props = {
   onConfirm: (pin: Pin) => void;
 };
 
+const FAILURE_COPY = {
+  denied: 'Permite la ubicación precisa de Confío en los ajustes (toca aquí), o mueve el mapa a mano hasta tu puerta.',
+  disabled: 'Tu ubicación está apagada. Actívala (toca aquí), o mueve el mapa a mano hasta tu puerta.',
+  unavailable: 'No pudimos ver tu ubicación. Mueve el mapa a mano hasta tu puerta.',
+} as const;
+
+const openLocationSettings = (failure: 'denied' | 'disabled') => () => {
+  if (failure === 'disabled' && Platform.OS === 'android') {
+    Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => { void Linking.openSettings(); });
+    return;
+  }
+  void Linking.openSettings();
+};
+
 // About 400 m across: close enough to see the street and the door.
 const STREET = { latitudeDelta: 0.004, longitudeDelta: 0.004 };
 const CITY = { latitudeDelta: 0.08, longitudeDelta: 0.08 };
@@ -31,7 +45,8 @@ export const LocationPickerModal = ({ visible, initial, fallbackCenter, onClose,
   const map = useRef<MapView>(null);
   const [center, setCenter] = useState<Pin | null>(initial ?? null);
   const [locating, setLocating] = useState(false);
-  const [denied, setDenied] = useState(false);
+  // Why "Usar mi ubicación" found nothing, said plainly (null = nothing to say).
+  const [failure, setFailure] = useState<'denied' | 'disabled' | 'unavailable' | null>(null);
   // A fix that arrives after the buyer dragged the map, or after the picker
   // closed/reopened, is stale: only the latest asked-for lookup applies.
   const generation = useRef(0);
@@ -46,12 +61,12 @@ export const LocationPickerModal = ({ visible, initial, fallbackCenter, onClose,
     const mine = ++generation.current;
     if (explicit) dragged.current = false; // "Usar mi ubicación" re-centers on purpose
     setLocating(true);
-    setDenied(false);
+    setFailure(null);
     try {
       const fix = await getPreciseFix();
       if (mine !== generation.current || dragged.current) return;
-      if (fix) goTo(fix);
-      else setDenied(true);
+      if ('pin' in fix) goTo(fix.pin);
+      else setFailure(fix.error);
     } finally {
       if (mine === generation.current) setLocating(false);
     }
@@ -118,8 +133,11 @@ export const LocationPickerModal = ({ visible, initial, fallbackCenter, onClose,
               : <Icon name="navigation" size={16} color={colors.primaryDeep} />}
             <Text style={styles.locateText}>Usar mi ubicación</Text>
           </Pressable>
-          {denied ? (
-            <Text style={styles.denied}>No pudimos ver tu ubicación. Mueve el mapa a mano hasta tu puerta.</Text>
+          {failure ? (
+            <Text style={styles.denied} testID="location-failure"
+              onPress={failure === 'unavailable' ? undefined : openLocationSettings(failure)}>
+              {FAILURE_COPY[failure]}
+            </Text>
           ) : null}
           <KitButton testID="location-confirm" label="Confirmar ubicación" icon="check" disabled={!center}
             onPress={() => { if (center) onConfirm(center); }} />
