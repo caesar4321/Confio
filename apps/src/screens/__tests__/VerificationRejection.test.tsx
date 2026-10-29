@@ -21,7 +21,8 @@ jest.mock('@apollo/client', () => ({
     query.includes('MyIdentityDocuments') ? (mockDocuments === null ? {} : {myIdentityDocuments: mockDocuments})
       : query === 'personal' ? {myPersonalKycStatus: {status: mockPersonalStatus, statusDetail: mockPersonalStatus ? mockReason : null}}
         : query === 'business' ? {businessKycStatus: mockBusinessStatus ? {status: mockBusinessStatus, statusDetail: mockReason} : null}
-          : query === 'any' ? {myKycStatus: {status: mockAnyStatus, statusDetail: 'Personal verification'}} : {},
+          : query === 'any' ? {myKycStatus: {status: mockAnyStatus, statusDetail: 'Personal verification'}}
+            : query === 'identity' ? {myIdentityStatus: {verifiedDocumentCountries: ['PY']}} : {},
   }),
 }));
 let mockRouteParams: any;
@@ -34,7 +35,7 @@ jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAcc
   type: mockBusiness ? 'business' : 'personal', business: {id: '1', name: 'Business'},
 }})}));
 jest.mock('../../hooks/useRampCountry', () => ({useRampCountry: () => ({countryCode: 'PY', isBlocked: false})}));
-jest.mock('../../apollo/queries', () => ({GET_ME: 'me', GET_MY_KYC_STATUS: 'any', GET_MY_PERSONAL_KYC_STATUS: 'personal', GET_BUSINESS_KYC_STATUS: 'business'}));
+jest.mock('../../apollo/queries', () => ({GET_ME: 'me', GET_MY_KYC_STATUS: 'any', GET_MY_PERSONAL_KYC_STATUS: 'personal', GET_BUSINESS_KYC_STATUS: 'business', GET_MY_IDENTITY_STATUS: 'identity'}));
 jest.mock('../../apollo/mutations', () => ({
   CREATE_DIDIT_VERIFICATION_SESSION: 'create', CREATE_DIDIT_BROWSER_VERIFICATION_SESSION: 'browser', SYNC_DIDIT_VERIFICATION_SESSION: 'sync',
 }));

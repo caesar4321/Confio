@@ -22,11 +22,11 @@ import {
 type Nav = NativeStackNavigationProp<MainStackParamList, 'AdditionalDocument'>;
 type Route = RouteProp<MainStackParamList, 'AdditionalDocument'>;
 
-// A second identity document of the same person, for a local-money rail the
-// primary one does not satisfy (a Venezuelan cédula cannot open a Colombian
-// account; a passport can). It never replaces the primary verification, which
-// Recarga/Retiro keep using — the copy says so, because that is exactly the
-// worry this screen has to answer.
+// Another identity document of the same person, from any country. It adds to
+// the ones already verified and replaces none: each document opens what its
+// own country's rails accept (Recargar/Retirar take a document issued by the
+// order's country; a passport only where the rail takes one), so a
+// Venezuelan cédula and a Colombian one can both be useful.
 function acceptedDocument(idCountry: string, types: string[]): string {
   if (idCountry === 'ARG') {
     return 'DNI o pasaporte argentino';
@@ -34,7 +34,7 @@ function acceptedDocument(idCountry: string, types: string[]): string {
   if (types.length === 1 && types[0] === 'P') {
     return 'Pasaporte vigente de cualquier país';
   }
-  return 'Pasaporte o documento de identidad de otro país';
+  return 'Documento de identidad o pasaporte, de cualquier país';
 }
 
 type Result = { variant: 'success' | 'info' | 'error'; message: string } | null;
@@ -107,7 +107,7 @@ export default function AdditionalDocumentScreen() {
   const rows: [string, string, string][] = [
     ['file-text', 'Documento aceptado', acceptedDocument(idCountry, documentTypes)],
     ['user-check', 'Tus mismos datos', 'El nombre y la fecha de nacimiento deben coincidir con tu verificación actual.'],
-    ['shield', 'Tu verificación actual no cambia', 'Recarga y Retiro siguen usando el documento que ya verificaste.'],
+    ['shield', 'Tus documentos verificados siguen igual', 'Este se suma: cada documento sirve en su propio país.'],
     ['clock', 'Unos 2 minutos', 'Una foto del documento y una selfie.'],
   ];
 

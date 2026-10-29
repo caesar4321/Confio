@@ -15,14 +15,14 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { Header } from '../navigation/Header';
 import { MainStackParamList, RootStackParamList } from '../types/navigation';
-import { GET_BUSINESS_KYC_STATUS, GET_ME, GET_MY_PERSONAL_KYC_STATUS } from '../apollo/queries';
+import { GET_BUSINESS_KYC_STATUS, GET_ME, GET_MY_IDENTITY_STATUS, GET_MY_PERSONAL_KYC_STATUS } from '../apollo/queries';
+import { isRampBlockedCountry } from '../config/env';
 import {
   CREATE_DIDIT_BROWSER_VERIFICATION_SESSION,
   CREATE_DIDIT_VERIFICATION_SESSION,
   SYNC_DIDIT_VERIFICATION_SESSION,
 } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
-import { useRampCountry } from '../hooks/useRampCountry';
 import { getDiditErrorMessage, getDiditResultSessionId, openDiditSessionUrl, startDiditVerification } from '../services/diditService';
 import { countryName } from '../config/localRails';
 import { AnalyticsService } from '../services/analyticsService';
@@ -136,14 +136,25 @@ type Capability = { feature: FeatureKey; allowed: boolean; detail: string };
 
 /**
  * What one verified document opens, feature by feature, described the same
- * way whichever country issued it.
+ * way whichever country issued it. Recargar/Retirar follow the document's
+ * own country (the server's verifiedDocumentCountries: a document issued by
+ * the order's country, a passport only where the rail takes one), never the
+ * phone's country.
  */
-function capabilities(doc: IdentityDocument, phoneCountryName: string, rampBlocked: boolean): Capability[] {
-  const ramps: Capability = doc.isAdditional
-    ? { feature: 'ramps', allowed: false, detail: 'Solo con el documento del país de tu teléfono.' }
-    : rampBlocked
-      ? { feature: 'ramps', allowed: false, detail: `Aún no disponible${phoneCountryName ? ` en ${phoneCountryName}` : ' en tu país'}.` }
-      : { feature: 'ramps', allowed: true, detail: phoneCountryName ? `Con bancos de ${phoneCountryName}.` : 'Con bancos de tu país.' };
+function capabilities(doc: IdentityDocument, rampCountries: string[]): Capability[] {
+  const issuer = (doc.issuingCountry || '').toUpperCase();
+  const issuerName = issuer ? countryName(issuer) : '';
+  // Per document, like the server's rail_accepts_document: a passport opens
+  // Recargar/Retirar only in Colombia, even when another document from the
+  // same country does.
+  const passportBlocked = doc.documentType === 'passport' && issuer !== 'CO';
+  const ramps: Capability = isRampBlockedCountry(issuer)
+    ? { feature: 'ramps', allowed: false, detail: `Aún no disponible${issuerName ? ` en ${issuerName}` : ''}.` }
+    : rampCountries.includes(issuer) && !passportBlocked
+    ? { feature: 'ramps', allowed: true, detail: issuerName ? `Con bancos de ${issuerName}.` : 'Con bancos de tu país.' }
+    : doc.documentType === 'passport'
+      ? { feature: 'ramps', allowed: false, detail: 'Con pasaporte, solo en Colombia. Agrega tu documento nacional.' }
+      : { feature: 'ramps', allowed: false, detail: `Aún no disponible${issuerName ? ` en ${issuerName}` : ''}.` };
   const open = LOCAL_ACCOUNTS.filter(country => doc.localCountries.includes(country)).map(countryName);
   const local: Capability = open.length
     ? { feature: 'local', allowed: true, detail: `En ${joinNames(open)}.` }
@@ -165,8 +176,10 @@ const VerificationScreen = () => {
   const route = useRoute<RouteProp<MainStackParamList, 'Verification'>>();
   const { activeAccount } = useAccount();
   const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
-  const { countryCode: phoneCountry, isBlocked: rampBlocked } = useRampCountry();
-  const phoneCountryName = phoneCountry ? countryName(phoneCountry) : '';
+  // Where each document opens Recargar/Retirar (by its own country).
+  const { data: identityData, refetch: refetchIdentity } = useQuery(GET_MY_IDENTITY_STATUS, { fetchPolicy: 'network-only' });
+  const rampCountries: string[] = (identityData?.myIdentityStatus?.verifiedDocumentCountries || [])
+    .map((code: string) => String(code || '').toUpperCase());
 
   const { data: meData, refetch: refetchMe, loading: meLoading } = useQuery(GET_ME, { fetchPolicy: 'network-only' });
   const { data: personalKycData, refetch: refetchPersonalKyc, loading: personalLoading } = useQuery(GET_MY_PERSONAL_KYC_STATUS, { fetchPolicy: 'network-only' });
@@ -221,12 +234,15 @@ const VerificationScreen = () => {
         refetchPersonalKyc(),
         isBusinessAccount && refetchBizKyc ? refetchBizKyc() : Promise.resolve(),
         isBusinessAccount ? Promise.resolve(undefined) : refetchDocuments().catch(() => undefined),
+        // Where each document works: its own failure (an older server) never
+        // stops the rest of the refresh.
+        refetchIdentity().catch(() => undefined),
       ]);
       return (docs as any)?.data?.myIdentityDocuments || null;
     } finally {
       setIsRefreshing(false);
     }
-  }, [isBusinessAccount, refetchBizKyc, refetchMe, refetchPersonalKyc, refetchDocuments]);
+  }, [isBusinessAccount, refetchBizKyc, refetchMe, refetchPersonalKyc, refetchDocuments, refetchIdentity]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -464,16 +480,13 @@ const VerificationScreen = () => {
             <Text style={styles.documentTitle}>
               {country || status === 'verified' ? `${documentLabel(doc)}${country ? ` · ${country}` : ''}` : 'Tu documento'}
             </Text>
-            <Text style={styles.documentSubtitle}>
-              {doc.isAdditional ? 'De otro país' : 'Del país de tu teléfono'}
-            </Text>
           </View>
           <StatusPill status={status} />
         </View>
 
         {status === 'verified' ? (
           <View style={styles.capabilityList}>
-            {capabilities(doc, phoneCountryName, rampBlocked).map(item => (
+            {capabilities(doc, rampCountries).map(item => (
               <View key={item.feature} style={styles.capabilityRow}>
                 <View style={[styles.capabilityMark, item.allowed ? styles.markYes : styles.markNo]}>
                   <Icon name={item.allowed ? 'check' : 'minus'} size={14} color={item.allowed ? colors.white : colors.textSecondary} />
@@ -512,34 +525,27 @@ const VerificationScreen = () => {
   const addDocument = (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>{verifiedCount ? 'Agregar otro documento' : 'Elige tu documento'}</Text>
-      {!hasCountryAttempt ? (
-        <TouchableOpacity style={styles.optionCard} onPress={handleStartDidit} disabled={isBusy} accessibilityRole="button">
-          <View style={styles.documentIcon}>
-            {isLaunchingDidit
-              ? <ActivityIndicator color={colors.primaryDark} />
-              : <Icon name="credit-card" size={18} color={colors.primaryDark} />}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.optionTitle}>
-              {phoneCountryName ? `Documento de ${phoneCountryName}` : 'Documento de identidad'}
-            </Text>
-            <Text style={styles.optionBody}>Recompensas, recargar y retirar, y cuentas locales donde se acepte.</Text>
-          </View>
-          <Icon name="chevron-right" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
-      ) : null}
-      {/* Not before the documents load: a primary under review must not race a new session. */}
-      {!hasCountryAttempt && !isInitialLoading ? browserFallback : null}
-      <TouchableOpacity style={styles.optionCard} onPress={openOtherDocument} disabled={isBusy} accessibilityRole="button">
+      {/* One way in, whatever country issued the document. The first
+          verification starts the account's own session; later ones are added
+          alongside it (the server keeps that distinction, the person never
+          needs to). */}
+      <TouchableOpacity style={styles.optionCard} onPress={hasCountryAttempt ? openOtherDocument : handleStartDidit}
+        disabled={isBusy} accessibilityRole="button">
         <View style={styles.documentIcon}>
-          <Icon name="book" size={18} color={colors.primaryDark} />
+          {isLaunchingDidit
+            ? <ActivityIndicator color={colors.primaryDark} />
+            : <Icon name="credit-card" size={18} color={colors.primaryDark} />}
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.optionTitle}>Pasaporte o documento de otro país</Text>
-          <Text style={styles.optionBody}>Recompensas y cuentas locales en Colombia, México, Brasil y Argentina.</Text>
+          <Text style={styles.optionTitle}>Documento de identidad o pasaporte</Text>
+          <Text style={styles.optionBody}>
+            De cualquier país. Recompensas, recargar y retirar donde tu documento se acepte, y cuentas locales.
+          </Text>
         </View>
         <Icon name="chevron-right" size={20} color={colors.textSecondary} />
       </TouchableOpacity>
+      {/* Not before the documents load: a first document under review must not race a new session. */}
+      {!hasCountryAttempt && !isInitialLoading ? browserFallback : null}
       <Text style={styles.hint}>Tus datos deben coincidir en todos tus documentos: mismo nombre y fecha de nacimiento.</Text>
       {/* Consent for Confío's own use of the selfie (Didit's screen covers only Didit). */}
       <Text style={styles.consent}>
