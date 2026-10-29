@@ -1,17 +1,21 @@
 """Who is verified: the one answer every caller asks.
 
-A person can hold several personal documents: the primary one (their phone
-country's, the one Didit's per-country workflow asks for) and additional ones
-(a passport or ID from another country, verified to open a local-money rail).
-The default manager hides additional documents on purpose; that is right for
-the few providers that need the phone-country document and wrong for every
-plain "is this person verified" question. So:
+A person can hold several personal documents: the primary one (from the
+general Didit workflow: any country's ID, passport or residence permit) and
+additional ones (another country's document, verified to open a local-money
+rail). The default manager hides additional documents on purpose; plain "is
+this person verified" questions read every document through the helpers
+below. So:
 
 - is_identity_verified: "Identidad verificada". Any CURRENT verified personal
   document, primary or additional. Badges, gates, profile, counts.
-- has_phone_country_identity / phone_country_identity: only the primary
-  document. Read ONLY where a provider requires the phone-country document
-  (Koywe's delegated KYC behind Recargar/Retirar).
+- rail_identity / has_rail_identity: a document ISSUED by one rail country,
+  primary or additional. Issued, not "naming it as nationality or residence":
+  a Colombian national's Peruvian residence permit would otherwise go to a
+  Colombian order as a Colombian document. Read where a provider needs that country's document
+  (Koywe's delegated KYC behind Recargar/Retirar). Until 2026-10 this was
+  "the primary document", which matched the phone country only because the
+  per-country Didit workflows forced it to.
 - has_ever_passed_kyc: verified now or verified and later expired. Security
   links that exist because someone went through KYC (Confío Face, bans,
   same-person checks) — an expiring document never switches them off.
@@ -50,16 +54,38 @@ def is_identity_verified(user) -> bool:
     return current_documents(user).exists()
 
 
-def phone_country_identity(user):
-    """The verified primary (phone-country) document, or None."""
-    return (
-        IdentityVerification.objects.filter(user=user, status='verified').filter(PERSONAL)
-        .order_by('-verified_at', '-updated_at', '-created_at').first()
-    )
+def rail_identity(user, country=None):
+    """A current verified document issued by `country` (ISO-2 or ISO-3;
+    default: their primary rail country, ramps.rail_country), or None.
+    National IDs and residence permits come before passports: most rails
+    (Koywe outside Colombia) refuse a passport, and a person holding both
+    should never be sent with the one that fails."""
+    from security.geo import to_iso3
+    code = str(country or '').strip().upper()
+    if not code:
+        from ramps.rail_country import primary_rail_country
+        code = primary_rail_country(user) or ''
+    iso3 = code if len(code) == 3 else to_iso3(code)
+    if not iso3:
+        return None
+    matches = list(current_documents(user).filter(document_issuing_country__iexact=iso3))
+    matches.sort(key=lambda doc: str(doc.document_type or '').lower() == 'passport')
+    return matches[0] if matches else None
 
 
-def has_phone_country_identity(user) -> bool:
-    return phone_country_identity(user) is not None
+def has_rail_identity(user, country=None) -> bool:
+    return rail_identity(user, country) is not None
+
+
+def verified_document_countries(user) -> list[str]:
+    """ISO-2 countries that issued a current verified document, primary first."""
+    from security.geo import to_iso2
+    countries = []
+    for issuing in current_documents(user).values_list('document_issuing_country', flat=True):
+        iso2 = to_iso2(issuing)
+        if iso2 and iso2 not in countries:
+            countries.append(iso2)
+    return countries
 
 
 def has_ever_passed_kyc(user) -> bool:

@@ -87,19 +87,19 @@
                 <tr>
                     <td style="font-weight: 500;">
                         <span class="country-flag">
-                            {% if country.user__phone_country == 'VE' %}🇻🇪
-                            {% elif country.user__phone_country == 'CO' %}🇨🇴
-                            {% elif country.user__phone_country == 'US' %}🇺🇸
-                            {% elif country.user__phone_country == 'GT' %}🇬🇹
-                            {% elif country.user__phone_country == 'ES' %}🇪🇸
-                            {% elif country.user__phone_country == 'AR' %}🇦🇷
-                            {% elif country.user__phone_country == 'MX' %}🇲🇽
-                            {% elif country.user__phone_country == 'PE' %}🇵🇪
-                            {% elif country.user__phone_country == 'CL' %}🇨🇱
-                            {% elif country.user__phone_country == 'BR' %}🇧🇷
+                            {% if country.user__country == 'VE' %}🇻🇪
+                            {% elif country.user__country == 'CO' %}🇨🇴
+                            {% elif country.user__country == 'US' %}🇺🇸
+                            {% elif country.user__country == 'GT' %}🇬🇹
+                            {% elif country.user__country == 'ES' %}🇪🇸
+                            {% elif country.user__country == 'AR' %}🇦🇷
+                            {% elif country.user__country == 'MX' %}🇲🇽
+                            {% elif country.user__country == 'PE' %}🇵🇪
+                            {% elif country.user__country == 'CL' %}🇨🇱
+                            {% elif country.user__country == 'BR' %}🇧🇷
                             {% else %}🌐{% endif %}
                         </span>
-                        {{ country.user__phone_country }}
+                        {{ country.user__country }}
                     </td>
                     <td style="text-align: right;">{{ country.count }} users</td>
                 </tr>
@@ -118,19 +118,19 @@
                 <tr>
                     <td style="font-weight: 500;">
                         <span class="country-flag">
-                            {% if country.user__phone_country == 'VE' %}🇻🇪
-                            {% elif country.user__phone_country == 'CO' %}🇨🇴
-                            {% elif country.user__phone_country == 'US' %}🇺🇸
-                            {% elif country.user__phone_country == 'GT' %}🇬🇹
-                            {% elif country.user__phone_country == 'ES' %}🇪🇸
-                            {% elif country.user__phone_country == 'AR' %}🇦🇷
-                            {% elif country.user__phone_country == 'MX' %}🇲🇽
-                            {% elif country.user__phone_country == 'PE' %}🇵🇪
-                            {% elif country.user__phone_country == 'CL' %}🇨🇱
-                            {% elif country.user__phone_country == 'BR' %}🇧🇷
+                            {% if country.user__country == 'VE' %}🇻🇪
+                            {% elif country.user__country == 'CO' %}🇨🇴
+                            {% elif country.user__country == 'US' %}🇺🇸
+                            {% elif country.user__country == 'GT' %}🇬🇹
+                            {% elif country.user__country == 'ES' %}🇪🇸
+                            {% elif country.user__country == 'AR' %}🇦🇷
+                            {% elif country.user__country == 'MX' %}🇲🇽
+                            {% elif country.user__country == 'PE' %}🇵🇪
+                            {% elif country.user__country == 'CL' %}🇨🇱
+                            {% elif country.user__country == 'BR' %}🇧🇷
                             {% else %}🌐{% endif %}
                         </span>
-                        {{ country.user__phone_country|default:'--' }}
+                        {{ country.user__country|default:'--' }}
                     </td>
                     <td style="text-align: right;">${{ country.usdc_volume|floatformat:0|intcomma }}</td>
                     <td style="text-align: right; color: #6b7280;">{{ country.count }} users / {{ country.tx_count }} txs</td>

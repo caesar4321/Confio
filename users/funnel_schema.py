@@ -13,6 +13,7 @@ import json
 import ipaddress
 
 import graphene
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ class TrackFunnelEvent(graphene.Mutation):
 
         # If authenticated and country not provided, fall back to user's phone_country.
         if not country and user is not None:
-            country = getattr(user, 'phone_country', '') or ''
+            country = country_of(user) or ''
 
         # Estimated request country for demand analytics; VPNs/proxies can
         # differ from physical location. Store only the country, never the IP.

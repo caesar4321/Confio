@@ -1,8 +1,9 @@
 """Geo-eligibility: one mechanism, one policy object per feature.
 
 Two signals decide whether someone may ENTER a gated product: the country
-their phone number was verified in, and the country their request appears to
-come from. Before this module each feature wrote its own pair — presale in
+the user lives in (`country_of`: the stored residence country, which replaced
+the verified phone country in 2026-10 when signup stopped requiring a phone),
+and the country their request appears to come from. Before this module each feature wrote its own pair — presale in
 `presale/geo_utils.py`, Ondo savings in `cusd_plus/eligibility.py` — and the
 shared IP resolver lived inside presale, which cusd_plus imported across app
 boundaries with a comment admitting it was a follow-up.
@@ -48,16 +49,23 @@ def _is_public_ip(ip: str) -> bool:
         return False
 
 
-def phone_country_of(user) -> str:
-    """The user's verified phone country, normalized the way BOTH features
-    already did it: strip + upper, nothing more.
+def country_of(user) -> str:
+    """Where the user lives (ISO-2): `User.country`, falling back to the
+    legacy phone country for accounts the backfill has not reached. Signup no
+    longer asks for a phone, so the phone country is never the answer to
+    "where is this user" on its own. Normalized the way the gates always did
+    it: strip + upper, nothing more.
 
     Deliberately NOT `normalize_country` — that rejects anything not exactly
     two characters, which would turn malformed data into a refusal. Stricter
     is arguably right for a regulated gate, but it is a policy change, not a
     refactor, so it stays a separate decision.
     """
-    return (getattr(user, 'phone_country', None) or '').strip().upper()
+    for attribute in ('country', 'phone_country'):
+        value = getattr(user, attribute, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return ''
 
 
 def normalize_country(code) -> str | None:
@@ -166,6 +174,16 @@ def to_iso3(code) -> str | None:
     return match.alpha_3 if match else None
 
 
+def to_iso2(code) -> str | None:
+    """ISO alpha-3 → alpha-2 (residence_country_for answers in alpha-3)."""
+    code = str(code or '').strip().upper()
+    if len(code) != 3:
+        return None
+    import pycountry
+    match = pycountry.countries.get(alpha_3=code)
+    return match.alpha_2 if match else None
+
+
 def residence_country_for(user, *, days: int = 90) -> str | None:
     """Where the user appears to live, from the IPs they actually use (ISO3).
 
@@ -217,7 +235,7 @@ def residence_country_for(user, *, days: int = 90) -> str | None:
 class GeoDecision:
     allowed: bool
     message: str | None = None
-    #: 'phone' | 'ip' | None — which signal refused, for logs and support.
+    #: 'country' | 'ip' | None — which signal refused, for logs and support.
     blocked_by: str | None = None
 
     def __bool__(self) -> bool:
@@ -241,7 +259,10 @@ class GeoPolicy:
     """One feature's geo rules. The mechanism above is shared; this is not."""
 
     name: str
-    #: Phone countries refused outright.
+    # The `phone_*` names predate phone-less signup (2026-10); they now apply
+    # to `country_of(user)`, the stored residence country. Kept so the policy
+    # definitions and their tests did not all change in the same commit.
+    #: Countries refused outright.
     # A callable is resolved at call time so operational country overlays can
     # be changed through Django settings without duplicating this policy
     # mechanism. Static issuer policies continue to use a frozenset.
@@ -254,7 +275,7 @@ class GeoPolicy:
     #: and these are module-level legal-control policies.
     phone_messages: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType({}))
-    #: A user with NO verified phone country. Ondo fails CLOSED (it cannot
+    #: A user with NO known country. Ondo fails CLOSED (it cannot
     #: attest a jurisdiction); presale falls through to eligible. Preserved
     #: from each feature's original behaviour — see the module docstring.
     allow_missing_phone: bool = False
@@ -271,11 +292,11 @@ class GeoPolicy:
 
     # -- the half-check, named so its partiality is visible at the call site
     def phone_eligible(self, user) -> bool:
-        """Phone country ONLY. Correct where no request exists (Celery, a
+        """Stored country ONLY. Correct where no request exists (Celery, a
         recipient's eligibility); everywhere else prefer `evaluate`."""
         if self.bypass is not None and self.bypass(user):
             return True
-        country = phone_country_of(user)
+        country = country_of(user)
         if not country:
             return self.allow_missing_phone
         blocked = self.phone_blocked
@@ -292,16 +313,16 @@ class GeoPolicy:
         if self.bypass is not None and self.bypass(user):
             return GeoDecision(True)
 
-        country = phone_country_of(user)
+        country = country_of(user)
         if not country:
             if not self.allow_missing_phone:
-                return GeoDecision(False, self.message, 'phone')
+                return GeoDecision(False, self.message, 'country')
         phone_blocked = self.phone_blocked
         if callable(phone_blocked):
             phone_blocked = phone_blocked()
         if country and country in phone_blocked:
             return GeoDecision(
-                False, self.phone_messages.get(country, self.message), 'phone')
+                False, self.phone_messages.get(country, self.message), 'country')
 
         blocked = self.ip_blocked
         if callable(blocked):

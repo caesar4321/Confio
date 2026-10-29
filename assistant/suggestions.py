@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from django.utils import timezone
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ def _state(viewer, request_meta) -> _State:
     return _State(
         personal=viewer.account_type != 'business',
         employee=viewer.is_employee,
-        country=(getattr(user, 'phone_country', '') or '').upper(),
+        country=(country_of(user) or '').upper(),
         funded=funded,
         topup_in_progress=in_progress,
         verification_pending=pending,
@@ -280,7 +281,7 @@ def record_probe_answer(user, probe_id, answer, *, funded):
         raise ValueError('Respuesta no válida')
     ProbeAnswer.objects.get_or_create(
         user=user, probe_id=probe_id,
-        defaults={'answer': answer, 'phone_country': (getattr(user, 'phone_country', '') or '')[:2].upper(),
+        defaults={'answer': answer, 'phone_country': (country_of(user) or '')[:2].upper(),
                   'funded': funded},
     )
 

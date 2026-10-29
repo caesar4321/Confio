@@ -28,6 +28,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from .destinations import PAID_OFFERS
+from security.geo import country_of
 
 LABELS = {'ia_plus': 'Conoce Confío IA+', 'cuenta_inteligente': 'Conoce Cuenta inteligente'}
 ASKED = {
@@ -108,7 +109,7 @@ def log_shown(viewer, chosen):
     if previewing(getattr(viewer.user, 'pk', None)):
         # A preview tester's chips are neither counted nor capped.
         return
-    emit_event(EVENT, user=viewer.user, country=(getattr(viewer.user, 'phone_country', '') or '')[:2],
+    emit_event(EVENT, user=viewer.user, country=(country_of(viewer.user) or '')[:2],
                source_type=PAID_OFFERS[key],
                properties={'stage': 'door_shown', 'offer': PAID_OFFERS[key], 'door': 'chip',
                            'trigger': trigger, 'account_type': viewer.account_type,

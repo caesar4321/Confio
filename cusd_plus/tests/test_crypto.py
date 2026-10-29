@@ -242,7 +242,7 @@ class CryptoGateTests(TestCase):
     def _gate(self, kind, country):
         from cusd_plus import crypto_risk
 
-        with mock.patch('security.geo.phone_country_of', return_value=country):
+        with mock.patch('security.geo.country_of', return_value=country):
             return crypto_risk.sponsor_gate(kind, self.user, {})
 
     def test_buy_needs_ack_then_passes_and_venezuela_is_allowed(self):
@@ -276,7 +276,7 @@ class CryptoGateTests(TestCase):
     def _gate_dollar(self, kind, dollar):
         from cusd_plus import crypto_risk
 
-        with mock.patch('security.geo.phone_country_of', return_value='VE'):
+        with mock.patch('security.geo.country_of', return_value='VE'):
             return crypto_risk.sponsor_gate(kind, self.user, {}, dollar=dollar)
 
     def test_canary_allowlist_and_kill_switches(self):

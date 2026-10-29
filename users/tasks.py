@@ -537,3 +537,28 @@ def rollup_funnel_events(target_date_str=None):
         logger.error("Error rolling up funnel events: %s", str(e), exc_info=True)
         raise
 
+
+
+@shared_task(name='users.refresh_residence_countries')
+@ensure_db_connection_closed
+def refresh_residence_countries(batch_size=500):
+    """Daily: move each user seen in the last day to their 90-day IP majority
+    country (users.residence). Users with no new activity keep what they have;
+    the refresh never writes null."""
+    from security.models import IPDeviceUser
+    from users.residence import refresh_residence_country
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    since = timezone.now() - timedelta(days=1)
+    user_ids = (IPDeviceUser.objects.filter(last_seen__gte=since)
+                .values_list('user_id', flat=True).distinct())
+    moved = checked = 0
+    for user in User.objects.filter(id__in=user_ids, is_active=True).iterator(chunk_size=batch_size):
+        checked += 1
+        try:
+            moved += int(refresh_residence_country(user))
+        except Exception:  # noqa: BLE001 — one user must not stop the batch
+            logger.exception('[RESIDENCE] refresh failed user_id=%s', user.id)
+    logger.info('Residence refresh: checked=%s moved=%s', checked, moved)
+    return {'checked': checked, 'moved': moved}

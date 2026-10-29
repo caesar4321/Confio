@@ -26,6 +26,7 @@ from .models import (
     FinancieraReport,
     FinancieraReview,
 )
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +242,7 @@ class Query(graphene.ObjectType):
         user = _require_user(info)
         if not user:
             return []
-        country = (country_code or '').upper().strip() or user.phone_country
+        country = (country_code or '').upper().strip() or country_of(user)
         if not country or country not in VALID_COUNTRY_CODES:
             return []
 
@@ -302,7 +303,7 @@ class Query(graphene.ObjectType):
         user = _require_user(info)
         if not user:
             return []
-        country = (country_code or '').upper().strip() or user.phone_country
+        country = (country_code or '').upper().strip() or country_of(user)
         if not country or level not in ('state', 'city', 'neighborhood'):
             return []
         qs = Financiera.objects.visible().filter(country_code=country)

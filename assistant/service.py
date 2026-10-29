@@ -25,6 +25,7 @@ from .engine import (AssistantUnavailable, Viewer, categorize_movements, general
                      run_turn, third_party_text)
 from .models import AssistantProfile, AssistantThreadState, AssistantTurn, TurnModality
 from .prompts import prompt_echo, transcribe_hint
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def _viewer(user, account, business, jwt_context, *, screen='', tz_name=None, re
         account_type=account_type,
         business_id=business_id,
         is_business_owner=is_owner,
-        tz=_resolve_tz(tz_name, getattr(user, 'phone_country', None)),
+        tz=_resolve_tz(tz_name, country_of(user)),
         screen=(screen or '')[:64],
         request_meta=dict(request_meta or {}),
     )
@@ -249,7 +250,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     modality, audio_seconds, transcript = TurnModality.TEXT, 0, None
     if audio:
         try:
-            transcript, audio_seconds = transcribe(*audio, country=getattr(user, 'phone_country', '') or '')
+            transcript, audio_seconds = transcribe(*audio, country=country_of(user) or '')
         except Exception as exc:
             turn.error = str(exc)[:280] or 'transcription failed'
             turn.save(update_fields=['error'])
@@ -332,7 +333,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             viewer, history,
             first_name=user.first_name,
             account_label=_account_label(viewer, business),
-            country=getattr(user, 'phone_country', ''),
+            country=country_of(user),
             analyses_left=0,
             reserve_analysis=_analysis_reserver(user, turn),
             reserve_news=_tool_reserver(user, turn, 'search_market_news', news_searches_left),

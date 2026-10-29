@@ -36,6 +36,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.cache import cache
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +245,7 @@ def protection_value(user, account, account_type, business_id, year: int, month:
     anything is unknown."""
     if account_type != 'personal' or not account.bsc_address:
         return None
-    country = (getattr(user, 'phone_country', None) or '').upper()
+    country = (country_of(user) or '').upper()
     if country not in protection_countries() or country not in CURRENCY_BY_COUNTRY:
         return None
     currency = CURRENCY_BY_COUNTRY[country]

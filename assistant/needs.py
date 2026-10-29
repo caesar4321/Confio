@@ -17,6 +17,7 @@ from django.db import IntegrityError
 from django.utils import timezone
 
 from . import conf
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ def tag_recent(hours=72):
                     message=message, user_id=user_id, category=tag['category'],
                     met_by_confio=CATEGORIES[tag['category']],
                     paraphrase=redact(tag['paraphrase'])[:120],
-                    phone_country=(getattr(message.sender_user, 'phone_country', '') or '')[:2].upper(),
+                    phone_country=(country_of(message.sender_user) or '')[:2].upper(),
                     funded=funded_cache[user_id], message_at=message.created_at,
                 )
                 saved += 1

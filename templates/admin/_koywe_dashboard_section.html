@@ -102,19 +102,19 @@
                 <tr>
                     <td style="font-weight: 500;">
                         <span class="country-flag">
-                            {% if country.actor_user__phone_country == 'VE' %}🇻🇪
-                            {% elif country.actor_user__phone_country == 'CO' %}🇨🇴
-                            {% elif country.actor_user__phone_country == 'US' %}🇺🇸
-                            {% elif country.actor_user__phone_country == 'GT' %}🇬🇹
-                            {% elif country.actor_user__phone_country == 'ES' %}🇪🇸
-                            {% elif country.actor_user__phone_country == 'AR' %}🇦🇷
-                            {% elif country.actor_user__phone_country == 'MX' %}🇲🇽
-                            {% elif country.actor_user__phone_country == 'PE' %}🇵🇪
-                            {% elif country.actor_user__phone_country == 'CL' %}🇨🇱
-                            {% elif country.actor_user__phone_country == 'BR' %}🇧🇷
+                            {% if country.actor_user__country == 'VE' %}🇻🇪
+                            {% elif country.actor_user__country == 'CO' %}🇨🇴
+                            {% elif country.actor_user__country == 'US' %}🇺🇸
+                            {% elif country.actor_user__country == 'GT' %}🇬🇹
+                            {% elif country.actor_user__country == 'ES' %}🇪🇸
+                            {% elif country.actor_user__country == 'AR' %}🇦🇷
+                            {% elif country.actor_user__country == 'MX' %}🇲🇽
+                            {% elif country.actor_user__country == 'PE' %}🇵🇪
+                            {% elif country.actor_user__country == 'CL' %}🇨🇱
+                            {% elif country.actor_user__country == 'BR' %}🇧🇷
                             {% else %}🌐{% endif %}
                         </span>
-                        {{ country.actor_user__phone_country|default:'--' }}
+                        {{ country.actor_user__country|default:'--' }}
                     </td>
                     <td style="text-align: right;">{{ country.count }} users</td>
                 </tr>
@@ -133,19 +133,19 @@
                 <tr>
                     <td style="font-weight: 500;">
                         <span class="country-flag">
-                            {% if country.actor_user__phone_country == 'VE' %}🇻🇪
-                            {% elif country.actor_user__phone_country == 'CO' %}🇨🇴
-                            {% elif country.actor_user__phone_country == 'US' %}🇺🇸
-                            {% elif country.actor_user__phone_country == 'GT' %}🇬🇹
-                            {% elif country.actor_user__phone_country == 'ES' %}🇪🇸
-                            {% elif country.actor_user__phone_country == 'AR' %}🇦🇷
-                            {% elif country.actor_user__phone_country == 'MX' %}🇲🇽
-                            {% elif country.actor_user__phone_country == 'PE' %}🇵🇪
-                            {% elif country.actor_user__phone_country == 'CL' %}🇨🇱
-                            {% elif country.actor_user__phone_country == 'BR' %}🇧🇷
+                            {% if country.actor_user__country == 'VE' %}🇻🇪
+                            {% elif country.actor_user__country == 'CO' %}🇨🇴
+                            {% elif country.actor_user__country == 'US' %}🇺🇸
+                            {% elif country.actor_user__country == 'GT' %}🇬🇹
+                            {% elif country.actor_user__country == 'ES' %}🇪🇸
+                            {% elif country.actor_user__country == 'AR' %}🇦🇷
+                            {% elif country.actor_user__country == 'MX' %}🇲🇽
+                            {% elif country.actor_user__country == 'PE' %}🇵🇪
+                            {% elif country.actor_user__country == 'CL' %}🇨🇱
+                            {% elif country.actor_user__country == 'BR' %}🇧🇷
                             {% else %}🌐{% endif %}
                         </span>
-                        {{ country.actor_user__phone_country|default:'--' }}
+                        {{ country.actor_user__country|default:'--' }}
                     </td>
                     <td style="text-align: right;">${{ country.usdc_volume|floatformat:0|intcomma }}</td>
                     <td style="text-align: right; color: #6b7280;">{{ country.count }} users / {{ country.tx_count }} txs</td>

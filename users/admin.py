@@ -18,7 +18,7 @@ from .admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
     list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'accounts_count', 'icp_summary', 'rating_summary', 'is_staff', 'created_at')
-    list_filter = ('backup_provider', 'is_staff', 'is_superuser', 'phone_country', 'confio_rating_star_count', 'confio_rating_action', 'created_at')
+    list_filter = ('backup_provider', 'is_staff', 'is_superuser', 'country', 'phone_country', 'confio_rating_star_count', 'confio_rating_action', 'created_at')
     search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name', 'phone_number', 'phone_key', 'confio_icp_other_text', 'confio_rating_feedback_text')
     readonly_fields = (
         'firebase_uid', 'auth_token_version', 'created_at', 'updated_at',
@@ -34,7 +34,7 @@ class UserAdmin(admin.ModelAdmin):
             'fields': ('username', 'email', 'first_name', 'last_name', 'firebase_uid')
         }),
         ('Contact Information', {
-            'fields': ('phone_country', 'phone_number', 'phone_key')
+            'fields': ('phone_country', 'phone_number', 'phone_key', 'country', 'country_source', 'country_updated_at', 'preferred_rail_country')
         }),
         ('Permissions', {
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),

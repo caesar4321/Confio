@@ -91,7 +91,7 @@
                         <a href="{% url 'confio_admin:users_user_change' row.id %}">
                             @{{ row.username }}
                         </a>
-                        {% if row.phone_country %}<div style="color:#6b7280;font-size:12px;">{{ row.phone_country }}</div>{% endif %}
+                        {% if row.country %}<div style="color:#6b7280;font-size:12px;">{{ row.country }}</div>{% endif %}
                     </td>
                     <td class="feedback-text">{{ row.text }}</td>
                 </tr>

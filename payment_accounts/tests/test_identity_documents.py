@@ -85,15 +85,16 @@ class AdditionalDocumentTests(TestCase):
         self.assertEqual(list(IdentityVerification.objects.filter(user=self.user)), [primary])
         self.assertEqual(set(IdentityVerification.all_documents.filter(user=self.user)), {primary, passport})
         self.assertEqual(self.user.security_verifications.count(), 1)
-        # Koywe keeps reading the primary document even though the passport is newer.
-        self.assertEqual(_get_latest_personal_verification(self.user), primary)
+        # Koywe prefers the national ID over the newer passport of the same country.
+        self.assertEqual(_get_latest_personal_verification(self.user, 'VE'), primary)
         self.assertTrue(self.user.is_identity_verified)
 
-    def test_a_passport_only_person_is_verified_but_not_koywe_verified(self):
+    def test_a_passport_only_person_has_no_document_for_other_countries(self):
         from ramps.schema import _get_latest_personal_verification
-        document(self.user, 'P-2', document_type='passport', is_additional_document=True)
-        self.assertIsNone(_get_latest_personal_verification(self.user))
-        self.assertFalse(self.user.has_phone_country_identity)
+        passport = document(self.user, 'P-2', document_type='passport', is_additional_document=True)
+        self.assertIsNone(_get_latest_personal_verification(self.user, 'PE'))
+        # Venezuela: the passport is the only document of that country, so it is what a rail gets.
+        self.assertEqual(_get_latest_personal_verification(self.user, 'VE'), passport)
         self.assertTrue(self.user.is_identity_verified)
 
     def pending(self, request):
@@ -182,8 +183,9 @@ class AdditionalDocumentTests(TestCase):
         document(self.user, 'P-RW', document_type='passport', document_issuing_country='PRY',
                  is_additional_document=True)
         self.assertTrue(self.user.has_verified_identity_document)
-        # Recargar and Retirar still need the phone country's document.
-        self.assertFalse(self.user.has_phone_country_identity)
+        # Recargar and Retirar in Peru still need a Peruvian document.
+        from security.identity_status import has_rail_identity
+        self.assertFalse(has_rail_identity(self.user, 'PE'))
         referral = SimpleNamespace(referred_user=self.user, referred_user_id=self.user.pk)
         self.assertIsNone(get_referrer_claim_verification_error(referral))
 

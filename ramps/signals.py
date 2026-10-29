@@ -22,6 +22,7 @@ from users.funnel import emit_event
 from users.models_unified import UnifiedTransactionTable
 from users.utils import touch_user_activity
 from send.models import PhoneInvite
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -909,7 +910,7 @@ def handle_ramp_transaction_save(sender, instance, created, **kwargs):
             emit_event(
                 'first_deposit',
                 user=instance.actor_user,
-                country=instance.country_code or getattr(instance.actor_user, 'phone_country', '') or '',
+                country=instance.country_code or country_of(instance.actor_user) or '',
                 platform=derived_platform,
                 source_type=source_type,
                 channel='koywe' if instance.provider == 'KOYWE' else (instance.provider or '').lower(),

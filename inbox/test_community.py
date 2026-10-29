@@ -1388,7 +1388,8 @@ class AdditionalDocumentVerificationTests(CommunityTestBase):
 
     def test_additional_verified_document_lets_a_member_post(self):
         user = self.member_verified_by_additional_document()
-        self.assertFalse(user.has_phone_country_identity)  # the rail-specific check
+        from security.identity_status import has_rail_identity
+        self.assertFalse(has_rail_identity(user, 'AR'))  # the rail-specific check
         self.assertIsNone(community.posting_block(user, None))
         self.assertIsNone(community.author_block(user))
         self.post(user)

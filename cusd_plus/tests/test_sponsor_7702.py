@@ -457,7 +457,8 @@ class SignatureTests(SimpleTestCase):
 
 class _Info:
     class context:
-        user = mock.Mock(is_authenticated=True, id=1)
+        # A real country: geo gates fail closed on a user with none.
+        user = mock.Mock(is_authenticated=True, id=1, country='AR', phone_country='AR')
 
 
 def _rpc_factory(overrides=None, delegated=False, sent_raws=None):

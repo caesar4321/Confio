@@ -1135,7 +1135,7 @@ def guardarian(w):
 
     # Top Countries by attempted sessions/users
     context['guardarian_attempt_countries'] = GuardarianTransaction.objects.values(
-        'user__phone_country'
+        'user__country'
     ).annotate(
         count=Count('user', distinct=True)
     ).order_by('-count')[:5]
@@ -1144,7 +1144,7 @@ def guardarian(w):
     context['guardarian_completed_countries'] = GuardarianTransaction.objects.filter(
         onchain_deposit__isnull=False
     ).values(
-        'user__phone_country'
+        'user__country'
     ).annotate(
         usdc_volume=Sum('to_amount_actual'),
         count=Count('user', distinct=True),
@@ -1236,7 +1236,7 @@ def koywe(w, request):
         ).order_by('-usdc_volume')[:5]
 
         attempt_countries = qs.values(
-            'actor_user__phone_country'
+            'actor_user__country'
         ).annotate(
             count=Count('actor_user', distinct=True)
         ).order_by('-count')[:5]
@@ -1244,7 +1244,7 @@ def koywe(w, request):
         completed_countries = qs.filter(
             status='COMPLETED'
         ).values(
-            'actor_user__phone_country'
+            'actor_user__country'
         ).annotate(
             usdc_volume=Sum('final_amount'),
             count=Count('actor_user', distinct=True),

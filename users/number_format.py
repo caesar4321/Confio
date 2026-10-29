@@ -12,6 +12,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from security.geo import country_of
 
 COMMA_DECIMAL_COUNTRIES = frozenset({
     'AR', 'BO', 'BR', 'CL', 'CO', 'CR', 'CU', 'EC', 'PY', 'UY', 'VE',
@@ -26,12 +27,12 @@ _reader_country: ContextVar[str | None] = ContextVar('reader_country', default=N
 
 
 def set_reader(user) -> None:
-    _reader_country.set((getattr(user, 'phone_country', None) or None) if user is not None else None)
+    _reader_country.set((country_of(user) or None) if user is not None else None)
 
 
 @contextmanager
 def reading_as(user):
-    token = _reader_country.set(getattr(user, 'phone_country', None) or None)
+    token = _reader_country.set(country_of(user) or None)
     try:
         yield
     finally:
@@ -43,7 +44,7 @@ def separators_for(user=None, country: str | None = None) -> tuple[str, str]:
     neither, the current reader's."""
     if user is None and country is None:
         country = _reader_country.get()
-    iso = (country or getattr(user, 'phone_country', None) or '').upper()
+    iso = (country or country_of(user) or '').upper()
     return ('.', ',') if iso in COMMA_DECIMAL_COUNTRIES else (',', '.')
 
 

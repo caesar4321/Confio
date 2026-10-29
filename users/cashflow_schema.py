@@ -11,6 +11,7 @@ import graphene
 from graphql import GraphQLError
 
 from users.cashflow import SummaryUnavailable
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ def _summary_context(info, year, month, timezone):
     account = jwt_account(user, jwt_context)
     if account is None:
         return None
-    tz = resolve_timezone(timezone, getattr(user, 'phone_country', None))
+    tz = resolve_timezone(timezone, country_of(user))
     local_now = dj_tz.now().astimezone(tz)
     if (int(year), int(month)) > (local_now.year, local_now.month):
         return None
@@ -419,7 +420,7 @@ class MonthSummaryQuery(graphene.ObjectType):
             return None
         # The user's LOCAL month (a UTC month would already be next month on
         # the last evening in La Paz or Caracas).
-        local = dj_tz.now().astimezone(resolve_timezone(timezone, getattr(user, 'phone_country', None)))
+        local = dj_tz.now().astimezone(resolve_timezone(timezone, country_of(user)))
         context = _summary_context(info, local.year, local.month, timezone)
         if context is None:
             return None

@@ -152,6 +152,10 @@ class RampUserAddress(models.Model):
     address_city = models.CharField(max_length=100)
     address_state = models.CharField(max_length=100)
     address_zip_code = models.CharField(max_length=30)
+    # ISO-3 country this street/city/state belong to, fixed when the address
+    # is saved. Reading it from the user's (moving) residence would relabel a
+    # saved Argentine address as Bolivian after a residence refresh.
+    address_country = models.CharField(max_length=3, blank=True, default='')
     economic_activity = models.CharField(max_length=255, blank=True, default='')
     auth_email = models.EmailField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)

@@ -567,7 +567,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         icp_freetext = list(
             User.objects.filter(confio_icp_other_text__isnull=False)
             .exclude(confio_icp_other_text='')
-            .values('id', 'username', 'first_name', 'last_name', 'phone_country',
+            .values('id', 'username', 'first_name', 'last_name', 'country',
                     'confio_icp_captured_at', 'confio_icp_other_text', 'confio_icp_tags')
         )
         for row in icp_freetext:
@@ -577,7 +577,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         rating_freetext = list(
             User.objects.filter(confio_rating_feedback_text__isnull=False)
             .exclude(confio_rating_feedback_text='')
-            .values('id', 'username', 'first_name', 'last_name', 'phone_country',
+            .values('id', 'username', 'first_name', 'last_name', 'country',
                     'confio_rating_prompted_at', 'confio_rating_feedback_text',
                     'confio_rating_star_count')
         )
@@ -623,9 +623,9 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         country_tag_counts = {}
         global_tag_counts = Counter()
         for u in User.objects.filter(confio_icp_captured_at__isnull=False).only(
-            'phone_country', 'confio_icp_tags'
+            'country', 'confio_icp_tags'
         ):
-            country = u.phone_country or 'UNK'
+            country = u.country or 'UNK'
             country_tag_counts.setdefault(country, Counter())
             for tag in (u.confio_icp_tags or []):
                 country_tag_counts[country][tag] += 1

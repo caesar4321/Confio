@@ -92,7 +92,7 @@ def count_real_signups_for_date(target_date, country_code=None):
     start_time, end_time = get_argentina_day_bounds(target_date)
     queryset = get_real_users_queryset().filter(created_at__gte=start_time, created_at__lte=end_time)
     if country_code:
-        queryset = queryset.filter(phone_country=country_code)
+        queryset = queryset.filter(country=country_code)
     return queryset.count()
 
 
@@ -266,8 +266,8 @@ def calculate_country_metrics(target_date=None):
     
     # Get all countries with users
     countries = _users().filter(
-        phone_country__isnull=False
-    ).values_list('phone_country', flat=True).distinct()
+        country__isnull=False
+    ).values_list('country', flat=True).distinct()
     
     metrics = {}
     
@@ -275,7 +275,7 @@ def calculate_country_metrics(target_date=None):
         if not country_code:
             continue
             
-        country_users = _users().filter(phone_country=country_code)
+        country_users = _users().filter(country=country_code)
         
         # Calculate DAU for this country
         dau = country_users.filter(

@@ -680,6 +680,10 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 from security.models import IntegrityVerdict
                 IntegrityVerdict.objects.filter(
                     pk=ac_result['verdict_id'], user__isnull=True).update(user=user)
+            # Signup no longer asks for a phone: an account with no country
+            # takes this request's IP country until its residence is known.
+            from users.residence import set_country_from_request
+            set_country_from_request(user, getattr(info.context, 'META', None))
             if not created:
                 is_valid, _ = validate_username(user.username or '')
                 if not is_valid:

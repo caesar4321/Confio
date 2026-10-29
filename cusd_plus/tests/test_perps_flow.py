@@ -193,7 +193,7 @@ class OpenFlowTests(TestCase):
                 mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=100 * WAD), \
                 mock.patch('cusd_plus.crypto_policy.expected_exit_usdt',
                            return_value=(int(Decimal('20.18') * WAD), 20 * WAD)), \
-                mock.patch('security.geo.phone_country_of', return_value='VE'):
+                mock.patch('security.geo.country_of', return_value='VE'):
             return perps_flow.prepare_open(self.user, self.wallet, {}, 'BTC', 'long', leverage, margin)
 
     def test_open_issues_exit_plus_relay_deposit_and_the_relay_accepts_only_it(self, *_):
@@ -319,7 +319,7 @@ class OpenFlowTests(TestCase):
                 mock.patch('cusd_plus.perps_flow._new_account', return_value=False), \
                 mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=100 * WAD), \
                 mock.patch('cusd_plus.crypto_policy.expected_exit_usdt', return_value=(20 * WAD, 20 * WAD)), \
-                mock.patch('security.geo.phone_country_of', return_value='VE'):
+                mock.patch('security.geo.country_of', return_value='VE'):
             with self.assertRaises(perps_flow.FlowError) as ctx:
                 perps_flow.prepare_open(self.user, self.wallet, {}, 'ETH', 'long', 5, '20.18')
         self.assertEqual(ctx.exception.code, 'one_position_at_a_time')

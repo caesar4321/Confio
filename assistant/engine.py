@@ -558,7 +558,8 @@ def exchange_rate_data(viewer: Viewer, currency=None):
     rate, shown before confirming."""
     from exchange_rates.currency_mapping import COUNTRY_TO_CURRENCY, get_currency_for_country
 
-    phone_country = (getattr(viewer.user, 'phone_country', '') or '').upper()
+    from security.geo import country_of
+    phone_country = (country_of(viewer.user) or '').upper()
     code = (currency or '').strip().upper() or get_currency_for_country(phone_country)
     # Dollar countries (Ecuador, Panamá, El Salvador, EE.UU.): nothing to convert. Only
     # a phone country actually mapped to USD (an unknown one also falls back to USD).
@@ -619,8 +620,8 @@ def _ondo_decision(viewer):
         return False, (f'Se está conectando desde {COUNTRY_NAMES_ES.get(where, "otro país")}, donde el emisor (Ondo) '
                        'no permite estas inversiones; no es por el país de su teléfono. No le sugieras conectarse desde '
                        'otro lugar ni usar una VPN.')
-    from security.geo import phone_country_of
-    if not phone_country_of(viewer.user):
+    from security.geo import country_of
+    if not country_of(viewer.user):
         return False, 'Su cuenta no tiene un país de teléfono verificado.'
     return False, 'El emisor (Ondo) no permite estas inversiones en el país de su teléfono.'
 
@@ -1292,10 +1293,10 @@ def _identity_status(viewer):
     if viewer.user is None or viewer.is_employee:
         return None
     try:
-        from security.identity_status import has_phone_country_identity, identity_status
+        from security.identity_status import has_rail_identity, identity_status
         status = identity_status(viewer.user)
-        if status == 'verified' and not has_phone_country_identity(viewer.user):
-            # Recargar needs the phone-country document (ramps/schema.py).
+        if status == 'verified' and not has_rail_identity(viewer.user):
+            # Recargar needs a document of the rail country (ramps/schema.py).
             return 'other_country'
         return status
     except Exception:  # noqa: BLE001 - unknown, never a guess

@@ -36,6 +36,7 @@ from .models import (
     TeamMembership,
     TeamRole,
 )
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,7 @@ def create_team(user, business, name: str, description: str = '', emoji: str = E
             with transaction.atomic():
                 team = Team.objects.create(
                     name=name, name_key=name_key(name), description=description, emoji=emoji, color=color,
-                    captain=user, join_mode=join_mode, country=(getattr(user, 'phone_country', '') or '')[:2])
+                    captain=user, join_mode=join_mode, country=(country_of(user) or '')[:2])
         except IntegrityError:
             raise _error('name_taken')
         TeamMembership.objects.create(team=team, user=user, role=TeamRole.CAPTAIN)

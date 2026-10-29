@@ -129,7 +129,7 @@ class CountryMetrics(models.Model):
     Daily snapshot of country-specific activity metrics
     
     Tracks DAU/WAU/MAU by country for geographic expansion analysis.
-    Country is determined by the user's phone_country field.
+    Country is the user's residence country (User.country).
     
     This enables:
     - Identifying high-growth markets

@@ -91,7 +91,7 @@ class DiditBrowserSessionMutationTests(SimpleTestCase):
 class DiditPayloadExtractionTests(SimpleTestCase):
     @override_settings(
         DIDIT_BUSINESS_WORKFLOW_ID='',
-        DIDIT_WORKFLOW_IDS_BY_PHONE_COUNTRY={'AR': 'personal-workflow'},
+        DIDIT_GENERAL_WORKFLOW_ID='personal-workflow',
     )
     @patch('security.didit.requests.request')
     def test_business_session_never_falls_back_to_personal_workflow(self, mock_request):
@@ -459,12 +459,7 @@ class DiditPayloadExtractionTests(SimpleTestCase):
 
 @override_settings(
     DIDIT_API_KEY='test-api-key',
-    DIDIT_WORKFLOW_IDS_BY_PHONE_COUNTRY={
-        'PY': 'workflow-paraguay',
-        'AR': 'workflow-argentina',
-        'PT': 'workflow-portugal',
-        'DE': 'workflow-europe',
-    },
+    DIDIT_GENERAL_WORKFLOW_ID='workflow-general',
     DIDIT_BUSINESS_WORKFLOW_ID='workflow-business',
 )
 class DiditIntegrationTests(TestCase):
@@ -637,7 +632,8 @@ class DiditIntegrationTests(TestCase):
         mock_request.assert_not_called()
 
     @patch('security.didit.requests.request')
-    def test_create_session_uses_phone_country_workflow_for_personal_accounts(self, mock_request):
+    def test_create_session_uses_general_workflow_for_personal_accounts(self, mock_request):
+        # protects=every personal session runs the one general workflow, whatever the phone; fails_when=the phone country still picks a per-country workflow; no_claim=Didit's own document-country UI
         mock_request.return_value = self._mock_response({
             'session_id': 'sess_456',
             'session_token': 'token_xyz',
@@ -647,7 +643,7 @@ class DiditIntegrationTests(TestCase):
         create_didit_session(user=self.user, account_type='personal')
 
         kwargs = mock_request.call_args.kwargs
-        self.assertEqual(kwargs['json']['workflow_id'], 'workflow-argentina')
+        self.assertEqual(kwargs['json']['workflow_id'], 'workflow-general')
 
     @patch('security.didit.requests.request')
     def test_hosted_personal_session_requires_a_safe_link(self, mock_request):
@@ -684,7 +680,9 @@ class DiditIntegrationTests(TestCase):
         verification = IdentityVerification.all_documents.get(user=self.user, risk_factors__didit__session_id='sess_web_doc')
         self.assertTrue(verification.is_additional_document)
 
-    def test_create_session_rejects_unsupported_phone_country(self):
+    @override_settings(DIDIT_GENERAL_WORKFLOW_ID='')
+    def test_create_session_refuses_without_the_general_workflow(self):
+        # protects=no personal session starts on an unconfigured workflow; fails_when=an empty id reaches Didit; no_claim=Didit's own validation
         self.user.phone_country = 'JP'
 
         with self.assertRaises(DiditConfigurationError):

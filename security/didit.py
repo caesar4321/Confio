@@ -701,22 +701,20 @@ def is_authoritative_brazilian_cpf_backfill(evidence: Any, *, cpf: str) -> bool:
     )
 
 
-def _workflow_id_for_account(account_type: str, phone_country: str | None = None) -> str:
+def _workflow_id_for_account(account_type: str) -> str:
     if account_type == 'business':
         business_workflow = (getattr(settings, 'DIDIT_BUSINESS_WORKFLOW_ID', '') or '').strip()
         if not business_workflow:
             raise DiditConfigurationError('La verificación de tu negocio no está disponible por ahora. Contacta a soporte.')
         return business_workflow
 
-    workflow_map = getattr(settings, 'DIDIT_WORKFLOW_IDS_BY_PHONE_COUNTRY', {}) or {}
-    normalized_phone_country = str(phone_country or '').strip().upper()
-    workflow_id = str(workflow_map.get(normalized_phone_country, '') or '')
+    # One personal workflow for every country (security/workflows/kyc/): the
+    # person picks their document's country in Didit, pre-selected from the
+    # IP. The per-phone-country map is gone with phone-less signup; which
+    # document a rail needs is the rail's question (ramps.rail_country).
+    workflow_id = str(getattr(settings, 'DIDIT_GENERAL_WORKFLOW_ID', '') or '').strip()
     if not workflow_id:
-        if normalized_phone_country:
-            raise DiditConfigurationError(
-                'La verificación de identidad no está disponible por ahora para tu país.'
-            )
-        raise DiditConfigurationError('No pudimos identificar tu país para iniciar la verificación.')
+        raise DiditConfigurationError('La verificación de identidad no está disponible por ahora.')
     return workflow_id
 
 
@@ -796,7 +794,6 @@ def create_didit_session(*, user, account_type: str = 'personal', business_id: s
         raise DiditConfigurationError('Business verification requires a business ID')
     if account_type == 'personal':
         business_id = None
-    phone_country = str(getattr(user, 'phone_country', '') or '').strip().upper()
     vendor_data = {
         'user_id': user.id,
         'account_type': account_type,
@@ -828,7 +825,7 @@ def create_didit_session(*, user, account_type: str = 'personal', business_id: s
             payload['expected_details'] = expected
     else:
         payload = {
-            'workflow_id': _workflow_id_for_account(account_type, phone_country=phone_country),
+            'workflow_id': _workflow_id_for_account(account_type),
             'vendor_data': json.dumps(vendor_data, separators=(',', ':')),
         }
     if callback_url:
@@ -1729,6 +1726,9 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         'session_id': session_id,
         'status': response_payload.get('status'),
         'raw_status': response_payload.get('status'),
+        # Which workflow verified this person; Didit is otherwise the only
+        # place that knows.
+        'workflow_id': str(response_payload.get('workflow_id') or '') or None,
         # Didit media links are short-lived credentials. Persist the decision
         # facts needed for audit/backfills, never the signed media URLs.
         'session': _without_transient_didit_media(response_payload),

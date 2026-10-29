@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
+from security.geo import country_of
 
 
 class Command(BaseCommand):
@@ -75,7 +76,7 @@ class Command(BaseCommand):
             event = FunnelEvent.objects.create(
                 event_name=event_name,
                 user=user,
-                country=(getattr(user, "phone_country", "") or "")[:2].upper(),
+                country=(country_of(user) or "")[:2].upper(),
                 platform="",
                 source_type=source_type,
                 channel=channel,

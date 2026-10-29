@@ -46,6 +46,7 @@ from ramps.koywe import (
     quote_ramp,
     sync_country_payment_methods,
 )
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,24 @@ def _format_maximum_amount_error(exc: 'KoyweMaximumAmountError', direction: str)
         f'El monto supera el máximo permitido para {action}. '
         f'Reduce el monto e inténtalo nuevamente.'
     )
+
+
+_KOYWE_UNSUPPORTED_OPERATION_RE = re.compile(
+    r'operation type (\w+) is not supported for currency (\w+)', re.IGNORECASE)
+
+
+def _format_koywe_error(exc: 'KoyweError') -> str:
+    """Koywe's account-level rail switches come back as English sentences;
+    users get Spanish. Anything unrecognized passes through unchanged."""
+    text = str(exc)
+    match = _KOYWE_UNSUPPORTED_OPERATION_RE.search(text)
+    if match:
+        action = 'recargas' if match.group(1).lower() == 'onramp' else 'retiros'
+        return (
+            f'Las {action} en {match.group(2).upper()} no están disponibles '
+            f'por el momento. Inténtalo más tarde.'
+        )
+    return text
 
 
 def _format_decimal_plain(value: Decimal) -> str:
@@ -734,11 +753,11 @@ class RampUserAddressType(graphene.ObjectType):
     updatedAt = graphene.DateTime()
 
     def resolve_address_country(self, info):
-        return _get_user_phone_country_alpha3(getattr(self, 'user', None))
+        return (str(getattr(self, 'address_country', '') or '').strip().upper()
+                or _get_user_residence_alpha3(getattr(self, 'user', None)))
 
     def resolve_country_name(self, info):
-        user = getattr(self, 'user', None)
-        return getattr(user, 'phone_country_name', None) or ''
+        return _address_country_name(self)
 
     def resolve_auth_email(self, info):
         return str(getattr(self, 'auth_email', '') or '').strip()
@@ -762,11 +781,11 @@ class RampUserAddressType(graphene.ObjectType):
         return self.address_zip_code
 
     def resolve_addressCountry(self, info):
-        return _get_user_phone_country_alpha3(getattr(self, 'user', None))
+        return (str(getattr(self, 'address_country', '') or '').strip().upper()
+                or _get_user_residence_alpha3(getattr(self, 'user', None)))
 
     def resolve_countryName(self, info):
-        user = getattr(self, 'user', None)
-        return getattr(user, 'phone_country_name', None) or ''
+        return _address_country_name(self)
 
     def resolve_economicActivity(self, info):
         return str(getattr(self, 'economic_activity', '') or '').strip()
@@ -841,10 +860,10 @@ class UpsertRampUserAddress(graphene.Mutation):
         if not (user and getattr(user, 'is_authenticated', False)):
             return cls(success=False, error='Authentication required', ramp_address=None)
 
-        if not _get_user_phone_country_alpha3(user):
+        if not _get_user_residence_alpha3(user):
             return cls(
                 success=False,
-                error='Debes tener un país de teléfono válido para guardar tu dirección de recargas y retiros.',
+                error='No pudimos identificar tu país para guardar tu dirección de recargas y retiros.',
                 ramp_address=None,
             )
 
@@ -888,6 +907,11 @@ class UpsertRampUserAddress(graphene.Mutation):
                 ramp_address=None,
             )
 
+        # The country an address belongs to is fixed when it is first saved;
+        # editing other fields later never moves it to a newer residence.
+        existing = RampUserAddress.objects.filter(user=user).only('address_country', 'address_street').first()
+        keeps_country = bool(existing and existing.address_country and (existing.address_street or '').strip())
+        values['address_country'] = existing.address_country if keeps_country else _get_user_residence_alpha3(user)
         ramp_address, _ = RampUserAddress.objects.update_or_create(
             user=user,
             defaults=values,
@@ -1422,7 +1446,7 @@ class CreateRampOrder(graphene.Mutation):
                 address_reservation, account_id=current_account.pk)
             release_on_ramp_check(face_claim_id)
             logger.warning('Koywe ramp order failed: %s', exc)
-            return RampOrderType(success=False, error=str(exc))
+            return RampOrderType(success=False, error=_format_koywe_error(exc))
         except Exception as exc:
             # Unknown application failures may happen after Koywe accepted the
             # POST. Fail closed exactly like a transport timeout.
@@ -1669,6 +1693,19 @@ class Query(graphene.ObjectType):
         LandingStatsType,
         description='Public, unauthenticated; cached 10 min',
     )
+    rail_countries = graphene.List(
+        graphene.NonNull(graphene.String),
+        required=True,
+        device_region=graphene.String(),
+        description='ISO-2 countries in the order Recibir/Enviar lists their rails (ramps.rail_country)',
+    )
+
+    def resolve_rail_countries(self, info, device_region=None):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return []
+        from ramps.rail_country import rail_countries
+        return rail_countries(user, device_region=device_region)
     fund_flow_stats = graphene.Field(
         FundFlowStatsType,
         description='Public aggregate, unauthenticated; cached 10 min',
@@ -1965,7 +2002,7 @@ class Query(graphene.ObjectType):
                 resolved_country_code,
                 exc,
             )
-            raise ValidationError(str(exc))
+            raise ValidationError(_format_koywe_error(exc))
 
         if fee_enabled and normalized_direction == 'ON_RAMP':
             try:
@@ -2169,9 +2206,11 @@ def _resolve_ramp_country_code(info, country_code=None):
         return country_code.upper()
 
     user = getattr(info.context, "user", None)
-    phone_country = getattr(user, "phone_country", None) if user and getattr(user, "is_authenticated", False) else None
-    if phone_country and phone_country.upper() in COUNTRY_METHODS:
-        return phone_country.upper()
+    if user and getattr(user, "is_authenticated", False):
+        from ramps.rail_country import rail_countries
+        for rail_country in rail_countries(user):
+            if rail_country in COUNTRY_METHODS:
+                return rail_country
     return "AR"
 
 
@@ -2737,24 +2776,52 @@ def _store_koywe_auth_email(*, user, auth_email: str | None) -> None:
         ramp_address.save(update_fields=['auth_email', 'updated_at'])
 
 
-def _get_user_phone_country_alpha3(user) -> str:
-    iso2 = str(getattr(user, 'phone_country', '') or '').strip().upper()
-    return ISO2_TO_ISO3.get(iso2, '')
+def _country_name(iso2: str) -> str:
+    from users.country_codes import COUNTRY_CODES
+    return next((row[0] for row in COUNTRY_CODES if row[2] == iso2), '') if iso2 else ''
 
 
-def _get_latest_personal_verification(user):
-    # Koywe's delegated KYC needs the phone-country document: deliberately the
-    # primary one only, never an additional passport/ID.
-    from security.identity_status import phone_country_identity
-    return phone_country_identity(user)
+def _address_country_name(address) -> str:
+    """Name of the country the saved address belongs to (its stored ISO-3),
+    else of where the user lives: always the same country as addressCountry."""
+    from security.geo import to_iso2
+    stored = to_iso2(str(getattr(address, 'address_country', '') or ''))
+    if stored:
+        return _country_name(stored)
+    user = getattr(address, 'user', None)
+    return _country_name(country_of(user) if user else '')
+
+
+def _get_user_residence_alpha3(user) -> str:
+    """Where the user lives (security.geo.country_of) as ISO-3: the country of
+    the address Recargar/Retirar and the payment-account rails declare."""
+    from security.geo import to_iso3
+    iso2 = country_of(user) if user else ''
+    return ISO2_TO_ISO3.get(iso2) or to_iso3(iso2) or ''
+
+
+def _get_latest_personal_verification(user, country_code: str | None = None):
+    """The document Koywe's delegated KYC sends: one tied to the order's
+    country (security.identity_status.rail_identity), national ID before
+    passport. Without a country, the primary rail country's."""
+    from security.identity_status import rail_identity
+    return rail_identity(user, country_code)
 
 
 def _build_effective_ramp_address_snapshot(user):
     verification = _get_latest_personal_verification(user)
     ramp_address = RampUserAddress.objects.filter(user=user).first()
-    address_country = _get_user_phone_country_alpha3(user) or (
-        (verification.verified_country or '').strip() if verification else ''
-    )
+    # One address, one country: a saved address keeps the country it was
+    # saved in; an address read off the identity document keeps the
+    # document's country. Residence only fills the gap.
+    saved_street = bool(ramp_address and (ramp_address.address_street or '').strip())
+    document_country = (verification.verified_country or '').strip().upper() if verification else ''
+    if saved_street:
+        address_country = (ramp_address.address_country or '').strip().upper() or _get_user_residence_alpha3(user)
+    elif verification and (verification.verified_address or '').strip() and document_country:
+        address_country = document_country
+    else:
+        address_country = _get_user_residence_alpha3(user) or document_country
     address_street = (
         (ramp_address.address_street or '').strip()
         if ramp_address and ramp_address.address_street
@@ -2798,7 +2865,8 @@ def _build_effective_ramp_address_snapshot(user):
 
 def _is_ramp_address_complete(value) -> bool:
     user = getattr(value, 'user', None)
-    country = _get_user_phone_country_alpha3(user)
+    country = (str(getattr(value, 'address_country', '') or '').strip().upper()
+               or _get_user_residence_alpha3(user))
     base_complete = bool(
         getattr(value, 'address_street', None)
         and getattr(value, 'address_city', None)
@@ -2820,7 +2888,7 @@ def _is_ramp_address_complete(value) -> bool:
 
 
 def _get_koywe_contact_profile(*, user, country_code: str, email_override: str | None = None) -> dict[str, str]:
-    verification = _get_latest_personal_verification(user)
+    verification = _get_latest_personal_verification(user, country_code)
     override = _get_koywe_test_account_override(user=user, country_code=country_code)
     # The order email and delegated-KYC identity are separate concerns. In
     # Colombia the former must be a real inbox for PSE, while these explicitly
@@ -2835,9 +2903,13 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
             from security.identity_status import is_identity_verified
             if is_identity_verified(user):
                 # Verified with another country's document only: say which one
-                # opens Koywe (older app builds pass their own gate on it).
-                raise KoyweError('Recargas y retiros necesitan el documento de identidad del país de tu número '
-                                 'de teléfono. Verifícalo en Perfil > Verificación.')
+                # opens this order's country (older app builds pass their own gate on it).
+                from security.geo import normalize_country
+                from users.country_names_es import COUNTRY_NAMES_ES
+                iso2 = normalize_country(country_code) or ''
+                place = COUNTRY_NAMES_ES.get(iso2) or iso2 or 'este país'
+                raise KoyweError(f'Para recargar o retirar en {place} necesitamos tu documento de identidad de {place}. '
+                                 'Agrégalo en Perfil > Verificación.')
             raise KoyweError('Completa la verificación de identidad antes de usar recargas y retiros')
         first_name = str(getattr(verification, 'verified_first_name', None) or '').strip()
         last_name = str(getattr(verification, 'verified_last_name', None) or '').strip()
@@ -2886,7 +2958,31 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
     return {key: value for key, value in profile.items() if value}
 
 
+class SetPreferredRailCountry(graphene.Mutation):
+    """The country the user picked in the Recibir/Enviar rail list; it leads
+    `railCountries` from then on. The account comes from the JWT."""
+
+    class Arguments:
+        country = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, country):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return cls(success=False, error='Inicia sesión para continuar')
+        from ramps.rail_country import is_real_country
+        if not is_real_country(country):
+            return cls(success=False, error='País no disponible')
+        user.preferred_rail_country = country.strip().upper()
+        user.save(update_fields=['preferred_rail_country'])
+        return cls(success=True)
+
+
 class Mutation(graphene.ObjectType):
     create_ramp_order = CreateRampOrder.Field()
+    set_preferred_rail_country = SetPreferredRailCountry.Field()
     create_mock_ramp_order = CreateMockRampOrder.Field()
     upsert_ramp_user_address = UpsertRampUserAddress.Field()

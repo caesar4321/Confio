@@ -495,6 +495,7 @@ class UserType(DjangoObjectType):
 	# Explicitly define sensitive fields to enforce security
 	phone_number = graphene.String()
 	email = graphene.String()
+	country = graphene.String(description="ISO-2 country the viewer lives in (residence). Own account only; phoneCountry is the phone number's country.")
 
 	class Meta:
 		model = User
@@ -514,6 +515,14 @@ class UserType(DjangoObjectType):
 			return self.phone_number
 		# Otherwise hide it
 		return None
+
+	def resolve_country(self, info):
+		"""Own account only: where someone lives is not for other viewers."""
+		user = info.context.user
+		if not user.is_authenticated or str(user.id) != str(self.id):
+			return None
+		from security.geo import country_of
+		return country_of(self) or None
 
 	def resolve_requires_backup_completion(self, info):
 		user = info.context.user
@@ -1609,7 +1618,7 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v14'
+		cache_key = 'stats_summary_v15'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1618,7 +1627,7 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		last_7d = now - timedelta(days=7)
 		last_30d = now - timedelta(days=30)
 		# Reuse the exact predicate as total_users so the two diverge only via
-		# the phone_country filter + COUNTRY_DISPLAY_MIN threshold below.
+		# the country filter + COUNTRY_DISPLAY_MIN threshold below.
 		# The admin's definition (users.analytics): Google Play pre-launch
 		# robots are not users, so the app and the admin show one number.
 		from users.analytics import get_real_users_queryset
@@ -1638,20 +1647,20 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 		_iso_to_en = {row[2]: row[0] for row in COUNTRY_CODES}
 		country_rows = (
 			verified_qs
-			.exclude(phone_country__isnull=True)
-			.exclude(phone_country='')
-			.values('phone_country')
+			.exclude(country__isnull=True)
+			.exclude(country='')
+			.values('country')
 			.annotate(count=Count('id'))
 			.filter(count__gte=COUNTRY_DISPLAY_MIN)
 			.order_by('-count')
 		)
 		users_by_country = [
 			{
-				'country_iso': r['phone_country'],
+				'country_iso': r['country'],
 				'country_name': (
-					COUNTRY_NAMES_ES.get(r['phone_country'])
-					or _iso_to_en.get(r['phone_country'])
-					or r['phone_country']
+					COUNTRY_NAMES_ES.get(r['country'])
+					or _iso_to_en.get(r['country'])
+					or r['country']
 				),
 				'verified_count': r['count'],
 			}
@@ -3279,7 +3288,8 @@ class SubmitIdentityVerificationS3(graphene.Mutation):
                 from security.s3_utils import public_s3_url as _public
                 risk['business_cert_url'] = _public(business_key)
             # Determine whether payout proof is required based on phone country
-            phone_country = (getattr(user, 'phone_country', '') or '').upper()
+            from security.geo import country_of
+            phone_country = (country_of(user) or '').upper()
             payout_label_raw = (kwargs.get('payout_method_label') or '').strip()
             payout_label_value = payout_label_raw or None
             payout_proof_key = kwargs.get('payout_proof_key')

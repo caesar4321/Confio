@@ -289,11 +289,11 @@ class CountryMetricsAdmin(admin.ModelAdmin):
         queryset = super().get_queryset(request)
         active_fcm_users = (
             User.objects.filter(
-                phone_country=OuterRef('country_code'),
+                country=OuterRef('country_code'),
                 is_active=True,
                 fcm_tokens__is_active=True,
             )
-            .values('phone_country')
+            .values('country')
             .annotate(count=Count('id', distinct=True))
             .values('count')[:1]
         )

@@ -197,7 +197,7 @@ class PerpsGateTests(TestCase):
     def _gate(self, country, meta=None):
         from cusd_plus import perps_risk
 
-        with mock.patch('security.geo.phone_country_of', return_value=country):
+        with mock.patch('security.geo.country_of', return_value=country):
             return perps_risk.open_gate(self.user, meta or {})
 
     def test_open_needs_ack_and_venezuela_is_allowed(self):
@@ -262,10 +262,10 @@ class PerpsGateTests(TestCase):
 
         perps_risk.acknowledge(self.user)
         with override_settings(PERPS_PROMOTION_BLOCKED_COUNTRIES='PE,CO'), \
-                mock.patch('security.geo.phone_country_of', return_value='PE'):
+                mock.patch('security.geo.country_of', return_value='PE'):
             self.assertTrue(perps_promotion_blocked(self.user))
             self.assertIsNone(perps_risk.open_gate(self.user, {}), 'still available')
-        with mock.patch('security.geo.phone_country_of', return_value='BO'):
+        with mock.patch('security.geo.country_of', return_value='BO'):
             self.assertFalse(perps_promotion_blocked(self.user))
 
 
@@ -281,7 +281,7 @@ class PerpsSchemaTests(TestCase):
         from config.schema import schema
 
         context = SimpleNamespace(user=self.user, META=meta or {})
-        with mock.patch('security.geo.phone_country_of', return_value=country), \
+        with mock.patch('security.geo.country_of', return_value=country), \
                 mock.patch('cusd_plus.perps_schema._personal_wallet', return_value='0x' + '44' * 20), \
                 mock.patch('cusd_plus.crypto_policy.live_fee_bps', return_value=90):
             return schema.execute(query, context_value=context)

@@ -8,7 +8,8 @@
 #   https://docs.ondo.finance/ondo-global-markets/eligibility
 # Mirrored in our Terms (users/legal/documents.py, section 12).
 #
-# Signal: User.phone_country (2-letter ISO, set at phone verification).
+# Signal: security.geo.country_of(user) (2-letter ISO residence country; the
+# verified phone country before phone-less signup, 2026-10).
 # Ondo also prohibits the occupied Ukraine regions (Crimea/DNR/LNR/Kherson/
 # Zaporizhzhia/Sevastopol) — a phone country code cannot resolve regions, and
 # Ukraine proper is NOT prohibited, so UA is not blocked here; that residual
@@ -182,9 +183,9 @@ PERPS_POLICY = GeoPolicy(
 
 def perps_promotion_blocked(user) -> bool:
     """True where Futuros may be used but never promoted (phone country)."""
-    from security.geo import phone_country_of
+    from security.geo import country_of
 
-    return (phone_country_of(user) or '') in _country_list('PERPS_PROMOTION_BLOCKED_COUNTRIES')
+    return (country_of(user) or '') in _country_list('PERPS_PROMOTION_BLOCKED_COUNTRIES')
 
 
 def is_ondo_eligible(user) -> bool:

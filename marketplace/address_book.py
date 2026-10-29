@@ -17,6 +17,7 @@ from users.models import Account
 from .checkout import CheckoutError, check_delivery_place, clean_pin, jwt_account
 from .models import DeliveryAddress
 from .permissions import BUY
+from security.geo import country_of
 
 RECARGA_ID = 'recarga'
 
@@ -93,7 +94,9 @@ def recarga_address(user) -> DeliveryAddressType | None:
     ramp = RampUserAddress.objects.filter(user=user).first()
     street = (getattr(ramp, 'address_street', '') or '').strip()
     city = (getattr(ramp, 'address_city', '') or '').strip()
-    country = (getattr(user, 'phone_country', '') or '').strip().upper()
+    # The country the address was saved in, not where the user lives today.
+    from security.geo import to_iso2
+    country = to_iso2(getattr(ramp, 'address_country', '') or '') or (country_of(user) or '').strip().upper()
     if not (street and city and country):
         return None
     neighborhood = (ramp.address_neighborhood or '').strip()

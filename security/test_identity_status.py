@@ -1,6 +1,6 @@
 """Who is verified: a person verified ONLY by an additional document (a passport
-from another country) is verified everywhere except Koywe, which needs the
-phone-country document."""
+from another country) is verified everywhere; Koywe reads a document of the
+order's country (rail_identity), whichever kind it is."""
 from datetime import date, timedelta
 from types import SimpleNamespace
 
@@ -36,8 +36,9 @@ class AdditionalDocumentOnlyTests(TestCase):
 
     def test_vocabulary(self):
         self.assertTrue(ids.is_identity_verified(self.user))
-        self.assertFalse(ids.has_phone_country_identity(self.user))
-        self.assertIsNone(ids.phone_country_identity(self.user))
+        # A Venezuelan passport naming Colombia as residence is still not a Colombian document.
+        self.assertIsNone(ids.rail_identity(self.user, 'CO'))
+        self.assertEqual(ids.rail_identity(self.user, 'VE'), self.passport)
         self.assertTrue(ids.has_ever_passed_kyc(self.user))
         self.assertEqual(ids.identity_status(self.user), 'verified')
         self.assertEqual(ids.verified_at(self.user), self.passport.verified_at)
@@ -48,7 +49,7 @@ class AdditionalDocumentOnlyTests(TestCase):
         self.assertTrue(self.user.is_identity_verified)
         self.assertTrue(self.user.has_verified_identity_document)
         self.assertTrue(self.user.has_passed_identity_verification)
-        self.assertFalse(self.user.has_phone_country_identity)
+        self.assertTrue(self.user.has_rail_identity)  # primary rail country = the document's
         self.assertEqual(self.user.verification_status, 'verified')
         self.assertEqual(self.user.last_verified_date, self.passport.verified_at)
 
@@ -57,24 +58,26 @@ class AdditionalDocumentOnlyTests(TestCase):
         from users.schema import UserType
         status = SecurityQuery.resolve_my_identity_status(None, info_for(self.user))
         self.assertEqual((status.verified, status.phone_country_verified, status.ever_passed_kyc, status.status),
-                         (True, False, True, 'verified'))
+                         (True, True, True, 'verified'))
         self.assertEqual(SecurityQuery.resolve_my_personal_verified_kyc(None, info_for(self.user)), self.passport)
         self.assertTrue(UserType.resolve_is_identity_verified(self.user, None))
         self.assertEqual(UserType.resolve_verification_status(self.user, None), 'verified')
         self.assertEqual(UserType.resolve_last_verified_date(self.user, None), self.passport.verified_at)
 
-    def test_koywe_still_needs_the_phone_country_document(self):
+    def test_koywe_reads_a_document_of_the_order_country(self):
+        # protects=Koywe gets the order country's document, primary or not; fails_when=it reads "the primary" again; no_claim=Koywe acceptance
         from ramps.schema import _get_latest_personal_verification
-        self.assertIsNone(_get_latest_personal_verification(self.user))
-        primary = document(self.user, 'V-1')
-        self.assertEqual(_get_latest_personal_verification(self.user), primary)
-        self.assertTrue(ids.has_phone_country_identity(self.user))
+        self.assertIsNone(_get_latest_personal_verification(self.user, 'PE'))
+        peruvian = document(self.user, 'PE-1', document_issuing_country='PER', verified_country='PER',
+                            verified_nationality='PER')
+        self.assertEqual(_get_latest_personal_verification(self.user, 'PE'), peruvian)
+        self.assertTrue(ids.has_rail_identity(self.user, 'PE'))
 
     def test_koywe_tells_a_passport_only_person_which_document_it_needs(self):
         from ramps.koywe_client import KoyweError
         from ramps.schema import _get_koywe_contact_profile
-        with self.assertRaisesRegex(KoyweError, 'país de tu número'):
-            _get_koywe_contact_profile(user=self.user, country_code='CO')
+        with self.assertRaisesRegex(KoyweError, 'documento de identidad de Perú'):
+            _get_koywe_contact_profile(user=self.user, country_code='PE')
 
     def test_payment_accounts_find_the_personal_document(self):
         # Personal rows carry no account_type key; .exclude() on it dropped them all.

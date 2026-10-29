@@ -316,8 +316,13 @@ class IdentityStatusType(graphene.ObjectType):
     """Who is verified (security/identity_status.py), for the signed-in person."""
     # Any current verified personal document, primary or additional.
     verified = graphene.Boolean(required=True)
-    # The primary (phone-country) document: what Recargar/Retirar (Koywe) need.
+    # A document issued by the country Recargar/Retirar runs in, for builds
+    # that pick that country from the phone (utils/rampIdentity.ts): the
+    # phone's country when there is one, else the primary rail country.
     phone_country_verified = graphene.Boolean(required=True)
+    # ISO-2 countries that issued a current verified document: newer builds
+    # check the country the person picked against this list.
+    verified_document_countries = graphene.List(graphene.NonNull(graphene.String), required=True)
     # Verified now, or verified and later expired.
     ever_passed_kyc = graphene.Boolean(required=True)
     status = graphene.String(required=True)
@@ -399,7 +404,8 @@ class SecurityQuery(graphene.ObjectType):
         from . import identity_status as ids
         return IdentityStatusType(
             verified=ids.is_identity_verified(user),
-            phone_country_verified=ids.has_phone_country_identity(user),
+            phone_country_verified=ids.has_rail_identity(user, user.phone_country or None),
+            verified_document_countries=ids.verified_document_countries(user),
             ever_passed_kyc=ids.has_ever_passed_kyc(user),
             status=ids.identity_status(user),
             verified_at=ids.verified_at(user),

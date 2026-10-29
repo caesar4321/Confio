@@ -34,6 +34,7 @@ from decimal import Decimal
 from users.jwt_context import get_jwt_business_context_with_validation
 from users.models import Account
 from users.number_format import format_amount
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 SPONSOR_SIGNER = get_kms_signer_from_settings()
@@ -561,7 +562,7 @@ class SubmitInviteForPhone(graphene.Mutation):
                 emit_event(
                     'invite_submitted',
                     user=user,
-                    country=getattr(user, 'phone_country', '') or '',
+                    country=country_of(user) or '',
                     source_type='send_invite',
                     channel='escrow',
                     properties={
@@ -1284,7 +1285,7 @@ class ClaimInviteForPhone(graphene.Mutation):
                                 emit_once(
                                     'signup_completed',
                                     user=user,
-                                    country=getattr(user, 'phone_country', '') or '',
+                                    country=country_of(user) or '',
                                     source_type='send_invite',
                                     channel='claim',
                                     properties={
@@ -1334,7 +1335,7 @@ class ClaimInviteForPhone(graphene.Mutation):
                                         emit_once(
                                             'referral_attached',
                                             user=user,
-                                            country=getattr(user, 'phone_country', '') or '',
+                                            country=country_of(user) or '',
                                             source_type='send_invite',
                                             channel='claim',
                                             properties={
@@ -1426,7 +1427,7 @@ class ClaimInviteForPhone(graphene.Mutation):
                 emit_event(
                     'invite_claimed',
                     user=user,
-                    country=getattr(user, 'phone_country', '') or '',
+                    country=country_of(user) or '',
                     source_type='send_invite',
                     channel='claim',
                     properties={

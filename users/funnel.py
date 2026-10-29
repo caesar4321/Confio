@@ -30,6 +30,7 @@ import logging
 from typing import Any, Optional
 
 from django.db import transaction
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ def emit_referral_signup_step(
         event_name,
         user=user,
         session_id=session_id,
-        country=getattr(user, 'phone_country', '') or '',
+        country=country_of(user) or '',
         source_type=source_type,
         channel=channel,
         properties={

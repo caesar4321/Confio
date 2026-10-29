@@ -182,7 +182,10 @@ def fund_flow_breakdown() -> dict:
     ops_by_country, users_by_country = {}, {}
     first_at = None
     entries, exits = _perimeter_conversions()
-    fields = ('actor_user__phone_country', 'actor_user_id', 'actor_business_id', 'created_at')
+    # The residence country; the phone country only for accounts the
+    # backfill has not reached yet (security.geo.country_of does the same).
+    fields = (Coalesce(NullIf('actor_user__country', Value('')), 'actor_user__phone_country'),
+              'actor_user_id', 'actor_business_id', 'created_at')
     entry_rows = list(entries.values_list(
         Coalesce('gross_amount_exact', 'from_amount', output_field=DOLLARS), *fields))
     exit_rows = list(exits.values_list(

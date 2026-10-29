@@ -60,6 +60,8 @@ class HumanitarianDonationType(DjangoObjectType):
         )
 
     def resolve_donor_country_code(self, info):
+        # Public donor wall: the phone's country, as before. Where a donor
+        # lives (User.country) is not published to anonymous readers.
         user = self.donor_user
         return ((getattr(user, 'phone_country', '') or '').upper()) if user else ''
 

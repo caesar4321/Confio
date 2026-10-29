@@ -17,6 +17,7 @@ from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 import requests
 from graphql_jwt.utils import jwt_decode
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -950,7 +951,7 @@ def guardarian_transaction_proxy(request):
         guardarian_payload['to_network'] = to_network or 'ALGO'
 
     # Add customer country
-    customer_country = body.get('customer_country') or body.get('customerCountry') or getattr(user, 'phone_country', None)
+    customer_country = body.get('customer_country') or body.get('customerCountry') or country_of(user)
     if customer_country:
         guardarian_payload['customer_country'] = customer_country
 

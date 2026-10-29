@@ -127,6 +127,15 @@ def link_verified_phone(user, verification, country_code, confirmation_token=Non
         current.phone_country = country_code
         current.phone_key = phone_key
         current.save(update_fields=['phone_number', 'phone_country', 'phone_key', 'updated_at'])
+        # A store-review number stands for its country everywhere: the
+        # residence a reviewer's IP gave must not hide the blocks a US/UK
+        # number exists to show (users/review_numbers.py).
+        review_number = review_number_for_key(phone_key)
+        if review_number:
+            current.country = review_number.country
+            current.country_source = current.COUNTRY_SOURCE_REVIEW
+            current.country_updated_at = timezone.now()
+            current.save(update_fields=['country', 'country_source', 'country_updated_at'])
         proof.is_verified = True
         proof.save(update_fields=['is_verified'])
 

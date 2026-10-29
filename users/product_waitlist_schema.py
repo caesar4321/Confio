@@ -19,6 +19,7 @@ from users.models_product_waitlist import (
     VOLUME_RANGES,
     ProductWaitlistEntry,
 )
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ class JoinPaidOfferWaitlist(graphene.Mutation):
         entry, created = ProductWaitlistEntry.objects.get_or_create(
             user=user, product=product,
             defaults={'door': door, 'trigger': trigger, 'account_type': account_type or '',
-                      'funded': has_funded(user), 'country': (user.phone_country or '')[:2]},
+                      'funded': has_funded(user), 'country': country_of(user)[:2]},
         )
         if created:
             emit_event(paid_offers.EVENT, user=user, country=entry.country, source_type=product,

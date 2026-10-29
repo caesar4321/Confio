@@ -16,6 +16,7 @@ from inbox.community import CommunityPostError
 
 from . import data, invites, league, rules
 from .models import Team, TeamFollow, TeamJoinRequest, TeamJoinRequestStatus
+from security.geo import country_of
 
 
 def _context(info):
@@ -265,7 +266,7 @@ class TeamsQuery(graphene.ObjectType):
         viewer = info.context.user
         offset, limit = max(offset or 0, 0), min(max(limit or 20, 1), 50)
         blocked = community.block_relation_ids(viewer)
-        country = (getattr(viewer, 'phone_country', '') or '')[:2]
+        country = (country_of(viewer) or '')[:2]
         ranked = {row.team_id: row.rank for row in league.table('teams', '30d')}
         # Bounded in the database: open seats only, same country first, then
         # newest; the league rank orders that bounded set.

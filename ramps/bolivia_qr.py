@@ -77,7 +77,8 @@ def offered(direction: str, meta, user=None) -> bool:
 
 
 def is_bolivian(user) -> bool:
-    return str(getattr(user, 'phone_country', '') or '').strip().upper() == COUNTRY
+    from ramps.rail_country import primary_rail_country
+    return primary_rail_country(user) == COUNTRY
 
 
 def koywe_replaced(user, meta) -> dict:

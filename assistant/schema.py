@@ -16,6 +16,7 @@ from inbox.schema import get_context_models, get_or_create_support_conversation
 from . import billing, conf, pets, service, voice
 from .engine import AssistantUnavailable
 from .models import Mascot
+from security.geo import country_of
 
 logger = logging.getLogger(__name__)
 
@@ -409,7 +410,7 @@ class StartAssistantVoice(graphene.Mutation):
             session, left = voice.start_session(
                 viewer, conversation, first_name=user.first_name,
                 account_label=service._account_label(viewer, business),
-                country=getattr(user, 'phone_country', ''),
+                country=country_of(user),
             )
         except voice.VoiceUnavailable as exc:
             return cls(success=False, error=str(exc))

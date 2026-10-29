@@ -119,6 +119,25 @@ class User(AbstractUser, SoftDeleteModel):
     phone_number = models.CharField(max_length=15, blank=True, null=True, help_text="User's phone number without country code")
     # Canonical normalized phone key: "callingcode:digits" (e.g., "1:9293993619")
     phone_key = models.CharField(max_length=32, blank=True, null=True, help_text="Canonical phone key for uniqueness across ISO variations")
+    # Where the user lives (ISO-2), the country every "where is this user"
+    # question reads through security.geo.country_of. phone_country stays the
+    # country of the phone number only. Written by signup/login IP, the daily
+    # residence refresh (users.tasks.refresh_residence_countries) and the
+    # store-review link; never by the client.
+    COUNTRY_SOURCE_RESIDENCE = 'residence'
+    COUNTRY_SOURCE_LEGACY_PHONE = 'legacy_phone'
+    COUNTRY_SOURCE_SIGNUP_IP = 'signup_ip'
+    COUNTRY_SOURCE_REVIEW = 'review'
+    country = models.CharField(
+        max_length=2, blank=True, null=True, db_index=True,
+        help_text="ISO-2 residence country (IP majority); see security.geo.country_of")
+    country_source = models.CharField(
+        max_length=16, blank=True, default='',
+        choices=[(COUNTRY_SOURCE_RESIDENCE, 'IP residence'), (COUNTRY_SOURCE_LEGACY_PHONE, 'Legacy phone'),
+                 (COUNTRY_SOURCE_SIGNUP_IP, 'Signup IP'), (COUNTRY_SOURCE_REVIEW, 'Store review')])
+    country_updated_at = models.DateTimeField(null=True, blank=True)
+    # The country the user last picked in the Recibir/Enviar rail list.
+    preferred_rail_country = models.CharField(max_length=2, blank=True, null=True)
     
     # Backup Tracking Fields (Added for KPI & Safety Monitoring)
     backup_provider = models.CharField(
@@ -406,11 +425,11 @@ class User(AbstractUser, SoftDeleteModel):
         return self.is_identity_verified
 
     @property
-    def has_phone_country_identity(self):
-        """Only the primary (phone-country) document. Read ONLY where a
+    def has_rail_identity(self):
+        """A document for the user's primary rail country. Read ONLY where a
         provider requires it: Koywe's delegated KYC behind Recargar/Retirar."""
-        from security.identity_status import has_phone_country_identity
-        return has_phone_country_identity(self)
+        from security.identity_status import has_rail_identity
+        return has_rail_identity(self)
 
     @property
     def has_passed_identity_verification(self):
