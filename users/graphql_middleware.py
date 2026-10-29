@@ -5,7 +5,7 @@ This middleware automatically calls touch_last_activity() for all authenticated 
 ensuring comprehensive activity tracking without manual calls in every mutation.
 """
 
-from graphql import GraphQLResolveInfo
+from graphql import GraphQLResolveInfo, OperationType
 from users.activity_tracking import touch_last_activity
 import logging
 
@@ -28,8 +28,15 @@ class ActivityTrackingMiddleware:
         # Get the result first
         result = next(root, info, **args)
 
-        # Only track on mutations (not queries)
-        if info.operation.operation != 'mutation':
+        # Only track on mutations (not queries). graphql-core 3 gives an
+        # OperationType enum here; comparing it to the string 'mutation' was
+        # never equal, so no mutation ever touched last_activity_at.
+        if info.operation.operation != OperationType.MUTATION:
+            return result
+
+        # Middleware runs for every field; touch once per root mutation field,
+        # not once per nested field of its payload.
+        if info.path.prev is not None:
             return result
 
         # Only track if user is authenticated
