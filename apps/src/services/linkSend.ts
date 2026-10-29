@@ -14,7 +14,8 @@
 
 import { gql } from '@apollo/client';
 import * as Keychain from 'react-native-keychain';
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { bytesToHex } from '@noble/hashes/utils';
 import { privKeyToAddress, signEip191Message } from './evmWallet';
 import { BscInviteToken, fundInvite } from './inviteBsc';
@@ -324,8 +325,9 @@ const OFFERED_SERVICE = 'com.confio.link_send_offered';
 
 export const takeClipboardLink = async (): Promise<ReceivedLink | null> => {
   try {
-    const { Platform } = await import('react-native');
-    const Clipboard = (await import('@react-native-clipboard/clipboard')).default;
+    // Static imports only: `await import('react-native')` copies every export
+    // and so touches DevSettings, which a release build lacks; that threw a
+    // fatal error on launch, which no catch here could stop.
     if (Platform.OS === 'ios' && typeof (Clipboard as any).hasURL === 'function' && !(await (Clipboard as any).hasURL())) {
       return null;
     }
