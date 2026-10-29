@@ -33,6 +33,7 @@ import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
 import { useRampCountry } from '../hooks/useRampCountry';
+import { isRampBlockedCountry } from '../config/env';
 import { hasKoyweTestIdentity } from '../utils/koyweTestIdentity';
 import { hasRampIdentity, needsCountryDocument } from '../utils/rampIdentity';
 import { RampCountrySheet } from '../components/RampCountrySheet';
@@ -44,6 +45,7 @@ import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { selectCreateRampOrderMutation } from '../apollo/mutations';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
+import { RampCountryRow } from '../components/ramps/RampCountryRow';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
@@ -72,6 +74,8 @@ type RampMethod = {
   offRampMinAmount?: string | null;
   offRampMaxAmount?: string | null;
 };
+
+
 
 const currencyNames: Record<string, string> = {
   COP: 'pesos colombianos',
@@ -333,16 +337,39 @@ const TopUpScreen = () => {
     }
   };
 
+  // Verified with another country's document (an Argentine DNI while living
+  // in Colombia): that country's ramp works today. Offer it by name.
+  const documentAlternative = useMemo(() => {
+    if (!needsCountryDocument(identityData?.myIdentityStatus, countryCode)) return null;
+    const codes = (identityData?.myIdentityStatus?.verifiedDocumentCountries || [])
+      .map((code: string) => String(code || '').toUpperCase());
+    return codes.find((code: string) => code && code !== String(countryCode || '').toUpperCase()
+      && !isRampBlockedCountry(code)) || null;
+  }, [identityData?.myIdentityStatus, countryCode]);
+
+  const switchToDocumentCountry = async () => {
+    if (!documentAlternative) return;
+    try {
+      await setRampCountry(documentAlternative);
+    } catch (error: any) {
+      Alert.alert('No pudimos cambiar el país', error?.message || 'Inténtalo de nuevo.');
+    }
+  };
+
   const openVerificationPrompt = () => {
     if (needsCountryDocument(identityData?.myIdentityStatus, countryCode)) {
       // Verified with another country's document; Koywe needs this country's.
       const place = countryName(countryCode || '');
+      const alternative = documentAlternative ? countryName(documentAlternative) : '';
       Alert.alert(
         'Necesitamos otro documento',
-        `Para recargar desde ${place} necesitamos tu documento de identidad o de residencia de ${place}.`,
+        `Para recargar desde ${place} necesitamos tu documento de identidad o de residencia de ${place}.`
+          + (alternative ? ` Con tu documento de ${alternative} puedes recargar desde ${alternative}.` : ''),
         [
           { text: 'Ahora no', style: 'cancel' },
-          { text: 'Cambiar país', onPress: () => setCountrySheetVisible(true) },
+          alternative
+            ? { text: `Recargar desde ${alternative}`, onPress: () => { switchToDocumentCountry(); } }
+            : { text: 'Cambiar país', onPress: () => setCountrySheetVisible(true) },
           {
             text: 'Agregar documento',
             onPress: () => (navigation as any).navigate('AdditionalDocument', {
@@ -568,28 +595,17 @@ const TopUpScreen = () => {
         </RampReveal>
 
         <RampReveal delay={60}>
-        <View style={styles.noticeCard}>
-          <View style={styles.noticeIconWrap}>
-            <Icon name="globe" size={16} color={colors.primary} />
-          </View>
-          <View style={styles.noticeCopy}>
-            <FlagLabel iso={countryCode} style={styles.noticeTitleRow} textStyle={[styles.noticeTitle, styles.noticeTitleInRow]}>
-              Recargar desde {availability?.countryName || countryName(countryCode)}
-            </FlagLabel>
-            <Text style={styles.noticeText}>Te mostramos los medios de pago de este país.</Text>
-            <TouchableOpacity onPress={() => setCountrySheetVisible(true)} activeOpacity={0.7}>
-              <Text style={styles.historyPillText}>Cambiar país</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity
-            style={styles.historyPill}
-            onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
-            activeOpacity={0.8}
-          >
-            <Icon name="clock" size={14} color={colors.primary} />
-            <Text style={styles.historyPillText}>Ver recargas</Text>
-          </TouchableOpacity>
-        </View>
+        <RampCountryRow verb="Recargar" style={styles.countryRow}
+          suggestion={documentAlternative} onSuggestion={() => { switchToDocumentCountry(); }} />
+        <TouchableOpacity
+          style={styles.historyLink}
+          onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+        >
+          <Icon name="clock" size={14} color={colors.successText} />
+          <Text style={styles.historyPillText}>Ver recargas</Text>
+        </TouchableOpacity>
         </RampReveal>
         <RampCountrySheet
           visible={countrySheetVisible}
@@ -898,6 +914,11 @@ const styles = StyleSheet.create({
   },
   noticeCopy: {
     flex: 1,
+  },
+  countryRow: { marginHorizontal: 22, marginBottom: 8 },
+  historyLink: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end',
+    marginHorizontal: 22, marginBottom: 16, paddingVertical: 6,
   },
   historyPill: {
     flexDirection: 'row',

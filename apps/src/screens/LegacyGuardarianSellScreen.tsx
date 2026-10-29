@@ -43,6 +43,8 @@ import { microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import algorandService from '../services/algorandService';
 import { formatDecimal, formatPercent, normalizeAmountInput, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 import { userCountryIso } from '../utils/userCountry';
+import { RampCountryRow } from '../components/ramps/RampCountryRow';
+import { useRampCountry } from '../hooks/useRampCountry';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -110,6 +112,9 @@ export const SellScreen = ({
     const { userProfile } = useAuth() as any;
     const { activeAccount } = useAccount();
     const { selectedCountry, userCountry } = useCountry();
+    // The ramp country (picked, else residence, else documents): the same one
+    // the row below changes.
+    const { countryCode: rampCountry } = useRampCountry();
 
     // cUSD+ savings mode: sell USDT-BSC straight from the savings vault
     // (redeemToUsdt pays Guardarian's deposit address — no intermediate hop).
@@ -173,8 +178,9 @@ export const SellScreen = ({
     const derivedCurrencyCode = useMemo(() => {
         let localCurrency = 'USD';
 
-        if (userCountryIso(userProfile)) {
-            const country = getCountryByIso(userCountryIso(userProfile));
+        const ownCountry = rampCountry || userCountryIso(userProfile);
+        if (ownCountry) {
+            const country = getCountryByIso(ownCountry);
             if (country) localCurrency = getCurrencyForCountry(country as any);
         } else if (selectedCountry) {
             localCurrency = getCurrencyForCountry(selectedCountry as any);
@@ -183,7 +189,7 @@ export const SellScreen = ({
         }
 
         return localCurrency;
-    }, [selectedCountry, userCountry, userProfile?.country, userProfile?.phoneCountry]);
+    }, [rampCountry, selectedCountry, userCountry, userProfile?.country, userProfile?.phoneCountry]);
 
     const [amount, setAmount] = useState('');
     const [currencyCode, setCurrencyCode] = useState(derivedCurrencyCode);
@@ -336,7 +342,7 @@ export const SellScreen = ({
                 fromNetwork: isSavings ? 'BSC' : undefined,
                 toCurrency: currencyCode,
                 email: userProfile?.email,
-                customerCountry: userCountryIso(userProfile) || undefined,
+                customerCountry: rampCountry || userCountryIso(userProfile) || undefined,
                 externalId: `confio-${isSavings ? 'ahorro-sell' : 'sell'}-${Date.now()}`,
             });
 
@@ -675,6 +681,8 @@ export const SellScreen = ({
                         </Text>
                     </View>
                 </View>
+
+                <RampCountryRow verb="Retirar" style={{ marginTop: 16, marginBottom: 16 }} />
 
                 {/* Info card */}
                 <View style={styles.infoCard}>

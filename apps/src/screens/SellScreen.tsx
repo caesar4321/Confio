@@ -43,6 +43,7 @@ import { formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampForm
 import { formatMicros, microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
+import { RampCountryRow } from '../components/ramps/RampCountryRow';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { selectCreateRampOrderMutation } from '../apollo/mutations';
@@ -629,6 +630,9 @@ export const SellScreen = () => {
               compact={isCompact}
             />
           </RampReveal>
+          <RampReveal delay={40}>
+            <RampCountryRow verb="Retirar" style={{ marginHorizontal: 22, marginBottom: 12 }} />
+          </RampReveal>
 
           <RampReveal delay={80}>
             <View style={styles.emptyStateCard}>
@@ -667,6 +671,9 @@ export const SellScreen = () => {
         </RampReveal>
 
         {/* ─── Info banner ─── */}
+        <RampReveal delay={60}>
+        <RampCountryRow verb="Retirar" style={{ marginHorizontal: 22, marginBottom: 12 }} />
+        </RampReveal>
         <RampReveal delay={60}>
         <View style={styles.bannerCard}>
           <View style={styles.bannerIconWrap}>

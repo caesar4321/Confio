@@ -43,6 +43,8 @@ import { Button } from '../components/common/Button';
 import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
 import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
 import { userCountryIso } from '../utils/userCountry';
+import { RampCountryRow } from '../components/ramps/RampCountryRow';
+import { useRampCountry } from '../hooks/useRampCountry';
 
 
 // GraphQL mutation for USDC opt-in
@@ -87,13 +89,17 @@ const TopUpScreen = () => {
   const { userProfile } = useAuth() as any;
   const { activeAccount } = useAccount();
   const { selectedCountry, userCountry } = useCountry();
+  // The ramp country (picked, else residence, else documents): the same one
+  // the row below changes.
+  const { countryCode: rampCountry } = useRampCountry();
   const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const derivedCurrencyCode = useMemo(() => {
     let localCurrency = 'USD';
 
-    if (userCountryIso(userProfile)) {
-      const country = getCountryByIso(userCountryIso(userProfile));
+    const ownCountry = rampCountry || userCountryIso(userProfile);
+    if (ownCountry) {
+      const country = getCountryByIso(ownCountry);
       if (country) localCurrency = getCurrencyForCountry(country as any);
     } else if (selectedCountry) {
       localCurrency = getCurrencyForCountry(selectedCountry as any);
@@ -105,7 +111,7 @@ const TopUpScreen = () => {
     // If fiatOptions is loaded, check against it
     // Otherwise, default to the local currency and let the API load handle it
     return localCurrency;
-  }, [selectedCountry, userCountry, userProfile?.country, userProfile?.phoneCountry]);
+  }, [rampCountry, selectedCountry, userCountry, userProfile?.country, userProfile?.phoneCountry]);
 
   const [amount, setAmount] = useState('');
   const [currencyCode, setCurrencyCode] = useState<string>('USD');
@@ -366,7 +372,7 @@ const TopUpScreen = () => {
         // Savings rail: NO payout address — the server injects the
         // registered bsc_address and refuses a client-supplied one.
         payoutAddress: isSavingsRail ? undefined : algorandAddress,
-        customerCountry: userCountryIso(userProfile) || undefined,
+        customerCountry: rampCountry || userCountryIso(userProfile) || undefined,
         externalId: `confio-topup-${Date.now()}`,
       });
 
@@ -446,6 +452,8 @@ const TopUpScreen = () => {
             </Text>
           </View>
         </View>
+
+        <RampCountryRow verb="Recargar" style={{ marginTop: 16, marginBottom: 12 }} />
 
         <Text style={styles.regulatoryNote}>
           Guardarian es un socio regulado. Lo que esté disponible en tu país aparece aquí.
