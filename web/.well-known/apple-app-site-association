@@ -8,7 +8,9 @@
           "/verify/*",
           "/pay/*",
           "/invite/*",
-          "/r/*"
+          "/r/*",
+          "/review",
+          "/review/*"
         ]
       }
     ]

@@ -112,6 +112,7 @@
             <data android:scheme="https" android:host="confio.lat" android:pathPrefix="/invite" />
             <data android:scheme="http" android:host="confio.lat" android:pathPrefix="/invite" />
             <data android:scheme="https" android:host="confio.lat" android:pathPrefix="/r/" />
+            <data android:scheme="https" android:host="confio.lat" android:pathPrefix="/review" />
         </intent-filter>
       </activity>
     </application>

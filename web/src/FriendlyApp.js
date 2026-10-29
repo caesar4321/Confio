@@ -22,6 +22,7 @@ import DeletionPage from './Components/LegalDocument/DeletionPage';
 import TransactionVerificationPage from './Components/Verification/TransactionVerificationPage';
 import PaymentRedirectionPage from './Components/Payment/PaymentRedirectionPage';
 import LinkSendPage from './Components/LinkSend/LinkSendPage';
+import ReviewLinkPage from './Components/LinkSend/ReviewLinkPage';
 import PortalConsole from './Components/Portal/PortalConsole';
 
 import './FriendlyApp.css';
@@ -103,6 +104,7 @@ function FriendlyApp() {
               <Route path="/verify/:hash" element={<TransactionVerificationPage />} />
               <Route path="/pay/:id" element={<PaymentRedirectionPage />} />
               <Route path="/r/:ref" element={<LinkSendPage />} />
+              <Route path="/review" element={<ReviewLinkPage />} />
               <Route
                 path="/portal"
                 element={isLocalDevServer ? <RedirectToBackend path="/portal" /> : <PortalConsole />}
