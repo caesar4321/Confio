@@ -44,6 +44,16 @@ def _business_verified(business):
     from security.identity_status import is_business_verified
     return bool(business) and is_business_verified(business.id)
 
+
+def _p2p_name(info, person, full_name):
+    """Offers, trader stats, favorites and ratings are seen by strangers: a
+    person's name only where users/name_visibility allows, the @usuario
+    otherwise. Businesses keep their names."""
+    if person is None:
+        return full_name
+    from users.name_visibility import can_see_name
+    return full_name if can_see_name(info, person) else f'@{person.username}'
+
 class P2PPaymentMethodType(graphene.ObjectType):
     id = graphene.ID()
     name = graphene.String()
@@ -116,7 +126,8 @@ class P2PUserStatsType(DjangoObjectType):
     
     def resolve_stats_display_name(self, info):
         """Returns display name for the stats owner"""
-        return self.stats_display_name
+        person = None if getattr(self, 'stats_business_id', None) else (self.stats_user or getattr(self, 'user', None))
+        return _p2p_name(info, person, self.stats_display_name)
     
     def resolve_avg_rating(self, info):
         """Convert Decimal to float for GraphQL compatibility"""
@@ -147,7 +158,8 @@ class P2PFavoriteTraderType(DjangoObjectType):
     
     def resolve_favorite_display_name(self, info):
         if self.favorite_user:
-            return f"{self.favorite_user.first_name} {self.favorite_user.last_name}".strip() or self.favorite_user.username
+            full = f"{self.favorite_user.first_name} {self.favorite_user.last_name}".strip() or self.favorite_user.username
+            return _p2p_name(info, self.favorite_user, full)
         elif self.favorite_business:
             return self.favorite_business.name
         return "Unknown"
@@ -235,7 +247,9 @@ class P2POfferType(DjangoObjectType):
     
     def resolve_offer_display_name(self, info):
         """Returns display name for the offer creator"""
-        return self.offer_display_name
+        # Legacy offers carry the person in the old `user` field.
+        person = None if self.offer_business_id else (self.offer_user or getattr(self, 'user', None))
+        return _p2p_name(info, person, self.offer_display_name)
     
     def resolve_is_favorite(self, info):
         """Check if current user has favorited this trader"""
@@ -353,10 +367,12 @@ class P2PTradeRatingType(DjangoObjectType):
         return self.ratee_type
     
     def resolve_rater_display_name(self, info):
-        return self.rater_display_name
+        return _p2p_name(info, None if getattr(self, 'rater_business_id', None) else self.rater_user,
+                         self.rater_display_name)
     
     def resolve_ratee_display_name(self, info):
-        return self.ratee_display_name
+        return _p2p_name(info, None if getattr(self, 'ratee_business_id', None) else self.ratee_user,
+                         self.ratee_display_name)
 
 class P2PTradeConfirmationType(DjangoObjectType):
     """GraphQL type for P2P trade confirmations"""
@@ -500,13 +516,18 @@ class P2PTradeType(DjangoObjectType):
         """Returns 'user' or 'business' for the seller"""
         return self.seller_type
     
+    # A trade can be opened against any public offer before money moves:
+    # each side's name only where users/name_visibility allows (a completed
+    # trade counts), the @usuario otherwise. Businesses keep their names.
     def resolve_buyer_display_name(self, info):
         """Returns display name for the buyer"""
-        return self.buyer_display_name
+        person = None if self.buyer_business_id else (self.buyer_user or getattr(self, 'buyer', None))
+        return _p2p_name(info, person, self.buyer_display_name)
     
     def resolve_seller_display_name(self, info):
         """Returns display name for the seller"""
-        return self.seller_display_name
+        person = None if self.seller_business_id else (self.seller_user or getattr(self, 'seller', None))
+        return _p2p_name(info, person, self.seller_display_name)
 
     def resolve_dispute(self, info):
         try:
@@ -1236,6 +1257,13 @@ class CreateP2PTrade(graphene.Mutation):
     @graphql_require_aml()
     @graphql_require_kyc('p2p_trade')
     def mutate(cls, root, info, input):
+        # P2P is deprecated: no new trades (open ones settle as before). A
+        # trade can be opened against any public offer before money moves, and
+        # its chat, confirmations and notifications name both sides.
+        from django.conf import settings as dj_settings
+        if not getattr(dj_settings, 'P2P_NEW_TRADES_ENABLED', False):
+            return CreateP2PTrade(trade=None, success=False,
+                                  errors=["El intercambio P2P ya no está disponible."])
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return CreateP2PTrade(
@@ -1443,9 +1471,10 @@ class CreateP2PTrade(graphene.Mutation):
             # Create notifications for trade creation
             from notifications.utils import create_p2p_notification
             
-            # Determine buyer and seller display names
-            buyer_name = trade.buyer_business.name if trade.buyer_business else f"{trade.buyer_user.first_name} {trade.buyer_user.last_name}".strip() or trade.buyer_user.username
-            seller_name = trade.seller_business.name if trade.seller_business else f"{trade.seller_user.first_name} {trade.seller_user.last_name}".strip() or trade.seller_user.username
+            # Handles, not names: notifications go out before money moves
+            # (users/name_visibility.py). Businesses keep their names.
+            buyer_name = trade.buyer_business.name if trade.buyer_business else f'@{trade.buyer_user.username}'
+            seller_name = trade.seller_business.name if trade.seller_business else f'@{trade.seller_user.username}'
             
             # Notification for buyer
             buyer_user = trade.buyer_user if trade.buyer_user else (trade.buyer_business.accounts.first().user if trade.buyer_business else None)
@@ -1700,9 +1729,10 @@ class UpdateP2PTradeStatus(graphene.Mutation):
             # Create notifications for status updates
             from notifications.utils import create_p2p_notification
             
-            # Determine buyer and seller display names
-            buyer_name = trade.buyer_business.name if trade.buyer_business else f"{trade.buyer_user.first_name} {trade.buyer_user.last_name}".strip() or trade.buyer_user.username
-            seller_name = trade.seller_business.name if trade.seller_business else f"{trade.seller_user.first_name} {trade.seller_user.last_name}".strip() or trade.seller_user.username
+            # Handles, not names: notifications go out before money moves
+            # (users/name_visibility.py). Businesses keep their names.
+            buyer_name = trade.buyer_business.name if trade.buyer_business else f'@{trade.buyer_user.username}'
+            seller_name = trade.seller_business.name if trade.seller_business else f'@{trade.seller_user.username}'
             
             # Get the other party's user
             if is_buyer:

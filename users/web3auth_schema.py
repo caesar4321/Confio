@@ -490,6 +490,16 @@ class Web3AuthUserType(DjangoObjectType):
         model = User
         fields = ['id', 'email', 'username', 'first_name', 'last_name']
 
+    # Same rule as UserType: this type is registered for User too, so any
+    # relation Graphene resolves through it must not name a stranger.
+    def resolve_first_name(self, info):
+        from users.name_visibility import can_see_name
+        return self.first_name if can_see_name(info, self) else ''
+
+    def resolve_last_name(self, info):
+        from users.name_visibility import can_see_name
+        return self.last_name if can_see_name(info, self) else ''
+
     def resolve_algorand_address(self, info):
         try:
             account = self.accounts.filter(account_type='personal', deleted_at__isnull=True).first()

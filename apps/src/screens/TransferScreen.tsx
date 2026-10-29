@@ -15,8 +15,10 @@ import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
+import { parsePhoneNumber } from 'libphonenumber-js';
 import ContactService, {
   contactService,
+  getDefaultPhoneRegion,
   hasDefaultPhoneRegion,
   type ContactSyncProgress as ContactSyncProgressState,
 } from '../services/contactService';
@@ -60,10 +62,9 @@ type TransferScreenNavigationProp = NativeStackNavigationProp<MainStackParamList
 // Memoized ContactCard component moved outside to prevent recreation
 interface ContactCardProps {
   contact: any;
-  isOnConfio?: boolean;
+  /** This sender confirmed the account behind the number (SavedRecipient). */
+  isSaved?: boolean;
   onPress: (contact: any) => void;
-  onSendPress: (contact: any) => void;
-  onInvitePress: (contact: any) => void;
 }
 
 interface EmployeeCardProps {
@@ -73,8 +74,8 @@ interface EmployeeCardProps {
   onCancelInvitation: (contact: any) => void;
 }
 
-const getContactCardLabel = (contact: any, isOnConfio: boolean) =>
-  `${isOnConfio ? 'Contacto en Confío' : 'Contacto para invitar'}: ${contact.name}. ${contact.phone || 'Sin teléfono'}`;
+const getContactCardLabel = (contact: any, isSaved: boolean) =>
+  `${isSaved ? 'Contacto en Confío' : 'Contacto'}: ${contact.name}. ${contact.phone || 'Sin teléfono'}`;
 
 const getEmployeeCardLabel = (contact: any) =>
   `${contact.isInvitation ? 'Invitación pendiente' : 'Empleado'}: ${contact.name}. ${contact.phone || 'Sin teléfono'}. Rol ${getRoleLabel(contact.role)}`;
@@ -149,81 +150,117 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
   );
 });
 
-const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, onInvitePress }: ContactCardProps) => (
+// A contact is just a person: whether money goes direct or by WhatsApp link
+// is worked out on the amount screen (resolveRecipientForPhone), never
+// guessed here. Contacts this sender confirmed carry a "Confío" tag.
+const ContactCard = memo(({ contact, isSaved = false, onPress }: ContactCardProps) => (
   <TouchableOpacity
     style={styles.contactCard}
     onPress={() => onPress(contact)}
     accessibilityRole="button"
-    accessibilityLabel={getContactCardLabel(contact, isOnConfio)}
-    accessibilityHint={isOnConfio ? 'Abre el detalle del contacto.' : 'Abre la invitación para este contacto.'}
+    accessibilityLabel={getContactCardLabel(contact, isSaved)}
+    accessibilityHint="Abre el envío a este contacto."
   >
-    <View style={[
-      styles.avatarContainer,
-      { backgroundColor: isOnConfio ? colors.primaryLight : colors.border }
-    ]}>
-      <Text style={[
-        styles.avatarText,
-        { color: isOnConfio ? colors.primaryDark : colors.text.secondary }
-      ]}>
+    <View style={[styles.avatarContainer, { backgroundColor: isSaved ? colors.primaryLight : colors.border }]}>
+      <Text style={[styles.avatarText, { color: isSaved ? colors.primaryDark : colors.text.secondary }]}>
         {contact.avatar}
       </Text>
     </View>
-
     <View style={styles.contactInfo}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-        <Text
-          style={[
-            styles.contactName,
-            isOnConfio && contact.statusTier && getTierNameColor(contact.statusTier)
-              ? { color: getTierNameColor(contact.statusTier) }
-              : undefined,
-          ]}
-          numberOfLines={1}
-        >{contact.name}</Text>
-        {isOnConfio && contact.isReferralVerified && (
-          <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, justifyContent: 'center', alignItems: 'center' }}>
-            <Icon name="check" size={10} color={colors.white} />
-          </View>
-        )}
-        {isOnConfio && contact.statusTier && contact.statusTier !== 'member' && (
-          <Text style={{ fontSize: 13 }}>{getTierMeta(contact.statusTier).emoji}</Text>
-        )}
-      </View>
+      <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
       <Text style={styles.contactPhone}>{contact.phone}</Text>
     </View>
-
-    {isOnConfio ? (
-      <TouchableOpacity
-        style={styles.sendButton}
-        onPress={(e) => {
-          e.stopPropagation();
-          onSendPress(contact);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={`Enviar dinero a ${contact.name}`}
-      >
-        <Icon name="send" size={18} color={colors.primaryDark} />
-      </TouchableOpacity>
-    ) : (
-      <TouchableOpacity
-        style={styles.inviteButton}
-        onPress={(e) => {
-          e.stopPropagation();
-          onInvitePress(contact);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={`Enviar e invitar a ${contact.name}`}
-      >
-        <Icon name="gift" size={15} color={colors.violet} style={{ marginRight: 6 }} />
-        <Text style={styles.inviteButtonText}>Invitar y enviar</Text>
-      </TouchableOpacity>
-    )}
+    {isSaved ? (
+      <View style={styles.savedTag}>
+        <Text style={styles.savedTagText}>Confío</Text>
+      </View>
+    ) : null}
+    <Icon name="chevron-right" size={18} color={colors.text.light} />
   </TouchableOpacity>
-), (prevProps, nextProps) => {
-  // Custom comparison to prevent unnecessary re-renders
-  return prevProps.contact.id === nextProps.contact.id &&
-    prevProps.isOnConfio === nextProps.isOnConfio;
-});
+), (prevProps, nextProps) => prevProps.contact.id === nextProps.contact.id
+  && prevProps.isSaved === nextProps.isSaved);
+
+// Someone this sender has moved money with (sendPeople.recent): sends direct.
+const RecentCard = memo(({ person, onPress }: { person: any; onPress: (person: any) => void }) => (
+  <TouchableOpacity
+    style={styles.contactCard}
+    onPress={() => onPress(person)}
+    accessibilityRole="button"
+    accessibilityLabel={`Enviar a ${person.displayName}`}
+  >
+    <View style={[styles.avatarContainer, { backgroundColor: colors.primaryLight }]}>
+      <Text style={[styles.avatarText, { color: colors.primaryDark }]}>
+        {(person.displayName || person.username || '?').replace(/^@/, '').charAt(0).toUpperCase()}
+      </Text>
+    </View>
+    <View style={styles.contactInfo}>
+      <Text style={styles.contactName} numberOfLines={1}>{person.displayName}</Text>
+      <Text style={styles.contactPhone}>
+        {person.receivesByQrOnly ? 'Cobra con QR' : `@${person.username}`}
+      </Text>
+    </View>
+    <Icon name="chevron-right" size={18} color={colors.text.light} />
+  </TouchableOpacity>
+));
+
+// What the search field typed, when it is a handle or a number rather than a name.
+const SearchActionCard = ({ title, subtitle, icon, onPress }: {
+  title: string; subtitle: string; icon: string; onPress: () => void;
+}) => (
+  <TouchableOpacity style={styles.contactCard} onPress={onPress} accessibilityRole="button" accessibilityLabel={title}>
+    <View style={[styles.avatarContainer, { backgroundColor: colors.primaryLight }]}>
+      <Icon name={icon} size={18} color={colors.primaryDark} />
+    </View>
+    <View style={styles.contactInfo}>
+      <Text style={styles.contactName} numberOfLines={1}>{title}</Text>
+      <Text style={styles.contactPhone}>{subtitle}</Text>
+    </View>
+    <Icon name="chevron-right" size={18} color={colors.text.light} />
+  </TouchableOpacity>
+);
+
+// Enviar's people (send/link_invite.py): its own query, so a server that does
+// not know it yet cannot fail the screen's other queries.
+const SEND_PEOPLE = gql`
+  query SendPeople {
+    sendPeople {
+      recent { userId username displayName identityVerified receivesByQrOnly }
+      savedPhoneKeys
+    }
+  }
+`;
+
+/** "+573001234567" → "57:3001234567", the server's phone_key
+ *  (users/phone_utils.canonicalize_phone_digits): Argentina drops the
+ *  mobile 9 and a trunk 0. */
+const phoneKeyOf = (e164?: string | null): string => {
+  try {
+    const parsed = e164 && e164.startsWith('+') ? parsePhoneNumber(e164) : null;
+    if (!parsed?.isValid()) return '';
+    let national = String(parsed.nationalNumber);
+    if (parsed.countryCallingCode === '54') {
+      if (national.startsWith('0') && national.length >= 11) national = national.slice(1);
+      if (national.startsWith('9') && national.length >= 11) national = national.slice(1);
+    }
+    return `${parsed.countryCallingCode}:${national}`;
+  } catch {
+    return '';
+  }
+};
+
+/** A typed number, international with "+" or local to the user's country. */
+const typedNumberE164 = (text: string): string => {
+  const trimmed = text.trim();
+  if (!/^\+?[\d\s()-]{7,}$/.test(trimmed)) return '';
+  try {
+    const parsed = trimmed.startsWith('+')
+      ? parsePhoneNumber(trimmed)
+      : parsePhoneNumber(trimmed, (getDefaultPhoneRegion() || undefined) as any);
+    return parsed?.isValid() ? parsed.format('E.164') : '';
+  } catch {
+    return '';
+  }
+};
 
 // Create isolated SearchInput component to prevent keyboard issues
 const SearchInput = React.memo(({
@@ -262,7 +299,7 @@ const SearchInput = React.memo(({
   return (
     <TextInput
       style={styles.searchInput}
-      placeholder={isBusinessAccount ? "Buscar empleados..." : "Buscar contactos..."}
+      placeholder={isBusinessAccount ? "Empleados o @usuario" : "Nombre, @usuario o número"}
       placeholderTextColor={colors.text.secondary}
       value={localValue}
       onChangeText={handleLocalChange}
@@ -270,7 +307,7 @@ const SearchInput = React.memo(({
       autoCapitalize="none"
       returnKeyType="search"
       blurOnSubmit={false}
-      accessibilityLabel={isBusinessAccount ? 'Buscar empleados' : 'Buscar contactos'}
+      accessibilityLabel={isBusinessAccount ? 'Buscar empleados' : 'Buscar por nombre, usuario o número'}
     />
   );
 });
@@ -590,6 +627,7 @@ export const TransferScreen = () => {
   // Handle pull to refresh
   const handleRefresh = async () => {
     setRefreshing(true);
+    if (isPersonalAccount) refetchSendPeople().catch(() => {});
 
     if (isBusinessAccount) {
       // Use the dedicated employee refresh function for business accounts
@@ -764,6 +802,66 @@ export const TransferScreen = () => {
       .sort((a, b) => a.name.localeCompare(b.name)),
     [contactsData.nonConfioFriends, searchTerm]
   );
+
+  // Recientes and the "Confío" tags. The address book stays on the phone:
+  // the server only answers which numbers this sender already confirmed.
+  const { data: sendPeopleData, refetch: refetchSendPeople } = useQuery(SEND_PEOPLE, {
+    skip: !isPersonalAccount,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+  });
+  // A save or "olvidar" on the amount screen changes both lists: refresh on return.
+  useFocusEffect(useCallback(() => {
+    if (isPersonalAccount) refetchSendPeople().catch(() => {});
+  }, [isPersonalAccount, refetchSendPeople]));
+  const savedPhoneKeys = useMemo(
+    () => new Set<string>(sendPeopleData?.sendPeople?.savedPhoneKeys || []),
+    [sendPeopleData],
+  );
+  const recentPeople = useMemo(() => {
+    const term = searchTerm.trim().replace(/^@/, '').toLowerCase();
+    return (sendPeopleData?.sendPeople?.recent || []).filter((person: any) => !term
+      || String(person.displayName || '').toLowerCase().includes(term)
+      || String(person.username || '').toLowerCase().includes(term));
+  }, [sendPeopleData, searchTerm]);
+  // Every contact in one list, A to Z (no "on Confío" split any more).
+  const filteredContacts = useMemo(
+    () => [...filteredConfioFriends, ...filteredNonConfioFriends].sort((a, b) => a.name.localeCompare(b.name)),
+    [filteredConfioFriends, filteredNonConfioFriends],
+  );
+  const searchUsername = /^@[A-Za-z0-9_.]{2,}$/.test(searchTerm.trim()) ? searchTerm.trim().slice(1) : '';
+  const searchNumber = searchUsername ? '' : typedNumberE164(searchTerm);
+  const [usernamePrefill, setUsernamePrefill] = useState('');
+
+  const handleRecentPress = useCallback((person: any) => {
+    if (person.receivesByQrOnly) {
+      Alert.alert('Cobra con QR', `${person.displayName} cobra con QR. Pídele su código de Cobrar para pagarle.`);
+      return;
+    }
+    handleSendToFriend({
+      id: String(person.userId),
+      userId: String(person.userId),
+      name: person.displayName,
+      avatar: (person.displayName || person.username || '?').replace(/^@/, '').charAt(0).toUpperCase(),
+      isOnConfio: true,
+      phone: '',
+      confioUsername: person.username,
+      confioFirstName: person.displayName,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleNumberPress = useCallback((e164: string) => {
+    handleSendToFriend({
+      id: `number_${e164}`,
+      name: e164,
+      avatar: '#',
+      phone: e164,
+      normalizedPhones: [e164],
+      isOnConfio: false,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleFriendPress = (contact: any) => {
     // Navigate all friends to FriendDetail, regardless of Confío status
@@ -995,7 +1093,12 @@ export const TransferScreen = () => {
         )
         : invitationContacts;
 
-      const sections = [];
+      const sections: any[] = [];
+      // A business pays @usuarios too (the old "A alguien en Confío" card).
+      if (searchUsername) {
+        sections.push({ title: 'Usuario', count: 1, isSearch: true,
+          data: [{ id: `search_user_${searchUsername}`, kind: 'username', username: searchUsername }] });
+      }
 
       if (filteredEmployees.length > 0 || filteredInvitations.length > 0) {
         sections.push({
@@ -1009,29 +1112,35 @@ export const TransferScreen = () => {
       return sections;
     }
 
-    const sectionData = [];
+    const sectionData: any[] = [];
 
-    if (filteredConfioFriends.length > 0) {
+    // What the search typed, when it is a handle or a number.
+    if (searchUsername) {
+      sectionData.push({ title: 'Usuario', count: 1, isSearch: true,
+        data: [{ id: `search_user_${searchUsername}`, kind: 'username', username: searchUsername }] });
+    } else if (searchNumber) {
+      sectionData.push({ title: 'Número', count: 1, isSearch: true,
+        data: [{ id: `search_number_${searchNumber}`, kind: 'number', phone: searchNumber }] });
+    }
+
+    if (recentPeople.length > 0) {
       sectionData.push({
-        title: 'Amigos en Confío',
-        count: filteredConfioFriends.length,
-        data: filteredConfioFriends,
-        isConfio: true
+        title: 'Recientes',
+        count: recentPeople.length,
+        data: recentPeople.map((person: any) => ({ ...person, id: `recent_${person.userId}`, kind: 'recent' })),
       });
     }
 
-    if (filteredNonConfioFriends.length > 0) {
+    if (filteredContacts.length > 0) {
       sectionData.push({
-        title: 'Invita a tus amigos',
-        count: filteredNonConfioFriends.length,
-        data: filteredNonConfioFriends,
-        isConfio: false,
-        showInfo: true
+        title: 'Tus contactos',
+        count: filteredContacts.length,
+        data: filteredContacts,
       });
     }
 
     return sectionData;
-  }, [filteredConfioFriends, filteredNonConfioFriends, isBusinessAccount, activeAccount, employeesLoading, invitationsLoading, employeesData, invitationsData, searchTerm]);
+  }, [filteredContacts, recentPeople, searchUsername, searchNumber, isBusinessAccount, activeAccount, employeesLoading, invitationsLoading, employeesData, invitationsData, searchTerm]);
 
   const renderSectionHeader = useCallback(({ section }) => (
     <View style={styles.section}>
@@ -1118,17 +1227,38 @@ export const TransferScreen = () => {
       );
     }
 
-    // For regular contacts
+    if (item.kind === 'username') {
+      return (
+        <SearchActionCard
+          icon="at-sign"
+          title={`Buscar @${item.username}`}
+          subtitle="Enviar a un usuario de Confío"
+          onPress={() => { setUsernamePrefill(item.username); setUsernameModalVisible(true); }}
+        />
+      );
+    }
+    if (item.kind === 'number') {
+      return (
+        <SearchActionCard
+          icon="phone"
+          title={`Enviar al ${item.phone}`}
+          subtitle="Te mostramos si ya le enviaste antes"
+          onPress={() => handleNumberPress(item.phone)}
+        />
+      );
+    }
+    if (item.kind === 'recent') {
+      return <RecentCard person={item} onPress={handleRecentPress} />;
+    }
+
     return (
       <ContactCard
         contact={item}
-        isOnConfio={item.isOnConfio || false}
-        onPress={handleFriendPressCallback}
-        onSendPress={handleSendToFriendCallback}
-        onInvitePress={handleInviteFriendCallback}
+        isSaved={(item.normalizedPhones || []).some((phone: string) => savedPhoneKeys.has(phoneKeyOf(phone)))}
+        onPress={handleSendToFriendCallback}
       />
     );
-  }, [handleFriendPressCallback, handleSendToFriendCallback, handleInviteFriendCallback, handleEmployeePress, handleEmployeeActions, handleCancelInvitation]);
+  }, [handleSendToFriendCallback, handleRecentPress, handleNumberPress, savedPhoneKeys, handleEmployeePress, handleEmployeeActions, handleCancelInvitation]);
 
   // Create a stable header component that won't cause re-renders
   // An ELEMENT, not a component defined inside the memo: a new function type
@@ -1235,21 +1365,10 @@ export const TransferScreen = () => {
                   mutation is owner_only server-side, CreateRampOrder refuses
                   employees), so an employee with sendFunds gets the cash
                   directory and crypto only. */}
-              <RouteCard label="A ALGUIEN EN CONFÍO">
-                <RouteOptionRow
-                  first
-                  option={{
-                    id: 'send_to_username',
-                    icon: 'at-sign',
-                    title: 'Enviar a un @usuario',
-                    subtitle: 'Escribe su usuario de Confío',
-                    onPress: () => setUsernameModalVisible(true),
-                  }}
-                />
-              </RouteCard>
               <UsernameRecipientModal
                 visible={usernameModalVisible}
-                onClose={() => setUsernameModalVisible(false)}
+                initialUsername={usernamePrefill}
+                onClose={() => { setUsernameModalVisible(false); setUsernamePrefill(''); }}
                 onFound={friend => {
                   setUsernameModalVisible(false);
                   handleSendToFriend(friend);
@@ -1873,6 +1992,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text.secondary,
   },
+  savedTag: {
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginRight: 6,
+    backgroundColor: colors.primaryLight,
+  },
+  savedTagText: { fontSize: 11, fontWeight: '700', color: colors.flowIn.textSmall },
   // Row affordances are soft chips, not filled buttons: a list of dozens of
   // people should read as people, not as a wall of CTAs. Color still carries
   // the signal (emerald = send now, violet = invite funnel).

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { gql, useLazyQuery } from '@apollo/client';
@@ -41,10 +41,13 @@ export type UsernameFriend = {
  */
 export const UsernameRecipientModal = ({
   visible,
+  initialUsername = '',
   onClose,
   onFound,
 }: {
   visible: boolean;
+  /** Typed in Enviar's search ("@ana"): opened already looking it up. */
+  initialUsername?: string;
   onClose: () => void;
   onFound: (friend: UsernameFriend) => void;
 }) => {
@@ -66,6 +69,15 @@ export const UsernameRecipientModal = ({
     setLookedUp(cleaned);
     lookup({ variables: { username: cleaned } });
   };
+
+  useEffect(() => {
+    if (!visible || !initialUsername) return;
+    const handle = initialUsername.replace(/^@/, '');
+    setUsername(handle);
+    setLookedUp(handle);
+    lookup({ variables: { username: handle } });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, initialUsername]);
 
   const close = () => {
     setUsername('');

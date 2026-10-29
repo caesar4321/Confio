@@ -517,6 +517,17 @@ class UserType(DjangoObjectType):
 		# Otherwise hide it
 		return None
 
+	def resolve_first_name(self, info):
+		"""Names go only where users/name_visibility.can_see_name allows:
+		the person, staff, people they have moved money with, their business
+		team and payroll. A username or a list never resolves a stranger's name."""
+		from users.name_visibility import can_see_name
+		return self.first_name if can_see_name(info, self) else ''
+
+	def resolve_last_name(self, info):
+		from users.name_visibility import can_see_name
+		return self.last_name if can_see_name(info, self) else ''
+
 	def resolve_direct_receive_status(self, info):
 		user = info.context.user
 		if not user.is_authenticated or str(user.id) != str(self.id):
@@ -880,14 +891,16 @@ class AccountType(DjangoObjectType):
 		return f"{self.account_type}_{self.account_index}"
 	
 	def resolve_display_name(self, info):
-		if hasattr(self, 'display_name'):
-			return self.display_name
-		# Generate display name for regular accounts
+		# Personal accounts first: Account.display_name (the model property)
+		# carries the full name, so it may not short-circuit the name rule.
 		if self.account_type == 'personal':
 			user = self.user
-			if user.first_name or user.last_name:
+			from users.name_visibility import can_see_name
+			if (user.first_name or user.last_name) and can_see_name(info, user):
 				return f"Personal - {user.first_name} {user.last_name}".strip()
 			return f"Personal - {user.username}"
+		if hasattr(self, 'display_name'):
+			return self.display_name
 		elif self.business:
 			# Check if this is an employee account
 			if getattr(self, 'is_employee', False):
@@ -1050,26 +1063,6 @@ class UserAchievementType(DjangoObjectType):
 		return self.reward_amount
 
 
-def _referrer_for_viewer(referrer, info):
-	"""Anyone can name any @usuario or number as their referrer, so being a
-	referee is not a reason to see that person's name: it shows only after the
-	two have moved money (users/name_visibility.py). The referrer's own view,
-	and the referrer's view of who chose them, are unchanged."""
-	if referrer is None:
-		return None
-	viewer = getattr(info.context, 'user', None)
-	from users.name_visibility import paid_each_other
-	if viewer is not None and getattr(viewer, 'is_authenticated', False) and (
-			viewer.pk == referrer.pk or referrer.pk in paid_each_other(viewer, [referrer.pk])):
-		return referrer
-	import copy
-	masked = copy.copy(referrer)
-	masked.first_name = ''
-	masked.last_name = ''
-	masked.save = None  # a display copy, never written back
-	return masked
-
-
 class InfluencerReferralType(DjangoObjectType):
 	influencer_user = graphene.Field(lambda: UserType)
 	viewer_reward_event_id = graphene.ID()
@@ -1086,10 +1079,9 @@ class InfluencerReferralType(DjangoObjectType):
 				 'created_at', 'updated_at')
 
 	def resolve_influencer_user(self, info):
-		return _referrer_for_viewer(getattr(self, 'referrer_user', None), info)
-
-	def resolve_referrer_user(self, info):
-		return _referrer_for_viewer(getattr(self, 'referrer_user', None), info)
+		# Its names go through UserType.resolve_first_name (name_visibility):
+		# naming someone your referrer does not reveal who they are.
+		return getattr(self, 'referrer_user', None)
 
 	def resolve_viewer_reward_event_id(self, info):
 		user = getattr(info.context, 'user', None)
@@ -1541,6 +1533,15 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 
 			recipient_name = format_name(transfer.recipient_user) if transfer.recipient_user else "Externo"
 			recipient_phone_masked = f"******{transfer.recipient_user.phone_number[-4:]}" if transfer.recipient_user and transfer.recipient_user.phone_number else ""
+			if transfer.status != 'CONFIRMED':
+				# A receipt for money that has not moved (an unsigned send is
+				# enough to get an id) names nobody: handles only
+				# (users/name_visibility.py).
+				if transfer.sender_user:
+					sender_name = f"@{transfer.sender_user.username}"
+				if transfer.recipient_user:
+					recipient_name = f"@{transfer.recipient_user.username}"
+				recipient_phone_masked = ""
 			if str(transfer.idempotency_key or '').startswith('tip-'):
 				# A Propina: Comunidad names as stored, never a real name or phone.
 				sender_name = transfer.sender_display_name or "Miembro de Comunidad"

@@ -281,11 +281,13 @@ class User(AbstractUser, SoftDeleteModel):
         # (markOnboarded, phone linking): a full save from a request that
         # loaded the user before it was set must not write it back to NULL.
         if not self._state.adding and update_fields is None:
+            # A phone edit writes all three phone fields: phone_key is derived
+            # below and phone_country may still be deferred on this instance.
             update_fields = {
                 field.attname for field in self._meta.concrete_fields
-                if not field.primary_key and field.attname in self.__dict__
-                and field.attname != 'onboarded_at'
-                and (phone_changed or field.attname not in self._phone_fields)
+                if not field.primary_key and field.attname != 'onboarded_at' and (
+                    (field.attname in self.__dict__ and field.attname not in self._phone_fields)
+                    or (phone_changed and field.attname in self._phone_fields))
             }
 
         # Only phone writes should normalize phone values or load deferred fields.

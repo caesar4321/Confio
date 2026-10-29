@@ -304,3 +304,48 @@ def forget(sender, phone: str) -> dict:
         RecipientRevocation.objects.update_or_create(
             sender_user=sender, phone_key=phone_key, defaults={'revoked_at': timezone.now()})
     return {'success': True}
+
+
+# ── Enviar's people list ──────────────────────────────────────────────────
+
+def recent_people(sender, limit: int = 20) -> list:
+    """People the sender has moved money with (confirmed sends either way,
+    claimed links either way; never a Propina, which is pseudonymous), newest first. Exactly the people whose names
+    the sender may see (users/name_visibility.py)."""
+    from django.contrib.auth import get_user_model
+    from django.db.models import Max, Q
+    from .models import PhoneInvite, SendTransaction
+    last = {}
+
+    def note(user_id, at):
+        if user_id and user_id != sender.pk and (user_id not in last or at > last[user_id]):
+            last[user_id] = at
+
+    for row in SendTransaction.objects.filter(
+        sender_user=sender, recipient_user__isnull=False, recipient_business__isnull=True,
+        status='CONFIRMED', deleted_at__isnull=True,
+    ).exclude(idempotency_key__startswith='tip-').order_by().values('recipient_user_id').annotate(at=Max('created_at')):
+        note(row['recipient_user_id'], row['at'])
+    for row in SendTransaction.objects.filter(
+        recipient_user=sender, sender_user__isnull=False, sender_business__isnull=True,
+        status='CONFIRMED', deleted_at__isnull=True,
+    ).exclude(idempotency_key__startswith='tip-').order_by().values('sender_user_id').annotate(at=Max('created_at')):
+        note(row['sender_user_id'], row['at'])
+    for row in PhoneInvite.objects.filter(
+        Q(inviter_user=sender) | Q(claimed_by=sender), status='claimed', claimed_at__isnull=False,
+        deleted_at__isnull=True,
+    ).order_by().values('inviter_user_id', 'claimed_by_id', 'claimed_at'):
+        note(row['claimed_by_id'] if row['inviter_user_id'] == sender.pk else row['inviter_user_id'],
+             row['claimed_at'])
+    ids = [uid for uid, _ in sorted(last.items(), key=lambda item: item[1], reverse=True)[:limit]]
+    users = {u.pk: u for u in get_user_model().objects.filter(pk__in=ids, is_active=True)}
+    return [users[uid] for uid in ids if uid in users]
+
+
+def saved_phone_keys(sender) -> list:
+    """Numbers the sender confirmed (SavedRecipient): the app tags these
+    contacts locally. The sender gave Confío each of them already."""
+    from .models import SavedRecipient
+    return list(SavedRecipient.objects.filter(
+        sender_user=sender, deleted_at__isnull=True, recipient_user__is_active=True,
+    ).values_list('phone_key', flat=True))

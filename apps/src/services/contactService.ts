@@ -100,7 +100,7 @@ export const setDefaultPhoneRegion = (country?: string | null): void => {
 
 export const hasDefaultPhoneRegion = (): boolean => defaultPhoneRegion !== null;
 
-const getDefaultPhoneRegion = (): CountryCode | undefined => defaultPhoneRegion || undefined;
+export const getDefaultPhoneRegion = (): CountryCode | undefined => defaultPhoneRegion || undefined;
 const CONTACTS_PRIVACY_SERVICE = 'com.confio.contacts_privacy';
 // Use a dedicated keychain service for upload consent to avoid overwriting permission status
 

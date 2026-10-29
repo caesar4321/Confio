@@ -100,6 +100,25 @@ class SendTransactionType(DjangoObjectType):
     def resolve_sender_user(self, info):
         return tip_safe_user(self, self.sender_user, info)
 
+    # The stored display names are written at prepare, before any money
+    # moves: an unsigned send to a stranger must not turn a username into a
+    # name (users/name_visibility.can_see_name). Confirmed sends are money
+    # moved, so their stored names stand.
+    def _display_for(self, info, user, stored, business=None):
+        # A Propina stores Comunidad pseudonyms: those stand, always.
+        if is_tip_send(self) or self.status == 'CONFIRMED' or user is None or business is not None:
+            return stored
+        from users.name_visibility import can_see_name
+        return stored if can_see_name(info, user) else f'@{user.username}'
+
+    def resolve_sender_display_name(self, info):
+        return SendTransactionType._display_for(
+            self, info, self.sender_user, self.sender_display_name, self.sender_business)
+
+    def resolve_recipient_display_name(self, info):
+        return SendTransactionType._display_for(
+            self, info, self.recipient_user, self.recipient_display_name, self.recipient_business)
+
     def resolve_recipient_user(self, info):
         return tip_safe_user(self, self.recipient_user, info)
 
@@ -679,8 +698,23 @@ def _link_user(user, viewer):
         identity_verified=is_identity_verified(user), receives_by_qr_only=is_blocked(user))
 
 
+class SendPeopleType(graphene.ObjectType):
+    """Enviar's people list: Recientes, plus the numbers to tag in the
+    phone's own contact list (it is never uploaded)."""
+    recent = graphene.List(LinkRecipientUserType)
+    saved_phone_keys = graphene.List(graphene.String)
+
+
 class LinkInviteQuery(graphene.ObjectType):
+    send_people = graphene.Field(SendPeopleType)
     resolve_recipient_for_phone = graphene.Field(RecipientForPhoneType, phone=graphene.String(required=True))
+
+    @login_required
+    def resolve_send_people(self, info):
+        from .link_invite import recent_people, saved_phone_keys
+        viewer = info.context.user
+        return SendPeopleType(recent=[_link_user(u, viewer) for u in recent_people(viewer)],
+                              saved_phone_keys=saved_phone_keys(viewer))
     link_invite = graphene.Field(LinkInviteType, public_ref=graphene.String(required=True))
 
     @login_required

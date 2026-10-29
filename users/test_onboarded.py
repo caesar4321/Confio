@@ -86,15 +86,38 @@ class NameVisibilityTests(TestCase):
                                    token_type='CUSD', status='claimed', claimed_by=self.stranger, kind='link')
         self.assertEqual(display_name_for(self.viewer, self.stranger), 'Rosa D.')
 
-    def test_naming_someone_your_referrer_does_not_reveal_their_name(self):
-        # protects=setReferrer on a public @usuario cannot be used to read a stranger's name; fails_when=the referee's view carries the referrer's first/last name; no_claim=referral rewards
-        from users.schema import _referrer_for_viewer
+    def test_user_names_follow_one_rule_everywhere(self):
+        # protects=any UserType (referrer, leaderboard, P2P owner, nested account) hides a stranger's name and shows it after money moved or within a business; fails_when=a username in any list resolves a real name; no_claim=strings stored on transactions
+        from users.schema import UserType
         info = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
-        masked = _referrer_for_viewer(self.stranger, info)
-        self.assertEqual((masked.first_name, masked.last_name, masked.username), ('', '', 'nv-stranger'))
-        self.assertEqual(User.objects.get(pk=self.stranger.pk).first_name, 'Rosa')
-        own = _referrer_for_viewer(self.stranger, SimpleNamespace(context=SimpleNamespace(user=self.stranger)))
-        self.assertEqual(own.first_name, 'Rosa')
+        self.assertEqual(UserType.resolve_first_name(self.stranger, info), '')
+        own = SimpleNamespace(context=SimpleNamespace(user=self.stranger))
+        self.assertEqual(UserType.resolve_first_name(self.stranger, own), 'Rosa')
+        from send.models import SendTransaction
+        SendTransaction.objects.create(
+            sender_user=self.viewer, recipient_user=self.stranger, sender_type='user', recipient_type='user',
+            amount=1, token_type='CUSD', status='CONFIRMED', sender_address='0x' + '1' * 40,
+            recipient_address='0x' + '2' * 40)
+        fresh = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
+        self.assertEqual(UserType.resolve_last_name(self.stranger, fresh), 'Díaz')
+
+    def test_business_names_need_an_accepted_invitation(self):
+        # protects=an owner sees an employee's name only after the employee accepted; fails_when=adding anyone by phone reveals their name; no_claim=permissions
+        from users.models import Business
+        from users.models_employee import BusinessEmployee, EmployeeInvitation
+        from users.schema import UserType
+        business = Business.objects.create(name='Tienda', category='retail')
+        Account.objects.create(user=self.viewer, account_type='business', account_index=0, business=business)
+        BusinessEmployee.objects.create(business=business, user=self.stranger, role='cashier')
+        info = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
+        self.assertEqual(UserType.resolve_first_name(self.stranger, info), '')
+        from datetime import timedelta
+        from django.utils import timezone
+        EmployeeInvitation.objects.create(business=business, invited_by=self.viewer, role='cashier',
+                                          status='accepted', accepted_by=self.stranger,
+                                          expires_at=timezone.now() + timedelta(days=7))
+        fresh = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
+        self.assertEqual(UserType.resolve_first_name(self.stranger, fresh), 'Rosa')
 
     def test_phone_lookup_hides_names_of_strangers(self):
         # protects=a guessed number does not return its holder's name; fails_when=checkUsersByPhones returns first/last for a stranger; no_claim=match ambiguity rules
@@ -111,3 +134,32 @@ class NameVisibilityTests(TestCase):
         from users.name_visibility import take_lookup_quota
         self.assertTrue(take_lookup_quota(self.viewer, 't', 2000, 2000, 60))
         self.assertFalse(take_lookup_quota(self.viewer, 't', 1, 2000, 60))
+
+    def test_an_unsigned_send_to_a_stranger_shows_only_the_handle(self):
+        # protects=prepareBscSend cannot be used to read a stranger's name from the pending row; fails_when=recipientDisplayName returns the stored real name before money moved; no_claim=confirmed history
+        from send.models import SendTransaction
+        from send.schema import SendTransactionType
+        tx = SendTransaction.objects.create(
+            sender_user=self.viewer, recipient_user=self.stranger, sender_type='user', recipient_type='user',
+            amount=1, token_type='CUSD', status='PENDING', sender_address='0x' + '1' * 40,
+            recipient_address='0x' + '2' * 40, recipient_display_name='Rosa Díaz')
+        info = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
+        self.assertEqual(SendTransactionType.resolve_recipient_display_name(tx, info), '@nv-stranger')
+        tx.status = 'CONFIRMED'
+        self.assertEqual(SendTransactionType.resolve_recipient_display_name(tx, info), 'Rosa Díaz')
+
+    def test_a_tip_never_reveals_who_is_behind_a_pseudonym(self):
+        # protects=Comunidad tips stay pseudonymous: no name, no handle, no Recientes entry; fails_when=a confirmed tip unlocks the real name or a pending tip shows @usuario; no_claim=tip settlement
+        from send import link_invite
+        from send.models import SendTransaction
+        from send.schema import SendTransactionType
+        from users.name_visibility import display_name_for
+        tip = SendTransaction.objects.create(
+            sender_user=self.viewer, recipient_user=self.stranger, sender_type='user', recipient_type='user',
+            amount=1, token_type='CUSD', status='PENDING', sender_address='0x' + '1' * 40,
+            recipient_address='0x' + '2' * 40, idempotency_key='tip-1', recipient_display_name='LunaInversora')
+        info = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
+        self.assertEqual(SendTransactionType.resolve_recipient_display_name(tip, info), 'LunaInversora')
+        SendTransaction.objects.filter(pk=tip.pk).update(status='CONFIRMED')
+        self.assertEqual(display_name_for(self.viewer, self.stranger), '@nv-stranger')
+        self.assertEqual(link_invite.recent_people(self.viewer), [])

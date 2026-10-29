@@ -473,6 +473,27 @@ class UnifiedTransactionType(DjangoObjectType):
         return (tip_safe_user(self.send_transaction, self.counterparty_user, info)
                 if self.send_transaction_id else self.counterparty_user)
 
+    def _send_name(self, info, user, business, stored):
+        """A send row is written at prepare, before money moves: until it is
+        CONFIRMED, a person's stored name shows only where the name rule
+        allows (users/name_visibility.py). Business names always stand."""
+        send = getattr(self, 'send_transaction', None)
+        if (self.transaction_type != 'send' or self.status == 'CONFIRMED'
+                or business is not None or user is None
+                # A Propina stores Comunidad pseudonyms: those stand, always.
+                or str(getattr(send, 'idempotency_key', '') or '').startswith('tip-')):
+            return stored
+        from users.name_visibility import can_see_name
+        return stored if can_see_name(info, user) else f'@{user.username}'
+
+    def resolve_counterparty_display_name(self, info):
+        return UnifiedTransactionType._send_name(
+            self, info, self.counterparty_user, self.counterparty_business, self.counterparty_display_name)
+
+    def resolve_sender_display_name(self, info):
+        return UnifiedTransactionType._send_name(
+            self, info, self.sender_user, self.sender_business, self.sender_display_name)
+
     def resolve_display_counterparty(self, info):
         """Resolve counterparty name based on direction"""
         try:
@@ -507,10 +528,10 @@ class UnifiedTransactionType(DjangoObjectType):
                 # guaranteed for every external send and every inbound
                 # deposit. The address IS the name in that case.
                 if direction == 'sent':
-                    return (self.counterparty_display_name
+                    return (UnifiedTransactionType.resolve_counterparty_display_name(self, info)
                             or _short_addr(self.to_address) or 'Unknown')
                 elif direction == 'received':
-                    return (self.sender_display_name
+                    return (UnifiedTransactionType.resolve_sender_display_name(self, info)
                             or _short_addr(self.from_address) or 'Unknown')
         except Exception as e:
             print(f"Error in resolve_display_counterparty: {e}")

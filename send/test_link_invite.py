@@ -226,3 +226,16 @@ class AuditFollowUpTests(TestCase):
         # A second (late) legacy save never replaces the one already saved.
         self.assertEqual(link_invite.save_legacy(self.sender, '+573001234567', recipient_user_id=holder.pk)['error'],
                          'already_saved')
+
+
+class SendPeopleTests(TestCase):
+    def test_recent_people_are_those_money_moved_with_newest_first(self):
+        # protects=Recientes lists exactly the people the sender may see by name, newest first; fails_when=a pending send or a stranger appears, or order is wrong; no_claim=the app's rendering
+        me = make_user('people-me')
+        old_friend, new_friend, pending = (make_user(n) for n in ('old-friend', 'new-friend', 'pending-one'))
+        for other, status in ((old_friend, 'CONFIRMED'), (new_friend, 'CONFIRMED'), (pending, 'PENDING')):
+            SendTransaction.objects.create(
+                sender_user=me, recipient_user=other, sender_type='user', recipient_type='user', amount=1,
+                token_type='CUSD', status=status, sender_address='0x' + '1' * 40, recipient_address='0x' + '2' * 40)
+        SendTransaction.objects.filter(recipient_user=old_friend).update(created_at=timezone.now() - timedelta(days=3))
+        self.assertEqual([u.username for u in link_invite.recent_people(me)], ['new-friend', 'old-friend'])
