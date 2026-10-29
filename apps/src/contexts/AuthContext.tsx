@@ -15,6 +15,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import { contactService, setDefaultPhoneRegion } from '../services/contactService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { applyReviewLink, setReviewLinkApplier, takePendingReviewLink } from '../services/reviewLink';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 import { setLinkOpener, takeClipboardLink, takePendingLink } from '../services/linkSend';
 
 const MARK_ONBOARDED = gql`
@@ -394,7 +395,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               .catch(() => {});
             // A store-review link opened before sign-in.
             takePendingReviewLink()
-              .then(link => (link ? applyReviewLink(apolloClient, link, refreshActiveProfile) : undefined))
+              .then(link => (link ? applyReviewLink(apolloClient, link, refreshActiveProfile, setReviewSwitching) : undefined))
               .catch(() => {});
             import('../services/messagingService')
               .then(({ default: messagingService }) => {
@@ -470,13 +471,15 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // wait in the keychain until Main is entered (services/reviewLink.ts).
   // Refresh the profile of the account in use: a business session must not
   // fall back to the personal profile.
+  const [reviewSwitching, setReviewSwitching] = useState<string | null>(null);
   const refreshActiveProfile = async () => {
     const context = await AuthService.getInstance().getActiveAccountContext();
     if (context?.type === 'business' && context.businessId) await refreshProfile('business', context.businessId);
     else await refreshProfile('personal');
   };
   useEffect(() => {
-    setReviewLinkApplier(isAuthenticated ? link => applyReviewLink(apolloClient, link, refreshActiveProfile) : null);
+    setReviewLinkApplier(isAuthenticated
+      ? link => applyReviewLink(apolloClient, link, refreshActiveProfile, setReviewSwitching) : null);
     return () => setReviewLinkApplier(null);
   }, [apolloClient, isAuthenticated, refreshActiveProfile]);
   useEffect(() => {
@@ -1451,6 +1454,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       accountContextTick,
     }}>
       {children}
+      <LoadingOverlay visible={reviewSwitching !== null} message={reviewSwitching || undefined} />
     </AuthContext.Provider>
   );
 };

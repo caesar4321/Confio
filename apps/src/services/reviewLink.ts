@@ -58,24 +58,66 @@ export const takePendingReviewLink = async (): Promise<ReviewLink | null> => {
   }
 };
 
+const SWITCH_DEADLINE_MS = 20_000;
+const COUNTRY_NAMES: Record<string, string> = { AR: 'Argentina', US: 'Estados Unidos', GB: 'Reino Unido' };
+
 export const applyReviewLink = async (
   client: ApolloClient<any>,
   link: ReviewLink,
   // AuthContext's refreshProfile: its profile is React state, not an Apollo query.
   refreshProfile?: () => Promise<unknown>,
+  // Shows (label) and hides (null) AuthContext's switching overlay.
+  setBusy?: (label: string | null) => void,
 ) => {
+  const name = COUNTRY_NAMES[link.country] || link.country;
+  setBusy?.(`Cambiando a ${name}…`);
+  let message: string;
   try {
-    const { data } = await client.mutate({ mutation: APPLY_REVIEW_ACCESS, variables: link });
+    // A request that never answers must not leave the overlay up: after the
+    // deadline, say so; opening the link again is safe (it renews the grant).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('timeout')), SWITCH_DEADLINE_MS);
+    });
+    const { data } = await Promise.race([
+      client.mutate({ mutation: APPLY_REVIEW_ACCESS, variables: link }),
+      deadline,
+    ]).finally(() => clearTimeout(timer));
     const result = data?.applyReviewAccess;
     if (result?.success) {
-      // Country-dependent screens read GET_ME and railCountries.
-      await client.refetchQueries({ include: 'active' });
-      if (refreshProfile) await refreshProfile();
-      Alert.alert('Modo revisión', `Tu cuenta muestra ahora la experiencia de ${result.country}.`);
+      // The account switch's two halves (hooks/useAtomicAccountSwitch.ts):
+      // empty the cache so no screen, open or not, shows the old country's
+      // answers, then refetch the open ones. Refetching alone left every
+      // screen not on display rendering the old country until it reloaded.
+      try {
+        await client.clearStore();
+      } catch {
+        // Refetching below still corrects what is on screen.
+      }
+      // clearStore() cancels in-flight queries on a later tick: refetching at
+      // once could join one of them and put the old country back.
+      await new Promise(resolve => setTimeout(resolve, 300));
+      // ...and one of them may have answered before it was cancelled: clear
+      // what it wrote, now that nothing old is left in flight.
+      try {
+        await client.clearStore();
+      } catch {
+        // As above.
+      }
+      // Every refetch settles before the overlay goes: one failure must not
+      // announce the switch while the rest are still loading.
+      await Promise.allSettled(client.refetchQueries({ include: 'active' }).results);
+      if (refreshProfile) await refreshProfile().catch(() => {});
+      message = `Tu cuenta muestra ahora la experiencia de ${COUNTRY_NAMES[result.country] || result.country}.`;
     } else {
-      Alert.alert('Modo revisión', result?.error || 'No pudimos aplicar el enlace.');
+      message = result?.error || 'No pudimos aplicar el enlace.';
     }
-  } catch {
-    Alert.alert('Modo revisión', 'No pudimos aplicar el enlace. Intenta nuevamente.');
+  } catch (error: any) {
+    message = error?.message === 'timeout'
+      ? 'No pudimos confirmar el cambio. Abre el enlace otra vez.'
+      : 'No pudimos aplicar el enlace. Intenta nuevamente.';
+  } finally {
+    setBusy?.(null);
   }
+  Alert.alert('Modo revisión', message);
 };
