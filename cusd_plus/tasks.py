@@ -12,6 +12,7 @@ fake a STUCK state while the money already landed. It remains available
 as a support diagnostic for genuinely stuck rows only.
 """
 import logging
+import re
 import threading
 import time
 
@@ -147,6 +148,7 @@ TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 # chunk fits 1rpc's 50-block cap when the primaries are all down.
 GETLOGS_CHUNK_BLOCKS = int(getattr(settings, 'CUSD_PLUS_BSC_GETLOGS_CHUNK', 2000))
 GETLOGS_MICRO_CHUNK_BLOCKS = 50
+SCAN_HEAD_MARGIN_BLOCKS = 5
 
 # After this many consecutive fully-failed scans, log at ERROR (alerting
 # picks ERROR up; WARNINGs every 30s proved invisible) and back off to
@@ -185,6 +187,19 @@ def _rpc_session(url):
         sess.mount('http://', adapter)
         by_url[url] = sess
     return sess
+
+
+_API_KEY_IN_URL = re.compile(r'/[0-9a-fA-F]{32,}')
+
+
+def _is_metered(url: str) -> bool:
+    """An endpoint carrying an API key in its path (the paid one)."""
+    return bool(_API_KEY_IN_URL.search(url or ''))
+
+
+def _redact(text: str) -> str:
+    """Logs never carry the key (an HTTP error message repeats the URL)."""
+    return _API_KEY_IN_URL.sub('/KEY', text or '')
 
 
 def _rpc_single(url, method, params, timeout=15):
@@ -239,16 +254,18 @@ def _rpc(method, params, timeout=15):
     for url in ordered:
         try:
             result = _rpc_single(url, method, params, timeout)
-            if url != preferred:
-                # Short: a failover from the keyless head of the pool to the
-                # metered key must not stick for long (NodeReal bills ~50 CU
-                # per eth_getLogs, and the scans run every 30 s).
+            if url != preferred and not _is_metered(url):
+                # A keyless endpoint that answered leads for a while. The
+                # metered one never does: it answers the call that failed
+                # over and nothing after it (NodeReal bills ~75 CU per
+                # eth_getLogs, and the scans run every 30 s; sticking to it
+                # for 5 minutes per publicnode hiccup spent 200k CU a day).
                 cache.set('cusd_plus_bsc_rpc_preferred', url, 300)
             return result
         except Exception as exc:  # noqa: BLE001 — try the next endpoint
             last_exc = exc
-            logger.info('bsc rpc %s failed on %s: %s', method, url, exc)
-    raise RuntimeError(f'all {len(ordered)} BSC RPC endpoints failed: {last_exc}')
+            logger.info('bsc rpc %s failed on %s: %s', method, _redact(url), _redact(str(exc)))
+    raise RuntimeError(f'all {len(ordered)} BSC RPC endpoints failed: {_redact(str(last_exc))}')
 
 
 def _get_logs_chunked(from_block: int, to_block: int, topics, address=USDT_BSC) -> list:
@@ -362,7 +379,12 @@ def monitor_bridge_arrivals():
             logger.warning('bsc %s failed: %s', stage, exc)
 
     try:
-        latest_block = int(_rpc('eth_blockNumber', []), 16)
+        # A few blocks short of the head: the public endpoints are load-
+        # balanced, and a node a block behind the one that answered refuses
+        # the range ('block range extends beyond current head block'). Each
+        # refusal failed over to the metered endpoint. Every scan rewinds
+        # far more than this, so nothing is skipped.
+        latest_block = int(_rpc('eth_blockNumber', []), 16) - SCAN_HEAD_MARGIN_BLOCKS
     except Exception as exc:  # noqa: BLE001 — watcher must not die
         _scan_failed('blockNumber', exc)
         return
