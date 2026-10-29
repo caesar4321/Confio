@@ -22,6 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { colors } from '../config/theme';
 import { Button } from './common/Button';
 import { CountryFlag, FlagLabel } from './CountryFlag';
+import { userCountryIso } from '../utils/userCountry';
 
 const CHECK_REFERRAL_STATUS = gql`
   mutation CheckReferralStatus {
@@ -59,12 +60,13 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
   const [showSuccess, setShowSuccess] = useState(false);
   const { userProfile } = useAuth();
   const defaultCountry = useMemo<Country>(() => {
-    if (userProfile?.phoneCountry) {
-      const match = countries.find((c) => c[2] === userProfile.phoneCountry);
+    const home = userCountryIso(userProfile);
+    if (home) {
+      const match = countries.find((c) => c[2] === home);
       if (match) return match;
     }
     return countries.find((c) => c[2] === 'VE') || countries[0];
-  }, [userProfile?.phoneCountry]);
+  }, [userProfile?.country, userProfile?.phoneCountry]);
 
   const [selectedCountry, setSelectedCountry] = useState<Country>(defaultCountry);
 

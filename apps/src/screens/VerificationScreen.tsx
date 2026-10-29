@@ -521,7 +521,7 @@ const VerificationScreen = () => {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.optionTitle}>
-              {phoneCountryName ? `Documento de ${phoneCountryName}` : 'Documento del país de tu teléfono'}
+              {phoneCountryName ? `Documento de ${phoneCountryName}` : 'Documento de identidad'}
             </Text>
             <Text style={styles.optionBody}>Recompensas, recargar y retirar, y cuentas locales donde se acepte.</Text>
           </View>

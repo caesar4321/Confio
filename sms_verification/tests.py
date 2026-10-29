@@ -84,3 +84,26 @@ class InitiateSmsMutationTests(TestCase):
         result = self._initiate(RuntimeError('network'))
         self.assertFalse(result.success)
         self.assertEqual(result.error, SMS_SEND_GENERIC)
+
+
+class PhoneVerificationSwitchTests(TestCase):
+    """Phone-less signup #3: the switch stops every OTP send."""
+
+    def test_switched_off_sends_nothing(self):
+        # protects=no Twilio/Telegram send once the switch is off; fails_when=a send still goes out; no_claim=provider billing itself
+        from types import SimpleNamespace
+        from unittest import mock
+        from django.test import override_settings
+        from sms_verification.schema import InitiateSMSVerification
+        from telegram_verification.schema import InitiateTelegramVerification
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=True, id=1), META={}))
+        with override_settings(PHONE_VERIFICATION_ENABLED=False), \
+             mock.patch('sms_verification.schema.requests', create=True) as sms_http, \
+             mock.patch('telegram_verification.schema.requests', create=True) as tg_http:
+            sms = InitiateSMSVerification.mutate(None, info, '71234567', 'BO')
+            tg = InitiateTelegramVerification.mutate(None, info, '71234567', 'BO')
+        self.assertFalse(sms.success)
+        self.assertFalse(tg.success)
+        self.assertIn('ya no es necesaria', sms.error)
+        sms_http.post.assert_not_called()
+        tg_http.post.assert_not_called()

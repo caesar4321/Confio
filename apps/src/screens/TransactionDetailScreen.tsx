@@ -55,6 +55,7 @@ import { investmentTitle, isInvestmentMovement } from '../utils/investmentMoveme
 import { isMarketplaceMovement } from '../utils/marketplaceMovement';
 import { isTipTransaction } from '../utils/tips';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
+import { userCountryIso } from '../utils/userCountry';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -318,7 +319,7 @@ export const TransactionDetailScreen = () => {
   // whenever the header's height changes (see AccountDetailScreen).
   const [fieldSize, setFieldSize] = useState({ width: 0, height: 0 });
   const { userProfile } = useAuth();
-  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+  const supportCopy = getSupportCopy(userCountryIso(userProfile));
   const styles = StyleSheet.create({
     container: {
       flex: 1,

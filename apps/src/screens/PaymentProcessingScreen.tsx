@@ -25,6 +25,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { formatTokenLabel } from '../utils/tokenDisplay';
 import { FACE_STEP_UP_MESSAGE } from '../services/faceStepUp';
 import { formatAmountString } from '../utils/numberLocale';
+import { userCountryIso } from '../utils/userCountry';
 
 type PaymentProcessingRouteProp = RouteProp<{
   PaymentProcessing: {
@@ -50,7 +51,7 @@ export const PaymentProcessingScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<PaymentProcessingRouteProp>();
   const { userProfile } = useAuth();
-  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+  const supportCopy = getSupportCopy(userCountryIso(userProfile));
   const [currentStep, setCurrentStep] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);

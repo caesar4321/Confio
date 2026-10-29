@@ -85,6 +85,7 @@ export const GET_ME = gql`
       lastName
       phoneCountry
       phoneNumber
+      country
       isIdentityVerified
       lastVerifiedDate
       verificationStatus
@@ -212,11 +213,20 @@ export const GET_MY_PERSONAL_VERIFIED_KYC = gql`
 
 // Who is verified (security/identity_status.py). Its own query: a server
 // predating it fails only this one, never GET_ME.
+// ISO-2 countries in the order Recibir/Enviar/Recargar show their rails:
+// picked > residence > document countries > device (ramps/rail_country.py).
+export const GET_RAIL_COUNTRIES = gql`
+  query GetRailCountries {
+    railCountries
+  }
+`;
+
 export const GET_MY_IDENTITY_STATUS = gql`
   query GetMyIdentityStatus {
     myIdentityStatus {
       verified
       phoneCountryVerified
+      verifiedDocumentCountries
       everPassedKyc
       status
       verifiedAt
@@ -587,65 +597,10 @@ export const GET_LEGAL_DOCUMENT = gql`
 
 // zkLogin mutations removed - using Web3Auth mutations from mutations.ts instead
 
-// Telegram Verification
-export const INITIATE_TELEGRAM_VERIFICATION = gql`
-  mutation InitiateTelegramVerification($phoneNumber: String!, $countryCode: String!) {
-    initiateTelegramVerification(phoneNumber: $phoneNumber, countryCode: $countryCode) {
-      success
-      error
-    }
-  }
-`;
 
-export const VERIFY_TELEGRAM_CODE = gql`
-  mutation VerifyTelegramCode($phoneNumber: String!, $countryCode: String!, $code: String!) {
-    verifyTelegramCode(phoneNumber: $phoneNumber, countryCode: $countryCode, code: $code) {
-      success
-      error
-      relinkConfirmation {
-        token
-        accounts { email username }
-      }
-    }
-  }
-`;
 
-// SMS Verification
-export const INITIATE_SMS_VERIFICATION = gql`
-  mutation InitiateSMSVerification($phoneNumber: String!, $countryCode: String!) {
-    initiateSmsVerification(phoneNumber: $phoneNumber, countryCode: $countryCode) {
-      success
-      error
-    }
-  }
-`;
 
-export const VERIFY_SMS_CODE = gql`
-  mutation VerifySMSCode($phoneNumber: String!, $countryCode: String!, $code: String!) {
-    verifySmsCode(phoneNumber: $phoneNumber, countryCode: $countryCode, code: $code) {
-      success
-      error
-      relinkConfirmation {
-        token
-        accounts { email username }
-      }
-    }
-  }
-`;
 
-export const CONFIRM_PHONE_RELINK = gql`
-  mutation ConfirmPhoneRelink($token: String!) {
-    confirmPhoneRelink(token: $token) {
-      success
-      error
-      retryable
-      relinkConfirmation {
-        token
-        accounts { email username }
-      }
-    }
-  }
-`;
 
 // User Profile Mutations
 export const UPDATE_PHONE_NUMBER = gql`

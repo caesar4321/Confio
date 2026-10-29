@@ -2,7 +2,7 @@
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from security.geo import country_of
 from users.residence import backfill_country, refresh_residence_country, set_country_from_request
@@ -48,10 +48,15 @@ class ResidenceCountryTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.country, 'PE')
 
+    @override_settings(REVIEW_LINK_TOKEN='t' * 40)
     @patch('users.residence.residence_country_for', return_value='ARG')
     def test_daily_refresh_leaves_review_accounts_alone(self, _res):
-        # protects=the store-review link owns review accounts; fails_when=refresh overwrites a review country; no_claim=review expiry handling
+        # protects=a live review-link grant owns the account's country; fails_when=refresh overwrites it; no_claim=expiry restore (users/test_review_access.py)
+        from datetime import timedelta
+        from django.utils import timezone
+        from users.models_review_access import ReviewAccess
         User.objects.filter(pk=self.user.pk).update(country='US', country_source='review')
+        ReviewAccess.objects.create(user=self.user, country='US', expires_at=timezone.now() + timedelta(days=1))
         self.user.refresh_from_db()
         self.assertFalse(refresh_residence_country(self.user))
         self.user.refresh_from_db()

@@ -29,6 +29,7 @@ import { CategoryPrompt } from '../components/CategoryChips';
 import { useSettlementStatus } from '../hooks/useSettlementStatus';
 import { formatAmountString } from '../utils/numberLocale';
 import { requestActivityShare } from '../services/communityShare';
+import { userCountryIso } from '../utils/userCountry';
 
 type PaymentSuccessRouteProp = RouteProp<MainStackParamList, 'PaymentSuccess'>;
 
@@ -41,7 +42,7 @@ export const PaymentSuccessScreen = () => {
   const [copied, setCopied] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
   const { userProfile, profileData } = useAuth();
-  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+  const supportCopy = getSupportCopy(userCountryIso(userProfile));
 
   // Haptic feedback on successful payment
   useEffect(() => {

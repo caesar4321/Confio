@@ -3,6 +3,7 @@ import { useQuery } from '@apollo/client';
 import { GET_ME } from '../apollo/queries';
 import { Country, getCountryByIso } from '../utils/countries';
 import { useAuth } from './AuthContext';
+import { userCountryIso } from '../utils/userCountry';
 
 interface CountryContextType {
   userCountry: Country | null;
@@ -24,8 +25,8 @@ export const CountryProvider: React.FC<CountryProviderProps> = ({ children }) =>
   // Auth owns the current profile. Ignore a cached query belonging to another user.
   const queryMatchesUser = !!userProfile?.id && userProfile.id === userData?.me?.id;
   const userCountry = isAuthenticated
-    ? resolveCountry(userProfile?.phoneCountry)
-      || (queryMatchesUser ? resolveCountry(userData?.me?.phoneCountry) : null)
+    ? resolveCountry(userCountryIso(userProfile))
+      || (queryMatchesUser ? resolveCountry(userCountryIso(userData?.me)) : null)
     : null;
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const previousUserCountryIsoRef = useRef<string | null>(null);

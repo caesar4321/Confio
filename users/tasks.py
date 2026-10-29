@@ -554,7 +554,10 @@ def refresh_residence_countries(batch_size=500):
     user_ids = (IPDeviceUser.objects.filter(last_seen__gte=since)
                 .values_list('user_id', flat=True).distinct())
     moved = checked = 0
-    for user in User.objects.filter(id__in=user_ids, is_active=True).iterator(chunk_size=batch_size):
+    # Review-link accounts too, active or not: an ended grant must hand the
+    # account its country back even if the reviewer never returns.
+    candidates = User.objects.filter(Q(id__in=user_ids) | Q(country_source=User.COUNTRY_SOURCE_REVIEW), is_active=True)
+    for user in candidates.iterator(chunk_size=batch_size):
         checked += 1
         try:
             moved += int(refresh_residence_country(user))

@@ -6,6 +6,7 @@ import { PlayInstallReferrer } from 'react-native-play-install-referrer';
 import 'react-native-url-polyfill/auto';
 import { setPendingTeamInvite } from '../services/teamInviteLinks';
 import { teamTokenFromCode } from './teams';
+import { parseReviewLink, receiveReviewLink } from '../services/reviewLink';
 
 const DEFERRED_LINK_KEY = 'confio_deferred_link';
 const AUTH_TOKEN_KEY = 'confio_auth_token';
@@ -302,6 +303,13 @@ export class DeepLinkHandler {
     try {
       const parsedUrl = new URL(url);
       const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+
+      // Store-review link: switches the reviewer's own account to a country.
+      const reviewLink = parseReviewLink(parsedUrl);
+      if (reviewLink) {
+        await receiveReviewLink(reviewLink);
+        return;
+      }
 
       // Public referral links are /invite/{username}. When the app is already
       // installed, Android App Links / iOS Universal Links deliver that URL

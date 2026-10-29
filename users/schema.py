@@ -6259,6 +6259,28 @@ from users.rail_waitlist_schema import LocalRailWaitlistMutations
 from users.product_waitlist_schema import PaidOfferMutations
 
 
+class ApplyReviewAccess(graphene.Mutation):
+	"""The store-review deep link (users/review_access.py). The account comes
+	from the JWT; the link carries only the country and the token."""
+
+	class Arguments:
+		country = graphene.String(required=True)
+		token = graphene.String(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	country = graphene.String()
+
+	@classmethod
+	def mutate(cls, root, info, country, token):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return cls(success=False, error='Inicia sesión para continuar')
+		from users.review_access import apply_review_access
+		ok, error = apply_review_access(user, country, token, getattr(info.context, 'META', None))
+		return cls(success=ok, error=error, country=(country or '').strip().upper() if ok else None)
+
+
 class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, PaidOfferMutations, graphene.ObjectType):
     report_backup_status = ReportBackupStatus.Field()
     report_wallet_recovery_diagnostic = ReportWalletRecoveryDiagnostic.Field()
@@ -6334,6 +6356,7 @@ class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, P
     
     # Unified referral system mutations
     set_referrer = SetReferrer.Field()
+    apply_review_access = ApplyReviewAccess.Field()
     check_referral_status = CheckReferralStatus.Field()
     prepare_referral_reward_claim = PrepareReferralRewardClaim.Field()
     submit_referral_reward_claim = SubmitReferralRewardClaim.Field()

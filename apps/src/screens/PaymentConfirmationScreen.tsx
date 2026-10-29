@@ -33,6 +33,7 @@ import { APP_LAYOUT } from '../config/layout';
 import { formatTokenLabel } from '../utils/tokenDisplay';
 import { useRampCountry } from '../hooks/useRampCountry';
 import { formatDecimal } from '../utils/numberLocale';
+import { userCountryIso } from '../utils/userCountry';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -81,7 +82,7 @@ export const PaymentConfirmationScreen = () => {
   const route = useRoute<PaymentConfirmationRouteProp>();
   const { activeAccount } = useAccount();
   const { userProfile } = useAuth();
-  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+  const supportCopy = getSupportCopy(userCountryIso(userProfile));
   const [isProcessing, setIsProcessing] = useState(false);
   const [prepared, setPrepared] = useState<any | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);

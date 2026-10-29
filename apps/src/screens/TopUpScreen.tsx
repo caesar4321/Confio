@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Text, TextInput } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { gql, useMutation, useQuery } from '@apollo/client';
 
@@ -34,7 +34,9 @@ import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
 import { useRampCountry } from '../hooks/useRampCountry';
 import { hasKoyweTestIdentity } from '../utils/koyweTestIdentity';
-import { hasRampIdentity } from '../utils/rampIdentity';
+import { hasRampIdentity, needsCountryDocument } from '../utils/rampIdentity';
+import { RampCountrySheet } from '../components/RampCountrySheet';
+import { countryName, toIso3 } from '../config/localRails';
 import { USD_UNIT, formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
@@ -113,12 +115,17 @@ const TopUpScreen = () => {
 
   // The user's OWN country, or null. Never a picker, never Argentina by
   // default — see useRampCountry.
-  const { countryCode, loading: countryLoading } = useRampCountry();
+  const { countryCode, railCountries, loading: countryLoading, setRampCountry } = useRampCountry();
+  const [countrySheetVisible, setCountrySheetVisible] = useState(false);
 
   const isKoyweCountry = isKoyweRoutingEnabledForCountry(countryCode);
 
   const { data: meData } = useQuery(GET_ME);
-  const { data: identityData } = useQuery(GET_MY_IDENTITY_STATUS, { fetchPolicy: 'cache-and-network' });
+  const { data: identityData, refetch: refetchIdentity } = useQuery(GET_MY_IDENTITY_STATUS, { fetchPolicy: 'cache-and-network' });
+  // Back from adding a document (AdditionalDocument): read the new list.
+  useFocusEffect(React.useCallback(() => {
+    refetchIdentity().catch(() => {});
+  }, [refetchIdentity]));
   const { data: personalKycData } = useQuery(GET_MY_PERSONAL_KYC_STATUS);
   const { data: rampAddressData, loading: rampAddressLoading } = useQuery(GET_MY_RAMP_ADDRESS, {
     fetchPolicy: 'cache-and-network',
@@ -172,12 +179,13 @@ const TopUpScreen = () => {
   const isVerified = useMemo(() => {
     // Match Koywe's test identity, including servers predating the optional flag.
     if (isKoyweMapped && hasTestIdentity) return true;
-    return hasRampIdentity(identityData?.myIdentityStatus, personalKycData?.myPersonalKycStatus?.status);
+    return hasRampIdentity(identityData?.myIdentityStatus, personalKycData?.myPersonalKycStatus?.status, countryCode);
   }, [
     isKoyweMapped,
     hasTestIdentity,
     identityData?.myIdentityStatus,
     personalKycData?.myPersonalKycStatus?.status,
+    countryCode,
   ]);
   const hasCompleteRampAddress = Boolean(rampAddressData?.myRampAddress?.isComplete);
   const selectedMethodMin = Number(selectedMethod?.onRampMinAmount || 0);
@@ -326,6 +334,26 @@ const TopUpScreen = () => {
   };
 
   const openVerificationPrompt = () => {
+    if (needsCountryDocument(identityData?.myIdentityStatus, countryCode)) {
+      // Verified with another country's document; Koywe needs this country's.
+      const place = countryName(countryCode || '');
+      Alert.alert(
+        'Necesitamos otro documento',
+        `Para recargar desde ${place} necesitamos tu documento de identidad o de residencia de ${place}.`,
+        [
+          { text: 'Ahora no', style: 'cancel' },
+          { text: 'Cambiar país', onPress: () => setCountrySheetVisible(true) },
+          {
+            text: 'Agregar documento',
+            onPress: () => (navigation as any).navigate('AdditionalDocument', {
+              idCountry: toIso3(countryCode), documentTypes: ['ID', 'RP'],
+              reason: `Para recargar desde ${place} necesitamos un documento de ${place}.`,
+            }),
+          },
+        ],
+      );
+      return;
+    }
     Alert.alert(
       'Verificación requerida',
       'Antes de confirmar tu compra, necesitamos validar tu identidad.',
@@ -461,14 +489,30 @@ const TopUpScreen = () => {
                   <Text style={styles.loadingText}>Cargando tus opciones...</Text>
                 </>
               ) : (
-                <Text style={styles.loadingText}>
-                  Todavía no sabemos desde qué país recargas, así que no podemos mostrarte
-                  medios de pago. Vuelve a intentarlo en un momento.
-                </Text>
+                <>
+                  <Text style={styles.loadingText}>
+                    Elige desde qué país vas a recargar para ver sus medios de pago.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.historyPill}
+                    onPress={() => setCountrySheetVisible(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="globe" size={14} color={colors.primary} />
+                    <Text style={styles.historyPillText}>Elegir país</Text>
+                  </TouchableOpacity>
+                </>
               )}
             </View>
           </RampReveal>
         </ScrollView>
+        <RampCountrySheet
+          visible={countrySheetVisible}
+          current={countryCode}
+          railCountries={railCountries}
+          onPick={setRampCountry}
+          onClose={() => setCountrySheetVisible(false)}
+        />
       </SafeAreaView>
     );
   }
@@ -530,9 +574,12 @@ const TopUpScreen = () => {
           </View>
           <View style={styles.noticeCopy}>
             <FlagLabel iso={countryCode} style={styles.noticeTitleRow} textStyle={[styles.noticeTitle, styles.noticeTitleInRow]}>
-              Según tu país
+              Recargar desde {availability?.countryName || countryName(countryCode)}
             </FlagLabel>
-            <Text style={styles.noticeText}>Te mostramos los medios de pago disponibles para {availability?.countryName || countryCode}.</Text>
+            <Text style={styles.noticeText}>Te mostramos los medios de pago de este país.</Text>
+            <TouchableOpacity onPress={() => setCountrySheetVisible(true)} activeOpacity={0.7}>
+              <Text style={styles.historyPillText}>Cambiar país</Text>
+            </TouchableOpacity>
           </View>
           <TouchableOpacity
             style={styles.historyPill}
@@ -544,6 +591,13 @@ const TopUpScreen = () => {
           </TouchableOpacity>
         </View>
         </RampReveal>
+        <RampCountrySheet
+          visible={countrySheetVisible}
+          current={countryCode}
+          railCountries={railCountries}
+          onPick={setRampCountry}
+          onClose={() => setCountrySheetVisible(false)}
+        />
 
         {availabilityLoading ? (
           <View style={styles.loadingCard}>

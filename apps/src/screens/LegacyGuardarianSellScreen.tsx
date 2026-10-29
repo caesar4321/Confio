@@ -42,6 +42,7 @@ import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
 import { microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import algorandService from '../services/algorandService';
 import { formatDecimal, formatPercent, normalizeAmountInput, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
+import { userCountryIso } from '../utils/userCountry';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -172,8 +173,8 @@ export const SellScreen = ({
     const derivedCurrencyCode = useMemo(() => {
         let localCurrency = 'USD';
 
-        if (userProfile?.phoneCountry) {
-            const country = getCountryByIso(userProfile.phoneCountry);
+        if (userCountryIso(userProfile)) {
+            const country = getCountryByIso(userCountryIso(userProfile));
             if (country) localCurrency = getCurrencyForCountry(country as any);
         } else if (selectedCountry) {
             localCurrency = getCurrencyForCountry(selectedCountry as any);
@@ -182,7 +183,7 @@ export const SellScreen = ({
         }
 
         return localCurrency;
-    }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
+    }, [selectedCountry, userCountry, userProfile?.country, userProfile?.phoneCountry]);
 
     const [amount, setAmount] = useState('');
     const [currencyCode, setCurrencyCode] = useState(derivedCurrencyCode);
@@ -335,7 +336,7 @@ export const SellScreen = ({
                 fromNetwork: isSavings ? 'BSC' : undefined,
                 toCurrency: currencyCode,
                 email: userProfile?.email,
-                customerCountry: userProfile?.phoneCountry,
+                customerCountry: userCountryIso(userProfile) || undefined,
                 externalId: `confio-${isSavings ? 'ahorro-sell' : 'sell'}-${Date.now()}`,
             });
 

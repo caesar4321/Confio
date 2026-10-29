@@ -20,6 +20,7 @@ import { useMemo } from 'react';
 import { gql, useQuery } from '@apollo/client';
 import { useAuth, useAuthReady } from '../contexts/AuthContext';
 import { isOndoPhoneCountryEligible } from '../config/ondoEligibility';
+import { userCountryIso } from '../utils/userCountry';
 
 // Flags gate surfaces (savingsEnabled gates ENTRY only — Ahorrar CTA,
 // Convert; exits are never gated. The deposit mutation enforces
@@ -136,7 +137,7 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
   // one being yanked away from a blocked user.
   const stocksEnabled: boolean = Boolean(
     summary?.stocksEnabled
-    && isOndoPhoneCountryEligible(userProfile?.phoneCountry),
+    && isOndoPhoneCountryEligible(userCountryIso(userProfile)),
   );
   // cUSD phase-out steering. Defaults to the shipped prod state (paused) so
   // the pre-answer frame renders the intended savings-first sheet instead of
@@ -169,7 +170,7 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
       // `enabled` is false both before the server answers (or when it
       // fails) and when the user is genuinely ineligible. Surfaces that
       // explain UNavailability must wait for this to be true.
-      eligibilityKnown: Boolean(summary) && Boolean(userProfile?.phoneCountry),
+      eligibilityKnown: Boolean(summary) && Boolean(userCountryIso(userProfile)),
       tradingEnabled: stocksEnabled && Boolean(summary?.stocksTradingEnabled),
       buyEnabled: stocksEnabled && Boolean(summary?.stocksBuyEnabled),
       totalUsd: positions.reduce((sum, p) => sum + p.valueUsd, 0),
@@ -202,5 +203,5 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
       loading: !isAuthReady || (loading && !data),
     };
   }, [data, savingsEnabled, stocksEnabled, cusdDepositsPaused, summary, refetch, loading, isAuthReady,
-      userProfile?.phoneCountry]);
+      userProfile?.country, userProfile?.phoneCountry]);
 };

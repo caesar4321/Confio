@@ -21,6 +21,7 @@ import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { EmptyState } from '../components/EmptyState';
 import { formatDecimal } from '../utils/numberLocale';
+import { userCountryIso as residenceCountryIso } from '../utils/userCountry';
 
 type CountryStat = {
   countryIso: string;
@@ -36,7 +37,7 @@ export const LatamCommunityScreen = () => {
     notifyOnNetworkStatusChange: true,
   });
 
-  const userCountryIso = (userProfile?.phoneCountry || '').toUpperCase();
+  const userCountryIso = residenceCountryIso(userProfile);
 
   const formatWhole = (n: number) => {
     return formatDecimal(n, { decimals: 0 });

@@ -13,7 +13,6 @@ import { CreateBusinessScreen } from '../screens/CreateBusinessScreen';
 import { EditBusinessScreen } from '../screens/EditBusinessScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
 import { UpdateUsernameScreen } from '../screens/UpdateUsernameScreen';
-import PhoneVerificationScreen from '../screens/PhoneVerificationScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import DepositScreen from '../screens/DepositScreen';
 import USDCManageScreen from '../screens/USDCManageScreen';
@@ -390,13 +389,6 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="UpdateUsername"
           component={UpdateUsernameScreen}
-          options={{
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="PhoneVerification"
-          component={PhoneVerificationScreen}
           options={{
             headerShown: false,
           }}

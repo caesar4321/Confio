@@ -22,6 +22,7 @@ import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { useSettlementStatus } from '../hooks/useSettlementStatus';
 import { formatTokenAmount, formatTokenLabel, explorerFor, sendTokenParamFor } from '../utils/tokenDisplay';
+import { userCountryIso } from '../utils/userCountry';
 
 type TransactionType = 'sent' | 'received' | 'payment';
 
@@ -179,7 +180,7 @@ export const TransactionSuccessScreen = () => {
   };
 
   const { userProfile } = useAuth();
-  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+  const supportCopy = getSupportCopy(userCountryIso(userProfile));
 
   const handleShareInvitation = async () => {
     const invitationId = (transactionData as any).invitationId

@@ -243,11 +243,18 @@ class GeoDecision:
 
 
 def store_review_exempt(user) -> bool:
-    """Accounts on a geo-exempt store-review number (Argentina) pass every
-    policy, phone and IP alike. Reviewer numbers in blocked countries (US,
-    UK) are NOT exempt: they exist to show the blocks. Fails closed."""
+    """Store-review accounts on Argentina pass every policy, country and IP
+    alike: through the review deep link (users/review_access.py) or a legacy
+    geo-exempt reviewer number. US/UK review accounts are NOT exempt: they
+    exist to show the blocks. Fails closed."""
     try:
+        from users.review_access import active_review_access
         from users.review_numbers import is_geo_exempt_reviewer
+        # A live review-link grant decides alone: a legacy Argentine reviewer
+        # number must not keep exempting an account switched to US/UK.
+        access = active_review_access(user)
+        if access is not None:
+            return bool(access.geo_exempt)
         return is_geo_exempt_reviewer(user)
     except Exception:  # noqa: BLE001
         logger.exception('[GEO] reviewer exemption check failed')

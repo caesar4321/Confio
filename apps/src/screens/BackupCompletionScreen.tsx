@@ -37,8 +37,7 @@ export const BackupCompletionScreen = () => {
       if (showPendingError) setError('Todavia no pudimos confirmar el respaldo en el servidor. Intenta nuevamente.');
       return false;
     }
-    const phoneVerified = !!(me?.phoneNumber && me?.phoneCountry);
-    await handleSuccessfulLogin(phoneVerified, false);
+    await handleSuccessfulLogin(true, false);
     return true;
   }, [apolloClient, handleSuccessfulLogin, refreshProfile]);
 

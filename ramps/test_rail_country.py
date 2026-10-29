@@ -66,6 +66,14 @@ class RailIdentityTests(TestCase):
         document(self.user, 'P-1', issuing='PER', document_type='passport', additional=True)
         self.assertEqual(ids.rail_identity(self.user, 'PE'), cedula)
 
+    def test_a_passport_alone_counts_only_where_the_rail_takes_one(self):
+        # protects=TopUp asks for a national ID instead of sending a passport Koywe refuses; fails_when=an Argentine passport opens AR; no_claim=Koywe's live rules
+        document(self.user, 'P-AR', issuing='ARG', document_type='passport')
+        document(self.user, 'P-CO', issuing='COL', document_type='passport', additional=True)
+        self.assertIsNone(ids.rail_identity(self.user, 'AR'))
+        self.assertIsNotNone(ids.rail_identity(self.user, 'CO'))
+        self.assertEqual(ids.verified_document_countries(self.user), ['CO'])
+
     def test_koywe_error_names_the_country_it_needs(self):
         # protects=the person learns which document opens this country; fails_when=the old phone-number copy shows; no_claim=app rendering
         from ramps.koywe_client import KoyweError

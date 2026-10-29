@@ -68,9 +68,19 @@ def rail_identity(user, country=None):
     iso3 = code if len(code) == 3 else to_iso3(code)
     if not iso3:
         return None
-    matches = list(current_documents(user).filter(document_issuing_country__iexact=iso3))
-    matches.sort(key=lambda doc: str(doc.document_type or '').lower() == 'passport')
+    matches = [doc for doc in current_documents(user).filter(document_issuing_country__iexact=iso3)
+               if rail_accepts_document(iso3, doc.document_type)]
     return matches[0] if matches else None
+
+
+# Koywe (ramps/koywe_client.py _resolve_document_type) takes a passport only
+# for Colombia; everywhere else it needs the national ID or a residence permit.
+PASSPORT_RAIL_COUNTRIES = frozenset({'COL'})
+
+
+def rail_accepts_document(iso3: str, document_type) -> bool:
+    is_passport = str(document_type or '').strip().lower() in ('passport', 'p')
+    return not is_passport or str(iso3 or '').upper() in PASSPORT_RAIL_COUNTRIES
 
 
 def has_rail_identity(user, country=None) -> bool:
@@ -78,10 +88,14 @@ def has_rail_identity(user, country=None) -> bool:
 
 
 def verified_document_countries(user) -> list[str]:
-    """ISO-2 countries that issued a current verified document, primary first."""
+    """ISO-2 countries whose Recargar/Retirar rail accepts one of the person's
+    current verified documents (a passport counts only where the rail takes
+    one, rail_accepts_document), primary first."""
     from security.geo import to_iso2
     countries = []
-    for issuing in current_documents(user).values_list('document_issuing_country', flat=True):
+    for issuing, document_type in current_documents(user).values_list('document_issuing_country', 'document_type'):
+        if not rail_accepts_document(issuing, document_type):
+            continue
         iso2 = to_iso2(issuing)
         if iso2 and iso2 not in countries:
             countries.append(iso2)

@@ -51,7 +51,8 @@ it('still backs up V2 and rechecks server acknowledgement before continuing', as
   await retry();
   expect(mockBackup).toHaveBeenCalledTimes(1);
   expect(mockQuery).toHaveBeenCalledTimes(2);
-  expect(mockLogin).toHaveBeenCalledWith(false, false);
+  // No phone on the account: login continues all the same (phone-less signup).
+  expect(mockLogin).toHaveBeenCalledWith(true, false);
 });
 
 it.each([null, {}, { requiresBackupCompletion: true }])('does not continue without explicit server clearance: %j', async me => {

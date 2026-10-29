@@ -26,6 +26,8 @@ import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { CountryFlag } from '../components/CountryFlag';
+import { userCountryIso } from '../utils/userCountry';
+import { toIso2 } from '../config/localRails';
 
 type Navigation = NavigationProp<MainStackParamList>;
 type EconomicActivityOption = {
@@ -54,18 +56,20 @@ export const RampAddressScreen: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
 
   const rampAddress = data?.myRampAddress;
-  const phoneCountryIso = String(userProfile?.phoneCountry || '').toUpperCase();
-  const phoneCountry = useMemo(() => {
-    if (!phoneCountryIso) return null;
-    return getCountryByIso(phoneCountryIso);
-  }, [phoneCountryIso]);
+  // The country this address belongs to: the one it was saved in, else
+  // where the user lives (server residence). Never the phone's prefix.
+  const addressCountryIso = toIso2(rampAddress?.addressCountry || '') || userCountryIso(userProfile);
+  const addressCountry = useMemo(() => {
+    if (!addressCountryIso) return null;
+    return getCountryByIso(addressCountryIso);
+  }, [addressCountryIso]);
   const accountEmail = String(userProfile?.email || '').trim().toLowerCase();
   const isAppleRelayEmail = /@privaterelay\.appleid\.com$/i.test(accountEmail);
-  const shouldShowAuthEmailField = phoneCountryIso === 'CO' && isAppleRelayEmail;
+  const shouldShowAuthEmailField = addressCountryIso === 'CO' && isAppleRelayEmail;
   // Bolivia has no postal codes in everyday use, but the provider needs the
   // field: 19 of 36 Bolivians already typed "0000", others a phone number
   // (2026-10-21). Prefill it and say why.
-  const noPostalCodes = phoneCountryIso === 'BO';
+  const noPostalCodes = addressCountryIso === 'BO';
   const economicActivities: EconomicActivityOption[] = data?.economicActivities || [];
   const shouldShowEconomicActivityField = economicActivities.length > 0;
   const addressRequirements = data?.rampAddressRequirements;
@@ -143,7 +147,7 @@ export const RampAddressScreen: React.FC = () => {
       if (/@privaterelay\.appleid\.com$/i.test(normalizedAuthEmail)) return 'Usa un email real, no un Apple private relay.';
       if (/@koywe-test\.com$/i.test(normalizedAuthEmail)) return 'Usa un email real donde puedas recibir los códigos de PSE.';
     }
-    if (!phoneCountryIso) return 'Primero configura el país de tu número de teléfono.';
+    if (!addressCountryIso) return 'No pudimos identificar tu país. Inténtalo más tarde.';
     return null;
   };
 
@@ -179,7 +183,7 @@ export const RampAddressScreen: React.FC = () => {
 
       void AnalyticsService.logEvent('ramp_profile_completed', {
         provider: 'koywe',
-        country: phoneCountryIso || '',
+        country: addressCountryIso || '',
         has_auth_email: shouldShowAuthEmailField && Boolean(authEmail.trim()),
       });
       // No interstitial: the saved address on the previous screen is the
@@ -192,7 +196,7 @@ export const RampAddressScreen: React.FC = () => {
     }
   };
 
-  const countryName = rampAddress?.countryName || phoneCountry?.[0] || phoneCountryIso || 'Sin configurar';
+  const countryName = rampAddress?.countryName || addressCountry?.[0] || addressCountryIso || 'Sin configurar';
   const isButtonDisabled = isSaving || !hasChanges;
 
   return (
@@ -245,7 +249,7 @@ export const RampAddressScreen: React.FC = () => {
               <ActivityIndicator size="small" color={colors.primaryDark} />
             ) : (
               <View style={styles.readOnlyInner}>
-                <CountryFlag iso={phoneCountry?.[2]} size={22} />
+                <CountryFlag iso={addressCountry?.[2]} size={22} />
                 <Text style={styles.readOnlyValue}>{countryName}</Text>
               </View>
             )}

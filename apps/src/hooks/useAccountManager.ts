@@ -105,7 +105,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           name: baseName,
           type: accountType,
           index: 0,
-          phone: accountType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
+          phone: undefined, // personal accounts show no phone number
           category: serverAcc.business?.category,
           avatar,
           algorandAddress: '',
@@ -131,7 +131,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       if (aPriority !== bPriority) return aPriority - bPriority;
       return a.index - b.index;
     });
-  }, [profileData?.userProfile?.phoneNumber]);
+  }, []);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -159,7 +159,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           name: displayName,
           type: 'personal',
           index: 0,
-          phone: profileData?.userProfile?.phoneNumber || undefined,
+          phone: undefined, // personal accounts show no phone number
           category: undefined,
           avatar: avatar,
           algorandAddress: '', // Will be set during authentication
@@ -230,7 +230,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           name: seedName,
           type: ctx.type,
           index: ctx.index,
-          phone: ctx.type === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
+          phone: undefined, // personal accounts show no phone number
           category: profileData?.businessProfile?.category,
           avatar: seedAvatar,
           algorandAddress: '',
@@ -295,7 +295,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
             name: personalName,
             type: 'personal',
             index: 0,
-            phone: profileData?.userProfile?.phoneNumber || undefined,
+            phone: undefined, // personal accounts show no phone number
             category: undefined,
             avatar: personalAvatar,
             algorandAddress: '',
@@ -341,7 +341,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           name,
           type: ctx.type,
           index: ctx.index,
-          phone: ctx.type === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
+          phone: undefined, // personal accounts show no phone number
           category: profileData?.businessProfile?.category,
           avatar: (name || 'N').charAt(0).toUpperCase(),
           algorandAddress: addr ?? '',
@@ -358,7 +358,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         setActiveAccount(prev => prev ?? fallback);
       } catch { }
     }
-  }, [apolloClient, convertServerAccounts, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.userProfile?.phoneNumber, dedupeById, ensureActiveAccountFrom]);
+  }, [apolloClient, convertServerAccounts, profileData?.userProfile?.firstName, profileData?.userProfile?.username, dedupeById, ensureActiveAccountFrom]);
 
   // Load accounts on mount and when server data changes
   useEffect(() => {
@@ -480,7 +480,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
             name: baseName,
             type: normalizedType, // 👈 Use normalized type here
             index: 0, // Always 0 for current system
-            phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
+            phone: undefined, // personal accounts show no phone number
             category: serverAcc.business?.category,
             avatar: avatar,
             algorandAddress: '', // Client will compute this on-demand
@@ -628,7 +628,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
             name: profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal',
             type: 'personal',
             index: 0,
-            phone: profileData?.userProfile?.phoneNumber || undefined,
+            phone: undefined, // personal accounts show no phone number
             category: undefined,
             avatar: (profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'P').charAt(0).toUpperCase(),
             algorandAddress: '',
@@ -641,7 +641,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       console.error('Error syncing with server:', error);
       throw error;
     }
-  }, [convertServerAccounts, authService, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.userProfile?.phoneNumber]);
+  }, [convertServerAccounts, authService, profileData?.userProfile?.firstName, profileData?.userProfile?.username]);
 
   // Combine loading states
   const combinedLoading = isLoading || serverLoading;

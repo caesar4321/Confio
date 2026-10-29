@@ -4,23 +4,8 @@ import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
-import { getCountryByIso } from '../utils/countries';
 
 // Utility function to format phone number with country code
-const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
-  if (!phoneNumber) return '';
-  
-  // If we have a country code, format it
-  if (phoneCountry) {
-    const country = getCountryByIso(phoneCountry);
-    if (country) {
-      const countryCode = country[1]; // country[1] is the phone code (e.g., '+54')
-      return `${countryCode} ${phoneNumber}`;
-    }
-  }
-  
-  return phoneNumber;
-};
 
 interface Account {
   id: string;
@@ -57,16 +42,10 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = React.memo(({
     return null;
   }
 
-  // For personal accounts, only format phone number with country code
-  const displayAccounts = useMemo(() => accounts.map(acc => {
-    if (acc.type === 'personal' && userProfile) {
-      return {
-        ...acc,
-        phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
-      };
-    }
-    return acc;
-  }), [accounts, userProfile]);
+  // A personal account shows no phone number (signup no longer asks for one).
+  const displayAccounts = useMemo(() => accounts.map(acc => (
+    acc.type === 'personal' ? { ...acc, phone: undefined } : acc
+  )), [accounts]);
 
   const currentAccount = useMemo(
     () => displayAccounts.find(acc => acc.id === selectedAccount) || displayAccounts[0],

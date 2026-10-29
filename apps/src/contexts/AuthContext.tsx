@@ -14,6 +14,8 @@ import { pushNotificationService } from '../services/pushNotificationService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { contactService, setDefaultPhoneRegion } from '../services/contactService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
+import { applyReviewLink, setReviewLinkApplier, takePendingReviewLink } from '../services/reviewLink';
+import { userCountryIso } from '../utils/userCountry';
 
 // Simple auth readiness gate to coordinate token-dependent queries
 let __authReady = false;
@@ -69,6 +71,8 @@ interface UserProfile {
   lastName?: string;
   phoneCountry?: string;
   phoneNumber?: string;
+  // Where the user lives (server residence); phoneCountry is the phone's.
+  country?: string;
   isIdentityVerified?: boolean;
   lastVerifiedDate?: string;
   verificationStatus?: string;
@@ -103,8 +107,9 @@ interface AuthContextType {
   isLoading: boolean;
   signOut: () => Promise<void>;
   checkLocalAuthState: () => Promise<boolean>;
+  // The first argument is the server's isPhoneVerified, ignored since signup
+  // stopped asking for a phone; kept so older call sites type-check.
   handleSuccessfulLogin: (isPhoneVerified: boolean, requiresBackupCompletion?: boolean) => Promise<void>;
-  completePhoneVerification: () => Promise<void>;
   completeBiometricAndEnter: () => Promise<boolean>;
   // Set when the device-auth unlock failed or was cancelled. The session is
   // kept; the lock screen retries the unlock instead of forcing a re-login.
@@ -166,9 +171,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // auth. Clearing or switching that profile clears the country immediately.
   useEffect(() => {
     const userProfile = isAuthenticated ? profileData?.userProfile : null;
-    setDefaultPhoneRegion(userProfile?.phoneCountry);
-    void contactService.setContactOwner(userProfile?.id, userProfile?.phoneCountry);
-  }, [isAuthenticated, profileData?.userProfile?.id, profileData?.userProfile?.phoneCountry]);
+    // Address-book numbers without a calling code are local to where the
+    // user lives.
+    setDefaultPhoneRegion(userCountryIso(userProfile) || undefined);
+    void contactService.setContactOwner(userProfile?.id, userCountryIso(userProfile) || undefined);
+  }, [isAuthenticated, profileData?.userProfile?.id, profileData?.userProfile?.country, profileData?.userProfile?.phoneCountry]);
 
   const perfLog = (_label: string, _startTime: number, _extra?: Record<string, any>) => {};
 
@@ -195,14 +202,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     });
     setPendingAuthRoute(null);
   }, [pendingAuthRoute, isAuthenticated, isLoading, isNavigationReady, navigationRef]);
-
-  const requirePhoneVerification = () => {
-    console.warn('[AuthContext] Phone link missing; routing existing session to PhoneVerification');
-    resetAuthReady();
-    setIsAuthenticated(false);
-    setProfileData(null);
-    resetAuthStack('PhoneVerification');
-  };
 
   const waitForAppToBeActive = async (timeoutMs = 4000): Promise<boolean> => {
     if (AppState.currentState === 'active') {
@@ -332,6 +331,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             deepLinkHandler.checkDeferredLinks().catch(error => {
               console.error('[AuthContext] Failed to process deferred deep link:', error);
             });
+            // A store-review link opened before sign-in.
+            takePendingReviewLink()
+              .then(link => (link ? applyReviewLink(apolloClient, link, refreshActiveProfile) : undefined))
+              .catch(() => {});
             import('../services/messagingService')
               .then(({ default: messagingService }) => {
                 messagingService.processPendingNotification();
@@ -357,19 +360,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           query: GET_ME,
           fetchPolicy: 'network-only',
         });
-
-        // Check phone verification status from server ONLY if we got a valid profile
-        // If data.me is null (e.g. auth error), we should NOT assume phone is unverified
-        // Instead, we let the auth error handlers/checkAuthState deal with the invalid session
-        if (data?.me) {
-          const serverPhoneVerified = data.me.phoneNumber && data.me.phoneCountry;
-
-          // If phone verification was lost on server but user is authenticated, require re-verification
-          if (!serverPhoneVerified && isAuthenticated) {
-            requirePhoneVerification();
-            return; // Exit early to prevent setting profile data
-          }
-        }
 
         // Address-book numbers that omit a country code are read against the
         // user's OWN country. Without this every non-Venezuelan user's local
@@ -414,6 +404,20 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       setIsProfileLoading(false);
     }
   };
+
+  // Review links that arrive while signed in apply at once; signed out they
+  // wait in the keychain until Main is entered (services/reviewLink.ts).
+  // Refresh the profile of the account in use: a business session must not
+  // fall back to the personal profile.
+  const refreshActiveProfile = async () => {
+    const context = await AuthService.getInstance().getActiveAccountContext();
+    if (context?.type === 'business' && context.businessId) await refreshProfile('business', context.businessId);
+    else await refreshProfile('personal');
+  };
+  useEffect(() => {
+    setReviewLinkApplier(isAuthenticated ? link => applyReviewLink(apolloClient, link, refreshActiveProfile) : null);
+    return () => setReviewLinkApplier(null);
+  }, [apolloClient, isAuthenticated, refreshActiveProfile]);
 
   // Fetch appropriate profile based on current account type
   useEffect(() => {
@@ -901,20 +905,16 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     return true;
   };
 
-  const handleSuccessfulLogin = async (isPhoneVerified: boolean, requiresBackupCompletion: boolean = false) => {
+  const handleSuccessfulLogin = async (_isPhoneVerified: boolean, requiresBackupCompletion: boolean = false) => {
     try {
       if (requiresBackupCompletion) {
         resetAuthStack('BackupCompletion');
         return;
       }
 
-      if (isPhoneVerified) {
-        // Route to biometric setup screen; completion will trigger the remaining flow
-        resetAuthStack('BiometricSetup', { origin: 'login' as const });
-      } else {
-        // Don't set isAuthenticated to true yet - keep user in Auth flow
-        resetAuthStack('PhoneVerification');
-      }
+      // No phone step: signup is Google/Apple only. Device biometric setup's
+      // completion runs the rest of the entry flow.
+      resetAuthStack('BiometricSetup', { origin: 'login' as const });
     } catch (error) {
       console.error('Error handling successful login:', error);
       setIsAuthenticated(false);
@@ -1141,7 +1141,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             lastBiometricSuccessRef.current = Date.now();
 
             let requiresBackupCompletion = false;
-            let requiresPhoneVerification = false;
             let banned403 = false;
             try {
               const meStart = Date.now();
@@ -1159,8 +1158,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 currentAccountType: 'personal'
               } : null);
               requiresBackupCompletion = !!me?.requiresBackupCompletion;
-              // A missing/failed profile is not evidence of a missing phone.
-              requiresPhoneVerification = !!me && !(me.phoneNumber && me.phoneCountry);
             } catch (profileErr) {
               // A 403 here is the security middleware's ban/lockout — the
               // error link marks the flag in parallel, but that write races
@@ -1227,11 +1224,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               void clearSignedOutCache();
               explainSessionEnded();
               navigateToScreen('Auth');
-              return;
-            }
-
-            if (requiresPhoneVerification) {
-              requirePhoneVerification();
               return;
             }
 
@@ -1362,30 +1354,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
   };
 
-  const completePhoneVerification = async () => {
-    try {
-      // After phone verification, send user to biometric setup flow
-      if (isNavigationReady && navigationRef.current) {
-        navigationRef.current.reset({
-          index: 0,
-          routes: [
-            {
-              name: 'Auth',
-              params: {
-                screen: 'BiometricSetup',
-                params: { origin: 'phoneVerification' as const },
-              },
-            },
-          ],
-        });
-      }
-    } catch (error) {
-      console.error('Error completing phone verification:', error);
-    }
-  };
-
-
-
   return (
     <AuthContext.Provider value={{
       isAuthenticated,
@@ -1393,7 +1361,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       signOut,
       checkLocalAuthState,
       handleSuccessfulLogin,
-      completePhoneVerification,
       completeBiometricAndEnter,
       isLocked,
       unlockApp,

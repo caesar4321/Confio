@@ -1403,3 +1403,20 @@ confio_admin_site.register(WalletRecoveryDiagnostic, WalletRecoveryDiagnosticAdm
 from payment_accounts.models import AgendaEntry
 from payment_accounts.admin import AgendaEntryAdmin
 confio_admin_site.register(AgendaEntry, AgendaEntryAdmin)
+
+# Store-review deep link grants (users/review_access.py). Read-only: grants
+# are made by the link and ended by expiry or by clearing REVIEW_LINK_TOKEN.
+from users.models_review_access import ReviewAccess  # noqa: E402
+
+
+class ReviewAccessAdmin(admin.ModelAdmin):
+    list_display = ('user', 'country', 'geo_exempt', 'created_at', 'expires_at', 'superseded_at')
+    list_filter = ('country', 'geo_exempt')
+    search_fields = ('user__username', 'user__email')
+    readonly_fields = [field.name for field in ReviewAccess._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+
+confio_admin_site.register(ReviewAccess, ReviewAccessAdmin)

@@ -42,6 +42,7 @@ import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { Button } from '../components/common/Button';
 import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
 import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
+import { userCountryIso } from '../utils/userCountry';
 
 
 // GraphQL mutation for USDC opt-in
@@ -91,8 +92,8 @@ const TopUpScreen = () => {
   const derivedCurrencyCode = useMemo(() => {
     let localCurrency = 'USD';
 
-    if (userProfile?.phoneCountry) {
-      const country = getCountryByIso(userProfile.phoneCountry);
+    if (userCountryIso(userProfile)) {
+      const country = getCountryByIso(userCountryIso(userProfile));
       if (country) localCurrency = getCurrencyForCountry(country as any);
     } else if (selectedCountry) {
       localCurrency = getCurrencyForCountry(selectedCountry as any);
@@ -104,7 +105,7 @@ const TopUpScreen = () => {
     // If fiatOptions is loaded, check against it
     // Otherwise, default to the local currency and let the API load handle it
     return localCurrency;
-  }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
+  }, [selectedCountry, userCountry, userProfile?.country, userProfile?.phoneCountry]);
 
   const [amount, setAmount] = useState('');
   const [currencyCode, setCurrencyCode] = useState<string>('USD');
@@ -365,7 +366,7 @@ const TopUpScreen = () => {
         // Savings rail: NO payout address — the server injects the
         // registered bsc_address and refuses a client-supplied one.
         payoutAddress: isSavingsRail ? undefined : algorandAddress,
-        customerCountry: userProfile?.phoneCountry,
+        customerCountry: userCountryIso(userProfile) || undefined,
         externalId: `confio-topup-${Date.now()}`,
       });
 

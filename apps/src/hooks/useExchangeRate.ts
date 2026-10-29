@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getCurrencyForCountry } from '../utils/currencyMapping';
 import { getCountryByIso } from '../utils/countries';
 import { formatDecimal } from '../utils/numberLocale';
+import { userCountryIso } from '../utils/userCountry';
 
 interface ExchangeRateResult {
   rate: number | null;
@@ -92,7 +93,7 @@ export const useSpecificExchangeRate = (
 export const useSelectedCountryRate = () => {
   const { selectedCountry, userCountry } = useCountry();
   const { userProfile } = useAuth() as any;
-  const profileCountry = userProfile?.phoneCountry ? getCountryByIso(userProfile.phoneCountry) : null;
+  const profileCountry = userCountryIso(userProfile) ? getCountryByIso(userCountryIso(userProfile)) : null;
   const countryToUse = selectedCountry || userCountry || profileCountry;
   const sourceCurrency = countryToUse ? getCurrencyForCountry(countryToUse as any) : 'USD';
   

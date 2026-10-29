@@ -264,11 +264,8 @@ export const NotificationScreen = () => {
       } else {
         employeePhoneResolved = rawPhone;
       }
-    } else if (isReceived && userProfile?.phoneNumber) {
-      // Fallback for PAYROLL_RECEIVED - current user is the employee
-      const dialCode = userProfile.phoneCountry ? countryDialingCodes[userProfile.phoneCountry] : '';
-      employeePhoneResolved = dialCode ? `${dialCode} ${userProfile.phoneNumber}` : userProfile.phoneNumber;
     }
+    // PAYROLL_RECEIVED: the employee is the viewer; their own number is not shown.
 
 
     navigation.navigate('TransactionReceipt', transactionReceiptRoute({

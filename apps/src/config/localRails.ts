@@ -314,6 +314,12 @@ export const toIso2 = (code: string | null | undefined): string => {
   return ISO3_TO_ISO2[raw] || '';
 };
 
+/** ISO-2 → ISO-3 for the rail countries above ('' when not one of them). */
+export const toIso3 = (code: string | null | undefined): string => {
+  const iso2 = toIso2(code);
+  return Object.keys(ISO3_TO_ISO2).find(iso3 => iso3 !== 'LUX' && ISO3_TO_ISO2[iso3] === iso2) || '';
+};
+
 // SEPA is a currency area, not a country, so it has no ISO-2 entry in the
 // app's country table. It gets a pseudo-entry rather than a special case at
 // every call site — the alternative was the literal string "EU" rendering

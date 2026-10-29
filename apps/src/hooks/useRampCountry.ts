@@ -1,16 +1,20 @@
 import { useCallback, useMemo } from 'react';
 import { Alert } from 'react-native';
-import { useQuery } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
 
-import { GET_ME } from '../apollo/queries';
+import { GET_ME, GET_RAIL_COUNTRIES } from '../apollo/queries';
+import { SET_PREFERRED_RAIL_COUNTRY } from '../apollo/mutations';
+import { userCountryIso } from '../utils/userCountry';
 import { useAuth } from '../contexts/AuthContext';
 import { isRampBlockedCountry } from '../config/env';
 import { getCountryByIso } from '../utils/countries';
 
 /**
- * Which country a ramp order belongs to is a fact about the USER — their
- * verified phone country — and nothing else.
+ * Which country a ramp order belongs to is a fact about the USER — the first
+ * of the server's rail countries (the one they picked in Recargar/Retirar,
+ * else where they live, else their documents' country) — and nothing else.
+ * Never the phone prefix: phone-less accounts have none.
  *
  * The ramp screens used to resolve it as
  * `phoneCountry || selectedCountry || userCountry || 'AR'`, which is wrong
@@ -31,19 +35,38 @@ export const useRampCountry = () => {
   const navigation = useNavigation<any>();
   const { userProfile, isUserProfileLoading } = useAuth() as any;
   const { data: meData, loading: meLoading } = useQuery(GET_ME);
+  // The server's order (ramps/rail_country.py): the country the user picked,
+  // then where they live, then their documents' countries.
+  const { data: railData, loading: railLoading, refetch: refetchRail } = useQuery(GET_RAIL_COUNTRIES, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const [setPreferredRailCountry] = useMutation(SET_PREFERRED_RAIL_COUNTRY);
+
+  const railCountries: string[] = useMemo(
+    () => ((railData?.railCountries || []) as string[])
+      .map(code => String(code || '').trim().toUpperCase())
+      .filter(code => Boolean(getCountryByIso(code))),
+    [railData?.railCountries],
+  );
 
   const countryCode = useMemo(() => {
-    const raw = String(userProfile?.phoneCountry || meData?.me?.phoneCountry || '')
-      .trim()
-      .toUpperCase();
-    // Only an ISO-2 we can actually resolve counts as known. phone_country
-    // tolerates a calling code being written into it (see users/models.py),
-    // and a calling code is ambiguous (+1 is a dozen countries) — never let
-    // one pick a country for us.
+    if (railCountries.length) return railCountries[0];
+    const raw = userCountryIso(userProfile) || userCountryIso(meData?.me);
+    // Only an ISO-2 we can actually resolve counts as known — never let an
+    // unresolvable value pick a country for us.
     return raw && getCountryByIso(raw) ? raw : null;
-  }, [meData?.me?.phoneCountry, userProfile?.phoneCountry]);
+  }, [railCountries, meData?.me, userProfile]);
 
-  const loading = !countryCode && (Boolean(isUserProfileLoading) || meLoading);
+  const loading = !countryCode && (Boolean(isUserProfileLoading) || meLoading || railLoading);
+
+  // The user picked another country in Recargar/Retirar: it leads from now on.
+  const setRampCountry = useCallback(async (iso: string) => {
+    const result = await setPreferredRailCountry({ variables: { country: iso } });
+    if (!result.data?.setPreferredRailCountry?.success) {
+      throw new Error(result.data?.setPreferredRailCountry?.error || 'No pudimos cambiar el país');
+    }
+    await refetchRail();
+  }, [refetchRail, setPreferredRailCountry]);
   const isBlocked = isRampBlockedCountry(countryCode);
 
   // Recargar/Retirar run through ramp providers (Koywe/Guardarian). Where
@@ -71,5 +94,5 @@ export const useRampCountry = () => {
     [isBlocked, navigation],
   );
 
-  return { countryCode, loading, isBlocked, navigateToRampOrEfectivo };
+  return { countryCode, railCountries, loading, isBlocked, navigateToRampOrEfectivo, setRampCountry };
 };

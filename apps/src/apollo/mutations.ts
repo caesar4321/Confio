@@ -1667,3 +1667,13 @@ export const SHARE_ACTIVITY_INTENT = gql`
     }
   }
 `;
+
+// The country the user picked for Recargar/Retirar; it leads railCountries.
+export const SET_PREFERRED_RAIL_COUNTRY = gql`
+  mutation SetPreferredRailCountry($country: String!) {
+    setPreferredRailCountry(country: $country) {
+      success
+      error
+    }
+  }
+`;

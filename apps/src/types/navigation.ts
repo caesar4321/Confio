@@ -5,7 +5,6 @@ import { NavigatorScreenParams } from '@react-navigation/native';
 export type AuthStackParamList = {
   Login: undefined;
   BackupCompletion: undefined;
-  PhoneVerification: undefined;
   Registration: undefined;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   BiometricSetup: { origin?: 'login' | 'phoneVerification' } | undefined;
@@ -89,7 +88,6 @@ export type MainStackParamList = {
   EditBusiness: undefined;
   EditProfile: undefined;
   UpdateUsername: undefined;
-  PhoneVerification: undefined;
   TraderProfile: {
     offer?: {
       id: string;

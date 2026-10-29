@@ -116,6 +116,10 @@ class InitiateSMSVerification(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, phone_number, country_code):
+        # Off once every supported build signs up without a phone (spec
+        # phoneless-signup #3): no SMS is sent at all.
+        if not getattr(settings, 'PHONE_VERIFICATION_ENABLED', True):
+            return InitiateSMSVerification(success=False, error="La verificación por teléfono ya no es necesaria. Actualizá Confío.")
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return InitiateSMSVerification(success=False, error="Authentication required")

@@ -10,7 +10,6 @@ import { useAccount } from '../contexts/AccountContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
-import { getCountryByIso } from '../utils/countries';
 import { ReferralInputModal } from '../components/ReferralInputModal';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { DriveStorageFullModal } from '../components/DriveStorageFullModal';
@@ -27,20 +26,6 @@ import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inv
 import { formatDecimal } from '../utils/numberLocale';
 
 // Utility function to format phone number with country code
-const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
-  if (!phoneNumber) return '';
-
-  // If we have a country code, format it
-  if (phoneCountry) {
-    const country = getCountryByIso(phoneCountry);
-    if (country) {
-      const countryCode = country[1]; // country[1] is the phone code (e.g., '+54')
-      return `${countryCode} ${phoneNumber}`;
-    }
-  }
-
-  return phoneNumber;
-};
 
 // Colors from the design
 type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -349,12 +334,11 @@ export const ProfileScreen = () => {
       const accountType = isPersonal ? 'Personal' : 'Negocio';
 
       if (isPersonal) {
-        // For personal accounts, show user profile info with phone number (no account type label)
+        // Personal: name and @username (no phone number, no account type label)
         const displayName = userProfile?.firstName || userProfile?.username || activeAccount.name;
-        const phoneNumber = formatPhoneNumber(userProfile?.phoneNumber, userProfile?.phoneCountry);
         return {
           name: displayName,
-          subtitle: phoneNumber,
+          subtitle: username,
           accountType: '',
           showAccountType: false
         };
@@ -369,12 +353,11 @@ export const ProfileScreen = () => {
       }
     }
 
-    // Fallback to user profile with phone number (no account type label)
+    // Fallback: name and @username (no account type label)
     const displayName = userProfile?.firstName || userProfile?.username || 'Sin perfil';
-    const phoneNumber = formatPhoneNumber(userProfile?.phoneNumber, userProfile?.phoneCountry);
     return {
       name: displayName,
-      subtitle: phoneNumber,
+      subtitle: username,
       accountType: '',
       showAccountType: false
     };

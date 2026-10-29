@@ -40,7 +40,6 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAtomicAccountSwitch } from '../hooks/useAtomicAccountSwitch';
 import { PushNotificationService } from '../services/pushNotificationService';
 import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
-import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery, useMutation } from '@apollo/client';
 import {
@@ -86,20 +85,6 @@ import { BALANCE_VISIBILITY_KEY, loadSavedBalanceVisibility, PREFERENCES_KEYCHAI
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
 const INVITE_TS_KEY = 'invite_banner_last_ts';
 
-const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
-  if (!phoneNumber) return '';
-
-  // If we have a country code, format it
-  if (phoneCountry) {
-    const country = getCountryByIso(phoneCountry);
-    if (country) {
-      const countryCode = country[1]; // country[1] is the phone code (e.g., '+54')
-      return `${countryCode} ${phoneNumber}`;
-    }
-  }
-
-  return phoneNumber;
-};
 
 interface Account {
   id: string;
@@ -634,19 +619,11 @@ export const HomeScreen = () => {
 
   // No more mock accounts - we fetch from server
 
-  // Convert stored accounts to the format expected by ProfileMenu
-  // For personal accounts, format phone number with country code
+  // Accounts as ProfileMenu shows them. A personal account shows no phone:
+  // signup no longer asks for one and it is not how friends find you.
   const accountMenuItems = React.useMemo(() => (
-    accounts.map(acc => {
-      if (acc.type === 'personal' && userProfile) {
-        return {
-          ...acc,
-          phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
-        };
-      }
-      return acc;
-    })
-  ), [accounts, userProfile]);
+    accounts.map(acc => (acc.type === 'personal' ? { ...acc, phone: undefined } : acc))
+  ), [accounts]);
 
   // Display accounts — useAccountManager already handles placeholders, no need
   // for a separate bootstrap effect that causes extra re-renders.
@@ -674,7 +651,7 @@ export const HomeScreen = () => {
         id: 'personal_0',
         name: userProfile.firstName || userProfile.username || 'Personal',
         type: 'personal' as const,
-        phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
+        phone: undefined,
         category: undefined,
         avatar: (userProfile.firstName || userProfile.username || 'P').charAt(0).toUpperCase(),
         isEmployee: false,
@@ -754,9 +731,7 @@ export const HomeScreen = () => {
     if (activeAccount) {
       return {
         ...activeAccount,
-        phone: activeAccount.type === 'personal' && userProfile
-          ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry)
-          : activeAccount.phone,
+        phone: activeAccount.type === 'personal' ? undefined : activeAccount.phone,
       };
     }
 

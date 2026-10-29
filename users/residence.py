@@ -78,15 +78,42 @@ def _pin_review_number(user) -> bool | None:
 
 def refresh_residence_country(user) -> bool:
     """Move the user to their 90-day IP majority country when there is one."""
+    from users.review_access import active_review_access
+    if active_review_access(user):
+        # A live review-link grant outranks everything, a reviewer number too.
+        return False
     pinned = _pin_review_number(user)
     if pinned is not None:
         return pinned
     if user.country_source == user.COUNTRY_SOURCE_REVIEW:
-        return False
+        return _restore_after_review(user)
     country = to_iso2(residence_country_for(user))
     if not country:
         return False
     return _write(user, country, user.COUNTRY_SOURCE_RESIDENCE)
+
+
+def _restore_after_review(user) -> bool:
+    """The review link's grant ended (expired, superseded with nothing after
+    it, or the token cleared): give the account back its country. Locked and
+    rechecked, so a grant issued meanwhile (users.review_access holds the same
+    row lock) is never overwritten."""
+    from django.db import transaction
+    from users.review_access import active_review_access, latest_review_access
+    with transaction.atomic():
+        user = type(user).objects.select_for_update().get(pk=user.pk)
+        if user.country_source != user.COUNTRY_SOURCE_REVIEW or active_review_access(user):
+            return False
+        country = to_iso2(residence_country_for(user))
+        if country:
+            return _write(user, country, user.COUNTRY_SOURCE_RESIDENCE)
+        last = latest_review_access(user)
+        before = getattr(last, 'country_before_review', None)
+        if before:
+            return _write(user, before, getattr(last, 'source_before_review', '') or user.COUNTRY_SOURCE_SIGNUP_IP)
+        user.country, user.country_source, user.country_updated_at = None, '', timezone.now()
+        user.save(update_fields=['country', 'country_source', 'country_updated_at'])
+        return True
 
 
 def backfill_country(user) -> bool:

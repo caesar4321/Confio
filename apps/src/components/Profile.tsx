@@ -62,12 +62,6 @@ const Profile: React.FC = () => {
           {userProfile.lastName && (
             <Text>Last Name: {userProfile.lastName}</Text>
           )}
-          {userProfile.phoneCountry && (
-            <Text>Phone Country: {userProfile.phoneCountry}</Text>
-          )}
-          {userProfile.phoneNumber && (
-            <Text>Phone Number: {userProfile.phoneNumber}</Text>
-          )}
           <Text>Identity Verified: {userProfile.isIdentityVerified ? 'Yes' : 'No'}</Text>
           {userProfile.verificationStatus && (
             <Text>Verification Status: {userProfile.verificationStatus}</Text>

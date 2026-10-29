@@ -24,6 +24,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { ProcessingHero } from '../components/common/ProcessingHero';
 import { formatAmountString } from '../utils/numberLocale';
+import { userCountryIso } from '../utils/userCountry';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -161,7 +162,7 @@ export const TransactionProcessingScreen = () => {
   const route = useRoute();
   const { activeAccount } = useAccount();
   const { userProfile } = useAuth();
-  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+  const supportCopy = getSupportCopy(userCountryIso(userProfile));
   // const insets = useSafeAreaInsets();
 
   const transactionData: TransactionData = (route.params as any)?.transactionData || {

@@ -1318,6 +1318,9 @@ from .models_analytics import (  # noqa: F401
     UserActivityDay,
 )
 
+# Store-review deep link grants (users/review_access.py)
+from .models_review_access import ReviewAccess  # noqa: F401,E402
+
 # Waitlist behind the "Próximamente" local rail rows
 from .models_rail_waitlist import LocalRailWaitlistEntry  # noqa: F401,E402
 

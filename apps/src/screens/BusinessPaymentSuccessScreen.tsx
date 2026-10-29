@@ -26,6 +26,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { formatTokenLabel, explorerFor } from '../utils/tokenDisplay';
 import { formatAmountString, formatDecimal, formatPercent } from '../utils/numberLocale';
+import { userCountryIso } from '../utils/userCountry';
 
 const { width } = Dimensions.get('window');
 
@@ -93,7 +94,7 @@ export const BusinessPaymentSuccessScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<BusinessPaymentSuccessRouteProp>();
   const { userProfile } = useAuth();
-  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+  const supportCopy = getSupportCopy(userCountryIso(userProfile));
   const [copied, setCopied] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
   const [displayCustomerName, setDisplayCustomerName] = useState<string>('Cliente');

@@ -127,32 +127,26 @@ describe('session loss after biometric unlock', () => {
     expect(Alert.alert).toHaveBeenCalledTimes(1);
   });
 
+  // protects=a phone-less account (signup no longer asks for one) enters Home; fails_when=any phone gate routes it to PhoneVerification; no_claim=server-side login
   it.each([
     { phoneNumber: null, phoneCountry: null },
     { phoneNumber: '123', phoneCountry: null },
-  ])('opens phone verification without entering Home for an incomplete phone link: %j', async phone => {
+  ])('enters Home without a phone link: %j', async phone => {
     mockClient.query.mockResolvedValue({ data: { me: { id: '1', ...phone } } });
     await mount();
-    expect(authenticatedStates).not.toContain(true);
-    expect(authState!.isLoading).toBe(false);
-    expect(navigationRef.current.reset).toHaveBeenCalledWith({
-      index: 0, routes: [{ name: 'Auth', params: { screen: 'PhoneVerification', params: undefined } }],
-    });
-    expect(await Keychain.getGenericPassword()).toBeTruthy();
+    expect(authState!.isAuthenticated).toBe(true);
+    expect(JSON.stringify(navigationRef.current.reset.mock.calls)).not.toContain('PhoneVerification');
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
-  it('routes an already open session to phone verification when its phone link is removed', async () => {
+  it('keeps an open session signed in when its phone link is removed', async () => {
     await mount();
     expect(authState!.isAuthenticated).toBe(true);
     navigationRef.current.reset.mockClear();
     mockClient.query.mockResolvedValue({ data: { me: { id: '1', phoneNumber: null, phoneCountry: null } } });
     await act(async () => { await authState!.refreshProfile(); });
-    expect(authState!.isAuthenticated).toBe(false);
-    expect(navigationRef.current.reset).toHaveBeenCalledWith({
-      index: 0, routes: [{ name: 'Auth', params: { screen: 'PhoneVerification', params: undefined } }],
-    });
-    expect(await Keychain.getGenericPassword()).toBeTruthy();
+    expect(authState!.isAuthenticated).toBe(true);
+    expect(JSON.stringify(navigationRef.current.reset.mock.calls)).not.toContain('PhoneVerification');
   });
 
   it('locks instead of ejecting to login when the startup unlock fails, then unlocks in place', async () => {
@@ -255,20 +249,16 @@ describe('session loss after biometric unlock', () => {
     });
   });
 
-  it.each(['login', 'phone'] as const)('routes %s to device biometric setup, never Confío Face', async source => {
+  it('routes login to device biometric setup, never Confío Face', async () => {
     await mount();
     mockClient.query.mockResolvedValue({ data: { me: { id: '1', phoneNumber: '123', phoneCountry: 'AR' } } });
     mockFace.mockClear();
     navigationRef.current.reset.mockClear();
     await act(async () => {
-      if (source === 'login') await authState!.handleSuccessfulLogin(true);
-      else await authState!.completePhoneVerification();
+      await authState!.handleSuccessfulLogin(false);
     });
-    // (Login queues the same route; it applies once the Auth stack mounts,
+    // (Login queues the route; it applies once the Auth stack mounts,
     // which this already-signed-in harness never does.)
-    if (source === 'phone') {
-      expect(JSON.stringify(navigationRef.current.reset.mock.calls)).toContain('BiometricSetup');
-    }
     expect(mockFace).not.toHaveBeenCalled();
   });
 

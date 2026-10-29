@@ -48,6 +48,9 @@ class InitiateTelegramVerification(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, phone_number, country_code):
+        from django.conf import settings
+        if not getattr(settings, 'PHONE_VERIFICATION_ENABLED', True):
+            return InitiateTelegramVerification(success=False, error="La verificación por teléfono ya no es necesaria. Actualizá Confío.")
         print("=== MUTATION CALLED ===")
         logger.info('=== Starting Telegram Verification ===')
         logger.info('Phone number received: %s', phone_number)

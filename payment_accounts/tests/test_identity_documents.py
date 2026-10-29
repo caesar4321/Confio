@@ -93,8 +93,9 @@ class AdditionalDocumentTests(TestCase):
         from ramps.schema import _get_latest_personal_verification
         passport = document(self.user, 'P-2', document_type='passport', is_additional_document=True)
         self.assertIsNone(_get_latest_personal_verification(self.user, 'PE'))
-        # Venezuela: the passport is the only document of that country, so it is what a rail gets.
-        self.assertEqual(_get_latest_personal_verification(self.user, 'VE'), passport)
+        # Venezuela's rail does not take a passport (only Colombia's does).
+        self.assertIsNone(_get_latest_personal_verification(self.user, 'VE'))
+        self.assertTrue(passport.is_additional_document)
         self.assertTrue(self.user.is_identity_verified)
 
     def pending(self, request):

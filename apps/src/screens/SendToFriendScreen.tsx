@@ -27,6 +27,7 @@ import {
   recipientNeedsConfirmation,
 } from '../services/recipientConfirmationService';
 import { formatDecimal, normalizeAmountInput, parseAmountInput, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
+import { userCountryIso } from '../utils/userCountry';
 
 type TokenType = 'cusd' | 'confio' | 'cusd_plus';
 
@@ -98,7 +99,7 @@ export const SendToFriendScreen = () => {
   // Safe area handled with SafeAreaView
   const { formatNumber } = useNumberFormat();
   const { userProfile } = useAuth();
-  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+  const supportCopy = getSupportCopy(userCountryIso(userProfile));
 
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
 

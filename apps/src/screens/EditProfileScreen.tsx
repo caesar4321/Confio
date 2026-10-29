@@ -8,7 +8,6 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_USER_PROFILE, UPDATE_USERNAME, GET_ME, GET_MY_PERSONAL_KYC_STATUS, GET_MY_PERSONAL_VERIFIED_KYC } from '../apollo/queries';
-import { getCountryByIso } from '../utils/countries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
@@ -20,20 +19,6 @@ import { ProfilePictureEditor } from '../components/ProfilePictureEditor';
 type EditProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 // Utility function to format phone number with country code
-const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
-  if (!phoneNumber) return '';
-
-  // If we have a country code, format it
-  if (phoneCountry) {
-    const country = getCountryByIso(phoneCountry);
-    if (country) {
-      const countryCode = country[1]; // country[1] is the phone code (e.g., '+54')
-      return `${countryCode} ${phoneNumber}`;
-    }
-  }
-
-  return phoneNumber;
-};
 
 export const EditProfileScreen = () => {
   const { userProfile, isUserProfileLoading, refreshProfile } = useAuth();
@@ -145,22 +130,6 @@ export const EditProfileScreen = () => {
 
   const handleCancel = () => {
     navigation.goBack();
-  };
-
-  const handleChangePhoneNumber = async () => {
-    if (isVerified) {
-      try {
-        const authenticated = await biometricAuthService.authenticate(
-          'Verifica tu identidad para cambiar tu número de teléfono'
-        );
-        if (!authenticated) {
-          return;
-        }
-      } catch (error) {
-        return;
-      }
-    }
-    navigation.navigate('PhoneVerification');
   };
 
   // Username validation and suggestions
@@ -348,30 +317,6 @@ export const EditProfileScreen = () => {
           )}
         </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Número de teléfono</Text>
-          <TouchableOpacity
-            style={styles.phoneInputContainer}
-            onPress={handleChangePhoneNumber}
-            activeOpacity={0.7}
-          >
-            <View style={styles.phoneInputContent}>
-              <Text style={styles.phoneInputText}>
-                {userProfile?.phoneNumber && userProfile?.phoneCountry
-                  ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry)
-                  : 'No configurado'
-                }
-              </Text>
-              <Icon name="chevron-right" size={20} color={colors.text.light} />
-            </View>
-          </TouchableOpacity>
-          <Text style={styles.phoneInputSubtext}>
-            {isVerified
-              ? 'Toca para cambiar tu número (requiere biometría)'
-              : 'Toca para cambiar tu número de teléfono'
-            }
-          </Text>
-        </View>
 
         <View style={styles.infoContainer}>
           <Icon name="info" size={16} color={colors.text.secondary} />

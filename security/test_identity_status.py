@@ -36,9 +36,10 @@ class AdditionalDocumentOnlyTests(TestCase):
 
     def test_vocabulary(self):
         self.assertTrue(ids.is_identity_verified(self.user))
-        # A Venezuelan passport naming Colombia as residence is still not a Colombian document.
+        # A Venezuelan passport naming Colombia as residence is not a Colombian
+        # document, and Venezuela's rail does not take a passport either.
         self.assertIsNone(ids.rail_identity(self.user, 'CO'))
-        self.assertEqual(ids.rail_identity(self.user, 'VE'), self.passport)
+        self.assertIsNone(ids.rail_identity(self.user, 'VE'))
         self.assertTrue(ids.has_ever_passed_kyc(self.user))
         self.assertEqual(ids.identity_status(self.user), 'verified')
         self.assertEqual(ids.verified_at(self.user), self.passport.verified_at)
@@ -49,7 +50,7 @@ class AdditionalDocumentOnlyTests(TestCase):
         self.assertTrue(self.user.is_identity_verified)
         self.assertTrue(self.user.has_verified_identity_document)
         self.assertTrue(self.user.has_passed_identity_verification)
-        self.assertTrue(self.user.has_rail_identity)  # primary rail country = the document's
+        self.assertFalse(self.user.has_rail_identity)  # a passport opens no rail outside Colombia
         self.assertEqual(self.user.verification_status, 'verified')
         self.assertEqual(self.user.last_verified_date, self.passport.verified_at)
 
@@ -58,7 +59,7 @@ class AdditionalDocumentOnlyTests(TestCase):
         from users.schema import UserType
         status = SecurityQuery.resolve_my_identity_status(None, info_for(self.user))
         self.assertEqual((status.verified, status.phone_country_verified, status.ever_passed_kyc, status.status),
-                         (True, True, True, 'verified'))
+                         (True, False, True, 'verified'))
         self.assertEqual(SecurityQuery.resolve_my_personal_verified_kyc(None, info_for(self.user)), self.passport)
         self.assertTrue(UserType.resolve_is_identity_verified(self.user, None))
         self.assertEqual(UserType.resolve_verification_status(self.user, None), 'verified')

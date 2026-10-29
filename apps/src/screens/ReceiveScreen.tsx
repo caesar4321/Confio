@@ -17,7 +17,6 @@ import { useLocalRailOptions } from '../hooks/useLocalRailOptions';
 import { useKoyweReplaced } from '../hooks/useKoyweReplaced';
 import { useRampFlows } from '../hooks/useRampFlows';
 import { MainStackParamList } from '../types/navigation';
-import { getCountryByIso } from '../utils/countries';
 import { buildInviteLink } from '../utils/inviteLinks';
 import { QrShowIcon } from '../components/QrPayIcon';
 
@@ -61,25 +60,20 @@ export default function ReceiveScreen() {
   const { receivePrimary, receiveMore } = useLocalRailOptions();
   const cryptoOptions = useCryptoReceiveOptions();
 
-  const phoneDisplay = useMemo(() => {
-    const number = userProfile?.phoneNumber;
-    if (!number) return null;
-    const country = userProfile?.phoneCountry ? getCountryByIso(userProfile.phoneCountry) : null;
-    return country ? `${country[1]} ${number}` : number;
-  }, [userProfile?.phoneNumber, userProfile?.phoneCountry]);
+  // Friends send to a username now; the phone number is not an address.
+  const usernameDisplay = userProfile?.username ? `@${userProfile.username}` : null;
 
   // The share doubles as an invite: the payer may not have Confío yet, and
   // the link carries this user's referral so the install is credited.
-  const handleSharePhone = useCallback(() => {
-    if (!phoneDisplay) return;
+  const handleShareUsername = useCallback(() => {
+    if (!usernameDisplay || !userProfile?.username) return;
     const lines = [
-      `Envíame dólares por Confío a mi número ${phoneDisplay}.`,
+      `Envíame dólares por Confío a mi usuario ${usernameDisplay}.`,
+      '',
+      `¿Aún no tienes Confío? ${buildInviteLink({ username: userProfile.username, source: 'receive' })}`,
     ];
-    if (userProfile?.username) {
-      lines.push('', `¿Aún no tienes Confío? ${buildInviteLink({ username: userProfile.username, source: 'receive' })}`);
-    }
     Share.share({ message: lines.join('\n') }).catch(() => {});
-  }, [phoneDisplay, userProfile?.username]);
+  }, [usernameDisplay, userProfile?.username]);
 
   // Where no ramp provider operates there is no one-off recharge to offer;
   // the cash row below is the way in.
@@ -137,21 +131,21 @@ export default function ReceiveScreen() {
                 }}
               />
             </RouteCard>
-          ) : phoneDisplay ? (
+          ) : usernameDisplay ? (
             <RouteCard label="DE ALGUIEN EN CONFÍO">
               <View style={styles.phoneRow}>
                 <View style={styles.phoneIcon}>
-                  <Icon name="smartphone" size={20} color={colors.primaryDark} />
+                  <Icon name="at-sign" size={20} color={colors.primaryDark} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.phoneNumber}>{phoneDisplay}</Text>
-                  <Text style={styles.phoneHint}>Te envían dólares a tu número</Text>
+                  <Text style={styles.phoneNumber}>{usernameDisplay}</Text>
+                  <Text style={styles.phoneHint}>Te envían dólares a tu usuario</Text>
                 </View>
                 <TouchableOpacity
                   style={styles.shareButton}
-                  onPress={handleSharePhone}
+                  onPress={handleShareUsername}
                   accessibilityRole="button"
-                  accessibilityLabel="Compartir mi número"
+                  accessibilityLabel="Compartir mi usuario"
                 >
                   <Icon name="share-2" size={16} color={colors.white} />
                   <Text style={styles.shareButtonText}>Compartir</Text>

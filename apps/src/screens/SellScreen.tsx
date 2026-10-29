@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Text, TextInput } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { gql, useMutation, useQuery } from '@apollo/client';
 
@@ -156,7 +156,11 @@ export const SellScreen = () => {
   const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',
   });
-  const { data: identityData } = useQuery(GET_MY_IDENTITY_STATUS, { fetchPolicy: 'cache-and-network' });
+  const { data: identityData, refetch: refetchIdentity } = useQuery(GET_MY_IDENTITY_STATUS, { fetchPolicy: 'cache-and-network' });
+  // Back from adding a document (AdditionalDocument): read the new list.
+  useFocusEffect(React.useCallback(() => {
+    refetchIdentity().catch(() => {});
+  }, [refetchIdentity]));
   const { data: personalKycData } = useQuery(GET_MY_PERSONAL_KYC_STATUS);
   const { data: rampAddressData, loading: rampAddressLoading } = useQuery(GET_MY_RAMP_ADDRESS, {
     fetchPolicy: 'cache-and-network',
@@ -201,8 +205,8 @@ export const SellScreen = () => {
   const isVerified = useMemo(() => {
     // Match Koywe's test identity, including servers predating the optional flag.
     if (isKoyweMapped && hasTestIdentity) return true;
-    return hasRampIdentity(identityData?.myIdentityStatus, personalKycData?.myPersonalKycStatus?.status);
-  }, [isKoyweMapped, hasTestIdentity, identityData?.myIdentityStatus, personalKycData?.myPersonalKycStatus?.status]);
+    return hasRampIdentity(identityData?.myIdentityStatus, personalKycData?.myPersonalKycStatus?.status, countryCode);
+  }, [isKoyweMapped, hasTestIdentity, identityData?.myIdentityStatus, personalKycData?.myPersonalKycStatus?.status, countryCode]);
   const hasCompleteRampAddress = Boolean(rampAddressData?.myRampAddress?.isComplete);
 
   const savedMethods: SavedPayoutMethod[] = useMemo(() => {
