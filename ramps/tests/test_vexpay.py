@@ -839,10 +839,10 @@ class RefusalGuidanceTests(TestCase):
     def test_movement_not_found_names_what_to_check(self):
         from ramps.vexpay import movement_not_found_message
         text = movement_not_found_message({
-            'payer': {'phone': '584221766767'}, 'expected_ves': '101405',
-            'receiving_account': {'phone': '04149333844', 'bank_name': 'R4 Conecta'}})
-        self.assertIn('desde el 04221766767', text)
-        self.assertIn('al 04149333844 (R4 Conecta)', text)
+            'payer': {'phone': '584141234567'}, 'expected_ves': '101405',
+            'receiving_account': {'phone': '04140000000', 'bank_name': 'R4 Conecta'}})
+        self.assertIn('desde el 04141234567', text)
+        self.assertIn('al 04140000000 (R4 Conecta)', text)
         self.assertIn('Bs 101.405,00', text)
         self.assertTrue(movement_not_found_message({}).startswith('Todavía no vemos tu Pago Móvil. Verifica que la referencia'))
 
