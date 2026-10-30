@@ -10,6 +10,12 @@ import { Country, countries, getCountryByIso } from '../../utils/countries';
 
 const MIN_DIGITS = 6;
 
+// A number can't say which country of a shared code it belongs to: show the
+// main one, not the first alphabetically (+1 was Anguila).
+const SHARED_CODE_DEFAULT: Record<string, string> = {
+  '+1': 'US', '+7': 'RU', '+44': 'GB', '+47': 'NO', '+61': 'AU', '+212': 'MA', '+262': 'RE', '+590': 'GP', '+599': 'CW',
+};
+
 const PROMISES = [
   { icon: 'bell-off', text: 'Sin códigos por SMS: no te enviaremos nada para confirmarlo.' },
   { icon: 'eye-off', text: 'Otros usuarios no lo ven y no sirve para encontrarte.' },
@@ -35,7 +41,10 @@ export const splitPhone = (saved: string, homeIso?: string | null) => {
     .filter(country => saved.startsWith(String(country[1])))
     .sort((a, b) => String(b[1]).length - String(a[1]).length);
   const longest = matches[0];
-  const country = home && longest && home[1] === longest[1] ? home : longest || home;
+  const sharing = matches.filter(country => country[1] === longest?.[1]);
+  const country = sharing.find(option => option[2] === home?.[2])
+    || sharing.find(option => option[2] === SHARED_CODE_DEFAULT[String(longest?.[1])])
+    || longest || home;
   return { country, number: longest ? saved.slice(String(longest[1]).length) : '' };
 };
 
