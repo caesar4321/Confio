@@ -659,6 +659,27 @@ export const SUBMIT_CONFIO_RATING = gql`
   }
 `;
 
+// Their own operations: against an older server only these fail.
+export const GET_RAMP_PHONE_STATUS = gql`
+  query GetRampPhoneStatus {
+    myRampPhoneStatus {
+      needed
+      contactPhone
+      addressCountryIso
+    }
+  }
+`;
+
+export const GET_RAMP_ADDRESS_REQUIREMENTS = gql`
+  query GetRampAddressRequirements($countryCode: String) {
+    rampAddressRequirements(countryCode: $countryCode) {
+      requiresAddressNeighborhood
+      addressNeighborhoodLabel
+      addressNeighborhoodPlaceholder
+    }
+  }
+`;
+
 export const UPSERT_RAMP_USER_ADDRESS = gql`
   mutation UpsertRampUserAddress(
     $addressStreet: String!
@@ -668,6 +689,8 @@ export const UPSERT_RAMP_USER_ADDRESS = gql`
     $addressZipCode: String!
     $economicActivity: String
     $authEmail: String
+    $addressCountry: String
+    $contactPhone: String
   ) {
     upsertRampUserAddress(
       addressStreet: $addressStreet
@@ -677,6 +700,8 @@ export const UPSERT_RAMP_USER_ADDRESS = gql`
       addressZipCode: $addressZipCode
       economicActivity: $economicActivity
       authEmail: $authEmail
+      addressCountry: $addressCountry
+      contactPhone: $contactPhone
     ) {
       success
       error

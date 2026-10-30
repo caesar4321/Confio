@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 KOYWE_SUPPORTED_COUNTRIES = ['COL', 'PER', 'BOL', 'ARG', 'MEX', 'CHL', 'BRA']
 
 
+@shared_task(bind=True, name='ramps.push_ramp_profile', max_retries=4, default_retry_delay=300)
+def push_ramp_profile(self, user_id):
+    from ramps.profile_push import push_to_providers
+    failed = push_to_providers(user_id)
+    if failed:
+        raise self.retry(exc=RuntimeError(f'Profile push failed for {failed}'))
+
+
 @shared_task(name='ramps.refresh_koywe_ramp_limits')
 def refresh_koywe_ramp_limits():
     """

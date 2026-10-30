@@ -805,6 +805,12 @@ class EconomicActivityOptionType(graphene.ObjectType):
     value = graphene.String()
 
 
+class RampPhoneStatusType(graphene.ObjectType):
+    needed = graphene.Boolean()
+    contactPhone = graphene.String()
+    addressCountryIso = graphene.String()
+
+
 class RampAddressRequirementType(graphene.ObjectType):
     requires_address_neighborhood = graphene.Boolean()
     address_neighborhood_label = graphene.String()
@@ -824,6 +830,13 @@ class RampAddressRequirementType(graphene.ObjectType):
         return self.address_neighborhood_placeholder
 
 
+# What providers hold on an open account: changing any of these updates them.
+PROVIDER_PROFILE_FIELDS = (
+    'address_street', 'address_neighborhood', 'address_city', 'address_state', 'address_zip_code',
+    'address_country', 'contact_phone',
+)
+
+
 class UpsertRampUserAddress(graphene.Mutation):
     class Arguments:
         address_street = graphene.String(required=True)
@@ -833,6 +846,8 @@ class UpsertRampUserAddress(graphene.Mutation):
         address_zip_code = graphene.String(required=True)
         economic_activity = graphene.String()
         auth_email = graphene.String()
+        address_country = graphene.String()
+        contact_phone = graphene.String()
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -855,12 +870,14 @@ class UpsertRampUserAddress(graphene.Mutation):
         address_neighborhood=None,
         economic_activity=None,
         auth_email=None,
+        address_country=None,
+        contact_phone=None,
     ):
         user = getattr(info.context, "user", None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return cls(success=False, error='Authentication required', ramp_address=None)
 
-        if not _get_user_residence_alpha3(user):
+        if not address_country and not _get_user_residence_alpha3(user):
             return cls(
                 success=False,
                 error='No pudimos identificar tu país para guardar tu dirección de recargas y retiros.',
@@ -907,15 +924,39 @@ class UpsertRampUserAddress(graphene.Mutation):
                 ramp_address=None,
             )
 
-        # The country an address belongs to is fixed when it is first saved;
-        # editing other fields later never moves it to a newer residence.
-        existing = RampUserAddress.objects.filter(user=user).only('address_country', 'address_street').first()
+        # The country an address belongs to is the one the person picks. With
+        # no pick it is fixed when first saved: editing other fields later
+        # never moves it to a newer residence. It describes this address for
+        # providers; eligibility stays on security.geo.country_of.
+        picked_country = str(address_country or '').strip().upper()
+        existing = RampUserAddress.objects.filter(user=user).first()
         keeps_country = bool(existing and existing.address_country and (existing.address_street or '').strip())
-        values['address_country'] = existing.address_country if keeps_country else _get_user_residence_alpha3(user)
+        if picked_country:
+            import pycountry
+            match = pycountry.countries.get(alpha_2=picked_country)
+            if match is None:
+                return cls(success=False, error='País no disponible', ramp_address=None)
+            values['address_country'] = match.alpha_3
+        else:
+            values['address_country'] = existing.address_country if keeps_country else _get_user_residence_alpha3(user)
+        # Address and phone are one record: both save, or neither does.
+        if contact_phone:
+            from ramps.contact_phone import normalize_contact_phone
+            values['contact_phone'] = normalize_contact_phone(contact_phone)
+            if not values['contact_phone']:
+                return cls(
+                    success=False,
+                    error='Revisa tu número: incluye el código de país y todos los dígitos.',
+                    ramp_address=None,
+                )
+        before = {field: getattr(existing, field, '') for field in PROVIDER_PROFILE_FIELDS}
         ramp_address, _ = RampUserAddress.objects.update_or_create(
             user=user,
             defaults=values,
         )
+        if any(getattr(ramp_address, field) != before[field] for field in PROVIDER_PROFILE_FIELDS):
+            from ramps.profile_push import queue_profile_push
+            queue_profile_push(user.id)
         return cls(success=True, error=None, ramp_address=ramp_address)
 
 
@@ -1781,6 +1822,7 @@ class Query(graphene.ObjectType):
         direction=graphene.String(),
     )
     my_ramp_address = graphene.Field(RampUserAddressType)
+    my_ramp_phone_status = graphene.Field(RampPhoneStatusType)
     economic_activities = graphene.List(
         EconomicActivityOptionType,
         country_code=graphene.String(),
@@ -2193,6 +2235,18 @@ class Query(graphene.ObjectType):
             provider_payload_created=(ramp_tx.metadata or {}).get('provider_payload_created'),
             provider_payload_latest=(ramp_tx.metadata or {}).get('provider_payload_latest'),
         )
+
+    def resolve_my_ramp_phone_status(self, info):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return None
+        import pycountry
+        from ramps.contact_phone import provider_phone
+        phone = provider_phone(user)
+        alpha3 = str(_build_effective_ramp_address_snapshot(user).address_country or '').strip().upper()
+        country = pycountry.countries.get(alpha_3=alpha3) if alpha3 else None
+        return RampPhoneStatusType(
+            needed=not phone, contactPhone=phone, addressCountryIso=country.alpha_2 if country else '')
 
     def resolve_my_ramp_address(self, info):
         user = getattr(info.context, "user", None)
@@ -2864,7 +2918,11 @@ def _build_effective_ramp_address_snapshot(user):
 
 
 def _is_ramp_address_complete(value) -> bool:
+    """Everything a provider owner needs from the person: the address and a phone."""
+    from ramps.contact_phone import has_provider_phone
     user = getattr(value, 'user', None)
+    if user is not None and not has_provider_phone(user):
+        return False
     country = (str(getattr(value, 'address_country', '') or '').strip().upper()
                or _get_user_residence_alpha3(user))
     base_complete = bool(
@@ -2919,6 +2977,8 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
     phone_country_code = getattr(user, 'phone_country_code', None) or ''
     phone_number = (getattr(user, 'phone_number', None) or '').strip()
     phone = f'{phone_country_code}{phone_number}'.replace(' ', '') if phone_number else ''
+    from ramps.contact_phone import saved_contact_phone
+    phone = saved_contact_phone(user) or phone
 
     profile = {
         'firstName': first_name,

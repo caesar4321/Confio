@@ -1017,6 +1017,29 @@ class KoyweClient:
         cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
         return None
 
+    def push_account_profile(self, *, email: str, country_code: str, contact_profile: dict[str, Any]) -> bool:
+        """Send an edited phone/address to an account Koywe already holds."""
+        normalized_email = str(email or '').strip().lower()
+        normalized_contact = self._normalize_contact_profile(contact_profile=contact_profile, country_code=country_code)
+        if not normalized_email or not normalized_contact:
+            return False
+        payload = self._build_account_profile_payload(
+            email=normalized_email, country_code=country_code, contact_profile=normalized_contact)
+        if not payload:
+            return False
+        try:
+            existing = self.get_account(email=normalized_email)
+        except KoyweError as exc:
+            if self._is_account_not_found_error(str(exc)):
+                return False
+            raise
+        if not existing:
+            return False
+        self.update_account(email=normalized_email, payload=self._build_migration_payload(
+            existing=existing, target_payload=payload, country_code=country_code,
+            current_email=normalized_email, new_email=None))
+        return True
+
     def _ensure_existing_account_profile(self, *, email: str, country_code: str, payload: dict[str, Any], previous_emails: list[str] | None = None) -> str | None:
         """Update an existing Koywe account profile.
 

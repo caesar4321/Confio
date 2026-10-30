@@ -148,7 +148,8 @@ def _verified_contact(decision):
 def _contact(decision, user):
     contact = decision.get('contact_details') or {}
     email = contact.get('email') or (user.email if user else None)
-    phone = contact.get('phone')
+    from ramps.contact_phone import saved_contact_phone
+    phone = (saved_contact_phone(user) if user else '') or contact.get('phone')
     if not phone and user and user.phone_number and user.phone_country_code:
         phone = f'{user.phone_country_code}{user.phone_number}'
     return (
@@ -431,6 +432,13 @@ def _declared_address(user):
     return _build_effective_ramp_address_snapshot(user)
 
 
+def declared_address_for_provider(declared):
+    line_1 = ', '.join(part for part in (
+        (declared.address_street or '').strip(), (declared.address_neighborhood or '').strip()) if part)
+    return _address(line_1=line_1, city=declared.address_city, state=declared.address_state,
+                    postal_code=declared.address_zip_code, country=declared.address_country)
+
+
 def _individual_payload(*, decision, identity, user, client, declared_address=None):
     if str(decision.get('status') or '').strip().lower() != 'approved':
         raise ComplianceHandoffError('Approved Didit KYC is required for each individual, including UBOs')
@@ -462,17 +470,8 @@ def _individual_payload(*, decision, identity, user, client, declared_address=No
         # The account owner: many LATAM cédulas/DNIs carry no address, so use
         # the same self-declared ramp address Koywe uses (country from the
         # phone). Proof of address is an EDD document, not an opening one.
-        declared = declared_address
-        line_1 = ', '.join(part for part in (
-            (declared.address_street or '').strip(), (declared.address_neighborhood or '').strip()) if part)
         try:
-            address = _address(
-                line_1=line_1,
-                city=declared.address_city,
-                state=declared.address_state,
-                postal_code=declared.address_zip_code,
-                country=declared.address_country,
-            )
+            address = declared_address_for_provider(declared_address)
         except (ComplianceHandoffError, ValueError) as exc:
             raise ComplianceHandoffError('Completa tu dirección para abrir tu cuenta local.') from exc
     elif answers:

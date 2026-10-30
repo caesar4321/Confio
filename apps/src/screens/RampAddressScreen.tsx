@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
 
-import { GET_MY_RAMP_ADDRESS, UPSERT_RAMP_USER_ADDRESS } from '../apollo/queries';
+import { GET_MY_RAMP_ADDRESS, GET_RAMP_ADDRESS_REQUIREMENTS, GET_RAMP_PHONE_STATUS, UPSERT_RAMP_USER_ADDRESS } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { AnalyticsService } from '../services/analyticsService';
@@ -26,6 +26,8 @@ import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { CountryFlag } from '../components/CountryFlag';
+import { RampCountryPicker } from '../components/ramps/RampCountryPicker';
+import { RampPhoneField, internationalPhone, splitPhone } from '../components/ramps/RampPhoneField';
 import { userCountryIso } from '../utils/userCountry';
 import { toIso2 } from '../config/localRails';
 
@@ -42,6 +44,12 @@ export const RampAddressScreen: React.FC = () => {
     fetchPolicy: 'cache-and-network',
   });
   const [upsertRampAddress] = useMutation(UPSERT_RAMP_USER_ADDRESS);
+  // The number providers get, set and edited here by everyone. Saved with the
+  // address in one mutation; a verified phone stays as it is.
+  const { data: phoneData } = useQuery(GET_RAMP_PHONE_STATUS, { fetchPolicy: 'cache-and-network' });
+  const phoneStatus = phoneData?.myRampPhoneStatus;
+  const showPhoneField = Boolean(phoneStatus);
+  const savedPhone = phoneStatus?.contactPhone || '';
 
   const [addressStreet, setAddressStreet] = useState('');
   const [addressNeighborhood, setAddressNeighborhood] = useState('');
@@ -54,11 +62,16 @@ export const RampAddressScreen: React.FC = () => {
   const [authEmail, setAuthEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pickedCountryIso, setPickedCountryIso] = useState('');
+  const [phoneCountry, setPhoneCountry] = useState<ReturnType<typeof getCountryByIso>>();
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
 
   const rampAddress = data?.myRampAddress;
-  // The country this address belongs to: the one it was saved in, else
-  // where the user lives (server residence). Never the phone's prefix.
-  const addressCountryIso = toIso2(rampAddress?.addressCountry || '') || userCountryIso(userProfile);
+  // The country this address belongs to: the one picked here, the one it was
+  // saved in, else where the user lives (server residence).
+  const savedCountryIso = phoneStatus?.addressCountryIso || toIso2(rampAddress?.addressCountry || '') || userCountryIso(userProfile);
+  const addressCountryIso = pickedCountryIso || savedCountryIso;
   const addressCountry = useMemo(() => {
     if (!addressCountryIso) return null;
     return getCountryByIso(addressCountryIso);
@@ -72,7 +85,16 @@ export const RampAddressScreen: React.FC = () => {
   const noPostalCodes = addressCountryIso === 'BO';
   const economicActivities: EconomicActivityOption[] = data?.economicActivities || [];
   const shouldShowEconomicActivityField = economicActivities.length > 0;
-  const addressRequirements = data?.rampAddressRequirements;
+  const { data: requirementsData } = useQuery(GET_RAMP_ADDRESS_REQUIREMENTS, {
+    variables: { countryCode: addressCountryIso },
+    skip: !addressCountryIso,
+  });
+  // A rail in the user's country can need the field even when the address is
+  // elsewhere: Mexican orders always ask for the colonia.
+  const pickedRequirements = requirementsData?.rampAddressRequirements;
+  const addressRequirements = pickedRequirements?.requiresAddressNeighborhood || !data?.rampAddressRequirements
+    ? pickedRequirements
+    : data.rampAddressRequirements;
   const shouldShowAddressNeighborhoodField = Boolean(addressRequirements?.requiresAddressNeighborhood);
   const addressNeighborhoodLabel = addressRequirements?.addressNeighborhoodLabel || 'Colonia o barrio';
   const addressNeighborhoodPlaceholder = addressRequirements?.addressNeighborhoodPlaceholder || addressNeighborhoodLabel;
@@ -104,6 +126,15 @@ export const RampAddressScreen: React.FC = () => {
     rampAddress?.authEmail,
   ]);
   useEffect(() => {
+    if (!phoneStatus) return;
+    const saved = splitPhone(savedPhone, userCountryIso(userProfile));
+    setPhoneCountry(saved.country);
+    setPhoneNumber(saved.number);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(phoneStatus), savedPhone]);
+  const enteredPhone = internationalPhone(phoneCountry, phoneNumber);
+
+  useEffect(() => {
     if (noPostalCodes && data && !rampAddress?.addressZipCode) {
       setAddressZipCode(current => current.trim() ? current : '0000');
     }
@@ -111,6 +142,8 @@ export const RampAddressScreen: React.FC = () => {
 
   const hasChanges = useMemo(() => {
     return (
+      addressCountryIso !== savedCountryIso ||
+      (showPhoneField && enteredPhone !== savedPhone) ||
       addressStreet.trim() !== (rampAddress?.addressStreet || '') ||
       (shouldShowAddressNeighborhoodField && addressNeighborhood.trim() !== (rampAddress?.addressNeighborhood || '')) ||
       addressCity.trim() !== (rampAddress?.addressCity || '') ||
@@ -120,6 +153,11 @@ export const RampAddressScreen: React.FC = () => {
       (shouldShowAuthEmailField && authEmail.trim().toLowerCase() !== String(rampAddress?.authEmail || '').trim().toLowerCase())
     );
   }, [
+    addressCountryIso,
+    savedCountryIso,
+    showPhoneField,
+    enteredPhone,
+    savedPhone,
     addressStreet,
     addressNeighborhood,
     addressCity,
@@ -147,6 +185,7 @@ export const RampAddressScreen: React.FC = () => {
       if (/@privaterelay\.appleid\.com$/i.test(normalizedAuthEmail)) return 'Usa un email real, no un Apple private relay.';
       if (/@koywe-test\.com$/i.test(normalizedAuthEmail)) return 'Usa un email real donde puedas recibir los códigos de PSE.';
     }
+    if (showPhoneField && !enteredPhone) return 'Ingresa tu número de celular.';
     if (!addressCountryIso) return 'No pudimos identificar tu país. Inténtalo más tarde.';
     return null;
   };
@@ -170,8 +209,10 @@ export const RampAddressScreen: React.FC = () => {
           addressZipCode: addressZipCode.trim(),
           economicActivity: shouldShowEconomicActivityField ? economicActivity.trim() : undefined,
           authEmail: shouldShowAuthEmailField ? authEmail.trim().toLowerCase() : undefined,
+          addressCountry: addressCountryIso || undefined,
+          contactPhone: showPhoneField && enteredPhone !== savedPhone ? enteredPhone : undefined,
         },
-        refetchQueries: [{ query: GET_MY_RAMP_ADDRESS }],
+        refetchQueries: [{ query: GET_MY_RAMP_ADDRESS }, { query: GET_RAMP_PHONE_STATUS }],
         awaitRefetchQueries: true,
       });
 
@@ -196,7 +237,8 @@ export const RampAddressScreen: React.FC = () => {
     }
   };
 
-  const countryName = rampAddress?.countryName || addressCountry?.[0] || addressCountryIso || 'Sin configurar';
+  const countryName = (pickedCountryIso ? addressCountry?.[0] : rampAddress?.countryName)
+    || addressCountry?.[0] || addressCountryIso || 'Sin configurar';
   const isButtonDisabled = isSaving || !hasChanges;
 
   return (
@@ -204,7 +246,7 @@ export const RampAddressScreen: React.FC = () => {
       <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />
       <Header
         navigation={navigation as any}
-        title="Recargas y retiros"
+        title="Dirección y teléfono"
         backgroundColor={colors.heroField}
         isLight
         showBackButton
@@ -226,8 +268,8 @@ export const RampAddressScreen: React.FC = () => {
             <Circle cx="105%" cy="16%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
           </Svg>
           <View style={styles.fieldInner}>
-            <Text style={styles.fieldEyebrow}>RECARGAS Y RETIROS</Text>
-            <Text style={styles.fieldTitle}>Conecta tu banco a Confío</Text>
+            <Text style={styles.fieldEyebrow}>TUS DATOS DE CONTACTO</Text>
+            <Text style={styles.fieldTitle}>Tu dirección y teléfono</Text>
             <Text style={styles.fieldSubtitle}>
               Los proveedores bancarios necesitan estos datos para habilitar
               recargas y retiros. Los completas una sola vez.
@@ -244,18 +286,25 @@ export const RampAddressScreen: React.FC = () => {
         <View style={styles.body}>
         <View style={styles.formCard}>
           <Text style={[styles.label, styles.labelFirst]}>País</Text>
-          <View style={styles.readOnlyField}>
+          <TouchableOpacity
+            style={styles.readOnlyField}
+            onPress={() => setShowCountryPicker(true)}
+            disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel={`País de tu dirección: ${countryName}. Cambiar`}
+          >
             {loading ? (
               <ActivityIndicator size="small" color={colors.primaryDark} />
             ) : (
               <View style={styles.readOnlyInner}>
                 <CountryFlag iso={addressCountry?.[2]} size={22} />
-                <Text style={styles.readOnlyValue}>{countryName}</Text>
+                <Text style={[styles.readOnlyValue, { flex: 1 }]}>{countryName}</Text>
+                <Icon name="chevron-down" size={16} color={colors.textSecondary} />
               </View>
             )}
-          </View>
+          </TouchableOpacity>
           <Text style={styles.fieldHelp}>
-            Se toma automáticamente del país de tu número de teléfono.
+            El país donde vives. Es parte de tu dirección: no cambia qué productos tienes disponibles.
           </Text>
 
           <Text style={styles.label}>Dirección</Text>
@@ -381,6 +430,18 @@ export const RampAddressScreen: React.FC = () => {
             </>
           ) : null}
 
+          {showPhoneField ? (
+            <>
+              <Text style={styles.label}>Tu número de celular</Text>
+              <RampPhoneField
+                country={phoneCountry}
+                number={phoneNumber}
+                onCountry={country => { setPhoneCountry(country); setError(null); }}
+                onNumber={number => { setPhoneNumber(number); setError(null); }}
+              />
+            </>
+          ) : null}
+
           {error ? (
             <InlineBanner
               message={error}
@@ -391,7 +452,7 @@ export const RampAddressScreen: React.FC = () => {
           ) : null}
 
           <Button
-            title="Guardar dirección"
+            title={showPhoneField ? 'Guardar datos' : 'Guardar dirección'}
             onPress={handleSave}
             loading={isSaving}
             disabled={isButtonDisabled}
@@ -401,6 +462,14 @@ export const RampAddressScreen: React.FC = () => {
         </View>
         </View>
       </ScrollView>
+
+      <RampCountryPicker
+        visible={showCountryPicker}
+        selected={addressCountryIso}
+        title="País de tu dirección"
+        onPick={country => { setPickedCountryIso(String(country[2])); setError(null); }}
+        onClose={() => setShowCountryPicker(false)}
+      />
 
       <Modal
         visible={showActivityPicker}

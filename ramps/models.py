@@ -158,6 +158,8 @@ class RampUserAddress(models.Model):
     address_country = models.CharField(max_length=3, blank=True, default='')
     economic_activity = models.CharField(max_length=255, blank=True, default='')
     auth_email = models.EmailField(blank=True, default='')
+    # Self-declared, for providers only: see ramps/contact_phone.py.
+    contact_phone = models.CharField(max_length=16, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
