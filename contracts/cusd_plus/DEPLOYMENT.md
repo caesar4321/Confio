@@ -55,9 +55,11 @@ row in `queued`. All BSC presale buys settled.
    revoked the three old grants, swept the old vaults and burned the old token
    down to 20,577.071168313880 CONFIO, all sealed in the paused old presale. It
    moved 102.09 cUSD of proceeds to the Safe.
-7. Prod: update `.env.mainnet` (`BSC_CONFIO_TOKEN_ADDRESS`,
-   `BSC_PRESALE_VAULT_ADDRESS`, `BSC_REWARD_VAULT_ADDRESS`,
-   `BSC_VESTING_VAULT_ADDRESS`), deploy, smoke-test a presale quote and buy.
+7. **DONE 2026-10-30.** Commit `f5f1afe15` moved seven `.env.mainnet` addresses
+   to the v2 set (including the three split vesting settings). All six services
+   restarted. Live: `confioCurrentPrice` 0.200514. The new vault's `buy` reached
+   `transferFrom` for a sponsor caller with no allowance. No real purchase has
+   run on the new vault yet.
 8. Upgrade cUSD: deploy the implementation, rerun
    `test/UpgradeCusdFreeze.fork.t.sol` with `CUSD_IMPL` set to it, then Safe
    `upgradeToAndCall(impl, "")`. Read back `frozen`, supply, fee, sponsor.
