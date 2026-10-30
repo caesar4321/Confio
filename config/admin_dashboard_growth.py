@@ -16,8 +16,9 @@ from users.analytics import get_real_users_queryset
 
 COHORT_WEEKS = 6
 HEADLINE_WEEKS = 4
-# Bolivia is most signups, and where the product bets are placed.
-FOCUS_COUNTRY = 'BO'
+# Bolivia is most signups and where the product bets are placed; Venezuela
+# is the organic cohort whose funding has been blocked.
+FOCUS_COUNTRIES = ('BO', 'VE')
 # users.activity_tracking fixed DAU and began UserActivityDay on this day.
 ACTIVITY_RELIABLE_SINCE = date(2026, 10, 29)
 # Futures count from PerpPosition.opened_at: a confirmed perps_open batch only
@@ -44,7 +45,7 @@ def _member_sets(w):
 
 def activation(w):
     """Weekly signup cohorts through KYC, first deposit and first investment,
-    split into Bolivia and everywhere else, plus the headline figures."""
+    split by focus country and everywhere else, plus the headline figures."""
     events, verified, invested = _member_sets(w)
     funded = {user for user, _at in events}
     investors = {user for user, _at in invested}
@@ -66,10 +67,11 @@ def activation(w):
         end = w.now - timedelta(days=7 * week)
         start = end - timedelta(days=7)
         ids = [(pk, country) for pk, at, country in members if start <= at < end]
-        focus = {pk for pk, country in ids if country == FOCUS_COUNTRY}
         everyone = {pk for pk, _country in ids}
+        focus = {code: {pk for pk, country in ids if country == code} for code in FOCUS_COUNTRIES}
         cohorts.append({'start': start, 'end': end, 'all': scope_row(everyone),
-                        'focus': scope_row(focus), 'rest': scope_row(everyone - focus)})
+                        'focus': [scope_row(focus[code]) for code in FOCUS_COUNTRIES],
+                        'rest': scope_row(everyone.difference(*focus.values()))})
 
     recent = cohorts[:HEADLINE_WEEKS]
     totals = {key: sum(c['all'][key] for c in recent) for key in ('signups', 'kyc', 'funded', 'invested')}
@@ -85,7 +87,7 @@ def activation(w):
         'totals': totals,
         'kyc_pct': _pct(totals['kyc'], totals['signups']),
         'funded_pct': _pct(totals['funded'], totals['signups']),
-        'focus_country': FOCUS_COUNTRY,
+        'focus_countries': FOCUS_COUNTRIES,
         'headline_weeks': HEADLINE_WEEKS,
     }}
 

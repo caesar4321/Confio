@@ -434,15 +434,17 @@ class ActivationTests(TestCase):
         from config import admin_dashboard_growth as growth
 
         funded, idle = self.member('funded'), self.member('idle', country='AR')
+        venezuelan = self.member('venezuelan', country='VE')
         at = timezone.now() - timedelta(hours=3)
-        with mock.patch('ramps.metrics.deposit_events', return_value=[(funded.pk, at)]):
+        with mock.patch('ramps.metrics.deposit_events', return_value=[(funded.pk, at), (venezuelan.pk, at)]):
             result = growth.activation(sections.Window.current())['activation']
         week = result['cohorts'][0]
-        self.assertEqual((week['all']['signups'], week['all']['funded']), (2, 1))
-        self.assertEqual((week['focus']['signups'], week['focus']['funded']), (1, 1))
+        self.assertEqual((week['all']['signups'], week['all']['funded']), (3, 2))
+        self.assertEqual(result['focus_countries'], ('BO', 'VE'))
+        self.assertEqual([(r['signups'], r['funded']) for r in week['focus']], [(1, 1), (1, 1)])
         self.assertEqual((week['rest']['signups'], week['rest']['funded']), (1, 0))
-        self.assertEqual(result['funded_30d'], 1)
-        self.assertEqual(result['funded_pct'], 50)
+        self.assertEqual(result['funded_30d'], 2)
+        self.assertAlmostEqual(result['funded_pct'], 200 / 3)
         self.assertIsNotNone(idle)
 
     def test_retention_only_counts_days_the_table_can_measure(self):

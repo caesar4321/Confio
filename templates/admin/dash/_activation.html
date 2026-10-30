@@ -38,7 +38,7 @@
                 <th>Signups, 7 days ending</th>
                 <th class="num">Signups</th><th class="num">KYC</th><th class="num">Funded</th><th class="num">Invested</th>
                 <th class="num">Funded %</th>
-                <th class="num">{{ activation.focus_country }} signups</th><th class="num">{{ activation.focus_country }} KYC</th><th class="num">{{ activation.focus_country }} funded</th>
+                {% for code in activation.focus_countries %}<th class="num">{{ code }} signups</th><th class="num">{{ code }} KYC</th><th class="num">{{ code }} funded</th>{% endfor %}
             </tr>
         </thead>
         <tbody>
@@ -50,9 +50,11 @@
                 <td class="num">{{ c.all.funded|intcomma }}</td>
                 <td class="num">{{ c.all.invested|intcomma }}</td>
                 <td class="num">{% if c.all.funded_pct is not None %}{{ c.all.funded_pct|floatformat:1 }}%{% else %}—{% endif %}</td>
-                <td class="num">{{ c.focus.signups|intcomma }}</td>
-                <td class="num">{{ c.focus.kyc|intcomma }}</td>
-                <td class="num">{{ c.focus.funded|intcomma }}</td>
+                {% for row in c.focus %}
+                <td class="num">{{ row.signups|intcomma }}</td>
+                <td class="num">{{ row.kyc|intcomma }}</td>
+                <td class="num">{{ row.funded|intcomma }}</td>
+                {% endfor %}
             </tr>
             {% endfor %}
         </tbody>
