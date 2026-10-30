@@ -27,7 +27,7 @@ contract ConfioRewardVaultTest is Test {
         signer = vm.addr(signerKey);
         user = makeAddr("user");
         confio = new MockConfio();
-        vault = new ConfioRewardVault(address(confio), signer, safeOwner);
+        vault = new ConfioRewardVault(address(confio), signer, safeOwner, 1_000_000e18);
         confio.mint(address(vault), 1_000_000e18); // treasury funds a tranche
     }
 
@@ -47,6 +47,69 @@ contract ConfioRewardVaultTest is Test {
     }
 
     // ── Lock gate ────────────────────────────────────────────────────
+
+    function test_daily_cap_limits_all_claimers_and_resets() public {
+        vm.prank(safeOwner);
+        vault.setDailyClaimCap(100e18);
+        _unlock();
+        uint256 deadline = block.timestamp + 2 days;
+        bytes memory first = _sig(user, 80e18, deadline, signerKey);
+        bytes memory second = _sig(stranger, 21e18, deadline, signerKey);
+        vm.prank(user);
+        vault.claim(80e18, deadline, first);
+        // Over what's left: pays the remainder, keeps the rest for tomorrow.
+        vm.prank(stranger);
+        vault.claim(21e18, deadline, second);
+        assertEq(confio.balanceOf(stranger), 20e18);
+        assertEq(vault.claimed(stranger), 20e18);
+
+        vm.prank(stranger);
+        vm.expectRevert("daily cap");
+        vault.claim(21e18, deadline, second);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(stranger);
+        vault.claim(21e18, deadline, second);
+        assertEq(confio.balanceOf(stranger), 21e18);
+    }
+
+    function test_delta_above_cap_drains_over_several_days() public {
+        vm.prank(safeOwner);
+        vault.setDailyClaimCap(100e18);
+        _unlock();
+        uint256 deadline = block.timestamp + 3 days;
+        bytes memory sig = _sig(user, 250e18, deadline, signerKey);
+        for (uint256 i; i < 3; ++i) {
+            vm.prank(user);
+            vault.claim(250e18, deadline, sig);
+            vm.warp(block.timestamp + 1 days);
+        }
+        assertEq(confio.balanceOf(user), 250e18);
+        assertEq(vault.totalClaimed(), 250e18);
+    }
+
+    function test_cap_setter_owner_only_and_nonzero() public {
+        vm.prank(stranger);
+        vm.expectRevert();
+        vault.setDailyClaimCap(1);
+        vm.prank(safeOwner);
+        vm.expectRevert("zero cap");
+        vault.setDailyClaimCap(0);
+        vm.expectRevert("zero cap");
+        new ConfioRewardVault(address(confio), signer, safeOwner, 0);
+    }
+
+    function test_safe_as_signer_keeps_claims_shut() public {
+        // The Safe is a contract: no key recovers to it, so signatures fail.
+        vm.prank(safeOwner);
+        vault.setSigner(address(this));
+        _unlock();
+        uint256 deadline = block.timestamp + 1 days;
+        bytes memory sig = _sig(user, 1e18, deadline, signerKey);
+        vm.prank(user);
+        vm.expectRevert("bad signature");
+        vault.claim(1e18, deadline, sig);
+    }
 
     function test_claim_locked_before_dex() public {
         uint256 dl = block.timestamp + 1 hours;
@@ -216,7 +279,7 @@ contract ConfioRewardVaultTest is Test {
 
     function test_signature_cannot_replay_on_another_vault() public {
         _unlock();
-        ConfioRewardVault other = new ConfioRewardVault(address(confio), signer, safeOwner);
+        ConfioRewardVault other = new ConfioRewardVault(address(confio), signer, safeOwner, 1_000_000e18);
         confio.mint(address(other), 100e18);
         vm.prank(safeOwner); other.unlockClaims();
         uint256 deadline = block.timestamp + 1 hours;

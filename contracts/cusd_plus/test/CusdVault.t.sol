@@ -34,6 +34,46 @@ contract CusdVaultTest is Test {
     address user = makeAddr("user");
     address recipient = makeAddr("recipient");
 
+    function test_frozen_address_cannot_transfer_receive_or_redeem() public {
+        deal(address(vault), user, 100e18, true);
+        deal(address(vault), recipient, 100e18, true);
+        vm.prank(user);
+        vault.approve(recipient, type(uint256).max);
+        vm.prank(treasury);
+        vault.freezeAddress(user);
+
+        vm.prank(user);
+        vm.expectRevert("address frozen");
+        vault.transfer(recipient, 1);
+        vm.prank(recipient);
+        vm.expectRevert("address frozen");
+        vault.transfer(user, 1);
+        vm.prank(recipient);
+        vm.expectRevert("address frozen");
+        vault.transferFrom(user, recipient, 1);
+
+        vm.prank(treasury);
+        vault.unfreezeAddress(user);
+        vm.prank(user);
+        vault.transfer(recipient, 1);
+        assertEq(vault.balanceOf(recipient), 100e18 + 1);
+    }
+
+    function test_freeze_is_owner_only_and_spares_core_addresses() public {
+        vm.prank(user);
+        vm.expectRevert();
+        vault.freezeAddress(recipient);
+
+        vm.startPrank(treasury);
+        vm.expectRevert("cannot freeze vault");
+        vault.freezeAddress(address(vault));
+        vm.expectRevert("cannot freeze zero");
+        vault.freezeAddress(address(0));
+        vm.expectRevert("cannot freeze savings vault");
+        vault.freezeAddress(savings);
+        vm.stopPrank();
+    }
+
     function setUp() public {
         savings = address(new MockSavingsVault());
         usdt = new CusdMockUsdt();

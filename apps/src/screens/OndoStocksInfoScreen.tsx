@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Alert,
   Image,
   Linking,
   Pressable,
@@ -31,14 +30,11 @@ import { useStockFeePolicy } from '../hooks/useStockFeePolicy';
 const ONDO_STOCKS_URL = 'https://ondo.finance/ondo-stocks';
 
 // The fee comes from the server's stock fee policy (useStockFeePolicy), never
-// a literal. This eligible-only query returns the router address and the
-// privacy-safe community rollup from the same snapshot as the Home
+// a literal. This eligible-only query returns the privacy-safe community
+// rollup from the same snapshot as the Home
 // market-value figure.
 const STOCK_INFO = gql`
   query OndoStocksInfoFee {
-    cusdPlusConvertParams {
-      stockRouterAddress
-    }
     gmCommunity {
       valueUsd
       holderWallets
@@ -185,8 +181,6 @@ export const OndoStocksInfoScreen = () => {
   const userBscAddress: string | null = isAuthReady
     ? (walletData?.stockWalletAddress ?? null)
     : null;
-  const routerAddress: string | null =
-    feeData?.cusdPlusConvertParams?.stockRouterAddress ?? null;
   const isBscAddress = (address: string | null): address is string =>
     Boolean(address && /^0x[0-9a-fA-F]{40}$/.test(address));
 
@@ -194,24 +188,6 @@ export const OndoStocksInfoScreen = () => {
     if (!isBscAddress(userBscAddress)) return;
     const url = bscscanTokenHoldingsUrl(userBscAddress);
     if (url) Linking.openURL(url).catch(() => {});
-  };
-
-  const explainConfioSystem = () => {
-    if (!isBscAddress(routerAddress)) return;
-    Alert.alert(
-      'Cómo funciona Confío',
-      'Esta página pública muestra el sistema que Confío utiliza para procesar compras y ventas. Contiene información técnica y operaciones de todos los usuarios, pero no revela sus identidades.',
-      [
-        {text: 'Cancelar', style: 'cancel'},
-        {
-          text: 'Continuar',
-          onPress: () =>
-            Linking.openURL(
-              `https://bscscan.com/address/${routerAddress}#code`,
-            ).catch(() => {}),
-        },
-      ],
-    );
   };
 
   // The navigation entry points are hidden for blocked jurisdictions, but
@@ -428,7 +404,7 @@ export const OndoStocksInfoScreen = () => {
           </Text>
         </View>
 
-        {(isBscAddress(userBscAddress) || isBscAddress(routerAddress)) && (
+        {isBscAddress(userBscAddress) && (
           <View style={styles.section}>
             <View style={styles.sectionHeadingRow}>
               <Icon name="check-circle" size={20} color={colors.primary} />
@@ -449,36 +425,19 @@ export const OndoStocksInfoScreen = () => {
                 links, not actions — the visual weight of a full-width button
                 made them compete with "Explorar acciones". */}
             <View style={styles.linksRow}>
-              {isBscAddress(userBscAddress) && (
-                <TouchableOpacity
-                  style={styles.linkButton}
-                  onPress={openMyStocks}
-                  activeOpacity={0.8}
-                  accessibilityRole="link"
-                  accessibilityLabel="Ver mis acciones">
-                  <Icon
-                    name="external-link"
-                    size={13}
-                    color={colors.successText}
-                  />
-                  <Text style={styles.linkText}>Ver mis acciones</Text>
-                </TouchableOpacity>
-              )}
-              {isBscAddress(routerAddress) && (
-                <TouchableOpacity
-                  style={styles.linkButton}
-                  onPress={explainConfioSystem}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Ver cómo funciona Confío">
-                  <Icon
-                    name="external-link"
-                    size={13}
-                    color={colors.successText}
-                  />
-                  <Text style={styles.linkText}>Ver cómo funciona Confío</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={styles.linkButton}
+                onPress={openMyStocks}
+                activeOpacity={0.8}
+                accessibilityRole="link"
+                accessibilityLabel="Ver mis acciones">
+                <Icon
+                  name="external-link"
+                  size={13}
+                  color={colors.successText}
+                />
+                <Text style={styles.linkText}>Ver mis acciones</Text>
+              </TouchableOpacity>
             </View>
             <Text style={styles.proofWarning}>
               BscScan también puede mostrar otros activos digitales enviados por

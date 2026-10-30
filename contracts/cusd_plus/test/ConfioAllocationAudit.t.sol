@@ -36,7 +36,7 @@ contract ConfioAllocationAuditTest is Test {
         uint256[] memory p = new uint256[](4);
         (p[0], p[1], p[2], p[3]) = (0.2e18, 0.3e18, 0.7e18, 1.3e18);
         presale = new ConfioPresaleVault(safe, IERC20(address(new AllocationPayment())), b, p, 0, 0, 0, 0, sponsor);
-        rewards = new ConfioRewardVault(address(token), sponsor, safe);
+        rewards = new ConfioRewardVault(address(token), sponsor, safe, 74_000e18);
         vm.startPrank(safe);
         token.transfer(address(presale), 74_000_000e18);
         presale.setConfioToken(IERC20(address(token)));

@@ -27,8 +27,9 @@ pragma solidity ^0.8.24;
  * never unpause — `unlockClaims` being one-way does NOT guarantee claims
  * stay available, and bounding withdraw wouldn't fix that (the owner could
  * rotate the signer and drain through signed claims). Users trust the
- * 3-of-5 Safe to honor the DB obligations. A compromised SIGNER is bounded
- * by the funded balance (fund a working tranche, top up), and — because
+ * 3-of-5 Safe to honor the DB obligations. The full allocation stays
+ * here so it reads off the chain; a compromised SIGNER is bounded instead by
+ * `dailyClaimCap`, which gives the Safe time to pause, and — because
  * there is no on-chain record of what is owed — the SIGNER must sign with
  * SHORT deadlines: a corrected-down entitlement can't revoke an already
  * issued higher-cumulative signature before its deadline, only outlast it.
@@ -41,6 +42,7 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract ConfioRewardVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
@@ -71,16 +73,25 @@ contract ConfioRewardVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
     mapping(address => uint256) public claimed;
     uint256 public totalClaimed;
 
+    /// Most CONFIO all claimers together can pull per UTC day.
+    uint256 public dailyClaimCap;
+    uint256 public capDay;
+    uint256 public paidInCapDay;
+
     event SignerSet(address indexed signer);
+    event DailyClaimCapSet(uint256 cap);
     event ClaimsUnlocked();
     event Claimed(address indexed user, uint256 amount, uint256 cumulative);
     event Withdrawn(address indexed to, uint256 amount);
 
-    constructor(address confio, address signer_, address owner_) Ownable(owner_) {
+    constructor(address confio, address signer_, address owner_, uint256 dailyClaimCap_) Ownable(owner_) {
         require(confio != address(0) && signer_ != address(0), "zero address");
+        require(dailyClaimCap_ > 0, "zero cap");
         CONFIO = IERC20(confio);
         signer = signer_;
+        dailyClaimCap = dailyClaimCap_;
         emit SignerSet(signer_);
+        emit DailyClaimCapSet(dailyClaimCap_);
     }
 
     // ═════════════════════════ Claim ════════════════════════════════════
@@ -104,12 +115,22 @@ contract ConfioRewardVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
         uint256 already = claimed[msg.sender];
         require(cumulativeAmount > already, "nothing to claim");
 
-        paid = cumulativeAmount - already;
-        claimed[msg.sender] = cumulativeAmount;
+        uint256 day = block.timestamp / 1 days;
+        if (day != capDay) {
+            capDay = day;
+            paidInCapDay = 0;
+        }
+        require(paidInCapDay < dailyClaimCap, "daily cap");
+
+        // A delta above what's left today pays in part; the rest stays
+        // claimable once the window resets.
+        paid = Math.min(cumulativeAmount - already, dailyClaimCap - paidInCapDay);
+        paidInCapDay += paid;
+        claimed[msg.sender] = already + paid;
         totalClaimed += paid;
 
         CONFIO.safeTransfer(msg.sender, paid);
-        emit Claimed(msg.sender, paid, cumulativeAmount);
+        emit Claimed(msg.sender, paid, already + paid);
     }
 
     /// Exposed so the backend signer and clients assert digest parity.
@@ -133,6 +154,12 @@ contract ConfioRewardVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
         require(signer_ != address(0), "zero signer");
         signer = signer_;
         emit SignerSet(signer_);
+    }
+
+    function setDailyClaimCap(uint256 cap) external onlyOwner {
+        require(cap > 0, "zero cap");
+        dailyClaimCap = cap;
+        emit DailyClaimCapSet(cap);
     }
 
     /// One-way: opening claims is a launch event, not a toggle — no path

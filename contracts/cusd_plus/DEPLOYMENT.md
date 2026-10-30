@@ -1,5 +1,62 @@
 # cUSD+ deployment record — BSC mainnet
 
+## CONFIO v2 and cUSD freeze — PREPARED 2026-10-30, NOT DEPLOYED
+
+Adds address freeze and delayed recovery to CONFIO, address freeze to cUSD,
+and a daily claim cap to the reward vault. Nothing below has run. Everything
+must land before any claim opens: today no CONFIO circulates, so a re-issue
+costs only gas. Run it top to bottom; do not reorder.
+
+**Preconditions.** Claims locked on both vaults. No `PresaleMigrationCredit`
+row in `queued`. All BSC presale buys settled.
+
+1. Deploy ConfioToken v2 with `manage.py deploy_confio_token`. Confirm
+   `owner == guardian == Safe` and `totalSupply == 1B`. BscScan verify.
+2. Deploy, pointing `BSC_CONFIO_TOKEN_ADDRESS` at v2 for the commands:
+   - `deploy_reward_vault` (signer = Safe, cap = 74,000 CONFIO/day);
+   - `deploy_vesting_vault`, three times (founder, co-builder, cultural).
+3. Safe: `pause()` the current presale vault. Run
+   `.kms-local/kms_evm_multisig/snapshot_presale_migration.py` against it, with
+   its `OLD`, `CANDIDATES` and `FROM_BLOCK` refreshed. Completeness holds only
+   if the non-zero `purchased` balances sum to `totalSold - migratedPool -
+   totalClaimed`.
+4. Deploy the replacement presale vault with `manage.py deploy_presale_vault`:
+   `initialSold` = old `totalSold`, `initialClaimed` = 0, `initialMigratedPool`
+   = old `migratedPool`, `initialLegacyPool` = the rest.
+5. Safe multisend on the new contracts:
+   - `presale.creditLegacy(buyers, amounts)` until `legacyPool == 0`;
+   - `presale.setConfioToken(v2)`;
+   - `v2.transfer`: 74M to presale, 7.4M to rewards, 893.6M / 10M / 15M to the
+     three vesting vaults;
+   - `vesting.addGrant(Safe, allocated, duration)` on each, 36 months / 24
+     months / 90 days, not started.
+   Do NOT call `unlockClaims` on anything. The old presale keeps old CONFIO
+   equal to its outstanding allocations; `sweepExcessConfio` cannot reach it,
+   and it stays sealed because that vault's claims are never unlocked.
+6. Safe: sweep the old token and burn it: `revokeGrant` then `withdrawSurplus`
+   on the three old vesting vaults, `sweepExcessConfio` on the old presale,
+   `withdraw` on the old reward vault, then `burn` the Safe balance. Sweep
+   cUSD proceeds from the old presale with `sweepPayment`.
+7. Prod: update `.env.mainnet` (`BSC_CONFIO_TOKEN_ADDRESS`,
+   `BSC_PRESALE_VAULT_ADDRESS`, `BSC_REWARD_VAULT_ADDRESS`,
+   `BSC_VESTING_VAULT_ADDRESS`), deploy, smoke-test a presale quote and buy.
+8. Upgrade cUSD: deploy the implementation, rerun
+   `test/UpgradeCusdFreeze.fork.t.sol` with `CUSD_IMPL` set to it, then Safe
+   `upgradeToAndCall(impl, "")`. Read back `frozen`, supply, fee, sponsor.
+9. Publish: update token and vault addresses, plus the "no owner" wording, in
+   tokenomics and whitepaper (EN/ES/KO), README and the app sources
+   (`ConfioNarrative.tsx`, `queries.ts`, `bscExit.ts`,
+   `PaymentConfirmationScreen.tsx`). `assistant/faq.md` already claims cUSD can
+   freeze; that becomes true at step 8.
+10. BscScan: submit token info and logo for v2.
+
+**Deferred to claim opening.** `ConfioInviteEscrow` and `ConfioPayContract` fix
+CONFIO at deploy. Neither needs moving until someone can hold v2.
+
+**At claim opening.** Move Safe custody first. Then redeploy those two,
+`setProtected` the vaults and the DEX pool, `setSigner` on rewards, and only
+then `unlockClaims`.
+
 ## AccountActivationCollector — deployed 2026-09-15
 
 | Field | Value |

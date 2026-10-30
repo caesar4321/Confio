@@ -2,7 +2,8 @@
 Deploy ConfioToken ($CONFIO BEP-20) to BSC via the KMS sponsor.
 
 Fixed-supply token: 1,000,000,000 CONFIO (18dp) minted in the constructor
-to the 3-of-5 Safe treasury; no owner, no minter, no pause. Mirrors the
+to the 3-of-5 Safe treasury, which also owns the incident controls (address
+freeze, delayed recovery); no minter, no pause, no upgrade. Mirrors the
 Algorand ASA 3351104258 (name "Confío", unit CONFIO, 1B total).
 
 Same KMS-creation-tx flow as deploy_presale_vault (non-extractable key).

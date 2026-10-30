@@ -5,17 +5,17 @@ Same KMS-creation-tx flow as deploy_presale_vault (the sponsor key is
 non-extractable, so forge --broadcast is not an option). Single contract,
 non-upgradeable, no proxy.
 
-Constructor: (confio, attestor, owner)
+Constructor: (confio, signer, owner, dailyClaimCap)
   - confio    = BSC_CONFIO_TOKEN_ADDRESS (re-issued CONFIO BEP-20)
-  - attestor  = the backend hot key that writes per-user eligibility;
-                defaults to the KMS sponsor (--attestor to override)
-  - owner     = the 3-of-5 Safe (price, attestor rotation, withdrawSurplus,
-                cancelEligibility, pause)
+  - signer    = claim signer. Defaults to the Safe, which cannot produce an
+                ECDSA signature, so nothing can claim until the Safe calls
+                setSigner at claim opening (--signer to override)
+  - owner     = the 3-of-5 Safe (signer rotation, daily cap, pause, withdraw)
+  - dailyClaimCap = most CONFIO all claimers can pull per UTC day
 
 Funding is SEPARATE: after deploy the Safe transfers CONFIO into the vault.
-Reward fund is 7,400,000 CONFIO total across ALL chains (tokenomics §3);
-the live Algorand vault (app 3361825928) has already committed ~2,250, so
-fund a WORKING TRANCHE here, never the whole fund behind the hot attestor.
+The full 7,400,000 allocation stays here so it reads off the chain; the
+daily cap, not a partial tranche, is what bounds a stolen signer key.
 
 Usage:
   # Dry run — builds the txn, estimates gas, broadcasts NOTHING (default):
@@ -53,7 +53,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--broadcast", action="store_true", help="Actually send the transaction")
         parser.add_argument("--yes-mainnet", action="store_true", help="Required alongside --broadcast to confirm mainnet")
-        parser.add_argument("--attestor", help="Attestor address (default: BSC_SPONSOR_ADDRESS)")
+        parser.add_argument("--signer", default=SAFE, help="Claim signer (default: the Safe, claims stay shut)")
+        parser.add_argument("--daily-cap", type=int, default=74_000, help="Daily claim cap in whole CONFIO")
 
     def handle(self, *args, **options):
         from eth_abi import encode as abi_encode
@@ -70,9 +71,10 @@ class Command(BaseCommand):
         confio = getattr(settings, "BSC_CONFIO_TOKEN_ADDRESS", "") or ""
         if not confio:
             raise CommandError("BSC_CONFIO_TOKEN_ADDRESS not configured")
-        attestor = options.get("attestor") or getattr(settings, "BSC_SPONSOR_ADDRESS", "") or ""
-        if not attestor:
-            raise CommandError("no attestor: pass --attestor or set BSC_SPONSOR_ADDRESS")
+        claim_signer = options["signer"]
+        daily_cap = options["daily_cap"] * 10**18
+        if daily_cap <= 0:
+            raise CommandError("--daily-cap must be positive")
 
         balance = int(_rpc(rpc_url, "eth_getBalance", [deployer, "latest"]), 16)
         nonce = int(_rpc(rpc_url, "eth_getTransactionCount", [deployer, "latest"]), 16)
@@ -87,14 +89,20 @@ class Command(BaseCommand):
         self.stdout.write(f"Deployer (KMS sponsor): {deployer}")
         self.stdout.write(f"Chain {chain_id} · balance {balance/1e18:.6f} BNB · nonce {nonce} · gasPrice {gas_price/1e9:.3f} gwei")
         self.stdout.write(f"confio       = {confio}")
-        self.stdout.write(f"attestor     = {attestor}")
+        self.stdout.write(f"signer       = {claim_signer}")
+        self.stdout.write(f"dailyCap     = {options['daily_cap']} CONFIO")
         self.stdout.write(f"owner (Safe) = {SAFE}")
 
         art = json.loads((ARTIFACTS / "ConfioRewardVault.sol" / "ConfioRewardVault.json").read_text())
+        ctor = next((e for e in art["abi"] if e.get("type") == "constructor"), None)
+        ctor_arity = len(ctor["inputs"]) if ctor else 0
+        if ctor_arity != 4:
+            raise CommandError(
+                f"artifact constructor takes {ctor_arity} args, expected 4 — rebuild with `forge build`")
         bytecode = bytes.fromhex(art["bytecode"]["object"].removeprefix("0x"))
         ctor_args = abi_encode(
-            ["address", "address", "address"],
-            [confio, attestor, SAFE],
+            ["address", "address", "address", "uint256"],
+            [confio, claim_signer, SAFE, daily_cap],
         )
         data = bytecode + ctor_args
 
@@ -138,6 +146,11 @@ class Command(BaseCommand):
             selector = keccak(text=sig)[:4]
             out = _rpc(rpc_url, "eth_call", [{"to": got, "data": "0x" + selector.hex()}, "latest"])
             return to_checksum_address("0x" + out[-40:])
+
+        cap_selector = keccak(text="dailyClaimCap()")[:4]
+        cap_out = _rpc(rpc_url, "eth_call", [{"to": got, "data": "0x" + cap_selector.hex()}, "latest"])
+        if int(cap_out, 16) != daily_cap:
+            raise CommandError(f"dailyClaimCap read back {cap_out}, expected {daily_cap}: do NOT fund this vault")
 
         self.stdout.write(self.style.SUCCESS(f"\nDEPLOYED. ConfioRewardVault: {got}"))
         self.stdout.write(f"  CONFIO   = {call_addr('CONFIO()')}")

@@ -6,7 +6,7 @@ import { setNumberLocaleCountry } from '../../utils/numberLocale';
 beforeAll(() => setNumberLocaleCountry('VE'));
 afterAll(() => setNumberLocaleCountry(null));
 import renderer, {ReactTestRenderer, act} from 'react-test-renderer';
-import {Alert, Linking} from 'react-native';
+import {Linking} from 'react-native';
 
 const FEE = 'OndoStocksInfoFee';
 const ADDRESS = 'OndoStocksWalletAddress';
@@ -84,7 +84,6 @@ beforeEach(() => {
   mockFeePayload = {
     cusdPlusConvertParams: {
       gmTradeFeeBps: 30,
-      stockRouterAddress: '0x2222222222222222222222222222222222222222',
     },
     gmCommunity: {
       valueUsd: 12345,
@@ -187,7 +186,6 @@ describe('OndoStocksInfoScreen headline figures', () => {
     const text = render();
     expect(text).toContain('Comprueba tus acciones');
     expect(text).toContain('Ver mis acciones');
-    expect(text).toContain('Ver cómo funciona Confío');
     expect(text).toContain('Tus acciones digitales quedan guardadas');
     expect(text).toContain(
       'Tus acciones digitales permanecen en tu cuenta, no en Confío',
@@ -198,12 +196,10 @@ describe('OndoStocksInfoScreen headline figures', () => {
 
   it('does not build public links from missing or malformed addresses', () => {
     mockWalletPayload.stockWalletAddress = 'not-an-address';
-    mockFeePayload.cusdPlusConvertParams.stockRouterAddress = null;
     const text = render();
 
     expect(text).not.toContain('Comprueba tus acciones');
     expect(text).not.toContain('Ver mis acciones');
-    expect(text).not.toContain('Ver cómo funciona Confío');
   });
 
   it('hides the wallet link while the active account token is changing', () => {
@@ -238,33 +234,7 @@ describe('OndoStocksInfoScreen headline figures', () => {
     openUrl.mockRestore();
   });
 
-  it('explains the shared activity before opening the server-provided system address', () => {
-    const openUrl = jest
-      .spyOn(Linking, 'openURL')
-      .mockReturnValue({catch: jest.fn()} as any);
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = renderer.create(<OndoStocksInfoScreen />);
-    });
-
-    act(() => {
-      tree.root
-        .findByProps({accessibilityLabel: 'Ver cómo funciona Confío'})
-        .props.onPress();
-    });
-    expect(alert).toHaveBeenCalledWith(
-      'Cómo funciona Confío',
-      expect.stringContaining('operaciones de todos los usuarios'),
-      expect.any(Array),
-    );
-
-    const buttons = alert.mock.calls[0][2] as any[];
-    act(() => buttons[1].onPress());
-    expect(openUrl).toHaveBeenCalledWith(
-      'https://bscscan.com/address/0x2222222222222222222222222222222222222222#code',
-    );
-    alert.mockRestore();
-    openUrl.mockRestore();
+  it('no longer links to the stock router', () => {
+    expect(render()).not.toContain('Ver cómo funciona Confío');
   });
 });

@@ -38,6 +38,8 @@ contract CusdVault is
     uint256 public accruedExitFees;
     mapping(address => bool) public isSponsor;
     address public savingsVault;
+    /// Per-address freeze, cUSD+ parity. Appended: layout above must stay.
+    mapping(address => bool) public frozen;
 
     event SponsorSet(address indexed sponsor, bool allowed);
     event SavingsVaultSet(address indexed previousVault, address indexed newVault);
@@ -66,6 +68,8 @@ contract CusdVault is
     );
     event ConversionFeesCollected(address indexed treasury, uint256 entryFees, uint256 exitFees);
     event SurplusUsdtRescued(address indexed treasury, uint256 amount);
+    event AddressFrozen(address indexed target);
+    event AddressUnfrozen(address indexed target);
 
     constructor(address usdt) {
         require(usdt != address(0), "zero usdt");
@@ -287,6 +291,21 @@ contract CusdVault is
         _unpause();
     }
 
+    function freezeAddress(address target) external onlyOwner {
+        require(target != address(this), "cannot freeze vault");
+        require(target != savingsVault, "cannot freeze savings vault");
+        // frozen[0] would brick every mint (from=0) and burn (to=0) via
+        // _update — pause() is the intentional full-stop, not this.
+        require(target != address(0), "cannot freeze zero");
+        frozen[target] = true;
+        emit AddressFrozen(target);
+    }
+
+    function unfreezeAddress(address target) external onlyOwner {
+        frozen[target] = false;
+        emit AddressUnfrozen(target);
+    }
+
     function backingUsdt() public view returns (uint256) {
         uint256 balance = USDT.balanceOf(address(this));
         uint256 fees = accruedEntryFees + accruedExitFees;
@@ -323,6 +342,7 @@ contract CusdVault is
     /// @dev The approved pause is global, including ordinary transfers.
     function _update(address from, address to, uint256 value) internal override {
         require(!paused(), "Pausable: paused");
+        require(!frozen[from] && !frozen[to], "address frozen");
         super._update(from, to, value);
     }
 }
