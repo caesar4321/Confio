@@ -1464,8 +1464,7 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
                     sender_display_name='Depósito externo',
                     recipient_display_name=account.display_name,
                     sender_phone='',
-                    recipient_phone=(getattr(account.user, 'phone_number', '') or '')
-                                    if not is_business else '',
+                    recipient_phone='',  # never the account's verified number
                     sender_address=from_addr or '',
                     recipient_address=to_addr,
                     amount=str(amount_usd),

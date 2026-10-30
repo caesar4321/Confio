@@ -307,6 +307,16 @@ class EmployeeInvitation(SoftDeleteModel):
         help_text="Name of the invited employee (optional)"
     )
 
+    # Invited by @usuario: the account itself, so a phone-less account can
+    # see and accept it, and no one's verified number is copied here.
+    employee_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='employee_invitations_received',
+    )
+
     employee_username = models.CharField(
         max_length=150,
         blank=True,
@@ -376,8 +386,13 @@ class EmployeeInvitation(SoftDeleteModel):
         constraints = [
             models.UniqueConstraint(
                 fields=['business', 'employee_phone', 'employee_phone_country'],
-                condition=models.Q(status='pending') & models.Q(deleted_at__isnull=True),
+                condition=models.Q(status='pending') & models.Q(deleted_at__isnull=True) & ~models.Q(employee_phone=''),
                 name='unique_pending_invitation_per_phone'
+            ),
+            models.UniqueConstraint(
+                fields=['business', 'employee_user'],
+                condition=models.Q(status='pending') & models.Q(employee_user__isnull=False) & models.Q(deleted_at__isnull=True),
+                name='unique_pending_invitation_per_user'
             ),
             models.UniqueConstraint(
                 fields=['business', 'employee_phone_key'],

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 
 from users.analytics import get_real_users_queryset
 from users.models import Account
@@ -119,15 +120,27 @@ class NameVisibilityTests(TestCase):
         fresh = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
         self.assertEqual(UserType.resolve_first_name(self.stranger, fresh), 'Rosa')
 
-    def test_phone_lookup_hides_names_of_strangers(self):
-        # protects=a guessed number does not return its holder's name; fails_when=checkUsersByPhones returns first/last for a stranger; no_claim=match ambiguity rules
+    def test_phone_lookup_reveals_nothing_about_a_strangers_number(self):
+        # protects=a guessed number does not reveal that an account holds it, nor its @usuario or wallet; fails_when=checkUsersByPhones matches another person's verified number; no_claim=the viewer's own saved contacts (below)
         from users.schema import Query
         User.objects.filter(pk=self.stranger.pk).update(phone_number='3001234567', phone_country='CO',
                                                         phone_key='57:3001234567')
         info = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
         row = Query.resolve_check_users_by_phones(None, info, ['+573001234567'])[0]
+        self.assertFalse(row.is_on_confio)
+        self.assertIsNone(row.username)
+        self.assertIsNone(row.active_account_algorand_address)
+
+    def test_phone_lookup_answers_a_contact_the_viewer_saved(self):
+        # protects=the viewer's own confirmed contact still shows as on Confío; fails_when=saved contacts stop resolving; no_claim=how the contact was saved
+        from send.models import SavedRecipient
+        from users.schema import Query
+        SavedRecipient.objects.create(sender_user=self.viewer, phone_key='57:3001234567', recipient_user=self.stranger,
+                                      source='link_claim', basis_at=timezone.now())
+        info = SimpleNamespace(context=SimpleNamespace(user=self.viewer))
+        row = Query.resolve_check_users_by_phones(None, info, ['+573001234567'])[0]
         self.assertTrue(row.is_on_confio)
-        self.assertIsNone(row.first_name)
+        self.assertEqual(row.username, self.stranger.username)
 
     def test_quota_holds_across_a_burst(self):
         # protects=the counter is the running total, so the call over the limit is refused; fails_when=calls past the limit pass; no_claim=cross-process atomicity (Redis)

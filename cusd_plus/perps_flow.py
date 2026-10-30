@@ -857,7 +857,7 @@ def sync_history(batch, receipt) -> None:
             'sender_business': account.business if out else None,
             'sender_type': 'business' if (not out or account.business_id) else 'user',
             'sender_display_name': name if out else venue,
-            'sender_phone': (getattr(account.user, 'phone_number', '') or '') if out else '',
+            'sender_phone': '',
             'sender_address': batch.user_bsc_address if out else '',
             'counterparty_user': None if out else account.user,
             'counterparty_business': None if out else account.business,

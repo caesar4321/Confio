@@ -33,7 +33,7 @@ def paid_each_other(viewer, user_ids) -> set:
 def _business_peer_ids(viewer) -> set:
     """The owner and the employees who ACCEPTED an invitation, for each
     business the viewer owns or joined that way. Consent is the point: an
-    owner can add anyone by phone (addBusinessEmployee) or as a payroll
+    owner could add anyone by phone (addBusinessEmployee, removed) or as a payroll
     recipient, and neither may reveal that person's name."""
     from users.models import Account
     from users.models_employee import EmployeeInvitation

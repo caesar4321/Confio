@@ -3612,27 +3612,6 @@ export const GET_BUSINESS_EMPLOYEES = gql`
   }
 `;
 
-export const ADD_BUSINESS_EMPLOYEE = gql`
-  mutation AddBusinessEmployee($input: AddBusinessEmployeeInput!) {
-    addBusinessEmployee(input: $input) {
-      employee {
-        id
-        user {
-          id
-          username
-          firstName
-          lastName
-        }
-        role
-        isActive
-        permissions
-      }
-      success
-      errors
-    }
-  }
-`;
-
 export const UPDATE_BUSINESS_EMPLOYEE = gql`
   mutation UpdateBusinessEmployee($input: UpdateBusinessEmployeeInput!) {
     updateBusinessEmployee(input: $input) {

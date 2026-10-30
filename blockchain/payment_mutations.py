@@ -447,14 +447,9 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                 # Prefer the actual account user tied to the merchant business account
                 merchant_user = getattr(recipient_account, 'user', None)
                 # Best-effort phone composition for payer
+                # No verified number on the payment: it is never shown to
+                # the merchant and is not kept beside who paid whom.
                 payer_phone_display = ''
-                try:
-                    cc = getattr(payer_user, 'phone_country_code', None)
-                    pn = getattr(payer_user, 'phone_number', None)
-                    if pn:
-                        payer_phone_display = f"+{cc}{pn}" if cc else str(pn)
-                except Exception:
-                    pass
                 # Build a unique placeholder hash to satisfy unique constraint before submit
                 placeholder_hash = f"pending_blockchain_{invoice_obj.internal_id}_{int(time.time()*1000)}"
                 # Assemble minimal defaults

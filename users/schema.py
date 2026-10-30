@@ -2283,7 +2283,7 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 			return None
 
 	def resolve_check_users_by_phones(self, info, phone_numbers):
-		"""Check which phone numbers belong to Confío users"""
+		"""Which of these numbers this person saved as a Confío account (link sends)."""
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return []
@@ -2314,45 +2314,28 @@ class Query(EmployeeQueries, PaidOfferQueries, graphene.ObjectType):
 				phone_to_key[phone] = key
 				keys_set.add(key)
 
-		from django.db.models import Q, Prefetch
+		from django.db.models import Prefetch
 		from users.models import Account
+		from send.models import SavedRecipient
 
+		# Only numbers this person saved themselves (a link they sent was
+		# opened, and they confirmed who opened it: send/link_invite.py). Any
+		# other number answers "not on Confío" whether or not an account holds
+		# it: matching other people's verified numbers told anyone who typed a
+		# number its holder's @usuario and wallet.
 		matched_users_by_key = {}
-		ambiguous_keys = set()
-
 		if keys_set:
 			accounts_prefetch = Prefetch(
-				'accounts',
+				'recipient_user__accounts',
 				queryset=Account.objects.filter(account_type='personal', account_index=0),
 				to_attr='prefetched_active_accounts'
 			)
-			# Deactivated users must not be offered as send targets.
-			# Ordered so a shared key resolves to the same account every time.
-			users = User.objects.filter(
-				is_active=True, phone_key__in=keys_set).order_by('id').prefetch_related(accounts_prefetch)
-
-			for u in users:
-				if not u.phone_key:
-					continue
-				# `phone_key` has no unique constraint in any migration, and
-				# production has none either — it really does hold several
-				# active accounts on one key. Report neither rather than
-				# arbitrarily handing back whichever row came back last.
-				if u.phone_key in matched_users_by_key:
-					ambiguous_keys.add(u.phone_key)
-					continue
-				matched_users_by_key[u.phone_key] = u
-
-		# The app-store reviewer number is shared on purpose and holds no real
-		# money — resolve it to the first account instead of hiding it, or the
-		# reviewer sees their own test contacts as "not on Confío".
-		from .review_numbers import is_shared_reviewer_phone_key
-		ambiguous_keys = {k for k in ambiguous_keys if not is_shared_reviewer_phone_key(k)}
-
-		for key in ambiguous_keys:
-			logger.error(
-				'contact discovery refused: phone_key=%r matches multiple active users', key)
-			matched_users_by_key.pop(key, None)
+			saved = SavedRecipient.objects.filter(
+				sender_user=user, phone_key__in=keys_set, deleted_at__isnull=True,
+				recipient_user__is_active=True,
+			).select_related('recipient_user').prefetch_related(accounts_prefetch)
+			for row in saved:
+				matched_users_by_key[row.phone_key] = row.recipient_user
 
 		# A number can be guessed: names only to someone who has moved money
 		# with that person (users/name_visibility.py).

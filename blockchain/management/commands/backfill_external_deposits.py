@@ -135,7 +135,7 @@ class Command(BaseCommand):
                 'sender_display_name': 'Billetera externa',
                 'recipient_display_name': account.display_name,
                 'sender_phone': '',
-                'recipient_phone': getattr(account.user, 'phone_number', '') if account.account_type == 'personal' else '',
+                'recipient_phone': '',  # never the account's verified number
                 'sender_address': m.sender or '',
                 'recipient_address': m.receiver or '',
                 'amount': amount,

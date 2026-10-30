@@ -68,8 +68,9 @@ class Command(BaseCommand):
 
                 # Add missing fields
                 data['recipient_username'] = recipient_user.username if recipient_user else ''
-                data['recipient_phone'] = recipient_user.phone_number if recipient_user else ''
-                data['recipient_phone_country'] = recipient_user.phone_country if recipient_user else ''
+                # Never the recipient's verified number.
+                data['recipient_phone'] = ''
+                data['recipient_phone_country'] = ''
                 data['business_name'] = business.name if business else 'Empresa'
                 data['status'] = 'completed'
 
@@ -78,7 +79,6 @@ class Command(BaseCommand):
                         self.style.SUCCESS(
                             f'[DRY RUN] Would update notification {notif.id}: '
                             f'recipient_username={data["recipient_username"]}, '
-                            f'recipient_phone={data["recipient_phone"]}, '
                             f'business_name={data["business_name"]}'
                         )
                     )

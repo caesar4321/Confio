@@ -197,16 +197,6 @@ class EmployeeActivityLogType(DjangoObjectType):
         ]
     
 
-class AddBusinessEmployeeInput(graphene.InputObjectType):
-    user_phone = graphene.String(required=True, description="Phone number of employee to add")
-    role = graphene.String(default_value='cashier')
-    custom_permissions = graphene.JSONString(description="Custom permissions overriding role defaults")
-    shift_start_time = graphene.String(description="Daily shift start time (HH:MM)")
-    shift_end_time = graphene.String(description="Daily shift end time (HH:MM)")
-    daily_transaction_limit = graphene.Decimal(description="Maximum daily transaction amount")
-    notes = graphene.String()
-
-
 class UpdateBusinessEmployeeInput(graphene.InputObjectType):
     employee_id = graphene.ID(required=True)
     role = graphene.String()
@@ -220,85 +210,6 @@ class UpdateBusinessEmployeeInput(graphene.InputObjectType):
 
 class RemoveBusinessEmployeeInput(graphene.InputObjectType):
     employee_id = graphene.ID(required=True)
-
-
-class AddBusinessEmployee(graphene.Mutation):
-    class Arguments:
-        input = AddBusinessEmployeeInput(required=True)
-    
-    employee = graphene.Field(BusinessEmployeeType)
-    success = graphene.Boolean()
-    errors = graphene.List(graphene.String)
-    
-    @classmethod
-    def mutate(cls, root, info, input):
-        user = info.context.user
-        if not user.is_authenticated:
-            return cls(success=False, errors=["Authentication required"])
-        
-        try:
-            # Use JWT context to get the current business
-            jwt_context = require_business_context(info)
-            business_id = jwt_context['business_id']
-            
-            # Get the business and verify access
-            business = Business.objects.get(
-                id=business_id,
-                accounts__user=user,
-                accounts__account_type='business',
-                deleted_at__isnull=True
-            )
-            
-            # Find employee user by phone
-            employee_user = User.objects.filter(
-                phone_number=input.user_phone,
-                is_active=True
-            ).first()
-            
-            if not employee_user:
-                return cls(success=False, errors=["User with this phone number not found"])
-            
-            if employee_user == user:
-                return cls(success=False, errors=["Cannot add yourself as an employee"])
-            
-            # Check if already an employee
-            if BusinessEmployee.objects.filter(
-                business=business,
-                user=employee_user,
-                deleted_at__isnull=True
-            ).exists():
-                return cls(success=False, errors=["User is already an employee of this business"])
-            
-            # Create employee record
-            with transaction.atomic():
-                perms = _sanitize_permissions(input.custom_permissions)
-                employee = BusinessEmployee.objects.create(
-                    business=business,
-                    user=employee_user,
-                    role=input.role or 'cashier',
-                    hired_by=user,
-                    permissions=perms,
-                    notes=input.notes or ''
-                )
-                
-                # Set optional fields
-                if input.shift_start_time:
-                    employee.shift_start_time = input.shift_start_time
-                if input.shift_end_time:
-                    employee.shift_end_time = input.shift_end_time
-                if input.daily_transaction_limit is not None:
-                    employee.daily_transaction_limit = input.daily_transaction_limit
-                
-                employee.save()
-                
-                # TODO: Send notification to employee about being added
-                
-                return cls(employee=employee, success=True)
-                
-        except Business.DoesNotExist:
-            return cls(success=False, errors=["Business not found or access denied"])
-        except Exception as e:
-            return cls(success=False, errors=[str(e)])
 
 
 class UpdateBusinessEmployee(graphene.Mutation):
@@ -464,14 +375,14 @@ class InviteEmployee(graphene.Mutation):
                 target_user = User.objects.filter(username__iexact=lookup_username).first()
                 if not target_user:
                     return cls(success=False, errors=["No encontramos este usuario. Verifica el @usuario."])
-                if not target_user.phone_number or not target_user.phone_country:
-                    return cls(success=False, errors=["El usuario debe tener un teléfono verificado para recibir la invitación."])
-                target_phone = target_user.phone_number
-                target_phone_country = target_user.phone_country
-                target_phone_key = target_user.phone_key or normalize_phone(target_phone, target_phone_country)
-                target_username = lookup_username
+                # The invitation names the account, never its verified number
+                # (phone-less accounts have none), and its name follows the
+                # name rule from the inviter's side.
+                target_phone, target_phone_country, target_phone_key = '', '', None
+                target_username = target_user.username
                 if not target_name:
-                    target_name = target_user.get_full_name() or target_user.username
+                    from users.name_visibility import display_name_for
+                    target_name = display_name_for(user, target_user)
             else:
                 # Phone-based invite requires phone info
                 if not input.employee_phone or not input.employee_phone_country:
@@ -487,11 +398,11 @@ class InviteEmployee(graphene.Mutation):
             if not target_user and user.phone_key and target_phone_key == user.phone_key:
                 return cls(success=False, errors=["No puedes invitarte a ti mismo como empleado. Ya eres el dueño."])
 
-            # Check if user already exists with this phone number (normalized)
-            existing_user = target_user or User.objects.filter(
-                phone_key=target_phone_key
-            ).first()
-            
+            # Only an account named by @usuario is checked here. A number is
+            # never looked up (that told the owner which of their employees
+            # holds a number); accepting refuses someone already employed.
+            existing_user = target_user
+
             if existing_user:
                 # Check if already an active employee
                 existing_employee = BusinessEmployee.objects.filter(
@@ -509,12 +420,13 @@ class InviteEmployee(graphene.Mutation):
             # Check for pending invitations
             pending_invitation = EmployeeInvitation.objects.filter(
                 business=business,
-                employee_phone_key=target_phone_key,
-                status='pending'
+                status='pending',
+                deleted_at__isnull=True,
+                **({'employee_user': target_user} if target_user else {'employee_phone_key': target_phone_key}),
             ).first()
-            
+
             if pending_invitation and not pending_invitation.is_expired:
-                return cls(success=False, errors=["An invitation is already pending for this phone number"])
+                return cls(success=False, errors=["An invitation is already pending for this person"])
             
             # Create invitation
             perms = _sanitize_permissions(input.custom_permissions)
@@ -525,6 +437,7 @@ class InviteEmployee(graphene.Mutation):
                 employee_phone_key=target_phone_key,
                 employee_name=target_name or '',
                 employee_username=target_username or '',
+                employee_user=target_user,
                 role=input.role,
                 permissions=perms,  # Default to filtered dict
                 invited_by=user,
@@ -561,9 +474,11 @@ class AcceptInvitation(graphene.Mutation):
                 invitation_code=invitation_code
             )
             
-            # Verify phone number matches (normalized)
-            if not user.phone_key or invitation.employee_phone_key != user.phone_key:
-                return cls(success=False, errors=["This invitation is not for your phone number"])
+            # For this account (invited by @usuario), or for its verified number.
+            for_this_account = invitation.employee_user_id == user.pk
+            for_this_number = bool(user.phone_key) and invitation.employee_phone_key == user.phone_key
+            if not (for_this_account or for_this_number):
+                return cls(success=False, errors=["This invitation is not for you"])
             
             # Accept the invitation
             employee = invitation.accept(user)
@@ -756,21 +671,22 @@ class EmployeeQueries(graphene.ObjectType):
         if not user.is_authenticated:
             return []
 
-        # Match on canonical phone_key to handle formatting differences; fall back to raw fields
+        # Invited by @usuario (the account), or by this account's verified
+        # number (canonical key, falling back to the raw fields).
+        mine = Q(employee_user=user)
         phone_key = user.phone_key
         if not phone_key and user.phone_number:
             phone_key = normalize_phone(user.phone_number, user.phone_country)
-        if not phone_key:
-            return []
+        if phone_key:
+            mine |= Q(employee_phone_key=phone_key)
+        if user.phone_number:
+            mine |= Q(employee_phone=user.phone_number, employee_phone_country=user.phone_country)
 
         return EmployeeInvitation.objects.filter(
             status='pending',
             expires_at__gt=timezone.now(),
             deleted_at__isnull=True
-        ).filter(
-            Q(employee_phone_key=phone_key) |
-            Q(employee_phone=user.phone_number, employee_phone_country=user.phone_country)
-        ).select_related('business', 'invited_by')
+        ).filter(mine).select_related('business', 'invited_by')
     
     def resolve_employee_activity_logs(self, info, business_id, employee_id=None, action=None, limit=100):
         """Get activity logs for a business"""
@@ -894,7 +810,6 @@ class EmployeeQueries(graphene.ObjectType):
 class EmployeeMutations(graphene.ObjectType):
     """Employee-related mutations"""
     
-    add_business_employee = AddBusinessEmployee.Field()
     update_business_employee = UpdateBusinessEmployee.Field()
     remove_business_employee = RemoveBusinessEmployee.Field()
     invite_employee = InviteEmployee.Field()

@@ -834,13 +834,14 @@ class ClaimLinkInvite(graphene.Mutation):
 
 
 class SaveRecipient(graphene.Mutation):
-    """Remember a contact's account: from a claimed link (public_ref) or after
-    a first direct send to a legacy verified number (phone)."""
+    """Remember a contact's account from a claimed link (public_ref). By phone
+    it is refused: confirming "this number is that account" against verified
+    numbers told anyone which @usuario held a number. Older builds still send
+    phone + recipient_user_id after a legacy send."""
 
     class Arguments:
         public_ref = graphene.String(required=False)
         phone = graphene.String(required=False)
-        # With phone: the account the send went to (save_legacy refuses another).
         recipient_user_id = graphene.ID(required=False)
 
     success = graphene.Boolean()
@@ -848,11 +849,11 @@ class SaveRecipient(graphene.Mutation):
 
     @login_required
     def mutate(self, info, public_ref=None, phone=None, recipient_user_id=None):
-        from .link_invite import save_from_link, save_legacy
+        from .link_invite import save_from_link
         if public_ref:
             result = save_from_link(info.context.user, public_ref)
         elif phone:
-            result = save_legacy(info.context.user, phone, recipient_user_id)
+            result = {'success': False, 'error': 'not_legacy'}
         else:
             result = {'success': False, 'error': 'nothing_to_save'}
         return SaveRecipient(success=result['success'], error=result.get('error'))

@@ -2766,8 +2766,9 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                     'fiat_currency': trade.offer.currency_code,
                     'payment_method': trade.payment_method.name if trade.payment_method else '',
                     'trader_name': trade.seller_display_name if is_buyer else trade.buyer_display_name,
-                    'trader_phone': trade.seller_user.phone_number if is_buyer and trade.seller_user else trade.buyer_user.phone_number if is_seller and trade.buyer_user else None,
-                    'counterparty_phone': other_user.phone_number if other_user else None
+                    # Never the other trader's verified number.
+                    'trader_phone': None,
+                    'counterparty_phone': None,
                 }
                 
                 if trade.status == 'PAYMENT_SENT':

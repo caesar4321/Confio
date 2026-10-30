@@ -1001,3 +1001,14 @@ class TipUnifiedRowTests(SimpleTestCase):
         self.assertEqual(UnifiedTransactionType.resolve_transaction_hash(plain, None), '0xabc')
         other = SimpleNamespace(transaction_type='payment', send_transaction_id=None, counterparty_address=RECIPIENT)
         self.assertEqual(UnifiedTransactionType.resolve_counterparty_address(other, None), RECIPIENT)
+
+
+class PhoneNeverResolvesTests(TestCase):
+    def test_a_send_to_any_number_answers_not_on_confio(self):
+        # protects=a send by number never reveals whether an account holds it (nor its wallet); fails_when=a verified holder's account comes back; no_claim=link sends
+        from django.contrib.auth import get_user_model
+        from send import bsc_flow
+        holder = get_user_model().objects.create_user(
+            username='num-holder', firebase_uid='num-holder', phone_number='3001234567', phone_country='CO')
+        self.assertEqual(bsc_flow._resolve_recipient(None, '+573001234567', None), (None, None, None, 'recipient_not_on_confio'))
+        self.assertEqual(bsc_flow._resolve_recipient(None, '+573009999999', None), (None, None, None, 'recipient_not_on_confio'))

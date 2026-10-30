@@ -27,7 +27,6 @@ DAILY_MAX_USD = Decimal('100')
 STALE_PREPARE = timedelta(minutes=30)
 SUBMIT_DEADLINE_MAX = timedelta(minutes=30)  # invite_bsc_flow.submit_create accepts deadlines up to now+1800s
 SAVE_WINDOW = timedelta(days=30)
-LEGACY_ACTIVE_DAYS = 180
 ADDRESS_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 # Counted toward the sender's daily link total ('draft' only while fresh).
 COUNTED_STATUSES = ('creating', 'pending', 'claiming', 'claimed')
@@ -186,21 +185,6 @@ def claim_link(user, public_ref, signature: str) -> dict:
 
 # ── Who a contact number reaches, for this sender ─────────────────────────
 
-def _legacy_holder(phone_key: str, sender):
-    """The one active, non-reviewer account holding this OTP-verified number
-    and seen in the last LEGACY_ACTIVE_DAYS (carriers recycle numbers)."""
-    from django.contrib.auth import get_user_model
-    from users.review_numbers import is_shared_reviewer_phone_key
-    if not phone_key or is_shared_reviewer_phone_key(phone_key):
-        return None
-    since = timezone.now() - timedelta(days=LEGACY_ACTIVE_DAYS)
-    matches = list(get_user_model().objects.filter(
-        phone_key=phone_key, is_active=True, last_activity_at__gte=since)[:2])
-    if len(matches) != 1 or matches[0].pk == sender.pk:
-        return None
-    return matches[0]
-
-
 def _unsaved_claim(sender, phone_key: str, after=None):
     """The newest link to this number claimed within SAVE_WINDOW (and after
     any "forget"), by an active account other than the sender."""
@@ -216,7 +200,7 @@ def _unsaved_claim(sender, phone_key: str, after=None):
 
 
 def resolve(sender, phone: str) -> dict:
-    """{'kind': 'SAVED'|'CLAIMED'|'LEGACY'|'NONE', 'user': User|None, 'public_ref'?}"""
+    """{'kind': 'SAVED'|'CLAIMED'|'NONE', 'user': User|None, 'public_ref'?}"""
     from .models import RecipientRevocation, SavedRecipient
     phone_key = _phone_key(phone)
     if not phone_key:
@@ -231,11 +215,10 @@ def resolve(sender, phone: str) -> dict:
         # The contact opened a link: the sender confirms that account before
         # it becomes where this number's money goes (save_from_link).
         return {'kind': 'CLAIMED', 'user': claimed.claimed_by, 'public_ref': str(claimed.public_ref)}
-    if revocation:
-        return {'kind': 'NONE', 'user': None}
-    holder = _legacy_holder(phone_key, sender)
-    if holder:
-        return {'kind': 'LEGACY', 'user': holder}
+    # No match on other people's verified numbers (no 'LEGACY' any more):
+    # answering one told anyone who typed a number its holder's @usuario. A
+    # contact who has an account opens the link like anyone else, and the
+    # sender confirms them once (CLAIMED -> SAVED).
     return {'kind': 'NONE', 'user': None}
 
 
@@ -270,30 +253,6 @@ def save_from_link(sender, public_ref) -> dict:
             return {'success': False, 'error': 'forgotten'}
         if not _replace_saved(sender, invite.phone_key, invite.claimed_by, 'link_claim', invite.claimed_at):
             return {'success': False, 'error': 'stale'}
-    return {'success': True}
-
-
-def save_legacy(sender, phone: str, recipient_user_id=None) -> dict:
-    """Keep the legacy holder the sender just paid. `recipient_user_id` is
-    the account the send went to: if the number now resolves to someone else,
-    nothing is saved (never a silent substitution)."""
-    phone_key = _phone_key(phone)
-    with transaction.atomic():
-        type(sender).objects.select_for_update().filter(pk=sender.pk).first()
-        from .models import RecipientRevocation
-        if RecipientRevocation.objects.filter(sender_user=sender, phone_key=phone_key).exists():
-            return {'success': False, 'error': 'revoked'}
-        # It only fills an empty slot: a save arriving late from an old legacy
-        # send never replaces a recipient the sender has confirmed since.
-        from .models import SavedRecipient
-        if SavedRecipient.objects.filter(sender_user=sender, phone_key=phone_key, deleted_at__isnull=True).exists():
-            return {'success': False, 'error': 'already_saved'}
-        holder = _legacy_holder(phone_key, sender)
-        if not holder:
-            return {'success': False, 'error': 'not_legacy'}
-        if str(holder.pk) != str(recipient_user_id or ''):
-            return {'success': False, 'error': 'recipient_changed'}
-        _replace_saved(sender, phone_key, holder, 'legacy_phone', timezone.now())
     return {'success': True}
 
 

@@ -145,6 +145,7 @@ def _notify_recipient_needs_app(recipient_user, sender_user) -> None:
     try:
         from notifications import utils as notif_utils
         from notifications.models import NotificationType as NotifType
+        from users.name_visibility import display_name_for
         notif_utils.create_notification(
             user=recipient_user,
             account=None,
@@ -152,7 +153,9 @@ def _notify_recipient_needs_app(recipient_user, sender_user) -> None:
             notification_type=NotifType.SEND_RECEIVED,
             title='Alguien quiere enviarte dólares',
             message=(
-                f'{_display_name(sender_user)} intentó enviarte dinero. '
+                # The name rule, from the recipient's side: @usuario unless
+                # the two have moved money before.
+                f'{display_name_for(recipient_user, sender_user)} intentó enviarte dinero. '
                 'Abre Confío para activar tu cuenta y poder recibirlo.'
             ),
             data={'transaction_type': 'send_blocked', 'reason': 'no_bsc_address'},
@@ -182,17 +185,12 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
         return recipient_user, None, (addr or None), None
 
     if recipient_phone:
-        # Full number only — canonical key "57:313…" or E.164. A local number
-        # without a calling code identifies no one and resolves to nothing.
-        from users.phone_utils import find_user_by_phone
-        found = find_user_by_phone(recipient_phone)
-        if not found:
-            # Non-Confío phone: the invite flow is a separate product
-            # (Algorand invite-send today; BSC invites are a follow-up).
-            return None, None, None, 'recipient_not_on_confio'
-        account = found.accounts.filter(account_type='personal', account_index=0).first()
-        addr = (getattr(account, 'bsc_address', None) or '').lower() if account else ''
-        return found, None, (addr or None), None
+        # A number never resolves to an account here: every number answers
+        # as one that is not on Confío, so the reply says nothing about who
+        # holds it (it used to return their account, wallet and @usuario).
+        # The app sends to a number by link (send/link_invite.py), and to a
+        # saved contact by recipient_user_id.
+        return None, None, None, 'recipient_not_on_confio'
 
     if recipient_address:
         if not EVM_ADDR_RE.match(recipient_address):

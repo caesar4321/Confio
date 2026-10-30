@@ -1154,33 +1154,12 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 except User.DoesNotExist:
                     return cls(success=False, error='Recipient user not found')
             
-            # Priority 2: Phone number lookup
+            # Priority 2: a number never resolves to an account: every number
+            # gets the not-registered answer, so the reply says nothing about
+            # who holds it (it used to return their wallet).
             elif recipient_phone:
-                from users.phone_utils import find_user_by_phone, phone_lookup_key
-                # A recipient is identified by the FULL number only: the
-                # canonical key ("57:3132587634") or E.164. A local number
-                # without a calling code names no one country, so it resolves
-                # to nothing rather than to a stranger.
-                logger.info(f"Looking up user by phone: original='{recipient_phone}', key='{phone_lookup_key(recipient_phone)}'")
+                return cls(success=False, error='Phone number not registered with Confío. Please ask them to sign up first.')
 
-                found_user = find_user_by_phone(recipient_phone)
-
-                if found_user:
-                    recipient_user = found_user
-                    # Get recipient's personal account
-                    recipient_user_account = recipient_user.accounts.filter(
-                        account_type='personal',
-                        account_index=0
-                    ).first()
-                    if recipient_user_account and recipient_user_account.algorand_address:
-                        resolved_recipient_address = recipient_user_account.algorand_address
-                        logger.info(f"Resolved recipient address from phone {recipient_phone}: {resolved_recipient_address[:10]}...")
-                    else:
-                        return cls(success=False, error="Recipient's Algorand address not found")
-                else:
-                    # Non-Confío user - create invitation (not supported for Algorand yet)
-                    return cls(success=False, error='Phone number not registered with Confío. Please ask them to sign up first.')
-            
             # Priority 3: Direct Algorand address
             elif recipient_address:
                 # Validate it's an Algorand address (58 chars, uppercase letters and numbers 2-7)
@@ -1655,23 +1634,10 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 sender_type = 'user'
                 recipient_type = 'business' if recipient_business else ('user' if recipient_user else 'external')
 
-                # Phone numbers (used for contact matching; optional)
-                try:
-                    sc = getattr(user, 'phone_country', None) or getattr(user, 'phoneCountry', None)
-                    sn = getattr(user, 'phone_number', None) or getattr(user, 'phoneNumber', None)
-                    sender_phone = (f"{sc}{sn}" if sn and sc else (sn or '')) or ''
-                except Exception:
-                    sender_phone = ''
-                try:
-                    # A business recipient has no phone of its own — the
-                    # owner's number is not the business's, and recording it
-                    # here is what let a "send again" reach a personal wallet.
-                    # Mirrors send/bsc_flow.py, which leaves it blank too.
-                    rc = getattr(recipient_user, 'phone_country', None) if (recipient_user and not recipient_business) else None
-                    rn = getattr(recipient_user, 'phone_number', None) if (recipient_user and not recipient_business) else None
-                    recipient_phone = (f"{rc}{rn}" if rn and rc else (rn or '')) or ''
-                except Exception:
-                    recipient_phone = ''
+                # No verified numbers on the row (they never reach the other
+                # person, and are not kept beside who paid whom).
+                sender_phone = ''
+                recipient_phone = ''
 
                 # Key the row on the AXFER's own txid, not result['tx_id'] —
                 # send_raw_transaction returns the FIRST txid in the group

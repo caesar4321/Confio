@@ -1,6 +1,10 @@
 import logging
 from decimal import Decimal
 
+# History rows never copy a verified phone number (an account's number never
+# reaches another person, and is not kept beside who paid whom): every
+# sender_phone / counterparty_phone below is blank, except a send's number
+# its sender typed (SendTransaction.recipient_phone_from_sender).
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.utils import timezone
@@ -154,7 +158,7 @@ def create_unified_transaction_from_payment(payment_transaction):
                 'sender_business': payment_transaction.payer_business,
                 'sender_type': payment_transaction.payer_type,
                 'sender_display_name': payment_transaction.payer_display_name,
-                'sender_phone': payment_transaction.payer_phone or '',
+                'sender_phone': '',
                 'sender_address': payment_transaction.payer_address,
                 
                 # Counterparty info (merchant)
@@ -249,7 +253,7 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
                 'sender_business': sender_business,
                 'sender_type': 'business' if sender_business else 'user',
                 'sender_display_name': sender_display_name,
-                'sender_phone': sender_user.phone_number if sender_user else '',
+                'sender_phone': '',
                 'sender_address': '',
                 
                 # Counterparty info
@@ -257,7 +261,7 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
                 'counterparty_business': counterparty_business,
                 'counterparty_type': 'business' if counterparty_business else 'user',
                 'counterparty_display_name': counterparty_display_name,
-                'counterparty_phone': counterparty_user.phone_number if counterparty_user else '',
+                'counterparty_phone': '',
                 'counterparty_address': '',
                 
                 # Additional fields
@@ -348,7 +352,7 @@ def create_unified_transaction_from_conversion(conversion):
                 'sender_business': conversion.actor_business,
                 'sender_type': conversion.actor_type,
                 'sender_display_name': conversion.actor_display_name,
-                'sender_phone': (conversion.actor_user.phone_number or '') if conversion.actor_user else '',
+                'sender_phone': '',
                 'sender_address': conversion.actor_address,
                 
                 # No real counterparty for conversions (self-transaction)
@@ -465,7 +469,7 @@ def create_unified_transaction_from_payroll(payroll_item):
                 'counterparty_business': None,
                 'counterparty_type': 'user',
                 'counterparty_display_name': recipient_name,
-                'counterparty_phone': recipient_user.phone_number if recipient_user else '',
+                'counterparty_phone': '',
                 'counterparty_address': recipient_account.algorand_address if recipient_account else '',
                 
                 # Additional fields
@@ -512,7 +516,7 @@ def create_unified_transaction_from_humanitarian_donation(donation):
                 'sender_business': None,
                 'sender_type': 'user' if donor else 'external',
                 'sender_display_name': donor_name,
-                'sender_phone': donor.phone_number if donor else '',
+                'sender_phone': '',
                 'sender_address': donation.from_address or '',
                 'counterparty_user': None,
                 'counterparty_business': None,
@@ -570,7 +574,7 @@ def create_unified_transaction_from_humanitarian_release(release):
                 'counterparty_business': None,
                 'counterparty_type': 'user' if recipient_user else 'external',
                 'counterparty_display_name': recipient_name,
-                'counterparty_phone': recipient_user.phone_number if recipient_user else '',
+                'counterparty_phone': '',
                 'counterparty_address': release.recipient_address or '',
                 'description': description,
                 'from_address': campaign.vault_address or '',

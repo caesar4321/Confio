@@ -560,7 +560,7 @@ def scan_inbound_deposits():
                     # reason to put a personal phone number in reach of them.
                     # Same rule the notification payloads follow next door.
                     'sender_phone': '',
-                    'recipient_phone': getattr(account.user, 'phone_number', '') if account.account_type == 'personal' else '',
+                    'recipient_phone': '',  # never the account's verified number
                     'sender_address': sender or '',
                     'recipient_address': to_addr or '',
                     'amount': amount_human,

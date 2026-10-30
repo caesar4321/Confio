@@ -3,11 +3,8 @@ import { View, StyleSheet, TouchableOpacity, Modal, ActivityIndicator, Alert } f
 import { Text, TextInput } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useMutation, useApolloClient } from '@apollo/client';
-import { CHECK_USERS_BY_PHONES, CHECK_USERS_BY_USERNAMES } from '../apollo/queries';
+import { CHECK_USERS_BY_USERNAMES } from '../apollo/queries';
 import { CREATE_PAYROLL_RECIPIENT } from '../apollo/mutations/payroll';
-import { countries } from '../utils/countries';
-import { useCountrySelection } from '../hooks/useCountrySelection';
-import { CountryFlag } from './CountryFlag';
 import { colors } from '../config/theme';
 
 type Props = {
@@ -17,20 +14,10 @@ type Props = {
 };
 
 export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onChanged }) => {
-  const [phone, setPhone] = useState('');
   const [username, setUsername] = useState('');
-  const [mode, setMode] = useState<'phone' | 'username'>('phone');
   const [displayName, setDisplayName] = useState('');
   const [lookupLoading, setLookupLoading] = useState(false);
   const apolloClient = useApolloClient();
-
-  const { selectedCountry, selectCountry } = useCountrySelection();
-  useEffect(() => {
-    if (!selectedCountry) {
-      const venezuela = countries.find(c => c[2] === 'VE');
-      if (venezuela) selectCountry(venezuela);
-    }
-  }, [selectedCountry, selectCountry]);
 
   const [createRecipient, { loading: creating }] = useMutation(CREATE_PAYROLL_RECIPIENT);
 
@@ -40,33 +27,18 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
       let match = null;
       let identifierDisplay = '';
 
-      if (mode === 'phone') {
-        if (!phone.trim()) {
-          Alert.alert('Ingresa teléfono', 'Por favor ingresa el número de teléfono del destinatario', [{ text: 'Entendido' }]);
-          return;
-        }
-        const fullPhone = `${selectedCountry?.[1] || ''}${phone.replace(/[^0-9]/g, '')}`;
-        const res = await apolloClient.query({
-          query: CHECK_USERS_BY_PHONES,
-          variables: { phoneNumbers: [fullPhone] },
-          fetchPolicy: 'network-only',
-        });
-        match = res.data?.checkUsersByPhones?.[0];
-        identifierDisplay = fullPhone;
-      } else {
-        if (!username.trim()) {
-          Alert.alert('Ingresa usuario', 'Por favor ingresa el @usuario de Confío', [{ text: 'Entendido' }]);
-          return;
-        }
-        const handle = username.trim().replace(/^@/, '');
-        const res = await apolloClient.query({
-          query: CHECK_USERS_BY_USERNAMES,
-          variables: { usernames: [handle] },
-          fetchPolicy: 'network-only',
-        });
-        match = res.data?.checkUsersByUsernames?.[0];
-        identifierDisplay = `@${handle}`;
+      if (!username.trim()) {
+        Alert.alert('Ingresa usuario', 'Por favor ingresa el @usuario de Confío', [{ text: 'Entendido' }]);
+        return;
       }
+      const handle = username.trim().replace(/^@/, '');
+      const res = await apolloClient.query({
+        query: CHECK_USERS_BY_USERNAMES,
+        variables: { usernames: [handle] },
+        fetchPolicy: 'network-only',
+      });
+      match = res.data?.checkUsersByUsernames?.[0];
+      identifierDisplay = `@${handle}`;
 
       if (!match || !match.isOnConfio) {
         Alert.alert('No encontrado', 'No encontramos un usuario de Confío con ese dato.', [{ text: 'Entendido' }]);
@@ -86,7 +58,6 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
       });
       if (resCreate.data?.createPayrollRecipient?.success) {
         onChanged?.();
-        setPhone('');
         setUsername('');
         setDisplayName('');
         onClose();
@@ -125,56 +96,6 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
             </TouchableOpacity>
           </View>
 
-          <View style={styles.modeToggle}>
-            <TouchableOpacity
-              style={[styles.modeButton, mode === 'phone' && styles.modeButtonActive]}
-              onPress={() => setMode('phone')}
-            >
-              <Text style={[styles.modeButtonText, mode === 'phone' && styles.modeButtonTextActive]}>Teléfono</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, mode === 'username' && styles.modeButtonActive]}
-              onPress={() => setMode('username')}
-            >
-              <Text style={[styles.modeButtonText, mode === 'username' && styles.modeButtonTextActive]}>@Usuario</Text>
-            </TouchableOpacity>
-          </View>
-
-          {mode === 'phone' ? (
-            <>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>País</Text>
-                <TouchableOpacity
-                  style={styles.countrySelector}
-                  onPress={() => selectCountry(selectedCountry || countries[0])}
-                >
-                  <View style={styles.countrySelectorContent}>
-                    {selectedCountry
-                      ? <CountryFlag iso={selectedCountry[2]} size={26} />
-                      : <Icon name="globe" size={24} color={colors.text.secondary} />}
-                    <Text style={styles.countryNameSelector}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
-                  </View>
-                  <Text style={styles.countryCode}>{selectedCountry?.[1] || '+58'}</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Número de teléfono</Text>
-                <View style={styles.phoneInputContainer}>
-                  <View style={styles.phoneCodeContainer}>
-                    <Text style={styles.phoneCode}>{selectedCountry?.[1] || '+58'}</Text>
-                  </View>
-                  <TextInput
-                    style={styles.phoneInput}
-                    placeholder="412 1234567"
-                    value={phone}
-                    onChangeText={setPhone}
-                    keyboardType="phone-pad"
-                  />
-                </View>
-              </View>
-            </>
-          ) : (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>@usuario</Text>
               <View style={styles.atInputContainer}>
@@ -188,9 +109,8 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
                   autoCorrect={false}
                 />
               </View>
-              <Text style={styles.helperText}>Agrega destinatario usando su @usuario de Confío.</Text>
+              <Text style={styles.helperText}>Agrega destinatario usando su @usuario de Confío. Lo encuentra en su perfil.</Text>
             </View>
-          )}
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Nombre a mostrar (opcional)</Text>

@@ -1,6 +1,7 @@
 """Link sends (send/link_invite.py) on the BSC invite flow."""
 from datetime import timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -138,11 +139,13 @@ class ResolveAndSaveTests(TestCase):
         self.friend = make_user('friend', phone_number='3001234567', phone_country='CO')
         User.objects.filter(pk=self.friend.pk).update(last_activity_at=timezone.now())
 
-    def test_saved_then_legacy_then_none(self):
-        # protects=the documented order and the 180-day recycle rule; fails_when=an inactive or revoked number still sends direct; no_claim=send execution
-        self.assertEqual(link_invite.resolve(self.sender, '+573001234567')['kind'], 'LEGACY')
-        User.objects.filter(pk=self.friend.pk).update(last_activity_at=timezone.now() - timedelta(days=200))
-        self.assertEqual(link_invite.resolve(self.sender, '+573001234567')['kind'], 'NONE')
+    def test_another_persons_verified_number_resolves_to_no_one(self):
+        # protects=typing a number never reveals the account holding it; fails_when=an active holder of the number comes back (the old LEGACY); no_claim=send execution
+        User.objects.filter(pk=self.friend.pk).update(last_activity_at=timezone.now())
+        self.assertEqual(link_invite.resolve(self.sender, '+573001234567'), {'kind': 'NONE', 'user': None})
+
+    def test_a_saved_contact_resolves_to_the_saved_account(self):
+        # protects=the sender's own confirmed contact still sends direct; fails_when=a saved number falls back to a link; no_claim=how it was saved
         SavedRecipient.objects.create(sender_user=self.sender, phone_key='57:3001234567', recipient_user=self.friend,
                                       source='link_claim', basis_at=timezone.now())
         self.assertEqual(link_invite.resolve(self.sender, '+573001234567')['kind'], 'SAVED')
@@ -216,17 +219,14 @@ class AuditFollowUpTests(TestCase):
                         created_at=timezone.now() - timedelta(hours=24, minutes=50))
         self.assertEqual(link_invite.links_today_usd(self.sender), Decimal('10'))
 
-    def test_legacy_save_refuses_an_account_other_than_the_one_paid(self):
-        # protects=saving after a legacy send keeps the paid account, never a new holder of the number; fails_when=the number moved and the new holder is saved; no_claim=none beyond protects
+    def test_saving_by_number_is_refused(self):
+        # protects=no one learns which account holds a number by trying to save it; fails_when=a number plus a guessed user id is accepted; no_claim=saving from a claimed link
+        from send.schema import SaveRecipient
         holder = make_user('legacy-holder', phone_number='3001234567', phone_country='CO')
-        User.objects.filter(pk=holder.pk).update(last_activity_at=timezone.now())
-        self.assertEqual(link_invite.save_legacy(self.sender, '+573001234567', recipient_user_id=999999)['error'],
-                         'recipient_changed')
-        self.assertTrue(link_invite.save_legacy(self.sender, '+573001234567', recipient_user_id=holder.pk)['success'])
-        # A second (late) legacy save never replaces the one already saved.
-        self.assertEqual(link_invite.save_legacy(self.sender, '+573001234567', recipient_user_id=holder.pk)['error'],
-                         'already_saved')
-
+        info = SimpleNamespace(context=SimpleNamespace(user=self.sender))
+        out = SaveRecipient.mutate.__wrapped__(None, info, phone='+573001234567', recipient_user_id=holder.pk)
+        self.assertEqual((out.success, out.error), (False, 'not_legacy'))
+        self.assertFalse(SavedRecipient.objects.filter(sender_user=self.sender).exists())
 
 class SendPeopleTests(TestCase):
     def test_recent_people_are_those_money_moved_with_newest_first(self):
