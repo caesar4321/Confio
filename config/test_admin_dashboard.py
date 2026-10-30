@@ -320,3 +320,32 @@ class DashboardPagesTests(TestCase):
         self.assertNotIn('No active partner agreement', html)
         self.assertIn('Jason BO 50% of fee', html)
         self.assertIn('cUSD limits unreadable', html)  # a failed read is unknown, never "off"
+
+    def test_rails_table_needs_the_infinia_view_permission(self):
+        self.assertEqual(sections.rails_by_period(sections.Window.current(), self.staff()), {})
+
+    def test_rails_by_period_splits_providers_and_windows(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from ramps.metrics import rail_flows_by_period
+        from ramps.models import RampTransaction
+
+        base = dict(actor_user=self.user, direction='off_ramp', status='COMPLETED',
+                    crypto_currency='USDT BSC', crypto_amount_actual=Decimal('10'))
+        now = timezone.now()
+        fresh = RampTransaction.objects.create(provider='vexpay', **base)
+        old = RampTransaction.objects.create(provider='koywe', **base)
+        RampTransaction.objects.filter(pk=fresh.pk).update(completed_at=now - timedelta(hours=2))
+        RampTransaction.objects.filter(pk=old.pk).update(completed_at=now - timedelta(days=10))
+        w = sections.Window.current()
+        rows = {r['label']: r['cells'] for r in rail_flows_by_period(w.periods())['withdrawals']}
+        # A rail outside the public deposit figure's provider list still shows.
+        self.assertEqual([c['usd'] for c in rows['VEXPay']], [Decimal('10')] * 4)
+        self.assertEqual([c['count'] for c in rows['Koywe']], [0, 0, 1, 1])
+
+    def test_investing_table_lists_every_product(self):
+        table = sections.investing_by_period(sections.Window.current())['period_table']
+        labels = [r['label'] for r in table['groups'][0]['rows']]
+        self.assertEqual(labels, ['Stocks buys', 'Stocks sells', 'Crypto & gold buys', 'Crypto & gold sells',
+                                  'Futures margin in', 'Futures dollars back'])
+        self.assertTrue(all(len(r['cells']) == 4 for r in table['groups'][0]['rows']))

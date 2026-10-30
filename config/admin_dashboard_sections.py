@@ -39,6 +39,9 @@ DIDIT_IN_REVIEW = Q(status='pending', risk_factors__didit__raw_status__iexact='i
 CHAIN_CACHE_SECONDS = 300
 
 
+ALL_TIME = datetime(2000, 1, 1, tzinfo=dt_timezone.utc)
+
+
 @dataclass(frozen=True)
 class Window:
     """Time bounds shared by every section. Calendar days are Argentina days,
@@ -52,6 +55,11 @@ class Window:
     # Chain reads made while building this request's page: every section
     # that shows a vault sees the same read, so alerts match the tiles.
     reads: dict = field(default_factory=dict, compare=False, repr=False)
+
+    def periods(self):
+        """The admin's reporting windows, shortest first."""
+        return [('24h', self.last_24h), ('7 days', self.last_7_start),
+                ('30 days', self.rolling_30_start), ('All time', ALL_TIME)]
 
     @classmethod
     def current(cls):
@@ -1342,6 +1350,49 @@ def cusd_bsc(w, *, refresh=False):
         # The fee table lists the legacy router fee still uncollected there.
         'stock_router_metrics': _admin_cached('stock_router', get_stock_router_metrics, w, refresh=refresh),
     }
+
+
+def rails_by_period(w, request):
+    """Every rail per provider, plus Movido, for 24h / 7d / 30d / all time.
+    Same permission as the provider volumes it replaces on the Infinia block."""
+    from ramps.metrics import rail_flows_by_period
+
+    if not request.user.has_perm('payment_accounts.view_infiniajourney'):
+        return {}
+    periods = w.periods()
+    flows = rail_flows_by_period(periods)
+    movido_total = [{'usd': a['usd'] + b['usd'], 'count': a['count'] + b['count']}
+                    for a, b in zip(flows['movido_in'], flows['movido_out'])]
+    return {'period_table': {
+        'title': 'Rails by period',
+        'note': 'Provider deposits are delivered dollars net of the fee, dated by completion. Movido is the '
+                'website figure (all rails, including outside USDT and Pay), deposits gross and withdrawals '
+                'net of the fee, so providers are a subset of it.',
+        'labels': [label for label, _since in periods],
+        'groups': [
+            {'title': 'Deposits by provider', 'rows': flows['deposits']},
+            {'title': 'Withdrawals by provider', 'rows': flows['withdrawals']},
+            {'title': 'Movido (website figure)', 'rows': [
+                {'label': 'Deposits', 'cells': flows['movido_in']},
+                {'label': 'Withdrawals', 'cells': flows['movido_out']},
+                {'label': 'Total', 'cells': movido_total, 'total': True},
+            ]},
+        ],
+    }}
+
+
+def investing_by_period(w):
+    """Stocks, crypto & gold and futures for 24h / 7d / 30d / all time."""
+    from cusd_plus.metrics import investment_flows_by_period
+
+    periods = w.periods()
+    return {'period_table': {
+        'title': 'Investing by period',
+        'note': 'Stocks and crypto are settled dollars of confirmed trades. Futures are the margin put in at '
+                'open and the dollars back at the end of a position, not the leveraged size.',
+        'labels': [label for label, _since in periods],
+        'groups': [{'title': '', 'rows': investment_flows_by_period(periods)}],
+    }}
 
 
 def infinia(request):

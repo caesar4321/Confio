@@ -14,8 +14,10 @@
     <thead>
         <tr style="text-align:left; border-bottom:1px solid #e5e7eb;">
             <th style="padding:8px;">Source</th>
-            <th style="padding:8px; text-align:right;">Fees, last 30 days</th>
-            <th style="padding:8px; text-align:right;">Fees, lifetime</th>
+            <th style="padding:8px; text-align:right;">24h</th>
+            <th style="padding:8px; text-align:right;">7 days</th>
+            <th style="padding:8px; text-align:right;">30 days</th>
+            <th style="padding:8px; text-align:right;">All time</th>
             <th style="padding:8px; text-align:right;">Events</th>
             <th style="padding:8px; text-align:right;">Gross through the fee</th>
         </tr>
@@ -24,6 +26,8 @@
         {% for row in fee_ledger.rows %}
         <tr style="border-bottom:1px solid #f3f4f6;{% if not row.count %} color:#9ca3af;{% endif %}">
             <td style="padding:8px;">{{ row.label }}</td>
+            <td style="padding:8px; text-align:right;">${{ row.fee_usd_24h|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ row.fee_usd_7d|floatformat:2|intcomma }}</td>
             <td style="padding:8px; text-align:right;">${{ row.fee_usd_30d|floatformat:2|intcomma }}</td>
             <td style="padding:8px; text-align:right;">${{ row.fee_usd|floatformat:2|intcomma }}</td>
             <td style="padding:8px; text-align:right;">{{ row.count|intcomma }}</td>
@@ -32,6 +36,8 @@
         {% endfor %}
         <tr style="font-weight:600; border-top:2px solid #e5e7eb;">
             <td style="padding:8px;">cUSD fee total</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.total.fee_usd_24h|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.total.fee_usd_7d|floatformat:2|intcomma }}</td>
             <td style="padding:8px; text-align:right;">${{ fee_ledger.total.fee_usd_30d|floatformat:2|intcomma }}</td>
             <td style="padding:8px; text-align:right;">${{ fee_ledger.total.fee_usd|floatformat:2|intcomma }}</td>
             <td style="padding:8px; text-align:right;">{{ fee_ledger.total.count|intcomma }}</td>
@@ -39,6 +45,8 @@
         </tr>
         <tr style="color:#6b7280;">
             <td style="padding:8px;">Legacy stock router (0.30%, pre-v2 builds)</td>
+            <td style="padding:8px; text-align:right;">—</td>
+            <td style="padding:8px; text-align:right;">—</td>
             <td style="padding:8px; text-align:right;">—</td>
             <td style="padding:8px; text-align:right;">
                 {% if stock_router_metrics.accrued_usdt_fees is not None %}

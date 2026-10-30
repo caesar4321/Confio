@@ -715,11 +715,13 @@ ConfioAdminSite.DASH_PAGES = [
         _w(sections.today_growth),
     ], [], {'template': 'admin/dash/today.html', 'chain': True, 'heading': 'Today'}),
     ('money', 'Money & rails', [
+        lambda w, request, refresh: sections.rails_by_period(w, request),
         _chain(sections.cusd_bsc),
         lambda w, request, refresh: sections.infinia(request),
         lambda w, request, refresh: sections.koywe(w, request),
         _w(sections.guardarian),
     ], [
+        'admin/dash/_period_table.html',
         'admin/dash/_cusd_bsc.html',
         'admin/dash/_fee_revenue.html',
         'admin/_infinia_dashboard.html',
@@ -732,10 +734,12 @@ ConfioAdminSite.DASH_PAGES = [
         ('Transaction analytics', 'transaction_analytics', ''),
     )}),
     ('savings', 'Savings & investing', [
+        _w(sections.investing_by_period),
         _chain(sections.cusd_plus),
         _chain(sections.stocks),
         _w(sections.crypto),
     ], [
+        'admin/dash/_period_table.html',
         'admin/dash/_cusd_plus.html',
         'admin/dash/_stocks.html',
         'admin/dash/_crypto.html',

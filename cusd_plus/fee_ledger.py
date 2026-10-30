@@ -234,11 +234,14 @@ def summary(now=None) -> dict:
 
     now = now or datetime.now(dt_timezone.utc)
     since = now - timedelta(days=30)
+    since_7d = now - timedelta(days=7)
+    since_24h = now - timedelta(hours=24)
     events = list(CusdFeeEvent.objects.all().only(
         'tx_hash', 'direction', 'fee_wei', 'gross_wei', 'block_time'))
     batches, ramps, payouts, providers = _context({e.tx_hash for e in events})
     rows = OrderedDict((key, {'key': key, 'label': label, 'count': 0, 'fee_usd': Decimal('0'),
-                              'volume_usd': Decimal('0'), 'fee_usd_30d': Decimal('0'), 'count_30d': 0})
+                              'volume_usd': Decimal('0'), 'fee_usd_30d': Decimal('0'), 'count_30d': 0,
+                              'fee_usd_7d': Decimal('0'), 'fee_usd_24h': Decimal('0')})
                        for key, label in SOURCES.items())
     unknown_time = 0
     for event in events:
@@ -253,10 +256,16 @@ def summary(now=None) -> dict:
         elif event.block_time >= since:
             row['count_30d'] += 1
             row['fee_usd_30d'] += fee
+            if event.block_time >= since_7d:
+                row['fee_usd_7d'] += fee
+            if event.block_time >= since_24h:
+                row['fee_usd_24h'] += fee
     total = {
         'count': sum(r['count'] for r in rows.values()),
         'fee_usd': sum((r['fee_usd'] for r in rows.values()), Decimal('0')),
         'fee_usd_30d': sum((r['fee_usd_30d'] for r in rows.values()), Decimal('0')),
+        'fee_usd_7d': sum((r['fee_usd_7d'] for r in rows.values()), Decimal('0')),
+        'fee_usd_24h': sum((r['fee_usd_24h'] for r in rows.values()), Decimal('0')),
         'volume_usd': sum((r['volume_usd'] for r in rows.values()), Decimal('0')),
     }
     return {'rows': list(rows.values()), 'total': total, 'undated_events': unknown_time}

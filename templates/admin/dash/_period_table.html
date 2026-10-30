@@ -1,0 +1,35 @@
+{% load humanize %}
+{% if period_table %}
+<h2 class="section-title">{{ period_table.title }}</h2>
+<p class="dash-asof" style="margin:-6px 0 12px;">{{ period_table.note }}</p>
+<div class="data-table">
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                {% for label in period_table.labels %}<th style="text-align:right;">{{ label }}</th>{% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for group in period_table.groups %}
+            {% if group.title %}
+            <tr><th colspan="5">{{ group.title }}</th></tr>
+            {% endif %}
+            {% for row in group.rows %}
+            <tr{% if row.total %} style="font-weight:600;"{% endif %}>
+                <td>{{ row.label }}</td>
+                {% for cell in row.cells %}
+                <td style="text-align:right;{% if not cell.count %} color:var(--dash-muted);{% endif %}">
+                    ${{ cell.usd|floatformat:2|intcomma }}
+                    <div style="font-size:12px; font-weight:400; color:var(--dash-muted);">{{ cell.count|intcomma }} ops{% if cell.users is not None %} · {{ cell.users|intcomma }} users{% endif %}</div>
+                </td>
+                {% endfor %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">Nothing yet.</td></tr>
+            {% endfor %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}

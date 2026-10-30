@@ -3,7 +3,7 @@ Provider delivery totals and fiat payout timing retain their separate ramp
 and journey evidence; neither is added to the perimeter total.
 """
 from decimal import Decimal
-from django.db.models import Case, DecimalField, F, Q, Sum, Value, When
+from django.db.models import Case, Count, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce, Greatest, NullIf
 from django.db.models.fields.json import KeyTextTransform
 
@@ -22,10 +22,11 @@ def _journey_mirrors():
     return mirrors.exclude(legacy_ramp_transaction__isnull=True)
 
 
-def _deposit_sources():
+def _deposit_sources(providers=LEGACY_PROVIDERS):
     """(queryset, per-row dollar expression, provider) for every deposit
     source. Shared by the volume and the operation count so the two can
-    never disagree about what a deposit is."""
+    never disagree about what a deposit is. `providers=None` is every ramp
+    provider (the admin's per-rail table)."""
     from ramps.models import RampTransaction
     from payment_accounts.models import CobreJourney, InfiniaJourney
 
@@ -35,8 +36,9 @@ def _deposit_sources():
     # transaction table or the same payment's deposit/conversion again.
     # Preserve the historical on-chain deposit boundary: a proven stablecoin
     # receipt counts before minting. Provider status/quotes alone never do.
-    legacy = RampTransaction.objects.filter(direction='on_ramp', status='COMPLETED',
-        provider__in=LEGACY_PROVIDERS)
+    legacy = RampTransaction.objects.filter(direction='on_ramp', status='COMPLETED')
+    if providers is not None:
+        legacy = legacy.filter(provider__in=providers)
     converted = Q(conversion__status='COMPLETED', conversion__is_deleted=False,
         final_amount__gt=0) & (
         Q(conversion__conversion_type='usdc_to_cusd', final_currency='CUSD')
@@ -95,7 +97,7 @@ def deposited_volume_by_provider():
     return totals
 
 
-def _withdrawal_sources():
+def _withdrawal_sources(providers=LEGACY_PROVIDERS):
     """(queryset, dollar field, country field, user field, completed field)
     for every completed fiat payout — the sample behind the public
     withdrawal-time median.
@@ -112,10 +114,10 @@ def _withdrawal_sources():
     # skipped rather than priced (prod values: "USDC Algorand", "USDT BSC").
     dollar_denominated = Q(crypto_currency__istartswith='USDC') | Q(crypto_currency__istartswith='USDT')
     legacy = RampTransaction.objects.filter(
-        dollar_denominated,
-        direction='off_ramp', status='COMPLETED', provider__in=LEGACY_PROVIDERS,
-        crypto_amount_actual__gt=0,
+        dollar_denominated, direction='off_ramp', status='COMPLETED', crypto_amount_actual__gt=0,
     ).exclude(pk__in=_journey_mirrors())
+    if providers is not None:
+        legacy = legacy.filter(provider__in=providers)
     sources = [(legacy, 'crypto_amount_actual', 'country_code', 'actor_user_id', 'completed_at')]
     for journey in (InfiniaJourney, CobreJourney):
         sources.append((journey.objects.filter(
@@ -124,6 +126,70 @@ def _withdrawal_sources():
         ), 'money_flow__source_amount', 'local_account__country',
             'confio_account__user_id', 'money_flow__completed_at'))
     return sources
+
+
+def _period_totals(periods):
+    """One query's worth of per-period aggregates over annotated
+    flow_usd / flow_at. `periods`: [(label, since)], oldest-possible `since`
+    for all time."""
+    totals = {}
+    for index, (_label, since) in enumerate(periods):
+        window = Q(flow_at__gte=since, flow_usd__gt=0)
+        totals[f'usd{index}'] = Sum('flow_usd', filter=window, output_field=DOLLARS)
+        totals[f'n{index}'] = Count('pk', filter=window)
+    return totals
+
+
+def _period_cells(row, periods):
+    return [{'usd': row[f'usd{i}'] or Decimal(0), 'count': row[f'n{i}']} for i in range(len(periods))]
+
+
+def rail_flows_by_period(periods) -> dict:
+    """Delivered deposits and completed payouts per provider, and the
+    perimeter (Movido) totals, for each period. Provider rows include every
+    ramp provider, unlike the public deposit figure; deposits are net of the
+    fee, Movido deposits gross, so providers are a subset, never a sum of it.
+    Dated by completion, falling back to creation."""
+    from ramps.models import RampTransaction
+
+    labels = dict(RampTransaction.PROVIDER_CHOICES)
+
+    def provider_rows(sources):
+        rows = {}
+        for queryset, amount, date_field, provider in sources:
+            annotated = queryset.order_by().annotate(
+                flow_usd=amount, flow_at=Coalesce(date_field, 'created_at'))
+            if provider is None:
+                for row in annotated.values('provider').annotate(**_period_totals(periods)):
+                    rows[row['provider']] = _period_cells(row, periods)
+            else:
+                rows[provider] = _period_cells(annotated.aggregate(**_period_totals(periods)), periods)
+        return sorted(
+            ({'label': labels.get(key, key.title()), 'cells': cells} for key, cells in rows.items()),
+            key=lambda row: (-row['cells'][-1]['usd'], row['label']))
+
+    deposit_dates = {None: 'completed_at', 'infinia': 'money_flow__completed_at', 'cobre': 'money_flow__completed_at'}
+    deposits = provider_rows(
+        (queryset, amount, deposit_dates[provider], provider)
+        for queryset, amount, provider in _deposit_sources(providers=None))
+    payouts = provider_rows(
+        (queryset, F(amount), completed, provider)
+        for (queryset, amount, _country, _user, completed), provider
+        in zip(_withdrawal_sources(providers=None), (None, 'infinia', 'cobre')))
+
+    entries, exits = _perimeter_conversions()
+    movido_in = entries.order_by().annotate(
+        flow_usd=Coalesce('gross_amount_exact', 'from_amount', output_field=DOLLARS),
+        flow_at=F('created_at')).aggregate(**_period_totals(periods))
+    movido_out = exits.order_by().annotate(
+        flow_usd=Coalesce('net_amount_exact', 'to_amount', output_field=DOLLARS),
+        flow_at=F('created_at')).aggregate(**_period_totals(periods))
+    return {
+        'deposits': deposits,
+        'withdrawals': payouts,
+        'movido_in': _period_cells(movido_in, periods),
+        'movido_out': _period_cells(movido_out, periods),
+    }
 
 
 # Same privacy floor as the Usuarios-by-country screen: a country with fewer

@@ -477,6 +477,55 @@ def _swap_trade_stats(buy_kind: str, sell_kind: str, *, since=None) -> dict:
     }
 
 
+def investment_flows_by_period(periods) -> list:
+    """Buys and sells of stocks and crypto & gold, and futures margin in and
+    back, for each period: [(label, since)]. One query per product, using the
+    same settled USD rows and creation dating as _swap_trade_stats; futures
+    come from their positions (margin at open, dollars back at done)."""
+    from blockchain.models import PerpPosition, SponsoredBatch
+    from users.models_unified import UnifiedTransactionTable
+
+    amount = Cast('amount', output_field=DecimalField(max_digits=38, decimal_places=18))
+
+    def swap_rows(label, buy_kind, sell_kind):
+        settlements = UnifiedTransactionTable.objects.filter(
+            sponsored_batch__in=SponsoredBatch.objects.filter(kind__in=(buy_kind, sell_kind), status='confirmed'),
+            deleted_at__isnull=True, status='CONFIRMED', amount_denomination='USD_VALUE',
+        ).order_by()
+        rows = []
+        for side, kind in (('buys', buy_kind), ('sells', sell_kind)):
+            totals = {}
+            for index, (_label, since) in enumerate(periods):
+                window = Q(sponsored_batch__kind=kind, sponsored_batch__created_at__gte=since)
+                totals[f'usd{index}'] = Sum(amount, filter=window)
+                totals[f'n{index}'] = Count('pk', filter=window)
+                totals[f'u{index}'] = Count('sponsored_batch__user_id', filter=window, distinct=True)
+            rows.append(_period_row(f'{label} {side}', settlements.aggregate(**totals), periods))
+        return rows
+
+    def perp_row(label, usd_field, date_field):
+        totals = {}
+        for index, (_label, since) in enumerate(periods):
+            window = Q(**{f'{date_field}__gte': since, f'{usd_field}__isnull': False})
+            totals[f'usd{index}'] = Sum(usd_field, filter=window)
+            totals[f'n{index}'] = Count('pk', filter=window)
+            totals[f'u{index}'] = Count('user_id', filter=window, distinct=True)
+        return _period_row(label, PerpPosition.objects.order_by().aggregate(**totals), periods)
+
+    return [
+        *swap_rows('Stocks', 'stock_buy', 'stock_sell'),
+        *swap_rows('Crypto & gold', 'crypto_buy', 'crypto_sell'),
+        perp_row('Futures margin in', 'margin_usd', 'opened_at'),
+        perp_row('Futures dollars back', 'returned_usd', 'done_at'),
+    ]
+
+
+def _period_row(label, row, periods) -> dict:
+    return {'label': label, 'cells': [
+        {'usd': row[f'usd{i}'] or Decimal('0'), 'count': row[f'n{i}'], 'users': row[f'u{i}']}
+        for i in range(len(periods))]}
+
+
 def get_stock_router_metrics(*, use_cache: bool = True) -> dict:
     """Live stock-router state for operations; never raises.
 
@@ -663,7 +712,7 @@ def get_bnb_autoconvert_stats() -> dict:
     return counts
 
 
-FEE_LEDGER_SUMMARY_KEY = 'confio_fee_ledger_summary:v1'
+FEE_LEDGER_SUMMARY_KEY = 'confio_fee_ledger_summary:v2'
 
 
 def refresh_fee_ledger_summary():
