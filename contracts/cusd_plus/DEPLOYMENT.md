@@ -14,9 +14,13 @@ row in `queued`. All BSC presale buys settled.
    (tx `0xa83bc67e39639acd2ad534eebebfe383e4e0e93fa74b3bfa917e5384000410a8`, KMS
    nonce 1072). Read back: `owner == guardian == Safe`, 1B held by the Safe,
    BscScan verified. Not yet referenced by any vault, prod or the docs.
-2. Deploy, pointing `BSC_CONFIO_TOKEN_ADDRESS` at v2 for the commands:
-   - `deploy_reward_vault` (signer = Safe, cap = 74,000 CONFIO/day);
-   - `deploy_vesting_vault`, three times (founder, co-builder, cultural).
+2. **DONE 2026-10-30.** Deployed by the KMS sponsor against v2, owned by the
+   Safe, BscScan verified, unfunded:
+   - ConfioRewardVault `0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49` (signer =
+     Safe, cap = 74,000 CONFIO/day);
+   - ConfioVestingVault founder `0x873A68182A384DD84385C7B610Df5D2A3746D75a`;
+   - ConfioVestingVault co-builder `0x854b3692Bd3eaCfD6BCdd14C726326B883568396`;
+   - ConfioVestingVault cultural `0x285963eD9D170C5762e0E3EA8efa027f9808DeE3`.
 3. Safe: `pause()` the current presale vault. Run
    `.kms-local/kms_evm_multisig/snapshot_presale_migration.py` against it, with
    its `OLD`, `CANDIDATES` and `FROM_BLOCK` refreshed. Completeness holds only
