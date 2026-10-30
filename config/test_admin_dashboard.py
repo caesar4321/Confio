@@ -400,3 +400,17 @@ class DashboardPagesTests(TestCase):
             [{'id': 5, 'user': ('business', 2), 'usd': Decimal('100'), 'at': now}])
         self.assertEqual(tied, set())
         self.assertEqual(len(unpaired), 1)
+
+    def test_pairing_does_not_depend_on_query_order(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from ramps.metrics import tie_to_conversions
+
+        now = timezone.now()
+        arrivals = [{'user': 1, 'usd': Decimal('100'), 'at': now},
+                    {'user': 1, 'usd': Decimal('100'), 'at': now + timedelta(days=6)}]
+        early = {'id': 1, 'user': 1, 'usd': Decimal('100'), 'at': now + timedelta(days=1)}
+        late = {'id': 2, 'user': 1, 'usd': Decimal('100'), 'at': now + timedelta(days=6)}
+        tied, unpaired = tie_to_conversions(arrivals, [late, early])
+        self.assertEqual(tied, {1, 2})
+        self.assertEqual(unpaired, [])
