@@ -50,10 +50,11 @@ row in `queued`. All BSC presale buys settled.
 
    Claims stay locked and the old presale keeps its old-token balance sealed:
    `sweepExcessConfio` cannot reach it and its claims are never unlocked.
-6. Safe: sweep the old token and burn it: `revokeGrant` then `withdrawSurplus`
-   on the three old vesting vaults, `sweepExcessConfio` on the old presale,
-   `withdraw` on the old reward vault, then `burn` the Safe balance. Sweep
-   cUSD proceeds from the old presale with `sweepPayment`.
+6. **DONE 2026-10-30.** Safe nonce 23
+   (`0xb570eef443989a4f1f9062a6c55f55da37e602f3f37dba5ce50653ceab7a7ac8`)
+   revoked the three old grants, swept the old vaults and burned the old token
+   down to 20,577.071168313880 CONFIO, all sealed in the paused old presale. It
+   moved 102.09 cUSD of proceeds to the Safe.
 7. Prod: update `.env.mainnet` (`BSC_CONFIO_TOKEN_ADDRESS`,
    `BSC_PRESALE_VAULT_ADDRESS`, `BSC_REWARD_VAULT_ADDRESS`,
    `BSC_VESTING_VAULT_ADDRESS`), deploy, smoke-test a presale quote and buy.
