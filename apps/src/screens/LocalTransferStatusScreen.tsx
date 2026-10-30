@@ -391,7 +391,7 @@ function JourneyList() {
   return (
     <>
       <RampReveal delay={0}>
-        <RampHero eyebrow="Transferencias locales" title="Tus envíos" subtitle="Envíos a cuentas locales y conversiones a dólares."
+        <RampHero eyebrow="Transferencias locales" title="Tus movimientos" subtitle="Envíos a cuentas locales y conversiones a dólares."
           onBack={() => navigation.goBack()} />
       </RampReveal>
       <View style={styles.section}>

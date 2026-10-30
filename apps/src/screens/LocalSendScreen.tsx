@@ -767,6 +767,8 @@ function InfiniaLocalSendScreen() {
             title={copy.hero}
             subtitle={`Tus dólares llegan como ${currency} a la cuenta de otra persona o negocio. Revisa el estimado y confirma al final.`}
             onBack={() => navigation.goBack()}
+            onHistory={() => navigation.navigate('LocalTransferStatus')}
+            historyLabel="Ver historial de envíos"
             compact={isCompact}
           />
         </RampReveal>
@@ -782,11 +784,6 @@ function InfiniaLocalSendScreen() {
               </FlagLabel>
               <Text style={styles.bannerText}>Guardamos a quién le envías para que la próxima vez sea más rápido.</Text>
             </View>
-            <TouchableOpacity style={styles.historyPill} onPress={() => navigation.navigate('LocalTransferStatus')}
-              activeOpacity={0.8}>
-              <Icon name="clock" size={14} color={colors.primary} />
-              <Text style={styles.historyPillText}>Ver envíos</Text>
-            </TouchableOpacity>
           </View>
         </RampReveal>
 

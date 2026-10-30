@@ -236,6 +236,8 @@ function InfiniaLocalReceiveScreen() {
             title={copy.hero}
             subtitle={`Recibe ${currency} por ${copy.rail}. Los ingresos aprobados se convierten automáticamente a dólares.`}
             onBack={() => navigation.goBack()}
+            onHistory={() => navigation.navigate('LocalTransferStatus')}
+            historyLabel="Ver historial de ingresos"
             compact={isCompact}
           />
         </RampReveal>
