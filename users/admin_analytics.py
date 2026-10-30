@@ -16,7 +16,7 @@ from decimal import Decimal
 
 from .models_analytics import DailyMetrics, CountryMetrics, FunnelEvent, FunnelDailyRollup, UserActivityDay
 from .models import User
-from .analytics import count_all_signups_for_date
+from .analytics import count_all_signups_for_date, count_cohort_onboarded_for_date
 
 
 @admin.register(DailyMetrics)
@@ -93,11 +93,11 @@ class DailyMetricsAdmin(admin.ModelAdmin):
             '<strong style="color: #10B981;">{}</strong>',
             f"{obj.new_users_today:,}"
         )
-    phone_signups_display.short_description = 'Phone Signups'
+    phone_signups_display.short_description = 'New users (finished signup)'
     phone_signups_display.admin_order_field = 'new_users_today'
 
     def phone_completion_rate_display(self, obj):
-        """Display the share of raw signups that completed phone capture."""
+        """Display the share of the day's new accounts that finished signup."""
         raw_signups = getattr(obj, '_raw_signups', None)
         if raw_signups is None:
             raw_signups = count_all_signups_for_date(obj.date)
@@ -106,14 +106,17 @@ class DailyMetricsAdmin(admin.ModelAdmin):
         if raw_signups == 0:
             return format_html('<span style="color: gray;">N/A</span>')
 
-        ratio = obj.new_users_today / raw_signups
+        # One cohort: of the accounts created that day, how many finished
+        # signup. new_users_today counts finishes dated that day (an old
+        # account finishing then included), a different base.
+        ratio = count_cohort_onboarded_for_date(obj.date) / raw_signups
         color = '#10B981' if ratio >= 0.80 else '#F59E0B' if ratio >= 0.60 else '#EF4444'
         return format_html(
             '<span style="color: {}; font-weight: bold;">{}</span>',
             color,
             f"{ratio:.1%}"
         )
-    phone_completion_rate_display.short_description = 'Signup → Phone'
+    phone_completion_rate_display.short_description = 'Signup → Onboarded'
     
     def wau_display(self, obj):
         """Display WAU with formatting"""

@@ -213,11 +213,12 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         start_date_arg = (now_arg - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
         start_date_utc = start_date_arg.astimezone(dt_timezone.utc)
         
+        # Dated by when signup finished (onboarded_at), not account creation:
+        # an old account that finishes on a phone-less build counts today.
         daily_signups = User.objects.exclude(is_platform_test_account=True).filter(
-            onboarded_at__isnull=False,
-            created_at__gte=start_date_utc
+            onboarded_at__gte=start_date_utc
         ).annotate(
-            day=TruncDate('created_at', tzinfo=tz)
+            day=TruncDate('onboarded_at', tzinfo=tz)
         ).values('day').annotate(
             count=Count('id')
         ).order_by('day')

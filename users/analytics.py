@@ -85,12 +85,23 @@ def count_all_signups_for_date(target_date):
     return _users().filter(created_at__gte=start_time, created_at__lte=end_time).count()
 
 
+def count_cohort_onboarded_for_date(target_date):
+    """Of the accounts CREATED on the given Argentina date, how many have
+    finished signup (whenever they did): the numerator of the creation
+    cohort's completion rate, on the same date base as
+    count_all_signups_for_date."""
+    start_time, end_time = get_argentina_day_bounds(target_date)
+    return get_real_users_queryset().filter(created_at__gte=start_time, created_at__lte=end_time).count()
+
+
 def count_real_signups_for_date(target_date, country_code=None):
     """
-    Count phone-complete signups for the given Argentina calendar date.
+    Count signups FINISHED on the given Argentina calendar date: dated by
+    onboarded_at, so someone who created an account months ago and finishes
+    today counts today, not on a day already reported.
     """
     start_time, end_time = get_argentina_day_bounds(target_date)
-    queryset = get_real_users_queryset().filter(created_at__gte=start_time, created_at__lte=end_time)
+    queryset = get_real_users_queryset().filter(onboarded_at__gte=start_time, onboarded_at__lte=end_time)
     if country_code:
         queryset = queryset.filter(country=country_code)
     return queryset.count()
@@ -295,13 +306,14 @@ def calculate_country_metrics(target_date=None):
             last_activity_at__lte=end_time
         ).count()
         
-        # Total users from this country
-        total_users = country_users.count()
+        # Total users from this country as of the target date (finished
+        # signup by then), like the global total.
+        total_users = country_users.filter(onboarded_at__lte=end_time).count()
         
         # New users today from this country
         new_users_today = country_users.filter(
-            created_at__gte=dau_start,
-            created_at__lte=end_time
+            onboarded_at__gte=dau_start,
+            onboarded_at__lte=end_time
         ).count()
         
         metrics[country_code] = {
@@ -355,7 +367,9 @@ def snapshot_daily_metrics(target_date=None):
     end_time_arg = _localize_arg(naive_end)
     end_time = end_time_arg.astimezone(UTC_TZ)
     
-    total_users = _users().filter(onboarded_at__isnull=False, created_at__lte=end_time).count()
+    # Dated by onboarded_at (finished signup), like new users below: a past
+    # day's total never grows when an old account finishes signup later.
+    total_users = _users().filter(onboarded_at__lte=end_time).count()
     
     # Calculate new users on target date
     # start_time is start of target_date in Argentina
@@ -363,9 +377,8 @@ def snapshot_daily_metrics(target_date=None):
     start_time_arg = _localize_arg(naive_start)
     start_time = start_time_arg.astimezone(UTC_TZ)
     new_users_today = _users().filter(
-        onboarded_at__isnull=False,
-        created_at__gte=start_time,
-        created_at__lte=end_time
+        onboarded_at__gte=start_time,
+        onboarded_at__lte=end_time
     ).count()
     
     # Calculate DAU/MAU ratio
