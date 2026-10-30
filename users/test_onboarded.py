@@ -299,3 +299,28 @@ class RampFiatAmountTests(TestCase):
         self.assertEqual(UnifiedTransactionType.resolve_ramp_fiat_amount(row, None), '1007443.5')
         ramp.fiat_amount, ramp.metadata = None, {}
         self.assertIsNone(UnifiedTransactionType.resolve_ramp_fiat_amount(row, None))
+
+
+class UserAdminOnboardedTests(TestCase):
+    def test_the_user_list_separates_finished_signups_and_the_date_cannot_be_edited(self):
+        # protects=staff can tell finished signups from dropouts; fails_when=the filter is gone or the form offers a date that saving ignores; no_claim=how onboarded_at gets set
+        from django.contrib.messages.storage.fallback import FallbackStorage
+        from django.test import RequestFactory
+        from django.urls import reverse
+        from config.admin_dashboard import confio_admin_site
+        staff = User.objects.create_superuser(username='admin-onb', firebase_uid='admin-onb', email='a@example.com', password='x')
+        done = User.objects.create_user(username='done', firebase_uid='done', onboarded_at=timezone.now())
+        dropout = User.objects.create_user(username='dropout', firebase_uid='dropout')
+        model_admin = confio_admin_site._registry[User]
+
+        def listed(query):
+            request = RequestFactory().get(reverse('confio_admin:users_user_changelist'), query)
+            staff.is_verified = lambda: True  # the site's two-factor check
+            request.user, request.session = staff, {}
+            request._messages = FallbackStorage(request)
+            return {row.pk for row in model_admin.changelist_view(request).context_data['cl'].queryset}
+
+        self.assertIn(dropout.pk, listed({'onboarded_at__isnull': 'True'}))
+        self.assertNotIn(done.pk, listed({'onboarded_at__isnull': 'True'}))
+        self.assertIn(done.pk, listed({'onboarded_at__isnull': 'False'}))
+        self.assertIn('onboarded_at', model_admin.readonly_fields)

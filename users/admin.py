@@ -17,11 +17,11 @@ from .admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'accounts_count', 'icp_summary', 'rating_summary', 'is_staff', 'created_at')
-    list_filter = ('backup_provider', 'is_staff', 'is_superuser', 'country', 'phone_country', 'confio_rating_star_count', 'confio_rating_action', 'created_at')
+    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'accounts_count', 'icp_summary', 'rating_summary', 'is_staff', 'onboarded_at', 'created_at')
+    list_filter = ('onboarded_at', 'backup_provider', 'is_staff', 'is_superuser', 'country', 'phone_country', 'confio_rating_star_count', 'confio_rating_action', 'created_at')
     search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name', 'phone_number', 'phone_key', 'confio_icp_other_text', 'confio_rating_feedback_text')
     readonly_fields = (
-        'firebase_uid', 'auth_token_version', 'created_at', 'updated_at',
+        'firebase_uid', 'auth_token_version', 'created_at', 'updated_at', 'onboarded_at',
         'first_cusd_acquired_at', 'rating_prompt_due_at',
         'confio_icp_tags', 'confio_icp_other_text', 'confio_icp_captured_at',
         'confio_rating_prompted_at', 'confio_rating_star_count',
@@ -48,7 +48,7 @@ class UserAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Basic Information', {
-            'fields': ('username', 'email', 'first_name', 'last_name', 'firebase_uid')
+            'fields': ('username', 'email', 'first_name', 'last_name', 'firebase_uid', 'onboarded_at')
         }),
         ('Direct receiving (users/direct_receive.py)', {
             'fields': ('direct_receive_nudged_at', 'direct_receive_blocked_at',
