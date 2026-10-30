@@ -808,6 +808,7 @@ class EconomicActivityOptionType(graphene.ObjectType):
 class RampPhoneStatusType(graphene.ObjectType):
     needed = graphene.Boolean()
     contactPhone = graphene.String()
+    contactPhoneCountry = graphene.String()
     addressCountryIso = graphene.String()
 
 
@@ -848,6 +849,7 @@ class UpsertRampUserAddress(graphene.Mutation):
         auth_email = graphene.String()
         address_country = graphene.String()
         contact_phone = graphene.String()
+        contact_phone_country = graphene.String()
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -872,6 +874,7 @@ class UpsertRampUserAddress(graphene.Mutation):
         auth_email=None,
         address_country=None,
         contact_phone=None,
+        contact_phone_country=None,
     ):
         user = getattr(info.context, "user", None)
         if not (user and getattr(user, 'is_authenticated', False)):
@@ -949,6 +952,14 @@ class UpsertRampUserAddress(graphene.Mutation):
                     error='Revisa tu número: incluye el código de país y todos los dígitos.',
                     ramp_address=None,
                 )
+            # A number saved without a pick must not keep the old number's country.
+            values['contact_phone_country'] = ''
+        picked_phone_country = str(contact_phone_country or '').strip().upper()
+        if picked_phone_country:
+            import pycountry
+            if pycountry.countries.get(alpha_2=picked_phone_country) is None:
+                return cls(success=False, error='País no disponible', ramp_address=None)
+            values['contact_phone_country'] = picked_phone_country
         before = {field: getattr(existing, field, '') for field in PROVIDER_PROFILE_FIELDS}
         ramp_address, _ = RampUserAddress.objects.update_or_create(
             user=user,
@@ -2245,8 +2256,11 @@ class Query(graphene.ObjectType):
         phone = provider_phone(user)
         alpha3 = str(_build_effective_ramp_address_snapshot(user).address_country or '').strip().upper()
         country = pycountry.countries.get(alpha_3=alpha3) if alpha3 else None
+        phone_country = (RampUserAddress.objects.filter(user=user).values_list('contact_phone_country', flat=True)
+                         .first() or '')
         return RampPhoneStatusType(
-            needed=not phone, contactPhone=phone, addressCountryIso=country.alpha_2 if country else '')
+            needed=not phone, contactPhone=phone, contactPhoneCountry=phone_country,
+            addressCountryIso=country.alpha_2 if country else '')
 
     def resolve_my_ramp_address(self, info):
         user = getattr(info.context, "user", None)

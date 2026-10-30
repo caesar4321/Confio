@@ -65,6 +65,7 @@ export const RampAddressScreen: React.FC = () => {
   const [pickedCountryIso, setPickedCountryIso] = useState('');
   const [phoneCountry, setPhoneCountry] = useState<ReturnType<typeof getCountryByIso>>();
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [loadedPhoneCountryIso, setLoadedPhoneCountryIso] = useState('');
   const [showCountryPicker, setShowCountryPicker] = useState(false);
 
   const rampAddress = data?.myRampAddress;
@@ -127,12 +128,17 @@ export const RampAddressScreen: React.FC = () => {
   ]);
   useEffect(() => {
     if (!phoneStatus) return;
-    const saved = splitPhone(savedPhone, userCountryIso(userProfile));
+    const saved = splitPhone(savedPhone, userCountryIso(userProfile), phoneStatus.contactPhoneCountry);
     setPhoneCountry(saved.country);
+    setLoadedPhoneCountryIso(String(saved.country?.[2] || ''));
     setPhoneNumber(saved.number);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [Boolean(phoneStatus), savedPhone]);
+  }, [Boolean(phoneStatus), savedPhone, phoneStatus?.contactPhoneCountry]);
   const enteredPhone = internationalPhone(phoneCountry, phoneNumber);
+  const phoneCountryIso = String(phoneCountry?.[2] || '');
+  // Picking another +1 country leaves the number the same but is still a change.
+  const phoneChanged = showPhoneField
+    && (enteredPhone !== savedPhone || phoneCountryIso !== loadedPhoneCountryIso);
 
   useEffect(() => {
     if (noPostalCodes && data && !rampAddress?.addressZipCode) {
@@ -143,7 +149,7 @@ export const RampAddressScreen: React.FC = () => {
   const hasChanges = useMemo(() => {
     return (
       addressCountryIso !== savedCountryIso ||
-      (showPhoneField && enteredPhone !== savedPhone) ||
+      phoneChanged ||
       addressStreet.trim() !== (rampAddress?.addressStreet || '') ||
       (shouldShowAddressNeighborhoodField && addressNeighborhood.trim() !== (rampAddress?.addressNeighborhood || '')) ||
       addressCity.trim() !== (rampAddress?.addressCity || '') ||
@@ -155,9 +161,7 @@ export const RampAddressScreen: React.FC = () => {
   }, [
     addressCountryIso,
     savedCountryIso,
-    showPhoneField,
-    enteredPhone,
-    savedPhone,
+    phoneChanged,
     addressStreet,
     addressNeighborhood,
     addressCity,
@@ -210,7 +214,8 @@ export const RampAddressScreen: React.FC = () => {
           economicActivity: shouldShowEconomicActivityField ? economicActivity.trim() : undefined,
           authEmail: shouldShowAuthEmailField ? authEmail.trim().toLowerCase() : undefined,
           addressCountry: addressCountryIso || undefined,
-          contactPhone: showPhoneField && enteredPhone !== savedPhone ? enteredPhone : undefined,
+          contactPhone: phoneChanged ? enteredPhone : undefined,
+          contactPhoneCountry: phoneChanged ? phoneCountryIso || undefined : undefined,
         },
         refetchQueries: [{ query: GET_MY_RAMP_ADDRESS }, { query: GET_RAMP_PHONE_STATUS }],
         awaitRefetchQueries: true,

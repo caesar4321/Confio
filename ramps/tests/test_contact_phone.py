@@ -55,6 +55,24 @@ class SaveTests(TestCase):
         row = RampUserAddress.objects.get(user=self.user)
         self.assertEqual((row.address_street, row.contact_phone), ('Calle 1', BOLIVIAN))
 
+    def test_the_picked_phone_country_is_kept(self, _push):
+        _save(self.user, contact_phone='+13055550100', contact_phone_country='ca')
+        self.assertEqual(RampUserAddress.objects.get(user=self.user).contact_phone_country, 'CA')
+
+    def test_an_unknown_phone_country_saves_nothing(self, _push):
+        self.assertFalse(_save(self.user, contact_phone='+13055550100', contact_phone_country='ZZ').success)
+        self.assertFalse(RampUserAddress.objects.filter(user=self.user).exists())
+
+    def test_a_new_number_without_a_pick_clears_the_old_country(self, _push):
+        _save(self.user, contact_phone='+13055550100', contact_phone_country='CA')
+        _save(self.user, contact_phone=BOLIVIAN)
+        self.assertEqual(RampUserAddress.objects.get(user=self.user).contact_phone_country, '')
+
+    def test_older_builds_saving_an_address_keep_the_phone_country(self, _push):
+        _save(self.user, contact_phone='+13055550100', contact_phone_country='CA')
+        _save(self.user, address_street='Calle 2')
+        self.assertEqual(RampUserAddress.objects.get(user=self.user).contact_phone_country, 'CA')
+
     def test_a_bad_number_saves_nothing(self, _push):
         result = _save(self.user, contact_phone='0000000000')
         self.assertFalse(result.success)

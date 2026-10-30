@@ -34,8 +34,14 @@ export const internationalPhone = (country: Country | undefined, number: string)
   return country && digits.length >= MIN_DIGITS ? `${country[1]}${digits}` : '';
 };
 
-/** Splits a saved "+59171234567" back into its country and local digits. */
-export const splitPhone = (saved: string, homeIso?: string | null) => {
+/** Splits a saved "+59171234567" back into its country and local digits.
+ *  `savedIso` is the country the person picked; only numbers saved before it
+ *  was kept need the guess below. */
+export const splitPhone = (saved: string, homeIso?: string | null, savedIso?: string | null) => {
+  const picked = savedIso ? getCountryByIso(savedIso) : undefined;
+  if (picked && saved.startsWith(String(picked[1]))) {
+    return { country: picked, number: saved.slice(String(picked[1]).length) };
+  }
   const home = homeIso ? getCountryByIso(homeIso) : undefined;
   const matches = countries
     .filter(country => saved.startsWith(String(country[1])))

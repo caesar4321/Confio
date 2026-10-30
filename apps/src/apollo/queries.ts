@@ -665,6 +665,7 @@ export const GET_RAMP_PHONE_STATUS = gql`
     myRampPhoneStatus {
       needed
       contactPhone
+      contactPhoneCountry
       addressCountryIso
     }
   }
@@ -691,6 +692,7 @@ export const UPSERT_RAMP_USER_ADDRESS = gql`
     $authEmail: String
     $addressCountry: String
     $contactPhone: String
+    $contactPhoneCountry: String
   ) {
     upsertRampUserAddress(
       addressStreet: $addressStreet
@@ -702,6 +704,7 @@ export const UPSERT_RAMP_USER_ADDRESS = gql`
       authEmail: $authEmail
       addressCountry: $addressCountry
       contactPhone: $contactPhone
+      contactPhoneCountry: $contactPhoneCountry
     ) {
       success
       error

@@ -160,6 +160,8 @@ class RampUserAddress(models.Model):
     auth_email = models.EmailField(blank=True, default='')
     # Self-declared, for providers only: see ramps/contact_phone.py.
     contact_phone = models.CharField(max_length=16, blank=True, default='')
+    # ISO-2 the person picked: a number can't tell +1 countries apart.
+    contact_phone_country = models.CharField(max_length=2, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
