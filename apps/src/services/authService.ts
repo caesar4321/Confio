@@ -381,6 +381,63 @@ async function attemptBscRegistration(addressOverride?: string): Promise<BscRegi
   }
 }
 
+type WalletReplacementBackup = {
+  assertReady?: () => void;
+  protect: () => Promise<void>;
+  signOwnership: (challenge: string, wallet: { address: string; privKeyHex: string }) => Promise<string>;
+};
+
+/** Google's half of replaceUnusedWallet: a verified Drive upload. */
+export function driveWalletBackup({ subject, driveToken, sessionToken, onProgress, onCloudSyncResult }: {
+  subject: string;
+  driveToken: () => string | undefined;
+  sessionToken: string;
+  onProgress?: (message: string) => void;
+  onCloudSyncResult: (synced: boolean) => void;
+}): WalletReplacementBackup {
+  return {
+    assertReady: () => {
+      if (!driveToken()) {
+        throw new Error(
+          'Para recuperar esta cuenta de forma segura, vuelve a iniciar sesión y activa el respaldo en Google Drive.'
+        );
+      }
+    },
+    protect: async () => {
+      onProgress?.('Protegiendo tu nueva billetera en Google Drive...');
+      const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+      let synced = false;
+      onCloudSyncResult(false);
+      await getOrCreateMasterSecret(subject, driveToken(), {
+        allowGenerate: true,
+        provider: 'google',
+        // Reenrollment is the one path where a local secret is not enough:
+        // the old server anchor is about to be retired, so force a real
+        // Drive upload even when the local-secret fast path could return.
+        requireCloudSync: true,
+        // This JWT stays request-scoped until reenrollment commits. The
+        // backup reporter is fire-and-forget, so it must not consult the
+        // intentionally invalidated Keychain session and later clear the
+        // fresh JWT persisted below.
+        backupReportAuthToken: sessionToken,
+        onCloudSyncResult: (result) => { synced = result; onCloudSyncResult(result); },
+      });
+      if (!synced) {
+        throw new Error(
+          'No pudimos verificar el respaldo de tu nueva billetera en Google Drive. Inténtalo de nuevo antes de continuar.'
+        );
+      }
+    },
+    signOwnership: async (challenge, wallet) => {
+      const { createWalletReenrollmentDriveAttestation } = await import('./secureDeterministicWallet');
+      const { ownershipSignature } = await createWalletReenrollmentDriveAttestation(
+        driveToken()!, challenge, wallet.address, wallet.privKeyHex,
+      );
+      return ownershipSignature;
+    },
+  };
+}
+
 async function registerBscAddressBestEffort() {
   return ensureBscAddressRegistered();
 }
@@ -1367,46 +1424,13 @@ export class AuthService {
           authData,
           invalidateSession: invalidateBackendSession,
           persistSession: persistBackendTokens,
-          backup: {
-            assertReady: () => {
-              if (!driveAccessToken) {
-                throw new Error(
-                  'Para recuperar esta cuenta de forma segura, vuelve a iniciar sesión y activa el respaldo en Google Drive.'
-                );
-              }
-            },
-            protect: async () => {
-              onProgress?.('Protegiendo tu nueva billetera en Google Drive...');
-              const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
-              driveSyncSucceeded = false;
-              await getOrCreateMasterSecret(googleSubject, driveAccessToken, {
-                allowGenerate: true,
-                provider: 'google',
-                // Reenrollment is the one path where a local secret is not enough:
-                // the old server anchor is about to be retired, so force a real
-                // Drive upload even when the local-secret fast path could return.
-                requireCloudSync: true,
-                // This JWT stays request-scoped until reenrollment commits. The
-                // backup reporter is fire-and-forget, so it must not consult the
-                // intentionally invalidated Keychain session and later clear the
-                // fresh JWT persisted below.
-                backupReportAuthToken: authData.accessToken,
-                onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
-              });
-              if (!driveSyncSucceeded) {
-                throw new Error(
-                  'No pudimos verificar el respaldo de tu nueva billetera en Google Drive. Inténtalo de nuevo antes de continuar.'
-                );
-              }
-            },
-            signOwnership: async (challenge, wallet) => {
-              const { createWalletReenrollmentDriveAttestation } = await import('./secureDeterministicWallet');
-              const { ownershipSignature } = await createWalletReenrollmentDriveAttestation(
-                driveAccessToken!, challenge, wallet.address, wallet.privKeyHex,
-              );
-              return ownershipSignature;
-            },
-          },
+          backup: driveWalletBackup({
+            subject: googleSubject,
+            driveToken: () => driveAccessToken,
+            sessionToken: authData.accessToken,
+            onProgress,
+            onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
+          }),
         });
       };
 
@@ -1877,11 +1901,7 @@ export class AuthService {
     authData: any;
     invalidateSession: (reason: string) => Promise<void>;
     persistSession: () => Promise<void>;
-    backup: {
-      assertReady?: () => void;
-      protect: () => Promise<void>;
-      signOwnership: (challenge: string, wallet: { address: string; privKeyHex: string }) => Promise<string>;
-    };
+    backup: WalletReplacementBackup;
   }): Promise<string> {
     let sessionInvalidated = false;
     try {
@@ -2170,6 +2190,7 @@ export class AuthService {
                 backup: {
                   // getActiveEvmWallet then reads this secret back from Keychain.
                   protect: async () => {
+                    onProgress?.('Protegiendo tu nueva billetera en tu llavero de iCloud...');
                     await getOrCreateMasterSecret(appleSub, undefined, {
                       allowGenerate: true,
                       provider: 'apple',
