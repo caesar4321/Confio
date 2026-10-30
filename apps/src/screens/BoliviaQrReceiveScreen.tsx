@@ -366,23 +366,9 @@ export default function BoliviaQrReceiveScreen() {
             title={order ? (order.phase === 'qr_ready' ? 'Tu QR' : 'Tu cobro') : 'Cobra con QR'}
             subtitle={order ? 'Te avisamos cuando los dólares lleguen.'
               : 'Crea un QR por el monto que quieras. Te pagan desde cualquier banco y recibes dólares.'}
-            onBack={() => navigation.goBack()} compact={!!order} />
-        </RampReveal>
-        <RampReveal delay={40}>
-          <View style={styles.bannerCard}>
-            <View style={styles.bannerIconWrap}>
-              <Icon name="clock" size={16} color={colors.primary} />
-            </View>
-            <View style={styles.bannerCopy}>
-              <Text style={styles.bannerTitle}>Cobros con QR</Text>
-              <Text style={styles.bannerText}>Tus cobros quedan en tu historial.</Text>
-            </View>
-            <TouchableOpacity style={styles.historyPill} activeOpacity={0.8} accessibilityRole="button"
-              onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}>
-              <Icon name="clock" size={14} color={colors.primary} />
-              <Text style={styles.historyPillText}>Ver cobros</Text>
-            </TouchableOpacity>
-          </View>
+            onBack={() => navigation.goBack()} compact={!!order}
+            onHistory={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
+            historyLabel="Ver historial de cobros" />
         </RampReveal>
         {error ? banner(error, 'warning') : null}
         {notice && !error ? banner(notice, 'info') : null}

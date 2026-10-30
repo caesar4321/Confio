@@ -563,23 +563,9 @@ export default function BoliviaQrSendScreen({ initialQr, onBack }: {
             title={order ? 'Tu pago' : 'Paga con QR'}
             subtitle={order ? 'Te avisamos cuando el QR quede pagado.'
               : 'Paga cualquier QR de bancos y billeteras de Bolivia con tu saldo en dólares.'}
-            onBack={onBack} compact={!!order} />
-        </RampReveal>
-        <RampReveal delay={40}>
-          <View style={styles.bannerCard}>
-            <View style={styles.bannerIconWrap}>
-              <Icon name="clock" size={16} color={colors.primary} />
-            </View>
-            <View style={styles.bannerCopy}>
-              <Text style={styles.bannerTitle}>Pagos con QR</Text>
-              <Text style={styles.bannerText}>Tus pagos quedan en tu historial.</Text>
-            </View>
-            <TouchableOpacity style={styles.historyPill} activeOpacity={0.8} accessibilityRole="button"
-              onPress={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}>
-              <Icon name="clock" size={14} color={colors.primary} />
-              <Text style={styles.historyPillText}>Ver pagos</Text>
-            </TouchableOpacity>
-          </View>
+            onBack={onBack} compact={!!order}
+            onHistory={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
+            historyLabel="Ver historial de pagos" />
         </RampReveal>
         {errorCard}
         {booting ? (

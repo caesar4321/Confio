@@ -571,23 +571,9 @@ export default function VePagoMovilSendScreen() {
             title={order ? 'Tu envío' : 'Envía bolívares'}
             subtitle={order ? 'Te avisamos cuando los bolívares lleguen.'
               : 'Tus dólares llegan como bolívares a cualquier cuenta con Pago Móvil, tuya o de otra persona.'}
-            onBack={goBack} compact={!!order} />
-        </RampReveal>
-        <RampReveal delay={40}>
-          <View style={styles.bannerCard}>
-            <View style={styles.bannerIconWrap}>
-              <Icon name="send" size={16} color={colors.primary} />
-            </View>
-            <View style={styles.bannerCopy}>
-              <Text style={styles.bannerTitle}>Envíos en bolívares</Text>
-              <Text style={styles.bannerText}>Tus envíos por Pago Móvil quedan en tu historial.</Text>
-            </View>
-            <TouchableOpacity style={styles.historyPill} activeOpacity={0.8} accessibilityRole="button"
-              onPress={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}>
-              <Icon name="clock" size={14} color={colors.primary} />
-              <Text style={styles.historyPillText}>Ver envíos</Text>
-            </TouchableOpacity>
-          </View>
+            onBack={goBack} compact={!!order}
+            onHistory={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
+            historyLabel="Ver historial de envíos" />
         </RampReveal>
         {errorCard}
         {booting ? (
