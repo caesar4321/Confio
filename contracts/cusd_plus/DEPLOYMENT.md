@@ -70,7 +70,14 @@ row in `queued`. All BSC presale buys settled.
    whitepaper v4.4 (EN/ES/KO), README, the website, the assistant FAQ and the
    app sources. Shipped builds still bundle the old address, so a new app build
    must be widely installed before claims open.
-10. BscScan: submit token info and logo for v2.
+10. BscScan: submit token info and logo for v2. Prove ownership by signing
+    their message with `manage.py bsc_sign_message`; the deployer is the KMS
+    sponsor. The repo records no completed submission for any earlier token.
+
+**Credits after cutover.** Safe nonce 25
+(`0x15a6df22d47652aa137c22712fa5b534957b6e0384089d8cec06454ec3a5da6c`) assigned
+the 5 pending buyers (485.90 CONFIO). `migratedPool` is 4,631.05, held for the
+13 Algorand buyers who have no BSC address yet.
 
 **Deferred to claim opening.** `ConfioInviteEscrow` and `ConfioPayContract` fix
 CONFIO at deploy. Neither needs moving until someone can hold v2.
