@@ -10,8 +10,10 @@ costs only gas. Run it top to bottom; do not reorder.
 **Preconditions.** Claims locked on both vaults. No `PresaleMigrationCredit`
 row in `queued`. All BSC presale buys settled.
 
-1. Deploy ConfioToken v2 with `manage.py deploy_confio_token`. Confirm
-   `owner == guardian == Safe` and `totalSupply == 1B`. BscScan verify.
+1. **DONE 2026-10-30.** ConfioToken v2 is `0xF5765933764562A51e179F6AF2b19b7a3d506101`
+   (tx `0xa83bc67e39639acd2ad534eebebfe383e4e0e93fa74b3bfa917e5384000410a8`, KMS
+   nonce 1072). Read back: `owner == guardian == Safe`, 1B held by the Safe,
+   BscScan verified. Not yet referenced by any vault, prod or the docs.
 2. Deploy, pointing `BSC_CONFIO_TOKEN_ADDRESS` at v2 for the commands:
    - `deploy_reward_vault` (signer = Safe, cap = 74,000 CONFIO/day);
    - `deploy_vesting_vault`, three times (founder, co-builder, cultural).
