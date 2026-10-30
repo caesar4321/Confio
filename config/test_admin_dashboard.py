@@ -389,3 +389,14 @@ class DashboardPagesTests(TestCase):
             self.assertIn('Pago ASAP', labels)
             self.assertIn('Mesa de pagos', labels)
         self.assertEqual(len(flows['direct_in']), 4)
+
+    def test_two_businesses_never_share_a_pairing_bucket(self):
+        from django.utils import timezone
+        from ramps.metrics import tie_to_conversions
+
+        now = timezone.now()
+        tied, unpaired = tie_to_conversions(
+            [{'user': ('business', 1), 'usd': Decimal('100'), 'at': now}],
+            [{'id': 5, 'user': ('business', 2), 'usd': Decimal('100'), 'at': now}])
+        self.assertEqual(tied, set())
+        self.assertEqual(len(unpaired), 1)

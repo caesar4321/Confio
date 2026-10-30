@@ -177,42 +177,63 @@ def _direct_flows(periods) -> dict:
     and provider deposits that never became a conversion. Exact links first;
     the rest pair by tie_to_conversions, an estimate by design: late provider
     attribution leaves arrivals with no link at all."""
-    from payment_accounts.models import CobreJourney, InfiniaJourney
+    from payment_accounts.models import InfiniaJourney
 
     entries, exits = _perimeter_conversions()
-    entry_rows = [{'id': pk, 'user': user, 'usd': Decimal(usd or 0), 'at': at, 'source': source}
-                  for pk, user, usd, at, source in entries.order_by().values_list(
-                      'id', 'actor_user_id', Coalesce('gross_amount_exact', 'from_amount', output_field=DOLLARS),
-                      'created_at', 'source')]
-    exit_rows = [{'id': pk, 'user': user, 'usd': Decimal(usd or 0), 'at': at}
-                 for pk, user, usd, at in exits.order_by().values_list(
-                     'id', 'actor_user_id', Coalesce('net_amount_exact', 'to_amount', output_field=DOLLARS),
-                     'created_at')]
 
-    legacy_deposits = _deposit_sources(providers=None)[0]
-    legacy, amount = legacy_deposits[0], legacy_deposits[1]
+    def owner(user, business):
+        # Business conversions carry no user; never let two businesses share a
+        # bucket, nor a business row pair with its employee's personal money.
+        return ('business', business) if business else ('user', user)
+
+    entry_rows = [{'id': pk, 'user': owner(user, business), 'usd': Decimal(usd or 0), 'at': at, 'source': source}
+                  for pk, user, business, usd, at, source in entries.order_by().values_list(
+                      'id', 'actor_user_id', 'actor_business_id',
+                      Coalesce('gross_amount_exact', 'from_amount', output_field=DOLLARS), 'created_at', 'source')]
+    exit_rows = [{'id': pk, 'user': owner(user, business), 'usd': Decimal(usd or 0), 'at': at}
+                 for pk, user, business, usd, at in exits.order_by().values_list(
+                     'id', 'actor_user_id', 'actor_business_id',
+                     Coalesce('net_amount_exact', 'to_amount', output_field=DOLLARS), 'created_at')]
+
+    (legacy, amount, _none), (infinia, _infinia_amount, _i), (cobre, cobre_amount, _c) = _deposit_sources(providers=None)
     linked = set(legacy.exclude(conversion__isnull=True).values_list('conversion_id', flat=True))
     linked |= set(InfiniaJourney.objects.filter(wallet_conversion__isnull=False)
                   .values_list('wallet_conversion_id', flat=True))
-    arrivals = [{'user': user, 'usd': Decimal(usd), 'at': done or made}
-                for user, usd, done, made in legacy.filter(conversion__isnull=True).order_by().annotate(
+    arrivals = [{'user': owner(user, business), 'usd': Decimal(usd), 'at': done or made}
+                for user, business, usd, done, made in legacy.filter(conversion__isnull=True).order_by().annotate(
                     flow_usd=amount).filter(flow_usd__gt=0).values_list(
-                        'actor_user_id', 'flow_usd', 'completed_at', 'created_at')]
+                        'actor_user_id', 'actor_business_id', 'flow_usd', 'completed_at', 'created_at')]
+    # Cobre deposits have no conversion link at all: they pair like late arrivals.
+    arrivals += [{'user': owner(user, business), 'usd': Decimal(usd), 'at': done or made}
+                 for user, business, usd, done, made in cobre.order_by().annotate(
+                     flow_usd=cobre_amount).filter(flow_usd__gt=0).values_list(
+                         'confio_account__user_id', 'confio_account__business_id', 'flow_usd',
+                         'money_flow__completed_at', 'created_at')]
     free_entries = [row for row in entry_rows if row['id'] not in linked and row['source'] != 'ramp']
     tied, never_converted = tie_to_conversions(arrivals, free_entries)
 
-    payouts, exit_links = [], set()
-    for queryset, field, _country, user, completed in _withdrawal_sources(providers=None):
-        payouts += [{'user': owner, 'usd': Decimal(usd), 'at': done or made}
-                    for owner, usd, done, made in queryset.order_by().values_list(user, field, completed, 'created_at')]
-    for queryset, usd, _date, _provider in (_ve_send_payouts(),):
-        payouts += [{'user': owner, 'usd': Decimal(value), 'at': done or made}
-                    for owner, value, done, made in queryset.order_by().annotate(flow_usd=usd).values_list(
-                        'actor_user_id', 'flow_usd', 'completed_at', 'created_at')]
-    for journey in (InfiniaJourney, CobreJourney):
-        if any(f.name == 'wallet_conversion' for f in journey._meta.get_fields()):
-            exit_links |= set(journey.objects.filter(direction='to_bank', wallet_conversion__isnull=False)
-                              .values_list('wallet_conversion_id', flat=True))
+    payout_sources = _withdrawal_sources(providers=None)
+    legacy_out = payout_sources[0][0]
+    exit_links = set(legacy_out.exclude(conversion__isnull=True).values_list('conversion_id', flat=True))
+    ve_sends, ve_usd, _date, _provider = _ve_send_payouts()
+    exit_links |= set(ve_sends.exclude(conversion__isnull=True).values_list('conversion_id', flat=True))
+    exit_links |= set(InfiniaJourney.objects.filter(direction='to_bank', wallet_conversion__isnull=False)
+                      .values_list('wallet_conversion_id', flat=True))
+    payouts = []
+    for queryset, field, _country, user, completed in payout_sources:
+        if queryset.model is legacy_out.model:
+            queryset, business_key = queryset.filter(conversion__isnull=True), 'actor_business_id'
+        else:
+            business_key = 'confio_account__business_id'
+            if queryset.model is InfiniaJourney:
+                queryset = queryset.filter(wallet_conversion__isnull=True)
+        payouts += [{'user': owner(person, business), 'usd': Decimal(usd), 'at': done or made}
+                    for person, business, usd, done, made in queryset.order_by().values_list(
+                        user, business_key, field, completed, 'created_at')]
+    payouts += [{'user': owner(person, business), 'usd': Decimal(value), 'at': done or made}
+                for person, business, value, done, made in ve_sends.filter(conversion__isnull=True).order_by().annotate(
+                    flow_usd=ve_usd).values_list('actor_user_id', 'actor_business_id', 'flow_usd',
+                                                 'completed_at', 'created_at')]
     free_exits = [row for row in exit_rows if row['id'] not in exit_links]
     exit_tied, _unpaired = tie_to_conversions(payouts, free_exits, conversion_follows=False)
     return {
