@@ -593,9 +593,9 @@ class UserType(DjangoObjectType):
 
 
 	def resolve_status_tier(self, info):
-		"""Only expose your own tier."""
+		"""A public badge, like the checkmark below (users/status_badges.py)."""
 		user = info.context.user
-		if not user.is_authenticated or str(user.id) != str(self.id):
+		if not user.is_authenticated:
 			return None
 		return self.status_tier
 

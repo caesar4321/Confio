@@ -64,6 +64,8 @@ export const LINK_INVITE_SENDER = gql`
     linkInvite(publicRef: $publicRef) {
       senderUserId
       senderAvatarUrl
+      senderStatusTier
+      senderIsReferralVerified
     }
   }
 `;

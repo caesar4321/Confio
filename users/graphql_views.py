@@ -224,6 +224,28 @@ def _send_fee_bps(send):
         receipt.get('fee_bps') if isinstance(receipt, dict) else None)
 
 
+def _person_badge(row, info, user_id, business_id) -> tuple:
+    """A person's public badges on a history row: never for a business, and
+    never behind a Propina's pseudonym."""
+    from users.status_badges import badge_of
+    if not user_id or business_id or _is_tip_row(row):
+        return None, None
+    return badge_of(info, user_id)
+
+
+def _preload_badges(rows, info):
+    """One query for a whole history page (users/status_badges.py)."""
+    from users.status_badges import preload_badges
+    ids = set()
+    for row in rows:
+        if not _is_tip_row(row):
+            if not row.sender_business_id:
+                ids.add(row.sender_user_id)
+            if not row.counterparty_business_id:
+                ids.add(row.counterparty_user_id)
+    preload_badges(info, ids)
+
+
 def _is_tip_row(row) -> bool:
     """A Propina row of the unified ledger (a send keyed tip-…)."""
     from send.schema import is_tip_send
@@ -251,6 +273,11 @@ class UnifiedTransactionType(DjangoObjectType):
     error_message = graphene.String(description="Error message if transaction failed")
     sender_phone = graphene.String(description="Sender phone number")
     counterparty_phone = graphene.String(description="Counterparty phone number")
+    # Public badges of the people on the row (users/status_badges.py).
+    sender_status_tier = graphene.String()
+    sender_is_referral_verified = graphene.Boolean()
+    counterparty_status_tier = graphene.String()
+    counterparty_is_referral_verified = graphene.Boolean()
     description = graphene.String(description="Transaction description")
     invoice_id = graphene.String(description="Invoice ID for payments")
     payment_transaction_id = graphene.String(description="Payment transaction ID")
@@ -472,6 +499,18 @@ class UnifiedTransactionType(DjangoObjectType):
         from send.schema import tip_safe_user
         return (tip_safe_user(self.send_transaction, self.counterparty_user, info)
                 if self.send_transaction_id else self.counterparty_user)
+
+    def resolve_sender_status_tier(self, info):
+        return _person_badge(self, info, self.sender_user_id, self.sender_business_id)[0]
+
+    def resolve_sender_is_referral_verified(self, info):
+        return _person_badge(self, info, self.sender_user_id, self.sender_business_id)[1]
+
+    def resolve_counterparty_status_tier(self, info):
+        return _person_badge(self, info, self.counterparty_user_id, self.counterparty_business_id)[0]
+
+    def resolve_counterparty_is_referral_verified(self, info):
+        return _person_badge(self, info, self.counterparty_user_id, self.counterparty_business_id)[1]
 
     def resolve_counterparty_phone(self, info):
         """Only the number the viewer typed on their own send (their contact
@@ -958,6 +997,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Apply pagination and add viewer context hints to each transaction for resolvers
         transactions = list(queryset[offset:offset + limit])
         _preload_external_deposit_conversions(transactions)
+        _preload_badges(transactions, info)
         for transaction in transactions:
             # Hints used by resolvers to compute perspective/direction correctly
             transaction._user_address = _viewer_address_for(transaction, account)
@@ -1040,6 +1080,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Apply pagination and add viewer context hints to each transaction for resolvers
         transactions = list(queryset[offset:offset + limit])
         _preload_external_deposit_conversions(transactions)
+        _preload_badges(transactions, info)
         print(f"Found {len(transactions)} transactions for account {account.id}")
         for transaction in transactions:
             transaction._user_address = _viewer_address_for(transaction, account)
@@ -1176,6 +1217,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Apply pagination and add user address to each transaction for direction calculation
         transactions = list(queryset[offset:offset + limit])
         _preload_external_deposit_conversions(transactions)
+        _preload_badges(transactions, info)
         
         print(f"Friend transactions resolver - Found {len(transactions)} transactions for account {account.id} with friend criteria")
         

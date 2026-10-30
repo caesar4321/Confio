@@ -33,7 +33,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { useQuery } from '@apollo/client';
 import { contactService } from '../services/contactService';
-import { GET_SEND_TRANSACTION_BY_ID, GET_PAYMENT_TRANSACTION_BY_ID, CHECK_USERS_BY_PHONES } from '../apollo/queries';
+import { GET_SEND_TRANSACTION_BY_ID, GET_PAYMENT_TRANSACTION_BY_ID } from '../apollo/queries';
 import { useContactNameSync } from '../hooks/useContactName';
 import { getPreferredDisplayName, getPreferredSecondaryLine } from '../utils/contactDisplay';
 import { SHARE_LINKS } from '../config/shareLinks';
@@ -104,15 +104,6 @@ const addNegativeSign = (value: unknown): string | undefined => {
   if (normalized.startsWith('-')) return normalized;
   if (normalized.startsWith('+')) return `-${normalized.slice(1)}`;
   return `-${normalized}`;
-};
-
-const normalizePhoneLookupKey = (value?: string | null): string => {
-  if (!value) return '';
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  const hasPlus = trimmed.startsWith('+');
-  const digits = trimmed.replace(/\D/g, '');
-  return hasPlus ? `+${digits}` : digits;
 };
 
 const normalizeRampDirection = (value: unknown, amount?: unknown, title?: unknown): 'on_ramp' | 'off_ramp' | '' => {
@@ -1352,45 +1343,18 @@ export const TransactionDetailScreen = () => {
     ? recipientPhone
     : (derivedRecipientPhoneFromAddress || derivedRecipientPhoneFromName || undefined);
 
-  const badgeLookupPhones = useMemo(() => {
-    const phones = [senderPhone, resolvedRecipientPhone]
-      .filter((phone): phone is string => typeof phone === 'string' && phone.trim().length > 0);
-    return Array.from(new Set(phones));
-  }, [senderPhone, resolvedRecipientPhone]);
-
-  const { data: badgeLookupData } = useQuery(CHECK_USERS_BY_PHONES, {
-    // $phoneNumbers is non-null; omitting variables made every one of these
-    // an invalid request, so phone-derived badges never loaded.
-    variables: { phoneNumbers: badgeLookupPhones },
-    skip: badgeLookupPhones.length === 0,
-    fetchPolicy: 'cache-first',
-  });
-
-  const badgeByPhone = useMemo(() => {
-    const map = new Map<string, { statusTier?: string | null; isReferralVerified?: boolean }>();
-    (badgeLookupData?.checkUsersByPhones || []).forEach((userInfo: any) => {
-      const rawPhone = typeof userInfo?.phoneNumber === 'string' ? userInfo.phoneNumber.trim() : '';
-      const normalizedPhone = normalizePhoneLookupKey(rawPhone);
-      const badgeInfo = {
-        statusTier: userInfo.statusTier || null,
-        isReferralVerified: userInfo.isReferralVerified || false,
-      };
-      if (rawPhone) map.set(rawPhone, badgeInfo);
-      if (normalizedPhone) map.set(normalizedPhone, badgeInfo);
-    });
-    return map;
-  }, [badgeLookupData]);
-
-  const senderBadgeInfo = badgeByPhone.get(senderPhone || '') || badgeByPhone.get(normalizePhoneLookupKey(senderPhone));
-  const recipientBadgeInfo = badgeByPhone.get(resolvedRecipientPhone || '') || badgeByPhone.get(normalizePhoneLookupKey(resolvedRecipientPhone));
-  const resolvedSenderStatusTier = currentTx?.senderStatusTier ?? senderBadgeInfo?.statusTier ?? null;
-  const resolvedSenderIsReferralVerified = currentTx?.senderIsReferralVerified ?? senderBadgeInfo?.isReferralVerified ?? false;
-  const resolvedRecipientStatusTier = currentTx?.recipientStatusTier ?? recipientBadgeInfo?.statusTier ?? null;
-  const resolvedRecipientIsReferralVerified = currentTx?.recipientIsReferralVerified ?? recipientBadgeInfo?.isReferralVerified ?? false;
-  const resolvedPayerStatusTier = currentTx?.payerStatusTier ?? resolvedSenderStatusTier;
-  const resolvedPayerIsReferralVerified = currentTx?.payerIsReferralVerified ?? resolvedSenderIsReferralVerified;
-  const resolvedMerchantStatusTier = currentTx?.merchantStatusTier ?? resolvedRecipientStatusTier;
-  const resolvedMerchantIsReferralVerified = currentTx?.merchantIsReferralVerified ?? resolvedRecipientIsReferralVerified;
+  // Badges belong to people: none behind a Propina's pseudonym, and none of
+  // an owner's beside their business.
+  const senderIsPerson = !isTip && !currentTx?.senderBusiness && !currentTx?.payerBusiness;
+  const recipientIsPerson = !isTip && !currentTx?.recipientBusiness && !currentTx?.merchantBusiness;
+  const resolvedSenderStatusTier = senderIsPerson ? currentTx?.senderStatusTier ?? null : null;
+  const resolvedSenderIsReferralVerified = senderIsPerson ? currentTx?.senderIsReferralVerified ?? false : false;
+  const resolvedRecipientStatusTier = recipientIsPerson ? currentTx?.recipientStatusTier ?? null : null;
+  const resolvedRecipientIsReferralVerified = recipientIsPerson ? currentTx?.recipientIsReferralVerified ?? false : false;
+  const resolvedPayerStatusTier = senderIsPerson ? currentTx?.payerStatusTier ?? resolvedSenderStatusTier : null;
+  const resolvedPayerIsReferralVerified = senderIsPerson ? currentTx?.payerIsReferralVerified ?? resolvedSenderIsReferralVerified : false;
+  const resolvedMerchantStatusTier = recipientIsPerson ? currentTx?.merchantStatusTier ?? resolvedRecipientStatusTier : null;
+  const resolvedMerchantIsReferralVerified = recipientIsPerson ? currentTx?.merchantIsReferralVerified ?? resolvedRecipientIsReferralVerified : false;
 
   // Always call hook unconditionally to respect Rules of Hooks
   const recipientContactResult = useContactNameSync(resolvedRecipientPhone, recipientFallbackName);

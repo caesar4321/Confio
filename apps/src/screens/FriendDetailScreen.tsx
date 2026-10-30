@@ -33,6 +33,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { colors } from '../config/theme';
 import { StatusTierBadge } from '../components/StatusTierBadge';
+import { isTipTransaction } from '../utils/tips';
 import { formatTokenLabel } from '../utils/tokenDisplay';
 import { parseAmountInput } from '../utils/numberLocale';
 import { unifiedTransactionReceipt, historyReceiptRoute, transferDirection } from '../utils/transactionReceipt';
@@ -734,10 +735,13 @@ export function FriendDetailScreen() {
                           invitationClaimed: transaction.invitationClaimed || false,
                           invitationReverted: transaction.invitationReverted || false,
                           invitationExpiresAt: transaction.invitationExpiresAt,
-                          recipientStatusTier: friendStatusTier,
-                          recipientIsReferralVerified: friendIsReferralVerified,
-                          senderStatusTier: friendStatusTier,
-                          senderIsReferralVerified: friendIsReferralVerified,
+                          // A Propina is between pseudonyms: never a badge.
+                          ...(isTipTransaction(transaction) ? {} : {
+                            recipientStatusTier: friendStatusTier,
+                            recipientIsReferralVerified: friendIsReferralVerified,
+                            senderStatusTier: friendStatusTier,
+                            senderIsReferralVerified: friendIsReferralVerified,
+                          }),
                       });
                       navigation.navigate('TransactionDetail', params);
                     }

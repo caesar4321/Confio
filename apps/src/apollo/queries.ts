@@ -2813,6 +2813,10 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       displayDescription
       
       # Original transaction data
+      senderStatusTier
+      senderIsReferralVerified
+      counterpartyStatusTier
+      counterpartyIsReferralVerified
       senderUser {
         id
         username
@@ -3371,6 +3375,10 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       rampStatus
       
       # Original transaction data
+      senderStatusTier
+      senderIsReferralVerified
+      counterpartyStatusTier
+      counterpartyIsReferralVerified
       senderUser {
         id
         username
@@ -3473,6 +3481,10 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
       displayDescription
       
       # Original transaction data
+      senderStatusTier
+      senderIsReferralVerified
+      counterpartyStatusTier
+      counterpartyIsReferralVerified
       senderUser {
         id
         username

@@ -137,10 +137,13 @@ def link_summary(public_ref, viewer=None) -> dict | None:
         avatar = picture_urls([sender.pk]).get(sender.pk) or ''
     except Exception:  # noqa: BLE001 — the initial stands in
         avatar = ''
+    from users.status_badges import badges_for
+    tier, checkmark = badges_for([sender.pk])[sender.pk]
     return {
         'sender_username': sender.username, 'sender_name': short_name(sender),
         'sender_verified': is_identity_verified(sender),
         'sender_user_id': sender.pk, 'sender_avatar_url': avatar,
+        'sender_status_tier': tier, 'sender_is_referral_verified': checkmark,
         'amount': invite.amount, 'token_type': invite.token_type,
         'status': invite.status, 'expires_at': invite.expires_at,
         'is_mine': is_mine,

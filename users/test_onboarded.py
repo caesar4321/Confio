@@ -244,3 +244,45 @@ class CounterpartyNumberTests(TestCase):
         # protects=merchants and their employees never see a payer's verified number; fails_when=payerPhone returns a stored number; no_claim=payment flow
         from payments.schema import PaymentTransactionType
         self.assertEqual(PaymentTransactionType.resolve_payer_phone(SimpleNamespace(payer_phone='+58313'), None), '')
+
+
+class PublicBadgeTests(TestCase):
+    def setUp(self):
+        from achievements.models import UserReferral
+        self.embajador = User.objects.create_user(username='badge-top', firebase_uid='badge-top')
+        for n in range(10):
+            UserReferral.objects.create(
+                referred_user=User.objects.create_user(username=f'badge-r{n}', firebase_uid=f'badge-r{n}'),
+                referrer_user=self.embajador, referrer_identifier='badge-top', referrer_reward_status='claimed')
+        self.plain = User.objects.create_user(username='badge-plain', firebase_uid='badge-plain')
+
+    def test_badges_are_computed_in_one_query_like_the_model_says(self):
+        # protects=the batch agrees with User.status_tier; fails_when=thresholds drift between the two; no_claim=reward rules
+        from users.status_badges import badges_for
+        with self.assertNumQueries(1):
+            badges = badges_for([self.embajador.pk, self.plain.pk])
+        self.assertEqual(badges[self.embajador.pk], (self.embajador.status_tier, True))
+        self.assertEqual(badges[self.embajador.pk][0], 'embajador')
+        self.assertEqual(badges[self.plain.pk], ('member', False))
+
+    def test_history_rows_carry_the_other_persons_badge_and_never_a_tips(self):
+        # protects=Embajador shows on history with no number lookup, a Propina stays pseudonymous, and a page costs one badge query; fails_when=the real resolvers raise, a tip reveals a tier, or queries grow per person; no_claim=rendering
+        from send.models import SendTransaction
+        from users.graphql_views import UnifiedTransactionType, _preload_badges
+        from users.models_unified import UnifiedTransactionTable
+
+        def row(key):
+            send = SendTransaction.objects.create(
+                sender_user=self.plain, recipient_user=self.embajador, sender_type='user', recipient_type='user', amount=1,
+                token_type='CUSD', status='CONFIRMED', sender_address='0x' + '1' * 40, recipient_address='0x' + '2' * 40,
+                idempotency_key=key)
+            return UnifiedTransactionTable.objects.select_related('send_transaction').get(send_transaction=send)
+
+        info = SimpleNamespace(context=SimpleNamespace(user=self.plain))
+        plain_row, tip_row = row('plain-1'), row('tip-1')
+        with self.assertNumQueries(1):
+            _preload_badges([plain_row, tip_row], info)
+            self.assertEqual(UnifiedTransactionType.resolve_counterparty_status_tier(plain_row, info), 'embajador')
+            self.assertTrue(UnifiedTransactionType.resolve_counterparty_is_referral_verified(plain_row, info))
+            self.assertEqual(UnifiedTransactionType.resolve_sender_status_tier(plain_row, info), 'member')
+        self.assertIsNone(UnifiedTransactionType.resolve_counterparty_status_tier(tip_row, info))

@@ -696,6 +696,8 @@ class LinkRecipientUserType(graphene.ObjectType):
     display_name = graphene.String()
     identity_verified = graphene.Boolean()
     receives_by_qr_only = graphene.Boolean()
+    status_tier = graphene.String()
+    is_referral_verified = graphene.Boolean()
 
 
 class RecipientForPhoneType(graphene.ObjectType):
@@ -715,6 +717,8 @@ class LinkInviteType(graphene.ObjectType):
     # photo and its "historial con …" link.
     sender_user_id = graphene.ID()
     sender_avatar_url = graphene.String()
+    sender_status_tier = graphene.String()
+    sender_is_referral_verified = graphene.Boolean()
     amount = graphene.Decimal()
     token_type = graphene.String()
     status = graphene.String()
@@ -725,9 +729,11 @@ class LinkInviteType(graphene.ObjectType):
     claim_message = graphene.String()
 
 
-def _link_user(user, viewer):
+def _link_user(user, viewer, badges=None):
     if user is None:
         return None
+    from users.status_badges import badges_for
+    tier, checkmark = (badges if badges is not None else badges_for([user.pk])).get(user.pk, (None, None))
     from security.identity_status import is_identity_verified
     from users.direct_receive import is_blocked
     from users.name_visibility import display_name_for
@@ -735,7 +741,8 @@ def _link_user(user, viewer):
     # money with that person (users/name_visibility.py).
     return LinkRecipientUserType(
         user_id=user.pk, username=user.username, display_name=display_name_for(viewer, user),
-        identity_verified=is_identity_verified(user), receives_by_qr_only=is_blocked(user))
+        identity_verified=is_identity_verified(user), receives_by_qr_only=is_blocked(user),
+        status_tier=tier, is_referral_verified=checkmark)
 
 
 class SendPeopleType(graphene.ObjectType):
@@ -753,7 +760,10 @@ class LinkInviteQuery(graphene.ObjectType):
     def resolve_send_people(self, info):
         from .link_invite import recent_people, saved_phone_keys
         viewer = info.context.user
-        return SendPeopleType(recent=[_link_user(u, viewer) for u in recent_people(viewer)],
+        from users.status_badges import badges_for
+        people = recent_people(viewer)
+        badges = badges_for([u.pk for u in people])
+        return SendPeopleType(recent=[_link_user(u, viewer, badges) for u in people],
                               saved_phone_keys=saved_phone_keys(viewer))
     link_invite = graphene.Field(LinkInviteType, public_ref=graphene.String(required=True))
 

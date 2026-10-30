@@ -43,7 +43,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE, GET_MY_BALANCES, GET_MY_CONFIO_BREAKDOWN, CHECK_USERS_BY_PHONES } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE, GET_MY_BALANCES, GET_MY_CONFIO_BREAKDOWN } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
@@ -153,15 +153,6 @@ interface TransactionSection {
   title: string;
   data: Transaction[];
 }
-
-const normalizePhoneLookupKey = (value?: string | null): string => {
-  if (!value) return '';
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  const hasPlus = trimmed.startsWith('+');
-  const digits = trimmed.replace(/\D/g, '');
-  return hasPlus ? `+${digits}` : digits;
-};
 
 export const AccountDetailScreen = () => {
   // Re-render when the user's country (number format) resolves after mount.
@@ -1004,6 +995,10 @@ export const AccountDetailScreen = () => {
           counterpartyUser: tx.counterpartyUser,
           recipientUser: tx.counterpartyUser,
           senderUser: tx.senderUser,
+          senderStatusTier: tx.senderStatusTier,
+          senderIsReferralVerified: tx.senderIsReferralVerified,
+          recipientStatusTier: tx.counterpartyStatusTier,
+          recipientIsReferralVerified: tx.counterpartyIsReferralVerified,
           counterpartyDisplayName: tx.counterpartyDisplayName,
           senderDisplayName: tx.senderDisplayName,
           businessName: payrollBusinessName,
@@ -1115,33 +1110,6 @@ export const AccountDetailScreen = () => {
 
   // Use unified transactions if available, fallback to legacy format
   const transactions = formatUnifiedTransactions();
-
-  const badgeLookupPhones = useMemo(() => {
-    const phones = transactions.flatMap((transaction) => [transaction.fromPhone, transaction.toPhone])
-      .filter((phone): phone is string => typeof phone === 'string' && phone.trim().length > 0);
-    return Array.from(new Set(phones));
-  }, [transactions]);
-
-  const { data: badgeLookupData } = useQuery(CHECK_USERS_BY_PHONES, {
-    variables: { phoneNumbers: badgeLookupPhones },
-    skip: badgeLookupPhones.length === 0,
-    fetchPolicy: 'cache-first',
-  });
-
-  const badgeByPhone = useMemo(() => {
-    const map = new Map<string, { statusTier?: string | null; isReferralVerified?: boolean }>();
-    (badgeLookupData?.checkUsersByPhones || []).forEach((userInfo: any) => {
-      const rawPhone = typeof userInfo?.phoneNumber === 'string' ? userInfo.phoneNumber.trim() : '';
-      const normalizedPhone = normalizePhoneLookupKey(rawPhone);
-      const badgeInfo = {
-        statusTier: userInfo.statusTier || null,
-        isReferralVerified: userInfo.isReferralVerified || false,
-      };
-      if (rawPhone) map.set(rawPhone, badgeInfo);
-      if (normalizedPhone) map.set(normalizedPhone, badgeInfo);
-    });
-    return map;
-  }, [badgeLookupData]);
 
   // Debug which data source is being used
 
@@ -1411,31 +1379,21 @@ export const AccountDetailScreen = () => {
 
     const navigation = useNavigation();
     const transferNavigation = useNavigation<AccountDetailScreenNavigationProp>();
-    const senderBadgeInfo =
-      badgeByPhone.get(transaction.fromPhone || '') ||
-      badgeByPhone.get(normalizePhoneLookupKey(transaction.fromPhone));
-    const recipientBadgeInfo =
-      badgeByPhone.get(transaction.toPhone || '') ||
-      badgeByPhone.get(normalizePhoneLookupKey(transaction.toPhone));
     const senderStatusTier =
       (transaction as any).senderStatusTier ??
       transaction.senderUser?.statusTier ??
-      senderBadgeInfo?.statusTier ??
       null;
     const senderIsReferralVerified =
       (transaction as any).senderIsReferralVerified ??
       transaction.senderUser?.isReferralVerified ??
-      senderBadgeInfo?.isReferralVerified ??
       false;
     const recipientStatusTier =
       (transaction as any).recipientStatusTier ??
       transaction.recipientUser?.statusTier ??
-      recipientBadgeInfo?.statusTier ??
       null;
     const recipientIsReferralVerified =
       (transaction as any).recipientIsReferralVerified ??
       transaction.recipientUser?.isReferralVerified ??
-      recipientBadgeInfo?.isReferralVerified ??
       false;
 
     const handlePress = () => {

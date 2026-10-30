@@ -8,6 +8,7 @@ import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { colors } from '../config/theme';
 import { IdentityStatusLine } from '../components/IdentityStatusLine';
+import { StatusTierBadge } from '../components/StatusTierBadge';
 import { BylineAvatar } from '../components/PostByline';
 import { LINK_INVITE, LINK_INVITE_SENDER, LINK_SEND_ERRORS, claimLink } from '../services/linkSend';
 
@@ -49,6 +50,7 @@ const LinkClaim = ({ publicRef, keyHex }: { publicRef: string; keyHex: string })
   const link = data?.linkInvite;
   const senderUserId = senderData?.linkInvite?.senderUserId || null;
   const avatarUrl = senderData?.linkInvite?.senderAvatarUrl || null;
+  const senderTier = senderData?.linkInvite?.senderStatusTier || null;
   const [avatarFailed, setAvatarFailed] = useState(false);
 
   const receive = async () => {
@@ -119,6 +121,7 @@ const LinkClaim = ({ publicRef, keyHex }: { publicRef: string; keyHex: string })
             <Text style={styles.fromName}>{sender}</Text> te envió
           </Text>
           {link.senderName && handle ? <Text style={styles.handle}>{handle}</Text> : null}
+          {senderTier && senderTier !== 'member' ? <StatusTierBadge tier={senderTier} /> : null}
           <Text style={styles.amount} adjustsFontSizeToFit numberOfLines={1}>{amount}</Text>
           <IdentityStatusLine verified={Boolean(link.senderVerified)} explain={false} />
         </View>

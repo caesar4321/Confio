@@ -194,7 +194,10 @@ const RecentCard = memo(({ person, onPress }: { person: any; onPress: (person: a
       </Text>
     </View>
     <View style={styles.contactInfo}>
-      <Text style={styles.contactName} numberOfLines={1}>{person.displayName}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <Text style={[styles.contactName, { flexShrink: 1 }]} numberOfLines={1}>{person.displayName}</Text>
+        {person.statusTier && person.statusTier !== 'member' ? <Text>{getTierMeta(person.statusTier).emoji}</Text> : null}
+      </View>
       <Text style={styles.contactPhone}>
         {person.receivesByQrOnly ? 'Cobra con QR' : `@${person.username}`}
       </Text>
@@ -224,7 +227,7 @@ const SearchActionCard = ({ title, subtitle, icon, onPress }: {
 const SEND_PEOPLE = gql`
   query SendPeople {
     sendPeople {
-      recent { userId username displayName identityVerified receivesByQrOnly }
+      recent { userId username displayName identityVerified receivesByQrOnly statusTier isReferralVerified }
       savedPhoneKeys
     }
   }
@@ -865,6 +868,8 @@ export const TransferScreen = () => {
       isOnConfio: true,
       friendConfioUsername: person.username,
       friendConfioFirstName: person.displayName,
+      friendStatusTier: person.statusTier || null,
+      friendIsReferralVerified: Boolean(person.isReferralVerified),
     } as any);
   }, [navigation]);
 
