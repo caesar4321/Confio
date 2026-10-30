@@ -34,16 +34,22 @@ row in `queued`. All BSC presale buys settled.
    `initialSold` = 20,577.071168313880, `initialClaimed` = 0,
    `initialMigratedPool` = 5,116.95, `initialLegacyPool` =
    15,460.121168313880. Not wired, funded or referenced by prod.
-5. Safe multisend on the new contracts:
-   - `presale.creditLegacy(buyers, amounts)` until `legacyPool == 0`;
-   - `presale.setConfioToken(v2)`;
-   - `v2.transfer`: 74M to presale, 7.4M to rewards, 893.6M / 10M / 15M to the
-     three vesting vaults;
-   - `vesting.addGrant(Safe, allocated, duration)` on each, 36 months / 24
-     months / 90 days, not started.
-   Do NOT call `unlockClaims` on anything. The old presale keeps old CONFIO
-   equal to its outstanding allocations; `sweepExcessConfio` cannot reach it,
-   and it stays sealed because that vault's claims are never unlocked.
+5. **DONE 2026-10-30.** Safe nonce 22
+   (`0xaa4daff45886b4d09f39b028dee7fb386f2d9913bb11fec5496ca5d5e8141817`)
+   imported 25 buyers with `creditLegacy` (`legacyPool == 0`), wired v2, funded
+   74M presale, 7.4M rewards, 893.6M founder, 10M co-builder and 15M cultural,
+   and registered three unstarted grants to the Safe.
+
+   Buyer audit before signing: `migratedPool` (5,116.95) is exactly what is
+   still unassigned: 13 Algorand buyers with no BSC address (4,631.05) and 5
+   with an address whose credit is `pending` (485.90). They keep their claim
+   through `creditMigrated` on the new vault, which is why they are not in
+   `creditLegacy`. The Algorand app 3353218127 shows 19,343.85 sold, and the
+   other 400 of the 19,743.85 in the ledger were paid on earlier presale apps
+   3327737507 and 3351520941.
+
+   Claims stay locked and the old presale keeps its old-token balance sealed:
+   `sweepExcessConfio` cannot reach it and its claims are never unlocked.
 6. Safe: sweep the old token and burn it: `revokeGrant` then `withdrawSurplus`
    on the three old vesting vaults, `sweepExcessConfio` on the old presale,
    `withdraw` on the old reward vault, then `burn` the Safe balance. Sweep
