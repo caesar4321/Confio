@@ -142,9 +142,13 @@ def users_core(w):
     context['active_users_week'] = real_users.filter(last_activity_at__gte=last_7_start).count()
     context['active_users_month'] = real_users.filter(last_activity_at__gte=now - timedelta(days=30)).count()
     context['new_users_last_7_days'] = real_users.filter(onboarded_at__gte=last_7_start).count()
-    context['all_signups_last_7_days'] = User.objects.exclude(is_platform_test_account=True).filter(created_at__gte=last_7_start).count()
+    # One cohort: accounts started in the window, and how many of those
+    # finished. Old accounts finishing now are signups, not this rate.
+    started = User.objects.exclude(is_platform_test_account=True).filter(created_at__gte=last_7_start)
+    context['all_signups_last_7_days'] = started.count()
+    context['finished_signups_last_7_days'] = started.filter(onboarded_at__isnull=False).count()
     context['signup_completion_last_7_days'] = (
-        context['new_users_last_7_days'] / context['all_signups_last_7_days'] * 100
+        context['finished_signups_last_7_days'] / context['all_signups_last_7_days'] * 100
         if context['all_signups_last_7_days'] else 0
     )
     fcm_reachability = get_fcm_reachability_metrics(now)
@@ -1415,7 +1419,9 @@ def needs_attention(w, request, *, refresh=False):
     if perp_stuck:
         items.append(_item(CRITICAL, 'Futures returns failed', 'Dollars have not come back to BSC.',
                            _url('blockchain_perpposition_changelist', 'state__exact=return_failed'), perp_stuck))
-    perp_bridging = PerpPosition.objects.filter(state='bridging', updated_at__lt=w.now - timedelta(hours=1)).count()
+    # created_at: reconciliation touches updated_at on every poll, even when
+    # the bridge has failed and nothing moves.
+    perp_bridging = PerpPosition.objects.filter(state='bridging', created_at__lt=w.now - timedelta(hours=1)).count()
     if perp_bridging:
         items.append(_item(WARNING, 'Futures bridges not moving for over an hour', '',
                            _url('blockchain_perpposition_changelist', 'state__exact=bridging'), perp_bridging))

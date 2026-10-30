@@ -362,7 +362,7 @@ class DashboardPagesTests(TestCase):
         table = sections.investing_by_period(sections.Window.current())['period_table']
         labels = [r['label'] for r in table['groups'][0]['rows']]
         self.assertEqual(labels, ['Stocks buys', 'Stocks sells', 'Crypto & gold buys', 'Crypto & gold sells',
-                                  'Futures margin in', 'Futures dollars back'])
+                                  'Futures margin in', 'Futures margin added', 'Futures dollars back'])
         self.assertTrue(all(len(r['cells']) == 4 for r in table['groups'][0]['rows']))
 
     def test_arrival_without_a_link_pairs_by_person_amount_and_time(self):
@@ -476,3 +476,18 @@ class ActivationTests(TestCase):
         rows = [{'date': date(2026, 10, 28), 'dau': 1, 'wau': 1, 'mau': 1},
                 {'date': date(2026, 10, 29), 'dau': 1, 'wau': 1, 'mau': 1}]
         self.assertEqual([r['reliable'] for r in sections.trend_chart(rows)], [False, True])
+
+    def test_signup_completion_follows_one_cohort(self):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        old = self.member('old-account', days_ago=1)
+        User = get_user_model()
+        User.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=60))
+        User.objects.create(username='started', firebase_uid='activation-started')
+        context = sections.users_core(sections.Window.current())
+        # The old account finishing now is a signup but not this cohort's rate.
+        self.assertEqual(context['new_users_last_7_days'], 1)
+        self.assertEqual(context['finished_signups_last_7_days'], 0)
+        self.assertEqual(context['signup_completion_last_7_days'], 0)
+

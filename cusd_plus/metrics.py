@@ -516,8 +516,24 @@ def investment_flows_by_period(periods) -> list:
         *swap_rows('Stocks', 'stock_buy', 'stock_sell'),
         *swap_rows('Crypto & gold', 'crypto_buy', 'crypto_sell'),
         perp_row('Futures margin in', 'margin_usd', 'opened_at'),
+        _margin_add_row(periods),
         perp_row('Futures dollars back', 'returned_usd', 'done_at'),
     ]
+
+
+def _margin_add_row(periods) -> dict:
+    """Futures top-ups: margin_usd is only the opening amount."""
+    from blockchain.models import PerpMarginChange
+
+    totals = {}
+    for index, (_label, since) in enumerate(periods):
+        window = Q(created_at__gte=since)
+        totals[f'usd{index}'] = Sum('amount_usd', filter=window)
+        totals[f'n{index}'] = Count('pk', filter=window)
+        totals[f'u{index}'] = Count('position__user_id', filter=window, distinct=True)
+    added = PerpMarginChange.objects.order_by().filter(direction='add', batch__status='confirmed').exclude(
+        state__in=('refunded', 'failed', 'cancelled'))
+    return _period_row('Futures margin added', added.aggregate(**totals), periods)
 
 
 def _period_row(label, row, periods) -> dict:

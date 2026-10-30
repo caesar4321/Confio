@@ -118,9 +118,12 @@ def retention(w):
 def deposit_health(w):
     """Local-money deposit attempts in 30 days per provider: the point where
     an intending member can fall out without anyone seeing it."""
+    from payment_accounts.models import CobreJourney, InfiniaJourney
+    from ramps.metrics import _journey_mirrors
     from ramps.models import RampTransaction
 
-    attempts = RampTransaction.objects.filter(direction='on_ramp', created_at__gte=w.rolling_30_start).order_by()
+    attempts = RampTransaction.objects.filter(direction='on_ramp', created_at__gte=w.rolling_30_start).exclude(
+        pk__in=_journey_mirrors()).order_by()
     labels = dict(RampTransaction._meta.get_field('provider').choices or [])
     rows = []
     for row in attempts.values('provider').annotate(
@@ -133,6 +136,24 @@ def deposit_health(w):
         rows.append({'label': labels.get(row['provider'], row['provider'].title()), **row,
                      'pending': row['total'] - ended, 'success_pct': _pct(row['completed'], ended),
                      'reasons': reasons.most_common(2)})
+    # Local-account rails have journeys, not ramp rows; "completed" is the
+    # same end-to-end delivery the provider table counts.
+    for label, journeys, delivered in (
+        ('Infinia', InfiniaJourney, Q(stage='completed', wallet_conversion__status='COMPLETED',
+                                      wallet_conversion__is_deleted=False)),
+        ('Cobre', CobreJourney, Q(stage='completed', bridge__status='delivered')),
+    ):
+        incoming = journeys.objects.filter(direction='to_wallet', created_at__gte=w.rolling_30_start).order_by()
+        row = incoming.aggregate(total=Count('pk'), completed=Count('pk', filter=delivered),
+                                 failed=Count('pk', filter=Q(stage__in=('failed', 'refunded'))))
+        if not row['total']:
+            continue
+        reasons = Counter((code or 'no reason recorded')[:70] for code in incoming.filter(
+            stage__in=('failed', 'refunded')).values_list('failure_code', flat=True))
+        ended = row['completed'] + row['failed']
+        rows.append({'label': label, **row, 'pending': row['total'] - ended,
+                     'success_pct': _pct(row['completed'], ended), 'reasons': reasons.most_common(2)})
+    rows.sort(key=lambda r: -r['total'])
     completed, failed = sum(r['completed'] for r in rows), sum(r['failed'] for r in rows)
     return {'deposit_health': {'rows': rows, 'completed': completed, 'failed': failed,
                                'success_pct': _pct(completed, completed + failed)}}
@@ -152,13 +173,17 @@ def _count_row(label, queryset, date_field, w, user_field=None):
 def community(w):
     """The social product and the assistant: is anyone using them, and what
     the assistant costs per person."""
-    from assistant.models import AssistantTurn
+    from assistant.models import AssistantTurn, CustomPet, VoiceSession
     from inbox.models import CommunityActivityShare, CommunityComment, CommunityFollow, DirectMessage, Tip
     from teams.models import Team, TeamMembership
 
     tips = Tip.objects.filter(status='confirmed').order_by()
-    spend = AssistantTurn.objects.filter(created_at__gte=w.rolling_30_start).aggregate(cost=Sum('cost_usd'))['cost']
-    talkers = AssistantTurn.objects.filter(created_at__gte=w.rolling_30_start).values('user_id').distinct().count()
+    # Same three cost sources the assistant's own economics report uses.
+    since = w.rolling_30_start
+    metered = (AssistantTurn.objects.filter(created_at__gte=since), VoiceSession.objects.filter(started_at__gte=since),
+               CustomPet.objects.filter(created_at__gte=since))
+    spend = sum((q.order_by().aggregate(cost=Sum('cost_usd'))['cost'] or Decimal('0') for q in metered), Decimal('0'))
+    talkers = len({user for q in metered for user in q.order_by().values_list('user_id', flat=True).distinct()})
     return {'community_table': {
         'labels': [label for label, _since in w.periods()],
         'rows': [
@@ -170,8 +195,8 @@ def community(w):
             _count_row('Tips confirmed', tips, 'created_at', w, 'sender_id'),
             _count_row('Team joins', TeamMembership.objects.order_by(), 'joined_at', w, 'user_id'),
         ],
-        'assistant_cost_30d': spend or Decimal('0'),
-        'assistant_cost_per_person': (spend or Decimal('0')) / talkers if talkers else None,
+        'assistant_cost_30d': spend,
+        'assistant_cost_per_person': spend / talkers if talkers else None,
         'tips_usd_30d': tips.filter(created_at__gte=w.rolling_30_start).aggregate(s=Sum('amount'))['s'] or Decimal('0'),
         'teams': Team.objects.count(),
     }}
@@ -188,7 +213,7 @@ def demand(w):
 
     preview = {int(p) for p in str(getattr(settings, 'PAID_OFFER_PREVIEW_USER_IDS', '') or '').split(',')
                if p.strip().isdigit()}
-    stages = ('door_shown', 'detail_opened', 'avisame_tapped', 'would_pay_answered')
+    stages = ('door_shown', 'detail_opened', 'avisame_tapped')
     reached = defaultdict(set)
     for user, product, props in FunnelEvent.objects.filter(
             event_name='paid_offer_interest', user__isnull=False,
@@ -197,13 +222,15 @@ def demand(w):
         reached[(product, (props or {}).get('stage'))].add(user)
     labels = dict(ProductWaitlistEntry._meta.get_field('product').choices or [])
     waitlisted = {row['product']: row for row in ProductWaitlistEntry.objects.order_by().values('product').annotate(
-        n=Count('id'), funded_n=Count('id', filter=Q(funded=True)))}
+        n=Count('id'), funded_n=Count('id', filter=Q(funded=True)),
+        yes_n=Count('id', filter=Q(would_pay='yes')))}
     offers = []
     for product in sorted({key[0] for key in reached} | set(waitlisted)):
         counts = [len(reached.get((product, stage), ())) for stage in stages]
         row = waitlisted.get(product, {})
         offers.append({'label': labels.get(product, product), 'stages': counts,
-                       'waitlist': row.get('n', 0), 'waitlist_funded': row.get('funded_n', 0)})
+                       'waitlist': row.get('n', 0), 'would_pay': row.get('yes_n', 0),
+                       'waitlist_funded': row.get('funded_n', 0)})
 
     rail_rows = FunnelEvent.objects.filter(
         event_name__in=['receive_rail_interest', 'local_rail_interest'],
@@ -222,7 +249,7 @@ def demand(w):
 
     probes = list(ProbeAnswer.objects.order_by().values('probe_id', 'answer').annotate(
         n=Count('id'), funded_n=Count('id', filter=Q(funded=True))).order_by('-n')[:12])
-    return {'demand_offers': offers, 'demand_stages': ('Saw it', 'Opened', 'Avísame', 'Would pay'),
+    return {'demand_offers': offers, 'demand_stages': ('Saw it', 'Opened', 'Avísame'),
             'demand_probes': probes, 'rail_interest': rail_interest, 'rail_interest_totals': totals}
 
 
@@ -232,12 +259,20 @@ PERP_LIVE_STATES = ('bridging', 'funded', 'open', 'closed', 'liquidated', 'retur
 
 def futures(w):
     """Futures (Hyperliquid): what is live, what came back, what members made."""
-    from blockchain.models import PerpPosition
+    from blockchain.models import PerpMarginChange, PerpPosition
 
     positions = PerpPosition.objects.order_by()
+    # margin_usd is only the opening amount: top-ups live in their own rows,
+    # and returned_usd includes them.
+    added = PerpMarginChange.objects.order_by().filter(direction='add', batch__status='confirmed').exclude(
+        state__in=('refunded', 'failed', 'cancelled'))
+
+    def top_ups(queryset):
+        return added.filter(position__in=queryset).aggregate(s=Sum('amount_usd'))['s'] or Decimal('0')
+
     live = positions.filter(state__in=PERP_LIVE_STATES)
     settled = positions.filter(done_at__isnull=False)
-    margin = live.aggregate(s=Sum('margin_usd'))['s'] or Decimal('0')
+    margin = (live.aggregate(s=Sum('margin_usd'))['s'] or Decimal('0')) + top_ups(live)
     done = settled.aggregate(pnl=Sum('realized_pnl'), funding=Sum('funding'), fees=Sum('venue_fees'),
                              margin=Sum('margin_usd'), back=Sum('returned_usd'))
     return {'futures': {
@@ -246,7 +281,7 @@ def futures(w):
         'margin_live': margin,
         'traders': positions.filter(opened_at__isnull=False).values('user_id').distinct().count(),
         'settled': settled.count(),
-        'margin_settled': done['margin'] or Decimal('0'),
+        'margin_settled': (done['margin'] or Decimal('0')) + top_ups(settled),
         'returned': done['back'] or Decimal('0'),
         'realized_pnl': done['pnl'] or Decimal('0'),
         'funding': done['funding'] or Decimal('0'),

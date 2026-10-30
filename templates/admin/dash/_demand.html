@@ -1,12 +1,12 @@
 {% load humanize %}
 <h2 class="section-title">Demand signals</h2>
-<p class="dash-asof" style="margin:-6px 0 12px;">What members ask for before it exists. Distinct people, last 30 days; waitlists are all-time.</p>
+<p class="dash-asof" style="margin:-6px 0 12px;">What members ask for before it exists. Doors are distinct people in the last 30 days; waitlist, would-pay and funded are all-time.</p>
 <div class="data-table">
     <table>
-        <thead><tr><th>Offer</th>{% for stage in demand_stages %}<th class="num">{{ stage }}</th>{% endfor %}<th class="num">Waitlist</th><th class="num">Funded on it</th></tr></thead>
+        <thead><tr><th>Offer</th>{% for stage in demand_stages %}<th class="num">{{ stage }}</th>{% endfor %}<th class="num">Waitlist</th><th class="num">Would pay</th><th class="num">Funded on it</th></tr></thead>
         <tbody>
             {% for row in demand_offers %}
-            <tr><td>{{ row.label }}</td>{% for n in row.stages %}<td class="num">{{ n|intcomma }}</td>{% endfor %}<td class="num">{{ row.waitlist|intcomma }}</td><td class="num">{{ row.waitlist_funded|intcomma }}</td></tr>
+            <tr><td>{{ row.label }}</td>{% for n in row.stages %}<td class="num">{{ n|intcomma }}</td>{% endfor %}<td class="num">{{ row.waitlist|intcomma }}</td><td class="num">{{ row.would_pay|intcomma }}</td><td class="num">{{ row.waitlist_funded|intcomma }}</td></tr>
             {% empty %}
             <tr><td colspan="7">No offer activity yet.</td></tr>
             {% endfor %}
