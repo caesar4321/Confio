@@ -286,3 +286,16 @@ class PublicBadgeTests(TestCase):
             self.assertTrue(UnifiedTransactionType.resolve_counterparty_is_referral_verified(plain_row, info))
             self.assertEqual(UnifiedTransactionType.resolve_sender_status_tier(plain_row, info), 'member')
         self.assertIsNone(UnifiedTransactionType.resolve_counterparty_status_tier(tip_row, info))
+
+
+class RampFiatAmountTests(TestCase):
+    def test_a_top_up_shows_what_the_person_was_told_to_pay_until_the_provider_reports(self):
+        # protects=Pago Móvil rows read in bolívares like every top-up; fails_when=the row falls back to USDT because VEXPay has not reported yet; no_claim=the final amount's accuracy
+        from users.graphql_views import UnifiedTransactionType
+        ramp = SimpleNamespace(fiat_amount=None, metadata={'vexpay': {'expected_ves': '1005000'}})
+        row = SimpleNamespace(transaction_type='ramp', ramp_transaction=ramp)
+        self.assertEqual(UnifiedTransactionType.resolve_ramp_fiat_amount(row, None), '1005000')
+        ramp.fiat_amount = '1007443.5'
+        self.assertEqual(UnifiedTransactionType.resolve_ramp_fiat_amount(row, None), '1007443.5')
+        ramp.fiat_amount, ramp.metadata = None, {}
+        self.assertIsNone(UnifiedTransactionType.resolve_ramp_fiat_amount(row, None))

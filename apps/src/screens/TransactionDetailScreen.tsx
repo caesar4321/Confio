@@ -1712,7 +1712,11 @@ export const TransactionDetailScreen = () => {
         || currentTx.net_amount;
 
       if (rampDirection === 'on_ramp') {
-        items.push({ label: 'Monto pagado', value: `${formatAmount(currentTx.amount)} ${currency}` });
+        // Paid only once it completed: a pending or cancelled top-up shows the
+        // amount the person was asked to pay.
+        const paid = ['COMPLETED', 'DELIVERED', 'CONFIRMED']
+          .includes(String((currentTx as any).rampStatus || currentTx.status || '').toUpperCase());
+        items.push({ label: paid ? 'Monto pagado' : 'Monto a pagar', value: `${formatAmount(currentTx.amount)} ${currency}` });
         if (fee !== null && fee > 0) {
           items.push({
             label: confioFeeLabel(currentTx),

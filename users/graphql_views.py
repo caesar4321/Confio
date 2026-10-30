@@ -672,8 +672,14 @@ class UnifiedTransactionType(DjangoObjectType):
 
     def resolve_ramp_fiat_amount(self, info):
         if self.transaction_type == 'ramp' and getattr(self, 'ramp_transaction', None):
-            value = getattr(self.ramp_transaction, 'fiat_amount', None)
-            return str(value) if value is not None else None
+            ramp = self.ramp_transaction
+            if ramp.fiat_amount is not None:
+                return str(ramp.fiat_amount)
+            # VEXPay reports the amount only once a payment is confirmed. Until
+            # then (or if it never is) the row shows what the person was told
+            # to pay, in their own currency like every other top-up.
+            expected = ((ramp.metadata or {}).get('vexpay') or {}).get('expected_ves')
+            return str(expected) if expected else None
         return None
 
     def resolve_ramp_fiat_currency(self, info):
