@@ -491,3 +491,30 @@ class ActivationTests(TestCase):
         self.assertEqual(context['finished_signups_last_7_days'], 0)
         self.assertEqual(context['signup_completion_last_7_days'], 0)
 
+
+    def test_journey_rails_need_the_infinia_view_permission(self):
+        from config import admin_dashboard_growth as growth
+        from payment_accounts.models import InfiniaJourney
+
+        allowed = mock.Mock(user=mock.Mock(has_perm=lambda perm: True))
+        denied = mock.Mock(user=mock.Mock(has_perm=lambda perm: False))
+        with mock.patch.object(InfiniaJourney, 'objects') as journeys:
+            growth.deposit_health(sections.Window.current(), denied)
+            journeys.filter.assert_not_called()
+            journeys.filter.return_value.order_by.return_value.aggregate.return_value = {
+                'total': 0, 'completed': 0, 'failed': 0}
+            growth.deposit_health(sections.Window.current(), allowed)
+            journeys.filter.assert_called()
+
+    def test_retention_activity_counts_only_real_members(self):
+        from django.utils import timezone
+        from config import admin_dashboard_growth as growth
+        from users.activity_tracking import ACTIVITY_DAY_TZ
+        from users.models_analytics import UserActivityDay
+
+        real, robot = self.member('real-one'), self.member('robot-one')
+        get_user_model().objects.filter(pk=robot.pk).update(is_platform_test_account=True)
+        today = timezone.localtime(timezone.now(), ACTIVITY_DAY_TZ).date()
+        for user in (real, robot):
+            UserActivityDay.objects.create(user=user, day=today, first_seen_at=timezone.now())
+        self.assertEqual(growth.retention(sections.Window.current())['retention']['active_7d'], 1)

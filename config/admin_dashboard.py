@@ -714,7 +714,7 @@ ConfioAdminSite.DASH_PAGES = [
         lambda w, request, refresh: {'attention': sections.needs_attention(w, request, refresh=refresh)},
         _w(growth.activation),
         _w(growth.retention),
-        _w(growth.deposit_health),
+        lambda w, request, refresh: growth.deposit_health(w, request),
         _chain(sections.today_money),
         _w(sections.today_growth),
     ], [], {'template': 'admin/dash/today.html', 'chain': True, 'heading': 'Today'}),
@@ -743,7 +743,7 @@ ConfioAdminSite.DASH_PAGES = [
         )}),
     ('money', 'Money', [
         lambda w, request, refresh: sections.rails_by_period(w, request),
-        _w(growth.deposit_health),
+        lambda w, request, refresh: growth.deposit_health(w, request),
         _chain(sections.cusd_bsc),
         lambda w, request, refresh: sections.infinia(request),
         lambda w, request, refresh: sections.koywe(w, request),

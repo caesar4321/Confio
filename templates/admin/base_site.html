@@ -7,7 +7,9 @@
 <style>
     /* The app's palette (apps/src/config/theme.ts) on Django's own admin
        variables, so changelists, forms and dark mode match: the bright
-       emerald field with emerald-900 text, since white on it is 1.9:1. */
+       emerald field with emerald-900 text, since white on it is 1.9:1.
+       Buttons stay deeper: Django shares --button-fg with red Delete and
+       gray Cancel, so it must remain white. */
     :root {
         --primary: #34d399;
         --secondary: #10b981;
@@ -30,11 +32,10 @@
         --border-color: #e5e7eb;
         --darkened-bg: #f9fafb;
         --selected-row: #d1fae5;
-        --button-fg: #064e3b;
-        --button-bg: #34d399;
-        --button-hover-bg: #10b981;
-        --default-button-bg: #34d399;
-        --default-button-hover-bg: #10b981;
+        --button-bg: #047857;
+        --button-hover-bg: #064e3b;
+        --default-button-bg: #047857;
+        --default-button-hover-bg: #064e3b;
         --message-success-bg: #d1fae5;
     }
     @media (prefers-color-scheme: dark) {
@@ -60,11 +61,10 @@
             --link-selected-fg: #6ee7b7;
             --selected-row: #064e3b;
             --message-success-bg: #065f46;
-            --button-fg: #064e3b;
-            --button-bg: #34d399;
-            --button-hover-bg: #10b981;
-            --default-button-bg: #34d399;
-            --default-button-hover-bg: #10b981;
+            --button-bg: #047857;
+            --button-hover-bg: #065f46;
+            --default-button-bg: #047857;
+            --default-button-hover-bg: #065f46;
         }
     }
     html[data-theme="dark"] {
@@ -89,11 +89,10 @@
         --link-selected-fg: #6ee7b7;
         --selected-row: #064e3b;
         --message-success-bg: #065f46;
-        --button-fg: #064e3b;
-        --button-bg: #34d399;
-        --button-hover-bg: #10b981;
-        --default-button-bg: #34d399;
-        --default-button-hover-bg: #10b981;
+        --button-bg: #047857;
+        --button-hover-bg: #065f46;
+        --default-button-bg: #047857;
+        --default-button-hover-bg: #065f46;
     }
     #site-name a, #site-name a:link, #site-name a:visited { color: var(--header-branding-color); font-weight: 600; letter-spacing: -0.01em; }
 </style>

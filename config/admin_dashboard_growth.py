@@ -103,7 +103,8 @@ def retention(w):
         back = sum(1 for pk, day in eligible if (pk, day + timedelta(days=offset)) in days)
         return {'back': back, 'eligible': len(eligible), 'pct': _pct(back, len(eligible))}
 
-    recent_days = UserActivityDay.objects.filter(day__gte=today - timedelta(days=6))
+    recent_days = UserActivityDay.objects.filter(
+        day__gte=today - timedelta(days=6), user__in=get_real_users_queryset())
     return {'retention': {
         'd1': returned(1),
         'd7': returned(7),
@@ -115,7 +116,7 @@ def retention(w):
     }}
 
 
-def deposit_health(w):
+def deposit_health(w, request):
     """Local-money deposit attempts in 30 days per provider: the point where
     an intending member can fall out without anyone seeing it."""
     from payment_accounts.models import CobreJourney, InfiniaJourney
@@ -137,12 +138,14 @@ def deposit_health(w):
                      'pending': row['total'] - ended, 'success_pct': _pct(row['completed'], ended),
                      'reasons': reasons.most_common(2)})
     # Local-account rails have journeys, not ramp rows; "completed" is the
-    # same end-to-end delivery the provider table counts.
-    for label, journeys, delivered in (
+    # same end-to-end delivery the provider table counts. Same permission as
+    # every other view of these journeys.
+    journey_rails = () if not request.user.has_perm('payment_accounts.view_infiniajourney') else (
         ('Infinia', InfiniaJourney, Q(stage='completed', wallet_conversion__status='COMPLETED',
                                       wallet_conversion__is_deleted=False)),
         ('Cobre', CobreJourney, Q(stage='completed', bridge__status='delivered')),
-    ):
+    )
+    for label, journeys, delivered in journey_rails:
         incoming = journeys.objects.filter(direction='to_wallet', created_at__gte=w.rolling_30_start).order_by()
         row = incoming.aggregate(total=Count('pk'), completed=Count('pk', filter=delivered),
                                  failed=Count('pk', filter=Q(stage__in=('failed', 'refunded'))))
@@ -221,7 +224,8 @@ def demand(w):
                 'user_id', 'source_type', 'properties'):
         reached[(product, (props or {}).get('stage'))].add(user)
     labels = dict(ProductWaitlistEntry._meta.get_field('product').choices or [])
-    waitlisted = {row['product']: row for row in ProductWaitlistEntry.objects.order_by().values('product').annotate(
+    waitlisted = {row['product']: row for row in ProductWaitlistEntry.objects.exclude(
+        user_id__in=preview).order_by().values('product').annotate(
         n=Count('id'), funded_n=Count('id', filter=Q(funded=True)),
         yes_n=Count('id', filter=Q(would_pay='yes')))}
     offers = []
@@ -273,8 +277,9 @@ def futures(w):
     live = positions.filter(state__in=PERP_LIVE_STATES)
     settled = positions.filter(done_at__isnull=False)
     margin = (live.aggregate(s=Sum('margin_usd'))['s'] or Decimal('0')) + top_ups(live)
-    done = settled.aggregate(pnl=Sum('realized_pnl'), funding=Sum('funding'), fees=Sum('venue_fees'),
-                             margin=Sum('margin_usd'), back=Sum('returned_usd'))
+    done = settled.aggregate(margin=Sum('margin_usd'), back=Sum('returned_usd'))
+    # Results land when a position closes, before (or without) its return.
+    results = positions.aggregate(pnl=Sum('realized_pnl'), funding=Sum('funding'), fees=Sum('venue_fees'))
     return {'futures': {
         'live': live.count(),
         'open': positions.filter(state='open').count(),
@@ -283,9 +288,9 @@ def futures(w):
         'settled': settled.count(),
         'margin_settled': (done['margin'] or Decimal('0')) + top_ups(settled),
         'returned': done['back'] or Decimal('0'),
-        'realized_pnl': done['pnl'] or Decimal('0'),
-        'funding': done['funding'] or Decimal('0'),
-        'venue_fees': done['fees'] or Decimal('0'),
+        'realized_pnl': results['pnl'] or Decimal('0'),
+        'funding': results['funding'] or Decimal('0'),
+        'venue_fees': results['fees'] or Decimal('0'),
         'liquidated': positions.exclude(liquidation='').count(),
         'return_failed': positions.filter(state='return_failed').count(),
         'by_state': list(live.values('state').annotate(n=Count('id')).order_by('-n')),
