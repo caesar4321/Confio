@@ -21,11 +21,13 @@ row in `queued`. All BSC presale buys settled.
    - ConfioVestingVault founder `0x873A68182A384DD84385C7B610Df5D2A3746D75a`;
    - ConfioVestingVault co-builder `0x854b3692Bd3eaCfD6BCdd14C726326B883568396`;
    - ConfioVestingVault cultural `0x285963eD9D170C5762e0E3EA8efa027f9808DeE3`.
-3. Safe: `pause()` the current presale vault. Run
-   `.kms-local/kms_evm_multisig/snapshot_presale_migration.py` against it, with
-   its `OLD`, `CANDIDATES` and `FROM_BLOCK` refreshed. Completeness holds only
-   if the non-zero `purchased` balances sum to `totalSold - migratedPool -
-   totalClaimed`.
+3. **DONE 2026-10-30.** Safe nonce 21 paused the presale
+   (`0xbfb31ac96bc8c9a8942a9c4f881d603c5ae0b382ddc3e40f40e1e07c9033499f`). The
+   snapshot at block 130643579 proves 25 buyers holding exactly the
+   15,460.12116831388 CONFIO of assigned allocations, with 5,116.95 CONFIO left
+   in `migratedPool`. Candidates came from production; dedupe them by checksum,
+   as mixed casing double-counts a buyer. Output:
+   `.kms-local/kms_evm_multisig/presale_snapshot_nonce21.json`.
 4. Deploy the replacement presale vault with `manage.py deploy_presale_vault`:
    `initialSold` = old `totalSold`, `initialClaimed` = 0, `initialMigratedPool`
    = old `migratedPool`, `initialLegacyPool` = the rest.
