@@ -1365,13 +1365,21 @@ def rails_by_period(w, request):
                     for a, b in zip(flows['movido_in'], flows['movido_out'])]
     return {'period_table': {
         'title': 'Rails by period',
-        'note': 'Provider deposits are delivered dollars net of the fee, dated by completion. Movido is the '
-                'website figure (all rails, including outside USDT and Pay), deposits gross and withdrawals '
-                'net of the fee, so providers are a subset of it.',
+        'note': 'Provider rows are delivered deposits and completed payouts, dated by completion. Direct is every '
+                'Movido conversion no provider row accounts for (outside wallets, Pay); rows without a conversion '
+                'link pair by person, amount and time, so it is an estimate. Providers plus direct approach Movido '
+                'but differ by fees and by deposits that never converted, which Movido does not count.',
         'labels': [label for label, _since in periods],
         'groups': [
-            {'title': 'Deposits by provider', 'rows': flows['deposits']},
-            {'title': 'Withdrawals by provider', 'rows': flows['withdrawals']},
+            {'title': 'Deposits by provider', 'rows': [
+                *flows['deposits'],
+                {'label': 'Direct (outside wallets)', 'cells': flows['direct_in']},
+                {'label': 'Provider deposits never converted (not in Movido)', 'cells': flows['never_converted']},
+            ]},
+            {'title': 'Withdrawals by provider', 'rows': [
+                *flows['withdrawals'],
+                {'label': 'Direct (outside wallets, Pay)', 'cells': flows['direct_out']},
+            ]},
             {'title': 'Movido (website figure)', 'rows': [
                 {'label': 'Deposits', 'cells': flows['movido_in']},
                 {'label': 'Withdrawals', 'cells': flows['movido_out']},

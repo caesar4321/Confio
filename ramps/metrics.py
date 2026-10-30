@@ -2,6 +2,7 @@
 Provider delivery totals and fiat payout timing retain their separate ramp
 and journey evidence; neither is added to the perimeter total.
 """
+from datetime import timedelta
 from decimal import Decimal
 from django.db.models import Case, Count, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce, Greatest, NullIf
@@ -58,6 +59,9 @@ def _deposit_sources(providers=LEGACY_PROVIDERS):
         When(converted, then=F('final_amount')),
         When(verified_usdc, then=F('usdc_deposit__amount')),
         When(verified_usdt, then=Cast(KeyTextTransform('bsc_arrival_amount', 'metadata'), dollars)),
+        # Newer rails (Bolivia QR) write the proven amount on completion. Only
+        # reachable with providers=None; the public figure keeps its own list.
+        When(~Q(provider__in=LEGACY_PROVIDERS) & Q(crypto_amount_actual__gt=0), then=F('crypto_amount_actual')),
         default=zero, output_field=dollars)
     # Journeys win over any legacy mirrors attached to their MoneyFlow.
     legacy = legacy.exclude(pk__in=_journey_mirrors())
@@ -128,6 +132,96 @@ def _withdrawal_sources(providers=LEGACY_PROVIDERS):
     return sources
 
 
+# Rails the admin always lists, even before their first operation.
+RAIL_PROVIDERS = {
+    'koywe': 'Koywe', 'guardarian': 'Guardarian', 'transak': 'Transak', 'infinia': 'Infinia', 'cobre': 'Cobre',
+    'vexpay': 'VEXPay', 'pagoasap': 'Pago ASAP', 'mesadepagos': 'Mesa de pagos', 'stereum': 'Stereum',
+}
+# Same person, an amount within the fee and rounding, close in time: how a
+# provider row with no conversion link finds the conversion it became.
+TIE_AMOUNT_PCT = Decimal('0.03')
+TIE_AMOUNT_MIN = Decimal('1')
+TIE_LATE = timedelta(days=7)
+TIE_EARLY = timedelta(hours=6)
+
+
+def tie_to_conversions(rows, conversions, *, conversion_follows=True):
+    """Pair provider rows with free conversions, oldest first; each
+    conversion pairs once. rows: dicts with user, usd, at. conversions: dicts
+    with id, user, usd, at. Returns (tied conversion ids, unpaired rows).
+    Deposits convert after arriving; payouts follow their conversion."""
+    by_user = {}
+    for conversion in conversions:
+        by_user.setdefault(conversion['user'], []).append(conversion)
+    tied, unpaired = set(), []
+    for row in sorted(rows, key=lambda r: r['at']):
+        margin = max(TIE_AMOUNT_MIN, row['usd'] * TIE_AMOUNT_PCT)
+        for conversion in by_user.get(row['user'], ()):
+            gap = conversion['at'] - row['at'] if conversion_follows else row['at'] - conversion['at']
+            if (conversion['id'] not in tied and abs(conversion['usd'] - row['usd']) <= margin
+                    and -TIE_EARLY <= gap <= TIE_LATE):
+                tied.add(conversion['id'])
+                break
+        else:
+            unpaired.append(row)
+    return tied, unpaired
+
+
+def _bucket(rows, periods):
+    return [{'usd': sum((r['usd'] for r in rows if r['at'] >= since), Decimal(0)),
+             'count': sum(1 for r in rows if r['at'] >= since)} for _label, since in periods]
+
+
+def _direct_flows(periods) -> dict:
+    """Movido conversions no provider row accounts for (outside wallets, Pay)
+    and provider deposits that never became a conversion. Exact links first;
+    the rest pair by tie_to_conversions, an estimate by design: late provider
+    attribution leaves arrivals with no link at all."""
+    from payment_accounts.models import CobreJourney, InfiniaJourney
+
+    entries, exits = _perimeter_conversions()
+    entry_rows = [{'id': pk, 'user': user, 'usd': Decimal(usd or 0), 'at': at, 'source': source}
+                  for pk, user, usd, at, source in entries.order_by().values_list(
+                      'id', 'actor_user_id', Coalesce('gross_amount_exact', 'from_amount', output_field=DOLLARS),
+                      'created_at', 'source')]
+    exit_rows = [{'id': pk, 'user': user, 'usd': Decimal(usd or 0), 'at': at}
+                 for pk, user, usd, at in exits.order_by().values_list(
+                     'id', 'actor_user_id', Coalesce('net_amount_exact', 'to_amount', output_field=DOLLARS),
+                     'created_at')]
+
+    legacy_deposits = _deposit_sources(providers=None)[0]
+    legacy, amount = legacy_deposits[0], legacy_deposits[1]
+    linked = set(legacy.exclude(conversion__isnull=True).values_list('conversion_id', flat=True))
+    linked |= set(InfiniaJourney.objects.filter(wallet_conversion__isnull=False)
+                  .values_list('wallet_conversion_id', flat=True))
+    arrivals = [{'user': user, 'usd': Decimal(usd), 'at': done or made}
+                for user, usd, done, made in legacy.filter(conversion__isnull=True).order_by().annotate(
+                    flow_usd=amount).filter(flow_usd__gt=0).values_list(
+                        'actor_user_id', 'flow_usd', 'completed_at', 'created_at')]
+    free_entries = [row for row in entry_rows if row['id'] not in linked and row['source'] != 'ramp']
+    tied, never_converted = tie_to_conversions(arrivals, free_entries)
+
+    payouts, exit_links = [], set()
+    for queryset, field, _country, user, completed in _withdrawal_sources(providers=None):
+        payouts += [{'user': owner, 'usd': Decimal(usd), 'at': done or made}
+                    for owner, usd, done, made in queryset.order_by().values_list(user, field, completed, 'created_at')]
+    for queryset, usd, _date, _provider in (_ve_send_payouts(),):
+        payouts += [{'user': owner, 'usd': Decimal(value), 'at': done or made}
+                    for owner, value, done, made in queryset.order_by().annotate(flow_usd=usd).values_list(
+                        'actor_user_id', 'flow_usd', 'completed_at', 'created_at')]
+    for journey in (InfiniaJourney, CobreJourney):
+        if any(f.name == 'wallet_conversion' for f in journey._meta.get_fields()):
+            exit_links |= set(journey.objects.filter(direction='to_bank', wallet_conversion__isnull=False)
+                              .values_list('wallet_conversion_id', flat=True))
+    free_exits = [row for row in exit_rows if row['id'] not in exit_links]
+    exit_tied, _unpaired = tie_to_conversions(payouts, free_exits, conversion_follows=False)
+    return {
+        'direct_in': _bucket([r for r in free_entries if r['id'] not in tied], periods),
+        'never_converted': _bucket(never_converted, periods),
+        'direct_out': _bucket([r for r in free_exits if r['id'] not in exit_tied], periods),
+    }
+
+
 def _period_totals(periods):
     """One query's worth of per-period aggregates over annotated
     flow_usd / flow_at. `periods`: [(label, since)], oldest-possible `since`
@@ -164,18 +258,19 @@ def rail_flows_by_period(periods) -> dict:
     Dated by completion, falling back to creation."""
     from ramps.models import RampTransaction
 
-    labels = dict(RampTransaction.PROVIDER_CHOICES)
+    labels = {**dict(RampTransaction.PROVIDER_CHOICES), **RAIL_PROVIDERS}
+    empty = [{'usd': Decimal(0), 'count': 0} for _period in periods]
 
     def provider_rows(sources):
-        rows = {}
+        rows = {key: empty for key in RAIL_PROVIDERS}
         for queryset, amount, date_field, provider in sources:
             annotated = queryset.order_by().annotate(
                 flow_usd=amount, flow_at=Coalesce(date_field, 'created_at'))
             if provider is None:
                 for row in annotated.values('provider').annotate(**_period_totals(periods)):
                     cells = _period_cells(row, periods)
-                    known = rows.get(row['provider'])
-                    rows[row['provider']] = cells if known is None else [
+                    known = rows.get(row['provider'], empty)
+                    rows[row['provider']] = [
                         {'usd': a['usd'] + b['usd'], 'count': a['count'] + b['count']}
                         for a, b in zip(known, cells)]
             else:
@@ -207,6 +302,7 @@ def rail_flows_by_period(periods) -> dict:
         'withdrawals': payouts,
         'movido_in': _period_cells(movido_in, periods),
         'movido_out': _period_cells(movido_out, periods),
+        **_direct_flows(periods),
     }
 
 

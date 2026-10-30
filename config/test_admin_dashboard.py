@@ -364,3 +364,28 @@ class DashboardPagesTests(TestCase):
         self.assertEqual(labels, ['Stocks buys', 'Stocks sells', 'Crypto & gold buys', 'Crypto & gold sells',
                                   'Futures margin in', 'Futures dollars back'])
         self.assertTrue(all(len(r['cells']) == 4 for r in table['groups'][0]['rows']))
+
+    def test_arrival_without_a_link_pairs_by_person_amount_and_time(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from ramps.metrics import tie_to_conversions
+
+        now = timezone.now()
+        arrivals = [{'user': 1, 'usd': Decimal('100'), 'at': now},   # became conversion 10
+                    {'user': 2, 'usd': Decimal('50'), 'at': now}]    # stayed USDT
+        conversions = [{'id': 10, 'user': 1, 'usd': Decimal('99.5'), 'at': now + timedelta(hours=1)},
+                       {'id': 11, 'user': 2, 'usd': Decimal('80'), 'at': now + timedelta(hours=1)},  # direct
+                       {'id': 12, 'user': 1, 'usd': Decimal('100'), 'at': now + timedelta(days=30)}]  # too late
+        tied, unpaired = tie_to_conversions(arrivals, conversions)
+        self.assertEqual(tied, {10})
+        self.assertEqual([r['user'] for r in unpaired], [2])
+
+    def test_every_rail_is_listed_before_its_first_operation(self):
+        from ramps.metrics import rail_flows_by_period
+
+        flows = rail_flows_by_period(sections.Window.current().periods())
+        for group in ('deposits', 'withdrawals'):
+            labels = [r['label'] for r in flows[group]]
+            self.assertIn('Pago ASAP', labels)
+            self.assertIn('Mesa de pagos', labels)
+        self.assertEqual(len(flows['direct_in']), 4)
