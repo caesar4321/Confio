@@ -60,9 +60,12 @@ row in `queued`. All BSC presale buys settled.
    restarted. Live: `confioCurrentPrice` 0.200514. The new vault's `buy` reached
    `transferFrom` for a sponsor caller with no allowance. No real purchase has
    run on the new vault yet.
-8. Upgrade cUSD: deploy the implementation, rerun
-   `test/UpgradeCusdFreeze.fork.t.sol` with `CUSD_IMPL` set to it, then Safe
-   `upgradeToAndCall(impl, "")`. Read back `frozen`, supply, fee, sponsor.
+8. **DONE 2026-10-30.** cUSD implementation
+   `0x9BB0C796B234957a3FB6cA3bE99c807a604CE75e`
+   (tx `0xdf46785a9076cccfb09596712ffeb8e8f0bff5c95df8a225d11dd5b5bd884acf`, via
+   `manage.py deploy_cusd_impl`, BscScan verified), rehearsed with `CUSD_IMPL`,
+   installed by Safe nonce 24
+   (`0x3cfb9fdbc499aa3bc2054f7c31f4ead979d6c29f58791a4e59bfa729e03fe680`).
 9. Publish: update token and vault addresses, plus the "no owner" wording, in
    tokenomics and whitepaper (EN/ES/KO), README and the app sources
    (`ConfioNarrative.tsx`, `queries.ts`, `bscExit.ts`,
