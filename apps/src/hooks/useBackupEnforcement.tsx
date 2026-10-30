@@ -301,7 +301,8 @@ export const useBackupEnforcement = () => {
             if (!migrationReady) return false;
         }
 
-        // 1. iOS Check - Implicitly backed up via iCloud
+        // 1. iOS Check - No Drive consent modal. The app backs up to CloudKit by
+        // itself, and that proof never gates anyone (ensureCloudKitBackup).
         if (Platform.OS === 'ios') return verifyInboundSigningWallet(action);
 
         // 2. Check if backup is already enabled in profile (fast check)

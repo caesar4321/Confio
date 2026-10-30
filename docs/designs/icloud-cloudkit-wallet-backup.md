@@ -1,7 +1,14 @@
 # iOS wallet backup in CloudKit
 
-Status: draft under /plan-eng-review. Nothing built.
-Target of review: this document. Base commit: aea9ddbeb.
+Status: built, on main (67481e5fe, 9475bf10e). Server live on prod with
+`users.0061` since 2026-10-30. Not released: the app build and the CloudKit
+Production schema are pending, so no store user has this yet.
+
+Proven so far: one real account backed up and acknowledged, from a Development
+build. Not proven: restore on a device without the key, and the Production
+environment. Development records are invisible to release builds.
+
+Remaining: T5, then a restore test on a second iPhone with a test account.
 
 ## Problem
 
@@ -184,7 +191,7 @@ Approved by the user during review:
 - `onCloudSyncResult`: the Drive proof pattern this copies.
 - `ConfioAudioRoute`: native module template.
 
-## Required before implementation
+## Device probe and release step
 
 **Device probe: core result passed (2026-10-30).** iPhone SE, Development
 environment, plain String field, fake payloads only. iCloud Keychain was turned
@@ -262,12 +269,12 @@ Restore adds one fetch only when no local key matches. Calls need a timeout
 ## Implementation Tasks
 
 - [x] **T0 (P1, human: ~2h / CC: ~30min)** Device probe with Keychain off: passed.
-- [ ] **T1 (P1, human: ~2d / CC: ~1h)** Container, entitlements, profile, `ConfioCloudBackup`.
-- [ ] **T2 (P1, human: ~2d / CC: ~1h)** `cloudKitBackup.ts`, foreground trigger, acknowledgement retry.
-- [ ] **T3 (P1, human: ~2d / CC: ~1h)** Reconciliation restore with the unknown state.
-- [ ] **T4 (P1, human: ~1d / CC: ~30min)** User fields, migration, mutation, admin column.
+- [x] **T1 (P1, human: ~2d / CC: ~1h)** Container, entitlements, profile, `ConfioCloudBackup`.
+- [x] **T2 (P1, human: ~2d / CC: ~1h)** `cloudKitBackup.ts`, foreground trigger, acknowledgement retry.
+- [x] **T3 (P1, human: ~2d / CC: ~1h)** Reconciliation restore with the unknown state.
+- [x] **T4 (P1, human: ~1d / CC: ~30min)** User fields, migration, mutation, admin column.
 - [ ] **T5 (P1, human: ~1h / CC: ~10min)** Deploy schema to Production, confirm a TestFlight write.
-- [ ] **T6 (P2, human: ~2h / CC: ~15min)** Update `docs/security`: backup is readable by Apple, as Drive is by Google.
+- [x] **T6 (P2, human: ~2h / CC: ~15min)** Update `docs/security`: backup is readable by Apple, as Drive is by Google.
 
 Sequential implementation, no parallelization opportunity.
 

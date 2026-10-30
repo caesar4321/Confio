@@ -6168,7 +6168,7 @@ class ReportBackupStatus(graphene.Mutation):
     """
     Report the status of a wallet backup to the server for safety tracking.
     Called when:
-    1. iOS user logs in (Provider='icloud') [Implicit]
+    1. iOS user logs in (Provider='icloud') [Implicit, proves nothing; see ReportCloudKitBackup]
     2. Any user successfully uploads to Drive (Provider='google_drive') [Explicit]
     """
     success = graphene.Boolean()

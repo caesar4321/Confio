@@ -68,6 +68,10 @@ class Command(BaseCommand):
             self.stdout.write(f'  backup_provider      = {u.backup_provider}')
             self.stdout.write(f'  backup_verified_at   = {u.backup_verified_at}')
             self.stdout.write(f'  backup_device_name   = {u.backup_device_name}')
+            # The only proven iOS backup. backup_provider='icloud' is implicit.
+            self.stdout.write(f'  cloudkit_state       = {u.cloudkit_backup_state or "(no report)"}')
+            self.stdout.write(f'  cloudkit_verified_at = {u.cloudkit_backup_verified_at}')
+            self.stdout.write(f'  cloudkit_wallet_hash = {u.cloudkit_backup_wallet_hash[:12]}')
 
             # Firebase linked providers — the smoking gun for "did he ever
             # sign in with Apple?". If 'apple.com' is present, recovery via
@@ -111,7 +115,8 @@ class Command(BaseCommand):
             for acc in accounts:
                 self.stdout.write(
                     f'  account id={acc.id} type={acc.account_type} '
-                    f'index={acc.account_index} algorand_address={acc.algorand_address}'
+                    f'index={acc.account_index} algorand_address={acc.algorand_address} '
+                    f'bsc_address={acc.bsc_address}'
                 )
 
             # Verdict
@@ -128,8 +133,10 @@ class Command(BaseCommand):
                     '    Apple Sign-In is linked AND we have evidence of iOS use. '
                     'Easiest recovery: have the user tap "Continuar con Apple" on '
                     'an iPhone with the same iCloud account. The V2 master secret '
-                    'will be restored from iCloud Keychain (or Drive if enabled), '
-                    'and the derived address should match this account.'
+                    'will be restored from iCloud Keychain, then CloudKit (proven '
+                    'only if cloudkit_state above is proven and the hash matches '
+                    'the registered address), or Drive if enabled, and the derived '
+                    'address should match this account.'
                 ))
             elif has_apple:
                 self.stdout.write(self.style.WARNING(

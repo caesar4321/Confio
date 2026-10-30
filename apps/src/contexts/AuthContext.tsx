@@ -927,7 +927,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       void ensureCloudKitBackup();
     }).catch(() => { });
 
-    // On iOS, Implicitly Report Safety (iCloud Keychain is auto-synced)
+    // On iOS, the implicit report that setup depends on. It proves nothing: the
+    // Keychain item may never sync. ensureCloudKitBackup is the proven copy.
     if (Platform.OS === 'ios') {
       import('../services/secureDeterministicWallet').then(({ reportBackupStatus }) => {
         reportBackupStatus('icloud').catch(() => {});

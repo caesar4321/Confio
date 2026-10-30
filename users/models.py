@@ -161,6 +161,8 @@ class User(AbstractUser, SoftDeleteModel):
         choices=[('google_drive', 'Google Drive'), ('icloud', 'iCloud')],
         help_text="Provider where the wallet backup was last verified"
     )
+    # Not proof on iOS: the implicit 'icloud' report refreshes this at every
+    # login. cloudkit_backup_verified_at below is the proven one.
     backup_verified_at = models.DateTimeField(
         null=True, 
         blank=True, 
