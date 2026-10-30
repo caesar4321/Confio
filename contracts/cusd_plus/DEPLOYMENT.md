@@ -28,9 +28,12 @@ row in `queued`. All BSC presale buys settled.
    in `migratedPool`. Candidates came from production; dedupe them by checksum,
    as mixed casing double-counts a buyer. Output:
    `.kms-local/kms_evm_multisig/presale_snapshot_nonce21.json`.
-4. Deploy the replacement presale vault with `manage.py deploy_presale_vault`:
-   `initialSold` = old `totalSold`, `initialClaimed` = 0, `initialMigratedPool`
-   = old `migratedPool`, `initialLegacyPool` = the rest.
+4. **DONE 2026-10-30.** Replacement ConfioPresaleVault is
+   `0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4`
+   (tx `0x3c0daca7dad913cdf2837632555f9c47fad3c4bec998c4611e750d9bd385b339`):
+   `initialSold` = 20,577.071168313880, `initialClaimed` = 0,
+   `initialMigratedPool` = 5,116.95, `initialLegacyPool` =
+   15,460.121168313880. Not wired, funded or referenced by prod.
 5. Safe multisend on the new contracts:
    - `presale.creditLegacy(buyers, amounts)` until `legacyPool == 0`;
    - `presale.setConfioToken(v2)`;
