@@ -720,7 +720,7 @@ export const ProfileScreen = () => {
                   onPress={() => navigation.navigate('RampAddress')}
                 >
                   <Icon name="map-pin" size={18} color={colors.text.secondary} />
-                  <Text style={styles.cardOptionText}>Dirección para recargas y retiros</Text>
+                  <Text style={styles.cardOptionText}>Dirección y teléfono</Text>
                   <Icon name="chevron-right" size={16} color={colors.text.light} />
                 </TouchableOpacity>
               )}
