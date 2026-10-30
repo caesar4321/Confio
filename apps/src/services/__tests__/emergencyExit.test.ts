@@ -54,7 +54,7 @@ describe('bsc exit checkpoint', () => {
   const DEST = '0x' + '22'.repeat(20);
   const VAULT = '0x' + '33'.repeat(20);
   const CUSD = '0x' + '44'.repeat(20);
-  const CONFIO = '0xcceb3f6127fa9160a26a1b85857ca4c9d56b3fa8';
+  const CONFIO = '0xf5765933764562a51e179f6af2b19b7a3d506101';
   const ACCOUNT_KEY = 'personal_0';
   const ONE_TOKEN = '0x' + (10n ** 18n).toString(16).padStart(64, '0');
 

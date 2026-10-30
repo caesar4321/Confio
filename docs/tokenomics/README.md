@@ -1,6 +1,6 @@
 # $CONFIO Tokenomics
 
-**Authoritative English Edition · Version 3.2 · 5 October 2026**
+**Authoritative English Edition · Version 3.3 · 30 October 2026**
 
 > **Fixed supply. Continuous on-chain presale. Founder ownership disclosed plainly.**
 
@@ -32,7 +32,7 @@ $CONFIO is separate from USDT, cUSD, cUSD+, USDY, Ondo Stocks, and the operating
 ## 1. Design principles
 
 1. **One canonical token:** only the disclosed BNB Smart Chain contract is official.
-2. **Fixed cap:** 1,000,000,000 CONFIO was minted once. The token has no owner, minter, or pause function. Holders may burn their own tokens, so supply can fall but cannot rise.
+2. **Fixed cap:** 1,000,000,000 CONFIO was minted once. The token has no minter, global pause, or upgrade path. Holders may burn their own tokens, so supply can fall but cannot rise.
 3. **Continuous pricing:** the public presale has no phases, rounds, or manually selected price windows. Price follows cumulative tokens sold under an immutable piecewise-linear curve.
 4. **Founder ownership stated directly:** 893,600,000 CONFIO is the founder allocation. Treasury custody does not reclassify it as an undefined ecosystem reserve.
 5. **Claims are not circulation:** presale allocations and reward entitlements do not circulate until the applicable claim path is opened and tokens are claimed.
@@ -53,12 +53,15 @@ $CONFIO is separate from USDT, cUSD, cUSD+, USDY, Ondo Stocks, and the operating
 | Symbol | CONFIO |
 | Decimals | 18 |
 | Initial and maximum supply | 1,000,000,000 CONFIO |
-| Canonical contract | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| Vesting vaults | Founder [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) · co-builder [`0xF32ACF2933a51D89e4C6F3a22C432E43b518A129`](https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129) · Cultural Invitation Fund [`0x86c2051eb6e882888bd12417642C664D4A2fb4E7`](https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7) (see §9.1) |
-| Privileged token powers | No owner, no minter, no token-level pause |
+| Canonical contract | [`0xF5765933764562A51e179F6AF2b19b7a3d506101`](https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101) |
+| Vesting vaults | Founder [`0x873A68182A384DD84385C7B610Df5D2A3746D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code) · co-builder [`0x854b3692Bd3eaCfD6BCdd14C726326B883568396`](https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396) · Cultural Invitation Fund [`0x285963eD9D170C5762e0E3EA8efa027f9808DeE3`](https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3) (see §9.1) |
+| Privileged token powers | No minter, no global pause, no upgrade. The multi-party treasury can freeze an address and recover a frozen balance (see below). |
+| Superseded token | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8), replaced on 30 October 2026 before any transfer to holders. Not CONFIO. |
 | Extensions | ERC-2612 Permit and holder-initiated Burnable |
 
 The full one-billion-token supply was minted once to the project’s multi-party treasury at deployment. Distribution from that treasury is governed by the allocations and release conditions in this document; it is not new token issuance.
+
+**Incident controls.** For a serious security incident, such as stolen tokens, the multi-party treasury can freeze an address, which then can neither send nor receive CONFIO. A freeze always ends on a set date. After a public 7-day wait, the treasury can return a frozen balance to the party it was stolen from. This moves existing tokens and creates none, so total supply does not change. Each action is public on-chain. The treasury can give up these powers permanently. Holders rely on the treasury to use them only for such incidents; a compromised treasury could misuse them, and that is a material risk.
 
 The on-chain name uses the ASCII spelling **“Confio”** because explorers and wallets render accented token metadata inconsistently. The product and brand remain **“Confío.”**
 
@@ -130,7 +133,7 @@ These are simple price-times-supply references. They are not company valuations,
 
 ### 4.4 Presale contract and controls
 
-**Canonical presale contract:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code)
+**Canonical presale contract:** [`0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4`](https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code)
 
 The contract is non-upgradeable. Its owner cannot rewrite the curve or mint CONFIO. Its limited administrative powers include:
 
@@ -145,7 +148,7 @@ The contract is non-upgradeable. Its owner cannot rewrite the curve or mint CONF
 
 Purchases are paid in cUSD, Confío’s USDT-backed dollar on BSC, through sponsored EIP-7702 transaction batches, so buyers do not have to redeem cUSD or cUSD+ into USDT first. Confío’s backend applies product terms, geographic eligibility, sanctions controls, purchase limits, and account checks; the contract independently enforces price and allocation accounting.
 
-**Superseded presale contract:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+**Superseded presale contracts:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) (cUSD, 31 August to 30 October 2026, replaced when CONFIO was re-issued; paused, and any tokens left there are the superseded token) and [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
 
 From 31 July to 31 August 2026, the BSC presale ran on the superseded contract above, paid in BSC-USDT. On 31 August 2026 the multi-party treasury paused new purchases on it and deployed the current contract, which charges cUSD. The current contract was initialized at the exact cumulative sold position of its predecessor, so the curve price continued rather than reset. The three outstanding buyer allocations on the superseded contract, totaling 323.97608200352 CONFIO, were imported one-for-one through a fixed legacy pool that cannot be reversed, and the current contract was funded with CONFIO for every outstanding obligation, including the unassigned migration pool. The superseded contract accepts no new purchases and is not an official place to buy.
 
@@ -201,13 +204,13 @@ Exact qualifying events, reward amounts, limits, and program availability may ch
 
 ### 5.1 RewardVault claim model
 
-**Canonical RewardVault:** [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code)
+**Canonical RewardVault:** [`0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49`](https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code)
 
 Reward claims use a short-lived EIP-712 signature over the user’s cumulative earned amount. The contract pays only the difference between that signed cumulative amount and the amount already claimed, preventing replayed claims from paying twice.
 
 This is a **treasury-controlled reward pool**, not a trustless escrow. The multi-party treasury owner can rotate the signer, pause claims, and withdraw vault funds, including after claims have been unlocked. Users therefore rely on Confío’s database records, signing service, funding policy, and treasury to honor valid reward obligations. Short signature deadlines limit the life of stale or mistakenly high authorizations.
 
-The RewardVault is deployed and source-verified, while reward accrual and claims remain subject to operational feature controls. At DEX launch, Confío must fund an appropriate CONFIO tranche, activate the claim-signing and client-claim path, and open claims before users can receive tokens from this vault.
+The RewardVault is deployed and source-verified, while reward accrual and claims remain subject to operational feature controls. The vault holds the full 7,400,000 CONFIO allocation and limits total claims to a daily cap. At DEX launch, Confío must activate the claim-signing and client-claim path and open claims before users can receive tokens from this vault.
 
 ---
 
@@ -222,7 +225,7 @@ The intended release structure is:
 - 90-day linear vesting after the published activation event; and
 - public disclosure of the final methodology, eligible ledger, appeal process, and aggregate reconciliation before distribution.
 
-BSC status on 5 October 2026: the full 15,000,000 CONFIO is deposited in the Cultural Invitation Fund vesting vault ([`0x86c2051eb6e882888bd12417642C664D4A2fb4E7`](https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7)) and registered as one 90-day grant with the multi-party treasury as temporary beneficiary. The grant has not been started. Before activation it can be split into fully funded participant grants under the published ledger.
+BSC status on 30 October 2026: the full 15,000,000 CONFIO is deposited in the Cultural Invitation Fund vesting vault ([`0x285963eD9D170C5762e0E3EA8efa027f9808DeE3`](https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3)) and registered as one 90-day grant with the multi-party treasury as temporary beneficiary. The grant has not been started. Before activation it can be split into fully funded participant grants under the published ledger.
 
 This fund is separate from referral rewards. Referral rewards recognize qualifying product adoption; the Cultural Invitation Fund recognizes documented early cultural and community contribution.
 
@@ -232,7 +235,7 @@ This fund is separate from referral rewards. Referral rewards recognize qualifyi
 
 The creative co-builder allocation is 10,000,000 CONFIO, or 1.00% of the initial supply.
 
-Its intended release structure is 24-month linear vesting after activation, with no implication that vesting equals sale. On 5 October 2026 the full 10,000,000 CONFIO is deposited in its own vesting vault ([`0xF32ACF2933a51D89e4C6F3a22C432E43b518A129`](https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129)) and registered as a 24-month grant with the multi-party treasury as temporary beneficiary, but the grant has not been started. The beneficiary address, funding transaction, activation transaction, and claimed amount must be disclosed when the grant is activated.
+Its intended release structure is 24-month linear vesting after activation, with no implication that vesting equals sale. On 30 October 2026 the full 10,000,000 CONFIO is deposited in its own vesting vault ([`0x854b3692Bd3eaCfD6BCdd14C726326B883568396`](https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396)) and registered as a 24-month grant with the multi-party treasury as temporary beneficiary, but the grant has not been started. The beneficiary address, funding transaction, activation transaction, and claimed amount must be disclosed when the grant is activated.
 
 ---
 
@@ -246,7 +249,7 @@ The intended founder release structure is approximately 36 months of linear vest
 
 The canonical BSC vesting vault is deployed, non-upgradeable, source-verified, and owned by the multi-party treasury. It enforces full funding before a grant can be added, linear vesting after a separate start transaction, beneficiary self-claims, no revocation after start, and surplus-only treasury withdrawals. Before start, the treasury can revoke a grant and withdraw the tokens it frees, so a funded but unstarted grant is not an irrevocable lock. At any time, including after start, the treasury can move a grant intact (vested and claimed amounts included) to a new beneficiary address: a started grant cannot be revoked, but it is not protected against reassignment by the treasury.
 
-On 5 October 2026 the founder's 893,600,000 CONFIO is deposited in that vault ([`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code)) and registered as a 36-month grant with the multi-party treasury as temporary beneficiary. The grant has not been started, so its BSC vesting clock is not running and nothing has been claimed. Earlier locked allocations must be reconciled one-for-one during migration so that they cannot be released twice. When the BSC grant is activated, Confío must publish the beneficiary, grant amount, funding and start transactions, duration, vested amount, claimed amount, and corresponding legacy-lock reconciliation.
+On 30 October 2026 the founder's 893,600,000 CONFIO is deposited in that vault ([`0x873A68182A384DD84385C7B610Df5D2A3746D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code)) and registered as a 36-month grant with the multi-party treasury as temporary beneficiary. The grant has not been started, so its BSC vesting clock is not running and nothing has been claimed. Earlier locked allocations must be reconciled one-for-one during migration so that they cannot be released twice. When the BSC grant is activated, Confío must publish the beneficiary, grant amount, funding and start transactions, duration, vested amount, claimed amount, and corresponding legacy-lock reconciliation.
 
 The size of this allocation makes public wallet mapping, vesting-state disclosure, transfer transparency, and disciplined founder reporting more important than promotional statements about long-term alignment.
 
@@ -271,11 +274,11 @@ Presale and reward claims are tied to the official DEX launch, not to completion
 
 | Grant | Vault | CONFIO deposited | Duration | Started |
 |---|---|---:|---|---|
-| Founder — Julian Moon | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) | 893,600,000 | 36 months | No |
-| Creative co-builder | [`0xF32ACF2933a51D89e4C6F3a22C432E43b518A129`](https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129) | 10,000,000 | 24 months | No |
-| Cultural Invitation Fund | [`0x86c2051eb6e882888bd12417642C664D4A2fb4E7`](https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7) | 15,000,000 | 90 days | No |
+| Founder — Julian Moon | [`0x873A68182A384DD84385C7B610Df5D2A3746D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code) | 893,600,000 | 36 months | No |
+| Creative co-builder | [`0x854b3692Bd3eaCfD6BCdd14C726326B883568396`](https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396) | 10,000,000 | 24 months | No |
+| Cultural Invitation Fund | [`0x285963eD9D170C5762e0E3EA8efa027f9808DeE3`](https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3) | 15,000,000 | 90 days | No |
 
-Status read from the contracts on 5 October 2026: each vault holds exactly its grant (`totalOwed` equals the balance), each grant is registered with the multi-party treasury as temporary beneficiary, and none has a start time or any claim. Funding and registration do not start a clock; only each grant's separately disclosed start transaction does. Until then the treasury can revoke a grant; it can reassign a grant to a new beneficiary at any time.
+Status read from the contracts on 30 October 2026: each vault holds exactly its grant (`totalOwed` equals the balance), each grant is registered with the multi-party treasury as temporary beneficiary, and none has a start time or any claim. Funding and registration do not start a clock; only each grant's separately disclosed start transaction does. Until then the treasury can revoke a grant; it can reassign a grant to a new beneficiary at any time.
 
 ### 9.2 Circulating-supply definition
 
@@ -369,22 +372,22 @@ The deployed smart contracts and definitive transaction records control on-chain
 
 ## 14. Primary sources
 
-1. Canonical ConfioToken on BscScan: 1,000,000,000 initial supply; no token owner, minter, or pause; ERC-2612 Permit and holder burn.
-   https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8
+1. Canonical ConfioToken on BscScan: 1,000,000,000 initial supply; no minter, global pause, or upgrade path; address freeze and delayed recovery under the treasury; ERC-2612 Permit and holder burn.
+   https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101
 
 2. Canonical ConfioPresaleVault on BscScan: immutable curve, cUSD purchases, purchase accounting, backing checks, imported predecessor allocations, legacy-credit pool, and claim controls. The superseded, paused vault is 0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c.
-   https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code
+   https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code
 
 3. Canonical ConfioRewardVault on BscScan: cumulative EIP-712 claims, one-way DEX unlock signal, signer rotation, pause, and treasury withdrawal controls.
-   https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code
+   https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code
 
 4. Confío public repository, BSC token, presale and reward contracts, tests, and deployment record.
    https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus
 
 5. ConfioVestingVault instances on BscScan (founder, co-builder, Cultural Invitation Fund): fully funded grant creation, separate start, linear vesting, beneficiary claims, pre-start revocation, beneficiary migration, and surplus-only treasury withdrawal.
-   https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code
-   https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129
-   https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7
+   https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code
+   https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396
+   https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3
 
 6. Confío public repository, current on-chain curve-price reader and presale statistics.
    https://github.com/caesar4321/Confio/blob/main/presale/price_utils.py

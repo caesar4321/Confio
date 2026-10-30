@@ -1227,7 +1227,7 @@ class PublicDocumentTests(TestCase):
         self.assertIn('read_public_document', {s['name'] for s in belt.specs()})
         tok = belt.call('read_public_document', {'document': 'tokenomics'})
         self.assertIn('893,600,000', tok['texto'])
-        self.assertIn('0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8', tok['texto'])
+        self.assertIn('0xF5765933764562A51e179F6AF2b19b7a3d506101', tok['texto'])
         self.assertIn('nota', belt.call('read_public_document', {'document': 'tokenomics'}))  # once per turn
         from .voice import _realtime_tools
         self.assertNotIn('read_public_document', {tool['name'] for tool in _realtime_tools(belt)})

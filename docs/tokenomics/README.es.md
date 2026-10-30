@@ -1,12 +1,12 @@
 # Tokenomics de $CONFIO
 
-**Traducción al español · Versión 3.2 · 5 de octubre de 2026**
+**Traducción al español · Versión 3.3 · 30 de octubre de 2026**
 
 > **Oferta fija. Preventa continua on-chain. Propiedad del fundador divulgada con claridad.**
 
 Este documento describe el token $CONFIO canónico en BNB Smart Chain, su oferta fija y asignación, la curva continua de preventa, la distribución de recompensas, los compromisos de vesting, los controles de gobernanza y los riesgos materiales.
 
-**[La edición en inglés](README.md) es la única fuente oficial y autoritativa.** Las versiones en español y [coreano](README.ko.md) son traducciones de cortesía y pueden quedar temporalmente desactualizadas. Si existe cualquier diferencia, prevalece la edición en inglés. Esta traducción se sincronizó con la versión 3.2 en inglés el 5 de octubre de 2026.
+**[La edición en inglés](README.md) es la única fuente oficial y autoritativa.** Las versiones en español y [coreano](README.ko.md) son traducciones de cortesía y pueden quedar temporalmente desactualizadas. Si existe cualquier diferencia, prevalece la edición en inglés. Esta traducción se sincronizó con la versión 3.2 en inglés el 30 de octubre de 2026.
 
 $CONFIO es independiente de USDT, cUSD, cUSD+, USDY, Ondo Stocks y de la empresa operadora. No respalda los saldos en dólares de los usuarios y, por sí solo, no representa acciones, deuda, participación en ingresos ni un derecho sobre los activos o utilidades de Confío.
 
@@ -32,7 +32,7 @@ $CONFIO es independiente de USDT, cUSD, cUSD+, USDY, Ondo Stocks y de la empresa
 ## 1. Principios de diseño
 
 1. **Un único token canónico:** solo el contrato divulgado en BNB Smart Chain es oficial.
-2. **Tope fijo:** se acuñaron 1,000,000,000 CONFIO una sola vez. El token no tiene propietario, minter ni función de pausa. Cada titular puede quemar sus propios tokens, por lo que la oferta puede disminuir, pero no aumentar.
+2. **Tope fijo:** se acuñaron 1,000,000,000 CONFIO una sola vez. El token no tiene minter, pausa global ni vía de actualización. Cada titular puede quemar sus propios tokens, por lo que la oferta puede disminuir, pero no aumentar.
 3. **Precio continuo:** la preventa pública no tiene fases, rondas ni ventanas de precio seleccionadas manualmente. El precio depende de los tokens vendidos acumulados bajo una curva lineal por tramos e inmutable.
 4. **Propiedad del fundador declarada directamente:** 893,600,000 CONFIO corresponden a la asignación del fundador. Que estén bajo custodia de tesorería no los convierte en una reserva de ecosistema indefinida.
 5. **Un derecho de reclamo no es circulación:** las asignaciones de preventa y los derechos de recompensa no circulan hasta que se habilita el mecanismo correspondiente y los tokens son reclamados.
@@ -53,12 +53,15 @@ $CONFIO es independiente de USDT, cUSD, cUSD+, USDY, Ondo Stocks y de la empresa
 | Símbolo | CONFIO |
 | Decimales | 18 |
 | Oferta inicial y máxima | 1,000,000,000 CONFIO |
-| Contrato canónico | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| Vaults de vesting | Fundador [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) · co-builder [`0xF32ACF2933a51D89e4C6F3a22C432E43b518A129`](https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129) · Fondo de Invitación Cultural [`0x86c2051eb6e882888bd12417642C664D4A2fb4E7`](https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7) (ver §9.1) |
-| Poderes privilegiados del token | Sin propietario, sin minter y sin pausa a nivel del token |
+| Contrato canónico | [`0xF5765933764562A51e179F6AF2b19b7a3d506101`](https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101) |
+| Vaults de vesting | Fundador [`0x873A68182A384DD84385C7B610Df5D2A3746D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code) · co-builder [`0x854b3692Bd3eaCfD6BCdd14C726326B883568396`](https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396) · Fondo de Invitación Cultural [`0x285963eD9D170C5762e0E3EA8efa027f9808DeE3`](https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3) (ver §9.1) |
+| Poderes privilegiados del token | Sin minter, sin pausa global y sin actualización. La tesorería multipartita puede congelar una dirección y recuperar un saldo congelado (ver abajo). |
+| Token reemplazado | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8), reemplazado el 30 de octubre de 2026 antes de cualquier entrega a titulares. No es CONFIO. |
 | Extensiones | ERC-2612 Permit y Burnable iniciado por el titular |
 
 La oferta completa de mil millones de tokens se acuñó una sola vez a la tesorería multipartita del proyecto durante el despliegue. La distribución desde esa tesorería se rige por las asignaciones y condiciones de liberación de este documento; no constituye una nueva emisión.
+
+**Controles ante incidentes.** Ante un incidente de seguridad grave, como un robo de tokens, la tesorería multipartita puede congelar una dirección, que entonces no puede enviar ni recibir CONFIO. Una congelación siempre termina en una fecha fijada. Tras una espera pública de 7 días, la tesorería puede devolver un saldo congelado a quien se lo robaron. Esto mueve tokens existentes y no crea ninguno, por lo que la oferta total no cambia. Cada acción es pública en la cadena. La tesorería puede renunciar a estos poderes de forma permanente. Los titulares confían en que la tesorería los usará solo en esos incidentes; una tesorería comprometida podría abusar de ellos, y ese es un riesgo material.
 
 El nombre on-chain usa la forma ASCII **“Confio”** porque los exploradores y wallets muestran metadatos acentuados de manera inconsistente. El producto y la marca siguen siendo **“Confío.”**
 
@@ -130,7 +133,7 @@ Estas son referencias simples de precio multiplicado por oferta. No son valoraci
 
 ### 4.4 Contrato y controles de la preventa
 
-**Contrato canónico de preventa:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code)
+**Contrato canónico de preventa:** [`0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4`](https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code)
 
 El contrato no es actualizable. Su propietario no puede cambiar la curva ni acuñar CONFIO. Sus poderes administrativos limitados incluyen:
 
@@ -145,7 +148,7 @@ El contrato no es actualizable. Su propietario no puede cambiar la curva ni acu�
 
 Las compras se pagan en cUSD, el dólar de Confío en BSC respaldado por USDT, mediante lotes patrocinados de transacciones EIP-7702, sin que el comprador tenga que canjear primero cUSD o cUSD+ por USDT. El backend aplica términos, elegibilidad geográfica, controles de sanciones, límites de compra y verificaciones de cuenta; el contrato aplica independientemente el precio y la contabilidad de asignaciones.
 
-**Contrato de preventa reemplazado:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+**Contratos de preventa reemplazados:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) (cUSD, del 31 de agosto al 30 de octubre de 2026, reemplazado al reemitir CONFIO; pausado, y los tokens que queden allí son del token reemplazado) y [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
 
 Del 31 de julio al 31 de agosto de 2026, la preventa en BSC funcionó en el contrato reemplazado, pagada en BSC-USDT. El 31 de agosto de 2026 la tesorería multiparte pausó las nuevas compras en ese contrato y desplegó el actual, que cobra en cUSD. El contrato actual se inicializó en la posición acumulada exacta de su predecesor, por lo que el precio de la curva continuó sin reiniciarse. Las tres asignaciones pendientes del contrato reemplazado, por un total de 323.97608200352 CONFIO, se importaron una por una mediante un pool fijo e irreversible, y el contrato actual se fondeó con CONFIO para todas las obligaciones pendientes, incluido el pool de migración no asignado. El contrato reemplazado no acepta nuevas compras y no es un lugar oficial de compra.
 
@@ -201,13 +204,13 @@ Los eventos, montos, límites y disponibilidad pueden cambiar de forma prospecti
 
 ### 5.1 Modelo de reclamo del RewardVault
 
-**RewardVault canónico:** [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code)
+**RewardVault canónico:** [`0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49`](https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code)
 
 Los reclamos usan una firma EIP-712 de corta vigencia sobre el monto acumulado ganado por el usuario. El contrato paga únicamente la diferencia entre ese monto firmado y lo ya reclamado, evitando que una firma repetida pague dos veces.
 
 Este es un **pool de recompensas controlado por tesorería**, no un escrow trustless. La tesorería multipartita puede rotar al firmante, pausar reclamos y retirar fondos, incluso después del desbloqueo. Por ello, los usuarios dependen de los registros de Confío, el servicio de firma, la política de fondeo y la tesorería para honrar obligaciones válidas. Los plazos cortos limitan la vigencia de autorizaciones antiguas o incorrectamente altas.
 
-El RewardVault está desplegado y su código fuente está verificado, mientras la acumulación y los reclamos siguen sujetos a controles operativos. Al lanzar el DEX, Confío debe fondear un tramo adecuado, activar el servicio de firma y el flujo de reclamo del cliente, y abrir los reclamos antes de que los usuarios reciban tokens del vault.
+El RewardVault está desplegado y su código fuente está verificado, mientras la acumulación y los reclamos siguen sujetos a controles operativos. El vault mantiene la asignación completa de 7,400,000 CONFIO y limita los reclamos totales con un tope diario. Al lanzar el DEX, Confío debe activar el servicio de firma y el flujo de reclamo del cliente, y abrir los reclamos antes de que los usuarios reciban tokens del vault.
 
 ---
 
@@ -222,7 +225,7 @@ La estructura prevista es:
 - vesting lineal de 90 días después del evento de activación publicado; y
 - publicación de la metodología final, registro de participantes, proceso de apelación y conciliación agregada antes de distribuir.
 
-Estado en BSC al 5 de octubre de 2026: los 15,000,000 CONFIO están depositados en el vault de vesting del Fondo de Invitación Cultural ([`0x86c2051eb6e882888bd12417642C664D4A2fb4E7`](https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7)) y registrados como una sola asignación de 90 días, con la tesorería multipartita como beneficiaria temporal. La asignación no ha sido iniciada. Antes de activarse puede dividirse en asignaciones individuales totalmente fondeadas según el registro publicado.
+Estado en BSC al 30 de octubre de 2026: los 15,000,000 CONFIO están depositados en el vault de vesting del Fondo de Invitación Cultural ([`0x285963eD9D170C5762e0E3EA8efa027f9808DeE3`](https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3)) y registrados como una sola asignación de 90 días, con la tesorería multipartita como beneficiaria temporal. La asignación no ha sido iniciada. Antes de activarse puede dividirse en asignaciones individuales totalmente fondeadas según el registro publicado.
 
 Este fondo es independiente de las recompensas por referidos. Las recompensas reconocen adopción del producto; el Fondo reconoce contribución cultural y comunitaria temprana documentada.
 
@@ -232,7 +235,7 @@ Este fondo es independiente de las recompensas por referidos. Las recompensas re
 
 La asignación de la co-builder creativa es de 10,000,000 CONFIO, o 1.00% de la oferta inicial.
 
-Su liberación prevista es vesting lineal de 24 meses después de la activación; vesting no equivale a venta. Al 5 de octubre de 2026, los 10,000,000 CONFIO están depositados en su propio vault de vesting ([`0xF32ACF2933a51D89e4C6F3a22C432E43b518A129`](https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129)) y registrados como una asignación de 24 meses, con la tesorería multipartita como beneficiaria temporal, pero la asignación no ha sido iniciada. Al activarse deben publicarse beneficiaria, transacción de fondeo, transacción de inicio y monto reclamado.
+Su liberación prevista es vesting lineal de 24 meses después de la activación; vesting no equivale a venta. Al 30 de octubre de 2026, los 10,000,000 CONFIO están depositados en su propio vault de vesting ([`0x854b3692Bd3eaCfD6BCdd14C726326B883568396`](https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396)) y registrados como una asignación de 24 meses, con la tesorería multipartita como beneficiaria temporal, pero la asignación no ha sido iniciada. Al activarse deben publicarse beneficiaria, transacción de fondeo, transacción de inicio y monto reclamado.
 
 ---
 
@@ -246,7 +249,7 @@ La estructura prevista es aproximadamente 36 meses de vesting lineal después de
 
 El vault BSC canónico está desplegado, no es actualizable, tiene código verificado y pertenece a la tesorería multipartita. Exige fondeo completo antes de agregar una asignación, vesting lineal después de una transacción de inicio separada, reclamo por el beneficiario, ninguna revocación después del inicio y retiros de tesorería limitados al excedente. Antes del inicio, la tesorería puede revocar una asignación y retirar los tokens que libera; por eso, una asignación fondeada pero no iniciada no es un bloqueo irrevocable. En cualquier momento, también después del inicio, la tesorería puede trasladar una asignación completa (con lo ya liberado y reclamado) a una nueva dirección beneficiaria: una asignación iniciada no puede revocarse, pero no está protegida contra una reasignación por parte de la tesorería.
 
-Al 5 de octubre de 2026, los 893,600,000 CONFIO del fundador están depositados en ese vault ([`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code)) y registrados como una asignación de 36 meses, con la tesorería multipartita como beneficiaria temporal. La asignación no ha sido iniciada, por lo que su reloj de vesting BSC no está corriendo y no se ha reclamado nada. Las asignaciones bloqueadas anteriores deben conciliarse uno a uno durante la migración para impedir una doble liberación. Cuando se active, Confío deberá publicar beneficiario, monto, transacciones de fondeo e inicio, duración, monto vested, monto reclamado y conciliación del bloqueo anterior.
+Al 30 de octubre de 2026, los 893,600,000 CONFIO del fundador están depositados en ese vault ([`0x873A68182A384DD84385C7B610Df5D2A3746D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code)) y registrados como una asignación de 36 meses, con la tesorería multipartita como beneficiaria temporal. La asignación no ha sido iniciada, por lo que su reloj de vesting BSC no está corriendo y no se ha reclamado nada. Las asignaciones bloqueadas anteriores deben conciliarse uno a uno durante la migración para impedir una doble liberación. Cuando se active, Confío deberá publicar beneficiario, monto, transacciones de fondeo e inicio, duración, monto vested, monto reclamado y conciliación del bloqueo anterior.
 
 El tamaño de esta asignación hace que el mapeo público de wallets, la divulgación del estado de vesting, la transparencia de transferencias y los reportes disciplinados del fundador sean más importantes que declaraciones promocionales sobre alineación a largo plazo.
 
@@ -271,11 +274,11 @@ Los reclamos de preventa y recompensas están vinculados al lanzamiento oficial 
 
 | Asignación | Vault | CONFIO depositados | Duración | Iniciada |
 |---|---|---:|---|---|
-| Fundador — Julian Moon | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) | 893,600,000 | 36 meses | No |
-| Co-builder creativa | [`0xF32ACF2933a51D89e4C6F3a22C432E43b518A129`](https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129) | 10,000,000 | 24 meses | No |
-| Fondo de Invitación Cultural | [`0x86c2051eb6e882888bd12417642C664D4A2fb4E7`](https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7) | 15,000,000 | 90 días | No |
+| Fundador — Julian Moon | [`0x873A68182A384DD84385C7B610Df5D2A3746D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code) | 893,600,000 | 36 meses | No |
+| Co-builder creativa | [`0x854b3692Bd3eaCfD6BCdd14C726326B883568396`](https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396) | 10,000,000 | 24 meses | No |
+| Fondo de Invitación Cultural | [`0x285963eD9D170C5762e0E3EA8efa027f9808DeE3`](https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3) | 15,000,000 | 90 días | No |
 
-Estado leído de los contratos el 5 de octubre de 2026: cada vault contiene exactamente su asignación (`totalOwed` igual al saldo), cada asignación está registrada con la tesorería multipartita como beneficiaria temporal y ninguna tiene fecha de inicio ni reclamos. Fondear y registrar no inician un reloj; solo lo hace la transacción de inicio de cada asignación, divulgada por separado. Hasta entonces la tesorería puede revocar una asignación; puede reasignarla a un nuevo beneficiario en cualquier momento.
+Estado leído de los contratos el 30 de octubre de 2026: cada vault contiene exactamente su asignación (`totalOwed` igual al saldo), cada asignación está registrada con la tesorería multipartita como beneficiaria temporal y ninguna tiene fecha de inicio ni reclamos. Fondear y registrar no inician un reloj; solo lo hace la transacción de inicio de cada asignación, divulgada por separado. Hasta entonces la tesorería puede revocar una asignación; puede reasignarla a un nuevo beneficiario en cualquier momento.
 
 ### 9.2 Definición de oferta circulante
 
@@ -369,22 +372,22 @@ Los contratos desplegados y registros definitivos controlan el comportamiento on
 
 ## 14. Fuentes primarias
 
-1. ConfioToken canónico en BscScan: oferta inicial de 1,000,000,000; sin propietario, minter ni pausa; ERC-2612 Permit y quema por el titular.
-   https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8
+1. ConfioToken canónico en BscScan: oferta inicial de 1,000,000,000; sin minter, pausa global ni actualización; congelación de direcciones y recuperación diferida a cargo de la tesorería; ERC-2612 Permit y quema por el titular.
+   https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101
 
 2. ConfioPresaleVault canónico: curva inmutable, compras en cUSD, contabilidad, respaldo, asignaciones importadas del predecesor, pool anterior y controles de reclamo. El vault reemplazado y pausado es 0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c.
-   https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code
+   https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code
 
 3. ConfioRewardVault canónico: reclamos EIP-712 acumulados, señal irreversible de desbloqueo DEX, rotación de firmante, pausa y retiros de tesorería.
-   https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code
+   https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code
 
 4. Repositorio público de Confío: contratos BSC del token, preventa y recompensas, pruebas y registro de despliegues.
    https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus
 
 5. Instancias de ConfioVestingVault (fundador, co-builder, Fondo de Invitación Cultural): creación de asignaciones totalmente fondeadas, inicio separado, vesting lineal, reclamos, revocación previa al inicio, cambio de beneficiario y retiro solo de excedente.
-   https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code
-   https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129
-   https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7
+   https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code
+   https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396
+   https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3
 
 6. Repositorio público: lector del precio vivo de la curva y estadísticas de preventa.
    https://github.com/caesar4321/Confio/blob/main/presale/price_utils.py

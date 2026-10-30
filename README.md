@@ -61,10 +61,10 @@ The product followed Ondo's production infrastructure onto BNB Smart Chain: USDY
 | cUSD vault (UUPS proxy) | [`0x6101cC37…8d543F`](https://bscscan.com/address/0x6101cC370635cF2c7f2725EaB010aC407A8d543F#code) |
 | cUSD+ vault | [`0x3C29417e…63Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
 | Ondo Stocks router (UUPS proxy) | [`0x40c8e134…29c3`](https://bscscan.com/address/0x40c8e134BCAf44EEf9e7D184846F36c9862329c3#code) |
-| $CONFIO token | [`0xCcEb3F61…B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| $CONFIO presale vault | [`0x8c3A1fff…aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) |
-| $CONFIO reward vault | [`0x812b8d86…De730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
-| $CONFIO vesting vault | [`0xb873e4db…0bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
+| $CONFIO token | [`0xF5765933…06101`](https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101) |
+| $CONFIO presale vault | [`0xB13Cda84…F18b4`](https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code) |
+| $CONFIO reward vault | [`0x3E022ADD…6AA49`](https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code) |
+| $CONFIO vesting vault | [`0x873A6818…6D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code) |
 | Invitation escrow | [`0xe6c49CcE…8AcDb59`](https://bscscan.com/address/0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59#code) |
 | Merchant payments | [`0x942BF5F3…5B830bA`](https://bscscan.com/address/0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA#code) |
 | Payroll vault | [`0x851e1a56•692027`](https://bscscan.com/address/0x851e1a56De5c0ADBB75e904B2E7325e132692027#code) |

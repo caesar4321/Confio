@@ -38,7 +38,7 @@
 
 
 ## $CONFIO
-- $CONFIO es el token de Confío en BNB Smart Chain, con suministro fijo de 1.000.000.000 (mil millones): no se pueden crear más. El único contrato oficial es 0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8; cualquier otro es falso.
+- $CONFIO es el token de Confío en BNB Smart Chain, con suministro fijo de 1.000.000.000 (mil millones): no se pueden crear más. El único contrato oficial es 0xF5765933764562A51e179F6AF2b19b7a3d506101; cualquier otro es falso. Ante un incidente de seguridad grave, como un robo, la tesorería multifirma puede congelar una dirección y, tras una espera pública de 7 días, devolver los tokens a quien se los robaron; esto no crea tokens nuevos.
 - Distribución: preventa pública 74 millones (7,4%); recompensas por referidos y uso 7,4 millones (0,74%); Fondo de Invitación Cultural 15 millones (1,5%, se libera en 90 días); co-creador creativo 10 millones (1%, en 24 meses); fundador Julian Moon 893,6 millones (89,36%, en 36 meses). Las liberaciones son lineales desde su activación.
 - Preventa: precio continuo en dólares que sube de US$0,20 a US$1,30 según cuántos tokens se han vendido (sin fases), y se paga con cUSD. Lo comprado queda bloqueado hasta el lanzamiento oficial en un exchange descentralizado (DEX); antes no se puede reclamar ni transferir.
 - La preventa no está disponible para residentes de EE.UU. ni para ciudadanos o residentes de Corea del Sur.

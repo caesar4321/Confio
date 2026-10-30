@@ -4,7 +4,7 @@
 
 Confío is a fully open-source, non-custodial financial application built for Latin America’s dollar reality. It combines local fiat access, yield-bearing dollars, transfers, payments, payroll, and eligible access to Ondo Stocks in a familiar mobile experience without requiring users to understand crypto.
 
-**Global reference · Version 4.3 · August 2026**<br>
+**Global reference · Version 4.4 · October 2026**<br>
 Julian Moon · Founder & CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
@@ -125,10 +125,10 @@ All contracts listed below are live on BNB Smart Chain mainnet and source-verifi
 | cUSD+ vault proxy | [`0x3C29417eb4314155e63d4C7D4507852b87763Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
 | Ondo Stocks router (UUPS proxy) | [`0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`](https://bscscan.com/address/0x40c8e134BCAf44EEf9e7D184846F36c9862329c3#code) |
 | Sponsored-batch delegate | [`0xC06BD197b34a587026615C6AEd21301F5E99bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
-| $CONFIO token | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| $CONFIO presale vault | [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) |
-| $CONFIO reward vault | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
-| $CONFIO vesting vault | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
+| $CONFIO token | [`0xF5765933764562A51e179F6AF2b19b7a3d506101`](https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101) |
+| $CONFIO presale vault | [`0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4`](https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code) |
+| $CONFIO reward vault | [`0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49`](https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code) |
+| $CONFIO vesting vault | [`0x873A68182A384DD84385C7B610Df5D2A3746D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code) |
 | Invitation escrow | [`0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59`](https://bscscan.com/address/0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59#code) |
 | Merchant-payment contract | [`0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA`](https://bscscan.com/address/0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA#code) |
 | Payroll vault | [`0x851e1a56De5c0ADBB75e904B2E7325e132692027`](https://bscscan.com/address/0x851e1a56De5c0ADBB75e904B2E7325e132692027#code) |
@@ -246,9 +246,9 @@ $CONFIO is the community and ecosystem token of Confío. It is not a stablecoin,
 
 ### 7.1 Fixed-supply token
 
-The current BNB Smart Chain token contract has a fixed initial supply of 1,000,000,000 CONFIO. The contract has no owner, no post-deployment mint function, and no pause function; the complete initial supply was created once at deployment to the multi-party treasury. ERC-20 permit and voluntary burn are the only extensions, so total supply can decrease but cannot increase. <sup>[17]</sup>
+The current BNB Smart Chain token contract has a fixed initial supply of 1,000,000,000 CONFIO. The contract has no post-deployment mint function, no global pause, and no upgrade path; the complete initial supply was created once at deployment to the multi-party treasury. Total supply can decrease through voluntary burn but cannot increase. The multi-party treasury can freeze an address during a serious security incident and, after a public 7-day wait, return a frozen balance to the party it was stolen from; this creates no tokens. <sup>[17]</sup>
 
-**Canonical BSC contract:** [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8)
+**Canonical BSC contract:** [`0xF5765933764562A51e179F6AF2b19b7a3d506101`](https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101)
 
 The on-chain token name is deliberately the ASCII **“Confio”**, while the accented **“Confío”** remains the product and brand name. This avoids inconsistent HTML escaping and rendering of non-ASCII metadata across explorers, wallets, and decentralized exchanges. Readers should use only the canonical address above. <sup>[17]</sup>
 
@@ -268,7 +268,7 @@ The curve segments have no administrative repricing function. The contract charg
 
 The replacement contract was initialized with the exact pre-deployment purchase history, so migrated purchases continue to push the same cumulative curve rather than resetting the price. It is funded for the migrated claim obligation; the superseded vault is paused.
 
-**Presale contract:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code)
+**Presale contract:** [`0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4`](https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code)
 
 ### 7.3 Rewards and DEX-locked claims
 
@@ -276,13 +276,13 @@ Confío’s reward system separates accrual from distribution. When reward accru
 
 At claim time, the backend signer issues a short-lived EIP-712 authorization for the user’s cumulative earned amount. The RewardVault subtracts the amount already claimed and pays only the difference, making the cumulative total the replay guard. Short deadlines limit the life of a signature if an entitlement must be corrected downward.
 
-Claims are locked until the DEX launch. Before claims open, the multi-party treasury must fund a CONFIO tranche, the claim-signer and client claim flow must be active, and governance must call the one-way `unlockClaims()` function. User claims can then be submitted through Confío’s sponsored-transaction flow.
+Claims are locked until the DEX launch. Before claims open, the claim-signer and client claim flow must be active, and governance must call the one-way `unlockClaims()` function. User claims can then be submitted through Confío’s sponsored-transaction flow.
 
 > **Treasury-controlled reward pool**
 >
-> The RewardVault is not a trustless escrow. Reward entitlements remain discretionary treasury obligations: its governance owner can rotate the signer, pause claims, and withdraw funds, including after the one-way DEX unlock. Users therefore rely on the treasury to reconcile database obligations, fund the pool, and keep valid claims available. The signer’s exposure is limited operationally by short signature deadlines and by funding the vault in working tranches, but these controls do not remove treasury trust.
+> The RewardVault is not a trustless escrow. Reward entitlements remain discretionary treasury obligations: its governance owner can rotate the signer, pause claims, and withdraw funds, including after the one-way DEX unlock. Users therefore rely on the treasury to reconcile database obligations, fund the pool, and keep valid claims available. The signer’s exposure is limited operationally by short signature deadlines and by a daily cap on total claims, but these controls do not remove treasury trust.
 
-**Canonical RewardVault:** [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code)
+**Canonical RewardVault:** [`0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49`](https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code)
 
 ## 8. Wallet, security, and open-source architecture
 
@@ -406,7 +406,7 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 | Fiat rails | Koywe and Guardarian are live; additional providers are named only after capabilities are verified. | Coverage, payment methods, banking dependencies, pricing, and provider availability can change. |
 | Regulatory and financial crime | Government-document/live-selfie checks, residential-address verification where required, provider screening, product geofencing, and legal review. | Verification does not eliminate fraud or illicit-finance risk; providers or authorities may reject, delay, report, or restrict activity. |
 | Token concentration and presale | Fixed supply, public contracts, immutable presale curve, separate tokenomics, and on-chain treasury visibility. | Concentrated founder ownership, vesting, treasury transfers, market liquidity, and token-price volatility remain material risks. |
-| Reward claims | Cumulative EIP-712 claims, replay accounting, short signature deadlines, DEX lock, public contract, and working-tranche funding model. | The treasury can rotate the signer, pause claims, withdraw the pool, or decline to fund database obligations; rewards are not trustless claims on an immutable reserve. |
+| Reward claims | Cumulative EIP-712 claims, replay accounting, short signature deadlines, DEX lock, public contract, and a daily cap on total claims. | The treasury can rotate the signer, pause claims, withdraw the pool, or decline to fund database obligations; rewards are not trustless claims on an immutable reserve. |
 | Metrics and concentration | Definitions, snapshot dates, and unaudited status are disclosed. | Early usage or balances may be concentrated and may not predict broad adoption. |
 
 ## 13. Roadmap and current status
@@ -419,7 +419,7 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 | Merchant payments | Replacement cUSD+/cUSD payment contract with the separate 0.9% Pay fee deployed, source-verified, and wired into production. | Expand staged user exposure and measure merchant settlement, repeat usage, and fee accrual. |
 | Payroll | Replacement asset-separated cUSD+/cUSD escrow, delegate-signed payouts, backend/client flows, and payroll vault deployed and source-verified. | Pilot with businesses, expand staged user exposure, and verify escrow and payout reliability at meaningful volume. |
 | $CONFIO | Fixed-supply token and cUSD-funded replacement continuous-curve presale vault deployed, source-verified, historical purchases imported, claim obligation funded, and wired into production on BSC. | Keep tokenomics disclosures synchronized with on-chain state and open claims only under the disclosed controls. |
-| $CONFIO rewards | Canonical RewardVault deployed, source-verified, wired to the canonical token, and locked until DEX launch; database-only accrual uses the live presale-curve price when enabled. | Enable database-only accrual when operationally ready; at DEX time, fund a working tranche, activate the short-deadline EIP-712 signer and sponsored client claim flow, and unlock claims. |
+| $CONFIO rewards | Canonical RewardVault deployed, source-verified, wired to the canonical token, and locked until DEX launch; database-only accrual uses the live presale-curve price when enabled. | Enable database-only accrual when operationally ready; at DEX time, activate the short-deadline EIP-712 signer and sponsored client claim flow, and unlock claims. |
 | Ondo Stocks | Dedicated UUPS router proxy deployed and source-verified at `0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`; app, backend, attestation, sponsored execution, direct-to-user delivery, sell-to-savings flow, and uniform 0.9% perimeter fee are implemented. | Complete and maintain the provider, sponsor, rehearsal, canary, eligibility, and runtime activation gates before expanding live trading. |
 | Fiat access | Koywe live across seven LATAM markets; Guardarian live for SEPA and card-based access. | Add verified providers and fallback routes without creating hidden dependencies. |
 | Distribution | 8,004 phone-complete users; 177 Didit-verified users; approximately 480,000 founder audience; effectively zero paid-media spend to date. | Convert distribution into funded users, retained balances, repeat transactions, referrals, and country-level cohorts. |

@@ -62,15 +62,15 @@ const FriendlyAssets = () => {
         {
           label: t('Contrato', 'Contract', '컨트랙트'),
           value: (
-            <a href="https://bscscan.com/address/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8#code" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
-              0xCcEb…3fa8
+            <a href="https://bscscan.com/address/0xF5765933764562A51e179F6AF2b19b7a3d506101#code" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+              0xF576…6101
             </a>
           )
         },
         {
           label: t('Explorador', 'Explorer', '탐색기'),
           value: (
-            <a href="https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+            <a href="https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
               {t('Ver en BscScan', 'View on BscScan', 'BscScan에서 보기')}
             </a>
           )

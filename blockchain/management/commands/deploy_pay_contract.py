@@ -12,7 +12,7 @@ Constructor: (cusdPlus, cusd, usdt, confio, signer, owner)
   - usdt      = BSC USDT 0x55d3…7955 — retained only so already-signed
                 legacy payment batches can settle during migration; new
                 authorizations never use raw USDT after fee activation
-  - confio    = BSC_CONFIO_TOKEN_ADDRESS (re-issued BEP-20 0xCcEb…3fa8) —
+  - confio    = BSC_CONFIO_TOKEN_ADDRESS (re-issued BEP-20 0xF576…6101) —
                 the second charge denomination (2026-08-01 ChargeScreen
                 migration; v2 could not settle it, "token not allowed")
   - signer    = the backend payment authorizer = the sponsor KMS address.

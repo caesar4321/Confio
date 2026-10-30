@@ -4,7 +4,7 @@
 
 Confío es una aplicación financiera totalmente de código abierto y no custodial, creada para la realidad del dólar en América Latina. Combina acceso mediante moneda local, dólares que generan rendimiento, transferencias, pagos, nóminas y acceso a Ondo Stocks para usuarios elegibles en una experiencia móvil familiar, sin exigir conocimientos de cripto.
 
-**Referencia global · Versión 4.3 · Agosto de 2026**<br>
+**Referencia global · Versión 4.4 · Octubre de 2026**<br>
 Julian Moon · Fundador y CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
@@ -125,10 +125,10 @@ Todos los contratos siguientes están activos en la red principal de BNB Smart C
 | Proxy del vault cUSD+ | [`0x3C29417eb4314155e63d4C7D4507852b87763Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
 | Router Ondo Stocks (proxy UUPS) | [`0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`](https://bscscan.com/address/0x40c8e134BCAf44EEf9e7D184846F36c9862329c3#code) |
 | Delegado de lotes patrocinados | [`0xC06BD197b34a587026615C6AEd21301F5E99bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
-| Token $CONFIO | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| Vault de preventa $CONFIO | [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) |
-| Vault de recompensas $CONFIO | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
-| Vault de vesting $CONFIO | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
+| Token $CONFIO | [`0xF5765933764562A51e179F6AF2b19b7a3d506101`](https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101) |
+| Vault de preventa $CONFIO | [`0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4`](https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code) |
+| Vault de recompensas $CONFIO | [`0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49`](https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code) |
+| Vault de vesting $CONFIO | [`0x873A68182A384DD84385C7B610Df5D2A3746D75a`](https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code) |
 | Escrow de invitaciones | [`0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59`](https://bscscan.com/address/0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59#code) |
 | Contrato de pagos comerciales | [`0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA`](https://bscscan.com/address/0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA#code) |
 | Vault de nóminas | [`0x851e1a56De5c0ADBB75e904B2E7325e132692027`](https://bscscan.com/address/0x851e1a56De5c0ADBB75e904B2E7325e132692027#code) |
@@ -246,9 +246,9 @@ $CONFIO es el token comunitario y del ecosistema Confío. No es una stablecoin, 
 
 ### 7.1 Token de oferta fija
 
-El contrato actual tiene una oferta inicial fija de 1,000,000,000 CONFIO. No tiene propietario, función de emisión posterior al despliegue ni función de pausa; toda la oferta se creó una sola vez para la tesorería multiparte. Sus únicas extensiones son ERC-20 permit y quema voluntaria: la oferta puede disminuir, pero no aumentar. <sup>[17]</sup>
+El contrato actual tiene una oferta inicial fija de 1,000,000,000 CONFIO. No tiene función de emisión posterior al despliegue, pausa global ni vía de actualización; toda la oferta se creó una sola vez para la tesorería multiparte. La oferta puede disminuir por quema voluntaria, pero no aumentar. Ante un incidente de seguridad grave, la tesorería multiparte puede congelar una dirección y, tras una espera pública de 7 días, devolver un saldo congelado a quien se lo robaron; esto no crea tokens. <sup>[17]</sup>
 
-**Contrato BSC canónico:** [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8)
+**Contrato BSC canónico:** [`0xF5765933764562A51e179F6AF2b19b7a3d506101`](https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101)
 
 El nombre on-chain utiliza deliberadamente el ASCII **“Confio”**; **“Confío”**, con tilde, sigue siendo el nombre del producto y la marca. Así se evitan inconsistencias de escape HTML y presentación de metadatos no ASCII entre exploradores, billeteras y exchanges descentralizados. Debe utilizarse únicamente la dirección canónica anterior. <sup>[17]</sup>
 
@@ -268,7 +268,7 @@ Los tramos no admiten cambios administrativos de precio. El contrato cobra la in
 
 El contrato de reemplazo se inicializó con el historial exacto previo al despliegue: las compras migradas mantienen la posición acumulada de la curva, sin reiniciar el precio. Está fondeado para las obligaciones migradas; el vault reemplazado está pausado.
 
-**Contrato de preventa:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code)
+**Contrato de preventa:** [`0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4`](https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code)
 
 ### 7.3 Recompensas y reclamos bloqueados hasta DEX
 
@@ -276,13 +276,13 @@ El sistema separa acumulación y distribución. Al habilitarse, la actividad ele
 
 Al reclamar, el firmante del backend emite una autorización EIP-712 de corta vigencia por el total acumulado ganado. RewardVault resta lo ya reclamado y paga solo la diferencia; el total acumulado protege contra reutilizaciones. Los plazos cortos limitan la vigencia de una firma si un derecho debe corregirse a la baja.
 
-Los reclamos están bloqueados hasta DEX. Antes de abrirlos, la tesorería multiparte debe fondear un tramo CONFIO, activar el firmante y el flujo del cliente, y ejecutar la función irreversible `unlockClaims()`. Después, los usuarios pueden reclamar mediante transacciones patrocinadas.
+Los reclamos están bloqueados hasta DEX. Antes de abrirlos, se debe activar el firmante y el flujo del cliente, y ejecutar la función irreversible `unlockClaims()`. Después, los usuarios pueden reclamar mediante transacciones patrocinadas.
 
 > **Pool de recompensas controlado por tesorería**
 >
-> RewardVault no es un depósito en garantía sin necesidad de confianza. Los derechos de recompensa siguen siendo obligaciones discrecionales de tesorería: su propietario de gobernanza puede rotar el firmante, pausar reclamos y retirar fondos incluso después del desbloqueo DEX irreversible. Los usuarios dependen de que la tesorería concilie obligaciones, fondee el pool y mantenga disponibles los reclamos válidos. Plazos cortos y fondeo por tramos operativos limitan la exposición del firmante, pero no eliminan esa dependencia de confianza.
+> RewardVault no es un depósito en garantía sin necesidad de confianza. Los derechos de recompensa siguen siendo obligaciones discrecionales de tesorería: su propietario de gobernanza puede rotar el firmante, pausar reclamos y retirar fondos incluso después del desbloqueo DEX irreversible. Los usuarios dependen de que la tesorería concilie obligaciones, fondee el pool y mantenga disponibles los reclamos válidos. Plazos cortos y un tope diario de reclamos limitan la exposición del firmante, pero no eliminan esa dependencia de confianza.
 
-**RewardVault canónico:** [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code)
+**RewardVault canónico:** [`0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49`](https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code)
 
 ## 8. Billetera, seguridad y arquitectura abierta
 
@@ -406,7 +406,7 @@ Ningún producto financiero blockchain está libre de riesgos. Esta tabla no es 
 | Canales fiat | Koywe y Guardarian están activos; solo se nombran nuevos proveedores tras verificar capacidades. | Cobertura, métodos, dependencias bancarias, precios y disponibilidad pueden cambiar. |
 | Regulación y delitos financieros | Documento oficial/selfie, domicilio cuando se requiere, controles del proveedor, restricciones geográficas y revisión jurídica. | Verificar no elimina fraude ni finanzas ilícitas; proveedores o autoridades pueden rechazar, retrasar, reportar o restringir actividad. |
 | Concentración y preventa | Oferta fija, contratos públicos, curva inmutable, tokenomics separado y tesorería visible on-chain. | Concentración del fundador, vesting, transferencias de tesorería, liquidez y volatilidad siguen siendo materiales. |
-| Reclamos de recompensas | EIP-712 acumulativo, contabilidad antirreutilización, vencimientos cortos, bloqueo DEX, contrato público y fondeo por tramos. | Tesorería puede rotar firmante, pausar, retirar o no fondear obligaciones de la base de datos; no son derechos sin confianza contra una reserva inmutable. |
+| Reclamos de recompensas | EIP-712 acumulativo, contabilidad antirreutilización, vencimientos cortos, bloqueo DEX, contrato público y tope diario de reclamos. | Tesorería puede rotar firmante, pausar, retirar o no fondear obligaciones de la base de datos; no son derechos sin confianza contra una reserva inmutable. |
 | Métricas y concentración | Definiciones, fechas y carácter no auditado divulgados. | Uso y saldos iniciales pueden concentrarse y no predecir adopción amplia. |
 
 ## 13. Hoja de ruta y estado actual
@@ -419,7 +419,7 @@ Ningún producto financiero blockchain está libre de riesgos. Esta tabla no es 
 | Pagos comerciales | Contrato de reemplazo cUSD+/cUSD con comisión Pay independiente del 0.9% desplegado, verificado y conectado a producción. | Ampliar exposición gradual y medir liquidaciones, repetición y comisiones devengadas. |
 | Nóminas | Escrow cUSD+/cUSD separado por activo, pagos firmados por delegados, flujos backend/cliente y vault de reemplazo desplegados y verificados. | Pilotos empresariales, exposición gradual y fiabilidad de depósitos y pagos a volumen significativo. |
 | $CONFIO | Token fijo y preventa de reemplazo con curva continua pagada en cUSD desplegados, verificados, con historial importado, obligaciones fondeadas y conexión de producción BSC. | Sincronizar divulgaciones con estado on-chain y abrir reclamos solo bajo los controles publicados. |
-| Recompensas $CONFIO | RewardVault canónico desplegado, verificado, conectado al token y bloqueado hasta DEX; al habilitarse, la acumulación solo en base de datos usa el precio actual de la curva. | Habilitar acumulación cuando esté operativamente lista; en DEX, fondear tramo, activar firmante EIP-712 de vencimiento corto y reclamo patrocinado del cliente, y desbloquear. |
+| Recompensas $CONFIO | RewardVault canónico desplegado, verificado, conectado al token y bloqueado hasta DEX; al habilitarse, la acumulación solo en base de datos usa el precio actual de la curva. | Habilitar acumulación cuando esté operativamente lista; en DEX, activar firmante EIP-712 de vencimiento corto y reclamo patrocinado del cliente, y desbloquear. |
 | Ondo Stocks | Proxy UUPS dedicado desplegado y verificado en `0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`; aplicación, backend, certificaciones, ejecución patrocinada, entrega directa, venta a ahorro y comisión uniforme del 0.9% en el perímetro implementados. | Completar y mantener controles de proveedor, patrocinador, ensayos, exposición gradual, elegibilidad y activación antes de ampliar operaciones reales. |
 | Acceso fiat | Koywe activo en siete mercados LATAM; Guardarian activo para SEPA y tarjetas. | Agregar proveedores verificados y alternativas sin dependencias ocultas. |
 | Distribución | 8,004 verificaciones telefónicas; 177 usuarios Didit; audiencia del fundador de unas 480,000 personas; gasto pagado prácticamente nulo hasta la fecha. | Convertir distribución en usuarios con fondos, saldos retenidos, repetición, referidos y cohortes por país. |

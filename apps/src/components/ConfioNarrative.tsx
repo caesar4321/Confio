@@ -11,14 +11,14 @@ import { colors } from '../config/theme';
 export const CONFIO_DOCUMENTS = {
   tokenomics: 'https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.es.md',
   whitepaper: 'https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.es.md',
-  token: 'https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8',
+  token: 'https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101',
   // Current cUSD vault since 2026-08-31 (BSC_PRESALE_VAULT_ADDRESS in .env.mainnet).
-  presaleVault: 'https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code',
+  presaleVault: 'https://bscscan.com/address/0xB13Cda84348609c534aD1eFA9D4D39a62b2F18b4#code',
   // Separate allocation vaults, funded on 2026-09-28; vesting clocks remain unstarted.
-  founderVestingVault: 'https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code',
-  coBuilderVestingVault: 'https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129#code',
-  culturalVestingVault: 'https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7#code',
-  rewardsVault: 'https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code',
+  founderVestingVault: 'https://bscscan.com/address/0x873A68182A384DD84385C7B610Df5D2A3746D75a#code',
+  coBuilderVestingVault: 'https://bscscan.com/address/0x854b3692Bd3eaCfD6BCdd14C726326B883568396#code',
+  culturalVestingVault: 'https://bscscan.com/address/0x285963eD9D170C5762e0E3EA8efa027f9808DeE3#code',
+  rewardsVault: 'https://bscscan.com/address/0x3E022ADD4b3ae8618e431D83004e2aeb5F76AA49#code',
 };
 
 export const openConfioDocument = async (url: string) => {

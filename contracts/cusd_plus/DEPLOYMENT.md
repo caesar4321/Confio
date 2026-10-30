@@ -66,11 +66,10 @@ row in `queued`. All BSC presale buys settled.
    `manage.py deploy_cusd_impl`, BscScan verified), rehearsed with `CUSD_IMPL`,
    installed by Safe nonce 24
    (`0x3cfb9fdbc499aa3bc2054f7c31f4ead979d6c29f58791a4e59bfa729e03fe680`).
-9. Publish: update token and vault addresses, plus the "no owner" wording, in
-   tokenomics and whitepaper (EN/ES/KO), README and the app sources
-   (`ConfioNarrative.tsx`, `queries.ts`, `bscExit.ts`,
-   `PaymentConfirmationScreen.tsx`). `assistant/faq.md` already claims cUSD can
-   freeze; that becomes true at step 8.
+9. **DONE 2026-10-30.** Addresses and wording updated in tokenomics v3.3,
+   whitepaper v4.4 (EN/ES/KO), README, the website, the assistant FAQ and the
+   app sources. Shipped builds still bundle the old address, so a new app build
+   must be widely installed before claims open.
 10. BscScan: submit token info and logo for v2.
 
 **Deferred to claim opening.** `ConfioInviteEscrow` and `ConfioPayContract` fix
