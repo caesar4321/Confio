@@ -1,3 +1,4 @@
+import hashlib
 import graphene
 from .phone_link_schema import ConfirmPhoneRelink
 from graphene_django import DjangoObjectType
@@ -6119,6 +6120,50 @@ class ReportWalletRecoveryDiagnostic(graphene.Mutation):
             return cls(success=False, error='Could not store diagnostic')
 
 
+class ReportCloudKitBackup(graphene.Mutation):
+    """
+    Records what the app learned about its CloudKit copy. Separate from
+    ReportBackupStatus: this never touches backup_provider or backup_verified_at,
+    and it gates nothing. 'proven' must name the registered wallet, so a replaced
+    wallet cannot inherit a previous proof.
+    """
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    class Arguments:
+        state = graphene.String(required=True)
+        wallet_hashes = graphene.List(graphene.NonNull(graphene.String))
+
+    def mutate(self, info, state, wallet_hashes=None):
+        user = info.context.user
+        if not user.is_authenticated:
+            return ReportCloudKitBackup(success=False, error="Authentication required")
+        if state not in ('proven', 'no_icloud_account', 'icloud_restricted', 'failed'):
+            return ReportCloudKitBackup(success=False, error="Invalid state")
+
+        update_fields = ['cloudkit_backup_state']
+        if state == 'proven':
+            from users.models import Account
+            account = Account.objects.filter(
+                user=user, account_type='personal', account_index=0
+            ).first()
+            addresses = [account.bsc_address, account.algorand_address] if account else []
+            registered = [
+                hashlib.sha256(address.lower().encode()).hexdigest()
+                for address in addresses if address
+            ]
+            # Every registered address: restore checks them all, so a copy that
+            # only matches one of them would be refused when it is needed.
+            if not registered or any(h not in (wallet_hashes or []) for h in registered):
+                return ReportCloudKitBackup(success=False, error="Wallet mismatch")
+            user.cloudkit_backup_wallet_hash = registered[0]
+            user.cloudkit_backup_verified_at = timezone.now()
+            update_fields += ['cloudkit_backup_wallet_hash', 'cloudkit_backup_verified_at']
+        user.cloudkit_backup_state = state
+        user.save(update_fields=update_fields)
+        return ReportCloudKitBackup(success=True)
+
+
 class ReportBackupStatus(graphene.Mutation):
     """
     Report the status of a wallet backup to the server for safety tracking.
@@ -6458,6 +6503,7 @@ class ApplyReviewAccess(graphene.Mutation):
 
 class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, PaidOfferMutations, graphene.ObjectType):
     report_backup_status = ReportBackupStatus.Field()
+    report_cloudkit_backup = ReportCloudKitBackup.Field()
     report_wallet_recovery_diagnostic = ReportWalletRecoveryDiagnostic.Field()
 
     update_phone_number = UpdatePhoneNumber.Field()

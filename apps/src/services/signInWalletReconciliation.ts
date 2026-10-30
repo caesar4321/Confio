@@ -132,9 +132,17 @@ async function reconcileSignInWalletInner(
   } = await import('./secureDeterministicWallet');
   let candidate: Awaited<ReturnType<typeof getSignInWalletCandidate>> | undefined;
   let restoredLegacyBackup = false;
+  let restoredFromCloudKit = false;
+  // CloudKit could not answer. Not "no backup": until something validates
+  // against the anchors, nothing may generate or replace a wallet.
+  let cloudKitUnknown = false;
+  const refuseUnknownCloudKit = async () => {
+    await reportTerminalRecoveryFailure(new WalletRecoveryError('unreadable'), authData.accessToken, evidenceSink);
+    throw new Error('No pudimos revisar tu respaldo de iCloud. Revisa tu conexión y vuelve a intentarlo. Código: RECOVERY-ICLOUD-READ.');
+  };
   const acknowledgeBackup = async () => {
     const acknowledged = await reportBackupStatus(
-      provider === 'google' ? 'google_drive' : 'icloud', authData.accessToken,
+      provider === 'google' && !restoredFromCloudKit ? 'google_drive' : 'icloud', authData.accessToken,
     );
     if (!acknowledged) throw new Error('No pudimos confirmar el respaldo. Vuelve a iniciar sesión. Código: RECONCILE-BACKUP-REPORT.');
     await candidate?.clearPendingBackupReport();
@@ -223,7 +231,30 @@ async function reconcileSignInWalletInner(
     applyPrimaryRegistration();
     return false;
   }
-  if (provider === 'google') {
+  if (!matchesAll()) {
+    const { findCloudKitBackups } = await import('./cloudKitBackup');
+    const primary = accounts.find(row => row.accountType === 'personal' && row.accountIndex === 0)!;
+    const lookup = await findCloudKitBackups([primary.bscAddress, primary.algorandAddress]);
+    cloudKitUnknown = lookup.unknown;
+    const localCandidate = candidate;
+    for (const cloudKitPayload of lookup.payloads) {
+      try {
+        candidate = await getSignInWalletCandidate(subject, undefined, {
+          reportAuthToken: authData.accessToken, cloudKitPayload,
+        });
+      } catch {
+        // A record we cannot read may still be this person's wallet.
+        cloudKitUnknown = true;
+        continue;
+      }
+      if (matchesAll()) {
+        restoredFromCloudKit = true;
+        break;
+      }
+      candidate = localCandidate;
+    }
+  }
+  if (provider === 'google' && !restoredFromCloudKit) {
     // Initial authorization is part of the lockout too: a user who cancels
     // it, or whose token request fails, cannot sign in and leaves exactly
     // the silence this diagnostic exists to end.
@@ -265,6 +296,7 @@ async function reconcileSignInWalletInner(
             if (candidate === null && accounts.every(row => !row.isKeylessMigrated && !row.bscAddress)
                 && legacyError instanceof WalletRecoveryError && legacyError.code === 'missing') return false;
             if (!(legacyError instanceof WalletRecoveryError) || legacyError.code !== 'missing') throw legacyError;
+            if (cloudKitUnknown) throw new WalletRecoveryError('unreadable');
             candidate = await createMissingSignInWalletCandidate(subject, token, accounts, async proposed => {
               const response = await client.mutate({ mutation: RESERVE_RECOVERY, context,
                 variables: { firebaseIdToken: options.firebaseToken, recoveryFileIds: proposed } });
@@ -303,6 +335,10 @@ async function reconcileSignInWalletInner(
   // An unmigrated Apple account may still use the reproducible V1 path.
   // No automatic Google authorization and no random replacement on missing keys.
   if (!candidate) {
+    if (cloudKitUnknown && (authData.walletReenrollmentAllowed
+        || accounts.some(row => row.isKeylessMigrated || row.bscAddress))) {
+      await refuseUnknownCloudKit();
+    }
     // A proven-unused wallet stays for the sign-in path to replace.
     if (authData.walletReenrollmentAllowed && !accounts.some(row => row.bscAddress)) return false;
     if (accounts.some(row => row.isKeylessMigrated || row.bscAddress)) {
@@ -322,6 +358,7 @@ async function reconcileSignInWalletInner(
     applyPrimaryRegistration();
     return false;
   }
+  if (cloudKitUnknown) await refuseUnknownCloudKit();
   if (restoredLegacyBackup) throw new WalletRecoveryError('mismatch');
   // A Drive restore can change the primary candidate after inventory discovery.
   // Refresh the bound inventory and grant before signing any replacement.

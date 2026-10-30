@@ -18,7 +18,7 @@ from .admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
     list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'accounts_count', 'icp_summary', 'rating_summary', 'is_staff', 'onboarded_at', 'created_at')
-    list_filter = ('onboarded_at', 'backup_provider', 'is_staff', 'is_superuser', 'country', 'phone_country', 'confio_rating_star_count', 'confio_rating_action', 'created_at')
+    list_filter = ('onboarded_at', 'backup_provider', 'cloudkit_backup_state', 'is_staff', 'is_superuser', 'country', 'phone_country', 'confio_rating_star_count', 'confio_rating_action', 'created_at')
     search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name', 'phone_number', 'phone_key', 'confio_icp_other_text', 'confio_rating_feedback_text')
     readonly_fields = (
         'firebase_uid', 'auth_token_version', 'created_at', 'updated_at', 'onboarded_at',

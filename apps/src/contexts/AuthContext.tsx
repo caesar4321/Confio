@@ -923,6 +923,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     import('../services/authService').then(({ ensureBscAddressRegistered }) => {
       void ensureBscAddressRegistered();
     }).catch(() => { });
+    import('../services/cloudKitBackup').then(({ ensureCloudKitBackup }) => {
+      void ensureCloudKitBackup();
+    }).catch(() => { });
 
     // On iOS, Implicitly Report Safety (iCloud Keychain is auto-synced)
     if (Platform.OS === 'ios') {
@@ -1325,6 +1328,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             // address, so it is a no-op after the first success.
             import('../services/authService').then(({ ensureBscAddressRegistered }) => {
               void ensureBscAddressRegistered();
+            }).catch(() => { });
+            import('../services/cloudKitBackup').then(({ ensureCloudKitBackup }) => {
+              void ensureCloudKitBackup();
             }).catch(() => { });
 
             // Fire-and-forget prefetch of accounts to warm ProfileMenu

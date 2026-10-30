@@ -27,7 +27,8 @@ To support seamless roaming between iOS and Android while maintaining high secur
 
 2.  **Cloud Backup (Encrypted Backup / Recovery)**
     *   **Android**: **Google Drive AppData Folder** (Hidden from user view).
-    *   **iOS**: **iCloud Keychain** (Synced via Apple ID) + **Google Drive Fallback**.
+    *   **iOS**: **iCloud Keychain** (Synced via Apple ID) + **CloudKit private database** + **Google Drive Fallback**.
+    *   **CloudKit**: The same statically wrapped body as Drive, in a plain record field. `encryptedValues` depend on iCloud Keychain, which this copy must not need. Like Google with Drive, Apple can technically read it; iCloud Keychain is the only copy Apple cannot read. The protection is the person's Apple account.
     *   **Encryption**: The Master Secret is **AES-Encrypted** with a static application key before being uploaded to Google Drive.
         *   *Note*: This encryption is intended as obfuscation against casual access and accidental exposure. It does not provide protection against a fully compromised client environment (RCE), which is an accepted trade-off to preserve usability (no backup password).
     *   **Scope**: Uses `https://www.googleapis.com/auth/drive.appdata` to isolate data from other apps.
@@ -39,7 +40,7 @@ A unique feature of Confío V2 is **optional cross-platform roaming**, enabled t
 *Note: Cross-platform restoration requires explicit user action. Automatic synchronization between Apple iCloud and Google Drive is not assumed.*
 
 1.  **Android -> iOS**: When logging in on iOS, the user can restore a wallet if they previously enabled Google Drive backup on Android.
-2.  **iOS -> Android**: Keys generated on iOS are strictly in iCloud by default. To roam to Android, the user must explicit enable "Respaldo en la Nube" (Google Drive Backup) in the iOS app settings, secured by biometrics.
+2.  **iOS -> Android**: Keys generated on iOS stay in iCloud (Keychain and CloudKit) by default. To roam to Android, the user must explicit enable "Respaldo en la Nube" (Google Drive Backup) in the iOS app settings, secured by biometrics.
 
 ## 3. Legacy Architecture (V1) & Migration
 

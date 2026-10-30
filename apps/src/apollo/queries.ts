@@ -821,6 +821,15 @@ export const REPORT_BACKUP_STATUS = gql`
   }
 `;
 
+export const REPORT_CLOUDKIT_BACKUP = gql`
+  mutation ReportCloudKitBackup($state: String!, $walletHashes: [String!]) {
+    reportCloudkitBackup(state: $state, walletHashes: $walletHashes) {
+      success
+      error
+    }
+  }
+`;
+
 // Invoice Mutations
 export const CREATE_INVOICE = gql`
   mutation CreateInvoice($input: InvoiceInput!) {

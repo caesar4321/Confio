@@ -2129,6 +2129,8 @@ export async function getSignInWalletCandidate(userSub: string, driveToken?: str
   evidenceSink?: RecoveryEvidenceSink;
   /** The registered wallet, used only to choose among duplicate backups. */
   anchors?: AnchorRegistration[];
+  /** A backup body found in CloudKit; the caller checks it against the anchors. */
+  cloudKitPayload?: string;
 }) {
   const probe: DriveCandidateReport[] = [];
   const sink = options?.evidenceSink;
@@ -2178,6 +2180,23 @@ export async function getSignInWalletCandidate(userSub: string, driveToken?: str
         await reportTerminalRecoveryFailure(named, options?.reportAuthToken, sink);
         throw error;
       }
+    },
+  };
+}
+
+/** What the CloudKit backup stores for this device's secret: the Drive body. */
+export async function getCloudKitBackupMaterial(userSub: string) {
+  const secret = await getExistingLocalV2MasterSecret(userSub);
+  if (!secret) return null;
+  return {
+    bscAddress: derivePersonalEvmAddress(secret),
+    algorandAddress: derivePersonalV2Address(secret),
+    payload: `${DRIVE_SECURITY_HEADER}\n${encryptBackupV2(secret, APP_BACKUP_KEY)}`,
+    holdsThisSecret: (body: string) => {
+      const stored = decryptBackupDetailed(
+        body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'),
+      ).secret;
+      return !!stored && secretsEqual(stored, secret);
     },
   };
 }
@@ -2351,6 +2370,7 @@ async function getSignInWalletCandidateInner(userSub: string, driveToken?: strin
    * backups; a single clean backup is adopted exactly as before.
    */
   anchors?: AnchorRegistration[];
+  cloudKitPayload?: string;
 }, probe: DriveCandidateReport[] = []) {
   const note = (
     shape: DriveCandidateReport['shape'],
@@ -2566,6 +2586,11 @@ async function getSignInWalletCandidateInner(userSub: string, driveToken?: strin
         restoreCurrentBackup = true;
       }
     }
+  } else if (options?.cloudKitPayload) {
+    secret = decryptBackupDetailed(
+      options.cloudKitPayload, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'),
+    ).secret;
+    if (!secret) throw new WalletRecoveryError('unreadable');
   } else {
     secret = await getExistingLocalV2MasterSecret(userSub);
     if (!secret) return null;

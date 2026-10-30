@@ -172,6 +172,33 @@ class User(AbstractUser, SoftDeleteModel):
         null=True, 
         help_text="Name of the device that performed the backup (e.g. iPhone 15)"
     )
+    # CloudKit proof, separate from backup_provider on purpose: 'icloud' is still
+    # the implicit report, and a null backup_verified_at gates setup. None of
+    # these fields ever gates anyone.
+    cloudkit_backup_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time the app read its CloudKit backup back from Apple's servers"
+    )
+    cloudkit_backup_wallet_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text="SHA-256 of the registered address that proof covers; stale once the wallet changes"
+    )
+    cloudkit_backup_state = models.CharField(
+        max_length=20,
+        blank=True,
+        default='',
+        db_index=True,
+        choices=[
+            ('proven', 'Proven'),
+            ('no_icloud_account', 'No iCloud account'),
+            ('icloud_restricted', 'iCloud restricted'),
+            ('failed', 'Failed'),
+        ],
+        help_text="Empty means no report reached the server, for any reason"
+    )
     
     # OS Tracking for Dashboard Stats
     platform_os = models.CharField(

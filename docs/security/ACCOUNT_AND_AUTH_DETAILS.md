@@ -21,8 +21,9 @@ Confío uses a "Keyless Self-Custody" model (V2).
             3.  If missing, check **iCloud Keychain** (may sync via Apple ID where available).
         *   **Apple Sign-In**:
             1.  **Check iCloud Keychain** (may sync via Apple ID based on user settings).
-            2.  Drive check is skipped (No Access Token).
-            3.  If missing -> Generate **New Random** Secret -> Save to Keychain.
+            2.  If missing, check **CloudKit**. Sign-in reconciliation validates a found record against the registered addresses.
+            3.  Drive check is skipped (No Access Token).
+            4.  If missing and no wallet is registered -> Generate **New Random** Secret -> Save to Keychain.
     *   **Android**:
         1.  **Check Google Drive** (App Data Folder).
         2.  If found -> Sync to local Android Keychain cache.
@@ -126,7 +127,7 @@ V2 implements a robust **Manifest-Based** backup strategy to safely support cros
 ### 5.2. Storage Hierarchy
 1.  **RAM (Memory)**: Decrypted Master Secret (Milliseconds duration during signing).
 2.  **Secure Hardware (Keychain/Keystore)**: Encrypted Master Secret (At Rest on Device).
-3.  **Cloud (Drive/iCloud)**: AES-Encrypted Master Secret (At Rest in Cloud).
+3.  **Cloud (Drive/iCloud Keychain/CloudKit)**: Master Secret wrapped with a static app key, which is obfuscation, not protection. Google and Apple can technically read the Drive and CloudKit copies.
 4.  **Server**: **Zero Knowledge**. The server stores no keys, no seeds, no backup files.
 
 ### 5.3. Conflict Resolution
