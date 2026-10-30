@@ -1108,13 +1108,13 @@ class WalletReenrollmentProofTestCase(SimpleTestCase):
         return grant, signature
 
     def test_reenrollment_requires_recent_google_authentication(self):
-        from users.web3auth_schema import _is_recent_google_auth
+        from users.web3auth_schema import _is_recent_provider_auth
 
         now = 1_800_000_000
-        self.assertTrue(_is_recent_google_auth(now - 30, now=now))
-        self.assertFalse(_is_recent_google_auth(now - 601, now=now))
-        self.assertFalse(_is_recent_google_auth(None, now=now))
-        self.assertFalse(_is_recent_google_auth(now + 61, now=now))
+        self.assertTrue(_is_recent_provider_auth(now - 30, now=now))
+        self.assertFalse(_is_recent_provider_auth(now - 601, now=now))
+        self.assertFalse(_is_recent_provider_auth(None, now=now))
+        self.assertFalse(_is_recent_provider_auth(now + 61, now=now))
 
     def test_login_hot_path_contains_no_wallet_chain_inspection(self):
         import inspect

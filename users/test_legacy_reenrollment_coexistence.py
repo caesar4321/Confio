@@ -151,3 +151,49 @@ class LegacyReenrollmentCoexistenceTests(TestCase):
                 self.assertEqual(self.account.algorand_address, 'A' * 58)
                 self.assertEqual(self.account.bsc_address, old_bsc)
                 self.assertFalse(RetiredWalletAddress.objects.filter(account=self.account).exists())
+
+
+class ProviderNeutralReenrollmentOfferTests(TestCase):
+    ADDRESS = 'M' * 58
+
+    def login(self, provider, identities):
+        from django.test import override_settings
+        from users.web3auth_schema import Web3AuthLoginMutation
+        user = User.objects.create_user(
+            username=f'offer-{provider}', firebase_uid=f'offer-{provider}', email=f'{provider}@example.com')
+        Account.objects.create(user=user, account_type='personal', account_index=0, algorand_address=self.ADDRESS,
+                               wallet_reenrollment_assessment={
+                                   'version': 2, 'status': 'eligible', 'eligible': True,
+                                   'reason': 'never_funded_wallet', 'snapshot_round': 100, 'sponsor_funding': 0,
+                                   'old_algorand_address': self.ADDRESS, 'old_bsc_address': ''})
+        claims = {'uid': user.firebase_uid, 'email': user.email, 'auth_time': int(timezone.now().timestamp()),
+                  'firebase': {'sign_in_provider': provider, 'identities': identities}}
+        with override_settings(APP_CHECK_ENFORCE=False), \
+                patch('firebase_admin.auth.verify_id_token', return_value=claims), \
+                patch('security.login_restrictions.login_is_restricted', return_value=False):
+            return Web3AuthLoginMutation.mutate(
+                None, SimpleNamespace(context=SimpleNamespace(META={}, headers={})), firebase_id_token='token')
+
+    def test_apple_gets_the_same_offer_as_google(self):
+        # protects=a proven-unused wallet is replaceable whichever provider signs in; fails_when=the offer is tied to Google again; no_claim=the assessment itself
+        result = self.login('apple.com', {'apple.com': ['apple-sub']})
+        self.assertTrue(result.wallet_reenrollment_allowed)
+        self.assertTrue(result.wallet_reenrollment_grant)
+
+    def test_a_token_with_no_provider_identity_gets_none(self):
+        # protects=the grant always binds a provider subject; fails_when=another sign-in method reaches the offer; no_claim=login itself
+        result = self.login('password', {})
+        self.assertFalse(result.wallet_reenrollment_allowed)
+
+    def test_a_grant_signed_before_the_rename_still_verifies(self):
+        # protects=sign-ins in flight during the deploy; fails_when=completion rejects a valid Google grant after the app dropped its session; no_claim=grant expiry
+        from django.core import signing
+        from users import web3auth_schema as schema
+        now = int(timezone.now().timestamp())
+        user = User.objects.create_user(username='old-grant', firebase_uid='old-grant')
+        account = Account.objects.create(user=user, account_type='personal', account_index=0, algorand_address=self.ADDRESS)
+        token = signing.dumps({'version': 1, 'user_id': user.id, 'account_id': account.id,
+                               'old_algorand_address': self.ADDRESS, 'old_bsc_address': '',
+                               'google_subject': 'google-sub', 'google_auth_time': now, 'nonce': 'n'},
+                              salt=schema.WALLET_REENROLLMENT_PREPARATION_SALT)
+        self.assertIsNotNone(schema._verify_wallet_reenrollment_preparation(token, user, account))

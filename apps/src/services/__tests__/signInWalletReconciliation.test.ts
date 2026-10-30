@@ -384,6 +384,15 @@ it('new users retain the existing signup path', async () => {
   expect(recover).not.toHaveBeenCalled();
 });
 
+it('Apple leaves a proven-unused wallet for the sign-in path to replace', async () => {
+  // protects=a keyless-flagged Algorand-only Apple account reaches the shared replacement; fails_when=reconciliation locks it out first; no_claim=the replacement itself
+  recover.mockResolvedValueOnce(null);
+  const args = fixture('apple');
+  (args.authData as any).walletReenrollmentAllowed = true;
+  (args.authData.user as any).bscAddress = null;
+  expect(await reconcileSignInWallet(args)).toBe(false);
+});
+
 it('Apple with a missing V2 Keychain fails without Google or generation', async () => {
   recover.mockResolvedValueOnce(null);
   const args = fixture('apple');

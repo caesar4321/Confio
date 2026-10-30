@@ -2879,6 +2879,7 @@ export async function getOrCreateMasterSecret(
           );
           console.log('[MasterSecret] Recovered V2 secret from address-bound alias.');
         } else if (options.allowGenerate === false && !accessToken) {
+          if (options.provider === 'apple') throw new WalletRecoveryError('mismatch');
           throw new Error(
             'Esta cuenta ya fue vinculada a otra billetera. Necesitamos recuperar esa billetera desde Google Drive antes de continuar.'
           );
@@ -3204,7 +3205,8 @@ export async function getOrCreateMasterSecret(
       } else {
         // No legacy secret to migrate, so from here on we would be GENERATING.
         if (options?.allowGenerate === false) {
-          throw new WalletRecoveryError(accessToken ? 'missing' : 'unexpected');
+          // Apple has no Drive token: an empty Keychain is its whole search.
+          throw new WalletRecoveryError(accessToken || options?.provider === 'apple' ? 'missing' : 'unexpected');
         }
 
         // An anchor means the server already knows this account's wallet, so

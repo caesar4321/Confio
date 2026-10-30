@@ -1295,31 +1295,7 @@ export class AuthService {
         void emitNewUserSignupOnce(authData.user?.id, 'google');
       }
 
-      const invalidateBackendSession = async (reason: string) => {
-        let cleared = false;
-        try {
-          cleared = await Keychain.resetGenericPassword({
-            service: AUTH_KEYCHAIN_SERVICE,
-            username: AUTH_KEYCHAIN_USERNAME,
-          });
-        } catch (clearError) {
-          console.error(`[AuthService] Failed to clear session ${reason}:`, clearError);
-        }
-        if (!cleared) {
-          // Some Keychain implementations transiently fail deletion. An
-          // invalid payload prevents cold start from accepting a partial JWT.
-          const invalidated = await Keychain.setGenericPassword(
-            AUTH_KEYCHAIN_USERNAME,
-            JSON.stringify({ accessToken: '', refreshToken: '' }),
-            {
-              service: AUTH_KEYCHAIN_SERVICE,
-              username: AUTH_KEYCHAIN_USERNAME,
-              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
-            },
-          );
-          if (invalidated === false) throw new Error('Could not invalidate the previous session');
-        }
-      };
+      const invalidateBackendSession = (reason: string) => this.invalidateSignInSession(reason);
 
       // Authentication itself is deliberately DB-only. The server normally
       // returns a background-precomputed grant; this branch only supports a
@@ -1387,104 +1363,51 @@ export class AuthService {
         if (!walletReenrollmentOfferAvailable) {
           throw new Error('Wallet reenrollment was not authorized for this account.');
         }
-        let sessionInvalidated = false;
-        try {
-          // Do not discard a valid prior session until normal wallet recovery
-          // has already demonstrated the collision and all local prerequisites
-          // for the repair are present.
-          if (!driveAccessToken) {
-            throw new Error(
-              'Para recuperar esta cuenta de forma segura, vuelve a iniciar sesión y activa el respaldo en Google Drive.'
-            );
-          }
-          if (!authData.walletReenrollmentChallenge || !authData.walletReenrollmentGrant) {
-            throw new Error(
-              'No pudimos autorizar la recuperación segura de tu billetera. Vuelve a iniciar sesión.'
-            );
-          }
-          await invalidateBackendSession('before wallet reenrollment');
-          sessionInvalidated = true;
-
-          onProgress?.('Protegiendo tu nueva billetera en Google Drive...');
-          const {
-            createWalletReenrollmentDriveAttestation,
-            getOrCreateMasterSecret,
-            getActiveEvmWallet,
-          } = await import('./secureDeterministicWallet');
-          driveSyncSucceeded = false;
-          await getOrCreateMasterSecret(googleSubject, driveAccessToken, {
-            allowGenerate: true,
-            provider: 'google',
-            // Reenrollment is the one path where a local secret is not enough:
-            // the old server anchor is about to be retired, so force a real
-            // Drive upload even when the local-secret fast path could return.
-            requireCloudSync: true,
-            // This JWT stays request-scoped until reenrollment commits. The
-            // backup reporter is fire-and-forget, so it must not consult the
-            // intentionally invalidated Keychain session and later clear the
-            // fresh JWT persisted below.
-            backupReportAuthToken: authData.accessToken,
-            onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
-          });
-          if (!driveSyncSucceeded) {
-            throw new Error(
-              'No pudimos verificar el respaldo de tu nueva billetera en Google Drive. Inténtalo de nuevo antes de continuar.'
-            );
-          }
-
-          const replacementWallet = await getActiveEvmWallet({ type: 'personal', index: 0 });
-          const { ownershipSignature } =
-            await createWalletReenrollmentDriveAttestation(
-            driveAccessToken,
-            authData.walletReenrollmentChallenge,
-            replacementWallet.address,
-            replacementWallet.privKeyHex,
-          );
-
-          const { data: reenrollmentData } = await apolloClient.mutate({
-            mutation: COMPLETE_WALLET_REENROLLMENT,
-            variables: {
-              bscAddress: replacementWallet.address,
-              reenrollmentGrant: authData.walletReenrollmentGrant,
-              bscSignature: ownershipSignature,
+        return this.replaceUnusedWallet({
+          authData,
+          invalidateSession: invalidateBackendSession,
+          persistSession: persistBackendTokens,
+          backup: {
+            assertReady: () => {
+              if (!driveAccessToken) {
+                throw new Error(
+                  'Para recuperar esta cuenta de forma segura, vuelve a iniciar sesión y activa el respaldo en Google Drive.'
+                );
+              }
             },
-            context: {
-              pinnedAuthToken: authData.accessToken,
-              skipProactiveRefresh: true,
+            protect: async () => {
+              onProgress?.('Protegiendo tu nueva billetera en Google Drive...');
+              const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+              driveSyncSucceeded = false;
+              await getOrCreateMasterSecret(googleSubject, driveAccessToken, {
+                allowGenerate: true,
+                provider: 'google',
+                // Reenrollment is the one path where a local secret is not enough:
+                // the old server anchor is about to be retired, so force a real
+                // Drive upload even when the local-secret fast path could return.
+                requireCloudSync: true,
+                // This JWT stays request-scoped until reenrollment commits. The
+                // backup reporter is fire-and-forget, so it must not consult the
+                // intentionally invalidated Keychain session and later clear the
+                // fresh JWT persisted below.
+                backupReportAuthToken: authData.accessToken,
+                onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
+              });
+              if (!driveSyncSucceeded) {
+                throw new Error(
+                  'No pudimos verificar el respaldo de tu nueva billetera en Google Drive. Inténtalo de nuevo antes de continuar.'
+                );
+              }
             },
-          });
-          const reenrollment = reenrollmentData?.completeWalletReenrollment;
-          if (!reenrollment?.success) {
-            throw new Error(
-              reenrollment?.error ||
-              'No pudimos terminar la recuperación segura de tu billetera. Inténtalo de nuevo.'
-            );
-          }
-
-          // Keep the remainder of this sign-in on the state the server just
-          // committed. A lost response is safe: the mutation is idempotent and
-          // the same Drive-backed secret will be reused on retry.
-          authData.isKeylessMigrated = true;
-          if (authData.user) {
-            authData.user.algorandAddress = null;
-            authData.user.bscAddress = replacementWallet.address;
-          }
-          await persistBackendTokens();
-          console.log('[AuthService] Wallet reenrollment completed with verified Drive backup.');
-          return replacementWallet.address;
-        } catch (reenrollmentError) {
-          // The fresh JWT remains request-scoped until completion. Do not leave
-          // any partial or older session available to the cold-start path: it
-          // could enter Main and skip collision handling on restart.
-          if (sessionInvalidated) {
-            try {
-              await invalidateBackendSession('after wallet reenrollment failure');
-            } catch (invalidateError) {
-              console.error('[AuthService] Failed to invalidate partial reenrollment session:', invalidateError);
-            }
-          }
-          throw reenrollmentError;
-        }
+            signOwnership: async (challenge, wallet) => {
+              const { createWalletReenrollmentDriveAttestation } = await import('./secureDeterministicWallet');
+              const { ownershipSignature } = await createWalletReenrollmentDriveAttestation(
+                driveAccessToken!, challenge, wallet.address, wallet.privKeyHex,
+              );
+              return ownershipSignature;
+            },
+          },
+        });
       };
 
       // ----------------------------------------------------------------------
@@ -1918,6 +1841,114 @@ export class AuthService {
 
 
   // Apple Sign-In
+  private async invalidateSignInSession(reason: string) {
+    let cleared = false;
+    try {
+      cleared = await Keychain.resetGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME,
+      });
+    } catch (clearError) {
+      console.error(`[AuthService] Failed to clear session ${reason}:`, clearError);
+    }
+    if (!cleared) {
+      // Some Keychain implementations transiently fail deletion. An
+      // invalid payload prevents cold start from accepting a partial JWT.
+      const invalidated = await Keychain.setGenericPassword(
+        AUTH_KEYCHAIN_USERNAME,
+        JSON.stringify({ accessToken: '', refreshToken: '' }),
+        {
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME,
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
+        },
+      );
+      if (invalidated === false) throw new Error('Could not invalidate the previous session');
+    }
+  }
+
+  /**
+   * The one way a registered wallet is replaced, for Google and Apple alike.
+   * The server offers it only for a wallet it proved was never used, and
+   * rechecks at completion; `backup` is what differs between the providers.
+   * Callers have already proven the registered wallet cannot be recovered.
+   */
+  private async replaceUnusedWallet({ authData, invalidateSession, persistSession, backup }: {
+    authData: any;
+    invalidateSession: (reason: string) => Promise<void>;
+    persistSession: () => Promise<void>;
+    backup: {
+      assertReady?: () => void;
+      protect: () => Promise<void>;
+      signOwnership: (challenge: string, wallet: { address: string; privKeyHex: string }) => Promise<string>;
+    };
+  }): Promise<string> {
+    let sessionInvalidated = false;
+    try {
+      // Do not discard a valid prior session until normal wallet recovery
+      // has already demonstrated the collision and all local prerequisites
+      // for the repair are present.
+      backup.assertReady?.();
+      if (!authData.walletReenrollmentChallenge || !authData.walletReenrollmentGrant) {
+        throw new Error(
+          'No pudimos autorizar la recuperación segura de tu billetera. Vuelve a iniciar sesión.'
+        );
+      }
+      await invalidateSession('before wallet reenrollment');
+      sessionInvalidated = true;
+
+      await backup.protect();
+
+      const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
+      const replacementWallet = await getActiveEvmWallet({ type: 'personal', index: 0 });
+      const ownershipSignature = await backup.signOwnership(authData.walletReenrollmentChallenge, replacementWallet);
+
+      const { data: reenrollmentData } = await apolloClient.mutate({
+        mutation: COMPLETE_WALLET_REENROLLMENT,
+        variables: {
+          bscAddress: replacementWallet.address,
+          reenrollmentGrant: authData.walletReenrollmentGrant,
+          bscSignature: ownershipSignature,
+        },
+        context: {
+          pinnedAuthToken: authData.accessToken,
+          skipProactiveRefresh: true,
+        },
+      });
+      const reenrollment = reenrollmentData?.completeWalletReenrollment;
+      if (!reenrollment?.success) {
+        throw new Error(
+          reenrollment?.error ||
+          'No pudimos terminar la recuperación segura de tu billetera. Inténtalo de nuevo.'
+        );
+      }
+
+      // Keep the remainder of this sign-in on the state the server just
+      // committed. A lost response is safe: the mutation is idempotent and
+      // the same backed-up secret will be reused on retry.
+      authData.isKeylessMigrated = true;
+      if (authData.user) {
+        authData.user.algorandAddress = null;
+        authData.user.bscAddress = replacementWallet.address;
+      }
+      await persistSession();
+      console.log('[AuthService] Wallet reenrollment completed with a verified backup.');
+      return replacementWallet.address;
+    } catch (reenrollmentError) {
+      // The fresh JWT remains request-scoped until completion. Do not leave
+      // any partial or older session available to the cold-start path: it
+      // could enter Main and skip collision handling on restart.
+      if (sessionInvalidated) {
+        try {
+          await invalidateSession('after wallet reenrollment failure');
+        } catch (invalidateError) {
+          console.error('[AuthService] Failed to invalidate partial reenrollment session:', invalidateError);
+        }
+      }
+      throw reenrollmentError;
+    }
+  }
+
   public async signInWithApple(onProgress?: (message: string) => void) {
     if (Platform.OS !== 'ios') {
       throw new Error('Apple Sign In is only supported on iOS');
@@ -2126,6 +2157,33 @@ export class AuthService {
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple V2 Master Secret:', v2Err);
           if (!allowV2SecretGeneration) {
+            // Reaching here means no V1 wallet with value (legacyAddress is
+            // null), so a wallet the server proved unused is the only thing
+            // left between this person and their account.
+            if (legacyInspection.inspectionSucceeded && canReplaceAfterRecoveryFailure(
+              v2Err, !!authData.walletReenrollmentAllowed, !!serverAlgorandAddress, !!authData.user?.bscAddress,
+            )) {
+              await this.replaceUnusedWallet({
+                authData,
+                invalidateSession: reason => this.invalidateSignInSession(reason),
+                persistSession: () => persistSignInSession(authData.accessToken, authData.refreshToken),
+                backup: {
+                  // getActiveEvmWallet then reads this secret back from Keychain.
+                  protect: async () => {
+                    await getOrCreateMasterSecret(appleSub, undefined, {
+                      allowGenerate: true,
+                      provider: 'apple',
+                      backupReportAuthToken: authData.accessToken,
+                    });
+                  },
+                  signOwnership: async (challenge, wallet) => {
+                    const { signEip191Message } = await import('./evmWallet');
+                    return signEip191Message(challenge, wallet.privKeyHex);
+                  },
+                },
+              });
+              return await this.finishAppleSignIn(userCredential, authData, null);
+            }
             // Report the real failure before the guidance replaces it: the
             // boundary at the end of this method would otherwise only ever
             // see 'unexpected', and a corrupt key reads nothing like a

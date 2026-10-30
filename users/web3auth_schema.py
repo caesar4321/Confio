@@ -49,7 +49,7 @@ WALLET_REENROLLMENT_PERMANENT_REFUSALS = {
 }
 
 
-def _is_recent_google_auth(auth_time, now=None):
+def _is_recent_provider_auth(auth_time, now=None):
     try:
         reference = now if now is not None else timezone.now().timestamp()
         age_seconds = float(reference) - float(auth_time)
@@ -161,22 +161,30 @@ def _wallet_reenrollment_challenge(payload):
     )
 
 
-def _wallet_reenrollment_identity_payload(user, account, google_subject, google_auth_time):
+def _wallet_reenrollment_identity_payload(user, account, subject, auth_time):
     return {
         'user_id': user.id,
         'account_id': account.id,
         'old_algorand_address': account.algorand_address,
         'old_bsc_address': getattr(account, 'bsc_address', None) or '',
-        'google_subject': google_subject,
-        'google_auth_time': google_auth_time,
+        'subject': subject,
+        'auth_time': auth_time,
     }
 
 
-def _issue_wallet_reenrollment_preparation(user, account, google_subject, google_auth_time):
+def _wallet_reenrollment_identity(payload):
+    """Tokens signed before Apple joined name these fields for Google."""
+    return (
+        payload.get('subject') or payload.get('google_subject'),
+        payload.get('auth_time') or payload.get('google_auth_time'),
+    )
+
+
+def _issue_wallet_reenrollment_preparation(user, account, subject, auth_time):
     payload = {
         'version': 1,
         **_wallet_reenrollment_identity_payload(
-            user, account, google_subject, google_auth_time
+            user, account, subject, auth_time
         ),
         'nonce': secrets.token_urlsafe(32),
     }
@@ -197,8 +205,8 @@ def _verify_wallet_reenrollment_preparation(token, user, account):
             or payload.get('old_algorand_address') != account.algorand_address
             or (payload.get('old_bsc_address') or '').lower()
             != (getattr(account, 'bsc_address', None) or '').lower()
-            or not payload.get('google_subject')
-            or not _is_recent_google_auth(payload.get('google_auth_time'))
+            or not _wallet_reenrollment_identity(payload)[0]
+            or not _is_recent_provider_auth(_wallet_reenrollment_identity(payload)[1])
             or not payload.get('nonce')
         ):
             return None
@@ -210,14 +218,14 @@ def _verify_wallet_reenrollment_preparation(token, user, account):
 def _issue_wallet_reenrollment_grant(
     user,
     account,
-    google_subject,
-    google_auth_time,
+    subject,
+    auth_time,
     inspection,
 ):
     payload = {
         'version': 2,
         **_wallet_reenrollment_identity_payload(
-            user, account, google_subject, google_auth_time
+            user, account, subject, auth_time
         ),
         'inspection_round': int(inspection.get('snapshot_round') or 0),
         'sponsor_funding': int(inspection.get('sponsor_funding') or 0),
@@ -249,8 +257,8 @@ def _verify_wallet_reenrollment_grant(grant, user, account, address, signature):
             or payload.get('old_algorand_address') != account.algorand_address
             or (payload.get('old_bsc_address') or '').lower()
             != (getattr(account, 'bsc_address', None) or '').lower()
-            or not payload.get('google_subject')
-            or not _is_recent_google_auth(payload.get('google_auth_time'))
+            or not _wallet_reenrollment_identity(payload)[0]
+            or not _is_recent_provider_auth(_wallet_reenrollment_identity(payload)[1])
             or int(payload.get('inspection_round') or 0) <= 0
             or not _valid_reenrollment_funding(int(payload.get('sponsor_funding') or 0), payload.get('inspection_reason'))
             or not payload.get('nonce')
@@ -600,9 +608,11 @@ class Web3AuthLoginMutation(graphene.Mutation):
             provider_data = decoded_token.get('firebase', {})
             sign_in_provider = provider_data.get('sign_in_provider', '')
             provider = 'google' if 'google' in sign_in_provider else 'apple' if 'apple' in sign_in_provider else 'unknown'
-            google_identities = (provider_data.get('identities') or {}).get('google.com') or []
-            google_subject = str(google_identities[0]) if google_identities else None
-            google_auth_time = decoded_token.get('auth_time')
+            provider_identities = (provider_data.get('identities') or {}).get(
+                {'google': 'google.com', 'apple': 'apple.com'}.get(provider, '')
+            ) or []
+            provider_subject = str(provider_identities[0]) if provider_identities else None
+            provider_auth_time = decoded_token.get('auth_time')
             
             # Initialize variables that need to be available for return statement
             opt_in_transactions = []
@@ -865,9 +875,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
             # permanent refusals continue normal V1 recovery; unassessed or
             # transient failures also continue normally until a later scan.
             if (
-                provider == 'google'
-                and google_subject
-                and _is_recent_google_auth(google_auth_time)
+                provider_subject
+                and _is_recent_provider_auth(provider_auth_time)
                 and existing_account
                 and existing_account.algorand_address
                 and _wallet_reenrollment_candidate(existing_account)
@@ -882,8 +891,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     ) = _issue_wallet_reenrollment_grant(
                         user,
                         existing_account,
-                        google_subject,
-                        google_auth_time,
+                        provider_subject,
+                        provider_auth_time,
                         assessment,
                     )
                     logger.info(
@@ -1771,8 +1780,7 @@ class PrepareWalletReenrollmentMutation(graphene.Mutation):
         challenge, grant = _issue_wallet_reenrollment_grant(
             user,
             account,
-            preparation.get('google_subject'),
-            preparation.get('google_auth_time'),
+            *_wallet_reenrollment_identity(preparation),
             inspection,
         )
         logger.info(

@@ -44,9 +44,15 @@ jest.mock('../oauthStorageService', () => ({
   },
 }));
 jest.mock('../appCheckService', () => ({ appCheckService: { primeTokenForAuth: jest.fn() } }));
+const mockGetOrCreateMasterSecret = jest.fn();
+const mockGetActiveEvmWallet = jest.fn();
 jest.mock('../secureDeterministicWallet', () => ({
   SecureDeterministicWalletService: { getInstance: () => ({}) },
+  getOrCreateMasterSecret: (...args: any[]) => mockGetOrCreateMasterSecret(...args),
+  getActiveEvmWallet: (...args: any[]) => mockGetActiveEvmWallet(...args),
+  reportTerminalRecoveryFailure: jest.fn(),
 }));
+jest.mock('../evmWallet', () => ({ signEip191Message: jest.fn(() => '0xsigned') }));
 jest.mock('../signInWalletReconciliation', () => ({ reconcileSignInWallet: jest.fn() }));
 jest.mock('../signInSessionStorage', () => ({ persistSignInSession: jest.fn() }));
 jest.mock('../../config/env', () => ({
@@ -55,6 +61,7 @@ jest.mock('../../config/env', () => ({
 }));
 
 import { AuthService } from '../authService';
+import { WalletRecoveryError } from '../walletRecoveryErrors';
 
 const V1_ADDRESS = 'UM3DCWWAUHXYHHKRMYZIOWTQ6CVEIUHBOCMZQSTFCCLC37I64MZ6AZMF2E';
 
@@ -111,5 +118,55 @@ describe('the other legacy checks get the registered address too (Google and App
     await service.switchAccount('personal_0');
     expect(inspect).toHaveBeenCalled();
     expect(lastAnchor()).toBe(V1_ADDRESS);
+  });
+});
+
+describe('a registered wallet missing from iCloud Keychain (App Review, user 3478, 2026-10-30)', () => {
+  const NEW_BSC = '0x' + '4'.repeat(40);
+  const login = (offer: object) => ({ data: { web3AuthLogin: {
+    success: true, accessToken: 'jwt', refreshToken: 'refresh',
+    user: { id: '3478', algorandAddress: V1_ADDRESS, bscAddress: null }, ...offer,
+  } } });
+  const offer = { walletReenrollmentAllowed: true, walletReenrollmentChallenge: 'challenge', walletReenrollmentGrant: 'grant' };
+  let service: any;
+  let finish: jest.SpyInstance;
+
+  beforeEach(() => {
+    mockMutate.mockReset();
+    mockGetOrCreateMasterSecret.mockReset();
+    mockGetActiveEvmWallet.mockReset().mockResolvedValue({ address: NEW_BSC, privKeyHex: '0xkey' });
+    service = AuthService.getInstance() as any;
+    jest.spyOn(service, 'getLegacyAddressIfMigrationPending').mockResolvedValue({
+      legacyAddress: null, derivedLegacyAddress: 'OTHER', inspectionSucceeded: true,
+    });
+    jest.spyOn(service, 'invalidateSignInSession').mockResolvedValue(undefined);
+    finish = jest.spyOn(service, 'finishAppleSignIn').mockResolvedValue('signed-in');
+    mockGetOrCreateMasterSecret.mockRejectedValueOnce(new WalletRecoveryError('missing')).mockResolvedValue(new Uint8Array(32));
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('replaces a wallet the server offered, through the shared step', async () => {
+    // protects=an Apple account with a proven-unused wallet can get in on a clean device; fails_when=Apple sign-in stops at RECOVERY-APPLE-KEYCHAIN or skips the server commit; no_claim=the server's proof of non-use
+    mockMutate.mockResolvedValueOnce(login(offer))
+      .mockResolvedValue({ data: { completeWalletReenrollment: { success: true } } });
+
+    await expect(service.signInWithApple()).resolves.toBe('signed-in');
+
+    expect(mockGetOrCreateMasterSecret.mock.calls[0][2]).toMatchObject({ allowGenerate: false, expectedAddress: V1_ADDRESS });
+    expect(mockGetOrCreateMasterSecret.mock.calls[1][2]).toMatchObject({ allowGenerate: true, provider: 'apple' });
+    expect(mockMutate.mock.calls[1][0].variables).toEqual({ bscAddress: NEW_BSC, reenrollmentGrant: 'grant', bscSignature: '0xsigned' });
+    expect(finish).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      user: expect.objectContaining({ algorandAddress: null, bscAddress: NEW_BSC }),
+    }), null);
+  });
+
+  it('never generates a wallet without the offer', async () => {
+    // protects=funded or unproven wallets keep the lockout instead of being replaced; fails_when=a missing secret alone mints a new wallet; no_claim=the wording of the guidance
+    mockMutate.mockResolvedValue(login({}));
+
+    await expect(service.signInWithApple()).rejects.toThrow('RECOVERY-APPLE-KEYCHAIN');
+
+    expect(mockGetOrCreateMasterSecret).toHaveBeenCalledTimes(1);
+    expect(finish).not.toHaveBeenCalled();
   });
 });

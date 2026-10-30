@@ -303,6 +303,8 @@ async function reconcileSignInWalletInner(
   // An unmigrated Apple account may still use the reproducible V1 path.
   // No automatic Google authorization and no random replacement on missing keys.
   if (!candidate) {
+    // A proven-unused wallet stays for the sign-in path to replace.
+    if (authData.walletReenrollmentAllowed && !accounts.some(row => row.bscAddress)) return false;
     if (accounts.some(row => row.isKeylessMigrated || row.bscAddress)) {
       // An Apple account with a registered wallet and no local key is a
       // lockout like any other: discovery RETURNED here, it did not throw,
