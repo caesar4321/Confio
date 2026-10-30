@@ -1,4 +1,6 @@
 """JWT-scoped Infinia journey API; no provider IDs or arbitrary wallet inputs."""
+from itertools import islice
+
 import graphene
 from graphene_django import DjangoObjectType
 from .models import InfiniaJourney, FinancialAccount, LedgerEntry, PayoutDestination, PaymentBridgeTransfer
@@ -213,6 +215,35 @@ class AttachInfiniaReturnBridge(graphene.Mutation):
             return cls(success=False, errors=[_public_error(exc)])
 
 
+def _incoming_credits(accounts, exclude_ids=None):
+    """Money that really arrived from outside, newest first: economic
+    provenance is filtered here, before any pagination. A conversion's target
+    credit never becomes an incoming payment merely because its operation_id
+    is missing."""
+    from .payin_admission import is_external_fiat_credit
+    from .models import MoneyOperation
+    from django.db.models import Q
+    entries = LedgerEntry.objects.filter(
+        Q(provider_data__operation__type__isnull=True) | Q(provider_data__operation__type__in=['PAYIN', 'CREDIT']),
+        provider='infinia', direction='credit', amount__gt=0,
+        financial_account__in=accounts,
+        provider_data__third_party__type='FIAT',
+    ).select_related('financial_account__provider_profile', 'operation', 'automatic_payin').order_by('-occurred_at', '-pk')
+    if exclude_ids is not None:
+        entries = entries.exclude(pk__in=exclude_ids)
+    for entry in entries.iterator(chunk_size=100):
+        if entry.operation and entry.operation.operation_type in {'conversion', 'internal_transfer', 'payout'}:
+            continue
+        voucher = (entry.provider_data.get('third_party') or {}).get('voucher_id')
+        if voucher and MoneyOperation.objects.filter(provider='infinia',
+                destination_account=entry.financial_account,
+                operation_type__in=['conversion', 'internal_transfer'],
+                provider_data__voucher_ids__contains=[voucher]).exists():
+            continue
+        if is_external_fiat_credit(entry):
+            yield entry
+
+
 class JourneyQuery(graphene.ObjectType):
     local_incoming_deposits = graphene.List(graphene.NonNull(InfiniaDepositType), required=True,
         account_id=graphene.UUID(required=True), offset=graphene.Int(default_value=0))
@@ -220,39 +251,28 @@ class JourneyQuery(graphene.ObjectType):
     def resolve_local_incoming_deposits(self, info, account_id, offset=0):
         from .schema import _active_account
         from .activation import visible_accounts
-        from .payin_admission import is_external_fiat_credit
-        from .models import MoneyOperation
-        from django.db.models import Q
         owner = _active_account(info, permission='view_transactions')
         accounts = visible_accounts(FinancialAccount.objects.filter(provider_profile__confio_account=owner))
-        entries = LedgerEntry.objects.filter(
-            Q(provider_data__operation__type__isnull=True) | Q(provider_data__operation__type__in=['PAYIN', 'CREDIT']),
-            provider='infinia', direction='credit', amount__gt=0,
-            financial_account__in=accounts, financial_account__internal_id=account_id,
-            provider_data__third_party__type='FIAT',
-        ).select_related('financial_account__provider_profile', 'operation', 'automatic_payin').order_by('-occurred_at', '-pk')
-        result, skip = [], max(0, offset)
-        # Filter economic provenance BEFORE pagination. Completed incoming
-        # receipts remain visible; a conversion's target credit never becomes
-        # a new incoming payment merely because its operation_id is missing.
-        for entry in entries.iterator(chunk_size=100):
-            if entry.operation and entry.operation.operation_type in {'conversion', 'internal_transfer', 'payout'}:
-                continue
-            voucher = (entry.provider_data.get('third_party') or {}).get('voucher_id')
-            if voucher and MoneyOperation.objects.filter(provider='infinia',
-                    destination_account=entry.financial_account,
-                    operation_type__in=['conversion', 'internal_transfer'],
-                    provider_data__voucher_ids__contains=[voucher]).exists():
-                continue
-            if not is_external_fiat_credit(entry):
-                continue
-            if skip:
-                skip -= 1
-                continue
-            result.append(entry)
-            if len(result) == 20:
-                break
-        return result
+        entries = _incoming_credits(accounts.filter(internal_id=account_id))
+        return list(islice(entries, max(0, offset), max(0, offset) + 20))
+
+    # Historial reads transactions, and a deposit becomes one only when its
+    # journey starts. The ones with no journey (returned, in review, waiting
+    # for Confío Face) are listed here or the person sees them nowhere.
+    local_deposits_without_transfer = graphene.List(graphene.NonNull(InfiniaDepositType), required=True)
+
+    def resolve_local_deposits_without_transfer(self, info):
+        from .schema import _active_account
+        from .activation import visible_accounts
+        owner = _active_account(info, permission='view_transactions')
+        accounts = visible_accounts(FinancialAccount.objects.filter(provider_profile__confio_account=owner))
+        # Only a journey that already has its history row covers a deposit:
+        # that row is written after commit and can fail until the repair runs.
+        journeys = InfiniaJourney.objects.filter(
+            funding_credit__isnull=False, money_flow__unified_transaction__isnull=False,
+            money_flow__unified_transaction__deleted_at__isnull=True,
+        ).values('funding_credit_id')
+        return list(islice(_incoming_credits(accounts, exclude_ids=journeys), 500))
 
     local_transfer_mints = graphene.List(graphene.NonNull(InfiniaJourneyType), required=True)
 

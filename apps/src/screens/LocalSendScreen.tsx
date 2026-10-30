@@ -767,7 +767,7 @@ function InfiniaLocalSendScreen() {
             title={copy.hero}
             subtitle={`Tus dólares llegan como ${currency} a la cuenta de otra persona o negocio. Revisa el estimado y confirma al final.`}
             onBack={() => navigation.goBack()}
-            onHistory={() => navigation.navigate('LocalTransferStatus')}
+            onHistory={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
             historyLabel="Ver historial de envíos"
             compact={isCompact}
           />

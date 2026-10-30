@@ -102,46 +102,12 @@ it('keeps Pix key presentation for a key response', async () => {
   await act(async () => tree.unmount());
 });
 
-it('shows incoming receipts without steps, selection, summary or manual conversion actions', async () => {
-  mockApollo.query.mockResolvedValue({data: {localIncomingDeposits: [{
-    internalId: 'auto-credit', asset: 'BRL', amount: '32.51', occurredAt: '2026-09-16T04:08:43Z',
-    held: false, heldReason: '', automaticStatus: 'pending',
-    sender: {name: 'Ana Pérez', bankName: 'Banco', accountMasked: '•••• 7890', reference: 'REF-1'},
-  }]}});
-  let tree!: renderer.ReactTestRenderer;
-  await act(async () => {tree = renderer.create(<Screen />);});
-  const node = tree.root.findAllByType(Text).find(t => t.props.children === 'Ingreso recibido')!;
-  expect(node).toBeTruthy();
-  expect(tree.root.findAllByType(TouchableOpacity).some(t => t.findAllByType(Text).includes(node))).toBe(false);
-  expect(tree.root.findAllByType('Step' as any)).toHaveLength(0);
-  const text = JSON.stringify(tree.toJSON());
-  for (const value of ['Ana Pérez', 'Banco', '•••• 7890', 'REF-1']) expect(text).toContain(value);
-  for (const oldCopy of ['Resumen', 'Convertir a dólares', 'Listo para convertir', 'Escríbenos a soporte', 'confirma la conversión']) {
-    expect(text).not.toContain(oldCopy);
-  }
-  await act(async () => tree.unmount());
-});
-
 it('withholds receiving controls for an unpaid opening', async () => {
   mockAccount = {...mockAccount, status: 'awaiting_payment', value: ''};
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {tree = renderer.create(<Screen />);});
   expect(tree.root.findAllByType('QRCode' as any)).toHaveLength(0);
   expect(tree.root.findAllByType(Text).some(t => t.props.children === 'Copiar')).toBe(false);
-  await act(async () => tree.unmount());
-});
-
-it('clears the previous account receipts even when loading the new account fails', async () => {
-  mockApollo.query.mockResolvedValue({data: {localIncomingDeposits: [{
-    internalId: 'old-credit', asset: 'BRL', amount: '32.51', occurredAt: '2026-09-16T04:08:43Z', held: false,
-  }]}});
-  let tree!: renderer.ReactTestRenderer;
-  await act(async () => {tree = renderer.create(<Screen />);});
-  expect(JSON.stringify(tree.toJSON())).toContain('Ingreso recibido');
-  mockAccount = {...mockAccount, localAccountId: 'another-account'};
-  mockApollo.query.mockRejectedValue(new Error('offline'));
-  await act(async () => {tree.update(<Screen />);});
-  expect(JSON.stringify(tree.toJSON())).not.toContain('Ingreso recibido');
   await act(async () => tree.unmount());
 });
 

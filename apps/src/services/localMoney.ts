@@ -322,6 +322,21 @@ export const LOCAL_DEPOSITS = gql`
   }
 `;
 
+// Its own query: an older server without it only loses these rows in Historial.
+export const LOCAL_DEPOSITS_WITHOUT_TRANSFER = gql`
+  query LocalDepositsWithoutTransfer {
+    localDepositsWithoutTransfer {
+      internalId
+      asset
+      amount
+      occurredAt
+      held
+      automaticStatus
+      sender { name }
+    }
+  }
+`;
+
 export const LOCAL_JOURNEY = gql`
   query LocalJourney($id: UUID!) {
     infiniaJourney(internalId: $id) {

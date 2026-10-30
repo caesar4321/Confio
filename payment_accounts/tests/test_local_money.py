@@ -633,7 +633,7 @@ class LocalMoneyTests(TestCase):
                 provider_data={'operation': {'type': kind, 'operation_id': None}, 'third_party': sender})
         receipt = entry('real-incoming')
         flow = MoneyFlow.objects.create(confio_account=self.owner, kind='fund', source_asset='COP', source_amount='32.51')
-        InfiniaJourney.objects.create(confio_account=self.owner, money_flow=flow, request_id=uuid.uuid4(),
+        journey = InfiniaJourney.objects.create(confio_account=self.owner, money_flow=flow, request_id=uuid.uuid4(),
             local_account=local, crypto_account=crypto, direction='to_wallet', funding_credit=receipt,
             minimum_fx_output='1', minimum_wallet_output='0.9', stage='completed', wallet_address='0x'+'1'*40)
         conversion = MoneyOperation.objects.create(provider='infinia', operation_type='conversion',
@@ -651,6 +651,17 @@ class LocalMoneyTests(TestCase):
             self.assertEqual([r.pk for r in rows], [receipt.pk])
             self.assertEqual(JourneyQuery.resolve_local_incoming_deposits(None, SimpleNamespace(), local.internal_id, 1), [])
             self.assertEqual(JourneyQuery.resolve_local_incoming_deposits(None, SimpleNamespace(), uuid.uuid4()), [])
+            # protects=a deposit with no journey (returned, in review) still shows in Historial, and one with a journey is not listed twice; fails_when=the journey's credit reappears or an unjourneyed one is lost; no_claim=rendering
+            unlisted = lambda: [r.pk for r in JourneyQuery.resolve_local_deposits_without_transfer(None, SimpleNamespace())]
+            from payment_accounts.activity import sync_activity
+            from users.models_unified import UnifiedTransactionTable
+            sync_activity(journey.pk, notify=False)
+            self.assertEqual(unlisted(), [])
+            returned = entry('returned-to-payer')
+            self.assertEqual(unlisted(), [returned.pk])
+            # With its history row gone, the journey's deposit must surface here.
+            UnifiedTransactionTable.objects.filter(local_money_flow=flow).update(deleted_at=timezone.now())
+            self.assertEqual(sorted(unlisted()), sorted([returned.pk, receipt.pk]))
 
     def fx(self, target):
         self.client_api.create_transfer_quote.return_value = {

@@ -19,6 +19,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 
 import { GET_CURRENT_ACCOUNT_TRANSACTIONS } from '../apollo/queries';
+import { LOCAL_DEPOSITS_WITHOUT_TRANSFER } from '../services/localMoney';
 import { useAccount } from '../contexts/AccountContext';
 import { MainStackParamList } from '../types/navigation';
 import { RampHero } from '../components/ramps/RampHero';
@@ -36,6 +37,8 @@ type ListRow =
   | { kind: 'item'; data: any; key: string };
 
 const PAGE_SIZE = 50;
+// Every operation that moves money in or out of Confío: one Historial.
+const HISTORY_TYPES = ['ramp', 'local_transfer'];
 
 /* ─── helpers ─── */
 
@@ -155,6 +158,30 @@ const formatPrimaryRampAmount = (item: any, isOffRamp: boolean): { amount: strin
   return { amount: formatAmount(rawAmount, currency), currency };
 };
 
+/** In or out of Confío, whichever rail carried it. */
+const directionOf = (tx: any): 'on_ramp' | 'off_ramp' => {
+  const kind = (tx.transactionType || '').toLowerCase();
+  if (kind === 'local_deposit') return 'on_ramp';
+  if (kind === 'local_transfer') return (tx.senderType || '').toLowerCase() === 'external' ? 'on_ramp' : 'off_ramp';
+  return (tx.rampDirection || '').toLowerCase() === 'off_ramp' ? 'off_ramp' : 'on_ramp';
+};
+
+/** A deposit with no transfer behind it: what happened to that money. */
+const depositStatus = (deposit: any): {
+  label: string; tone: 'success' | 'info' | 'warning' | 'error' | 'neutral'; credited: boolean;
+} => {
+  switch (deposit.automaticStatus) {
+    case 'returned': return { label: 'Devuelto', tone: 'neutral', credited: false };
+    case 'returning': return { label: 'Devolviendo', tone: 'info', credited: false };
+    case 'return_failed': return { label: 'En revisión', tone: 'warning', credited: false };
+    case 'awaiting_face': return { label: 'Confirma tu Face', tone: 'warning', credited: false };
+    default:
+      return deposit.held
+        ? { label: 'En revisión', tone: 'warning', credited: false }
+        : { label: 'En proceso', tone: 'info', credited: false };
+  }
+};
+
 /* ─── component ─── */
 
 export const RampHistoryScreen = () => {
@@ -171,10 +198,18 @@ export const RampHistoryScreen = () => {
     // Algorand cUSD/USDC/ALGO,
     // BSC cUSD/cUSD+/USDT/BNB, and future ramp assets cannot disappear just
     // because a separate token allowlist has not been updated yet.
-    variables: { limit: PAGE_SIZE, offset: 0, transactionTypes: ['ramp'] },
+    variables: { limit: PAGE_SIZE, offset: 0, transactionTypes: HISTORY_TYPES },
     skip: !activeAccount,
     fetchPolicy: 'cache-and-network',
     notifyOnNetworkStatusChange: true,
+  });
+
+  // Deposits that never became a transaction (returned, in review, waiting
+  // for Confío Face). An error here only loses these rows.
+  const { data: depositsData, error: depositsError, refetch: refetchDeposits } = useQuery(LOCAL_DEPOSITS_WITHOUT_TRANSFER, {
+    skip: !activeAccount,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
   });
 
   const onRefresh = useCallback(async () => {
@@ -182,9 +217,10 @@ export const RampHistoryScreen = () => {
     await refetch({
       limit: PAGE_SIZE,
       offset: 0,
-      transactionTypes: ['ramp'],
+      transactionTypes: HISTORY_TYPES,
     });
-  }, [refetch]);
+    await refetchDeposits().catch(() => {});
+  }, [refetch, refetchDeposits]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || loading) return;
@@ -196,7 +232,7 @@ export const RampHistoryScreen = () => {
         variables: {
           limit: PAGE_SIZE,
           offset: currentTransactions.length,
-          transactionTypes: ['ramp'],
+          transactionTypes: HISTORY_TYPES,
         },
         updateQuery: (previous, { fetchMoreResult }) => {
           const incoming = fetchMoreResult?.currentAccountTransactions || [];
@@ -219,17 +255,19 @@ export const RampHistoryScreen = () => {
     }
   }, [data?.currentAccountTransactions, fetchMore, hasMore, loading, loadingMore]);
 
-  const rampTransactions = useMemo(() => {
-    const transactions = data?.currentAccountTransactions || [];
-    return transactions
-      .filter((tx: any) => (tx.transactionType || '').toLowerCase() === 'ramp')
-      .filter((tx: any) => {
-        const rampDirection = (tx.rampDirection || '').toLowerCase();
-        if (selectedFilter === 'on_ramp') return rampDirection === 'on_ramp';
-        if (selectedFilter === 'off_ramp') return rampDirection === 'off_ramp';
-        return true;
-      });
-  }, [data?.currentAccountTransactions, selectedFilter]);
+  const history = useMemo(() => {
+    const transactions = (data?.currentAccountTransactions || [])
+      .filter((tx: any) => HISTORY_TYPES.includes((tx.transactionType || '').toLowerCase()));
+    const deposits = (depositsData?.localDepositsWithoutTransfer || []).map((deposit: any) => ({
+      ...deposit, id: `deposit-${deposit.internalId}`, transactionType: 'local_deposit', createdAt: deposit.occurredAt,
+    }));
+    return [...transactions, ...deposits]
+      .sort((a: any, b: any) => moment.utc(b.createdAt).valueOf() - moment.utc(a.createdAt).valueOf());
+  }, [data?.currentAccountTransactions, depositsData?.localDepositsWithoutTransfer]);
+
+  const rampTransactions = useMemo(() => history.filter((tx: any) => (
+    selectedFilter === 'all' || directionOf(tx) === selectedFilter
+  )), [history, selectedFilter]);
 
   /* Build grouped list rows */
   const listRows = useMemo((): ListRow[] => {
@@ -247,26 +285,15 @@ export const RampHistoryScreen = () => {
   }, [rampTransactions]);
 
   /* Per-filter counts for badge */
-  const counts = useMemo(() => {
-    const transactions = data?.currentAccountTransactions || [];
-    const ramps = transactions.filter((tx: any) => (tx.transactionType || '').toLowerCase() === 'ramp');
-    return {
-      all: ramps.length,
-      on_ramp: ramps.filter((tx: any) => (tx.rampDirection || '').toLowerCase() === 'on_ramp').length,
-      off_ramp: ramps.filter((tx: any) => (tx.rampDirection || '').toLowerCase() === 'off_ramp').length,
-    };
-  }, [data?.currentAccountTransactions]);
+  const counts = useMemo(() => ({
+    all: history.length,
+    on_ramp: history.filter((tx: any) => directionOf(tx) === 'on_ramp').length,
+    off_ramp: history.filter((tx: any) => directionOf(tx) === 'off_ramp').length,
+  }), [history]);
 
-  const title = selectedFilter === 'on_ramp'
-    ? 'Historial de recargas'
-    : selectedFilter === 'off_ramp'
-      ? 'Historial de retiros'
-      : 'Recargas y retiros';
-  const subtitle = selectedFilter === 'on_ramp'
-    ? 'Consulta el estado y el monto final de tus compras de saldo.'
-    : selectedFilter === 'off_ramp'
-      ? 'Consulta el estado y el monto final de tus retiros.'
-      : 'Todas tus operaciones de rampa en un solo lugar.';
+  const title = selectedFilter === 'on_ramp' ? 'Lo que recibiste'
+    : selectedFilter === 'off_ramp' ? 'Lo que enviaste' : 'Tu historial';
+  const subtitle = 'Recargas, retiros y transferencias locales, con su estado y monto.';
 
   const renderFilterChip = (filter: RampFilter, label: string) => {
     const selected = selectedFilter === filter;
@@ -299,11 +326,23 @@ export const RampHistoryScreen = () => {
     }
 
     const item = row.data;
-    const isOffRamp = (item.rampDirection || '').toLowerCase() === 'off_ramp';
-    const statusTone = getStatusTone(item.rampStatus || item.status);
-    const providerLabel = item.rampProvider || item.displayCounterparty || 'Proveedor';
-    const titleText = isOffRamp ? 'Retiro' : 'Recarga';
-    const primaryAmount = formatPrimaryRampAmount(item, isOffRamp);
+    const kind = (item.transactionType || '').toLowerCase();
+    const isDeposit = kind === 'local_deposit';
+    const isLocal = kind === 'local_transfer';
+    const isOffRamp = directionOf(item) === 'off_ramp';
+    const depositState = isDeposit ? depositStatus(item) : null;
+    const statusTone = depositState?.tone || getStatusTone(item.rampStatus || item.status);
+    const statusLabel = depositState?.label || getStatusLabel(item.rampStatus || item.status);
+    const providerLabel = isDeposit ? (item.sender?.name || 'Remitente no informado')
+      : isLocal ? ((isOffRamp ? item.counterpartyDisplayName : item.senderDisplayName) || item.description || 'Cuenta local')
+        : (item.rampProvider || item.displayCounterparty || 'Proveedor');
+    const titleText = isDeposit || (isLocal && !isOffRamp) ? 'Ingreso' : isLocal ? 'Envío' : isOffRamp ? 'Retiro' : 'Recarga';
+    const primaryAmount = isDeposit
+      ? { amount: formatAmount(item.amount, item.asset), currency: item.asset }
+      : formatPrimaryRampAmount(item, isOffRamp);
+    // Not credited yet, or sent back: never a "+".
+    const amountPending = isLocal && item.localTransferPendingAmount;
+    const amountSign = depositState?.credited === false ? '' : isOffRamp ? '−' : '+';
 
     const statusColors = {
       success: { bg: colors.primaryLight, text: colors.primaryDark },
@@ -316,7 +355,16 @@ export const RampHistoryScreen = () => {
     return (
       <TouchableOpacity
         style={styles.itemCard}
+        disabled={isDeposit && item.automaticStatus !== 'awaiting_face'}
         onPress={() => {
+          if (isDeposit) {
+            navigation.navigate('PendingIncoming');
+            return;
+          }
+          if (isLocal) {
+            navigation.navigate('LocalTransferStatus', { journeyId: item.localTransferId });
+            return;
+          }
           navigation.navigate('TransactionDetail', unifiedDetailRoute({
             transactionType: 'ramp',
             transactionData: {
@@ -357,12 +405,12 @@ export const RampHistoryScreen = () => {
         {/* Right: amount + status */}
         <View style={styles.itemRight}>
           <Text style={[styles.itemAmount, isOffRamp ? styles.itemAmountNegative : styles.itemAmountPositive]}>
-            {isOffRamp ? '−' : '+'}{primaryAmount.amount}
+            {amountPending ? 'Pendiente' : `${amountSign}${primaryAmount.amount}`}
           </Text>
-          <Text style={styles.itemCurrency}>{primaryAmount.currency}</Text>
+          {amountPending ? null : <Text style={styles.itemCurrency}>{primaryAmount.currency}</Text>}
           <View style={[styles.statusPill, { backgroundColor: statusColors.bg }]}>
             <Text style={[styles.statusPillText, { color: statusColors.text }]}>
-              {getStatusLabel(item.rampStatus || item.status)}
+              {statusLabel}
             </Text>
           </View>
         </View>
@@ -400,9 +448,16 @@ export const RampHistoryScreen = () => {
             />
             <View style={styles.filtersRow}>
               {renderFilterChip('all', 'Todo')}
-              {renderFilterChip('on_ramp', 'Recargas')}
-              {renderFilterChip('off_ramp', 'Retiros')}
+              {renderFilterChip('on_ramp', 'Recibido')}
+              {renderFilterChip('off_ramp', 'Enviado')}
             </View>
+            {depositsError ? (
+              // A failed request is not "no deposits".
+              <TouchableOpacity style={styles.depositsError} onPress={() => { refetchDeposits().catch(() => {}); }}
+                accessibilityRole="button">
+                <Text style={styles.depositsErrorText}>No pudimos cargar algunos depósitos. Toca para reintentar.</Text>
+              </TouchableOpacity>
+            ) : null}
           </>
         )}
         ListEmptyComponent={(
@@ -416,7 +471,7 @@ export const RampHistoryScreen = () => {
                 </View>
                 <Text style={styles.emptyTitle}>Sin operaciones aún</Text>
                 <Text style={styles.emptyText}>
-                  Cuando generes una recarga o un retiro, aparecerá aquí con su estado.
+                  Cuando recibas o envíes dinero desde un banco, aparecerá aquí con su estado.
                 </Text>
               </>
             )}
@@ -452,6 +507,9 @@ const styles = StyleSheet.create({
   footerLoader: {
     paddingVertical: 20,
   },
+
+  depositsError: { marginHorizontal: 22, marginBottom: 12, paddingVertical: 8 },
+  depositsErrorText: { fontSize: 13, color: colors.warning.text },
 
   /* ── Filters ── */
   filtersRow: {
