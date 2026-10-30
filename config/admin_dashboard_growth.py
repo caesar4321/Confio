@@ -20,7 +20,9 @@ HEADLINE_WEEKS = 4
 FOCUS_COUNTRY = 'BO'
 # users.activity_tracking fixed DAU and began UserActivityDay on this day.
 ACTIVITY_RELIABLE_SINCE = date(2026, 10, 29)
-INVEST_KINDS = ('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell', 'perps_open')
+# Futures count from PerpPosition.opened_at: a confirmed perps_open batch only
+# proves the BSC funding left, not that an order filled.
+INVEST_KINDS = ('stock_buy', 'stock_sell', 'crypto_buy', 'crypto_sell')
 
 
 def _pct(part, whole):
@@ -28,13 +30,15 @@ def _pct(part, whole):
 
 
 def _member_sets(w):
-    """(deposit events, verified ids, investor ids). Deposits cover every
+    """(deposit events, verified ids, investing events). Deposits cover every
     source, so a provider deposit that never converted still counts as funded."""
-    from blockchain.models import SponsoredBatch
+    from blockchain.models import PerpPosition, SponsoredBatch
     from ramps.metrics import deposit_events
     from security.identity_status import verified_user_ids
 
-    invested = SponsoredBatch.objects.filter(status='confirmed', kind__in=INVEST_KINDS).order_by()
+    invested = list(SponsoredBatch.objects.filter(status='confirmed', kind__in=INVEST_KINDS).order_by().values_list(
+        'user_id', 'created_at'))
+    invested += list(PerpPosition.objects.filter(opened_at__isnull=False).order_by().values_list('user_id', 'opened_at'))
     return deposit_events(), set(verified_user_ids()), invested
 
 
@@ -43,7 +47,7 @@ def activation(w):
     split into Bolivia and everywhere else, plus the headline figures."""
     events, verified, invested = _member_sets(w)
     funded = {user for user, _at in events}
-    investors = set(invested.values_list('user_id', flat=True))
+    investors = {user for user, _at in invested}
     first_deposit = {}
     for user, at in events:
         if user not in first_deposit or at < first_deposit[user]:
@@ -75,8 +79,8 @@ def activation(w):
         'funded_ever': len(funded),
         'new_funded_7d': sum(1 for at in first_deposit.values() if at >= w.last_7_start),
         'new_funded_30d': sum(1 for at in first_deposit.values() if at >= w.rolling_30_start),
-        'investors_30d': invested.filter(created_at__gte=w.rolling_30_start).values('user_id').distinct().count(),
-        'investors_7d': invested.filter(created_at__gte=w.last_7_start).values('user_id').distinct().count(),
+        'investors_30d': len({u for u, at in invested if at >= w.rolling_30_start}),
+        'investors_7d': len({u for u, at in invested if at >= w.last_7_start}),
         'cohorts': cohorts,
         'totals': totals,
         'kyc_pct': _pct(totals['kyc'], totals['signups']),

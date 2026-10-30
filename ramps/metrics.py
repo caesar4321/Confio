@@ -252,6 +252,7 @@ def deposit_events() -> list:
     and provider deliveries that never converted. "Funded" must not depend on
     a conversion existing, or the arrivals Movido misses read as unfunded."""
     from payment_accounts.models import CobreJourney, InfiniaJourney
+    from ramps.models import RampTransaction
 
     entries, _exits = _perimeter_conversions()
     events = [(user, at) for user, at in entries.order_by().exclude(actor_user_id=None).values_list(
@@ -260,6 +261,11 @@ def deposit_events() -> list:
     events += [(user, done or made) for user, done, made in legacy.order_by().annotate(
         flow_usd=amount).filter(flow_usd__gt=0).exclude(actor_user_id=None).values_list(
             'actor_user_id', 'completed_at', 'created_at')]
+    # Guardarian holds a received deposit in PROCESSING until its conversion
+    # finishes; the money has still arrived.
+    events += [(user, made) for user, made in RampTransaction.objects.filter(
+        direction='on_ramp', status='PROCESSING', usdc_deposit__status='COMPLETED', usdc_deposit__is_deleted=False,
+        usdc_deposit__amount__gt=0).exclude(actor_user_id=None).order_by().values_list('actor_user_id', 'created_at')]
     for journey, statuses in ((InfiniaJourney, {'wallet_conversion__status': 'COMPLETED'}),
                               (CobreJourney, {'bridge__status': 'delivered'})):
         events += [(user, done or made) for user, done, made in journey.objects.filter(
