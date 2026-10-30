@@ -200,7 +200,7 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.11.0',
+    'version': '1.11.1',
     'last_updated': '2026-10-30',
     'is_legally_binding': True,
     'sections': [
@@ -284,7 +284,7 @@ PRIVACY = {
                 'Cumplir con obligaciones legales y regulatorias',
                 'Verificar su identidad y prevenir fraudes',
                 'Investigar y prevenir abusos, por ejemplo cuando otra persona intenta verificarse en nombre del titular de la cuenta',
-                'Confirmar con su rostro que es usted, y no otra persona con acceso a su cuenta, antes de operaciones sensibles: recargas, retiros, envíos y pagos según su nivel de riesgo, recibir transferencias bancarias en cuentas personales, autorizar nóminas y la salida de emergencia',
+                'Confirmar con su rostro que es usted, y no otra persona con acceso a su cuenta, antes de operaciones sensibles: recargas, retiros, envíos y pagos según su nivel de riesgo, recibir transferencias bancarias en cuentas personales y autorizar nóminas',
                 'Cumplir con requisitos de KYC/AML',
                 'Detectar que una misma persona verifique varias cuentas o vuelva a registrarse tras una suspensión, comparando los rostros de las verificaciones de identidad',
                 'Determinar la elegibilidad geográfica de funciones sujetas a reglas de emisores terceros, usando su país de residencia estimado a partir de la ubicación de su dispositivo, cuando la ha compartido, y de sus direcciones IP, el país de la dirección IP desde la que se conecta y, si no contamos con otro dato, el país de su número de teléfono verificado',
