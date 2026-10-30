@@ -590,6 +590,8 @@ const TopUpScreen = () => {
             ? 'Dinero nuevo llega directo a tu ahorro (Confío Dollar+). Elige tu medio de pago y confirma.'
             : 'Elige tu medio de pago, revisa la cotización y confirma cuando estés listo.'}
           onBack={() => navigation.goBack()}
+          onHistory={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
+          historyLabel="Ver historial de recargas"
           compact={isCompact}
         />
         </RampReveal>
@@ -597,15 +599,6 @@ const TopUpScreen = () => {
         <RampReveal delay={60}>
         <RampCountryRow verb="Recargar" style={styles.countryRow}
           suggestion={documentAlternative} onSuggestion={() => { switchToDocumentCountry(); }} />
-        <TouchableOpacity
-          style={styles.historyLink}
-          onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-        >
-          <Icon name="clock" size={14} color={colors.successText} />
-          <Text style={styles.historyPillText}>Ver recargas</Text>
-        </TouchableOpacity>
         </RampReveal>
         <RampCountrySheet
           visible={countrySheetVisible}
@@ -915,11 +908,7 @@ const styles = StyleSheet.create({
   noticeCopy: {
     flex: 1,
   },
-  countryRow: { marginHorizontal: 22, marginBottom: 8 },
-  historyLink: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end',
-    marginHorizontal: 22, marginBottom: 16, paddingVertical: 6,
-  },
+  countryRow: { marginHorizontal: 22, marginBottom: 20 },
   historyPill: {
     flexDirection: 'row',
     alignItems: 'center',

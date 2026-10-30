@@ -627,6 +627,8 @@ export const SellScreen = () => {
               title="Retiro en BOB no disponible"
               subtitle="Por ahora en Bolivia solo está habilitada la Recarga. Koywe nos avisará cuando los retiros en BOB estén operativos."
               onBack={() => navigation.goBack()}
+              onHistory={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
+              historyLabel="Ver historial de retiros"
               compact={isCompact}
             />
           </RampReveal>
@@ -666,6 +668,8 @@ export const SellScreen = () => {
           title="Retira a tu banco"
           subtitle="Elige cómo quieres recibir tu dinero, revisa el estimado y confirma al final."
           onBack={() => navigation.goBack()}
+          onHistory={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
+          historyLabel="Ver historial de retiros"
           compact={isCompact}
         />
         </RampReveal>
@@ -687,14 +691,6 @@ export const SellScreen = () => {
               Puedes guardar tu cuenta o billetera para no volver a cargarla en próximos retiros.
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.historyPill}
-            onPress={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
-            activeOpacity={0.8}
-          >
-            <Icon name="clock" size={14} color={colors.primary} />
-            <Text style={styles.historyPillText}>Ver retiros</Text>
-          </TouchableOpacity>
         </View>
         </RampReveal>
 
@@ -1040,23 +1036,6 @@ const styles = StyleSheet.create({
   },
   bannerCopy: {
     flex: 1,
-  },
-  historyPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: '#bbf7d0',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  historyPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
   },
   bannerTitle: {
     fontSize: 14,

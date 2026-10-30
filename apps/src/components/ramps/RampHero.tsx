@@ -20,6 +20,9 @@ type Props = {
   subtitle: string;
   onBack: () => void;
   compact?: boolean;
+  /** "Historial" pill across from the back button (as on Guardarian's screens). */
+  onHistory?: () => void;
+  historyLabel?: string;
   /** Top gradient stop — defaults to the brand field (primary → primaryDark). */
   fromColor?: string;
   /** Bottom gradient stop. */
@@ -38,6 +41,8 @@ export const RampHero = ({
   subtitle,
   onBack,
   compact = false,
+  onHistory,
+  historyLabel = 'Ver historial',
   fromColor = colors.heroField,
   toColor = colors.heroFieldDark,
 }: Props) => {
@@ -56,9 +61,16 @@ export const RampHero = ({
         <Circle cx="105%" cy="30%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
       </Svg>
       <View style={[styles.heroInner, { paddingTop: Math.max(insets.top, 12) + 12 }]}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-          <Icon name="arrow-left" size={20} color={colors.white} />
-        </TouchableOpacity>
+        <View style={styles.topRow}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
+            <Icon name="arrow-left" size={20} color={colors.white} />
+          </TouchableOpacity>
+          {onHistory ? (
+            <TouchableOpacity onPress={onHistory} style={styles.historyButton} accessibilityRole="button" accessibilityLabel={historyLabel}>
+              <Text style={styles.historyButtonText}>Historial</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
         {eyebrowCountry ? (
           <FlagLabel iso={eyebrowCountry} size={14} style={styles.eyebrowRow} textStyle={[styles.eyebrow, styles.eyebrowInRow]}>
             {eyebrow}
@@ -83,6 +95,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 28,
   },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
   backButton: {
     width: 40,
     height: 40,
@@ -90,9 +108,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.15)',
-    marginBottom: 20,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
+  },
+  historyButton: {
+    minWidth: 72,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    alignItems: 'center',
+  },
+  historyButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.white,
   },
   eyebrow: {
     fontSize: 11,
