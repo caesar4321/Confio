@@ -2,9 +2,9 @@ import json
 import logging
 import re
 
-from django.http import JsonResponse
+from django.http import HttpResponseRedirect, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods
 
 from security.didit import DiditAPIError, sync_didit_session, verify_didit_webhook_signature
 
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 _CPF_BACKFILL_VENDOR_DATA = re.compile(r'confio-(?:user|cpf-backfill)-\d+')
+_REDIRECT_SESSION_ID = re.compile(r'[A-Za-z0-9_-]+')
 
 
 def _is_standalone_cpf_backfill_webhook(payload):
@@ -37,9 +38,21 @@ def _is_standalone_cpf_backfill_webhook(payload):
     )
 
 
+class _AppRedirect(HttpResponseRedirect):
+    allowed_schemes = ['confio']
+
+
 @csrf_exempt
-@require_POST
+@require_http_methods(['GET', 'POST'])
 def didit_webhook(request):
+    if request.method == 'GET':
+        # Native sessions use this URL as their callback too, and a session a
+        # reviewer sent back is finished on Didit's page: Didit sends the
+        # browser here, which only needs to return to the app.
+        session_id = request.GET.get('verificationSessionId', '')
+        query = f'?verificationSessionId={session_id}' if _REDIRECT_SESSION_ID.fullmatch(session_id) else ''
+        return _AppRedirect(f'confio://verification{query}')
+
     signature = request.headers.get('X-Signature-V2') or request.headers.get('X-Signature')
     signature_v2 = request.headers.get('X-Signature-V2')
     signature_simple = request.headers.get('X-Signature-Simple')

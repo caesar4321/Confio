@@ -11,14 +11,17 @@ let mockPersonalStatus: string | null = 'rejected';
 const mockCreateSession = jest.fn();
 const mockSyncSession = jest.fn();
 const mockBrowserSession = jest.fn();
+const mockResume = jest.fn();
+let mockActions: any[] | null = null;
 const mockRefetch = jest.fn().mockResolvedValue({});
 const mockReason = 'El documento no coincide con tu identidad verificada.';
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('@apollo/client', () => ({
   gql: (parts: TemplateStringsArray) => parts.join(''),
-  useMutation: (query: string) => [query === 'create' ? mockCreateSession : query === 'browser' ? mockBrowserSession : mockSyncSession],
+  useMutation: (query: string) => [query === 'create' ? mockCreateSession : query === 'browser' ? mockBrowserSession : query === 'resume' ? mockResume : mockSyncSession],
   useQuery: (query: string) => ({loading: false, refetch: mockRefetch, data:
-    query.includes('MyIdentityDocuments') ? (mockDocuments === null ? {} : {myIdentityDocuments: mockDocuments})
+    query.includes('MyIdentityDocumentActions') ? (mockActions ? {myIdentityDocuments: mockActions} : undefined)
+      : query.includes('MyIdentityDocuments') ? (mockDocuments === null ? {} : {myIdentityDocuments: mockDocuments})
       : query === 'personal' ? {myPersonalKycStatus: {status: mockPersonalStatus, statusDetail: mockPersonalStatus ? mockReason : null}}
         : query === 'business' ? {businessKycStatus: mockBusinessStatus ? {status: mockBusinessStatus, statusDetail: mockReason} : null}
           : query === 'any' ? {myKycStatus: {status: mockAnyStatus, statusDetail: 'Personal verification'}}
@@ -37,7 +40,7 @@ jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAcc
 jest.mock('../../hooks/useRampCountry', () => ({useRampCountry: () => ({countryCode: 'PY', isBlocked: false})}));
 jest.mock('../../apollo/queries', () => ({GET_ME: 'me', GET_MY_KYC_STATUS: 'any', GET_MY_PERSONAL_KYC_STATUS: 'personal', GET_BUSINESS_KYC_STATUS: 'business', GET_MY_IDENTITY_STATUS: 'identity'}));
 jest.mock('../../apollo/mutations', () => ({
-  CREATE_DIDIT_VERIFICATION_SESSION: 'create', CREATE_DIDIT_BROWSER_VERIFICATION_SESSION: 'browser', SYNC_DIDIT_VERIFICATION_SESSION: 'sync',
+  CREATE_DIDIT_VERIFICATION_SESSION: 'create', CREATE_DIDIT_BROWSER_VERIFICATION_SESSION: 'browser', RESUME_DIDIT_VERIFICATION: 'resume', SYNC_DIDIT_VERIFICATION_SESSION: 'sync',
 }));
 jest.mock('../../services/diditService', () => ({getDiditResultSessionId: jest.fn(), startDiditVerification: jest.fn(),
   openDiditSessionUrl: jest.requireActual('../../services/diditService').openDiditSessionUrl}));
@@ -48,7 +51,7 @@ jest.mock('../../components/common/InlineBanner', () => ({InlineBanner: () => nu
 
 import VerificationScreen from '../VerificationScreen';
 
-beforeEach(() => { mockRouteParams = undefined; mockSetParams.mockReset(); mockAccountLoading = false; mockBusiness = false; mockDocuments = []; mockBusinessStatus = 'rejected'; mockAnyStatus = null; mockPersonalStatus = 'rejected'; });
+beforeEach(() => { mockActions = null; mockResume.mockReset(); mockRouteParams = undefined; mockSetParams.mockReset(); mockAccountLoading = false; mockBusiness = false; mockDocuments = []; mockBusinessStatus = 'rejected'; mockAnyStatus = null; mockPersonalStatus = 'rejected'; });
 
 it.each(['verified', 'pending', 'rejected'])('does not use %s personal KYC for an unverified business', async personalStatus => {
   mockBusiness = true;
@@ -338,4 +341,48 @@ it('offers the browser fallback on an expired country document', async () => {
   await act(async () => { tree = renderer.create(<VerificationScreen />); });
   expect(browserLink(tree)).toHaveLength(1);
   await act(async () => tree.unmount());
+});
+
+describe('a document a reviewer sent back', () => {
+  const pendingDoc = {id: '7', documentType: 'national_id', issuingCountry: 'PY', status: 'pending',
+    isAdditional: false, localCountries: []};
+  const render = async () => {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<VerificationScreen />); });
+    return tree;
+  };
+  const texts = (tree: renderer.ReactTestRenderer) => tree.root.findAllByType(Text).map(n => n.props.children);
+
+  it('asks for the step instead of saying it is under review', async () => {
+    mockDocuments = [pendingDoc];
+    mockActions = [{id: '7', actionRequired: true, actionDetail: 'Repite la selfie.'}];
+    const tree = await render();
+    expect(texts(tree)).toContain('Repite la selfie.');
+    expect(texts(tree)).toContain('Falta un paso');
+    expect(texts(tree)).not.toContain('Estamos revisando este documento. Te avisaremos apenas termine.');
+    await act(async () => tree.unmount());
+  });
+
+  it('continues the same session in the browser', async () => {
+    mockDocuments = [pendingDoc];
+    mockActions = [{id: '7', actionRequired: true, actionDetail: 'Repite la selfie.'}];
+    mockCreateSession.mockClear();
+    mockResume.mockResolvedValue({data: {resumeDiditVerification: {success: true, sessionUrl: 'https://verify.didit.me/session/abc123'}}});
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as any);
+    const tree = await render();
+    const button = tree.root.findByProps({title: 'Continuar verificación'});
+    await act(async () => { await button.props.onPress(); });
+    expect(mockResume).toHaveBeenCalledWith({variables: {verificationId: '7'}});
+    expect(openURL).toHaveBeenCalledWith('https://verify.didit.me/session/abc123');
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    openURL.mockRestore();
+    await act(async () => tree.unmount());
+  });
+
+  it('stays under review on a server without the new fields', async () => {
+    mockDocuments = [pendingDoc];
+    const tree = await render();
+    expect(texts(tree)).toContain('Estamos revisando este documento. Te avisaremos apenas termine.');
+    await act(async () => tree.unmount());
+  });
 });

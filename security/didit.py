@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from notifications.models import NotificationType as NotificationTypeChoices
 from notifications.utils import create_notification
-from security.models import PASSED_KYC, IdentityVerification, normalize_brazilian_cpf
+from security.models import DIDIT_AWAITING_PERSON, PASSED_KYC, IdentityVerification, normalize_brazilian_cpf
 from users.models import Business
 
 logger = logging.getLogger(__name__)
@@ -319,6 +319,7 @@ USER_FIXABLE_DECLINE_REASONS = {
         'La foto del documento no tiene suficiente calidad. Acércate y toma la foto con buena luz.'),
     'PORTRAIT_IMAGE_NOT_DETECTED': (
         'No pudimos ver la foto de tu documento. Toma la foto de frente, sin reflejos.'),
+    'NAME_NOT_DETECTED': 'No pudimos leer tu nombre en el documento. Toma la foto con buena luz y sin reflejos.',
     'NO_FACE_DETECTED': 'No detectamos tu rostro en la selfie. Mira de frente a la cámara con buena luz.',
     'MULTIPLE_FACES_DETECTED': 'Aparece más de una persona en la selfie. Tómala a solas.',
 }
@@ -448,17 +449,43 @@ def reviewer_decline_comment(response_payload: dict[str, Any]) -> str | None:
     carry internal notes that name fraud checks and cases; only a Console
     reviewer, signed in with an email, ever speaks to the person.
     """
+    return _reviewer_comment(response_payload, 'declined')
+
+
+def _reviewer_comment(response_payload: dict[str, Any], new_status: str) -> str | None:
     reviews = response_payload.get('reviews')
-    declines = [
+    matching = [
         review for review in (reviews if isinstance(reviews, list) else [])
-        if isinstance(review, dict) and str(review.get('new_status') or '').strip().lower() == 'declined'
+        if isinstance(review, dict) and str(review.get('new_status') or '').strip().lower() == new_status
     ]
-    if not declines:
+    if not matching:
         return None
-    latest = max(declines, key=lambda review: str(review.get('created_at') or ''))
+    latest = max(matching, key=lambda review: str(review.get('created_at') or ''))
     if '@' not in str(latest.get('user') or ''):
         return ''
     return str(latest.get('comment') or '').strip()
+
+
+def resubmission_reason(session_id: str, response_payload: dict[str, Any]) -> str:
+    """Why a reviewer sent this session back, or '' for the generic copy: the
+    reviewer's own note first, then Didit's reason when every step's reason is
+    one the person can fix. Fails closed like user_facing_decline_reason."""
+    note = _reviewer_comment(response_payload, 'resubmitted')
+    if note:
+        return note
+    try:
+        detail = _didit_request('GET', f'/v3/session/{session_id}/decision/?include=resubmissions')
+    except DiditAPIError:
+        return ''  # The next sync asks again; the steps themselves are on Didit's page.
+    requests_made = [item for item in detail.get('resubmissions') or [] if isinstance(item, dict)]
+    if not requests_made:
+        return ''
+    latest = max(requests_made, key=lambda item: item.get('number') or 0)
+    reasons = latest.get('reasons')
+    codes = [str(code).strip().upper() for code in reasons.values()] if isinstance(reasons, dict) else []
+    if not codes or any(code not in USER_FIXABLE_DECLINE_REASONS for code in codes):
+        return ''
+    return USER_FIXABLE_DECLINE_REASONS[codes[0]]
 
 
 def _safe_json_loads(value: Any) -> dict[str, Any]:
@@ -754,6 +781,9 @@ def _personal_vendor_data(user) -> dict[str, Any]:
     return {'user_id': user.id, 'account_type': 'personal'}
 
 
+PLACEHOLDER_BIRTH_DATE = date(1900, 1, 1)
+
+
 def _validated_didit_session_url(value: Any) -> str:
     url = str(value or '').strip()
     try:
@@ -929,7 +959,7 @@ def _placeholder_defaults(*, user, session_id: str, account_type: str, business_
     return {
         'verified_first_name': user.first_name or 'Pending',
         'verified_last_name': user.last_name or 'Verification',
-        'verified_date_of_birth': date(1900, 1, 1),
+        'verified_date_of_birth': PLACEHOLDER_BIRTH_DATE,
         'verified_nationality': 'UNK',
         'verified_address': '',
         'verified_address_neighborhood': '',
@@ -1144,7 +1174,7 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         ),
         'verified_date_of_birth': _parse_date(
             _first_non_empty(response_payload.get('date_of_birth'), id_verification.get('date_of_birth'))
-        ) or date(1900, 1, 1),
+        ) or PLACEHOLDER_BIRTH_DATE,
         'verified_nationality': _normalize_iso3(
             _first_non_empty(id_verification.get('nationality'), response_payload.get('nationality'))
         ),
@@ -1308,6 +1338,30 @@ def _notify_verification_status_change(
     )
 
 
+def _notify_resubmission_requested(*, verification: IdentityVerification) -> None:
+    create_notification(
+        user=verification.user,
+        notification_type=NotificationTypeChoices.SECURITY_ALERT,
+        title='Falta un paso en tu verificación',
+        # The reason itself stays off the lock screen: it can describe the ID.
+        message='Necesitamos que repitas un paso para terminar. Toca para continuar.',
+        data={'verification_id': str(verification.id)},
+        related_object_type='IdentityVerification',
+        related_object_id=str(verification.id),
+        action_url='confio://verification',
+    )
+
+
+def _superseded(verification: IdentityVerification) -> bool:
+    """An attempt that never passed, with a newer one of its kind: the app no
+    longer lists it (resolve_my_identity_documents), so nothing can be asked."""
+    from .identity_status import personal_documents
+    return verification.verified_at is None and personal_documents(verification.user).filter(
+        is_additional_document=verification.is_additional_document,
+        created_at__gt=verification.created_at,
+    ).exists()
+
+
 def _name_tokens(value: Any) -> set[str]:
     import unicodedata
     text = unicodedata.normalize('NFKD', str(value or ''))
@@ -1339,6 +1393,11 @@ def _same_person(primary: IdentityVerification, extracted: dict[str, Any]) -> bo
     )
 
 
+def _matches_anchor(anchor: IdentityVerification, extracted: dict[str, Any]) -> bool:
+    # A document that lost its identity data can only be bound by its face.
+    return anchor.verified_date_of_birth == PLACEHOLDER_BIRTH_DATE or _same_person(anchor, extracted)
+
+
 NOT_SAME_PERSON_MESSAGE = 'El documento no coincide con tu identidad verificada.'
 FACE_UNCONFIRMED_MESSAGE = 'No pudimos confirmar que el documento sea tuyo. Verifícalo de nuevo.'
 # When a document started waiting for the face comparison (AWS or Didit was
@@ -1355,6 +1414,10 @@ DUPLICATED_FACE_UNVERIFIED_KEY = 'duplicated_face_unverified'
 class _NoSelfie(Exception):
     """No selfie of the anchor exists anywhere (an account verified before
     selfies were kept, or whose Didit media is gone): retrying cannot help."""
+
+
+# Set while a session holds a resubmitted attempt no approval has stood for.
+SESSION_REOPENED_KEY = 'session_reopened'
 
 
 def _anchor_selfie(anchor: IdentityVerification) -> bytes:
@@ -1383,7 +1446,10 @@ def _anchor_selfie(anchor: IdentityVerification) -> bytes:
             logger.warning('Same-person face check: stored selfie missing for anchor=%s', anchor.pk)
     from .face_step_up import FaceStepUpError
     session_id = ((anchor.risk_factors or {}).get('didit') or {}).get('session_id')
-    if not session_id:
+    # A session that was reopened holds the new attempt's selfie, which proves
+    # nothing about who passed: only an untouched session speaks for the person.
+    if (not session_id or anchor.status not in ('verified', 'expired')
+            or (anchor.risk_factors or {}).get(SESSION_REOPENED_KEY)):
         raise _NoSelfie()
     try:
         url = _didit_selfie_url(_didit_request('GET', f'/v3/session/{session_id}/decision/'))
@@ -1516,6 +1582,8 @@ def retry_pending_same_face() -> int:
             factors = dict(expired.risk_factors or {})
             factors.pop(SAME_FACE_RETRY_KEY, None)
             factors[SAME_FACE_EXHAUSTED_KEY] = True
+            if expired.verified_at:  # As a sync's own refusal: it still binds the account.
+                factors['replacement_refused'] = True
             expired.status, expired.rejected_reason, expired.risk_factors = (
                 'rejected', FACE_UNCONFIRMED_MESSAGE, factors)
             expired.save(update_fields=['status', 'rejected_reason', 'risk_factors', 'updated_at'])
@@ -1544,19 +1612,27 @@ def retry_pending_same_face() -> int:
 
 def _anchor_for(verification: IdentityVerification) -> IdentityVerification | None:
     from django.db.models import Q
-    return (
+    passed = (
         # A document that was verified and then expired still names the
         # person: re-verifying after expiry must be the same person.
         IdentityVerification.all_documents.filter(user=verification.user).filter(PASSED_KYC)
         .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        .exclude(pk=verification.pk)
         # The personal copy a company verification creates (security.models
         # ensure_personal_verified_on_save: empty risk_factors, the company's
         # document number) describes the company, not the person.
         .exclude(risk_factors={}, document_number__in=IdentityVerification.all_documents.filter(
             user=verification.user, risk_factors__account_type='business').values('document_number'))
-        .order_by('is_additional_document', 'verified_at', 'created_at').first()
     )
+    others = passed.exclude(pk=verification.pk).order_by('is_additional_document', 'verified_at', 'created_at')
+    # A document that lost its identity to placeholders still binds by face
+    # (_matches_anchor), so it only comes after any that kept theirs.
+    other = others.exclude(verified_date_of_birth=PLACEHOLDER_BIRTH_DATE).first() or others.first()
+    if other:
+        return other
+    # With no other, a document that passed answers for itself until an
+    # approval sticks: not in PASSED_KYC once an attempt was refused.
+    return (IdentityVerification.all_documents
+            .filter(pk=verification.pk, verified_at__isnull=False).exclude(status='verified').first())
 
 
 def precompute_same_face(verification: IdentityVerification, extracted: dict[str, Any],
@@ -1567,7 +1643,7 @@ def precompute_same_face(verification: IdentityVerification, extracted: dict[str
     if verification.status == 'verified' or (verification.risk_factors or {}).get(SAME_FACE_EXHAUSTED_KEY):
         return None
     anchor = _anchor_for(verification)
-    if anchor is None or not _same_person(anchor, extracted):
+    if anchor is None or not _matches_anchor(anchor, extracted):
         return None
     return anchor.pk, _same_face(anchor, response_payload)
 
@@ -1591,7 +1667,7 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
     anchor = _anchor_for(verification)
     if anchor is None:
         return 'verified', ''
-    if not _same_person(anchor, extracted):
+    if not _matches_anchor(anchor, extracted):
         return 'rejected', NOT_SAME_PERSON_MESSAGE
     # Once: a later sync of an already verified document neither pays for
     # another comparison nor drops the KYC to pending when AWS is unreachable.
@@ -1605,6 +1681,10 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
             verification.risk_factors = factors
             return 'pending', ''
         factors.pop(SAME_FACE_RETRY_KEY, None)
+        if same == FACE_NO_REFERENCE and anchor.verified_date_of_birth == PLACEHOLDER_BIRTH_DATE:
+            # Neither its identity nor its face is left to compare with.
+            verification.risk_factors = factors
+            return 'rejected', FACE_UNCONFIRMED_MESSAGE
         if same == FACE_NO_REFERENCE:
             # An account verified before selfies were kept: bound by identity
             # data alone, as before; recorded for audit.
@@ -1680,6 +1760,13 @@ def sync_didit_session(*, session_id: str, expected_user=None, expected_account_
                                    expected_business_id=expected_business_id)
 
 
+_IDENTITY_FIELDS = (
+    'verified_first_name', 'verified_last_name', 'verified_date_of_birth', 'verified_nationality',
+    'verified_address', 'verified_address_neighborhood', 'verified_city', 'verified_state', 'verified_country',
+    'verified_postal_code', 'document_type', 'document_number', 'document_issuing_country', 'document_expiry_date',
+)
+
+
 def _sync_didit_session(*, session_id: str, expected_user=None, expected_account_type=None, expected_business_id=None) -> tuple[IdentityVerification, dict[str, Any]]:
     # An EDD session (proof of address, source of funds) is not an identity
     # document. Refuse it here, whichever path delivers it (webhook or the
@@ -1720,6 +1807,7 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
     extracted = _extract_verification_payload(response_payload)
     status = _map_didit_status(response_payload)
     previous_status = verification.status
+    previous_raw = str(((verification.risk_factors or {}).get('didit') or {}).get('raw_status') or '').strip().lower()
     risk_factors = dict(verification.risk_factors or {})
     risk_factors['provider'] = 'didit'
     risk_factors['didit'] = {
@@ -1733,6 +1821,11 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         # facts needed for audit/backfills, never the signed media URLs.
         'session': _without_transient_didit_media(response_payload),
     }
+    reopened = str(response_payload.get('status') or '').strip().lower() in DIDIT_AWAITING_PERSON
+    if reopened or previous_raw in DIDIT_AWAITING_PERSON:
+        risk_factors[SESSION_REOPENED_KEY] = True
+    if account_type != 'business' and reopened:
+        risk_factors['didit']['resubmission_reason'] = resubmission_reason(session_id, response_payload)
     if account_type == 'business':
         risk_factors['account_type'] = 'business'
     if business_id:
@@ -1755,6 +1848,11 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
                 if others:
                     risk_factors['duplicated_face'] = {'risks': duplicated, 'matched_user_ids': others}
 
+    # A document that once passed still names the person, whatever happens to
+    # this attempt: Didit clears the steps it reopens, and a refused attempt
+    # holds someone else. Only a new approval replaces that identity.
+    kept_identity = ({field: getattr(verification, field) for field in _IDENTITY_FIELDS}
+                     if verification.verified_at else None)
     verification.verified_first_name = extracted['verified_first_name']
     verification.verified_last_name = extracted['verified_last_name']
     verification.verified_date_of_birth = extracted['verified_date_of_birth']
@@ -1818,6 +1916,21 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
             # A primary verified after an extra document must be the same person too.
             status, review_reason = _bind_to_person(verification, extracted, response_payload, precomputed_face)
         verification.status = status
+        if kept_identity and status != 'verified':
+            for field, value in kept_identity.items():
+                setattr(verification, field, value)
+        didit_says = _map_didit_status(response_payload)
+        factors = dict(verification.risk_factors or {})
+        if kept_identity and status == 'rejected' and didit_says == 'verified':
+            # Our own checks refused this attempt, not a reviewer: the document
+            # still binds the account, or a fresh session gets past it (PASSED_KYC).
+            factors['replacement_refused'] = True
+        elif status == 'verified' or didit_says == 'rejected':
+            # Only an approval that stood or a reviewer's decline ends that.
+            factors.pop('replacement_refused', None)
+        if status == 'verified':
+            factors.pop(SESSION_REOPENED_KEY, None)  # This selfie passed the same-person check.
+        verification.risk_factors = factors
         if status == 'verified' and verification.verified_at is None:
             verification.verified_at = timezone.now()
         if status != 'rejected':
@@ -1853,8 +1966,34 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
             previous_status=previous_status,
             new_status=status,
         )
+    # Once per request: Didit repeats webhooks. Business KYB waits on its owner
+    # as a normal step of the flow, so it has no push.
+    if (account_type != 'business' and verification.needs_person_action
+            and previous_raw not in DIDIT_AWAITING_PERSON and not _superseded(verification)):
+        _notify_resubmission_requested(verification=verification)
 
     return verification, response_payload
+
+
+def resume_didit_resubmission(*, user, verification_id: Any) -> str:
+    """The hosted link back into a session a reviewer sent back: Didit keeps it
+    open for the requested steps, so the person never starts over. Asks Didit
+    first, so a stale screen never reopens a session that already moved on."""
+    gone = 'Esta verificación ya no necesita ningún paso.'
+    verification = None
+    if str(verification_id or '').isdigit():
+        verification = IdentityVerification.all_documents.filter(
+            pk=int(verification_id), user=user, status='pending',
+        ).first()
+    if (verification is None or not verification.needs_person_action
+            or (verification.risk_factors or {}).get('account_type') == 'business'):
+        raise DiditAPIError(gone)
+    session_id = str(((verification.risk_factors or {}).get('didit') or {}).get('session_id') or '')
+    verification, response_payload = sync_didit_session(
+        session_id=session_id, expected_user=user, expected_account_type='personal')
+    if not verification.needs_person_action:
+        raise DiditAPIError(gone)
+    return _validated_didit_session_url(response_payload.get('session_url'))
 
 
 def verify_didit_webhook_signature(

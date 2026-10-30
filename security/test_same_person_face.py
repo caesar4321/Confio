@@ -434,7 +434,7 @@ class DuplicatedFaceHoldTests(TestCase):
             self.assertIsNone(didit.other_users_with_face(self.user, _decision()))
 
     def test_the_sync_records_the_flag_and_keeps_it(self):
-        row = _document(self.user, 'P-11', status='pending',
+        row = _document(self.user, 'P-11', status='pending', verified_at=None,
                         risk_factors={'provider': 'didit', 'didit': {'session_id': 's-dup'}})
         approved = {
             'session_id': 's-dup', 'status': 'Approved',

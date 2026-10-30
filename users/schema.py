@@ -3216,6 +3216,37 @@ class CreateDiditVerificationSession(graphene.Mutation):
             )
 
 
+class ResumeDiditVerification(graphene.Mutation):
+    """Back into a session a reviewer sent back. Its own mutation: older apps
+    keep starting a new session, which needs a token this path has none of."""
+    class Arguments:
+        verification_id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    session_url = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, verification_id):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return ResumeDiditVerification(success=False, error="Authentication required")
+        try:
+            from users.jwt_context import get_jwt_business_context_with_validation
+            from security.didit import resume_didit_resubmission
+
+            account_ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+            if (account_ctx.get('account_type') or 'personal') != 'personal':
+                raise DiditAPIError('Esta verificación pertenece a tu cuenta personal.')
+            session_url = resume_didit_resubmission(user=user, verification_id=verification_id)
+            return ResumeDiditVerification(success=True, session_url=session_url)
+        except (DiditConfigurationError, DiditAPIError) as e:
+            return ResumeDiditVerification(success=False, error=str(e))
+        except Exception:
+            logger.exception("ResumeDiditVerification failed")
+            return ResumeDiditVerification(success=False, error='No se pudo abrir la verificación. Inténtalo de nuevo.')
+
+
 class SyncDiditVerificationSession(graphene.Mutation):
     class Arguments:
         session_id = graphene.String(required=True)
@@ -6440,6 +6471,7 @@ class Mutation(EmployeeMutations, FunnelMutations, LocalRailWaitlistMutations, P
     switch_account_token = SwitchAccountToken.Field()
     submit_identity_verification = SubmitIdentityVerification.Field()
     create_didit_verification_session = CreateDiditVerificationSession.Field()
+    resume_didit_verification = ResumeDiditVerification.Field()
     sync_didit_verification_session = SyncDiditVerificationSession.Field()
     request_identity_upload = RequestIdentityUpload.Field()
     submit_identity_verification_s3 = SubmitIdentityVerificationS3.Field()

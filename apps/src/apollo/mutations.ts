@@ -481,6 +481,16 @@ export const CREATE_DIDIT_BROWSER_VERIFICATION_SESSION = gql`
   }
 `;
 
+export const RESUME_DIDIT_VERIFICATION = gql`
+  mutation ResumeDiditVerification($verificationId: ID!) {
+    resumeDiditVerification(verificationId: $verificationId) {
+      success
+      error
+      sessionUrl
+    }
+  }
+`;
+
 export const SYNC_DIDIT_VERIFICATION_SESSION = gql`
   mutation SyncDiditVerificationSession($sessionId: String!) {
     syncDiditVerificationSession(sessionId: $sessionId) {

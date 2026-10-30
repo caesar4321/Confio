@@ -271,6 +271,9 @@ class IdentityDocumentType(graphene.ObjectType):
     issuing_country = graphene.String(required=True)  # ISO-2, '' while unknown
     status = graphene.String(required=True)
     rejected_reason = graphene.String()
+    # Didit is waiting for the person to redo a step, not reviewing.
+    action_required = graphene.Boolean(required=True)
+    action_detail = graphene.String()
     is_additional = graphene.Boolean(required=True)
     verified_at = graphene.DateTime()
     # ISO-2 countries whose local account this document can open: the same
@@ -413,8 +416,9 @@ class SecurityQuery(graphene.ObjectType):
 
     def resolve_my_identity_documents(self, info):
         """Every personal document (additional ones included, which the default
-        manager hides): verified ones, plus an attempt still in review or
-        rejected when it is newer than the last verified document of its kind."""
+        manager hides): verified ones, ones a reviewer sent back after passing,
+        plus an attempt still in review or rejected when it is newer than the
+        last verified document of its kind."""
         user = info.context.user
         if not user.is_authenticated:
             return []
@@ -432,10 +436,14 @@ class SecurityQuery(graphene.ObjectType):
             if latest and latest.status in ('pending', 'rejected') and (
                     newest_verified is None or latest.created_at > newest_verified):
                 documents.append(latest)
+        # A document that passed and was sent back: losing it is not a stale
+        # attempt, whatever came after it.
+        documents += [row for row in rows if row.needs_person_action and row.verified_at and row not in documents]
         return [IdentityDocumentType(
             id=str(row.pk), document_type=row.document_type or '', issuing_country=_iso2(row.document_issuing_country),
             status=row.status, is_additional=bool(row.is_additional_document), verified_at=row.verified_at,
             rejected_reason=row.rejected_reason if row.status == 'rejected' else None,
+            action_required=row.needs_person_action, action_detail=row.action_detail or None,
             local_countries=_local_countries(row),
         ) for row in documents]
 

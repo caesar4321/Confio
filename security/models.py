@@ -54,10 +54,22 @@ class PrimaryIdentityManager(SoftDeleteManager):
 
 
 # A person who passed KYC with this document: verified now, or verified and
-# later expired (Didit "Kyc Expired"). Links between people (bans, duplicate
-# identities, rewards, same-person binding, Confío Face) use this; features
-# that need a CURRENT document filter status='verified' only.
-PASSED_KYC = Q(status='verified') | Q(status='expired', verified_at__isnull=False)
+# later expired (Didit "Kyc Expired") or sent back to 'pending' by a reviewer
+# (Didit "Resubmitted"), including when our own check then refused someone
+# else's re-approval of it (a reviewer's decline does unbind it: a borrowed
+# document). Links between people (bans, duplicate identities, rewards,
+# same-person binding, Confío Face) use this; features that need a CURRENT
+# document filter status='verified' only.
+PASSED_KYC = (Q(status='verified') | Q(status__in=('expired', 'pending'), verified_at__isnull=False)
+              | Q(status='rejected', verified_at__isnull=False, risk_factors__replacement_refused=True))
+
+# Didit is waiting for the person, not reviewing: stored as 'pending', but
+# nobody will decide anything until they redo what was asked.
+DIDIT_AWAITING_PERSON = {
+    'resubmitted', 'resubmission requested', 'resubmission required', 'resub_requested',
+    'awaiting user', 'awaiting_user',
+}
+GENERIC_RESUBMISSION_DETAIL = 'Necesitamos que repitas un paso de tu verificación. No tienes que empezar de nuevo.'
 
 # Didit's raw status → why an attempt we store as 'expired' ended.
 DIDIT_EXPIRED_REASONS = {
@@ -300,13 +312,29 @@ class IdentityVerification(SoftDeleteModel):
         if self.status == 'rejected':
             return self.rejected_reason or 'La verificación fue rechazada. Puedes intentar nuevamente.'
         if self.status == 'pending':
-            raw_status = str(((self.risk_factors or {}).get('didit') or {}).get('raw_status') or '').lower()
-            if is_business and raw_status in {'awaiting user', 'awaiting_user', 'resub_requested', 'resubmission requested'}:
-                return 'Se necesita información adicional. Continúa la verificación de tu negocio en Didit.'
+            if self.needs_person_action:
+                if is_business:
+                    return 'Se necesita información adicional. Continúa la verificación de tu negocio en Didit.'
+                return self.action_detail
             return 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.'
         if self.status == 'expired':
             return EXPIRED_DETAILS.get(self.expired_reason, EXPIRED_DETAILS[''])
         return 'Todavía no iniciaste una verificación de identidad.'
+
+    @property
+    def needs_person_action(self) -> bool:
+        if self.status != 'pending':
+            return False
+        raw = str(((self.risk_factors or {}).get('didit') or {}).get('raw_status') or '').strip().lower()
+        return raw in DIDIT_AWAITING_PERSON
+
+    @property
+    def action_detail(self) -> str:
+        """What the person has to redo; '' when nothing is asked of them."""
+        if not self.needs_person_action:
+            return ''
+        didit = (self.risk_factors or {}).get('didit') or {}
+        return didit.get('resubmission_reason') or GENERIC_RESUBMISSION_DETAIL
 
     @property
     def expired_reason(self) -> str:

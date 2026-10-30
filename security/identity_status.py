@@ -16,9 +16,10 @@ below. So:
   (Koywe's delegated KYC behind Recargar/Retirar). Until 2026-10 this was
   "the primary document", which matched the phone country only because the
   per-country Didit workflows forced it to.
-- has_ever_passed_kyc: verified now or verified and later expired. Security
-  links that exist because someone went through KYC (Confío Face, bans,
-  same-person checks) — an expiring document never switches them off.
+- has_ever_passed_kyc: verified now, or verified and later expired or sent
+  back by a reviewer. Security links that exist because someone went through
+  KYC (Confío Face, bans, same-person checks) — neither an expiring document
+  nor a resubmission ever switches them off.
 - identity_status / verified_at: what the app shows.
 - is_business_verified: KYB, a different question (business-context rows).
 

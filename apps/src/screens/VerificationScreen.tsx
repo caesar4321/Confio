@@ -20,6 +20,7 @@ import { isRampBlockedCountry } from '../config/env';
 import {
   CREATE_DIDIT_BROWSER_VERIFICATION_SESSION,
   CREATE_DIDIT_VERIFICATION_SESSION,
+  RESUME_DIDIT_VERIFICATION,
   SYNC_DIDIT_VERIFICATION_SESSION,
 } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
@@ -47,6 +48,18 @@ const MY_IDENTITY_DOCUMENTS = gql`
   }
 `;
 
+// Its own document too: an older server without these fields keeps the list
+// above working, and every document simply reads as under review.
+const MY_IDENTITY_DOCUMENT_ACTIONS = gql`
+  query MyIdentityDocumentActions {
+    myIdentityDocuments {
+      id
+      actionRequired
+      actionDetail
+    }
+  }
+`;
+
 const DIDIT_SESSION_ID = /^[A-Za-z0-9_-]+$/;
 
 // The server's own message, never a raw GraphQL or transport error.
@@ -55,6 +68,7 @@ function userFacingMessage(error: any): string | null {
 }
 
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
+type DisplayStatus = NormalizedStatus | 'action';
 
 type IdentityDocument = {
   id: string;
@@ -112,9 +126,10 @@ function normalizeStatus(value?: string | null): NormalizedStatus {
   return 'unverified';
 }
 
-const STATUS_META: Record<NormalizedStatus, { label: string; color: string; bg: string; icon: string }> = {
+const STATUS_META: Record<DisplayStatus, { label: string; color: string; bg: string; icon: string }> = {
   verified: { label: 'Verificado', color: colors.success, bg: colors.successLight, icon: 'check-circle' },
   pending: { label: 'En revisión', color: colors.warning.icon, bg: colors.warningLight, icon: 'clock' },
+  action: { label: 'Falta un paso', color: colors.warning.icon, bg: colors.warningLight, icon: 'alert-circle' },
   rejected: { label: 'Rechazado', color: colors.danger, bg: colors.dangerLight, icon: 'x-circle' },
   unverified: { label: 'Sin verificar', color: colors.info, bg: colors.infoLight, icon: 'shield' },
 };
@@ -122,7 +137,7 @@ const STATUS_META: Record<NormalizedStatus, { label: string; color: string; bg: 
 const joinNames = (names: string[]) =>
   names.length > 1 ? `${names.slice(0, -1).join(', ')} y ${names[names.length - 1]}` : names[0] || '';
 
-function StatusPill({ status }: { status: NormalizedStatus }) {
+function StatusPill({ status }: { status: DisplayStatus }) {
   const meta = STATUS_META[status];
   return (
     <View style={[styles.statusPill, { backgroundColor: meta.bg }]}>
@@ -196,10 +211,21 @@ const VerificationScreen = () => {
   });
   const refetchDocuments = documentsQuery.refetch;
   const documents: IdentityDocument[] | null = documentsQuery.data?.myIdentityDocuments || null;
+  const actionsQuery = useQuery(MY_IDENTITY_DOCUMENT_ACTIONS, {
+    skip: isBusinessAccount, fetchPolicy: 'network-only', errorPolicy: 'all',
+  });
+  const refetchActions = actionsQuery.refetch;
+  // Document id → what it asks of the person; absent when Didit is not waiting for them.
+  const documentActions = new Map<string, string>(
+    (actionsQuery.data?.myIdentityDocuments || [])
+      .filter((doc: any) => doc?.actionRequired)
+      .map((doc: any) => [doc.id, doc.actionDetail || 'Necesitamos que repitas un paso de tu verificación.']),
+  );
 
   const [createDiditSession] = useMutation(CREATE_DIDIT_VERIFICATION_SESSION);
   const [syncDiditSession] = useMutation(SYNC_DIDIT_VERIFICATION_SESSION);
   const [createDiditBrowserSession] = useMutation(CREATE_DIDIT_BROWSER_VERIFICATION_SESSION);
+  const [resumeDiditVerification] = useMutation(RESUME_DIDIT_VERIFICATION);
   // True while the user verifies on Didit's page in the browser: the next return
   // to the app refreshes once. Didit's redirect back is synced separately below.
   const awaitingBrowserRef = React.useRef(false);
@@ -234,6 +260,7 @@ const VerificationScreen = () => {
         refetchPersonalKyc(),
         isBusinessAccount && refetchBizKyc ? refetchBizKyc() : Promise.resolve(),
         isBusinessAccount ? Promise.resolve(undefined) : refetchDocuments().catch(() => undefined),
+        isBusinessAccount ? Promise.resolve(undefined) : refetchActions().catch(() => undefined),
         // Where each document works: its own failure (an older server) never
         // stops the rest of the refresh.
         refetchIdentity().catch(() => undefined),
@@ -242,7 +269,7 @@ const VerificationScreen = () => {
     } finally {
       setIsRefreshing(false);
     }
-  }, [isBusinessAccount, refetchBizKyc, refetchMe, refetchPersonalKyc, refetchDocuments, refetchIdentity]);
+  }, [isBusinessAccount, refetchBizKyc, refetchMe, refetchPersonalKyc, refetchDocuments, refetchActions, refetchIdentity]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -396,6 +423,28 @@ const VerificationScreen = () => {
     }
   }, [createDiditBrowserSession]);
 
+  // A reviewer sent this document back: Didit's page reopens the same session
+  // with only the requested steps, so nothing starts over.
+  const handleResumeDidit = React.useCallback(async (verificationId: string) => {
+    setIsLaunchingDidit(true);
+    try {
+      const { data } = await resumeDiditVerification({ variables: { verificationId } });
+      const result = data?.resumeDiditVerification;
+      if (!result?.success) {
+        await refreshStatuses().catch(() => null);
+        throw new Error(result?.error || 'No se pudo abrir la verificación.');
+      }
+      awaitingBrowserRef.current = true;
+      await openDiditSessionUrl(result.sessionUrl, 'No se recibió un enlace seguro para continuar tu verificación.');
+      setBanner({ variant: 'info', message: 'Termina la verificación en tu navegador. Al volver, actualizaremos tu estado.' });
+    } catch (error: any) {
+      awaitingBrowserRef.current = false;
+      setBanner({ variant: 'error', message: userFacingMessage(error) || 'No se pudo abrir la verificación.' });
+    } finally {
+      setIsLaunchingDidit(false);
+    }
+  }, [refreshStatuses, resumeDiditVerification]);
+
   const browserFallback = (
     <TouchableOpacity onPress={handleStartDiditInBrowser} disabled={isBusy} accessibilityRole="button" style={styles.inlineAction}>
       <Icon name="globe" size={15} color={colors.primaryDark} />
@@ -408,20 +457,22 @@ const VerificationScreen = () => {
   const list = documents || [];
   const verifiedCount = list.filter(doc => doc.status === 'verified').length;
   const hasPending = list.some(doc => doc.status === 'pending');
+  const needsAction = list.some(doc => documentActions.has(doc.id));
   const hasCountryAttempt = list.some(doc => !doc.isAdditional);
   // One browser fallback per screen: on the first country document not yet
   // verified. Under review too: "¿Te equivocaste?" already starts a second
   // session there, and a camera that will not open needs the same way out.
   const browserFallbackDocId = list.find(doc => !doc.isAdditional
-    && normalizeStatus(doc.status) !== 'verified')?.id;
+    && normalizeStatus(doc.status) !== 'verified' && !documentActions.has(doc.id))?.id;
 
   // ─── Pieces ───
 
   const summary = (() => {
-    const status: NormalizedStatus = verifiedCount ? 'verified' : hasPending ? 'pending' : effectiveStatus;
+    const status: DisplayStatus = verifiedCount ? 'verified' : needsAction ? 'action' : hasPending ? 'pending' : effectiveStatus;
     const title = verifiedCount
       ? (verifiedCount === 1 ? 'Tienes 1 documento verificado' : `Tienes ${verifiedCount} documentos verificados`)
-      : hasPending ? 'Estamos revisando tu documento' : 'Verifica tu identidad';
+      : needsAction ? 'Falta un paso en tu verificación'
+        : hasPending ? 'Estamos revisando tu documento' : 'Verifica tu identidad';
     // The last attempt ended without a result: say why (the session timed
     // out, it was left unfinished, or the document expired).
     const ended = !isBusinessAccount
@@ -430,6 +481,8 @@ const VerificationScreen = () => {
       : null;
     const body = verifiedCount
       ? 'Abajo ves qué habilita cada uno. Puedes agregar otro documento cuando quieras.'
+      : needsAction
+        ? 'Repite solo lo que te pedimos. No tienes que empezar de nuevo.'
       : hasPending
         ? 'Suele tardar pocos minutos. Mientras tanto, puedes enviar otra verificación si te equivocaste.'
         : ended || 'Con un documento verificado desbloqueas recompensas, recargas y retiros, y cuentas locales.';
@@ -468,6 +521,7 @@ const VerificationScreen = () => {
 
   const renderDocument = (doc: IdentityDocument) => {
     const status = normalizeStatus(doc.status);
+    const actionDetail = documentActions.get(doc.id);
     const country = doc.issuingCountry ? countryName(doc.issuingCountry) : '';
     const retry = doc.isAdditional ? openOtherDocument : handleStartDidit;
     return (
@@ -481,7 +535,7 @@ const VerificationScreen = () => {
               {country || status === 'verified' ? `${documentLabel(doc)}${country ? ` · ${country}` : ''}` : 'Tu documento'}
             </Text>
           </View>
-          <StatusPill status={status} />
+          <StatusPill status={actionDetail ? 'action' : status} />
         </View>
 
         {status === 'verified' ? (
@@ -498,6 +552,17 @@ const VerificationScreen = () => {
               </View>
             ))}
           </View>
+        ) : actionDetail ? (
+          <>
+            <Text style={styles.note}>{actionDetail}</Text>
+            <Button
+              title="Continuar verificación"
+              onPress={() => handleResumeDidit(doc.id)}
+              loading={isLaunchingDidit}
+              disabled={isBusy}
+              icon={<Icon name="arrow-up-right" size={18} color={colors.white} />}
+            />
+          </>
         ) : status === 'pending' ? (
           <>
             <Text style={styles.note}>Estamos revisando este documento. Te avisaremos apenas termine.</Text>

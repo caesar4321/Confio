@@ -239,11 +239,14 @@ def store_face_reference_from_didit(verification, response_payload: dict) -> Fac
 def _active_reference(user) -> FaceReference | None:
     """Only while its KYC stands: a selfie from a session later rejected (a
     borrowed document) proves only that the same impostor is at the phone.
-    A document that was verified and then expired still stands for this: the
-    face is the same person's, and the owner keeps sending while they renew."""
+    A document that was verified and then expired or sent back by a reviewer
+    still stands for this: the face is the same person's, and the owner keeps
+    sending while they renew."""
     return FaceReference.objects.filter(user=user, is_active=True).filter(
         Q(identity_verification__status='verified')
-        | Q(identity_verification__status='expired', identity_verification__verified_at__isnull=False)
+        | Q(identity_verification__status__in=('expired', 'pending'), identity_verification__verified_at__isnull=False)
+        | Q(identity_verification__status='rejected', identity_verification__verified_at__isnull=False,
+            identity_verification__risk_factors__replacement_refused=True)
     ).first()
 
 
