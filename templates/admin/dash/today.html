@@ -21,13 +21,18 @@
     </div>
 </section>
 
+<section class="band" aria-labelledby="band-activation">
+    <h2 class="band-title" id="band-activation">Activation <a href="{% url 'confio_admin:dash_activation' %}">Activation →</a></h2>
+    {% include "admin/dash/_activation.html" %}
+</section>
+
 <section class="band" aria-labelledby="band-money">
-    <h2 class="band-title" id="band-money">Money <a href="{% url 'confio_admin:dash_money' %}">Money &amp; rails →</a></h2>
+    <h2 class="band-title" id="band-money">Money <a href="{% url 'confio_admin:dash_money' %}">Money →</a></h2>
     <div class="kpis">
-        <div class="kpi kpi-hero">
-            <div class="kpi-label">Movido (website figure)</div>
-            <div class="kpi-value">{% if movido %}${{ movido.total_usd|floatformat:0|intcomma }}{% else %}<span class="unknown">unavailable</span>{% endif %}</div>
-            <div class="kpi-sub">{% if movido %}In ${{ movido.deposited_usd|floatformat:0|intcomma }} · out ${{ movido.withdrawn_usd|floatformat:0|intcomma }}{% endif %}</div>
+        <div class="kpi">
+            <div class="kpi-label">Customer assets</div>
+            <div class="kpi-value">{% if customer_assets is not None %}${{ customer_assets|floatformat:0|intcomma }}{% else %}<span class="unknown">unknown</span>{% endif %}</div>
+            <div class="kpi-sub">cUSD + cUSD+ + stocks, no crypto or gold yet</div>
         </div>
         <div class="kpi">
             <div class="kpi-label">Confío fees, last 30 days</div>
@@ -35,45 +40,40 @@
             <div class="kpi-sub">{% if fee_ledger.total.count %}${{ fee_ledger.total.fee_usd|floatformat:2|intcomma }} all time{% endif %}</div>
         </div>
         <div class="kpi">
-            <div class="kpi-label">cUSD in circulation (BSC)</div>
-            <div class="kpi-value">{% if cusd_bsc_metrics.circulating_cusd is not None %}${{ cusd_bsc_metrics.circulating_cusd|floatformat:0|intcomma }}{% else %}<span class="unknown">unknown</span>{% endif %}</div>
-            <div class="kpi-sub">{% if cusd_bsc_backing_pct is not None %}Backing {{ cusd_bsc_backing_pct|floatformat:2 }}%{% else %}Backing unknown{% endif %}</div>
-        </div>
-        <div class="kpi">
-            <div class="kpi-label">cUSD+ in circulation</div>
-            <div class="kpi-value">{% if cusd_plus_metrics.circulating_cusd_plus is not None %}{{ cusd_plus_metrics.circulating_cusd_plus|floatformat:0|intcomma }}{% else %}<span class="unknown">unknown</span>{% endif %}</div>
-            <div class="kpi-sub">{% if cusd_plus_metrics.usdy_reserve_usd is not None %}USDY reserve ${{ cusd_plus_metrics.usdy_reserve_usd|floatformat:0|intcomma }}{% else %}Reserve unknown{% endif %}</div>
-        </div>
-        <div class="kpi">
-            <div class="kpi-label">Stocks held by users</div>
-            <div class="kpi-value">{% if stock_portfolio_value is not None %}${{ stock_portfolio_value|floatformat:0|intcomma }}{% else %}<span class="unknown">no snapshot</span>{% endif %}</div>
-            <div class="kpi-sub">Marked to market</div>
+            <div class="kpi-label">Deposits completing, 30 days</div>
+            <div class="kpi-value">{% if deposit_health.success_pct is not None %}{{ deposit_health.success_pct|floatformat:0 }}%{% else %}<span class="unknown">—</span>{% endif %}</div>
+            <div class="kpi-sub">{{ deposit_health.completed|intcomma }} completed · {{ deposit_health.failed|intcomma }} failed</div>
         </div>
         <div class="kpi">
             <div class="kpi-label">Investment trades, last 24h</div>
             <div class="kpi-value">${{ trades_24h_volume|floatformat:0|intcomma }}</div>
-            <div class="kpi-sub">Stocks ${{ stock_stats_24h.total_volume|floatformat:0|intcomma }} ({{ stock_stats_24h.confirmed|intcomma }}) · crypto &amp; gold ${{ crypto_stats_24h.total_volume|floatformat:0|intcomma }} ({{ crypto_stats_24h.confirmed|intcomma }})</div>
+            <div class="kpi-sub">Stocks ${{ stock_stats_24h.total_volume|floatformat:0|intcomma }} · crypto &amp; gold ${{ crypto_stats_24h.total_volume|floatformat:0|intcomma }}</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Movido (website figure)</div>
+            <div class="kpi-value">{% if movido %}${{ movido.total_usd|floatformat:0|intcomma }}{% else %}<span class="unknown">unavailable</span>{% endif %}</div>
+            <div class="kpi-sub">{% if movido %}In ${{ movido.deposited_usd|floatformat:0|intcomma }} · out ${{ movido.withdrawn_usd|floatformat:0|intcomma }}{% endif %}</div>
         </div>
     </div>
 </section>
 
 <section class="band" aria-labelledby="band-growth">
-    <h2 class="band-title" id="band-growth">Growth <a href="{% url 'confio_admin:dash_growth' %}">Growth →</a></h2>
+    <h2 class="band-title" id="band-growth">Growth</h2>
     <div class="kpis">
         <div class="kpi">
-            <div class="kpi-label">Phone-complete users</div>
+            <div class="kpi-label">Users</div>
             <div class="kpi-value">{{ total_users|intcomma }}</div>
             <div class="kpi-sub">+{{ new_users_today|intcomma }} today · +{{ new_users_last_7_days|intcomma }} in 7d</div>
-        </div>
-        <div class="kpi">
-            <div class="kpi-label">Active, last 24h</div>
-            <div class="kpi-value">{{ active_users_today|intcomma }}</div>
-            <div class="kpi-sub">{{ active_users_week|intcomma }} WAU · {{ active_users_month|intcomma }} MAU</div>
         </div>
         <div class="kpi">
             <div class="kpi-label">Verified identity</div>
             <div class="kpi-value">{{ verified_users|intcomma }}</div>
             <div class="kpi-sub">{% if total_users %}{% widthratio verified_users total_users 100 %}% of users{% endif %}</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Active, last 24h</div>
+            <div class="kpi-value">{{ active_users_today|intcomma }}</div>
+            <div class="kpi-sub">{{ active_users_week|intcomma }} WAU · {{ active_users_month|intcomma }} MAU</div>
         </div>
     </div>
     {% include "admin/dash/_growth_chart.html" %}

@@ -17,6 +17,7 @@ from django.db.models.functions import TruncDate
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
+from config.admin_dashboard_growth import ACTIVITY_RELIABLE_SINCE
 from conversion.models import Conversion
 from p2p_exchange.models import P2PDispute
 from ramps.models import RampTransaction
@@ -28,7 +29,6 @@ from security.models import DeviceFingerprint, IdentityVerification
 from users.analytics import ARG_TZ, get_argentina_day_bounds, get_real_users_queryset
 from users.models import Business, User
 from users.models_analytics import CountryMetrics, DailyMetrics, FunnelDailyRollup, FunnelEvent
-from users.rail_interest_metrics import build_rail_interest_metrics, merge_waitlist_counts
 
 # A pending row whose Didit session is waiting on a human. Every other
 # pending row is a session the person opened and has not finished.
@@ -141,9 +141,9 @@ def users_core(w):
     context['active_users_today'] = real_users.filter(last_activity_at__gte=last_24h).count()
     context['active_users_week'] = real_users.filter(last_activity_at__gte=last_7_start).count()
     context['active_users_month'] = real_users.filter(last_activity_at__gte=now - timedelta(days=30)).count()
-    context['new_users_last_7_days'] = real_users.filter(created_at__gte=last_7_start).count()
+    context['new_users_last_7_days'] = real_users.filter(onboarded_at__gte=last_7_start).count()
     context['all_signups_last_7_days'] = User.objects.exclude(is_platform_test_account=True).filter(created_at__gte=last_7_start).count()
-    context['phone_completion_last_7_days'] = (
+    context['signup_completion_last_7_days'] = (
         context['new_users_last_7_days'] / context['all_signups_last_7_days'] * 100
         if context['all_signups_last_7_days'] else 0
     )
@@ -243,7 +243,7 @@ def os_stats(w):
 
 
 def funnels(w):
-    """Send-and-invite + referral-link funnels, cohorts and rail-interest probes."""
+    """Referral-link funnel and its cohorts."""
     today_arg = w.today_arg
     context = {}
     # Invite/referral funnel metrics
@@ -317,9 +317,7 @@ def funnels(w):
                     user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code,
                 )
             ).exclude(pk__in=paid_event_pks)
-        if cohort == 'send_invite':
             return queryset
-        return queryset
 
     def _rollup_event_counts(source_type, event_names, start_date, cohort=None):
         rollup_base = FunnelDailyRollup.objects.filter(
@@ -393,129 +391,10 @@ def funnels(w):
                 rows[day][row['event_name']] = rows[day].get(row['event_name'], 0) + (row['count'] or 0)
         return [rows[day] for day in sorted(rows.keys(), reverse=True)]
 
-    send_invite_event_names = [
-        'invite_submitted',
-        'whatsapp_share_tapped',
-        'invite_link_clicked',
-        'signup_completed',
-        'referral_attached',
-        'invite_claimed',
-        'first_deposit',
-    ]
-    send_invite_90d = _rollup_event_counts(
-        source_type='send_invite',
-        event_names=send_invite_event_names,
-        start_date=funnel_last_90_date,
-        cohort='send_invite',
-    )
-    send_invite_7d = _rollup_event_counts(
-        source_type='send_invite',
-        event_names=send_invite_event_names,
-        start_date=funnel_last_7_date,
-        cohort='send_invite',
-    )
-
-    invite_submitted_total = send_invite_90d.get('invite_submitted', 0)
-    share_tapped_total = send_invite_90d.get('whatsapp_share_tapped', 0)
-    link_clicked_total = send_invite_90d.get('invite_link_clicked', 0)
-    signup_completed_total = send_invite_90d.get('signup_completed', 0)
-    referral_attached_total = send_invite_90d.get('referral_attached', 0)
-    invite_claimed_total = send_invite_90d.get('invite_claimed', 0)
-    first_deposit_total = send_invite_90d.get('first_deposit', 0)
-
-    context['send_invite_funnel_stats'] = {
-        'invite_submitted_total': invite_submitted_total,
-        'share_tapped_total': share_tapped_total,
-        'link_clicked_total': link_clicked_total,
-        'signup_completed_total': signup_completed_total,
-        'referral_attached_total': referral_attached_total,
-        'invite_claimed_total': invite_claimed_total,
-        'first_deposit_total': first_deposit_total,
-        'raw_events_90d': FunnelEvent.objects.filter(
-            source_type='send_invite',
-            created_at__gte=funnel_last_90_start,
-        ).count(),
-        'rollup_rows_90d': FunnelDailyRollup.objects.filter(
-            source_type='send_invite',
-            date__gte=funnel_last_90_date,
-        ).count(),
-        'invite_to_share_pct': _pct(share_tapped_total, invite_submitted_total),
-        'share_to_click_pct': _pct(link_clicked_total, share_tapped_total),
-        'click_to_signup_pct': _pct(signup_completed_total, link_clicked_total),
-        'signup_to_claim_pct': _pct(invite_claimed_total, signup_completed_total),
-        'claim_to_deposit_pct': _pct(first_deposit_total, invite_claimed_total),
-        'invite_submitted_7d': send_invite_7d.get('invite_submitted', 0),
-        'share_tapped_7d': send_invite_7d.get('whatsapp_share_tapped', 0),
-        'link_clicked_7d': send_invite_7d.get('invite_link_clicked', 0),
-        'signup_completed_7d': send_invite_7d.get('signup_completed', 0),
-        'referral_attached_7d': send_invite_7d.get('referral_attached', 0),
-        'invite_claimed_7d': send_invite_7d.get('invite_claimed', 0),
-        'first_deposit_7d': send_invite_7d.get('first_deposit', 0),
-    }
-    context['send_invite_recent'] = list(
-        FunnelEvent.objects.filter(
-            source_type='send_invite',
-            event_name__in=send_invite_event_names,
-            created_at__gte=funnel_last_90_start,
-        )
-        .order_by('-created_at')
-        .values('created_at', 'event_name', 'country', 'platform', 'channel', 'session_id', 'user__username')[:10]
-    )
-    send_invite_trend = _rollup_trend_rows(
-        source_type='send_invite',
-        event_names=send_invite_event_names,
-        start_date=funnel_last_90_date,
-        cohort='send_invite',
-    )
-    for row in send_invite_trend:
-        row['invite_to_share_pct'] = _pct(row['whatsapp_share_tapped'], row['invite_submitted'])
-        row['click_to_signup_pct'] = _pct(row['signup_completed'], row['invite_link_clicked'])
-        row['signup_to_claim_pct'] = _pct(row['invite_claimed'], row['signup_completed'])
-        row['claim_to_deposit_pct'] = _pct(row['first_deposit'], row['invite_claimed'])
-    context['send_invite_daily_trend'] = send_invite_trend
-
     referral_90d = FunnelEvent.objects.filter(
         source_type='referral_link',
         created_at__gte=funnel_last_90_start,
     )
-    # --- Rail interest (demand probes) ---------------------------------
-    # Rails we do NOT support yet stay visible in the receive/send sheets;
-    # a tap is curiosity and the follow-up confirmation is real demand.
-    # These never showed up anywhere in this dashboard because every panel
-    # above filters on source_type ('send_invite' / 'referral_link') and
-    # the probes were emitted with none — so the only way to read them was
-    # the raw FunnelEvent changelist. They decide which corridor we build
-    # next and which virtual accounts are worth paying to open, so they get
-    # their own panel. Aggregated in Python: the rail and stage live inside
-    # the JSON `properties`, not in indexed columns.
-    rail_interest_rows = FunnelEvent.objects.filter(
-        event_name__in=['receive_rail_interest', 'local_rail_interest'],
-        created_at__gte=funnel_last_90_start,
-    ).values(
-        'event_name',
-        'properties',
-        'country',
-        'created_at',
-        'user_id',
-        'session_id',
-    )
-
-    rail_interest, rail_interest_totals = build_rail_interest_metrics(rail_interest_rows)
-    # The durable waitlist (LocalRailWaitlistEntry) outlives the 90-day raw
-    # events, so its size is all-time; a rail whose taps aged out still
-    # keeps the people to notify.
-    from users.models_rail_waitlist import LocalRailWaitlistEntry
-    waitlist_by_rail = {
-        row['rail_id']: row
-        for row in LocalRailWaitlistEntry.objects.values('rail_id', 'direction', 'kind')
-        .annotate(count=Count('id'))
-    }
-    rail_interest = merge_waitlist_counts(rail_interest, waitlist_by_rail)
-    rail_interest_totals['rails'] = len(rail_interest)
-    rail_interest_totals['waitlist'] = LocalRailWaitlistEntry.objects.values('user_id').distinct().count()
-    context['rail_interest'] = rail_interest
-    context['rail_interest_totals'] = rail_interest_totals
-
     referral_event_names = [
         'referral_whatsapp_share_tapped',
         'referral_link_clicked',
@@ -1067,105 +946,6 @@ def presale_phases(w):
     return {'all_presale_phases': PresalePhase.objects.all().order_by('-phase_number')}
 
 
-def guardarian(w):
-    """Guardarian on-ramp sessions."""
-    context = {}
-    # Guardarian Metrics
-    from usdc_transactions.models import GuardarianTransaction
-
-    # Volume (Successful only - USDC)
-    guardarian_volume = GuardarianTransaction.objects.filter(
-        onchain_deposit__isnull=False
-    ).aggregate(total=Sum('to_amount_actual'))['total'] or Decimal('0')
-
-    # Transaction Counts
-    guardarian_total = GuardarianTransaction.objects.count()
-
-    # KPI 2: Provider Completion (Guardarian says finished)
-    provider_completed_count = GuardarianTransaction.objects.filter(status='finished').count()
-
-    # KPI 1: On-chain Completion (We received USDC)
-    onchain_completed_count = GuardarianTransaction.objects.filter(onchain_deposit__isnull=False).count()
-
-    # Abandoned/Idle Logic (Grey Box)
-    # "Active" but older than 1 hour = Abandoned (Window Shopping)
-    one_hour_ago = timezone.now() - timedelta(hours=1)
-    active_states = ['new', 'waiting', 'pending', 'sending', 'exchanging']
-
-    abandoned_count = GuardarianTransaction.objects.filter(
-        status__in=active_states,
-        created_at__lt=one_hour_ago
-    ).count()
-
-    # Real Active (In Progress < 1h)
-    real_active_count = GuardarianTransaction.objects.filter(
-        status__in=active_states,
-        created_at__gte=one_hour_ago
-    ).count()
-
-    # Breakdown buckets
-    failed_count = GuardarianTransaction.objects.filter(status='failed').count()
-    expired_count = GuardarianTransaction.objects.filter(status='expired').count()
-    refunded_count = GuardarianTransaction.objects.filter(status='refunded').count()
-    hold_count = GuardarianTransaction.objects.filter(status='hold').count()
-
-    # Rates
-    # KPI 1: On-chain Rate = How many "Finished" transactions actually arrived?
-    # Target: 100%
-    onchain_rate = (onchain_completed_count / provider_completed_count * 100) if provider_completed_count > 0 else 0
-
-    # KPI 2: Provider Rate = How many sessions finished?
-    provider_rate = (provider_completed_count / guardarian_total * 100) if guardarian_total > 0 else 0
-
-    context['guardarian_stats'] = {
-        'volume': guardarian_volume,
-        'total_sessions': guardarian_total,
-        'onchain_completed': onchain_completed_count,
-        'provider_completed': provider_completed_count,
-        'onchain_rate': onchain_rate,
-        'provider_rate': provider_rate,
-        'abandoned_count': abandoned_count,
-        'real_active_count': real_active_count,
-        'failed_count': failed_count,
-        'expired_count': expired_count,
-        'refunded_count': refunded_count,
-        'hold_count': hold_count,
-    }
-
-    # Top Currencies (Successful only)
-    context['guardarian_currencies'] = GuardarianTransaction.objects.filter(
-        status='finished'
-    ).values('from_currency').annotate(
-        usdc_volume=Sum('to_amount_actual'),
-        local_volume=Sum('from_amount'),
-        count=Count('id')
-    ).order_by('-usdc_volume')[:5]
-
-    # Top Countries by attempted sessions/users
-    context['guardarian_attempt_countries'] = GuardarianTransaction.objects.values(
-        'user__country'
-    ).annotate(
-        count=Count('user', distinct=True)
-    ).order_by('-count')[:5]
-
-    # Top Countries by verified completed volume/users
-    context['guardarian_completed_countries'] = GuardarianTransaction.objects.filter(
-        onchain_deposit__isnull=False
-    ).values(
-        'user__country'
-    ).annotate(
-        usdc_volume=Sum('to_amount_actual'),
-        count=Count('user', distinct=True),
-        tx_count=Count('id'),
-    ).order_by('-usdc_volume')[:5]
-
-    # Recent Transactions
-    context['guardarian_recent'] = GuardarianTransaction.objects.select_related(
-        'user'
-    ).order_by('-created_at')[:10]
-    return context
-
-
 def koywe(w, request):
     """Koywe on/off-ramp sections with the country/direction filters."""
     one_hour_ago = w.now - timedelta(hours=1)
@@ -1371,12 +1151,12 @@ def rails_by_period(w, request):
                 'but differ by fees and by deposits that never converted, which Movido does not count.',
         'labels': [label for label, _since in periods],
         'groups': [
-            {'title': 'Deposits by provider', 'rows': [
+            {'title': 'Deposits by provider', 'flow': 'in', 'rows': [
                 *flows['deposits'],
                 {'label': 'Direct (outside wallets)', 'cells': flows['direct_in']},
                 {'label': 'Provider deposits never converted (not in Movido)', 'cells': flows['never_converted']},
             ]},
-            {'title': 'Withdrawals by provider', 'rows': [
+            {'title': 'Withdrawals by provider', 'flow': 'out', 'rows': [
                 *flows['withdrawals'],
                 {'label': 'Direct (outside wallets, Pay)', 'cells': flows['direct_out']},
             ]},
@@ -1508,7 +1288,7 @@ def needs_attention(w, request, *, refresh=False):
     # Collateral and contract state.
     for label, key, build, page in (
         ('cUSD (BSC)', 'cusd_bsc', get_cusd_bsc_platform_metrics, 'dash_money'),
-        ('cUSD+', 'cusd_plus', get_cusd_plus_platform_metrics, 'dash_savings'),
+        ('cUSD+', 'cusd_plus', get_cusd_plus_platform_metrics, 'dash_invest'),
     ):
         metrics = _admin_cached(key, build, w, refresh=refresh)
         if metrics.source == 'unavailable':
@@ -1568,7 +1348,7 @@ def needs_attention(w, request, *, refresh=False):
     ):
         if stats['history_missing']:
             items.append(_item(WARNING, f'{label} trades confirmed without settlement history (30d)', '',
-                               _url('dash_savings'), stats['history_missing']))
+                               _url('dash_invest'), stats['history_missing']))
 
     # Ramps.
     ramp_failed = RampTransaction.objects.filter(status='FAILED', updated_at__gte=w.last_24h).count()
@@ -1622,11 +1402,23 @@ def needs_attention(w, request, *, refresh=False):
         if price_source != 'live':
             items.append(_item(WARNING, 'CONFIO price is not the live curve',
                                f'Source: {price_source.replace("_", " ")}; the vault price read is failing.',
-                               _url('dash_presale')))
+                               _url('dash_ops')))
     credits_failed = PresaleMigrationCredit.objects.filter(status='failed').count()
     if credits_failed:
         items.append(_item(WARNING, 'Presale migration credits failed verification', '',
                            _url('presale_presalemigrationcredit_changelist', 'status__exact=failed'), credits_failed))
+
+    # Futures: money on the way back that stopped.
+    from blockchain.models import PerpPosition
+
+    perp_stuck = PerpPosition.objects.filter(state='return_failed').count()
+    if perp_stuck:
+        items.append(_item(CRITICAL, 'Futures returns failed', 'Dollars have not come back to BSC.',
+                           _url('blockchain_perpposition_changelist', 'state__exact=return_failed'), perp_stuck))
+    perp_bridging = PerpPosition.objects.filter(state='bridging', updated_at__lt=w.now - timedelta(hours=1)).count()
+    if perp_bridging:
+        items.append(_item(WARNING, 'Futures bridges not moving for over an hour', '',
+                           _url('blockchain_perpposition_changelist', 'state__exact=bridging'), perp_bridging))
 
     # Legacy P2P: deprecated, but an escalated dispute is still someone's money.
     escalated = P2PDispute.objects.filter(status='ESCALATED').count()
@@ -1655,6 +1447,16 @@ def needs_attention(w, request, *, refresh=False):
     return items
 
 
+def _customer_assets(cusd, plus, portfolio):
+    """cUSD + cUSD+ + stocks held by members. One unknown part makes the
+    total unknown; a partial sum would read as a drop in assets. Crypto and
+    gold have no holdings snapshot yet, and the page says so."""
+    parts = (cusd.circulating_cusd, plus.circulating_cusd_plus, (portfolio or {}).get('value_usd'))
+    if any(part is None for part in parts):
+        return None
+    return sum((Decimal(str(part)) for part in parts), Decimal('0'))
+
+
 def today_money(w, *, refresh=False):
     """Headline money figures. Movido is the exact snapshot the website shows."""
     from cusd_plus import gm_tvl
@@ -1670,6 +1472,7 @@ def today_money(w, *, refresh=False):
     stock_24h = get_stock_trade_stats(since=w.last_24h)
     crypto_24h = get_crypto_trade_stats(since=w.last_24h)
     cusd_bsc_metrics = _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, w, refresh=refresh)
+    plus_metrics = _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, w, refresh=refresh)
     return {
         'movido': movido,
         'fee_ledger': get_fee_ledger_summary(),
@@ -1677,8 +1480,9 @@ def today_money(w, *, refresh=False):
         'cusd_bsc_backing_pct': (
             cusd_bsc_metrics.backing_ratio_bps / 100 if cusd_bsc_metrics.backing_ratio_bps is not None else None
         ),
-        'cusd_plus_metrics': _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, w, refresh=refresh),
+        'cusd_plus_metrics': plus_metrics,
         'stock_portfolio_value': (portfolio or {}).get('value_usd'),
+        'customer_assets': _customer_assets(cusd_bsc_metrics, plus_metrics, portfolio),
         'stock_stats_24h': stock_24h,
         'crypto_stats_24h': crypto_24h,
         'trades_24h_volume': stock_24h['total_volume'] + crypto_24h['total_volume'],
@@ -1694,8 +1498,8 @@ def today_growth(w):
     thirty_days_ago = w.now.date() - timedelta(days=30)
     return {
         'total_users': real_users.count(),
-        'new_users_last_7_days': real_users.filter(created_at__gte=w.last_7_start).count(),
-        'new_users_today': real_users.filter(created_at__gte=w.today_start).count(),
+        'new_users_last_7_days': real_users.filter(onboarded_at__gte=w.last_7_start).count(),
+        'new_users_today': real_users.filter(onboarded_at__gte=w.today_start).count(),
         'active_users_today': real_users.filter(last_activity_at__gte=w.last_24h).count(),
         'active_users_week': real_users.filter(last_activity_at__gte=w.last_7_start).count(),
         'active_users_month': real_users.filter(last_activity_at__gte=w.rolling_30_start).count(),
@@ -1711,7 +1515,8 @@ def today_growth(w):
 def trend_chart(rows):
     """DailyMetrics rows as JSON-safe points for the growth chart."""
     return [
-        {'label': row['date'].strftime('%b %-d'), 'dau': row['dau'], 'wau': row['wau'], 'mau': row['mau']}
+        {'label': row['date'].strftime('%b %-d'), 'dau': row['dau'], 'wau': row['wau'], 'mau': row['mau'],
+         'reliable': row['date'] >= ACTIVITY_RELIABLE_SINCE}
         for row in rows
     ]
 

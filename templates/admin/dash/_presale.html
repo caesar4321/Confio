@@ -22,7 +22,7 @@
 <div class="metrics-grid">
     <div class="metric-card">
         <div class="metric-label">{% if presale_price_source == 'live' %}Current curve price (live){% else %}CONFIO price ({{ presale_price_source }}, not live){% endif %}</div>
-        <div class="metric-value">${{ presale_price|floatformat:4 }}</div>
+        <div class="metric-value confio-accent">${{ presale_price|floatformat:4 }}</div>
         <div class="metric-change">
             Linear ${{ presale_curve.start_price|floatformat:2 }} → ${{ presale_curve.final_price|floatformat:2 }}
             · {{ presale_curve_position_pct|floatformat:1 }}% along the curve

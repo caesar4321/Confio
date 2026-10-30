@@ -1,0 +1,21 @@
+{% load humanize %}
+<h2 class="section-title">Deposit attempts, last 30 days</h2>
+<div class="data-table">
+    <table>
+        <thead><tr><th>Provider</th><th class="num">Completed</th><th class="num">Failed</th><th class="num">Pending</th><th class="num">Success</th><th>Top failure reasons</th></tr></thead>
+        <tbody>
+            {% for row in deposit_health.rows %}
+            <tr>
+                <td>{{ row.label }}</td>
+                <td class="num">{{ row.completed|intcomma }}</td>
+                <td class="num">{{ row.failed|intcomma }}</td>
+                <td class="num">{{ row.pending|intcomma }}</td>
+                <td class="num">{% if row.success_pct is not None %}{{ row.success_pct|floatformat:0 }}%{% else %}—{% endif %}</td>
+                <td>{% for reason, n in row.reasons %}{{ reason }} ({{ n }}){% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6">No deposit attempts in 30 days.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

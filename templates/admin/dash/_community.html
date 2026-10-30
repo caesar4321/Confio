@@ -1,0 +1,28 @@
+{% load humanize %}
+<h2 class="section-title">Community &amp; assistant</h2>
+<div class="data-table">
+    <table>
+        <thead><tr><th></th>{% for label in community_table.labels %}<th class="num">{{ label }}</th>{% endfor %}<th class="num">People, 30 days</th></tr></thead>
+        <tbody>
+            {% for row in community_table.rows %}
+            <tr><td>{{ row.label }}</td>{% for n in row.cells %}<td class="num">{{ n|intcomma }}</td>{% endfor %}<td class="num">{% if row.people is not None %}{{ row.people|intcomma }}{% else %}—{% endif %}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Assistant cost, last 30 days</div>
+        <div class="metric-value">${{ community_table.assistant_cost_30d|floatformat:2|intcomma }}</div>
+        <div class="metric-change">{% if community_table.assistant_cost_per_person is not None %}${{ community_table.assistant_cost_per_person|floatformat:2 }} per person{% endif %}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Tips, last 30 days</div>
+        <div class="metric-value">${{ community_table.tips_usd_30d|floatformat:2|intcomma }}</div>
+        <div class="metric-change">Confirmed</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Teams</div>
+        <div class="metric-value">{{ community_table.teams|intcomma }}</div>
+    </div>
+</div>

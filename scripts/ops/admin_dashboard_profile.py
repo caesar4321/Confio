@@ -23,8 +23,8 @@ from django.urls import reverse
 from config.admin_dashboard import confio_admin_site as site
 
 PAGES = [p for p in os.environ.get('PAGES', '').split(',') if p] or [
-    'dashboard', 'dash_money', 'dash_savings', 'dash_presale', 'dash_growth', 'dash_funnels',
-    'dash_risk', 'dash_platform', 'dash_archive',
+    'dashboard', 'dash_activation', 'dash_money', 'dash_invest', 'dash_community', 'dash_comprar',
+    'dash_ops', 'dash_archive',
 ]
 VIEW_FOR = {u.name: u.callback for u in site.get_urls() if getattr(u, 'name', None)}
 user = get_user_model().objects.filter(is_superuser=True, is_active=True).order_by('id').first()

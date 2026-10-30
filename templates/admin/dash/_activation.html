@@ -1,0 +1,60 @@
+{% load humanize %}
+<div class="kpis">
+    <div class="kpi kpi-hero">
+        <div class="kpi-label">Funded members, last 30 days</div>
+        <div class="kpi-value">{{ activation.funded_30d|intcomma }}</div>
+        <div class="kpi-sub">{{ activation.funded_7d|intcomma }} in 7 days · {{ activation.funded_ever|intcomma }} ever</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">New funded members</div>
+        <div class="kpi-value">{{ activation.new_funded_7d|intcomma }}</div>
+        <div class="kpi-sub">first deposit in 7 days · {{ activation.new_funded_30d|intcomma }} in 30</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Signup → funded, {{ activation.headline_weeks }} weeks</div>
+        <div class="kpi-value">{% if activation.funded_pct is not None %}{{ activation.funded_pct|floatformat:1 }}%{% else %}<span class="unknown">—</span>{% endif %}</div>
+        <div class="kpi-sub">{{ activation.totals.funded|intcomma }} of {{ activation.totals.signups|intcomma }} signups</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Signup → KYC, {{ activation.headline_weeks }} weeks</div>
+        <div class="kpi-value">{% if activation.kyc_pct is not None %}{{ activation.kyc_pct|floatformat:1 }}%{% else %}<span class="unknown">—</span>{% endif %}</div>
+        <div class="kpi-sub">{{ activation.totals.kyc|intcomma }} verified</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Investors, last 30 days</div>
+        <div class="kpi-value">{{ activation.investors_30d|intcomma }}</div>
+        <div class="kpi-sub">{{ activation.investors_7d|intcomma }} in 7 days</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Returning members, 7 days</div>
+        <div class="kpi-value">{{ retention.returning_7d|intcomma }}</div>
+        <div class="kpi-sub">joined over 30 days ago · {{ retention.active_7d|intcomma }} active in all</div>
+    </div>
+</div>
+<div class="data-table" style="margin-top:12px;">
+    <table>
+        <thead>
+            <tr>
+                <th>Signups, 7 days ending</th>
+                <th class="num">Signups</th><th class="num">KYC</th><th class="num">Funded</th><th class="num">Invested</th>
+                <th class="num">Funded %</th>
+                <th class="num">{{ activation.focus_country }} signups</th><th class="num">{{ activation.focus_country }} KYC</th><th class="num">{{ activation.focus_country }} funded</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in activation.cohorts %}
+            <tr>
+                <td>{{ c.end|date:"M j" }}{% if forloop.first %} <span class="dash-asof">(still converting)</span>{% endif %}</td>
+                <td class="num">{{ c.all.signups|intcomma }}</td>
+                <td class="num">{{ c.all.kyc|intcomma }}</td>
+                <td class="num">{{ c.all.funded|intcomma }}</td>
+                <td class="num">{{ c.all.invested|intcomma }}</td>
+                <td class="num">{% if c.all.funded_pct is not None %}{{ c.all.funded_pct|floatformat:1 }}%{% else %}—{% endif %}</td>
+                <td class="num">{{ c.focus.signups|intcomma }}</td>
+                <td class="num">{{ c.focus.kyc|intcomma }}</td>
+                <td class="num">{{ c.focus.funded|intcomma }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

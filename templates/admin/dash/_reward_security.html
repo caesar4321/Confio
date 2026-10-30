@@ -1,7 +1,7 @@
 {% load humanize %}
 <!-- $CONFIO Reward Security -->
 {% if fraud_stats %}
-<h2 class="section-title">🔍 $CONFIO Reward Security</h2>
+<h2 class="section-title">$CONFIO Reward Security</h2>
 <p style="margin-bottom: 18px; color: #1f2937;">
     Monitoring referral-earned $CONFIO balances, KYC holds, and duplicate identities tied to referee rewards.
     Presale and externally deposited tokens stay unrestricted.
@@ -60,7 +60,7 @@
 <!-- Reward Security Actions -->
 <div style="margin-bottom: 20px;">
     <a href="{% url 'confio_admin:achievements_userachievement_fraud_dashboard' %}" class="action-button"
-        style="margin-right: 10px;">🔍 Reward Security Dashboard</a>
+        style="margin-right: 10px;">Reward Security Dashboard</a>
     <a href="{% url 'confio_admin:achievements_userachievement_changelist' %}?fraud_status=multi_device"
         class="action-button secondary" style="margin-right: 10px;">Device Flags</a>
     <a href="{% url 'confio_admin:achievements_referralwithdrawallog_changelist' %}"

@@ -1,9 +1,9 @@
 {% load humanize %}
 <div class="metrics-grid">
     <div class="metric-card">
-        <div class="metric-label">Phone-complete users</div>
+        <div class="metric-label">Users</div>
         <div class="metric-value">{{ total_users|intcomma }}</div>
-        <div class="metric-change">+{{ new_users_last_7_days|intcomma }} phone signups in the last 7 days</div>
+        <div class="metric-change">+{{ new_users_last_7_days|intcomma }} signups in the last 7 days</div>
     </div>
     <div class="metric-card">
         <div class="metric-label">Verified users</div>
@@ -16,14 +16,19 @@
         <div class="metric-change">{{ active_users_week|intcomma }} WAU · {{ active_users_month|intcomma }} MAU</div>
     </div>
     <div class="metric-card">
-        <div class="metric-label">Signup → phone (7d)</div>
-        <div class="metric-value">{{ phone_completion_last_7_days|floatformat:1 }}%</div>
-        <div class="metric-change">{{ new_users_last_7_days|intcomma }} / {{ all_signups_last_7_days|intcomma }} completed phone</div>
+        <div class="metric-label">Finished signup (7d)</div>
+        <div class="metric-value">{{ signup_completion_last_7_days|floatformat:1 }}%</div>
+        <div class="metric-change">{{ new_users_last_7_days|intcomma }} of {{ all_signups_last_7_days|intcomma }} started accounts</div>
     </div>
     <div class="metric-card">
         <div class="metric-label">Push-reachable users</div>
         <div class="metric-value">{{ fcm_active_users|intcomma }}</div>
         <div class="metric-change">{{ fcm_recent_users|intcomma }} registered or reached in the last 30d</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Platform</div>
+        <div class="metric-value">{{ os_stats.android_pct|floatformat:0 }}% Android</div>
+        <div class="metric-change">{{ os_stats.android_count|intcomma }} Android · {{ os_stats.ios_count|intcomma }} iOS</div>
     </div>
 </div>
 {% include "admin/dash/_growth_chart.html" %}

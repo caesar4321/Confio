@@ -35,6 +35,7 @@ from send.models import SendTransaction
 from payments.models import PaymentTransaction
 from inbox.models import ContentPlatformClick
 from config import admin_dashboard_sections as sections
+from config import admin_dashboard_growth as growth
 from config.admin_dashboard_sections import get_fcm_reachability_metrics  # noqa: F401 — re-exported for tests
 
 
@@ -711,107 +712,86 @@ def _chain(fn):
 ConfioAdminSite.DASH_PAGES = [
     ('today', 'Today', [
         lambda w, request, refresh: {'attention': sections.needs_attention(w, request, refresh=refresh)},
+        _w(growth.activation),
+        _w(growth.retention),
+        _w(growth.deposit_health),
         _chain(sections.today_money),
         _w(sections.today_growth),
     ], [], {'template': 'admin/dash/today.html', 'chain': True, 'heading': 'Today'}),
-    ('money', 'Money & rails', [
+    ('activation', 'Activation', [
+        _w(growth.activation),
+        _w(growth.retention),
+        _w(sections.users_core),
+        _w(sections.os_stats),
+        _w(sections.funnels),
+        _w(sections.referral_program),
+    ], [
+        'admin/dash/_activation.html',
+        'admin/dash/_retention.html',
+        'admin/dash/_users.html',
+        'admin/dash/_referral_funnel.html',
+        'admin/dash/_referral_program.html',
+    ], {'intro': 'Signups becoming funded, returning members. Cohorts are rolling 7-day windows; referral funnels use '
+                 'Argentina calendar days.',
+        'tools': (
+            ('User analytics', 'user_analytics', ''),
+            ('Daily metrics', 'users_dailymetrics_changelist', ''),
+            ('Country metrics', 'users_countrymetrics_changelist', ''),
+            ('Raw funnel events', 'users_funnelevent_changelist', ''),
+            ('Daily rollups', 'users_funneldailyrollup_changelist', ''),
+            ('ICP + ratings', 'icp_rating_analytics', ''),
+        )}),
+    ('money', 'Money', [
         lambda w, request, refresh: sections.rails_by_period(w, request),
+        _w(growth.deposit_health),
         _chain(sections.cusd_bsc),
         lambda w, request, refresh: sections.infinia(request),
         lambda w, request, refresh: sections.koywe(w, request),
-        _w(sections.guardarian),
     ], [
         'admin/dash/_period_table.html',
-        'admin/dash/_cusd_bsc.html',
+        'admin/dash/_deposit_health.html',
         'admin/dash/_fee_revenue.html',
+        'admin/dash/_cusd_bsc.html',
         'admin/_infinia_dashboard.html',
         'admin/dash/_koywe.html',
-        'admin/dash/_guardarian.html',
     ], {'chain': True, 'tools': (
         ('Ramp transactions', 'ramps_ramptransaction_changelist', ''),
         ('Infinia transfers', 'payment_accounts_infiniajourney_changelist', ''),
+        ('Guardarian sessions', 'usdc_transactions_guardariantransaction_changelist', ''),
         ('Conversions', 'conversion_conversion_changelist', ''),
         ('Transaction analytics', 'transaction_analytics', ''),
     )}),
-    ('savings', 'Savings & investing', [
+    ('invest', 'Invest', [
         _w(sections.investing_by_period),
         _chain(sections.cusd_plus),
         _chain(sections.stocks),
         _w(sections.crypto),
+        _w(growth.futures),
     ], [
         'admin/dash/_period_table.html',
         'admin/dash/_cusd_plus.html',
         'admin/dash/_stocks.html',
         'admin/dash/_crypto.html',
+        'admin/dash/_futures.html',
     ], {'chain': True, 'tools': (
         ('Stock trades', 'blockchain_ondostocktrade_changelist', ''),
         ('Crypto swaps', 'blockchain_cryptoswaptrade_changelist', ''),
         ('Stock holdings', 'blockchain_stockholdings_changelist', ''),
+        ('Futures positions', 'blockchain_perpposition_changelist', ''),
     )}),
-    ('presale', 'Presale', [
-        _w(sections.presale),
-    ], [
-        'admin/dash/_presale.html',
-    ], {'intro': 'CONFIO on the BSC ConfioPresaleVault: one linear price curve, raised totals from completed purchases.',
-        'tools': (
-            ('Purchases', 'presale_presalepurchase_changelist', ''),
-            ('Migration credits', 'presale_presalemigrationcredit_changelist', ''),
-            ('Phases (purchase gate)', 'presale_presalephase_changelist', ''),
-            ('Presale settings', 'presale_presalesettings_changelist', ''),
-        )}),
-    ('growth', 'Growth', [
-        _w(sections.users_core),
-        _w(sections.os_stats),
+    ('community', 'Community', [
+        _w(growth.demand),
+        _w(growth.community),
         _w(sections.content),
     ], [
-        'admin/dash/_users.html',
-        'admin/dash/_os.html',
+        'admin/dash/_demand.html',
+        'admin/dash/_community.html',
         'admin/dash/_content.html',
     ], {'tools': (
-        ('User analytics', 'user_analytics', ''),
-        ('Daily metrics', 'users_dailymetrics_changelist', ''),
-        ('Country metrics', 'users_countrymetrics_changelist', ''),
-        ('ICP + ratings', 'icp_rating_analytics', ''),
-        ('Achievements', 'achievement_dashboard', ''),
-    )}),
-    ('funnels', 'Funnels', [
-        _w(sections.funnels),
-        _w(sections.referral_program),
-    ], [
-        'admin/dash/_send_invite_funnel.html',
-        'admin/dash/_referral_funnel.html',
-        'admin/dash/_referral_program.html',
-    ], {'intro': 'Argentina calendar days. Completed days come from the nightly rollup; today and any unrolled day from raw events.',
-        'tools': (
-            ('Raw funnel events', 'users_funnelevent_changelist', ''),
-            ('Daily rollups', 'users_funneldailyrollup_changelist', ''),
-            ('Rail waitlist', 'users_localrailwaitlistentry_changelist', ''),
-            ('Product waitlist', 'users_productwaitlistentry_changelist', ''),
-        )}),
-    ('risk', 'Identity & risk', [
-        _w(sections.verifications),
-        _w(sections.reward_security),
-    ], [
-        'admin/dash/_verifications.html',
-        'admin/dash/_reward_security.html',
-    ], {'tools': (
-        ('Unfinished + in review', 'security_identityverification_changelist', 'status__exact=pending'),
-        ('Suspicious activity', 'security_suspiciousactivity_changelist', ''),
-        ('Bans', 'security_userban_changelist', ''),
-    )}),
-    ('platform', 'Platform', [
-        _w(sections.sponsorship),
-        _w(sections.messaging),
-        _w(sections.balance_cache),
-    ], [
-        'admin/dash/_sponsorship.html',
-        'admin/dash/_messaging.html',
-        'admin/dash/_balance_cache.html',
-    ], {'tools': (
-        ('Sponsored batches', 'blockchain_sponsoredbatch_changelist', ''),
-        ('Send broadcast', 'notifications_notification_broadcast', ''),
-        ('Push stats', 'notifications_notification_stats', ''),
-        ('Blockchain analytics', 'blockchain_analytics', ''),
+        ('Rail waitlist', 'users_localrailwaitlistentry_changelist', ''),
+        ('Product waitlist', 'users_productwaitlistentry_changelist', ''),
+        ('Probe answers', 'assistant_probeanswer_changelist', ''),
+        ('Assistant turns', 'assistant_assistantturn_changelist', ''),
     )}),
     ('comprar', 'Comprar', [
         _w(sections.comprar),
@@ -830,22 +810,51 @@ ConfioAdminSite.DASH_PAGES = [
             ('Fake-door answers', 'marketplace_marketplaceinterest_changelist', ''),
             ('Location checks', 'marketplace_marketplacelocationcheck_changelist', ''),
         )}),
+    ('ops', 'Ops', [
+        _w(sections.verifications),
+        _w(sections.sponsorship),
+        _w(sections.presale),
+        _w(sections.messaging),
+    ], [
+        'admin/dash/_verifications.html',
+        'admin/dash/_sponsorship.html',
+        'admin/dash/_presale.html',
+        'admin/dash/_messaging.html',
+    ], {'tools': (
+        ('Unfinished + in review', 'security_identityverification_changelist', 'status__exact=pending'),
+        ('Suspicious activity', 'security_suspiciousactivity_changelist', ''),
+        ('Bans', 'security_userban_changelist', ''),
+        ('Sponsored batches', 'blockchain_sponsoredbatch_changelist', ''),
+        ('Presale purchases', 'presale_presalepurchase_changelist', ''),
+        ('Migration credits', 'presale_presalemigrationcredit_changelist', ''),
+        ('Presale phases', 'presale_presalephase_changelist', ''),
+        ('Presale settings', 'presale_presalesettings_changelist', ''),
+        ('Send broadcast', 'notifications_notification_broadcast', ''),
+        ('Push stats', 'notifications_notification_stats', ''),
+    )}),
     ('archive', 'Archive', [
         _w(sections.disputes),
+        _w(sections.reward_security),
+        _w(sections.balance_cache),
         _w(sections.legacy_cusd),
         _w(sections.legacy_conversions),
         _w(sections.presale_phases),
         _w(sections.v2_security),
     ], [
         'admin/dash/_disputes.html',
+        'admin/dash/_reward_security.html',
+        'admin/dash/_balance_cache.html',
         'admin/dash/_legacy_cusd.html',
         'admin/dash/_presale_phases.html',
         'admin/dash/_v2_security.html',
     ], {'chain': True,
-        'intro': 'Retired models: P2P, a-cUSD on Algorand, fixed-price presale phases and the V2 keyless migration.',
+        'intro': 'Retired or dormant: P2P, $CONFIO reward security (no activity since July), Algorand balances and '
+                 'a-cUSD, fixed-price presale phases and the V2 keyless migration.',
         'tools': (
             ('P2P analytics', 'p2p_analytics', ''),
             ('P2P disputes', 'p2p_exchange_p2pdispute_changelist', ''),
+            ('Blockchain analytics', 'blockchain_analytics', ''),
+            ('Achievements', 'achievement_dashboard', ''),
         )}),
 ]
 

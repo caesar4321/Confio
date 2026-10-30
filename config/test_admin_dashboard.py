@@ -232,7 +232,7 @@ class DashboardPagesTests(TestCase):
 
     def test_presale_is_live_and_only_phases_are_archived(self):
         pages = {key: partials for key, _l, _b, partials, _o in confio_admin_site.DASH_PAGES}
-        self.assertIn('admin/dash/_presale.html', pages['presale'])
+        self.assertIn('admin/dash/_presale.html', pages['ops'])
         self.assertIn('admin/dash/_presale_phases.html', pages['archive'])
         self.assertNotIn('admin/dash/_presale.html', pages['archive'])
 
@@ -414,3 +414,65 @@ class DashboardPagesTests(TestCase):
         tied, unpaired = tie_to_conversions(arrivals, [late, early])
         self.assertEqual(tied, {1, 2})
         self.assertEqual(unpaired, [])
+
+
+class ActivationTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def member(self, name, *, days_ago=1, country='BO'):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        return get_user_model().objects.create(
+            username=name, firebase_uid=f'activation-{name}', country=country,
+            onboarded_at=timezone.now() - timedelta(days=days_ago))
+
+    def test_cohort_counts_a_deposit_that_never_converted_as_funded(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from config import admin_dashboard_growth as growth
+
+        funded, idle = self.member('funded'), self.member('idle', country='AR')
+        at = timezone.now() - timedelta(hours=3)
+        with mock.patch('ramps.metrics.deposit_events', return_value=[(funded.pk, at)]):
+            result = growth.activation(sections.Window.current())['activation']
+        week = result['cohorts'][0]
+        self.assertEqual((week['all']['signups'], week['all']['funded']), (2, 1))
+        self.assertEqual((week['focus']['signups'], week['focus']['funded']), (1, 1))
+        self.assertEqual((week['rest']['signups'], week['rest']['funded']), (1, 0))
+        self.assertEqual(result['funded_30d'], 1)
+        self.assertEqual(result['funded_pct'], 50)
+        self.assertIsNotNone(idle)
+
+    def test_retention_only_counts_days_the_table_can_measure(self):
+        from datetime import date, timedelta
+        from django.utils import timezone
+        from config import admin_dashboard_growth as growth
+        from users.activity_tracking import ACTIVITY_DAY_TZ
+        from users.models_analytics import UserActivityDay
+
+        back = self.member('back', days_ago=2)
+        self.member('gone', days_ago=2)
+        joined = timezone.localtime(back.onboarded_at, ACTIVITY_DAY_TZ).date()
+        UserActivityDay.objects.create(user=back, day=joined + timedelta(days=1), first_seen_at=timezone.now())
+        w = sections.Window.current()
+        with mock.patch.object(growth, 'ACTIVITY_RELIABLE_SINCE', date(2000, 1, 1)):
+            d1 = growth.retention(w)['retention']['d1']
+        self.assertEqual((d1['back'], d1['eligible']), (1, 2))
+        with mock.patch.object(growth, 'ACTIVITY_RELIABLE_SINCE', timezone.now().date() + timedelta(days=30)):
+            self.assertEqual(growth.retention(w)['retention']['d1']['eligible'], 0)
+
+    def test_one_unknown_part_makes_customer_assets_unknown(self):
+        known = mock.Mock(circulating_cusd=Decimal('10'), circulating_cusd_plus=Decimal('5'))
+        self.assertEqual(sections._customer_assets(known, known, {'value_usd': 2}), Decimal('17'))
+        self.assertIsNone(sections._customer_assets(known, known, None))
+        blind = mock.Mock(circulating_cusd=None, circulating_cusd_plus=Decimal('5'))
+        self.assertIsNone(sections._customer_assets(blind, known, {'value_usd': 2}))
+
+    def test_chart_marks_the_day_activity_became_reliable(self):
+        from datetime import date
+
+        rows = [{'date': date(2026, 10, 28), 'dau': 1, 'wau': 1, 'mau': 1},
+                {'date': date(2026, 10, 29), 'dau': 1, 'wau': 1, 'mau': 1}]
+        self.assertEqual([r['reliable'] for r in sections.trend_chart(rows)], [False, True])

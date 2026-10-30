@@ -1,0 +1,75 @@
+{% load humanize %}
+<h2 class="section-title">Demand signals</h2>
+<p class="dash-asof" style="margin:-6px 0 12px;">What members ask for before it exists. Distinct people, last 30 days; waitlists are all-time.</p>
+<div class="data-table">
+    <table>
+        <thead><tr><th>Offer</th>{% for stage in demand_stages %}<th class="num">{{ stage }}</th>{% endfor %}<th class="num">Waitlist</th><th class="num">Funded on it</th></tr></thead>
+        <tbody>
+            {% for row in demand_offers %}
+            <tr><td>{{ row.label }}</td>{% for n in row.stages %}<td class="num">{{ n|intcomma }}</td>{% endfor %}<td class="num">{{ row.waitlist|intcomma }}</td><td class="num">{{ row.waitlist_funded|intcomma }}</td></tr>
+            {% empty %}
+            <tr><td colspan="7">No offer activity yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div class="data-table">
+    <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+        Rail Interest — demand probes (90d)
+        <span style="font-weight: 400; color: #6b7280;">
+            · {{ rail_interest_totals.rails|default:"0" }} rails
+            · {{ rail_interest_totals.taps|default:"0"|intcomma }} users tapped
+            · {{ rail_interest_totals.confirmed|default:"0"|intcomma }} users confirmed
+            · {{ rail_interest_totals.waitlist|default:"0"|intcomma }} users on a waitlist (all-time)
+            {% if rail_interest_totals.unidentified_events %}
+                · {{ rail_interest_totals.unidentified_events|intcomma }} unidentified events ignored
+            {% endif %}
+        </span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Rail</th>
+                <th>Direction</th>
+                <th style="text-align: right;">Users tapped</th>
+                <th style="text-align: right;">Users confirmed</th>
+                <th style="text-align: right;">User conversion</th>
+                <th style="text-align: right;">On waitlist (all-time)</th>
+                <th>Countries</th>
+                <th>Last seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rail_interest %}
+            <tr>
+                <td>{{ row.rail }}{% if row.waitlist_kind == 'nationality_blocked' %} <span style="color:#6b7280;">· blocked by nationality</span>{% endif %}</td>
+                <td>{{ row.direction }}</td>
+                <td style="text-align: right;">{{ row.taps|intcomma }}</td>
+                <td style="text-align: right;">{{ row.confirmed|intcomma }}</td>
+                <td style="text-align: right; color:#6b7280;">{{ row.conversion_pct|floatformat:1 }}%</td>
+                <td style="text-align: right;">{{ row.waitlist|default:"0"|intcomma }}</td>
+                <td>{{ row.countries }}</td>
+                <td>{{ row.last_seen|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" style="padding: 16px; color: #6b7280;">
+                    No rail interest in the last 90 days and nobody on a waitlist.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% if demand_probes %}
+<div class="data-table">
+    <table>
+        <thead><tr><th>Assistant probe</th><th>Answer</th><th class="num">People</th><th class="num">Funded</th></tr></thead>
+        <tbody>
+            {% for row in demand_probes %}
+            <tr><td>{{ row.probe_id }}</td><td>{{ row.answer }}</td><td class="num">{{ row.n|intcomma }}</td><td class="num">{{ row.funded_n|intcomma }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}

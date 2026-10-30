@@ -1,0 +1,24 @@
+{% load humanize %}
+<h2 class="section-title">Futures (Hyperliquid)</h2>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Live positions</div>
+        <div class="metric-value">{{ futures.live|intcomma }}</div>
+        <div class="metric-change">{{ futures.open|intcomma }} open · ${{ futures.margin_live|floatformat:2|intcomma }} margin · {% for s in futures.by_state %}{{ s.state }} {{ s.n }}{% if not forloop.last %}, {% endif %}{% endfor %}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Traders, all time</div>
+        <div class="metric-value">{{ futures.traders|intcomma }}</div>
+        <div class="metric-change">{{ futures.liquidated|intcomma }} liquidated positions</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Finished positions</div>
+        <div class="metric-value">{{ futures.settled|intcomma }}</div>
+        <div class="metric-change">${{ futures.margin_settled|floatformat:2|intcomma }} in · ${{ futures.returned|floatformat:2|intcomma }} back</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Members' realized P&amp;L</div>
+        <div class="metric-value">${{ futures.realized_pnl|floatformat:2|intcomma }}</div>
+        <div class="metric-change">Funding ${{ futures.funding|floatformat:2|intcomma }} · venue fees ${{ futures.venue_fees|floatformat:2|intcomma }}</div>
+    </div>
+</div>

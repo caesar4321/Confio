@@ -1,7 +1,7 @@
 {% load humanize %}
 <div class="split">
     <div class="panel">
-        <h3>Daily, weekly and monthly actives (30 days)</h3>
+        <h3>Daily, weekly and monthly actives (30 days, undercounted before the marked day)</h3>
         <div style="height: 260px; position: relative;"><canvas id="growthChart" aria-label="Active users over the last 30 days" role="img"></canvas></div>
     </div>
     <div class="panel">
@@ -36,14 +36,25 @@
                  backgroundColor: fill || 'transparent', borderDash: dash || [], borderWidth: 2,
                  pointRadius: 0, pointHitRadius: 8, fill: !!fill, lineTension: 0.25 };
     }
+    var firstReliable = rows.findIndex(function (r) { return r.reliable; });
+    // The activity tracker never fired before this day: the lines look
+    // continuous but are not comparable across it.
+    var reliableMarker = { afterDraw: function (chart) {
+        if (firstReliable <= 0) return;
+        var x = chart.scales['x-axis-0'].getPixelForTick(firstReliable);
+        var area = chart.chartArea, c = chart.ctx;
+        c.save(); c.strokeStyle = ink; c.setLineDash([4, 4]); c.beginPath();
+        c.moveTo(x, area.top); c.lineTo(x, area.bottom); c.stroke(); c.restore();
+    } };
     new Chart(el.getContext('2d'), {
         type: 'line',
+        plugins: [reliableMarker],
         data: {
             labels: rows.map(function (r) { return r.label; }),
             datasets: [
-                line('MAU', 'mau', '#065f46', [5, 4]),
-                line('WAU', 'wau', '#10b981'),
-                line('DAU', 'dau', '#047857', null, 'rgba(16,185,129,0.12)'),
+                line('MAU', 'mau', '#064E3B', [5, 4]),
+                line('WAU', 'wau', '#34D399'),
+                line('DAU', 'dau', '#10B981', null, 'rgba(52,211,153,0.16)'),
             ]
         },
         options: {

@@ -7,7 +7,7 @@
         <thead>
             <tr>
                 <th></th>
-                {% for label in period_table.labels %}<th style="text-align:right;">{{ label }}</th>{% endfor %}
+                {% for label in period_table.labels %}<th class="num">{{ label }}</th>{% endfor %}
             </tr>
         </thead>
         <tbody>
@@ -19,7 +19,7 @@
             <tr{% if row.total %} style="font-weight:600;"{% endif %}>
                 <td>{{ row.label }}</td>
                 {% for cell in row.cells %}
-                <td style="text-align:right;{% if not cell.count %} color:var(--dash-muted);{% endif %}">
+                <td class="num{% if group.flow %} flow-{{ group.flow }}{% endif %}{% if not cell.count %} is-zero{% endif %}">
                     ${{ cell.usd|floatformat:2|intcomma }}
                     <div style="font-size:12px; font-weight:400; color:var(--dash-muted);">{{ cell.count|intcomma }} ops{% if cell.users is not None %} · {{ cell.users|intcomma }} users{% endif %}</div>
                 </td>

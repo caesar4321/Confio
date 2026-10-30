@@ -1,0 +1,20 @@
+{% load humanize %}
+<h2 class="section-title">Retention</h2>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Came back next day (D1)</div>
+        <div class="metric-value">{% if retention.d1.pct is not None %}{{ retention.d1.pct|floatformat:1 }}%{% else %}<span class="unknown">not yet</span>{% endif %}</div>
+        <div class="metric-change">{{ retention.d1.back|intcomma }} of {{ retention.d1.eligible|intcomma }} signups</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Came back on day 7 (D7)</div>
+        <div class="metric-value">{% if retention.d7.pct is not None %}{{ retention.d7.pct|floatformat:1 }}%{% else %}<span class="unknown">not yet</span>{% endif %}</div>
+        <div class="metric-change">{% if retention.d7.eligible %}{{ retention.d7.back|intcomma }} of {{ retention.d7.eligible|intcomma }} signups{% else %}Measurable from {{ retention.d7_first_measurable|date:"M j" }}{% endif %}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Active, last 7 days</div>
+        <div class="metric-value">{{ retention.active_7d|intcomma }}</div>
+        <div class="metric-change">{{ retention.returning_7d|intcomma }} joined over 30 days ago</div>
+    </div>
+</div>
+<p class="dash-asof" style="margin:-8px 0 20px;">La Paz days, from daily activity recorded since {{ retention.reliable_since|date:"M j" }}.</p>

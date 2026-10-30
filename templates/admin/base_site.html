@@ -5,53 +5,97 @@
 {% block extrastyle %}
 {{ block.super }}
 <style>
-    /* Confío emerald on Django's own admin variables, so every admin page
-       (changelists, forms, dark mode) shares the dashboard's palette. */
+    /* The app's palette (apps/src/config/theme.ts) on Django's own admin
+       variables, so changelists, forms and dark mode match: the bright
+       emerald field with emerald-900 text, since white on it is 1.9:1. */
     :root {
-        --primary: #10b981;
-        --secondary: #065f46;
-        --accent: #a7f3d0;
-        --header-color: #d1fae5;
-        --header-branding-color: #ffffff;
-        --breadcrumbs-fg: #a7f3d0;
-        --breadcrumbs-bg: #047857;
+        --primary: #34d399;
+        --secondary: #10b981;
+        --accent: #d1fae5;
+        --header-bg: #34d399;
+        --header-color: #064e3b;
+        --header-branding-color: #064e3b;
+        --header-link-color: #064e3b;
+        --breadcrumbs-fg: #064e3b;
+        --breadcrumbs-bg: #d1fae5;
+        --breadcrumbs-link-fg: #064e3b;
         --link-fg: #047857;
-        --link-hover-color: #065f46;
-        --link-selected-fg: #065f46;
-        --selected-row: #ecfdf5;
-        --button-bg: #047857;
-        --button-hover-bg: #065f46;
-        --default-button-bg: #065f46;
-        --default-button-hover-bg: #047857;
+        --link-hover-color: #064e3b;
+        --link-selected-fg: #064e3b;
+        --body-fg: #1f2937;
+        --body-quiet-color: #6b7280;
+        --body-medium-color: #4b5563;
+        --body-loud-color: #111827;
+        --hairline-color: #e5e7eb;
+        --border-color: #e5e7eb;
+        --darkened-bg: #f9fafb;
+        --selected-row: #d1fae5;
+        --button-fg: #064e3b;
+        --button-bg: #34d399;
+        --button-hover-bg: #10b981;
+        --default-button-bg: #34d399;
+        --default-button-hover-bg: #10b981;
         --message-success-bg: #d1fae5;
     }
     @media (prefers-color-scheme: dark) {
         :root:not([data-theme="light"]) {
+            --body-fg: #eeeeee;
+            --body-quiet-color: #d0d0d0;
+            --body-medium-color: #e0e0e0;
+            --body-loud-color: #ffffff;
+            --hairline-color: #272727;
+            --border-color: #353535;
+            --darkened-bg: #212121;
             --primary: #10b981;
             --secondary: #064e3b;
             --header-bg: #022c22;
             --header-color: #a7f3d0;
+            --header-branding-color: #34d399;
+            --header-link-color: #d1fae5;
+            --breadcrumbs-fg: #a7f3d0;
             --breadcrumbs-bg: #064e3b;
+            --breadcrumbs-link-fg: #d1fae5;
             --link-fg: #34d399;
             --link-hover-color: #6ee7b7;
             --link-selected-fg: #6ee7b7;
             --selected-row: #064e3b;
             --message-success-bg: #065f46;
+            --button-fg: #064e3b;
+            --button-bg: #34d399;
+            --button-hover-bg: #10b981;
+            --default-button-bg: #34d399;
+            --default-button-hover-bg: #10b981;
         }
     }
     html[data-theme="dark"] {
+        --body-fg: #eeeeee;
+        --body-quiet-color: #d0d0d0;
+        --body-medium-color: #e0e0e0;
+        --body-loud-color: #ffffff;
+        --hairline-color: #272727;
+        --border-color: #353535;
+        --darkened-bg: #212121;
         --primary: #10b981;
         --secondary: #064e3b;
         --header-bg: #022c22;
         --header-color: #a7f3d0;
+        --header-branding-color: #34d399;
+        --header-link-color: #d1fae5;
+        --breadcrumbs-fg: #a7f3d0;
         --breadcrumbs-bg: #064e3b;
+        --breadcrumbs-link-fg: #d1fae5;
         --link-fg: #34d399;
         --link-hover-color: #6ee7b7;
         --link-selected-fg: #6ee7b7;
         --selected-row: #064e3b;
         --message-success-bg: #065f46;
+        --button-fg: #064e3b;
+        --button-bg: #34d399;
+        --button-hover-bg: #10b981;
+        --default-button-bg: #34d399;
+        --default-button-hover-bg: #10b981;
     }
-    #site-name a { font-weight: 600; letter-spacing: -0.01em; }
+    #site-name a, #site-name a:link, #site-name a:visited { color: var(--header-branding-color); font-weight: 600; letter-spacing: -0.01em; }
 </style>
 {% endblock %}
 
