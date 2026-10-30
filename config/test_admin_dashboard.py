@@ -343,6 +343,21 @@ class DashboardPagesTests(TestCase):
         self.assertEqual([c['usd'] for c in rows['VEXPay']], [Decimal('10')] * 4)
         self.assertEqual([c['count'] for c in rows['Koywe']], [0, 0, 1, 1])
 
+    def test_ves_sends_count_their_verified_funding(self):
+        # ve_send never sets crypto_amount_actual; an unfunded row proves nothing.
+        from django.utils import timezone
+        from ramps.metrics import rail_flows_by_period
+        from ramps.models import RampTransaction
+
+        base = dict(provider='pagoasap', actor_user=self.user, direction='off_ramp', status='COMPLETED',
+                    completed_at=timezone.now())
+        RampTransaction.objects.create(metadata={'ve_send': {'funded_wei': str(25 * 10**18)}}, **base)
+        RampTransaction.objects.create(metadata={'ve_send': {}}, **base)
+        rows = {r['label']: r['cells'] for r in
+                rail_flows_by_period(sections.Window.current().periods())['withdrawals']}
+        self.assertEqual(rows['Pago ASAP'][0]['usd'], Decimal('25'))
+        self.assertEqual(rows['Pago ASAP'][0]['count'], 1)
+
     def test_investing_table_lists_every_product(self):
         table = sections.investing_by_period(sections.Window.current())['period_table']
         labels = [r['label'] for r in table['groups'][0]['rows']]

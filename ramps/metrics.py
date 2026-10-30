@@ -5,7 +5,7 @@ and journey evidence; neither is added to the perimeter total.
 from decimal import Decimal
 from django.db.models import Case, Count, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce, Greatest, NullIf
-from django.db.models.fields.json import KeyTextTransform
+from django.db.models.fields.json import KeyTextTransform, KeyTransform
 
 
 DOLLARS = DecimalField(max_digits=78, decimal_places=18)
@@ -144,6 +144,18 @@ def _period_cells(row, periods):
     return [{'usd': row[f'usd{i}'] or Decimal(0), 'count': row[f'n{i}']} for i in range(len(periods))]
 
 
+def _ve_send_payouts():
+    """VES sends never set crypto_amount_actual: their dollars are the USDT
+    funding verified on chain (ramps.ve_send, metadata.ve_send.funded_wei)."""
+    from ramps.models import RampTransaction
+
+    funded = KeyTextTransform('funded_wei', KeyTransform('ve_send', 'metadata'))
+    queryset = RampTransaction.objects.filter(
+        direction='off_ramp', status='COMPLETED', metadata__ve_send__funded_wei__regex=r'^[0-9]{1,38}$',
+    ).exclude(crypto_amount_actual__gt=0).exclude(pk__in=_journey_mirrors())
+    return queryset, Cast(funded, DOLLARS) / Value(Decimal(10**18)), 'completed_at', None
+
+
 def rail_flows_by_period(periods) -> dict:
     """Delivered deposits and completed payouts per provider, and the
     perimeter (Movido) totals, for each period. Provider rows include every
@@ -161,7 +173,11 @@ def rail_flows_by_period(periods) -> dict:
                 flow_usd=amount, flow_at=Coalesce(date_field, 'created_at'))
             if provider is None:
                 for row in annotated.values('provider').annotate(**_period_totals(periods)):
-                    rows[row['provider']] = _period_cells(row, periods)
+                    cells = _period_cells(row, periods)
+                    known = rows.get(row['provider'])
+                    rows[row['provider']] = cells if known is None else [
+                        {'usd': a['usd'] + b['usd'], 'count': a['count'] + b['count']}
+                        for a, b in zip(known, cells)]
             else:
                 rows[provider] = _period_cells(annotated.aggregate(**_period_totals(periods)), periods)
         return sorted(
@@ -172,10 +188,12 @@ def rail_flows_by_period(periods) -> dict:
     deposits = provider_rows(
         (queryset, amount, deposit_dates[provider], provider)
         for queryset, amount, provider in _deposit_sources(providers=None))
-    payouts = provider_rows(
-        (queryset, F(amount), completed, provider)
-        for (queryset, amount, _country, _user, completed), provider
-        in zip(_withdrawal_sources(providers=None), (None, 'infinia', 'cobre')))
+    payouts = provider_rows([
+        *((queryset, F(amount), completed, provider)
+          for (queryset, amount, _country, _user, completed), provider
+          in zip(_withdrawal_sources(providers=None), (None, 'infinia', 'cobre'))),
+        _ve_send_payouts(),
+    ])
 
     entries, exits = _perimeter_conversions()
     movido_in = entries.order_by().annotate(
