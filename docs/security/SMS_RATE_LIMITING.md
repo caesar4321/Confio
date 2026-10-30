@@ -1,5 +1,7 @@
 # SMS Rate Limiting & DDoS Mitigation
 
+> **Older app builds only (October 2026):** signup no longer sends an SMS. These limits still protect the endpoint until `PHONE_VERIFICATION_ENABLED` is turned off.
+
 ## Overview
 To protect the platform and Twilio budget from SMS flooding/DDoS attacks, we have implemented strict server-side rate limiting on the SMS verification endpoint (`InitiateSMSVerification`).
 

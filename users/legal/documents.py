@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.8.1',
-    'last_updated': '2026-10-27',
+    'version': '1.8.2',
+    'last_updated': '2026-10-30',
     'is_legally_binding': True,
     'sections': [
         {
@@ -147,17 +147,17 @@ TERMS = {
                     'En ciertas jurisdicciones solo están disponibles para inversionistas calificados o profesionales según la ley local, incluyendo Brasil, el Espacio Económico Europeo, el Reino Unido, Suiza, Hong Kong, Singapur y Malasia.',
                     'La lista de jurisdicciones del emisor puede cambiar; la versión vigente está publicada en docs.ondo.finance. Podemos bloquear, limitar o suspender estas funciones para cumplir con esos requisitos.',
                     'Si usted no es elegible, puede seguir usando el resto de Confío con normalidad: recibir, enviar, pagar y retirar dólares digitales. Lo que no está disponible es la conversión a cUSD+ y la compra de acciones tokenizadas. La emisión de nuevo cUSD puede limitarse por jurisdicción conforme a la sección 5.',
-                    'Para aplicar estas reglas usamos el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP.'
+                    'Para aplicar estas reglas usamos su país de residencia, que estimamos a partir de la ubicación de su dispositivo, cuando la ha compartido, y de sus direcciones IP, y, cuando corresponde, el país de la dirección IP desde la que se conecta. Si su cuenta tiene un número de teléfono verificado y no contamos con otro dato, usamos el país de ese número.'
                 ],
                 'oro_y_bitcoin': [
                     'La compra de oro y bitcoin no está disponible para personas ubicadas o residentes en Estados Unidos, Reino Unido, Cuba, Irán, Corea del Norte y Siria.',
-                    'Para aplicar estas reglas usamos el país de su número de teléfono verificado y el país estimado a partir de su dirección IP.',
+                    'Para aplicar estas reglas usamos su país de residencia, que estimamos a partir de la ubicación de su dispositivo, cuando la ha compartido, y de sus direcciones IP, y el país de la dirección IP desde la que se conecta. Si su cuenta tiene un número de teléfono verificado y no contamos con otro dato, usamos el país de ese número.',
                     'Podemos ampliar o reducir la lista de países para cumplir con las reglas de los proveedores o la ley.',
                     'Estas restricciones solo afectan las compras. Si ya tiene tokens, puede venderlos cuando quiera.'
                 ],
                 'futuros': [
                     'Futuros no está disponible para personas ubicadas o residentes en Estados Unidos, Canadá, Reino Unido, Bélgica, Cuba, Irán, Corea del Norte y Siria, ni donde la ley local lo prohíba.',
-                    'Para aplicar estas reglas usamos el país de su número de teléfono verificado y el país estimado a partir de su dirección IP.',
+                    'Para aplicar estas reglas usamos su país de residencia, que estimamos a partir de la ubicación de su dispositivo, cuando la ha compartido, y de sus direcciones IP, y el país de la dirección IP desde la que se conecta. Si su cuenta tiene un número de teléfono verificado y no contamos con otro dato, usamos el país de ese número.',
                     'Podemos ampliar o reducir la lista de países, o limitar Futuros, para cumplir con las reglas de los proveedores o la ley.',
                     'Estas restricciones solo afectan la apertura de posiciones y el margen adicional. Cerrar posiciones y retirar su dinero sigue disponible.'
                 ]
@@ -200,8 +200,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.10.0',
-    'last_updated': '2026-10-23',
+    'version': '1.11.0',
+    'last_updated': '2026-10-30',
     'is_legally_binding': True,
     'sections': [
         {
@@ -210,10 +210,11 @@ PRIVACY = {
                 'personal_info': [
                     'Nombre completo',
                     'Dirección de correo electrónico',
-                    'Número de teléfono',
+                    'Número de teléfono: crear una cuenta no lo requiere. Lo tenemos si usted lo verificó en una versión anterior de la app o si lo proporciona para una función que lo necesite. Para recargas, retiros y cuentas locales puede indicar un número de contacto, declarado por usted y no verificado, que no reemplaza al número que haya verificado',
+                    'Si envía dinero por enlace a un contacto: el número que usted elige de su agenda, guardado solo en relación con su cuenta para gestionar ese envío y recordar qué cuenta Confío lo recibió. No guardamos su agenda, y ese dato no permite a otras personas encontrar a nadie en Confío',
                     'Direcciones de billetera',
                     'Información de transacciones',
-                    'Información de cuenta y perfil, incluyendo identificadores internos, país de teléfono y nombre de usuario'
+                    'Información de cuenta y perfil, incluyendo identificadores internos, país de residencia estimado, país de teléfono si corresponde y nombre de usuario'
                 ],
                 'kyc_info': [
                     'Fecha de nacimiento',
@@ -286,7 +287,7 @@ PRIVACY = {
                 'Confirmar con su rostro que es usted, y no otra persona con acceso a su cuenta, antes de operaciones sensibles: recargas, retiros, envíos y pagos según su nivel de riesgo, recibir transferencias bancarias en cuentas personales, autorizar nóminas y la salida de emergencia',
                 'Cumplir con requisitos de KYC/AML',
                 'Detectar que una misma persona verifique varias cuentas o vuelva a registrarse tras una suspensión, comparando los rostros de las verificaciones de identidad',
-                'Determinar la elegibilidad geográfica de funciones sujetas a reglas de emisores terceros, usando el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP',
+                'Determinar la elegibilidad geográfica de funciones sujetas a reglas de emisores terceros, usando su país de residencia estimado a partir de la ubicación de su dispositivo, cuando la ha compartido, y de sus direcciones IP, el país de la dirección IP desde la que se conecta y, si no contamos con otro dato, el país de su número de teléfono verificado',
                 'Confirmar que Bre-B está disponible en su ubicación al solicitarlo y al usarlo, mediante la ubicación precisa del dispositivo en ese momento, la verificación de integridad de la app (Apple o Google) y el país de su dirección IP',
                 'En Comprar, mostrarle tiendas según la ciudad detectada o seleccionada, calcular el precio de envío según las tarifas de la tienda y facilitar la entrega con la dirección o el punto del mapa y la referencia que usted indique. Si proporciona coordenadas y contamos con datos geográficos de referencia, realizamos comprobaciones aproximadas de distancia respecto de las ciudades configuradas; estas comprobaciones no garantizan que el punto esté dentro de una zona exacta de cobertura',
                 'Revisar automáticamente los productos y las opiniones de Comprar antes de mostrarlos',
@@ -302,6 +303,7 @@ PRIVACY = {
                 'Con proveedores de servicios de verificación KYC y cumplimiento regulatorio',
                 'Con Amazon Web Services (AWS), que analiza la verificación con su rostro y compara las selfies de sus verificaciones de identidad. Confío las envía a AWS en la Unión Europea (Irlanda); AWS puede conservar y usar esos datos conforme a sus propios términos. AWS no entrega el video a Confío; solo imágenes de la verificación, que Confío guarda en Suiza',
                 'Con proveedores de recargas, retiros, pagos, transferencias y conversión de activos cuando sea necesario para ejecutar una operación solicitada por usted',
+                'Con los proveedores de sus recargas, retiros y cuentas locales, su número de contacto y su dirección declarada. Si los cambia en la app, enviamos el cambio a esos proveedores para actualizar sus datos',
                 'Con proveedores de infraestructura, almacenamiento, autenticación, notificaciones push y seguridad que actúan como encargados del tratamiento',
                 'Con autoridades regulatorias, judiciales o administrativas cuando sea necesario',
                 'Con proveedores de pago, bancos o autoridades que lo requieran, los registros de verificación de ubicación de Bre-B como evidencia de cumplimiento',

@@ -697,7 +697,8 @@ fields; it does not hard-code a provider-country matrix.
 
 ### Country ordering source
 
-Phone country code is a weak onboarding hint, not the authorization or permanent sorting
+Signup no longer asks for a phone. Where an older account still has a phone country code, it is a
+weak hint, not the authorization or permanent sorting
 source. A Venezuelan number may belong to a Colombian resident; a Colombian number may
 belong to someone living elsewhere.
 

@@ -343,7 +343,7 @@ Confío’s founder-led Spanish-language audience is approximately 480,000 acros
 >
 > Confío does not plan to win by permanently outbidding competitors on cashback. It aims to convert a trusted audience into verified users, funded balances, retained savings, repeat payments, and referrals with effectively zero paid-media spend to date.
 
-The funnel is measured from content reach through installation, phone completion, identity verification, first funding, retained balance, repeat deposit or transaction, and referral. Country-level cohorts matter more than a single global signup count.
+The funnel is measured from content reach through installation, account completion, identity verification, first funding, retained balance, repeat deposit or transaction, and referral. Country-level cohorts matter more than a single global signup count.
 
 ### 9.3 Country-by-country rollout
 
@@ -383,7 +383,7 @@ Confío’s architecture separates wallet-key custody from product and provider 
 - Residential-address information is a separate provider requirement. For Koywe transactions, Confío asks the user to enter the address and, with the user’s consent, submits it to Koywe for provider-side verification. <sup>[13]</sup>
 - Koywe applies its own identity, address, eligibility, sanctions, and transaction controls across its supported local rails. <sup>[13]</sup>
 - Guardarian’s onboarding for SEPA and card access also includes residential-address information and remains subject to its identity, eligibility, payment-method, sanctions, and transaction controls. <sup>[13]</sup>
-- Phone completion or Didit verification alone does not guarantee that Koywe, Guardarian, Ondo, or another provider will approve a user or transaction.
+- Completing signup or Didit verification alone does not guarantee that Koywe, Guardarian, Ondo, or another provider will approve a user or transaction.
 - USDY minting is limited by Ondo eligibility, geographic, address, and compliance requirements. <sup>[7, 10]</sup>
 - Ondo Stocks access is separately subject to Ondo Global Markets eligibility, asset and market availability, jurisdictional restrictions, signed trade attestations, and applicable provider terms. <sup>[18]</sup>
 - Additional countries and rails launch only after the corresponding legal, operational, and provider checks.
@@ -426,9 +426,9 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 
 ### 13.1 Measurement principles
 
-Confío distinguishes signups, phone-complete users, verified users, funded users, reachable devices, active users, and retained balances. Core operating measures include funded users, cUSD and cUSD+ obligations, backing, conversion fees, gross deposits, redemptions, net inflow, average and median balance, balance retention, fiat-originated inflow, concentration, merchant volume, payroll volume, and country cohorts.
+Confío distinguishes signups, onboarded users, verified users, funded users, reachable devices, active users, and retained balances. Core operating measures include funded users, cUSD and cUSD+ obligations, backing, conversion fees, gross deposits, redemptions, net inflow, average and median balance, balance retention, fiat-originated inflow, concentration, merchant volume, payroll volume, and country cohorts.
 
-Distribution is measured as a funnel: content reach, store visit, installation, phone completion, identity verification, first funding, retained balance, repeat deposit or transaction, and referral. Organic acquisition is separated from paid campaigns.
+Distribution is measured as a funnel: content reach, store visit, installation, account completion, identity verification, first funding, retained balance, repeat deposit or transaction, and referral. Organic acquisition is separated from paid campaigns.
 
 ### 13.2 The next proof point
 

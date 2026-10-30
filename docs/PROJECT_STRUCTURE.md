@@ -41,8 +41,8 @@ This is a **monolithic repository** containing the full Confío stack.
 ├── presale/           # CONFIO Token presale
 ├── send/              # Two-phase send transaction system
 ├── security/          # Fraud prevention & IP tracking
-├── telegram_verification/ # Phone verification
-├── sms_verification/  # SMS verification fallback
+├── telegram_verification/ # Phone verification (older app builds only)
+├── sms_verification/  # SMS verification fallback (older app builds only)
 ├── notifications/     # User notifications
 ├── conversion/        # Currency conversion service
 ├── exchange_rates/    # Fiat/Crypto exchange rates

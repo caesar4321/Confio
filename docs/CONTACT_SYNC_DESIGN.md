@@ -1,5 +1,7 @@
 # Contact Sync and Transaction Display Design
 
+> **Superseded (October 2026):** new accounts sign up without a phone number and the app no longer uploads the address book. See `send/link_invite.py`. Kept for history.
+
 ## Overview
 Following WhatsApp's privacy-first approach for contact handling and transaction display.
 

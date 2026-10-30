@@ -343,7 +343,7 @@ La audiencia del fundador en español suma aproximadamente 480,000 personas entr
 >
 > Confío no pretende ganar ofreciendo más cashback permanentemente. Busca convertir una audiencia que confía en usuarios verificados, saldos fondeados, ahorro retenido, pagos recurrentes y referidos, con gasto en medios pagados prácticamente nulo hasta la fecha.
 
-El embudo se mide desde alcance del contenido hasta instalación, verificación telefónica, identidad, primer fondeo, saldo retenido, depósito o transacción repetidos y referido. Las cohortes por país importan más que una cifra global de registros.
+El embudo se mide desde alcance del contenido hasta instalación, cuenta completada, identidad, primer fondeo, saldo retenido, depósito o transacción repetidos y referido. Las cohortes por país importan más que una cifra global de registros.
 
 ### 9.3 Despliegue por país
 
@@ -383,7 +383,7 @@ La arquitectura separa custodia de claves y obligaciones de productos y proveedo
 - El domicilio es un requisito separado del proveedor. Para Koywe, Confío solicita que el usuario introduzca su dirección y la envía con su consentimiento para verificación por Koywe. <sup>[13]</sup>
 - Koywe aplica sus propios controles de identidad, dirección, elegibilidad, sanciones y transacciones en sus canales locales. <sup>[13]</sup>
 - El alta de Guardarian para SEPA y tarjetas incluye domicilio y sigue sus controles de identidad, elegibilidad, método, sanciones y transacciones. <sup>[13]</sup>
-- Completar teléfono o Didit no garantiza aprobación del usuario o transacción por Koywe, Guardarian, Ondo u otro proveedor.
+- Completar el registro o Didit no garantiza aprobación del usuario o transacción por Koywe, Guardarian, Ondo u otro proveedor.
 - La acuñación USDY está limitada por requisitos Ondo de elegibilidad, geografía, dirección y cumplimiento. <sup>[7, 10]</sup>
 - Ondo Stocks tiene requisitos separados de Global Markets: elegibilidad, disponibilidad de activos y mercados, jurisdicción, certificaciones firmadas de operaciones y términos aplicables. <sup>[18]</sup>
 - Países y canales adicionales se lanzan solo tras las verificaciones legales, operativas y de proveedor correspondientes.
@@ -426,9 +426,9 @@ Ningún producto financiero blockchain está libre de riesgos. Esta tabla no es 
 
 ### 13.1 Principios de medición
 
-Confío distingue registros, verificación telefónica, identidad verificada, usuarios con fondos, dispositivos alcanzables, usuarios activos y saldos retenidos. Las medidas centrales incluyen usuarios con fondos, obligaciones cUSD y cUSD+, respaldo, comisiones de conversión, depósitos brutos, redenciones, entrada neta, saldo promedio y mediano, retención, entradas originadas en fiat, concentración, volumen comercial, nóminas y cohortes por país.
+Confío distingue registros, cuentas completadas, identidad verificada, usuarios con fondos, dispositivos alcanzables, usuarios activos y saldos retenidos. Las medidas centrales incluyen usuarios con fondos, obligaciones cUSD y cUSD+, respaldo, comisiones de conversión, depósitos brutos, redenciones, entrada neta, saldo promedio y mediano, retención, entradas originadas en fiat, concentración, volumen comercial, nóminas y cohortes por país.
 
-La distribución se mide como embudo: alcance, visita a tienda, instalación, teléfono, identidad, primer fondeo, saldo retenido, depósito o transacción repetidos y referido. La adquisición orgánica se separa de campañas pagadas.
+La distribución se mide como embudo: alcance, visita a tienda, instalación, cuenta completada, identidad, primer fondeo, saldo retenido, depósito o transacción repetidos y referido. La adquisición orgánica se separa de campañas pagadas.
 
 ### 13.2 La siguiente prueba
 

@@ -11,7 +11,7 @@ data = {
 			{
 				"header": "1. Información que Recopilamos",
 				"paragraphs": [
-					"INFORMACIÓN PERSONAL: Nombre completo, dirección de correo electrónico, número de teléfono, direcciones de billetera, información de transacciones.",
+					"INFORMACIÓN PERSONAL: Nombre completo, dirección de correo electrónico, número de teléfono (solo si usted lo proporcionó), direcciones de billetera, información de transacciones.",
 					"INFORMACIÓN KYC: Fecha de nacimiento, número de identificación (cédula, DNI, pasaporte), fotografía de documento de identidad, documento de identidad escaneado o fotografiado, selfie con documento de identidad, información de dirección residencial, información de fuente de fondos.",
 					"INFORMACIÓN TÉCNICA Y DEL DISPOSITIVO: Sistema operativo, versiones de software y hardware, dirección IP, ubicación, ID del dispositivo, ID de Publicidad (Advertising ID), configuración de notificaciones, última hora activa y registros de actividad en Confío."
 				]

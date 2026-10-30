@@ -47,7 +47,7 @@
 - Para más detalle (vesting, riesgos, contratos), el documento de tokenomics y el whitepaper están en GitHub.
 
 ## Países, recargas y retiros
-- Puedes crear tu cuenta con un teléfono de casi cualquier país. Recargar y Retirar dependen del país de tu teléfono.
+- Creas tu cuenta con Google o Apple desde casi cualquier país, sin número de teléfono. Recargar y Retirar dependen del país que eliges en esas pantallas. Para usarlos te pedimos tu dirección y un número de contacto, sin códigos por SMS; los cambias en Perfil → Dirección y teléfono.
 - En Argentina, Bolivia, Brasil, Chile, Colombia, México y Perú recargas con medios locales, y retiras en todos salvo Bolivia:
   - Argentina: transferencia (recargar y retirar); Khipu y QR interoperable (solo recargar).
   - Bolivia: QR interoperable, solo para recargar: en Recargar eliges el monto y la app genera un QR para esa orden, que pagas desde la app de tu banco o billetera. Por ahora no se puede retirar a bolivianos ni pagar QR locales; retirar y pagar con QR en Bolivia llegará muy pronto (sin fecha).
@@ -98,11 +98,11 @@
 - "Autenticación requerida" al recargar o retirar no es un error: la app te pide confirmar que eres tú. Si todavía no verificaste tu identidad, primero complétala (Perfil → Verificación) y vuelve a intentar. Si ya estás verificado, el mensaje aparece cuando no se completó la confirmación con Confío Face: toca "Reintentar", con buena luz y la cara centrada. No hace falta pasarlo al equipo.
 
 - Tu nombre y fecha de nacimiento deben coincidir en todos tus documentos.
-- Si no tienes un documento del país de tu teléfono, puedes verificarte con tu pasaporte o un documento de otro país. Algunas funciones lo aceptan y otras (como recargar y retirar) piden el del país de tu teléfono: la app te dice cuál necesitas.
+- Si no tienes un documento del país donde quieres recargar, puedes verificarte con tu pasaporte o un documento de otro país. Algunas funciones lo aceptan y otras (como recargar y retirar) piden un documento de ese país: la app te dice cuál necesitas.
 
 - Para un límite mayor en cuentas locales se pide un comprobante de domicilio y unas preguntas sobre tus ingresos y el origen de tus fondos.
 - Si tu documento venció, la verificación deja de valer: verifícate de nuevo con un documento vigente.
-- El país de tu cuenta es el de tu teléfono verificado y no se cambia desde la app. Qué productos tienes (por ejemplo Confío Dollar+ y acciones) depende de ese país y de desde dónde te conectas, por reglas del emisor: cambiar de país no es una forma de habilitarlos. No lo pases al equipo por eso.
+- El país de tu cuenta se estima según dónde usas la app habitualmente y no se cambia desde la app. En Recargar y Retirar sí eliges el país de cada operación. Qué productos tienes (por ejemplo Confío Dollar+ y acciones) depende de ese país y de desde dónde te conectas, por reglas del emisor: cambiar de país no es una forma de habilitarlos. No lo pases al equipo por eso.
 
 - Fotografía tu documento original (no una foto de pantalla ni un escaneo) y evita reflejos sobre el holograma.
 

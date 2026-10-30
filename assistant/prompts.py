@@ -181,7 +181,7 @@ IDENTITY_NOTES = {
     'unverified': ('Para recargar necesita verificar su identidad. Si pregunta cómo recargar o poner sus primeros '
                    'dólares, dile primero que verifique su identidad en Perfil → Verificación y que después '
                    'recargue.\n'),
-    'other_country': ('Para recargar necesita el documento de identidad del país de su número de teléfono. Si '
+    'other_country': ('Para recargar necesita un documento de identidad del país desde donde recarga. Si '
                       'pregunta cómo recargar, dile que lo agregue en Perfil → Verificación.\n'),
     'pending': ('Su verificación de identidad todavía no está aprobada: si pregunta cómo recargar, dile que podrá '
                 'cuando se apruebe y que, si no la terminó, la complete en Perfil → Verificación.\n'),

@@ -16,7 +16,7 @@ Blocking is implemented at both the **Client Support** (UI/UX) level and the **S
 The backend rejects requests from restricted users regardless of the client they are using.
 
 *   **Location:** `presale/geo_utils.py`
-*   **Logic:** `check_presale_eligibility(user)` checks `user.phone_country`.
+*   **Logic:** `check_presale_eligibility(user)` checks the user's residence country (`security.geo.country_of`: residence from device location and IP, with the phone country only as a fallback on older accounts).
     *   If `US` or `KR`, it returns `False`.
 
 ### A. Waitlist Blocking
@@ -39,7 +39,7 @@ The backend rejects requests from restricted users regardless of the client they
 ## 2. Client-Side Guardrails (The "Soft" Shield)
 The React Native app provides immediate feedback and prevents accidental clicks.
 
-*   **Detection Method:** Uses `selectedCountry` from `CountryContext` (derived from User Profile/Phone).
+*   **Detection Method:** Uses `selectedCountry` from `CountryContext` (derived from the User Profile residence country).
 
 ### A. Waitlist Screen (`ConfioPresaleScreen.tsx`)
 *   **"Notificar" Button:**

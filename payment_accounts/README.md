@@ -267,9 +267,9 @@ is provider-scoped for future adapters.
 
 # Identity documents, residence, and EDD (local money)
 
-**Primary vs additional documents.** The primary verification stays the
-phone-country, rail-enforced Didit workflow; Koywe and every existing reader
-keep using it. A person may add documents for local-money rails the primary
+**Primary vs additional documents.** The primary verification is the
+general Didit workflow, which accepts any country's document; Koywe takes a
+document issued by the order's country (`rail_identity`). A person may add documents for local-money rails the primary
 one does not satisfy (any country's national ID — DNI/cédula — or passport
 opens COP, MXN, BRL and ARS accounts, plus the CNH for BRL; Venezuelan
 documents are never accepted; `local_money.accepts_identity`). Additional
