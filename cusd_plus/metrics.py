@@ -482,7 +482,7 @@ def investment_flows_by_period(periods) -> list:
     back, for each period: [(label, since)]. One query per product, using the
     same settled USD rows and creation dating as _swap_trade_stats; futures
     come from their positions (margin at open, dollars back at done)."""
-    from blockchain.models import PerpPosition, SponsoredBatch
+    from blockchain.models import SponsoredBatch
     from users.models_unified import UnifiedTransactionTable
 
     amount = Cast('amount', output_field=DecimalField(max_digits=38, decimal_places=18))
@@ -503,6 +503,18 @@ def investment_flows_by_period(periods) -> list:
             rows.append(_period_row(f'{label} {side}', settlements.aggregate(**totals), periods))
         return rows
 
+    return [
+        *swap_rows('Stocks', 'stock_buy', 'stock_sell'),
+        *swap_rows('Crypto & gold', 'crypto_buy', 'crypto_sell'),
+        *futures_flows_by_period(periods),
+    ]
+
+
+def futures_flows_by_period(periods) -> list:
+    """Margin in, margin added and dollars back for each period: the real
+    dollars that moved, not the leveraged notional."""
+    from blockchain.models import PerpPosition
+
     def perp_row(label, usd_field, date_field):
         totals = {}
         for index, (_label, since) in enumerate(periods):
@@ -513,8 +525,6 @@ def investment_flows_by_period(periods) -> list:
         return _period_row(label, PerpPosition.objects.order_by().aggregate(**totals), periods)
 
     return [
-        *swap_rows('Stocks', 'stock_buy', 'stock_sell'),
-        *swap_rows('Crypto & gold', 'crypto_buy', 'crypto_sell'),
         perp_row('Futures margin in', 'margin_usd', 'opened_at'),
         _margin_add_row(periods),
         perp_row('Futures dollars back', 'returned_usd', 'done_at'),

@@ -1466,8 +1466,8 @@ def _customer_assets(cusd, plus, portfolio):
 def today_money(w, *, refresh=False):
     """Headline money figures. Movido is the exact snapshot the website shows."""
     from cusd_plus import gm_tvl
-    from cusd_plus.metrics import get_crypto_trade_stats, get_fee_ledger_summary, get_stock_trade_stats
-    from cusd_plus.metrics import get_cusd_bsc_platform_metrics, get_cusd_plus_platform_metrics
+    from cusd_plus.metrics import futures_flows_by_period, get_crypto_trade_stats, get_fee_ledger_summary
+    from cusd_plus.metrics import get_cusd_bsc_platform_metrics, get_cusd_plus_platform_metrics, get_stock_trade_stats
     from ramps.metrics import public_fund_flow_snapshot
 
     try:
@@ -1477,6 +1477,7 @@ def today_money(w, *, refresh=False):
     portfolio = gm_tvl.snapshot()
     stock_24h = get_stock_trade_stats(since=w.last_24h)
     crypto_24h = get_crypto_trade_stats(since=w.last_24h)
+    futures_24h = sum(row['cells'][0]['usd'] for row in futures_flows_by_period([('24h', w.last_24h)]))
     cusd_bsc_metrics = _admin_cached('cusd_bsc', get_cusd_bsc_platform_metrics, w, refresh=refresh)
     plus_metrics = _admin_cached('cusd_plus', get_cusd_plus_platform_metrics, w, refresh=refresh)
     return {
@@ -1491,7 +1492,8 @@ def today_money(w, *, refresh=False):
         'customer_assets': _customer_assets(cusd_bsc_metrics, plus_metrics, portfolio),
         'stock_stats_24h': stock_24h,
         'crypto_stats_24h': crypto_24h,
-        'trades_24h_volume': stock_24h['total_volume'] + crypto_24h['total_volume'],
+        'futures_flow_24h': futures_24h,
+        'trades_24h_volume': stock_24h['total_volume'] + crypto_24h['total_volume'] + futures_24h,
     }
 
 

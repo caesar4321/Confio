@@ -212,13 +212,17 @@ class DashboardPagesTests(TestCase):
         kinds = [c.kwargs.get('kind__in') for c in flt.call_args_list if 'kind__in' in c.kwargs]
         self.assertEqual(kinds, [('crypto_buy', 'crypto_sell'), ('stock_buy', 'stock_sell')])
 
-    def test_today_trades_tile_sums_stocks_and_crypto(self):
+    def test_today_trades_tile_sums_stocks_crypto_and_futures(self):
         stats = lambda v: {'total_volume': Decimal(v), 'confirmed': 1}  # noqa: E731
+        flow = lambda v: {'label': '', 'cells': [{'usd': Decimal(v), 'count': 1, 'users': 1}]}  # noqa: E731
         with chain_reads(), \
                 mock.patch('cusd_plus.metrics.get_stock_trade_stats', return_value=stats('199')), \
-                mock.patch('cusd_plus.metrics.get_crypto_trade_stats', return_value=stats('50')):
+                mock.patch('cusd_plus.metrics.get_crypto_trade_stats', return_value=stats('50')), \
+                mock.patch('cusd_plus.metrics.futures_flows_by_period',
+                           return_value=[flow('30'), flow('5'), flow('20')]):
             money = sections.today_money(sections.Window.current())
-        self.assertEqual(money['trades_24h_volume'], Decimal('249'))
+        self.assertEqual(money['futures_flow_24h'], Decimal('55'))
+        self.assertEqual(money['trades_24h_volume'], Decimal('304'))
 
     def test_only_didit_in_review_documents_need_attention(self):
         from security.models import IdentityVerification
