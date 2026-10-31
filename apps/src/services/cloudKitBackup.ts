@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { Alert, NativeModules, Platform } from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import { jwtDecode } from 'jwt-decode';
 import { sha256 } from '@noble/hashes/sha256';
@@ -10,8 +10,10 @@ import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
  * before anyone is told it exists. See docs/designs/icloud-cloudkit-wallet-backup.md.
  */
 const CLOUD_TIMEOUT_MS = 15_000;
+// CKError.quotaExceeded: the record counts against the person's own iCloud plan.
+const ICLOUD_FULL_CODE = 'CK_25';
 
-type CloudKitState = 'proven' | 'no_icloud_account' | 'icloud_restricted' | 'failed';
+type CloudKitState = 'proven' | 'no_icloud_account' | 'icloud_restricted' | 'icloud_full' | 'failed';
 
 const nativeBackup = () => (Platform.OS === 'ios' ? NativeModules.ConfioCloudBackup : undefined);
 
@@ -58,12 +60,14 @@ export async function findCloudKitBackups(
   return { payloads, unknown };
 }
 
-async function reportState(state: CloudKitState, token: string, walletHashes?: string[]): Promise<boolean> {
+async function reportState(
+  state: CloudKitState, token: string, walletHashes?: string[], errorCode?: string,
+): Promise<boolean> {
   const { REPORT_CLOUDKIT_BACKUP } = await import('../apollo/queries');
   const { apolloClient } = await import('../apollo/client');
   const { data } = await apolloClient.mutate({
     mutation: REPORT_CLOUDKIT_BACKUP,
-    variables: { state, walletHashes },
+    variables: { state, walletHashes, errorCode },
     context: { pinnedAuthToken: token, skipProactiveRefresh: true },
   });
   return !!data?.reportCloudkitBackup?.success;
@@ -83,19 +87,22 @@ async function uploadAndVerify(
   }
 }
 
-async function runCloudKitBackup(): Promise<void> {
+let storageFull = false;
+
+/** Resolves true while the person's iCloud is known to be full and nothing is stored. */
+async function runCloudKitBackup(): Promise<boolean> {
   const backup = nativeBackup();
-  if (!backup) return;
+  if (!backup) return false;
   const { oauthStorage } = await import('./oauthStorageService');
   const { AuthService } = await import('./authService');
   const { getCloudKitBackupMaterial } = await import('./secureDeterministicWallet');
   const oauth = await oauthStorage.getOAuthSubject();
   const token = await AuthService.getInstance().getToken();
-  if (!oauth?.subject || !token) return;
+  if (!oauth?.subject || !token) return storageFull;
   const userId = jwtDecode<{ user_id?: string | number }>(token)?.user_id;
-  if (!userId) return;
+  if (!userId) return storageFull;
   const material = await getCloudKitBackupMaterial(oauth.subject);
-  if (!material) return;
+  if (!material) return storageFull;
 
   const walletHashes = [material.bscAddress, material.algorandAddress].map(cloudKitAddressHash);
   // Keyed by user too: after deleting an account and signing up again, the same
@@ -111,20 +118,24 @@ async function runCloudKitBackup(): Promise<void> {
       await Keychain.setGenericPassword('cloudkit', JSON.stringify({ ...marker, acknowledged: false }), { service });
     }
     await reportState(status === 'noAccount' ? 'no_icloud_account' : 'icloud_restricted', token);
-    return;
+    return false;
   }
-  if (status !== 'available') return;
+  if (status !== 'available') return storageFull;
 
   const iCloudUser = await withTimeout<string>(backup.userHash());
-  if (marker?.iCloudUser === iCloudUser && marker.acknowledged) return;
+  if (marker?.iCloudUser === iCloudUser && marker.acknowledged) return false;
 
   if (marker?.iCloudUser !== iCloudUser) {
     try {
       await uploadAndVerify(backup, material);
-    } catch (error) {
+    } catch (error: any) {
       console.warn('[CloudKitBackup] Backup not proven:', error);
-      await reportState('failed', token);
-      return;
+      const code = String(error?.code || error?.message || '');
+      const full = code === ICLOUD_FULL_CODE;
+      // The person must hear about a full iCloud even if this report is lost.
+      await reportState(full ? 'icloud_full' : 'failed', token, undefined, code).catch(() => false);
+      // Any other failure says nothing about the space: keep what we knew.
+      return full || storageFull;
     }
     await Keychain.setGenericPassword('cloudkit', JSON.stringify({ iCloudUser, acknowledged: false }), { service });
   }
@@ -133,16 +144,40 @@ async function runCloudKitBackup(): Promise<void> {
   if (await reportState('proven', token, walletHashes)) {
     await Keychain.setGenericPassword('cloudkit', JSON.stringify({ iCloudUser, acknowledged: true }), { service });
   }
+  return false;
 }
 
 let running: Promise<void> | null = null;
+let noticeOpen = false;
+
+function warnStorageFull() {
+  if (noticeOpen) return;
+  noticeOpen = true;
+  Alert.alert(
+    'Tu respaldo no se guardó en la nube',
+    'Tu iCloud no tiene espacio, así que tu billetera no quedó respaldada. Si pierdes este teléfono o se daña, podrías perder tu dinero para siempre.\n\nLibera espacio en iCloud desde Ajustes > tu nombre > iCloud. Tu respaldo necesita muy poco.',
+    [
+      { text: 'Entendido', style: 'cancel', onPress: () => { noticeOpen = false; } },
+      { text: 'Ya liberé espacio', onPress: () => { noticeOpen = false; void ensureCloudKitBackup(); } },
+    ],
+  );
+}
 
 /** Runs at every app entry and never blocks it. */
 export function ensureCloudKitBackup(): Promise<void> {
   if (!running) {
     running = runCloudKitBackup()
+      .then(full => {
+        storageFull = full;
+        if (full) warnStorageFull();
+      })
       .catch(error => console.warn('[CloudKitBackup] Skipped, will retry:', error))
       .finally(() => { running = null; });
   }
   return running;
+}
+
+/** A return from the background is an app open too, for someone still at risk. */
+export function retryFullCloudKitBackup(): Promise<void> {
+  return storageFull ? ensureCloudKitBackup() : Promise.resolve();
 }

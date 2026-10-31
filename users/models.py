@@ -197,6 +197,7 @@ class User(AbstractUser, SoftDeleteModel):
             ('proven', 'Proven'),
             ('no_icloud_account', 'No iCloud account'),
             ('icloud_restricted', 'iCloud restricted'),
+            ('icloud_full', 'iCloud storage full'),
             ('failed', 'Failed'),
         ],
         help_text="Empty means no report reached the server, for any reason"

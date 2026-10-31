@@ -113,7 +113,7 @@
 
 ## Seguridad
 - Confío Face (una selfie en vivo) confirma que eres tú cuando mueves dinero.
-- Tu billetera se respalda en tu cuenta personal: Google Drive en Android, iCloud en iPhone. Protege bien esa cuenta (contraseña fuerte y verificación en dos pasos): quien entre en ella podría recuperar tu billetera. Si cambias de teléfono, entra con la misma cuenta de Google o Apple.
+- Tu billetera se respalda en tu cuenta personal: Google Drive en Android, iCloud en iPhone. Protege bien esa cuenta (contraseña fuerte y verificación en dos pasos): quien entre en ella podría recuperar tu billetera. Si cambias de teléfono, entra con la misma cuenta de Google o Apple. Si la app avisa que tu respaldo no se guardó en la nube porque iCloud está lleno, libera espacio desde Ajustes > tu nombre > iCloud: mientras no haya respaldo, perder el teléfono puede significar perder tu dinero.
 - La Salida de emergencia, siempre en Perfil, te deja mover tu dinero sin depender de la app ni de los servidores de Confío.
 - Confío nunca te pide contraseñas, códigos ni frases secretas. Si alguien te los pide, es una estafa.
 - No tienes una frase semilla que guardar: si recuperas tu cuenta de Google o Apple, recuperas tu cuenta de Confío.

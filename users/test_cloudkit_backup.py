@@ -74,6 +74,20 @@ class ReportCloudKitBackupTests(TestCase):
         self.assertEqual(self.user.cloudkit_backup_state, 'failed')
         self.assertEqual(self.user.cloudkit_backup_verified_at, proven_at)
 
+    def test_a_full_icloud_keeps_the_last_proof_time(self):
+        self.report('proven', [wallet_hash('0xabc')])
+        proven_at = self.user.cloudkit_backup_verified_at
+        self.report('icloud_full')
+        self.assertEqual(self.user.cloudkit_backup_state, 'icloud_full')
+        self.assertEqual(self.user.cloudkit_backup_verified_at, proven_at)
+
+    def test_a_device_error_code_reaches_the_log_only_when_plain(self):
+        with self.assertLogs('users.schema', level='WARNING') as logs:
+            ReportCloudKitBackup().mutate(self.info, 'failed', error_code='CK_12')
+            ReportCloudKitBackup().mutate(self.info, 'failed', error_code='CK\n12 forged')
+        self.assertIn('code=CK_12', logs.output[0])
+        self.assertIn('code=unknown', logs.output[1])
+
     def test_unknown_states_are_refused(self):
         self.assertFalse(self.report('verified').success)
         self.assertEqual(self.user.cloudkit_backup_state, '')

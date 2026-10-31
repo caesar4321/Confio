@@ -145,7 +145,8 @@ New on `User`:
   replaced wallet does not inherit proof, and "proven" only counts while this
   hash equals the current one. Reports use the pinned session token.
 - `cloudkit_backup_state`: `proven`, `no_icloud_account`, `icloud_restricted`,
-  `failed`. Null means no report reached the server, for any reason.
+  `icloud_full`, `failed`. Null means no report reached the server, for any
+  reason. The CloudKit error code of a failed upload goes to the server log.
 
 New mutation `reportCloudKitBackup`, separate from `ReportBackupStatus`, in its
 own try/catch so an older server cannot fail a shared request.
@@ -231,6 +232,7 @@ missed deploy fails every write while Development builds look fine.
 | Path | Failure | Handling | User sees |
 |---|---|---|---|
 | Upload | iCloud signed out | state `no_icloud_account` | nothing |
+| Upload | iCloud storage full (CKError 25) | state `icloud_full`, retried at every open | an alert at every open: not backed up, risk of losing funds, free up iCloud |
 | Upload | Production schema not deployed | state `failed`, metric at zero proofs | nothing; caught by canary check |
 | Upload | Read-back differs | no marker, state `failed` | nothing |
 | Upload | Report lost | marker unacknowledged, retried | nothing |

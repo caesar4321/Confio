@@ -822,8 +822,8 @@ export const REPORT_BACKUP_STATUS = gql`
 `;
 
 export const REPORT_CLOUDKIT_BACKUP = gql`
-  mutation ReportCloudKitBackup($state: String!, $walletHashes: [String!]) {
-    reportCloudkitBackup(state: $state, walletHashes: $walletHashes) {
+  mutation ReportCloudKitBackup($state: String!, $walletHashes: [String!], $errorCode: String) {
+    reportCloudkitBackup(state: $state, walletHashes: $walletHashes, errorCode: $errorCode) {
       success
       error
     }

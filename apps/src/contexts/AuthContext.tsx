@@ -491,12 +491,21 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       resetOnboardingMark();
       return;
     }
+    // Only a real background: Face ID and system sheets go inactive and back.
+    let wasInBackground = false;
     const sub = AppState.addEventListener('change', state => {
+      if (state === 'background') wasInBackground = true;
       if (state !== 'active') return;
       markOnboarded(apolloClient);
       import('../services/location')
         .then(({ reportResidenceLocation }) => reportResidenceLocation(apolloClient))
         .catch(() => {});
+      if (wasInBackground && !isFaceCaptureRunning() && !isSystemPickerOpen()) {
+        import('../services/cloudKitBackup')
+          .then(({ retryFullCloudKitBackup }) => retryFullCloudKitBackup())
+          .catch(() => {});
+      }
+      wasInBackground = false;
     });
     return () => sub.remove();
   }, [apolloClient, isAuthenticated]);

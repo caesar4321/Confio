@@ -6133,13 +6133,18 @@ class ReportCloudKitBackup(graphene.Mutation):
     class Arguments:
         state = graphene.String(required=True)
         wallet_hashes = graphene.List(graphene.NonNull(graphene.String))
+        error_code = graphene.String(required=False)
 
-    def mutate(self, info, state, wallet_hashes=None):
+    def mutate(self, info, state, wallet_hashes=None, error_code=None):
         user = info.context.user
         if not user.is_authenticated:
             return ReportCloudKitBackup(success=False, error="Authentication required")
-        if state not in ('proven', 'no_icloud_account', 'icloud_restricted', 'failed'):
+        if state not in ('proven', 'no_icloud_account', 'icloud_restricted', 'icloud_full', 'failed'):
             return ReportCloudKitBackup(success=False, error="Invalid state")
+        if state in ('icloud_full', 'failed'):
+            # Logged, not stored: device text, so only a plain code gets through.
+            code = error_code if re.fullmatch(r'[A-Za-z0-9_-]{1,40}', error_code or '') else 'unknown'
+            logger.warning('CloudKit backup not stored for user %s: state=%s code=%s', user.id, state, code)
 
         update_fields = ['cloudkit_backup_state']
         if state == 'proven':

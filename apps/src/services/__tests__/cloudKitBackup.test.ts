@@ -3,7 +3,13 @@ const mockMutate = jest.fn();
 const mockMarkers = new Map<string, string>();
 const mockMaterial = jest.fn();
 
-jest.mock('react-native', () => ({ Platform: { OS: 'ios' }, NativeModules: { get ConfioCloudBackup() { return mockNative; } } }));
+const mockAlert = jest.fn();
+
+jest.mock('react-native', () => ({
+  Alert: { alert: (...args: any[]) => mockAlert(...args) },
+  Platform: { OS: 'ios' },
+  NativeModules: { get ConfioCloudBackup() { return mockNative; } },
+}));
 jest.mock('react-native-keychain', () => ({
   getGenericPassword: jest.fn(async ({ service }) => (mockMarkers.has(service) ? { password: mockMarkers.get(service) } : false)),
   setGenericPassword: jest.fn(async (_u, password, { service }) => { mockMarkers.set(service, password); return true; }),
@@ -15,7 +21,7 @@ jest.mock('../oauthStorageService', () => ({ oauthStorage: { getOAuthSubject: as
 jest.mock('../authService', () => ({ AuthService: { getInstance: () => ({ getToken: async () => 'jwt' }) } }));
 jest.mock('../secureDeterministicWallet', () => ({ getCloudKitBackupMaterial: (...args: any[]) => mockMaterial(...args) }));
 
-import { ensureCloudKitBackup, findCloudKitBackups, cloudKitAddressHash } from '../cloudKitBackup';
+import { ensureCloudKitBackup, findCloudKitBackups, cloudKitAddressHash, retryFullCloudKitBackup } from '../cloudKitBackup';
 
 const material = {
   bscAddress: '0xABC', algorandAddress: 'ALGO', payload: 'body',
@@ -58,6 +64,80 @@ it('never reports proof when the server copy holds something else', async () => 
   await ensureCloudKitBackup();
   expect(reports()).toEqual(['failed']);
   expect(mockMarkers.size).toBe(0);
+});
+
+describe('a full iCloud', () => {
+  const quotaError = Object.assign(new Error('CloudKit error 25'), { code: 'CK_25' });
+  const dismissNotice = () => mockAlert.mock.calls[mockAlert.mock.calls.length - 1][2][0].onPress();
+
+  it('warns of the risk at every open until a retry stores the backup', async () => {
+    mockNative.insert.mockRejectedValue(quotaError);
+    await ensureCloudKitBackup();
+    expect(reports()).toEqual(['icloud_full']);
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    expect(mockAlert.mock.calls[0][1]).toContain('podrías perder tu dinero');
+    expect(mockAlert.mock.calls[0][1]).toContain('Libera espacio en iCloud');
+    dismissNotice();
+
+    await ensureCloudKitBackup();
+    expect(mockAlert).toHaveBeenCalledTimes(2);
+    dismissNotice();
+
+    await retryFullCloudKitBackup();
+    expect(mockAlert).toHaveBeenCalledTimes(3);
+    dismissNotice();
+
+    mockNative.insert.mockResolvedValue('inserted');
+    await retryFullCloudKitBackup();
+    expect(mockAlert).toHaveBeenCalledTimes(3);
+    expect(reports()).toContain('proven');
+
+    jest.clearAllMocks();
+    await retryFullCloudKitBackup();
+    expect(mockNative.accountStatus).not.toHaveBeenCalled();
+  });
+
+  it('keeps warning through a failure that says nothing about the space', async () => {
+    mockNative.insert.mockRejectedValue(quotaError);
+    await ensureCloudKitBackup();
+    dismissNotice();
+    mockNative.insert.mockRejectedValue(new Error('CLOUDKIT-TIMEOUT'));
+    await retryFullCloudKitBackup();
+    expect(mockAlert).toHaveBeenCalledTimes(2);
+    dismissNotice();
+    await retryFullCloudKitBackup();
+    expect(mockAlert).toHaveBeenCalledTimes(3);
+    dismissNotice();
+    mockNative.insert.mockResolvedValue('inserted');
+    await ensureCloudKitBackup();
+  });
+
+  it('never stacks a second notice over one still open', async () => {
+    mockNative.insert.mockRejectedValue(quotaError);
+    await ensureCloudKitBackup();
+    await ensureCloudKitBackup();
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    dismissNotice();
+    mockNative.insert.mockResolvedValue('inserted');
+    await ensureCloudKitBackup();
+  });
+
+  it('still warns when the report cannot reach the server', async () => {
+    mockNative.insert.mockRejectedValue(quotaError);
+    mockMutate.mockRejectedValueOnce(new Error('network'));
+    await ensureCloudKitBackup();
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    dismissNotice();
+    mockNative.insert.mockResolvedValue('inserted');
+    await ensureCloudKitBackup();
+  });
+});
+
+it('reports any other failure with its code and no notice', async () => {
+  mockNative.insert.mockRejectedValue(Object.assign(new Error('CloudKit error 12'), { code: 'CK_12' }));
+  await ensureCloudKitBackup();
+  expect(mockMutate.mock.calls[0][0].variables).toMatchObject({ state: 'failed', errorCode: 'CK_12' });
+  expect(mockAlert).not.toHaveBeenCalled();
 });
 
 it('never reports proof when the read-back finds nothing', async () => {
