@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
@@ -20,6 +20,7 @@ import { VenueAttribution, venueA11y } from '../components/VenueAttribution';
 import { FEATURED_STOCK_TICKERS } from '../config/stockPresentation';
 import { colors } from '../config/theme';
 import { useAccount } from '../contexts/AccountContext';
+import { reportGuideTap, useGuideAnchor, useScrollToGuidePointer } from '../assistant/guidePointer';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket } from '../hooks/useCrypto';
 import { usePerpsCapabilities, usePerpsMarkets, usePerpsPositions } from '../hooks/usePerps';
@@ -69,6 +70,11 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
   const { activeAccount } = useAccount();
   const isEmployee = Boolean(activeAccount?.isEmployee);
 
+  const scrollRef = useRef<ScrollView>(null);
+  const onGuideScroll = useScrollToGuidePointer(scrollRef);
+  const stocksAnchor = useGuideAnchor('invest_stocks');
+  const cryptoAnchor = useGuideAnchor('invest_crypto');
+  const futuresAnchor = useGuideAnchor('invest_futures');
   const { stocks: market } = useGmMarket(stocks.enabled && !isEmployee);
   // Bitcoin & gold: its own country policy, separate from Ondo's. The list is
   // whatever the server lists (two at launch); nothing is hard-coded here.
@@ -200,7 +206,7 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
     <View style={styles.screen}>
       {/* Scoped to focus: the tab stays mounted under the other tabs. */}
       {isFocused && <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />}
-      <ScrollView contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}
+      <ScrollView ref={scrollRef} onScroll={onGuideScroll} scrollEventThrottle={32} contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}
         refreshControl={isEmployee ? undefined : (
           <RefreshControl refreshing={refreshing} onRefresh={() => { void onRefresh(); }}
             tintColor={colors.white} colors={[colors.primary]} />
@@ -231,7 +237,11 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
                 'No disponible para residentes de EE.UU. ni de Brasil',
                 holdsStocks ? 'Abre tus acciones' : 'Abre el explorador de acciones',
               ].filter(Boolean).join('. ')}
-              onPress={() => navigation.navigate('StocksList')}
+              ref={stocksAnchor}
+              onPress={() => {
+                reportGuideTap('invest_stocks');
+                navigation.navigate('StocksList');
+              }}
               style={({ pressed }) => [styles.card, pressed && styles.pressed]}
             >
               <View style={styles.cardHead}>
@@ -304,7 +314,7 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
           )}
 
           {cryptoRows.length > 0 && (cryptoEnabled || holdsCrypto) && (
-            <View style={styles.card} testID="invest-crypto-card">
+            <View ref={cryptoAnchor} collapsable={false} style={styles.card} testID="invest-crypto-card">
               <View style={styles.cardHead}>
                 <View style={styles.cryptoHeadMarks}>
                   {cryptoRows.slice(0, 2).map((asset, index) => (
@@ -338,7 +348,10 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
                         change != null ? `24 horas ${up ? 'más' : 'menos'} ${formatNumber(Math.abs(change), { maximumFractionDigits: 2 })}%` : null,
                         'Abre el detalle',
                       ].filter(Boolean).join('. ')}
-                      onPress={() => navigation.navigate('CryptoDetail', { symbol: asset.symbol })}
+                      onPress={() => {
+                        reportGuideTap('invest_crypto');
+                        navigation.navigate('CryptoDetail', { symbol: asset.symbol });
+                      }}
                       style={({ pressed }) => [styles.cryptoRow, pressed && styles.pressed]}
                     >
                       <CryptoAssetMark ticker={asset.ticker} category={asset.category} size={36} />
@@ -374,7 +387,11 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
               accessibilityRole="button"
               accessibilityLabel={`Futuros. ${venueA11y('hyperliquid')}`}
               accessibilityHint={livePerps.length > 0 ? `Tus posiciones: ${formatPerpUsd(perpsEquity)}` : 'Abre los mercados de futuros'}
-              onPress={() => navigation.navigate('FuturesMarkets')}
+              ref={futuresAnchor}
+              onPress={() => {
+                reportGuideTap('invest_futures');
+                navigation.navigate('FuturesMarkets');
+              }}
               style={({ pressed }) => [styles.card, pressed && styles.pressed]}
               testID="invest-futures-card"
             >

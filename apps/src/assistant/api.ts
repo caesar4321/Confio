@@ -143,6 +143,53 @@ export const ASK_ASSISTANT = gql`
   }
 `;
 
+// Own document: the guideStep argument must not reach the chat's mutation.
+export const ASK_ASSISTANT_IN_GUIDE = gql`
+  mutation AskAssistantInGuide($body: String, $screen: String, $guideStep: String) {
+    askAssistant(body: $body, screen: $screen, guideStep: $guideStep) {
+      success
+      error
+      reply { ${MESSAGE_FIELDS} }
+      mode
+    }
+  }
+`;
+
+export const GET_ASSISTANT_GUIDE = gql`
+  query GetAssistantGuide($screen: String, $contextKey: String) {
+    assistantGuide(screen: $screen, contextKey: $contextKey) {
+      step
+      stage
+      text
+      pointerText
+      chips { label kind destination pointer answer trail { route text pointer } }
+    }
+  }
+`;
+
+export const RECORD_ASSISTANT_GUIDE_EVENT = gql`
+  mutation RecordAssistantGuideEvent($step: String!, $event: String!, $answer: String, $detail: String) {
+    recordAssistantGuideEvent(step: $step, event: $event, answer: $answer, detail: $detail) { success error }
+  }
+`;
+
+export type AssistantGuideTrailStop = { route: string; text: string; pointer: string };
+export type AssistantGuideChip = {
+  label: string;
+  kind: string;
+  destination: string;
+  pointer: string;
+  answer: string;
+  trail: AssistantGuideTrailStop[];
+};
+export type AssistantGuide = {
+  step: string;
+  stage: string;
+  text: string;
+  pointerText: string;
+  chips: AssistantGuideChip[];
+};
+
 export const RETURN_TO_ASSISTANT = gql`
   mutation ReturnToAssistant {
     returnToAssistant { success mode }

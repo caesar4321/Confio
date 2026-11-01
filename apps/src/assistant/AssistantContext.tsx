@@ -69,6 +69,9 @@ type AssistantState = {
   // there, so nobody lands on a screen without knowing why.
   navNote: { text: string; seq: number } | null;
   showNavNote: (text: string) => void;
+  // The first-steps card or its pencil is up: the bubble steps aside.
+  guideShown: boolean;
+  setGuideShown: (shown: boolean) => void;
 };
 
 const AssistantContext = createContext<AssistantState | null>(null);
@@ -83,6 +86,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [plan, setPlan] = useState<AssistantPlan | null>(null);
   const [inCall, setInCall] = useState(false);
   const [boxShown, setBoxShown] = useState(false);
+  const [guideShown, setGuideShown] = useState(false);
   const [micBusy, setMicBusy] = useState(false);
   const [openSeq, setOpenSeq] = useState(0);
   const [navNote, setNavNote] = useState<{ text: string; seq: number } | null>(null);
@@ -169,10 +173,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
       consumeDmFolder, consumeVoiceNote, consumeVoiceNoteData, available, setAvailable, aiEnabled, setAiEnabled, plan, setPlan, inCall, setInCall,
       bubbleAnchor, setBubbleAnchor, micBusy, setMicBusy, openSeq, navNote, showNavNote, boxShown, setBoxShown,
+      guideShown, setGuideShown,
     }),
     [isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
       consumeDmFolder, consumeVoiceNote, consumeVoiceNoteData, available,
-      aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote, boxShown],
+      aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote, boxShown, guideShown],
   );
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }

@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 from .destinations import DESTINATIONS
+from .rails import topup_route
 
 # Approved answers to product questions, reviewed by the team (assistant/faq.md).
 # HTML comments in the file are notes for reviewers, not for the model.
@@ -166,6 +167,13 @@ VE_TOPUP_UPDATE_NOTE = ('En Venezuela ya se puede recargar con Pago Móvil, pero
                         'si quiere recargar, dile que actualice Confío desde la tienda y que después lo encuentra en '
                         'Recibir → Pago Móvil (con su identidad verificada). Retirar con Pago Móvil todavía no está '
                         'disponible: llegará muy pronto, sin fecha.\n')
+INTERNATIONAL_SOON_NOTE = ('La recarga internacional llegará a su país en unas dos semanas: dilo así si pregunta '
+                           'cómo recargar, sin dar una fecha. Mientras tanto puede recibir USDT desde Binance u otra '
+                           'billetera. Esto prevalece sobre lo que diga el FAQ de su país.\n')
+GUIDE_OPENING_NOTE = ('\n\nEscribe un solo mensaje corto para abrir la conversación, de máximo dos frases y 200 '
+                      'caracteres, sin cifras, sin listas y sin negritas. Solo di lo que se te pide.')
+GUIDE_STEERING_NOTE = ('\n\nLa persona sigue su guía de primeros pasos. Responde primero lo que pregunta, en dos frases '
+                       'como máximo, y termina invitándola a seguir con este paso: {step}\n')
 NO_RAMP_NOTE = ('En su país hoy no hay Recargar ni Retirar en la app: no le digas que puede recargar o retirar con '
                 'medios locales.\n')
 
@@ -215,6 +223,7 @@ def build_system_prompt(*, first_name, account_label, country, screen, local_now
                     else VE_TOPUP_UPDATE_NOTE if (country or '').upper() == 'VE' and ve_topup == 'update'
                     else VE_RAMP_NOTE if (country or '').upper() == 'VE'
                     else BO_RAILS_NOTE if (country or '').upper() == 'BO'
+                    else INTERNATIONAL_SOON_NOTE if topup_route(country) == 'international_soon'
                     else NO_RAMP_NOTE if (country or '').upper() in NO_RAMP_COUNTRIES else ''),
     )
 

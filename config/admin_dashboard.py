@@ -791,6 +791,8 @@ ConfioAdminSite.DASH_PAGES = [
         ('Rail waitlist', 'users_localrailwaitlistentry_changelist', ''),
         ('Product waitlist', 'users_productwaitlistentry_changelist', ''),
         ('Probe answers', 'assistant_probeanswer_changelist', ''),
+        ('Guide steps', 'assistant_assistantguidestep_changelist', ''),
+        ('Guide events', 'assistant_assistantguideevent_changelist', ''),
         ('Assistant turns', 'assistant_assistantturn_changelist', ''),
     )}),
     ('comprar', 'Comprar', [
@@ -1396,7 +1398,11 @@ confio_admin_site.register(AssistantThreadState, AssistantThreadStateAdmin)
 confio_admin_site.register(AssistantProfile, AssistantProfileAdmin)
 from assistant.models import ProbeAnswer
 from assistant.admin import ProbeAnswerAdmin
+from assistant.models import AssistantGuideEvent, AssistantGuideStep
+from assistant.admin import AssistantGuideEventAdmin, AssistantGuideStepAdmin
 confio_admin_site.register(ProbeAnswer, ProbeAnswerAdmin)
+confio_admin_site.register(AssistantGuideStep, AssistantGuideStepAdmin)
+confio_admin_site.register(AssistantGuideEvent, AssistantGuideEventAdmin)
 from assistant.models import AssistantNeed
 from assistant.admin import AssistantNeedAdmin
 confio_admin_site.register(AssistantNeed, AssistantNeedAdmin)

@@ -124,6 +124,10 @@ export function openDestination(key: string, opts: { isBusiness?: boolean; ticke
     });
     return true;
   }
+  if (key === 'invest') {
+    // Comunidad may be the open segment: `at` asks for Invertir even so.
+    target = { tab: 'Invest', params: { segment: 'invest', at: Date.now() } };
+  }
   if ('tab' in target) {
     // Business accounts have Cobrar where personal accounts have Pagar.
     const tab = target.tab === 'Scan' && opts.isBusiness ? 'Charge' : target.tab;

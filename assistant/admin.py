@@ -21,6 +21,32 @@ class AssistantProfileAdmin(admin.ModelAdmin):
     raw_id_fields = ('user',)
 
 
+class AssistantGuideStepAdmin(admin.ModelAdmin):
+    """What the first-steps guide offered each person (read-only evidence)."""
+    list_display = ('user', 'step', 'shown_count', 'shown_at', 'accepted_at', 'dismissed_at')
+    list_filter = ('step',)
+    raw_id_fields = ('user',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+class AssistantGuideEventAdmin(admin.ModelAdmin):
+    """The guide's funnel, event by event (read-only evidence)."""
+    list_display = ('created_at', 'user', 'step', 'event', 'detail', 'country')
+    list_filter = ('step', 'event', 'country')
+    raw_id_fields = ('user',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
 class ProbeAnswerAdmin(admin.ModelAdmin):
     """Answers to the bubble's one-time question (read-only evidence)."""
     list_display = ('probe_id', 'answer', 'phone_country', 'funded', 'created_at')

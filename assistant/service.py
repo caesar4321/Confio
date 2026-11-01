@@ -20,7 +20,7 @@ from inbox.models import SupportMessage
 from inbox.push_service import send_support_staff_push
 from inbox.schema import get_or_create_support_conversation
 
-from . import conf
+from . import conf, guide
 from .engine import (AssistantUnavailable, Viewer, categorize_movements, general_while_waiting, human_mode_active,
                      run_turn, third_party_text)
 from .models import AssistantProfile, AssistantThreadState, AssistantTurn, TurnModality
@@ -216,7 +216,7 @@ def _route_to_team(message):
 
 
 def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='', tz_name=None,
-        can_navigate=True, request_meta=None):
+        can_navigate=True, request_meta=None, guide_step=''):
     """Answer `body` (or a voice note: audio=(base64, mime, duration_ms)) in
     the user's support thread.
 
@@ -339,6 +339,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             reserve_news=_tool_reserver(user, turn, 'search_market_news', news_searches_left),
             can_navigate=can_navigate,
             waiting_for_team=bool(waiting),
+            guide_note='' if waiting else guide.steering_note(guide_step),
         )
     except AssistantUnavailable as exc:
         logger.warning('Confio Assistant unavailable: %s', exc)

@@ -63,6 +63,7 @@ import {
   leverageColor,
   sideLabel,
 } from '../utils/perpsPresentation';
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type R = RouteProp<MainStackParamList, 'FuturesOrder'>;
@@ -85,6 +86,7 @@ const parsePx = (raw: string) => {
 const BRIDGE_ESTIMATE_USD = 0.05;
 
 export const FuturesOrderScreen = () => {
+  const confirmAnchor = useGuideAnchor('asset_confirm');
   const navigation = useNavigation<Nav>();
   const route = useRoute<R>();
   const { capabilities, refetch: refetchCaps } = usePerpsCapabilities();
@@ -535,7 +537,11 @@ export const FuturesOrderScreen = () => {
           {error && <Text style={[styles.error, { marginHorizontal: 4, marginBottom: 12 }]}>{error}</Text>}
 
           <Pressable style={[styles.primary, !canReview && styles.disabled, { backgroundColor: sideColors.solid }]}
-            onPress={() => { void review(); }} disabled={!canReview} testID="perps-review">
+            ref={confirmAnchor}
+            onPress={() => {
+              reportGuideTap('asset_confirm');
+              void review();
+            }} disabled={!canReview} testID="perps-review">
             {phase === 'quoting'
               ? <ActivityIndicator color="#FFFFFF" />
               : <Text style={styles.primaryText}>Revisar {side === 'long' ? 'largo' : 'corto'}</Text>}

@@ -193,7 +193,62 @@ class AssistantSuggestionsType(graphene.ObjectType):
     probe = graphene.Field(AssistantProbeType, description='Set while the one-time question is pending')
 
 
+class AssistantGuideTrailStopType(graphene.ObjectType):
+    route = graphene.String(required=True)
+    text = graphene.String(required=True)
+    pointer = graphene.String(required=True, description='Button to circle; empty shows only the sentence')
+
+
+class AssistantGuideChipType(graphene.ObjectType):
+    label = graphene.String(required=True)
+    kind = graphene.String(required=True, description='navigate | probe | dismiss; unknown kinds are not drawn')
+    destination = graphene.String(required=True)
+    pointer = graphene.String(required=True, description='Button the pencil circles on arrival; may be empty')
+    answer = graphene.String(required=True)
+    trail = graphene.List(graphene.NonNull(AssistantGuideTrailStopType), required=True,
+                          description='Screens to walk through after the tap, each with its own sentence')
+
+
+class AssistantGuideType(graphene.ObjectType):
+    step = graphene.String(required=True)
+    stage = graphene.String(required=True)
+    text = graphene.String(required=True)
+    pointer_text = graphene.String(required=True)
+    chips = graphene.List(graphene.NonNull(AssistantGuideChipType), required=True)
+
+
 class Query(graphene.ObjectType):
+    assistant_guide = graphene.Field(
+        AssistantGuideType, screen=graphene.String(),
+        context_key=graphene.String(description='Active account id; only keys the client cache per account'),
+        description='The first-steps card to show now. Null means no card.')
+
+    @login_required
+    def resolve_assistant_guide(self, info, screen=None, context_key=None):
+        from . import guide
+
+        user, account, business, jwt_context = get_context_models(info)
+        try:
+            viewer = service._viewer(user, account, business, jwt_context, screen=screen or '',
+                                     request_meta=getattr(info.context, 'META', None))
+            conversation = get_or_create_support_conversation(user, account, business)
+            if service.is_human_mode(conversation):
+                return None
+            found = guide.current(
+                viewer, getattr(info.context, 'META', {}), conversation=conversation, first_name=user.first_name,
+                account_label=service._account_label(viewer, business), country=country_of(user))
+        except Exception:  # noqa: BLE001 - no card is always safe
+            logger.exception('assistant guide failed')
+            return None
+        if found is None:
+            return None
+        return AssistantGuideType(
+            step=found.key, stage=found.stage, text=found.text, pointer_text=found.pointer_text,
+            chips=[AssistantGuideChipType(
+                label=c.label, kind=c.kind, destination=c.destination, pointer=c.pointer, answer=c.answer,
+                trail=[AssistantGuideTrailStopType(route=t.route, text=t.text, pointer=t.pointer) for t in c.trail])
+                for c in found.chips])
+
     assistant_suggestions = graphene.Field(
         AssistantSuggestionsType, screen=graphene.String(),
         context_key=graphene.String(description='Active account id; only keys the client cache per account'),
@@ -276,6 +331,7 @@ class AskAssistant(graphene.Mutation):
         audio_duration_ms = graphene.Int()
         screen = graphene.String(description='Route name the user is on, for context only')
         timezone = graphene.String(description='Device IANA timezone')
+        guide_step = graphene.String(description='Typed in the first-steps card: steer back to this step')
 
     success = graphene.Boolean(required=True)
     error = graphene.String()
@@ -290,7 +346,7 @@ class AskAssistant(graphene.Mutation):
     @classmethod
     @login_required
     def mutate(cls, root, info, body=None, audio_base64=None, audio_mime_type=None,
-               audio_duration_ms=None, screen=None, timezone=None):
+               audio_duration_ms=None, screen=None, timezone=None, guide_step=None):
         user, account, business, jwt_context = get_context_models(info)
         audio = (audio_base64, audio_mime_type, audio_duration_ms) if audio_base64 else None
         if not audio and not (body or '').strip():
@@ -298,7 +354,7 @@ class AskAssistant(graphene.Mutation):
         try:
             # Transcription happens inside, after the quota/human-mode checks.
             outcome = service.ask(user, account, business, jwt_context, None if audio else body, audio=audio,
-                                  screen=screen or '', tz_name=timezone,
+                                  screen=screen or '', tz_name=timezone, guide_step=guide_step or '',
                                   request_meta=getattr(info.context, 'META', None))
         except ValueError as exc:
             return AskAssistant(success=False, error=str(exc), actions=[], mode='AI')
@@ -606,7 +662,37 @@ class AnswerAssistantProbe(graphene.Mutation):
         return AnswerAssistantProbe(success=True, label=suggestion_rules.answer_label(answer))
 
 
+class RecordAssistantGuideEvent(graphene.Mutation):
+    """shown, accepted or dismissed, for one step of the first-steps guide."""
+
+    class Arguments:
+        step = graphene.String(required=True)
+        event = graphene.String(required=True)
+        answer = graphene.String(description='The opening question\'s answer, when a chip carries one')
+        detail = graphene.String(description='Which option or button, for the funnel')
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+
+    @login_required
+    def mutate(self, info, step, event, answer=None, detail=None):
+        from users.funding import has_funded
+
+        from . import guide
+
+        user, account, business, jwt_context = get_context_models(info)
+        viewer = service._viewer(user, account, business, jwt_context)
+        if viewer.account_type == 'business':
+            return RecordAssistantGuideEvent(success=False, error='No disponible')
+        try:
+            guide.record_event(viewer, step, event, answer=answer, funded=has_funded(user), detail=detail or '')
+        except ValueError as exc:
+            return RecordAssistantGuideEvent(success=False, error=str(exc))
+        return RecordAssistantGuideEvent(success=True)
+
+
 class Mutation(graphene.ObjectType):
+    record_assistant_guide_event = RecordAssistantGuideEvent.Field()
     answer_assistant_probe = AnswerAssistantProbe.Field()
     create_assistant_pet = CreateAssistantPet.Field()
     use_assistant_pet = UseAssistantPet.Field()

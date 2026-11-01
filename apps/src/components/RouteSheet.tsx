@@ -21,6 +21,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { CountryFlag } from './CountryFlag';
 import { useAppSafeArea } from '../hooks/useAppSafeArea';
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 
 export interface RouteOption {
   /**
@@ -81,11 +82,17 @@ export const RouteOptionRow = ({
   onPress?: () => void;
   /** Drops the top hairline — for the first row of an inline card. */
   first?: boolean;
-}) => (
+}) => {
+  const anchor = useGuideAnchor(o.id);
+  return (
   <TouchableOpacity
+    ref={anchor}
     style={[styles.option, first && { borderTopWidth: 0 }, o.disabled && { opacity: 0.45 }]}
     disabled={o.disabled}
-    onPress={onPress ?? o.onPress}
+    onPress={() => {
+      reportGuideTap(o.id);
+      (onPress ?? o.onPress)?.();
+    }}
     activeOpacity={0.8}
     accessibilityRole="button"
   >
@@ -108,7 +115,8 @@ export const RouteOptionRow = ({
     </View>
     <Icon name="chevron-right" size={18} color={colors.text.light} />
   </TouchableOpacity>
-);
+  );
+};
 
 export const RouteSheet = ({
   visible,

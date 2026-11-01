@@ -42,6 +42,7 @@ import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { STOCKS_TRADING_UI_ENABLED } from '../config/features';
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type DetailRoute = RouteProp<MainStackParamList, 'StockDetail'>;
@@ -50,6 +51,7 @@ const CHART_W = 320;
 const CHART_H = 110;
 
 export const StockDetailScreen = () => {
+  const buyAnchor = useGuideAnchor('asset_buy');
   const navigation = useNavigation<NavProp>();
   const route = useRoute<DetailRoute>();
   const { formatNumber } = useNumberFormat();
@@ -255,8 +257,12 @@ export const StockDetailScreen = () => {
           <>
             <View style={styles.ctaRow}>
               <TouchableOpacity
+                ref={buyAnchor}
                 style={[styles.ctaBuy, (!stockHoldings.buyEnabled || tradability === 'closed') && styles.ctaDisabled]}
-                onPress={onComprar}
+                onPress={() => {
+                  reportGuideTap('asset_buy');
+                  onComprar();
+                }}
                 disabled={!stockHoldings.buyEnabled || tradability === 'closed'}
                 activeOpacity={0.85}
               >

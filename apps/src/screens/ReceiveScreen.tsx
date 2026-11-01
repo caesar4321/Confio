@@ -19,6 +19,7 @@ import { useCryptoReceiveOptions } from '../hooks/useCryptoReceiveOptions';
 import { useLocalRailOptions } from '../hooks/useLocalRailOptions';
 import { useKoyweReplaced } from '../hooks/useKoyweReplaced';
 import { useRampFlows } from '../hooks/useRampFlows';
+import { useScrollToGuidePointer } from '../assistant/guidePointer';
 import { MainStackParamList } from '../types/navigation';
 import { QrShowIcon } from '../components/QrPayIcon';
 
@@ -59,6 +60,8 @@ export default function ReceiveScreen() {
   const { openRechargeFlow, sheets, isRampBlocked } = useRampFlows({ legacyCusdBalance });
   // QR Bolivia takes over the one-off recharge for Bolivians while it is on.
   const koyweReplaced = useKoyweReplaced();
+  const scrollRef = React.useRef<ScrollView>(null);
+  const onGuideScroll = useScrollToGuidePointer(scrollRef);
   const { receivePrimary, receiveMore } = useLocalRailOptions();
   const cryptoOptions = useCryptoReceiveOptions();
 
@@ -145,7 +148,7 @@ export default function ReceiveScreen() {
     <View style={styles.container}>
       {/* Header: the same stack header as Enviar (ReceiveStackHeader) —
           mirror screens start from the same chrome. */}
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} onScroll={onGuideScroll} scrollEventThrottle={32} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         <View style={styles.body}>
           {isBusiness ? (

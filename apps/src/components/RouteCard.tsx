@@ -5,6 +5,7 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { colors } from '../config/theme';
 import { RouteOption, RouteOptionRow, RouteSheet } from './RouteSheet';
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 
 /**
  * One section of the Enviar and Recibir screens: a white card, an uppercase
@@ -66,11 +67,16 @@ export const LocalRailsCard = ({
 /** Collapsed "Avanzado" card (crypto addresses) — same in both directions. */
 export const AdvancedCard = ({ subtitle, options }: { subtitle: string; options: RouteOption[] }) => {
   const [open, setOpen] = useState(false);
+  const anchor = useGuideAnchor('advanced_receive');
   return (
     <RouteCard>
       <TouchableOpacity
+        ref={anchor}
         style={styles.advancedToggle}
-        onPress={() => setOpen(v => !v)}
+        onPress={() => {
+          reportGuideTap('advanced_receive');
+          setOpen(v => !v);
+        }}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={`Avanzado: ${subtitle}`}

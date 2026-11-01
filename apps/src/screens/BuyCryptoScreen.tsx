@@ -58,6 +58,7 @@ import {
   formatUsdPrice,
   fundingDollarName,
 } from '../utils/cryptoPresentation';
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type BuyRoute = RouteProp<MainStackParamList, 'BuyCrypto'>;
@@ -67,6 +68,7 @@ export const MIN_CRYPTO_BUY_USD = 1;
 type Phase = 'input' | 'processing' | 'success';
 
 export const BuyCryptoScreen = () => {
+  const confirmAnchor = useGuideAnchor('asset_confirm');
   const navigation = useNavigation<NavProp>();
   const route = useRoute<BuyRoute>();
   const { formatNumber } = useNumberFormat();
@@ -360,8 +362,12 @@ export const BuyCryptoScreen = () => {
           <View style={{ flex: 1 }} />
 
           <TouchableOpacity
+            ref={confirmAnchor}
             style={[styles.confirmBtn, (!canConfirm || phase === 'processing') && styles.confirmBtnDisabled]}
-            onPress={onConfirm}
+            onPress={() => {
+              reportGuideTap('asset_confirm');
+              onConfirm();
+            }}
             disabled={!canConfirm || phase === 'processing'}
             activeOpacity={0.85}
             testID="crypto-buy-confirm"

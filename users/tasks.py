@@ -399,6 +399,7 @@ def rollup_funnel_events(target_date_str=None):
     Roll up yesterday's raw FunnelEvent rows into FunnelDailyRollup and
     delete raw rows older than 90 days.
     """
+    from assistant.guide import prune_guide_events
     from users.models_analytics import FunnelDailyRollup, FunnelEvent
     from users.funnel import CREATOR_REFERRAL_CODE, derive_rollup_cohort
     from achievements.models import UserReferral
@@ -521,12 +522,14 @@ def rollup_funnel_events(target_date_str=None):
             rollup_count += 1
 
         deleted_raw, _ = FunnelEvent.objects.filter(created_at__lt=retention_cutoff).delete()
+        deleted_guide = prune_guide_events(retention_cutoff)
 
         logger.info(
-            "Funnel rollup complete for %s: segments=%s deleted_raw=%s",
+            "Funnel rollup complete for %s: segments=%s deleted_raw=%s deleted_guide=%s",
             target_date,
             rollup_count,
             deleted_raw,
+            deleted_guide,
         )
         return {
             'date': str(target_date),

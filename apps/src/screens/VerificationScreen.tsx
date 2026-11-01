@@ -30,6 +30,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 
 // Its own document: an older server without the field fails only this list,
 // and the screen falls back to the single verification status.
@@ -363,6 +364,7 @@ const VerificationScreen = () => {
 
   // Business verification resumes its pending hosted session; personal
   // verification starts a new native session.
+  const guideAnchor = useGuideAnchor('verify_start');
   const handleStartDidit = React.useCallback(async () => {
     setIsLaunchingDidit(true);
     awaitingBrowserRef.current = false;
@@ -594,7 +596,10 @@ const VerificationScreen = () => {
           verification starts the account's own session; later ones are added
           alongside it (the server keeps that distinction, the person never
           needs to). */}
-      <TouchableOpacity style={styles.optionCard} onPress={hasCountryAttempt ? openOtherDocument : handleStartDidit}
+      <TouchableOpacity ref={guideAnchor} style={styles.optionCard} onPress={() => {
+        reportGuideTap('verify_start');
+        (hasCountryAttempt ? openOtherDocument : handleStartDidit)();
+      }}
         disabled={isBusy} accessibilityRole="button">
         <View style={styles.documentIcon}>
           {isLaunchingDidit

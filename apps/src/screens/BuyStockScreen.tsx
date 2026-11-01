@@ -53,6 +53,7 @@ import {
 import { createSponsoredRequestId } from '../services/sponsored7702';
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { formatDecimal, formatPercent, parseAmountInput, sanitizeAmountInput } from '../utils/numberLocale';
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type BuyRoute = RouteProp<MainStackParamList, 'BuyStock'>;
@@ -62,6 +63,7 @@ const MIN_AMOUNT_USD = 1.01; // stays above Ondo's ~$0.98 deposit minimum after 
 type Phase = 'input' | 'processing' | 'success';
 
 export const BuyStockScreen = () => {
+  const confirmAnchor = useGuideAnchor('asset_confirm');
   const navigation = useNavigation<NavProp>();
   // Tu mes is owners only (employees never see the month).
   const canOpenMonth = !useAccount().activeAccount?.isEmployee;
@@ -410,8 +412,12 @@ export const BuyStockScreen = () => {
           <View style={{ flex: 1 }} />
 
           <TouchableOpacity
+            ref={confirmAnchor}
             style={[styles.confirmBtn, (!canConfirm || phase === 'processing') && styles.confirmBtnDisabled]}
-            onPress={onConfirm}
+            onPress={() => {
+              reportGuideTap('asset_confirm');
+              onConfirm();
+            }}
             disabled={!canConfirm || phase === 'processing'}
             activeOpacity={0.85}
           >

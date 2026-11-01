@@ -5,6 +5,12 @@ from django.conf import settings
 
 DEFAULTS = {
     'CONFIO_ASSISTANT_ENABLED': True,
+    'ASSISTANT_GUIDE_ENABLED': True,
+    # Off until Guardarian reopens: the guide and prompt say it arrives soon.
+    'ASSISTANT_INTERNATIONAL_TOPUP_ENABLED': False,
+    'ASSISTANT_GUIDE_MODEL_TIMEOUT_SECONDS': 3,
+    # Test accounts (BO, VE, GT): funded, so they need a way to see every step.
+    'ASSISTANT_GUIDE_PREVIEW_USER_IDS': (4, 5, 21),
     # Everyday turns (support, navigation, quick questions).
     'CONFIO_ASSISTANT_MODEL': 'gpt-6-luna',
     'CONFIO_ASSISTANT_REASONING_EFFORT': 'low',

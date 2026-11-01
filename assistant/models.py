@@ -233,6 +233,42 @@ class ProbeAnswer(models.Model):
         return f'{self.probe_id}: {self.answer}'
 
 
+class AssistantGuideStep(models.Model):
+    """What the first-steps guide offered one person, and how it went."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_guide_steps')
+    step = models.CharField(max_length=32)
+    shown_count = models.PositiveSmallIntegerField(default=0)
+    shown_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    dismissed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'step'], name='assistant_guide_step_once_per_user')]
+
+    def __str__(self):
+        return f'{self.user_id}: {self.step}'
+
+
+class AssistantGuideEvent(models.Model):
+    """One thing that happened in the first-steps guide: the funnel's raw data.
+    Which step comes next is never read from here, only from real records."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_guide_events')
+    step = models.CharField(max_length=32)
+    stage = models.CharField(max_length=32)
+    event = models.CharField(max_length=24)
+    # Which option or button, for steps with several: 'perps:asset_confirm'.
+    detail = models.CharField(max_length=40, blank=True, default='')
+    country = models.CharField(max_length=2, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['step', 'event', 'created_at'], name='assistant_guide_event_idx')]
+
+    def __str__(self):
+        return f'{self.user_id}: {self.step} {self.event}'
+
+
 class AssistantNeed(models.Model):
     """What a user's message asked for, tagged nightly (assistant/needs.py).
     Product evidence only: a short redacted paraphrase, never the message."""

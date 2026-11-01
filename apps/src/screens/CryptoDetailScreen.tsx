@@ -38,6 +38,7 @@ import {
   formatUsdPrice,
   fundingDollarName,
 } from '../utils/cryptoPresentation';
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type DetailRoute = RouteProp<MainStackParamList, 'CryptoDetail'>;
@@ -46,6 +47,7 @@ const CHART_W = 320;
 const CHART_H = 110;
 
 export const CryptoDetailScreen = () => {
+  const buyAnchor = useGuideAnchor('asset_buy');
   const navigation = useNavigation<NavProp>();
   const route = useRoute<DetailRoute>();
   const { formatNumber } = useNumberFormat();
@@ -229,8 +231,12 @@ export const CryptoDetailScreen = () => {
             <View style={styles.ctaRow}>
               {canBuy && (
                 <TouchableOpacity
+                  ref={buyAnchor}
                   style={styles.ctaBuy}
-                  onPress={() => navigation.navigate('BuyCrypto', { symbol: asset.symbol })}
+                  onPress={() => {
+                    reportGuideTap('asset_buy');
+                    navigation.navigate('BuyCrypto', { symbol: asset.symbol });
+                  }}
                   activeOpacity={0.85}
                   accessibilityRole="button"
                   testID="crypto-detail-buy"

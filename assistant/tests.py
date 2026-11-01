@@ -2287,3 +2287,198 @@ class HandoffGuardAndTopupStatusTests(TestCase):
         employee = Viewer(user=ana, account=None, account_type='business', business_id=1,
                           is_business_owner=False, tz=ZoneInfo('UTC'))
         self.assertFalse(topup_status_data(employee)['disponible'])
+
+
+from django.core.cache import cache  # noqa: E402
+
+from .models import ProbeAnswer  # noqa: E402
+
+
+class GuideStepTests(TestCase):
+    """Which first step a person gets, and what the app is told to draw."""
+
+    def setUp(self):
+        self.user = User.objects.create(username='guide', firebase_uid='guide', phone_country='BO')
+
+    def _viewer(self):
+        from .engine import Viewer
+        return Viewer(user=self.user, account=None, account_type='personal', business_id=None,
+                      is_business_owner=False, tz=dt_timezone.utc)
+
+    def _key(self, *, funded=False, country='BO', ondo=False, identity='verified'):
+        from . import guide
+
+        state = SimpleNamespace(personal=True, employee=False, funded=funded, country=country, ondo_eligible=ondo,
+                                topup_in_progress=False)
+        with patch.object(guide, '_state', return_value=state), \
+                patch('assistant.engine._identity_status', return_value=identity), \
+                patch('assistant.engine._ve_topup', return_value='live' if country == 'VE' else None), \
+                patch('ramps.koywe.on_ramp_paused', return_value=False), \
+                patch('ramps.koywe.on_ramp_rejection_locked', return_value=False):
+            return guide.current_key(self._viewer(), {})
+
+    def _answer(self, answer='savings'):
+        ProbeAnswer.objects.create(user=self.user, probe_id='first_use_2026_10', answer=answer)
+
+    def test_a_new_person_starts_with_the_opening_question(self):
+        self.assertEqual(self._key(), 'opening')
+
+    def test_stage_follows_identity(self):
+        from . import guide
+        self._answer()
+        self.assertEqual(self._key(identity='unverified'), 'verify')
+        with patch.object(guide, '_didit_stage', return_value='in_review'):
+            self.assertEqual(self._key(identity='pending'), 'verifying')
+        with patch.object(guide, '_didit_stage', return_value='unfinished'):
+            self.assertEqual(self._key(identity='pending'), 'verify')
+        self.assertEqual(self._key(identity='verified'), 'top_up')
+
+    def test_guardarian_countries_wait_and_the_rest_get_usdt(self):
+        self._answer()
+        self.assertEqual(self._key(country='HN'), 'international_soon')
+        self.assertEqual(self._key(country='PA'), 'usdt')
+        with override_settings(ASSISTANT_INTERNATIONAL_TOPUP_ENABLED=True):
+            self.assertEqual(self._key(country='HN'), 'international')
+
+    def test_saying_no_rests_a_step_and_the_need_brings_it_back(self):
+        from . import guide
+        from .models import AssistantGuideStep
+        self._answer()
+        guide.record_event(self._viewer(), 'top_up', 'dismissed')
+        self.assertIsNone(self._key())
+        AssistantGuideStep.objects.filter(user=self.user).update(
+            dismissed_at=timezone.now() - guide.DISMISSED_REST - timedelta(minutes=1))
+        self.assertEqual(self._key(), 'top_up')
+
+    def test_being_shown_many_times_never_ends_a_step(self):
+        from . import guide
+        from .models import AssistantGuideStep
+        self._answer()
+        for _ in range(5):
+            guide.record_event(self._viewer(), 'top_up', 'shown')
+        self.assertIsNone(self._key())
+        AssistantGuideStep.objects.filter(user=self.user).update(
+            shown_at=timezone.now() - guide.SHOWN_REST - timedelta(minutes=1))
+        self.assertEqual(self._key(), 'top_up')
+
+    def test_refusing_the_opening_question_moves_on_for_good(self):
+        from . import guide
+        from .models import AssistantGuideStep
+        guide.record_event(self._viewer(), 'opening', 'dismissed')
+        AssistantGuideStep.objects.filter(user=self.user).update(dismissed_at=timezone.now() - timedelta(days=30))
+        self.assertEqual(self._key(), 'top_up')
+
+    def test_a_test_account_can_see_any_step_and_only_a_test_account(self):
+        from . import guide
+        cache.clear()
+        with override_settings(ASSISTANT_GUIDE_PREVIEW_USER_IDS=(self.user.pk,)):
+            guide.set_preview(self.user.pk, 'top_up')
+            self.assertEqual(self._key(funded=True), 'top_up')
+            guide.set_preview(self.user.pk, None)
+            self.assertNotEqual(self._key(funded=True), 'top_up')
+        with self.assertRaises(ValueError):
+            guide.set_preview(self.user.pk, 'top_up')
+
+    def test_guide_events_are_pruned_after_90_days_with_the_funnel(self):
+        from . import guide
+        from .models import AssistantGuideEvent
+        old = AssistantGuideEvent.objects.create(user=self.user, step='top_up', stage='top_up', event='shown')
+        AssistantGuideEvent.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=91))
+        fresh = AssistantGuideEvent.objects.create(user=self.user, step='top_up', stage='top_up', event='shown')
+        guide.prune_guide_events(timezone.now() - timedelta(days=90))
+        self.assertEqual(list(AssistantGuideEvent.objects.values_list('pk', flat=True)), [fresh.pk])
+
+    def test_every_event_lands_in_the_funnel(self):
+        from . import guide
+        from .models import AssistantGuideEvent
+        for event in ('shown', 'accepted', 'opened', 'pointer_shown', 'pointer_tapped'):
+            guide.record_event(self._viewer(), 'top_up', event)
+        self.assertEqual(AssistantGuideEvent.objects.filter(user=self.user, step='top_up').count(), 5)
+
+    def test_a_stock_bought_and_sold_still_counts(self):
+        from . import guide
+        with patch('blockchain.models.SponsoredBatch.objects') as batches:
+            batches.filter.return_value.exists.return_value = True
+            self.assertTrue(guide._ladder_done(self.user, 'invest'))
+        self.assertEqual(batches.filter.call_args.kwargs['kind__in'], ('stock_buy', 'crypto_buy'))
+
+    def test_ladder_follows_the_answer_and_skips_what_is_not_offered(self):
+        from . import guide
+        self._answer('devaluation')
+        with patch.object(guide, '_ladder_done', return_value=False), \
+                patch('marketplace.checkout.live_city_names', return_value=[]):
+            with patch.object(guide, '_invest_options', return_value=['stocks']):
+                self.assertEqual(self._key(funded=True), 'invest')
+            with patch.object(guide, '_invest_options', return_value=[]):
+                self.assertEqual(self._key(funded=True), 'send')
+
+    def test_every_pointer_is_a_button_the_app_registers(self):
+        from . import guide, rails
+        pointers = {c.pointer for s in guide.STEPS.values() for c in s.chips if c.pointer}
+        pointers |= {t.pointer for c in guide.INVEST_OPTIONS.values() for t in c.trail if t.pointer}
+        registered = {'recharge_now', 'advanced_receive', 'verify_start', 'receive_ve_pagomovil', 'receive_bo_qr',
+                      'invest_stocks', 'invest_crypto', 'invest_futures', 'asset_buy', 'asset_confirm'}
+        self.assertLessEqual(pointers | {e.pointer for e in rails.TOPUP_ENTRIES.values()}, registered)
+
+    def test_invest_never_goes_through_the_model(self):
+        from . import guide
+        self.assertEqual(guide.STEPS['invest'].brief, '')
+
+    def _options(self, *, ondo=True, crypto=True, perps=True, blocked=False, stocks_on=True):
+        from . import guide
+        with patch('cusd_plus.crypto_risk.buy_enabled', return_value=crypto), \
+                override_settings(CUSD_PLUS_STOCKS_ENABLED=stocks_on), \
+                patch('cusd_plus.schema._stock_execution_ready', return_value=True), \
+                patch('cusd_plus.eligibility.check_stock_buy_eligibility', return_value=ondo), \
+                patch('cusd_plus.perps_risk.open_enabled', return_value=perps), \
+                patch('cusd_plus.eligibility.perps_promotion_blocked', return_value=blocked):
+            return guide._invest_options(self._viewer(), SimpleNamespace(ondo_eligible=ondo))
+
+    def test_invest_offers_only_what_this_person_may_buy(self):
+        self.assertEqual(self._options(), ['stocks', 'crypto', 'perps'])
+        self.assertEqual(self._options(ondo=False, perps=False), ['crypto'])
+        self.assertEqual(self._options(stocks_on=False, perps=False), ['crypto'])
+
+    def test_futures_are_not_offered_where_they_may_not_be_promoted(self):
+        self.assertNotIn('perps', self._options(blocked=True))
+
+    def test_no_walk_names_an_asset_and_each_ends_at_the_real_confirm(self):
+        from . import guide
+        for chip in guide.INVEST_OPTIONS.values():
+            self.assertEqual(chip.trail[-1].pointer, 'asset_confirm')
+            for stop in chip.trail:
+                self.assertNotRegex(stop.text, r'\b[A-Z]{2,5}\b')
+
+    def test_top_up_entry_differs_by_country(self):
+        from . import guide, rails
+
+        def chip(country, replaced=False):
+            with patch('ramps.bolivia_qr.koywe_replaced', return_value={'top_up': replaced}):
+                return guide._for_country(guide.STEPS['top_up'], rails.topup_entry(country, self.user, {}))
+
+        self.assertEqual(chip('PE').chips[0].pointer, 'recharge_now')
+        self.assertEqual(chip('BO').chips[0].pointer, 'recharge_now')
+        self.assertEqual(chip('BO', replaced=True).chips[0].pointer, 'receive_bo_qr')
+        self.assertEqual(chip('BO', replaced=True).chips[0].label, 'Sí, ir a QR Bolivia')
+        self.assertEqual(chip('VE').chips[0].pointer, 'receive_ve_pagomovil')
+        self.assertIn('Pago móvil', chip('VE').pointer_text)
+
+    def test_model_text_with_a_new_number_falls_back(self):
+        from . import guide
+        self.assertIsNone(guide._usable_text('Recarga desde US$1 hoy.', 'Ya puedes recargar.'))
+        self.assertIsNone(guide._usable_text('Recarga desde un dólar.', 'Ya puedes recargar.'))
+        self.assertIsNone(guide._usable_text('Es gratis.', 'Ya puedes recargar.'))
+        self.assertEqual(guide._usable_text(' Hola,  ya puedes. ', 'Ya puedes recargar.'), 'Hola, ya puedes.')
+
+    def test_a_slow_model_never_blocks_the_card(self):
+        from . import guide
+        cache.clear()
+        with patch.object(guide, '_generate', side_effect=TimeoutError):
+            text = guide._text(self._viewer(), 'top_up', guide.STEPS['verify'])
+        self.assertEqual(text, guide.STEPS['verify'].text)
+
+    def test_the_prompt_says_two_weeks_only_where_guardarian_serves(self):
+        common = dict(first_name='A', account_label='p', screen='', local_now='n', destinations=[])
+        self.assertIn('unas dos semanas', build_system_prompt(country='HN', **common))
+        self.assertNotIn('unas dos semanas', build_system_prompt(country='PA', **common))
+        self.assertNotIn('unas dos semanas', build_system_prompt(country='BO', **common))

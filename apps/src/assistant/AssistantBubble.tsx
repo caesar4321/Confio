@@ -51,7 +51,7 @@ const NOTE_MAX_CHARS = 180;
 export default function AssistantBubble() {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const { route, isOpen, open, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy, navNote, boxShown } = useAssistant();
+  const { route, isOpen, open, guideShown, setAvailable, setAiEnabled, inCall, setBubbleAnchor, setMicBusy, navNote, boxShown } = useAssistant();
   const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
   const { activeAccount } = useAccount();
   const [keyboardUp, setKeyboardUp] = useState(false);
@@ -332,7 +332,7 @@ export default function AssistantBubble() {
     [pan, saveProfile],
   );
 
-  const visible = enabled && !isOpen && !boxShown && !keyboardUp && !(route && HIDDEN_ROUTES.has(route));
+  const visible = enabled && !isOpen && !boxShown && !keyboardUp && !guideShown && !(route && HIDDEN_ROUTES.has(route));
 
   // The chat just moved the app: say here what it said there. Not a
   // suggestion, so no cooldown or session cap, and it survives the route change.

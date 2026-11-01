@@ -147,7 +147,7 @@ def _phone_eligible(viewer):
 # OpenAI transport
 # --------------------------------------------------------------------------- #
 
-def _openai_post(payload):
+def _openai_post(payload, timeout=None):
     api_key = getattr(settings, 'OPENAI_API_KEY', '')
     if not api_key:
         raise AssistantUnavailable('OPENAI_API_KEY is not configured')
@@ -156,7 +156,7 @@ def _openai_post(payload):
             OPENAI_RESPONSES_URL,
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
             json=payload,
-            timeout=conf.get('CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS'),
+            timeout=timeout or conf.get('CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS'),
         )
     except requests.RequestException as exc:
         raise AssistantUnavailable(f'OpenAI request failed: {exc}') from exc
@@ -1342,13 +1342,14 @@ def _open_claimed_screen(belt, result):
 
 
 def run_turn(viewer: Viewer, history, *, first_name, account_label, country, analyses_left, can_navigate=True,
-             reserve_analysis=None, reserve_news=None, waiting_for_team=False):
+             reserve_analysis=None, reserve_news=None, waiting_for_team=False, guide_note=''):
     """Answer the last user message in `history`. Raises AssistantUnavailable,
     except after the model already escalated: the handoff is kept."""
     result = TurnResult(reply='')
     belt = Toolbelt(viewer, result, analyses_left=analyses_left, can_navigate=can_navigate,
                     reserve_analysis=reserve_analysis, reserve_news=reserve_news)
     belt.waiting_for_team = waiting_for_team
+    belt.guide_note = guide_note
     said = [item['content'] for item in history_items(history) if item['role'] == 'user']
     belt.last_user_message = said[-1] if said else ''
     # Tapped answers ("Que mi dinero no pierda valor") are not the person's
@@ -1400,6 +1401,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
     )
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
+    system += getattr(belt, 'guide_note', '')
     if belt.force_tool:
         system += RETRY_NOTE
     model = conf.get('CONFIO_ASSISTANT_MODEL')
