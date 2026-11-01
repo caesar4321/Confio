@@ -18,16 +18,17 @@ export type MascotKind = 'CONFI' | 'LLAMA' | 'CAPYBARA' | 'CAT' | 'DOG' | 'CUSTO
 export type MascotMood = 'idle' | 'thinking' | 'talking' | 'listening' | 'happy';
 
 export const MASCOTS: { kind: MascotKind; label: string; color: string }[] = [
-  { kind: 'CONFI', label: 'Confi', color: '#10B981' },
+  { kind: 'CONFI', label: 'Confi', color: '#FCD34D' },
   { kind: 'LLAMA', label: 'Llama', color: '#F5E6D3' },
   { kind: 'CAPYBARA', label: 'Capibara', color: '#B07A4F' },
   { kind: 'CAT', label: 'Gato', color: '#F59E0B' },
   { kind: 'DOG', label: 'Perro', color: '#A16207' },
 ];
 
-export const MASCOT_COLORS = ['#10B981', '#047857', '#F59E0B', '#B07A4F', '#F5E6D3', '#8B5CF6', '#3B82F6', '#F472B6', '#374151'];
+export const MASCOT_COLORS = ['#FCD34D', '#10B981', '#047857', '#F59E0B', '#B07A4F', '#F5E6D3', '#8B5CF6', '#3B82F6', '#F472B6', '#374151'];
 
 const INK = '#1F2937';
+const LEAF_INK = '#047857';
 // Calm moods bob a few times, then rest. An endless repeat redraws the whole
 // window every frame (240 fps, ~85% CPU on a 120 Hz Android phone), which
 // made every tap wait behind the bubble. Active moods (talking, listening,
@@ -53,7 +54,9 @@ function isLight(hex: string) {
   return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 0xff) + 0.114 * (n & 0xff) > 170;
 }
 
-function Eyes({ y, spread = 13, closed, mood }: { y: number; spread?: number; closed: boolean; mood: MascotMood }) {
+function Eyes({ y, spread = 13, closed, mood, big = false }: {
+  y: number; spread?: number; closed: boolean; mood: MascotMood; big?: boolean;
+}) {
   if (closed || mood === 'happy') {
     const d = (cx: number) => `M${cx - 5} ${y} Q${cx} ${y - 5} ${cx + 5} ${y}`;
     return (
@@ -66,10 +69,10 @@ function Eyes({ y, spread = 13, closed, mood }: { y: number; spread?: number; cl
   const look = mood === 'thinking' ? -2 : 0;
   return (
     <G>
-      <Ellipse cx={50 - spread} cy={y} rx={4.5} ry={5.5} fill={INK} />
-      <Ellipse cx={50 + spread} cy={y} rx={4.5} ry={5.5} fill={INK} />
-      <Circle cx={50 - spread + 1.5} cy={y - 2 + look} r={1.6} fill="#FFFFFF" />
-      <Circle cx={50 + spread + 1.5} cy={y - 2 + look} r={1.6} fill="#FFFFFF" />
+      <Ellipse cx={50 - spread} cy={y} rx={big ? 7 : 4.5} ry={big ? 8.5 : 5.5} fill={INK} />
+      <Ellipse cx={50 + spread} cy={y} rx={big ? 7 : 4.5} ry={big ? 8.5 : 5.5} fill={INK} />
+      <Circle cx={50 - spread + (big ? 2.5 : 1.5)} cy={y - (big ? 3 : 2) + look} r={big ? 2.6 : 1.6} fill="#FFFFFF" />
+      <Circle cx={50 + spread + (big ? 2.5 : 1.5)} cy={y - (big ? 3 : 2) + look} r={big ? 2.6 : 1.6} fill="#FFFFFF" />
     </G>
   );
 }
@@ -163,15 +166,15 @@ function Body({ kind, color, closed, mood, mouthOpen }: {
     default:
       return (
         <G>
-          {/* A sprout: Confío's money that grows. */}
-          <Path d="M50 22 Q50 12 50 8" stroke={dark} strokeWidth={3} strokeLinecap="round" />
-          <Path d="M50 12 Q40 2 32 8 Q40 16 50 12Z" fill="#34D399" stroke={dark} strokeWidth={1.5} />
-          <Path d="M50 12 Q60 2 68 8 Q60 16 50 12Z" fill="#6EE7B7" stroke={dark} strokeWidth={1.5} />
-          <Path d="M50 20 C78 20 88 38 88 58 C88 80 72 92 50 92 C28 92 12 80 12 58 C12 38 22 20 50 20Z" fill={color} />
-          <Ellipse cx={36} cy={36} rx={10} ry={6} fill="#FFFFFF" opacity={0.25} transform="rotate(-25 36 36)" />
-          <Eyes y={54} closed={closed} mood={mood} />
-          <Mouth y={66} mood={mood} open={mouthOpen} />
-          <Cheeks y={62} />
+          {/* A coin with a sprout: Confío's money that grows. Its own color,
+              so it never melts into the app's green. */}
+          <Path d="M50 24 Q49 14 50 9" stroke={LEAF_INK} strokeWidth={4} strokeLinecap="round" fill="none" />
+          <Path d="M50 13 Q37 -1 25 7 Q35 20 50 13Z" fill="#34D399" stroke={LEAF_INK} strokeWidth={2.5} />
+          <Path d="M50 13 Q63 -1 75 7 Q65 20 50 13Z" fill="#6EE7B7" stroke={LEAF_INK} strokeWidth={2.5} />
+          <Circle cx={50} cy={59} r={37} fill={color} stroke={shade(color, -70)} strokeWidth={3} />
+          <Circle cx={50} cy={59} r={30} fill="none" stroke={shade(color, -40)} strokeWidth={2} />
+          <Eyes y={54} closed={closed} mood={mood} big />
+          <Mouth y={70} mood={mood} open={mouthOpen} />
         </G>
       );
   }

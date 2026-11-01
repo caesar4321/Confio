@@ -459,7 +459,7 @@ def general_while_waiting(message):
 
 
 # What a turn may use while the team owns the thread: nothing personal.
-WAITING_TOOLS = {'navigate', 'read_public_document', 'get_exchange_rate', 'get_stock_quote'}
+WAITING_TOOLS = {'navigate', 'read_public_document', 'get_exchange_rate', 'get_stock_quote', 'show_steps'}
 WAITING_FOR_TEAM_NOTE = (
     '\n# Esta conversación está con el equipo de Confío\n'
     'El equipo ya tiene el caso de esta persona y le responderá en este chat. Responde solo esta pregunta general '
@@ -800,6 +800,8 @@ class Toolbelt:
         self.destinations = allowed_destinations(viewer, paid_offers_allowed=paid_offers_allowed)
 
     def specs(self):
+        from .guide import WALKS
+
         specs = [] if not self.can_navigate else [
             {
                 'type': 'function',
@@ -819,6 +821,23 @@ class Toolbelt:
                 'strict': True,
             },
         ]
+        if self.can_navigate and self._walks():
+            specs.append({
+                'type': 'function',
+                'name': 'show_steps',
+                'description': 'Agrega un botón "Muéstrame": al tocarlo, un lápiz señala en la app, paso a paso, los '
+                               'botones reales. Úsalo cuando pregunte cómo hacer algo de esta lista o pida que se lo '
+                               'muestres, y dile que puede tocar el botón. No abras además esa pantalla con `navigate`: '
+                               'la idea es que aprenda el camino. Opciones: ' + '; '.join(
+                                   f'{k}: {WALKS[k]}' for k in self._walks()),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {'topic': {'type': 'string', 'enum': self._walks()}},
+                    'required': ['topic'],
+                    'additionalProperties': False,
+                },
+                'strict': True,
+            })
         specs += [
             {
                 'type': 'function',
@@ -1021,6 +1040,7 @@ class Toolbelt:
     def call(self, name, args):
         handler = {
             'navigate': self.navigate,
+            'show_steps': self.show_steps,
             'escalate_to_human': self.escalate_to_human,
             'get_month_summary': self.get_month_summary,
             'get_transactions': self.get_transactions,
@@ -1040,6 +1060,28 @@ class Toolbelt:
         if handler is None:
             return {'error': f'herramienta desconocida: {name}'}
         return handler(**args)
+
+    def _walks(self):
+        """Only on builds that can run a walk, and only ones this person can use."""
+        from .guide import WALKS, walk_trail, walks_on_this_build
+
+        if hasattr(self, '_walk_keys'):  # asked again at every tool step of a turn
+            return self._walk_keys
+        self._walk_keys = []
+        if walks_on_this_build(self.viewer.request_meta):
+            try:
+                self._walk_keys = [k for k in WALKS if walk_trail(self.viewer, k, self.viewer.request_meta)]
+            except Exception:  # noqa: BLE001 - no button is always safe
+                logger.warning('Confio Assistant: walks unavailable', exc_info=True)
+        return self._walk_keys
+
+    def show_steps(self, topic):
+        if topic not in self._walks():
+            return {'ok': False, 'error': 'Eso no está disponible para este usuario.'}
+        action = {'type': 'walk', 'target': topic, 'label': 'Muéstrame'}
+        if action not in self.result.actions:
+            self.result.actions.append(action)
+        return {'ok': True, 'boton': 'Muéstrame'}
 
     def navigate(self, destination, asset=None, label=None):
         if not self.can_navigate or destination not in self.destinations:

@@ -9,15 +9,19 @@ import {
   type ScrollView,
   type View,
 } from 'react-native';
+import { initialWindowMetrics } from 'react-native-safe-area-context';
 
 // id may be empty: a sentence for this screen with nothing to circle.
 export type GuidePointer = { id: string; text: string; step: string; detail?: string };
 export type GuideRect = { x: number; y: number; width: number; height: number };
 
 const SCROLL_TARGET_RATIO = 0.35;
+const BACK_ARROW = 'nav_back';
 
 const anchors = new Map<string, View>();
 const listeners = new Set<() => void>();
+const refreshListeners = new Set<() => void>();
+let walkListener: ((key: string) => void) | null = null;
 let pointer: GuidePointer | null = null;
 let tapListener: ((tapped: GuidePointer) => void) | null = null;
 
@@ -49,11 +53,37 @@ export function setGuideTapListener(listener: ((tapped: GuidePointer) => void) |
   tapListener = listener;
 }
 
+// A screen saw the person's situation change: ask the server what comes next.
+export function requestGuideRefresh() {
+  refreshListeners.forEach((listener) => listener());
+}
+
+export function subscribeGuideRefresh(listener: () => void) {
+  refreshListeners.add(listener);
+  return () => {
+    refreshListeners.delete(listener);
+  };
+}
+
+// A "Muéstrame" button in the chat: the card runs the walk.
+export function requestGuideWalk(key: string) {
+  walkListener?.(key);
+}
+
+export function setGuideWalkListener(listener: ((key: string) => void) | null) {
+  walkListener = listener;
+}
+
 export function useGuidePointer() {
   return useSyncExternalStore(subscribe, () => pointer);
 }
 
 export function measureGuideAnchor(id: string): Promise<GuideRect | null> {
+  // Screens draw their own back arrow, always in this corner.
+  if (id === BACK_ARROW) {
+    const top = initialWindowMetrics?.insets.top ?? 0;
+    return Promise.resolve({ x: 8, y: top + 6, width: 40, height: 40 });
+  }
   const view = anchors.get(id);
   if (!view) {
     return Promise.resolve(null);

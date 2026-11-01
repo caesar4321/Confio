@@ -1,7 +1,7 @@
 // The first meeting: once ever, the person's own pet greets them across the
 // whole screen. When they answer, the pet shrinks into its corner and the
 // conversation carries on in a speech bubble over the real Inicio.
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, BackHandler, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +11,7 @@ import AssistantMascot from './AssistantMascot';
 import type { AssistantGuide, AssistantGuideChip, AssistantProfile } from './api';
 
 const PET_SIZE = 120;
+const TALK_MS = 2500;
 const PET_TOP = 56;
 const APPEAR_MS = 260;
 
@@ -29,6 +30,12 @@ export default function GuideOpening({ guide, profile, collapse, landing, leavin
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const appear = useRef(new Animated.Value(0)).current;
+  // Talking redraws the window: a greeting's worth, then it rests.
+  const [talking, setTalking] = useState(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setTalking(false), TALK_MS);
+    return () => clearTimeout(timer);
+  }, []);
   const dismiss = chips.find((c) => c.kind === 'dismiss');
   const answers = chips.filter((c) => c.kind !== 'dismiss');
 
@@ -90,16 +97,17 @@ export default function GuideOpening({ guide, profile, collapse, landing, leavin
         }]}
       >
         <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
-          size={PET_SIZE} mood="talking" />
+          size={PET_SIZE} mood={talking ? 'talking' : 'idle'} />
       </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { backgroundColor: colors.heroFieldDark },
+  // Pale on purpose: the pet is often this green, and any pet color must stand out.
+  backdrop: { backgroundColor: colors.primarySoft },
   content: { flex: 1, paddingHorizontal: 20 },
-  text: { fontSize: 22, lineHeight: 29, fontWeight: '700', color: colors.white, textAlign: 'center' },
+  text: { fontSize: 22, lineHeight: 29, fontWeight: '700', color: colors.text.primary, textAlign: 'center' },
   answers: { gap: 8, marginTop: 22 },
   answer: {
     flexDirection: 'row',
@@ -108,11 +116,13 @@ const styles = StyleSheet.create({
     minHeight: 50,
     paddingHorizontal: 16,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
     backgroundColor: colors.white,
   },
   pressed: { opacity: 0.8 },
   answerText: { flex: 1, fontSize: 15, color: colors.text.primary },
   later: { alignSelf: 'center', marginTop: 16, padding: 6 },
-  laterText: { fontSize: 15, color: colors.white },
+  laterText: { fontSize: 15, color: colors.text.secondary },
   pet: { position: 'absolute', width: PET_SIZE, height: PET_SIZE, alignItems: 'center', justifyContent: 'center' },
 });

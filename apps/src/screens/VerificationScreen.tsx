@@ -30,7 +30,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
-import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
+import { reportGuideTap, requestGuideRefresh, useGuideAnchor } from '../assistant/guidePointer';
 
 // Its own document: an older server without the field fails only this list,
 // and the screen falls back to the single verification status.
@@ -266,6 +266,7 @@ const VerificationScreen = () => {
         // stops the rest of the refresh.
         refetchIdentity().catch(() => undefined),
       ]);
+      requestGuideRefresh();
       return (docs as any)?.data?.myIdentityDocuments || null;
     } finally {
       setIsRefreshing(false);

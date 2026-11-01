@@ -202,8 +202,6 @@ class AssistantGuideTrailStopType(graphene.ObjectType):
 class AssistantGuideChipType(graphene.ObjectType):
     label = graphene.String(required=True)
     kind = graphene.String(required=True, description='navigate | probe | dismiss; unknown kinds are not drawn')
-    destination = graphene.String(required=True)
-    pointer = graphene.String(required=True, description='Button the pencil circles on arrival; may be empty')
     answer = graphene.String(required=True)
     trail = graphene.List(graphene.NonNull(AssistantGuideTrailStopType), required=True,
                           description='Screens to walk through after the tap, each with its own sentence')
@@ -213,12 +211,37 @@ class AssistantGuideType(graphene.ObjectType):
     step = graphene.String(required=True)
     stage = graphene.String(required=True)
     text = graphene.String(required=True)
-    pointer_text = graphene.String(required=True)
     presentation = graphene.String(required=True, description='full | bubble; anything unknown is a bubble')
     chips = graphene.List(graphene.NonNull(AssistantGuideChipType), required=True)
 
 
+class AssistantWalkType(graphene.ObjectType):
+    key = graphene.String(required=True)
+    trail = graphene.List(graphene.NonNull(AssistantGuideTrailStopType), required=True)
+
+
 class Query(graphene.ObjectType):
+    assistant_walk = graphene.Field(
+        AssistantWalkType, key=graphene.String(required=True),
+        description='The steps of a walk the person asked for. Null when they can\'t do it now.')
+
+    @login_required
+    def resolve_assistant_walk(self, info, key):
+        from . import guide
+
+        user, account, business, jwt_context = get_context_models(info)
+        meta = getattr(info.context, 'META', None)
+        try:
+            viewer = service._viewer(user, account, business, jwt_context, request_meta=meta)
+            trail = guide.walk_trail(viewer, key, meta)
+        except Exception:  # noqa: BLE001 - the chat explains it in words instead
+            logger.exception('assistant walk failed')
+            return None
+        if not trail:
+            return None
+        return AssistantWalkType(key=key, trail=[
+            AssistantGuideTrailStopType(route=t.route, text=t.text, pointer=t.pointer) for t in trail])
+
     assistant_guide = graphene.Field(
         AssistantGuideType, screen=graphene.String(),
         context_key=graphene.String(description='Active account id; only keys the client cache per account'),
@@ -244,10 +267,10 @@ class Query(graphene.ObjectType):
         if found is None:
             return None
         return AssistantGuideType(
-            step=found.key, stage=found.stage, text=found.text, pointer_text=found.pointer_text,
+            step=found.key, stage=found.stage, text=found.text,
             presentation=found.presentation,
             chips=[AssistantGuideChipType(
-                label=c.label, kind=c.kind, destination=c.destination, pointer=c.pointer, answer=c.answer,
+                label=c.label, kind=c.kind, answer=c.answer,
                 trail=[AssistantGuideTrailStopType(route=t.route, text=t.text, pointer=t.pointer) for t in c.trail])
                 for c in found.chips])
 

@@ -4,7 +4,7 @@
 // kind are not drawn. The assistant never moves the app by itself: a tap does.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Keyboard, Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
-import { useMutation, useQuery } from '@apollo/client';
+import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../components/common/AppText';
@@ -18,21 +18,30 @@ import {
   type AssistantAction,
   GET_ASSISTANT_GUIDE,
   GET_ASSISTANT_THREAD,
+  GET_ASSISTANT_WALK,
   RECORD_ASSISTANT_GUIDE_EVENT,
   type AssistantGuide,
   type AssistantGuideChip,
   type AssistantGuideTrailStop,
 } from './api';
 import { openDestination, resolveNavigate } from './destinations';
-import { measureGuideAnchor, setGuidePointer, setGuideTapListener, useGuidePointer } from './guidePointer';
-import { TAB_ROUTES } from './suggestions';
+import {
+  measureGuideAnchor,
+  setGuidePointer,
+  setGuideTapListener,
+  setGuideWalkListener,
+  requestGuideWalk,
+  subscribeGuideRefresh,
+  useGuidePointer,
+} from './guidePointer';
+import { BUBBLE_ROUTES, TAB_ROUTES } from './suggestions';
 import GuideOpening from './GuideOpening';
 
 const HOME_ROUTE = 'Home';
+const VERIFICATION_ROUTE = 'Verification';
 const OPEN_DELAY_MS = 1200;
 const NAVIGATION_SETTLE_MS = 700;
 const POINTER_CHECK_MS = 2500;
-const LAST_TAP = 'asset_confirm';
 // A button in the lower part of the screen: the strip moves above it.
 const LOWER_SCREEN_RATIO = 0.6;
 const CHIP_KINDS = new Set(['navigate', 'probe', 'dismiss']);
@@ -43,6 +52,7 @@ const GAP = 8;
 const PET_SIZE = 46;
 const COLLAPSE_MS = 520;
 const NEXT_STEP_LIMIT_MS = 8000;
+const TALK_MS = 2500;
 
 // A stuck network must never leave the waiting bubble on screen for good.
 function withinLimit<T>(work: Promise<T>): Promise<T | null> {
@@ -52,13 +62,32 @@ function withinLimit<T>(work: Promise<T>): Promise<T | null> {
   ]);
 }
 
+function guideAllowedOn(route?: string) {
+  return !!route && (BUBBLE_ROUTES.has(route) || route === VERIFICATION_ROUTE);
+}
+
 type ReplyChip = { key: string; label: string; ticker?: string };
-type Trail = { step: string; detail: string; stops: AssistantGuideTrailStop[]; started: boolean };
+type Trail = {
+  step: string;
+  detail: string;
+  stops: AssistantGuideTrailStop[];
+  started: boolean;
+  pointing: string;
+};
+
+// The way to the first real stop from wherever the person is.
+function stopFor(walk: Trail, route?: string) {
+  const onPath = walk.stops.find((s) => s.route === route);
+  if (onPath || walk.started) {
+    return onPath;
+  }
+  return walk.stops.find((s) => s.route === (route && TAB_ROUTES.has(route) ? '*tab' : '*back'));
+}
 
 export default function AssistantGuideCard() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const { route, isOpen, open, inCall, available, aiEnabled, setGuideShown } = useAssistant();
+  const { route, isOpen, open, inCall, available, aiEnabled, setGuideShown, showNavNote } = useAssistant();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { activeAccount } = useAccount();
   const contextKey = activeAccount?.id || 'no-account';
@@ -67,6 +96,7 @@ export default function AssistantGuideCard() {
   const [reply, setReply] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [replyChips, setReplyChips] = useState<ReplyChip[]>([]);
+  const [replyWalks, setReplyWalks] = useState<string[]>([]);
   const [thinking, setThinking] = useState(false);
   const [keyboard, setKeyboard] = useState(0);
   // The full-screen first meeting, kept until the pet has landed.
@@ -74,11 +104,11 @@ export default function AssistantGuideCard() {
   const [leaving, setLeaving] = useState(false);
   const [pending, setPending] = useState(false);
   const [typing, setTyping] = useState(false);
+  const [talking, setTalking] = useState(true);
   const collapse = useRef(new Animated.Value(0)).current;
   // One card per session: what was already shown stays closed until next time.
   const seen = useRef(new Set<string>());
   const pointerRoute = useRef<string | undefined>(undefined);
-  const pointerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerLogged = useRef(false);
   const trail = useRef<Trail | null>(null);
   const flowRef = useRef(0);
@@ -89,13 +119,20 @@ export default function AssistantGuideCard() {
   guideRef.current = guide;
 
   const personal = activeAccount?.type?.toLowerCase() !== 'business';
+  const onGuideRoute = guideAllowedOn(route);
   const ready = isAuthenticated && !authLoading && available && aiEnabled && personal;
   const { data, refetch } = useQuery(GET_ASSISTANT_GUIDE, {
-    variables: { screen: HOME_ROUTE, contextKey },
-    skip: !ready || route !== HOME_ROUTE,
+    variables: { screen: route ?? null, contextKey },
+    skip: !ready || !onGuideRoute,
     fetchPolicy: 'network-only',
     errorPolicy: 'ignore',
   });
+  // Something changed on this screen (an identity came back approved).
+  useEffect(() => subscribeGuideRefresh(() => {
+    if (ready && onGuideRoute) {
+      refetch().catch(() => undefined);
+    }
+  }), [ready, onGuideRoute, refetch]);
   // Only for the person's own pet and its color.
   const { data: threadData } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: 1, contextKey },
@@ -106,6 +143,7 @@ export default function AssistantGuideCard() {
   const profile = threadData?.assistantThread?.profile;
   const [recordEvent] = useMutation(RECORD_ASSISTANT_GUIDE_EVENT, { errorPolicy: 'ignore' });
   const [ask] = useMutation(ASK_ASSISTANT_IN_GUIDE);
+  const apollo = useApolloClient();
 
   const record = useCallback((step: string, event: string, answer?: string, detail?: string) => (
     recordEvent({ variables: { step, event, answer, detail } }).catch(() => undefined)
@@ -113,14 +151,20 @@ export default function AssistantGuideCard() {
 
   useEffect(() => {
     const next: AssistantGuide | null | undefined = data?.assistantGuide;
-    if (!next || seen.current.has(next.step) || guide || opening || pending || route !== HOME_ROUTE || isOpen || inCall) {
+    // Verification steps give way as soon as the next real step exists.
+    const busy = !!guide && guide.step !== 'verify' && guide.step !== 'verifying';
+    const walking = !!trail.current || (!!pointer && pointer.step !== 'verify');
+    if (!next || seen.current.has(next.step) || busy || walking || opening || pending || !onGuideRoute
+        || isOpen || inCall || (next.presentation === 'full' && route !== HOME_ROUTE)) {
       return undefined;
     }
     const timer = setTimeout(() => {
       seen.current.add(next.step);
       setReply(null);
       setReplyChips([]);
+      setReplyWalks([]);
       setTyping(false);
+      setGuidePointer(null);
       if (next.presentation === 'full') {
         collapse.setValue(0);
         setOpening(next);
@@ -130,14 +174,10 @@ export default function AssistantGuideCard() {
       record(next.step, 'shown');
     }, OPEN_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [data, guide, opening, pending, route, isOpen, inCall, record, collapse]);
+  }, [data, guide, opening, pending, onGuideRoute, route, pointer, isOpen, inCall, record, collapse]);
 
   const clear = useCallback(() => {
     flowRef.current += 1;
-    if (pointerTimer.current) {
-      clearTimeout(pointerTimer.current);
-      pointerTimer.current = null;
-    }
     setGuide(null);
     setOpening(null);
     setLeaving(false);
@@ -145,6 +185,7 @@ export default function AssistantGuideCard() {
     setTyping(false);
     setReply(null);
     setReplyChips([]);
+    setReplyWalks([]);
     trail.current = null;
     setGuidePointer(null);
   }, []);
@@ -157,14 +198,14 @@ export default function AssistantGuideCard() {
     }
   }, [personal, clear]);
 
-  // The card lives on Inicio: it must never sit on a payment screen.
+  // Wherever the bubble may float, never on a confirmation or payment screen.
   useEffect(() => {
-    if (route !== HOME_ROUTE) {
+    if (!onGuideRoute) {
       setGuide(null);
       setOpening(null);
       setPending(false);
     }
-  }, [route]);
+  }, [onGuideRoute]);
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', (e) => setKeyboard(e.endCoordinates.height));
@@ -175,6 +216,22 @@ export default function AssistantGuideCard() {
     };
   }, []);
 
+  const showStop = useCallback((walk: Trail) => {
+    const stop = stopFor(walk, routeRef.current);
+    if (!stop) {
+      trail.current = null;
+      setGuidePointer(null);
+      return;
+    }
+    walk.started = walk.started || !stop.route.startsWith('*');
+    // Tab icons can't report a tap: moving on means it happened.
+    if (walk.pointing && walk.pointing !== stop.pointer) {
+      record(walk.step, 'pointer_tapped', undefined, `${walk.detail}:${walk.pointing}`);
+    }
+    walk.pointing = stop.pointer;
+    setGuidePointer({ id: stop.pointer, text: stop.text, step: walk.step, detail: walk.detail });
+  }, [record]);
+
   // A walk: each screen brings its own sentence and button. Going back works;
   // leaving the walk's screens ends it.
   useEffect(() => {
@@ -182,15 +239,8 @@ export default function AssistantGuideCard() {
     if (!walk) {
       return;
     }
-    const stop = walk.stops.find((s) => s.route === route);
-    if (stop) {
-      walk.started = true;
-      setGuidePointer({ id: stop.pointer, text: stop.text, step: walk.step, detail: walk.detail });
-    } else if (walk.started) {
-      trail.current = null;
-      setGuidePointer(null);
-    }
-  }, [route]);
+    showStop(walk);
+  }, [route, showStop]);
 
   // The person left the screen we pointed at: the lesson is over.
   useEffect(() => {
@@ -206,6 +256,31 @@ export default function AssistantGuideCard() {
     }
   }, [pointer, route]);
 
+  // A "Muéstrame" from the chat: same pencil, same way there, any time.
+  useEffect(() => {
+    setGuideWalkListener((key) => {
+      const step = `walk:${key}`;
+      const flow = flowRef.current;
+      const failed = () => showNavNote('No pude mostrarte los pasos ahora. Inténtalo de nuevo.');
+      apollo.query({ query: GET_ASSISTANT_WALK, variables: { key }, fetchPolicy: 'network-only' }).then(({ data: found }) => {
+        if (flow !== flowRef.current) {
+          return;  // another account meanwhile
+        }
+        const stops = found?.assistantWalk?.trail;
+        if (!stops?.length) {
+          failed();
+          return;
+        }
+        record(step, 'accepted');
+        clear();
+        const walk = { step, detail: '', stops, started: false, pointing: '' };
+        trail.current = walk;
+        showStop(walk);
+      }).catch(failed);
+    });
+    return () => setGuideWalkListener(null);
+  }, [apollo, clear, record, showStop, showNavNote]);
+
   // The funnel: did the pencil appear, and did the person tap what it circled?
   useEffect(() => {
     setGuideTapListener((tapped) => {
@@ -216,7 +291,9 @@ export default function AssistantGuideCard() {
         record(tapped.step, 'pointer_shown', undefined, detail);
       }
       record(tapped.step, 'pointer_tapped', undefined, detail);
-      if (tapped.id === LAST_TAP) {
+      // The last real button is theirs to press: the walk ends there.
+      const lastStop = trail.current?.stops.filter((s) => !s.route.startsWith('*')).pop();
+      if (tapped.id === lastStop?.pointer) {
         trail.current = null;
       }
     });
@@ -248,6 +325,13 @@ export default function AssistantGuideCard() {
   }, [pointedId, pointedStep, pointedDetail, height, record]);
 
   const shown = !!guide || !!pointer || !!opening || pending;
+  // Talking redraws the window: it follows what was said, then the pet rests.
+  const said = reply ?? guide?.text ?? pointer?.text;
+  useEffect(() => {
+    setTalking(true);
+    const timer = setTimeout(() => setTalking(false), TALK_MS);
+    return () => clearTimeout(timer);
+  }, [said]);
   useEffect(() => setGuideShown(shown), [shown, setGuideShown]);
 
   const close = useCallback(() => {
@@ -306,7 +390,7 @@ export default function AssistantGuideCard() {
         return;  // cleared or another account meanwhile
       }
       setPending(false);
-      if (next && !seen.current.has(next.step) && routeRef.current === HOME_ROUTE) {
+      if (next && !seen.current.has(next.step) && guideAllowedOn(routeRef.current)) {
         seen.current.add(next.step);
         setGuide(next);
         record(next.step, 'shown');
@@ -318,36 +402,13 @@ export default function AssistantGuideCard() {
     }
     record(guide.step, 'accepted', undefined, chip.answer);
     setGuide(null);
-    if (!openDestination(chip.destination, { isBusiness: false })) {
+    if (!chip.trail.length) {
       return;
     }
-    record(guide.step, 'opened', undefined, chip.answer);
-    if (chip.trail.length) {
-      trail.current = { step: guide.step, detail: chip.answer, stops: chip.trail, started: false };
-      pointerTimer.current = setTimeout(() => {
-        pointerTimer.current = null;
-        if (trail.current) {
-          const stop = trail.current.stops.find((s) => s.route === routeRef.current);
-          if (stop) {
-            trail.current.started = true;
-            setGuidePointer({ id: stop.pointer, text: stop.text, step: guide.step, detail: chip.answer });
-          }
-        }
-      }, NAVIGATION_SETTLE_MS);
-      return;
-    }
-    if (chip.pointer) {
-      const text = guide.pointerText;
-      const { step } = guide;
-      pointerTimer.current = setTimeout(() => {
-        pointerTimer.current = null;
-        // Back on Inicio already: there is nothing to point at.
-        if (routeRef.current !== HOME_ROUTE) {
-          setGuidePointer({ id: chip.pointer, text, step });
-        }
-      }, NAVIGATION_SETTLE_MS);
-    }
-  }, [guide, opening, close, land, record, refetch]);
+    const walk = { step: guide.step, detail: chip.answer, stops: chip.trail, started: false, pointing: '' };
+    trail.current = walk;
+    showStop(walk);
+  }, [guide, opening, close, land, record, refetch, showStop]);
 
   const send = useCallback(async () => {
     const body = draft.trim();
@@ -369,6 +430,8 @@ export default function AssistantGuideCard() {
       if (typeof text === 'string' && text.trim()) {
         record(guide.step, 'replied');
         setReply(text.trim());
+        setReplyWalks(((message.actions ?? []) as AssistantAction[])
+          .filter((a) => a.type === 'walk' && a.target).map((a) => a.target as string));
         setReplyChips(((message.actions ?? []) as AssistantAction[])
           .filter((a) => a.type === 'navigate')
           .map(resolveNavigate)
@@ -378,7 +441,7 @@ export default function AssistantGuideCard() {
           await record(guide.step, 'dismissed');
           const next = (await refetch()).data?.assistantGuide as AssistantGuide | null | undefined;
           // Closed, moved or switched account meanwhile: the next visit shows it.
-          if (next && guideRef.current?.step === guide.step && routeRef.current === HOME_ROUTE) {
+          if (next && guideRef.current?.step === guide.step && guideAllowedOn(routeRef.current)) {
             seen.current.add(next.step);
             setGuide(next);
             record(next.step, 'shown');
@@ -414,7 +477,7 @@ export default function AssistantGuideCard() {
   const pet = (size: number, hidden = false) => (
     <View style={hidden ? styles.hidden : undefined}>
       <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
-        size={size} mood="talking" />
+        size={size} mood={talking ? 'talking' : 'idle'} />
     </View>
   );
 
@@ -446,6 +509,12 @@ export default function AssistantGuideCard() {
                   </Pressable>
                 </View>
                 <View style={styles.chips}>
+                  {replyWalks.map((key) => (
+                    <Pressable key={key} onPress={() => requestGuideWalk(key)} accessibilityRole="button"
+                      style={[styles.chip, styles.chipPrimary]}>
+                      <Text style={styles.chipText}>Muéstrame</Text>
+                    </Pressable>
+                  ))}
                   {replyChips.map((chip) => (
                     <Pressable key={chip.key} onPress={() => pressReplyChip(chip)} accessibilityRole="button"
                       style={[styles.chip, styles.chipPrimary]}>

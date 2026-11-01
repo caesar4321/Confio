@@ -37,6 +37,7 @@ MAX_EVENTS_PER_DAY = 200
 PERP_OPENED_STATES = ('funded', 'open', 'closed', 'liquidated', 'returning', 'return_failed', 'landed', 'done')
 PREVIEW_SECONDS = 7 * 24 * 3600
 PREVIEW_UNFUNDED = 'as_if_unfunded'
+WALK_PREFIX = 'walk:'
 OPEN_ORDER_DAYS = 3
 TEXT_CACHE_SECONDS = 24 * 3600
 FALLBACK_CACHE_SECONDS = 300
@@ -58,14 +59,27 @@ class TrailStop:
 class Chip:
     label: str
     kind: str  # navigate | probe | dismiss
-    destination: str = ''
-    pointer: str = ''
     answer: str = ''
     trail: tuple = ()
 
 
-def _go(label, destination, pointer=''):
-    return (Chip(label, 'navigate', destination=destination, pointer=pointer), Chip(LATER, 'dismiss'))
+# Nobody is carried anywhere: from wherever they are, the pencil points at the
+# real buttons and they tap the way themselves, so they know it next time.
+_OFF_PATH = (TrailStop('*tab', 'Toca Inicio para seguir.', 'tab_home'),
+             TrailStop('*back', 'Toca la flecha para volver.', 'nav_back'))
+
+
+def _walk(*stops):
+    return (*stops, *_OFF_PATH)
+
+
+def _go(label, *stops):
+    return (Chip(label, 'navigate', trail=_walk(*stops)), Chip(LATER, 'dismiss'))
+
+
+_TO_RECEIVE = TrailStop('Home', 'Toca Recibir.', 'home_receive')
+_TO_USDT = (_TO_RECEIVE, TrailStop('Receive', 'Toca aquí para ver tu dirección de USDT.', 'advanced_receive'))
+_TO_TOP_UP = (_TO_RECEIVE, TrailStop('Receive', 'Toca aquí para crear tu recarga.', 'recharge_now'))
 
 
 @dataclass(frozen=True)
@@ -74,7 +88,6 @@ class Step:
     text: str  # also the fallback when the model doesn't answer
     brief: str = ''  # what the model should say; empty keeps the fixed text
     chips: tuple = ()
-    pointer_text: str = ''
 
 
 STEPS = {
@@ -85,62 +98,65 @@ STEPS = {
     'verify': Step(
         'verify', 'Para recargar, primero necesitas verificar tu identidad.',
         brief='Dile que para recargar primero debe verificar su identidad y pregúntale si empiezan ahora.',
-        chips=_go('Sí, empezar', 'verification', 'verify_start'),
-        pointer_text='Toca aquí para verificar tu identidad.'),
+        chips=_go('Sí, empezar',
+                  TrailStop('Home', 'Toca Perfil.', 'tab_profile'),
+                  TrailStop('Profile', 'Toca Verificación.', 'profile_verification'),
+                  TrailStop('Verification', 'Toca aquí para verificar tu identidad.', 'verify_start'))),
     'verifying': Step('verifying', 'Tu verificación sigue en revisión.'),
     'top_up': Step(
         'top_up', 'Ya puedes recargar.',
-        brief='Dile que ya puede recargar (en la app se llama {entry}) y que la llevas a Recibir para mostrarle dónde tocar. '
-              'Pregúntale si van.',
-        chips=_go('Sí, ir a Recargar', 'receive', 'recharge_now'),
-        pointer_text='Toca aquí para crear tu recarga.'),
+        brief='Dile que ya puede recargar (en la app se llama {entry}) y que le muestras el camino paso a paso. '
+              'Pregúntale si empiezan.',
+        chips=_go('Sí, ir a Recargar', *_TO_TOP_UP)),
     'top_up_update': Step('top_up_update', 'Actualiza Confío para poder recargar con Pago Móvil.'),
     'awaiting_payment': Step(
         'awaiting_payment', 'Tu orden de recarga sigue esperando el pago.',
         brief='Dile que su orden de recarga sigue esperando el pago y pregúntale si le muestras dónde verla.',
-        chips=_go('Sí, muéstrame', 'receive', 'recharge_now'),
-        pointer_text='Toca aquí para ver tu recarga.'),  # the order's row, per country below
+        chips=_go('Sí, muéstrame', _TO_RECEIVE, TrailStop('Receive', 'Toca aquí para ver tu recarga.', 'recharge_now'))),
     'international_soon': Step(
         'international_waitlist', 'La recarga internacional llegará a tu país en unas dos semanas. '
         'Mientras tanto, puedes recibir USDT desde Binance u otra billetera.',
-        chips=_go('Ver cómo recibir USDT', 'receive', 'advanced_receive'),
-        pointer_text='Toca aquí para ver tu dirección de USDT.'),
+        chips=_go('Ver cómo recibir USDT', *_TO_USDT)),
     'international': Step(
         'international_top_up', 'Ya puedes recargar desde tu país.',
-        chips=_go('Sí, ir a Recargar', 'receive', 'recharge_now'),
-        pointer_text='Toca aquí para crear tu recarga.'),
+        chips=_go('Sí, ir a Recargar', *_TO_TOP_UP)),
     'usdt': Step(
         'usdt_only', 'Puedes recibir USDT desde Binance u otra billetera.',
         brief='Dile que puede poner dólares recibiendo USDT desde Binance u otra billetera y pregúntale si le muestras cómo.',
-        chips=_go('Ver cómo recibir USDT', 'receive', 'advanced_receive'),
-        pointer_text='Toca aquí para ver tu dirección de USDT.'),
+        chips=_go('Ver cómo recibir USDT', *_TO_USDT)),
     'send': Step(
         'first_action', '¿Te muestro cómo enviarle a alguien?',
         brief='Dile que ya tiene dólares en Confío y pregúntale si le muestras cómo enviarle a alguien.',
-        chips=_go('Sí, enviar', 'send')),
+        chips=_go('Sí, enviar', TrailStop('Home', 'Toca Enviar.', 'home_send'),
+                  TrailStop('Send', 'Elige a quién quieres enviarle.'))),
     # Fixed on purpose: no generated sentence may lean towards an investment.
     # The options come from _invest_options, each with its walk to the purchase.
     'invest': Step('first_action', '¿Qué te gustaría comprar? Tú eliges, y el precio puede subir o bajar.'),
     'comprar': Step(
         'first_action', '¿Quieres conocer Comprar?',
         brief='Pregúntale si quiere conocer Comprar, donde vendedores verificados venden productos.',
-        chips=_go('Sí, ver Comprar', 'comprar')),
+        chips=_go('Sí, ver Comprar', TrailStop('Home', 'Toca Comprar.', 'tab_comprar'),
+                  TrailStop('Comprar', 'Mira lo que venden y elige lo que quieras.'))),
 }
 # The walk never names an asset: the person picks, the last tap is theirs.
+_TO_INVEST = TrailStop('Home', 'Toca Invertir.', 'tab_invest')
 _CONFIRM = 'Revisa el monto y el costo. Si estás de acuerdo, confirma.'
 INVEST_OPTIONS = {
-    'stocks': Chip('Acciones', 'navigate', destination='invest', answer='stocks', trail=(
+    'stocks': Chip('Acciones', 'navigate', answer='stocks', trail=_walk(
+        _TO_INVEST,
         TrailStop('Invest', 'Toca aquí para ver las acciones.', 'invest_stocks'),
         TrailStop('StocksList', 'Elige la que tú quieras. Yo no te recomiendo ninguna.'),
         TrailStop('StockDetail', 'Si quieres comprarla, toca aquí.', 'asset_buy'),
         TrailStop('BuyStock', _CONFIRM, 'asset_confirm'),
     )),
-    'crypto': Chip('Oro y Bitcoin', 'navigate', destination='invest', answer='crypto', trail=(
+    'crypto': Chip('Oro y Bitcoin', 'navigate', answer='crypto', trail=_walk(
+        _TO_INVEST,
         TrailStop('Invest', 'Elige aquí oro o Bitcoin.', 'invest_crypto'),
         TrailStop('CryptoDetail', 'Si quieres comprarlo, toca aquí.', 'asset_buy'),
         TrailStop('BuyCrypto', _CONFIRM, 'asset_confirm'),
     )),
-    'perps': Chip('Futuros', 'navigate', destination='invest', answer='perps', trail=(
+    'perps': Chip('Futuros', 'navigate', answer='perps', trail=_walk(
+        _TO_INVEST,
         TrailStop('Invest', 'Toca aquí para ver los futuros.', 'invest_futures'),
         TrailStop('FuturesMarkets', 'Elige el mercado que tú quieras. Yo no te recomiendo ninguno.'),
         TrailStop('FuturesMarket', 'Largo gana si sube y corto si baja. Con apalancamiento puedes perder tu margen.'),
@@ -170,7 +186,6 @@ class Guide:
     stage: str
     text: str
     chips: tuple
-    pointer_text: str
     presentation: str = 'bubble'  # full | bubble; the app treats anything else as bubble
 
 
@@ -385,10 +400,11 @@ def _first_meeting(viewer):
 
 def _for_country(step, entry):
     chip = step.chips[0]
-    label = entry.chip if chip.label == 'Sí, ir a Recargar' else chip.label
+    top_up = chip.label == 'Sí, ir a Recargar'
+    trail = tuple(replace(stop, pointer=entry.pointer, text=entry.pointer_text if top_up else stop.text)
+                  if stop.route == 'Receive' else stop for stop in chip.trail)
     return replace(step, brief=step.brief.format(entry=entry.name),
-                   pointer_text=entry.pointer_text if label == entry.chip else step.pointer_text,
-                   chips=(replace(chip, label=label, pointer=entry.pointer), *step.chips[1:]))
+                   chips=(replace(chip, label=entry.chip if top_up else chip.label, trail=trail), *step.chips[1:]))
 
 
 def current(viewer, request_meta, **context):
@@ -413,7 +429,7 @@ def current(viewer, request_meta, **context):
         options = _invest_options(viewer, _state(viewer, request_meta))
         step = replace(step, chips=(*(INVEST_OPTIONS[o] for o in options), Chip(LATER, 'dismiss')))
     return Guide(key=key, stage=step.stage, text=_text(viewer, key, step, **context), chips=step.chips,
-                 pointer_text=step.pointer_text, presentation=presentation)
+                 presentation=presentation)
 
 
 def steering_note(key):
@@ -422,6 +438,77 @@ def steering_note(key):
 
     step = STEPS.get(key)
     return GUIDE_STEERING_NOTE.format(step=step.brief or step.text) if step else ''
+
+
+# Walks on request: anyone, any time, however far along they are. The model only
+# picks a key; the route comes from here, and only if this person can use it.
+WALKS = {
+    'top_up': 'Recargar dinero en su cuenta Confío',
+    'usdt': 'Recibir USDT desde Binance u otra billetera',
+    'verify': 'Verificar su identidad',
+    'send': 'Enviarle dinero a otra persona',
+    'withdraw': 'Retirar a su propia cuenta bancaria',
+    'pay_qr': 'Pagar con un código QR',
+    'share_number': 'Compartir su usuario para que le envíen dinero',
+    'stocks': 'Comprar acciones',
+    'crypto': 'Comprar oro o Bitcoin',
+    'perps': 'Abrir una posición en futuros',
+    'comprar': 'Comprar productos en Comprar',
+}
+_WITHDRAW = (TrailStop('Home', 'Toca Enviar.', 'home_send'),
+             TrailStop('Send', 'Toca aquí para retirar a tu cuenta.', 'own_account'))
+_PAY_QR = (TrailStop('Home', 'Toca Pagar.', 'tab_pay'), TrailStop('Scan', 'Apunta la cámara al código QR.'))
+_SHARE = (_TO_RECEIVE, TrailStop('Receive', 'Toca aquí para compartir tu usuario.', 'username_share'))
+
+
+def _can_withdraw(country):
+    from ramps.koywe import get_country_ramp_config
+
+    config = get_country_ramp_config(country) or {}
+    return any(method.get('supports_off_ramp') for method in config.get('methods', []))
+
+
+def walks_on_this_build(request_meta):
+    from django.conf import settings
+
+    from users.paid_offers import _version
+
+    floor = _version(getattr(settings, 'ASSISTANT_WALKS_MIN_APP_VERSION', '5.3.4'))
+    version = _version(str((request_meta or {}).get('HTTP_X_CONFIO_VERSION', '') or ''))
+    return floor is not None and version is not None and version >= floor
+
+
+def walk_trail(viewer, key, request_meta):
+    """The steps for this person now, or None if they can't do this. Read when
+    the button is tapped, so an old message can't lead somewhere that changed."""
+    from ramps.koywe import on_ramp_paused, on_ramp_rejection_locked
+
+    if viewer.user is None or viewer.account_type == 'business' or key not in WALKS:
+        return None
+    country = (country_of(viewer.user) or '').upper()
+    state = _state(viewer, request_meta)
+    if key == 'top_up':
+        if (topup_route(country) != 'local' or on_ramp_paused(country)
+                or on_ramp_rejection_locked(viewer.user)):
+            return None
+        step = _for_country(STEPS['top_up'], topup_entry(country, viewer.user, request_meta))
+        return step.chips[0].trail
+    if key == 'usdt':
+        return STEPS['usdt'].chips[0].trail
+    if key == 'verify':
+        from .engine import _identity_status
+        return None if _identity_status(viewer) == 'verified' else STEPS['verify'].chips[0].trail
+    if key == 'send':
+        return STEPS['send'].chips[0].trail
+    if key == 'withdraw':
+        return _walk(*_WITHDRAW) if _can_withdraw(country) else None
+    if key == 'pay_qr':
+        return _walk(*_PAY_QR)
+    if key == 'share_number':
+        return _walk(*_SHARE)
+    if key == 'comprar':
+        return STEPS['comprar'].chips[0].trail if _ladder_usable(viewer, state, 'comprar') else None
+    return INVEST_OPTIONS[key].trail if key in _invest_options(viewer, state) else None
 
 
 def prune_guide_events(cutoff):
@@ -435,15 +522,19 @@ def prune_guide_events(cutoff):
 def record_event(viewer, key, event, *, answer=None, funded=False, detail=''):
     from .models import AssistantGuideEvent, AssistantGuideStep
 
-    if key not in STEPS or event not in EVENTS:
+    requested = key.startswith(WALK_PREFIX) and key[len(WALK_PREFIX):] in WALKS
+    if (key not in STEPS and not requested) or event not in EVENTS:
         raise ValueError('Evento no válido')
     now = timezone.now()
     today = AssistantGuideEvent.objects.filter(user=viewer.user, created_at__gte=now - timedelta(days=1)).count()
     if today >= MAX_EVENTS_PER_DAY:
         return
-    AssistantGuideEvent.objects.create(user=viewer.user, step=key, stage=STEPS[key].stage, event=event,
+    AssistantGuideEvent.objects.create(user=viewer.user, step=key, stage='requested' if requested else STEPS[key].stage,
+                                       event=event,
                                        detail=(detail or '')[:40],
                                        country=(country_of(viewer.user) or '')[:2].upper())
+    if requested:
+        return  # asked for by the person: the guide's own steps don't rest for it
     row, _ = AssistantGuideStep.objects.get_or_create(user=viewer.user, step=key)
     if event == 'shown':
         AssistantGuideStep.objects.filter(pk=row.pk).update(shown_count=F('shown_count') + 1, shown_at=now)

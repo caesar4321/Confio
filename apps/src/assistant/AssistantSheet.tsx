@@ -46,6 +46,7 @@ import {
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
 import { PAID_OFFER_KEYS, openDestination, resolveNavigate } from './destinations';
+import { requestGuideWalk } from './guidePointer';
 import MascotPicker from './MascotPicker';
 import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
@@ -86,6 +87,31 @@ function formatClock(ms: number) {
 }
 
 type OpenTarget = { key: string; ticker?: string; label: string };
+
+function WalkChips({ actions, onClose }: { actions: AssistantAction[]; onClose: () => void }) {
+  const walks = actions.filter((a) => a.type === 'walk' && a.target);
+  if (!walks.length) {
+    return null;
+  }
+  return (
+    <View style={styles.chipsRow}>
+      {walks.map((a) => (
+        <Pressable
+          key={a.target}
+          onPress={() => {
+            onClose();
+            requestGuideWalk(a.target as string);
+          }}
+          style={styles.actionChip}
+          accessibilityRole="button"
+        >
+          <Text style={styles.actionChipText}>{a.label || 'Muéstrame'}</Text>
+          <Icon name="edit-2" size={14} color={EMERALD} />
+        </Pressable>
+      ))}
+    </View>
+  );
+}
 
 function ActionChips({ actions, onPress }: { actions: AssistantAction[]; onPress: (target: OpenTarget) => void }) {
   const known = actions
@@ -143,7 +169,7 @@ function TypingDots() {
   );
 }
 
-function Bubble({ message, onAction, pet }: { message: AssistantMessage; onAction: (target: OpenTarget) => void; pet: PetFace }) {
+function Bubble({ message, onAction, onWalk, pet }: { message: AssistantMessage; onAction: (target: OpenTarget) => void; onWalk: () => void; pet: PetFace }) {
   const mine = message.role === 'user';
   const team = message.role === 'team';
   const ai = message.role === 'assistant';
@@ -169,6 +195,7 @@ function Bubble({ message, onAction, pet }: { message: AssistantMessage; onActio
         {message.pending ? <ActivityIndicator size="small" color="#D1FAE5" style={styles.pending} /> : null}
       </View>
       {!mine ? <ActionChips actions={message.actions} onPress={onAction} /> : null}
+      {!mine ? <WalkChips actions={message.actions} onClose={onWalk} /> : null}
     </View>
     </View>
   );
@@ -997,7 +1024,7 @@ export default function AssistantSheet() {
             data={reversed}
             inverted
             keyExtractor={(m) => m.id}
-            renderItem={({ item }) => <Bubble message={item} onAction={runAction} pet={aiEnabled ? profile : null} />}
+            renderItem={({ item }) => <Bubble message={item} onAction={runAction} onWalk={close} pet={aiEnabled ? profile : null} />}
             contentContainerStyle={styles.list}
             onEndReached={loadOlder}
             onEndReachedThreshold={0.3}

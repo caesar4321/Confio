@@ -1,3 +1,4 @@
+import { reportGuideTap, useGuideAnchor, useScrollToGuidePointer } from '../assistant/guidePointer';
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, AppState, AppStateStatus } from 'react-native';
 import { Text } from '../components/common/AppText';
@@ -31,6 +32,9 @@ import { formatDecimal } from '../utils/numberLocale';
 type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const ProfileScreen = () => {
+  const verificationAnchor = useGuideAnchor('profile_verification');
+  const scrollRef = React.useRef<ScrollView>(null);
+  const onGuideScroll = useScrollToGuidePointer(scrollRef);
   const { signOut, userProfile, isUserProfileLoading } = useAuth();
   const { activeAccount, accounts, isLoading: accountsLoading, refreshAccounts } = useAccount();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
@@ -414,7 +418,7 @@ export const ProfileScreen = () => {
 
   return (
     <>
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <ScrollView ref={scrollRef} onScroll={onGuideScroll} scrollEventThrottle={32} style={styles.container} contentContainerStyle={styles.scrollContent}>
         {/* Header Section — brand field: same vertical gradient + coin ring
             family as Home; top edge is exactly colors.heroField so it meets the
             flat nav header without a seam. Padding lives on headerInner (Yoga
@@ -682,8 +686,12 @@ export const ProfileScreen = () => {
               </TouchableOpacity>
             )}
             <TouchableOpacity
+              ref={verificationAnchor}
               style={styles.cardOption}
-              onPress={() => navigation.navigate('Verification')}
+              onPress={() => {
+                reportGuideTap('profile_verification');
+                navigation.navigate('Verification');
+              }}
             >
               <Icon name="user-check" size={18} color={colors.text.secondary} />
               <Text style={styles.cardOptionText}>Verificación</Text>

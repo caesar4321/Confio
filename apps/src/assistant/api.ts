@@ -161,10 +161,15 @@ export const GET_ASSISTANT_GUIDE = gql`
       step
       stage
       text
-      pointerText
       presentation
-      chips { label kind destination pointer answer trail { route text pointer } }
+      chips { label kind answer trail { route text pointer } }
     }
+  }
+`;
+
+export const GET_ASSISTANT_WALK = gql`
+  query GetAssistantWalk($key: String!) {
+    assistantWalk(key: $key) { key trail { route text pointer } }
   }
 `;
 
@@ -178,8 +183,6 @@ export type AssistantGuideTrailStop = { route: string; text: string; pointer: st
 export type AssistantGuideChip = {
   label: string;
   kind: string;
-  destination: string;
-  pointer: string;
   answer: string;
   trail: AssistantGuideTrailStop[];
 };
@@ -187,7 +190,6 @@ export type AssistantGuide = {
   step: string;
   stage: string;
   text: string;
-  pointerText: string;
   presentation: string;
   chips: AssistantGuideChip[];
 };

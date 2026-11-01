@@ -1,3 +1,4 @@
+import GuideAnchorView from '../assistant/GuideAnchorView';
 import React, { useCallback, useMemo } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
@@ -97,9 +98,11 @@ export const BottomTabNavigator = () => {
       <Text style={{ color: '#10B981', fontSize: 12, fontWeight: '600' }}>Pagar</Text>
     ),
     tabBarIcon: () => (
-      <View style={styles.payButton}>
-        <QrPayIcon size={32} color="#fff" />
-      </View>
+      <GuideAnchorView id="tab_pay">
+        <View style={styles.payButton}>
+          <QrPayIcon size={32} color="#fff" />
+        </View>
+      </GuideAnchorView>
     ),
     tabBarAccessibilityLabel: 'Pagar con QR',
     tabBarButton: !canSendFunds ? () => null : undefined,
@@ -155,7 +158,7 @@ export const BottomTabNavigator = () => {
             header: () => <HomeHeader />,
             freezeOnBlur: true,
             tabBarLabel: 'Inicio',
-            tabBarIcon: ({ color, size }: any) => <Icon name="home" size={size} color={color} />
+            tabBarIcon: ({ color, size }: any) => <GuideAnchorView id="tab_home"><Icon name="home" size={size} color={color} /></GuideAnchorView>
           }}
         />
         <Tabs.Screen
@@ -177,7 +180,7 @@ export const BottomTabNavigator = () => {
               />
             ),
             tabBarLabel: 'Invertir',
-            tabBarIcon: ({ color, size }) => <Icon name="trending-up" size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => <GuideAnchorView id="tab_invest"><Icon name="trending-up" size={size} color={color} /></GuideAnchorView>,
             tabBarBadge: investBadge === null ? undefined : investBadge,
             tabBarBadgeStyle: investBadge === ''
               ? { minWidth: 10, maxHeight: 10, borderRadius: 5, backgroundColor: colors.secondary }
@@ -217,7 +220,7 @@ export const BottomTabNavigator = () => {
               />
             ),
             tabBarLabel: 'Comprar',
-            tabBarIcon: ({ color, size }) => <Icon name="shopping-bag" size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => <GuideAnchorView id="tab_comprar"><Icon name="shopping-bag" size={size} color={color} /></GuideAnchorView>,
           }}
         />
         <Tabs.Screen 
@@ -226,7 +229,7 @@ export const BottomTabNavigator = () => {
           options={{
             header: () => <ProfileHeader />,
             tabBarLabel: 'Perfil',
-            tabBarIcon: ({ color, size }: any) => <Icon name="user" size={size} color={color} />
+            tabBarIcon: ({ color, size }: any) => <GuideAnchorView id="tab_profile"><Icon name="user" size={size} color={color} /></GuideAnchorView>
           }}
         />
       </Tabs.Navigator>

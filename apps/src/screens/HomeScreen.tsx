@@ -1,3 +1,4 @@
+import { reportGuideTap, useGuideAnchor } from '../assistant/guidePointer';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
@@ -118,6 +119,8 @@ interface QuickAction {
 }
 
 export const HomeScreen = () => {
+  const sendAnchor = useGuideAnchor('home_send');
+  const receiveAnchor = useGuideAnchor('home_receive');
   // Re-render when the user's country (number format) resolves after mount.
   useNumberLocale();
   const navigation = useNavigation<HomeScreenNavigationProp>();
@@ -1268,8 +1271,12 @@ export const HomeScreen = () => {
                 return (
                   <TouchableOpacity
                     key={action.id}
+                    ref={action.id === 'send' ? sendAnchor : receiveAnchor}
                     style={[styles.heroAction, filled ? styles.heroActionFilled : styles.heroActionGlass]}
-                    onPress={action.route}
+                    onPress={() => {
+                      reportGuideTap(action.id === 'send' ? 'home_send' : 'home_receive');
+                      action.route();
+                    }}
                     activeOpacity={0.85}
                     accessibilityRole="button"
                     accessibilityLabel={action.label}

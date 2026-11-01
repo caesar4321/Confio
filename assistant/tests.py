@@ -2402,6 +2402,38 @@ class GuideStepTests(TestCase):
         self.assertEqual(self._key(country='VE', identity='other_country'), 'top_up')
         self.assertEqual(self._key(country='PE', identity='other_country'), 'verify')
 
+    def test_walks_only_where_the_person_can_use_them(self):
+        from . import guide
+        state = SimpleNamespace(personal=True, employee=False, funded=True, country='BO', ondo_eligible=True,
+                                topup_in_progress=False)
+        with patch.object(guide, '_state', return_value=state), \
+                patch('ramps.koywe.on_ramp_paused', return_value=False), \
+                patch('ramps.koywe.on_ramp_rejection_locked', return_value=False), \
+                patch.object(guide, 'topup_entry', return_value=guide.topup_entry.__globals__['DEFAULT_TOPUP_ENTRY']), \
+                patch.object(guide, '_invest_options', return_value=['crypto']):
+            viewer = self._viewer()
+            self.assertEqual(guide.walk_trail(viewer, 'top_up', {})[0].pointer, 'home_receive')
+            self.assertEqual(guide.walk_trail(viewer, 'pay_qr', {})[0].pointer, 'tab_pay')
+            self.assertIsNone(guide.walk_trail(viewer, 'withdraw', {}))
+            self.assertIsNone(guide.walk_trail(viewer, 'stocks', {}))
+            self.assertIsNotNone(guide.walk_trail(viewer, 'crypto', {}))
+            self.assertIsNone(guide.walk_trail(viewer, 'nothing', {}))
+            self.user.phone_country = 'HN'
+            self.assertIsNone(guide.walk_trail(viewer, 'top_up', {}))
+
+    def test_a_requested_walk_leaves_the_guides_own_step_alone(self):
+        from . import guide
+        from .models import AssistantGuideEvent, AssistantGuideStep
+        guide.record_event(self._viewer(), 'walk:top_up', 'accepted')
+        self.assertEqual(AssistantGuideEvent.objects.get(user=self.user).stage, 'requested')
+        self.assertFalse(AssistantGuideStep.objects.filter(user=self.user).exists())
+
+    def test_the_tool_only_exists_on_a_build_that_can_run_it(self):
+        from . import guide
+        self.assertFalse(guide.walks_on_this_build({'HTTP_X_CONFIO_VERSION': '5.3.3'}))
+        self.assertTrue(guide.walks_on_this_build({'HTTP_X_CONFIO_VERSION': '5.3.4'}))
+        self.assertFalse(guide.walks_on_this_build({}))
+
     def test_every_event_lands_in_the_funnel(self):
         from . import guide
         from .models import AssistantGuideEvent
@@ -2428,10 +2460,13 @@ class GuideStepTests(TestCase):
 
     def test_every_pointer_is_a_button_the_app_registers(self):
         from . import guide, rails
-        pointers = {c.pointer for s in guide.STEPS.values() for c in s.chips if c.pointer}
+        pointers = {t.pointer for s in guide.STEPS.values() for c in s.chips for t in c.trail if t.pointer}
         pointers |= {t.pointer for c in guide.INVEST_OPTIONS.values() for t in c.trail if t.pointer}
         registered = {'recharge_now', 'advanced_receive', 'verify_start', 've_pagomovil_receive', 'bo_qr_receive',
-                      'invest_stocks', 'invest_crypto', 'invest_futures', 'asset_buy', 'asset_confirm'}
+                      'invest_stocks', 'invest_crypto', 'invest_futures', 'asset_buy', 'asset_confirm',
+                      'home_send', 'home_receive', 'tab_home', 'tab_invest', 'tab_comprar', 'tab_profile',
+                      'profile_verification', 'nav_back', 'own_account', 'tab_pay', 'username_share'}
+        pointers |= {t.pointer for t in (*guide._WITHDRAW, *guide._PAY_QR, *guide._SHARE) if t.pointer}
         self.assertLessEqual(pointers | {e.pointer for e in rails.TOPUP_ENTRIES.values()}, registered)
 
     def test_opening_offers_each_job_once_and_only_where_it_exists(self):
@@ -2479,7 +2514,7 @@ class GuideStepTests(TestCase):
     def test_no_walk_names_an_asset_and_each_ends_at_the_real_confirm(self):
         from . import guide
         for chip in guide.INVEST_OPTIONS.values():
-            self.assertEqual(chip.trail[-1].pointer, 'asset_confirm')
+            self.assertEqual([t for t in chip.trail if not t.route.startswith('*')][-1].pointer, 'asset_confirm')
             for stop in chip.trail:
                 self.assertNotRegex(stop.text, r'\b[A-Z]{2,5}\b')
 
@@ -2488,14 +2523,24 @@ class GuideStepTests(TestCase):
 
         def chip(country, replaced=False):
             with patch('ramps.bolivia_qr.koywe_replaced', return_value={'top_up': replaced}):
-                return guide._for_country(guide.STEPS['top_up'], rails.topup_entry(country, self.user, {}))
+                step = guide._for_country(guide.STEPS['top_up'], rails.topup_entry(country, self.user, {}))
+            return step.chips[0], next(t for t in step.chips[0].trail if t.route == 'Receive')
 
-        self.assertEqual(chip('PE').chips[0].pointer, 'recharge_now')
-        self.assertEqual(chip('BO').chips[0].pointer, 'recharge_now')
-        self.assertEqual(chip('BO', replaced=True).chips[0].pointer, 'bo_qr_receive')
-        self.assertEqual(chip('BO', replaced=True).chips[0].label, 'Sí, ir a QR Bolivia')
-        self.assertEqual(chip('VE').chips[0].pointer, 've_pagomovil_receive')
-        self.assertIn('Pago Móvil', chip('VE').pointer_text)
+        self.assertEqual(chip('PE')[1].pointer, 'recharge_now')
+        self.assertEqual(chip('BO')[1].pointer, 'recharge_now')
+        self.assertEqual(chip('BO', replaced=True)[1].pointer, 'bo_qr_receive')
+        self.assertEqual(chip('BO', replaced=True)[0].label, 'Sí, ir a QR Bolivia')
+        self.assertEqual(chip('VE')[1].pointer, 've_pagomovil_receive')
+        self.assertIn('Pago Móvil', chip('VE')[1].text)
+
+    def test_every_walk_starts_on_inicio_and_can_find_its_way_back(self):
+        from . import guide
+        chips = [c for s in guide.STEPS.values() for c in s.chips if c.kind == 'navigate']
+        chips += list(guide.INVEST_OPTIONS.values())
+        self.assertTrue(chips)
+        for chip in chips:
+            self.assertEqual(chip.trail[0].route, 'Home')
+            self.assertEqual({t.route for t in chip.trail if t.route.startswith('*')}, {'*tab', '*back'})
 
     def test_model_text_with_a_new_number_falls_back(self):
         from . import guide
