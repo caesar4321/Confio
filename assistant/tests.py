@@ -2416,7 +2416,7 @@ class GuideStepTests(TestCase):
         from . import guide, rails
         pointers = {c.pointer for s in guide.STEPS.values() for c in s.chips if c.pointer}
         pointers |= {t.pointer for c in guide.INVEST_OPTIONS.values() for t in c.trail if t.pointer}
-        registered = {'recharge_now', 'advanced_receive', 'verify_start', 'receive_ve_pagomovil', 'receive_bo_qr',
+        registered = {'recharge_now', 'advanced_receive', 'verify_start', 've_pagomovil_receive', 'bo_qr_receive',
                       'invest_stocks', 'invest_crypto', 'invest_futures', 'asset_buy', 'asset_confirm'}
         self.assertLessEqual(pointers | {e.pointer for e in rails.TOPUP_ENTRIES.values()}, registered)
 
@@ -2478,10 +2478,10 @@ class GuideStepTests(TestCase):
 
         self.assertEqual(chip('PE').chips[0].pointer, 'recharge_now')
         self.assertEqual(chip('BO').chips[0].pointer, 'recharge_now')
-        self.assertEqual(chip('BO', replaced=True).chips[0].pointer, 'receive_bo_qr')
+        self.assertEqual(chip('BO', replaced=True).chips[0].pointer, 'bo_qr_receive')
         self.assertEqual(chip('BO', replaced=True).chips[0].label, 'Sí, ir a QR Bolivia')
-        self.assertEqual(chip('VE').chips[0].pointer, 'receive_ve_pagomovil')
-        self.assertIn('Pago móvil', chip('VE').pointer_text)
+        self.assertEqual(chip('VE').chips[0].pointer, 've_pagomovil_receive')
+        self.assertIn('Pago Móvil', chip('VE').pointer_text)
 
     def test_model_text_with_a_new_number_falls_back(self):
         from . import guide

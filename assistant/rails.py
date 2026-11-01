@@ -16,8 +16,9 @@ GUARDARIAN_UNSUPPORTED = frozenset("""
 
 @dataclass(frozen=True)
 class TopupEntry:
-    """Where a country starts a top-up. `pointer` is the row's id on Recibir:
-    the app circles any row by id, so changing it here needs no build."""
+    """Where a country starts a top-up. `pointer` is the row's id on Recibir: a
+    live rail's method id (localMoneyMethods), not the receive_* "coming soon"
+    probe. The app circles any row by id, so changing it here needs no build."""
     name: str = 'Recargar ahora'
     pointer: str = 'recharge_now'
     chip: str = 'Sí, ir a Recargar'
@@ -26,11 +27,11 @@ class TopupEntry:
 
 DEFAULT_TOPUP_ENTRY = TopupEntry()
 TOPUP_ENTRIES = {
-    'VE': TopupEntry(name='Pago móvil', pointer='receive_ve_pagomovil', chip='Sí, ir a Pago móvil',
-                     pointer_text='Toca aquí para recargar con Pago móvil.'),
+    'VE': TopupEntry(name='Pago Móvil', pointer='ve_pagomovil_receive', chip='Sí, ir a Pago Móvil',
+                     pointer_text='Toca aquí para recargar con Pago Móvil.'),
 }
 # Bolivia moves to this one by itself once its partner is approved.
-BOLIVIA_QR_ENTRY = TopupEntry(name='QR Bolivia', pointer='receive_bo_qr', chip='Sí, ir a QR Bolivia',
+BOLIVIA_QR_ENTRY = TopupEntry(name='QR Bolivia', pointer='bo_qr_receive', chip='Sí, ir a QR Bolivia',
                               pointer_text='Toca aquí para recargar con QR Bolivia.')
 
 
