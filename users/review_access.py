@@ -81,7 +81,7 @@ def apply_review_access(user, country: str, token: str, meta=None) -> tuple[bool
                     cursor.execute("SELECT pg_advisory_xact_lock(hashtext('review_link_cap'))")
             month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             granted = ReviewAccess.objects.filter(geo_exempt=True, created_at__gte=month_start).count()
-            if granted >= int(getattr(settings, 'REVIEW_LINK_MONTHLY_CAP', 10)):
+            if granted >= int(getattr(settings, 'REVIEW_LINK_MONTHLY_CAP', 50)):
                 return False, 'Este enlace ya no está disponible este mes.'
         user.refresh_from_db(fields=['country', 'country_source'])
         previous = ReviewAccess.objects.filter(user_id=user.pk).order_by('-created_at').first()
