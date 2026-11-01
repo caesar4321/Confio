@@ -2388,6 +2388,20 @@ class GuideStepTests(TestCase):
         guide.prune_guide_events(timezone.now() - timedelta(days=90))
         self.assertEqual(list(AssistantGuideEvent.objects.values_list('pk', flat=True)), [fresh.pk])
 
+    def test_a_test_account_leaves_the_opening_with_its_real_identity(self):
+        from . import guide
+        cache.clear()
+        with override_settings(ASSISTANT_GUIDE_PREVIEW_USER_IDS=(self.user.pk,)):
+            guide.set_preview(self.user.pk, 'opening')
+            guide.record_event(self._viewer(), 'opening', 'accepted', answer='savings')
+            self.assertEqual(self._key(funded=True, identity='unverified'), 'verify')
+            self.assertEqual(self._key(funded=True, identity='verified'), 'top_up')
+
+    def test_venezuela_accepts_a_document_from_another_country(self):
+        self._answer()
+        self.assertEqual(self._key(country='VE', identity='other_country'), 'top_up')
+        self.assertEqual(self._key(country='PE', identity='other_country'), 'verify')
+
     def test_every_event_lands_in_the_funnel(self):
         from . import guide
         from .models import AssistantGuideEvent

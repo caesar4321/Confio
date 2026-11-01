@@ -36,6 +36,7 @@ MAX_EVENTS_PER_DAY = 200
 # A position that really reached Hyperliquid, not a refunded attempt.
 PERP_OPENED_STATES = ('funded', 'open', 'closed', 'liquidated', 'returning', 'return_failed', 'landed', 'done')
 PREVIEW_SECONDS = 7 * 24 * 3600
+PREVIEW_UNFUNDED = 'as_if_unfunded'
 OPEN_ORDER_DAYS = 3
 TEXT_CACHE_SECONDS = 24 * 3600
 FALLBACK_CACHE_SECONDS = 300
@@ -217,6 +218,9 @@ def _unfunded_key(viewer, state, answer):
         # "pending" also covers a session never finished: that one still has a step.
         latest = personal_documents(viewer.user).order_by('-created_at').first()
         return 'verifying' if _didit_stage(latest) == 'in_review' else 'verify'
+    # Venezuela's top-up takes any verified document, not one from Venezuela.
+    if identity == 'other_country' and state.country == 'VE':
+        return 'top_up'
     return 'top_up' if identity == 'verified' else 'verify'
 
 
@@ -296,6 +300,11 @@ def current_key(viewer, request_meta):
         previewed = cache.get(_preview_key(viewer.user.pk))
         if previewed in STEPS:
             return previewed
+        if previewed == PREVIEW_UNFUNDED:
+            state = _state(viewer, request_meta)
+            answer = ProbeAnswer.objects.filter(user=viewer.user, probe_id=PROBE_ID).values_list(
+                'answer', flat=True).first()
+            return _unfunded_key(viewer, state, answer)
     state = _state(viewer, request_meta)
     if not state.personal or state.employee:
         return None
@@ -444,6 +453,7 @@ def record_event(viewer, key, event, *, answer=None, funded=False, detail=''):
         AssistantGuideStep.objects.filter(pk=row.pk).update(accepted_at=now)
         if key == 'opening' and answer:
             record_probe_answer(viewer.user, PROBE_ID, answer, funded=funded)
-            # A test account walks on from the first meeting to the bubble.
+            # A test account walks on from the first meeting as a new person
+            # would: its real identity decides, only its money is ignored.
             if is_preview_user(viewer.user.pk) and cache.get(_preview_key(viewer.user.pk)) == 'opening':
-                set_preview(viewer.user.pk, 'top_up')
+                cache.set(_preview_key(viewer.user.pk), PREVIEW_UNFUNDED, PREVIEW_SECONDS)
