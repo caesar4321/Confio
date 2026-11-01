@@ -38,6 +38,7 @@ PERP_OPENED_STATES = ('funded', 'open', 'closed', 'liquidated', 'returning', 're
 PREVIEW_SECONDS = 7 * 24 * 3600
 OPEN_ORDER_DAYS = 3
 TEXT_CACHE_SECONDS = 24 * 3600
+FALLBACK_CACHE_SECONDS = 300
 MAX_TEXT_CHARS = 240
 EVENTS = {'shown', 'accepted', 'dismissed', 'replied', 'opened', 'pointer_shown', 'pointer_missing',
           'pointer_tapped', 'pointer_closed'}
@@ -358,9 +359,9 @@ def _text(viewer, key, step, **context):
     except Exception:  # noqa: BLE001 - the card never waits on the model
         logger.warning('assistant guide: wording unavailable for %s', key, exc_info=True)
         text = None
-    text = text or step.text
-    cache.set(cache_key, text, TEXT_CACHE_SECONDS)
-    return text
+    # A miss is only remembered briefly: the next app start can get the real one.
+    cache.set(cache_key, text or step.text, TEXT_CACHE_SECONDS if text else FALLBACK_CACHE_SECONDS)
+    return text or step.text
 
 
 def _for_country(step, entry):
