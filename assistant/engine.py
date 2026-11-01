@@ -398,10 +398,10 @@ def _is_roadmap_question(text):
 
 def is_tapped_text(message):
     """An informational suggestion or a first-use probe answer, sent by a tap."""
-    from .suggestions import PROBE_ANSWERS
+    from .suggestions import GUIDE_ANSWERS, PROBE_ANSWERS
 
     text = ' '.join((message or '').lower().split())
-    return text in INFORMATIONAL_PROMPTS or text in {label.lower() for _, label in PROBE_ANSWERS}
+    return text in INFORMATIONAL_PROMPTS or text in {label.lower() for _, label in PROBE_ANSWERS + GUIDE_ANSWERS}
 
 
 # While the team owns a thread, the assistant still answers a plain question

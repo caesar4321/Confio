@@ -2420,6 +2420,20 @@ class GuideStepTests(TestCase):
                       'invest_stocks', 'invest_crypto', 'invest_futures', 'asset_buy', 'asset_confirm'}
         self.assertLessEqual(pointers | {e.pointer for e in rails.TOPUP_ENTRIES.values()}, registered)
 
+    def test_opening_offers_each_job_once_and_only_where_it_exists(self):
+        from . import guide
+        answers = [c.answer for c in guide.STEPS['opening'].chips]
+        self.assertEqual(answers, ['savings', 'family', 'invest', 'comprar', 'usdt'])
+        state = SimpleNamespace(personal=True, employee=False, funded=False, country='GT', ondo_eligible=False,
+                                topup_in_progress=False)
+        with patch.object(guide, '_state', return_value=state), \
+                patch.object(guide, 'current_key', return_value='opening'), \
+                patch.object(guide, '_text', return_value='x'), \
+                patch.object(guide, '_invest_options', return_value=['crypto']), \
+                patch('marketplace.checkout.live_city_names', return_value=[]):
+            chips = guide.current(self._viewer(), {}).chips
+        self.assertEqual([c.answer for c in chips], ['savings', 'family', 'invest', 'usdt'])
+
     def test_invest_never_goes_through_the_model(self):
         from . import guide
         self.assertEqual(guide.STEPS['invest'].brief, '')

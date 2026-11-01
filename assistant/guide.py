@@ -23,7 +23,7 @@ from security.geo import country_of
 
 from . import conf
 from .rails import topup_entry, topup_route
-from .suggestions import PROBE_ANSWERS, PROBE_ID, _didit_stage, _state, record_probe_answer
+from .suggestions import GUIDE_ANSWERS, PROBE_ID, _didit_stage, _state, record_probe_answer
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,6 @@ FALLBACK_CACHE_SECONDS = 300
 MAX_TEXT_CHARS = 240
 EVENTS = {'shown', 'accepted', 'dismissed', 'replied', 'opened', 'pointer_shown', 'pointer_missing',
           'pointer_tapped', 'pointer_closed'}
-# Chips of the opening question that fit the card; typing covers the rest.
-OPENING_ANSWERS = ('devaluation', 'family', 'savings', 'usdt')
 LATER = 'Ahora no'
 
 
@@ -78,12 +76,11 @@ class Step:
     pointer_text: str = ''
 
 
-_opening_labels = dict(PROBE_ANSWERS)
 STEPS = {
     'opening': Step(
         'opening', '¿Para qué te gustaría usar Confío?',
         brief='Salúdala por su nombre, di que eres su asistente y pregúntale para qué le gustaría usar Confío.',
-        chips=tuple(Chip(_opening_labels[k], 'probe', answer=k) for k in OPENING_ANSWERS)),
+        chips=tuple(Chip(label, 'probe', answer=key) for key, label in GUIDE_ANSWERS)),
     'verify': Step(
         'verify', 'Para recargar, primero necesitas verificar tu identidad.',
         brief='Dile que para recargar primero debe verificar su identidad y pregúntale si empiezan ahora.',
@@ -151,6 +148,8 @@ INVEST_OPTIONS = {
 }
 COUNTRY_ENTRY_STEPS = {'top_up', 'awaiting_payment'}
 LADDERS = {
+    'invest': ('invest', 'send', 'comprar'),
+    'comprar': ('comprar', 'send', 'invest'),
     'family': ('send', 'invest', 'comprar'),
     'devaluation': ('invest', 'send', 'comprar'),
     'savings': ('invest', 'send', 'comprar'),
@@ -380,6 +379,10 @@ def current(viewer, request_meta, **context):
     step = STEPS[key]
     if key in COUNTRY_ENTRY_STEPS:
         step = _for_country(step, topup_entry(context.get('country'), viewer.user, request_meta))
+    if key == 'opening':
+        state = _state(viewer, request_meta)
+        hidden = {job for job in ('invest', 'comprar') if not _ladder_usable(viewer, state, job)}
+        step = replace(step, chips=tuple(c for c in step.chips if c.answer not in hidden))
     if key == 'invest':
         options = _invest_options(viewer, _state(viewer, request_meta))
         step = replace(step, chips=(*(INVEST_OPTIONS[o] for o in options), Chip(LATER, 'dismiss')))

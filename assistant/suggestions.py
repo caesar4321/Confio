@@ -37,7 +37,15 @@ PROBE_ANSWERS = [
     ('pay', 'Pagar en comercios'),
     ('other', 'Otra cosa'),
 ]
-PROBE_KEYS = {key for key, _ in PROBE_ANSWERS}
+# The guide's opening chips: one saving answer, plus the app's two other jobs.
+GUIDE_ANSWERS = [
+    ('savings', 'Ahorrar en dólares'),
+    ('family', 'Enviar o recibir dinero de mi familia'),
+    ('invest', 'Invertir'),
+    ('comprar', 'Comprar'),
+    ('usdt', 'Ya tengo dólares (Binance u otra)'),
+]
+PROBE_KEYS = {key for key, _ in PROBE_ANSWERS + GUIDE_ANSWERS}
 # An unfinished identity verification is worth a nudge for this long.
 VERIFICATION_NUDGE_DAYS = 14
 MAX_STARTERS = 4
