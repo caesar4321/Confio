@@ -1,3 +1,4 @@
+import { withExitBuffer, withoutExitBuffer } from '../stockFeeMath';
 import {
   buyRequirement,
   buySpendForGross,
@@ -49,5 +50,18 @@ describe('stockFeeMath', () => {
   it('formats the percent for display', () => {
     expect(feePercent(V2)).toBe(0.9);
     expect(feePercent(LEGACY)).toBe(0.3);
+  });
+});
+
+describe('exit buffer', () => {
+  it('asks for enough to survive USDT a hair above a dollar', () => {
+    const gross = 100n * 10n ** 18n;
+    const netAtLivePremium = (withExitBuffer(gross) * 99995n) / 100000n; // 0.5 bps short
+    expect(netAtLivePremium).toBeGreaterThan(gross);
+  });
+
+  it('keeps a whole-balance purchase inside the balance', () => {
+    const balance = 100n * 10n ** 18n;
+    expect(withExitBuffer(withoutExitBuffer(balance))).toBeLessThanOrEqual(balance + 1n);
   });
 });

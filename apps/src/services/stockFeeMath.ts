@@ -47,6 +47,26 @@ export const buyRequirement = (
   return { requiredGrossWei: spendWei + fee, feeWei: fee, minUsdtOutWei: spendWei + fee };
 };
 
+/**
+ * cUSD+ redeems through Ondo at the live USDT rate, while our prediction treats
+ * USDT as exactly one dollar. With USDT a hair above it the exit nets less than
+ * predicted (0.48 bps on 2026-11-01, which refused every purchase). The router
+ * returns what is left over as USDT, but the vault's fee applies to the whole
+ * exit, so this stays small: ten times what was measured, not a round margin.
+ */
+export const EXIT_RATE_BUFFER_BPS = 5n;
+
+export const withExitBuffer = (grossWei: bigint): bigint =>
+  ceilDiv(grossWei * (BPS + EXIT_RATE_BUFFER_BPS), BPS);
+
+/** What the exit actually costs: on the whole of it where the vault charges. */
+export const exitFee = (exitGrossWei: bigint, spendWei: bigint, policy: StockFeePolicy): bigint =>
+  policy.mode === 'perimeter' ? perimeterFee(exitGrossWei, policy.feeBps) : buyRequirement(spendWei, policy).feeWei;
+
+/** The most a position can pay for once the buffer is set aside. */
+export const withoutExitBuffer = (grossWei: bigint): bigint =>
+  (grossWei * BPS) / (BPS + EXIT_RATE_BUFFER_BPS);
+
 /** Fee taken from a sale's USDT proceeds before they re-enter savings. */
 export const sellFee = (proceedsWei: bigint, policy: StockFeePolicy): bigint =>
   policy.mode === 'perimeter'

@@ -2421,6 +2421,16 @@ class GuideStepTests(TestCase):
             self.user.phone_country = 'HN'
             self.assertIsNone(guide.walk_trail(viewer, 'top_up', {}))
 
+    def test_venezuela_only_gets_the_top_up_walk_while_pago_movil_is_live(self):
+        from . import guide
+        self.user.phone_country = 'VE'
+        state = SimpleNamespace(funded=True, country='VE', ondo_eligible=False)
+        with patch.object(guide, '_state', return_value=state), \
+                patch('ramps.koywe.on_ramp_paused', return_value=False), \
+                patch('ramps.koywe.on_ramp_rejection_locked', return_value=False), \
+                patch('assistant.engine._ve_topup', return_value='update'):
+            self.assertIsNone(guide.walk_trail(self._viewer(), 'top_up', {}))
+
     def test_a_requested_walk_leaves_the_guides_own_step_alone(self):
         from . import guide
         from .models import AssistantGuideEvent, AssistantGuideStep
@@ -2433,6 +2443,12 @@ class GuideStepTests(TestCase):
         self.assertFalse(guide.walks_on_this_build({'HTTP_X_CONFIO_VERSION': '5.3.3'}))
         self.assertTrue(guide.walks_on_this_build({'HTTP_X_CONFIO_VERSION': '5.3.4'}))
         self.assertFalse(guide.walks_on_this_build({}))
+
+    def test_the_app_cannot_inject_a_promise_for_the_wrong_country(self):
+        from . import guide
+        self.assertEqual(guide.steering_note('international_soon', 'PA'), '')
+        self.assertIn('dos semanas', guide.steering_note('international_soon', 'HN'))
+        self.assertIn('Recargar ahora', guide.steering_note('top_up', 'BO'))
 
     def test_every_event_lands_in_the_funnel(self):
         from . import guide
@@ -2547,6 +2563,7 @@ class GuideStepTests(TestCase):
         self.assertIsNone(guide._usable_text('Recarga desde US$1 hoy.', 'Ya puedes recargar.'))
         self.assertIsNone(guide._usable_text('Recarga desde un dólar.', 'Ya puedes recargar.'))
         self.assertIsNone(guide._usable_text('Es gratis.', 'Ya puedes recargar.'))
+        self.assertIsNone(guide._usable_text('Recarga desde cuatro dólares.', 'Ya puedes recargar.'))
         self.assertEqual(guide._usable_text(' Hola,  ya puedes. ', 'Ya puedes recargar.'), 'Hola, ya puedes.')
 
     def test_a_slow_model_never_blocks_the_card(self):

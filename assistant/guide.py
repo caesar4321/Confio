@@ -34,6 +34,8 @@ ACCEPTED_REST = timedelta(hours=24)
 DISMISSED_REST = timedelta(days=3)
 MAX_EVENTS_PER_DAY = 200
 # A position that really reached Hyperliquid, not a refunded attempt.
+# An order somebody actually paid for, not a checkout left unpaid or cancelled.
+PAID_ORDER_STATUSES = ('funded', 'shipped', 'disputed', 'released')
 PERP_OPENED_STATES = ('funded', 'open', 'closed', 'liquidated', 'returning', 'return_failed', 'landed', 'done')
 PREVIEW_SECONDS = 7 * 24 * 3600
 PREVIEW_UNFUNDED = 'as_if_unfunded'
@@ -176,8 +178,10 @@ DEFAULT_LADDER = ('send', 'invest', 'comprar')
 
 
 # Amounts and promises in words: the digit check can't see these.
-_PROMISE = re.compile(r'\b(un|una|uno|dos|tres|cinco|diez|cien|mil)\s+(d[oó]lar|boliviano|peso|sol\b|real)'
-                      r'|\bgratis\b|\bsin (costo|comisi[oó]n)|\bgarantiz|\bm[ií]nimo\b', re.I)
+_PROMISE = re.compile(r'\b(un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|veinte|treinta|cincuenta|cien|'
+                      r'quinientos|mil|mill[oó]n)\s+(d[oó]lar|boliviano|peso|sol\b|soles|real|reales|bol[ií]var)'
+                      r'|\bgratis\b|\bsin (costo|comisi[oó]n)|\bgarantiz|\bm[ií]nimo\b|\bdesde\s+(un|una|solo)\b'
+                      r'|\bganar\b|\bganancia|\brendimiento', re.I)
 
 
 @dataclass(frozen=True)
@@ -243,7 +247,7 @@ def _ladder_done(user, key):
     if key == 'send':
         from users.models_unified import UnifiedTransactionTable
         return UnifiedTransactionTable.objects.filter(
-            sender_user=user, status='CONFIRMED', deleted_at__isnull=True,
+            sender_user=user, sender_business__isnull=True, status='CONFIRMED', deleted_at__isnull=True,
             transaction_type__in=('send', 'payment')).exists()
     if key == 'invest':
         from blockchain.models import PerpPosition, SponsoredBatch
@@ -251,7 +255,7 @@ def _ladder_done(user, key):
                                               status='confirmed').exists()
                 or PerpPosition.objects.filter(user=user, state__in=PERP_OPENED_STATES).exists())
     from marketplace.models import Order
-    return Order.objects.filter(buyer=user).exists()
+    return Order.objects.filter(buyer=user, status__in=PAID_ORDER_STATUSES).exists()
 
 
 def _invest_options(viewer, state):
@@ -432,12 +436,15 @@ def current(viewer, request_meta, **context):
                  presentation=presentation)
 
 
-def steering_note(key):
-    """For a question typed in the card: answer it, then back to this step."""
+def steering_note(key, country=None):
+    """For a question typed in the card: answer it, then back to this step.
+    The key comes from the app, so a promise only reaches where it holds."""
     from .prompts import GUIDE_STEERING_NOTE
 
     step = STEPS.get(key)
-    return GUIDE_STEERING_NOTE.format(step=step.brief or step.text) if step else ''
+    if step is None or (key in ('international_soon', 'international') and topup_route(country) != key):
+        return ''
+    return GUIDE_STEERING_NOTE.format(step=step.brief.format(entry='Recargar ahora') if step.brief else step.text)
 
 
 # Walks on request: anyone, any time, however far along they are. The model only
@@ -488,8 +495,11 @@ def walk_trail(viewer, key, request_meta):
     country = (country_of(viewer.user) or '').upper()
     state = _state(viewer, request_meta)
     if key == 'top_up':
+        from .engine import _ve_topup
+
         if (topup_route(country) != 'local' or on_ramp_paused(country)
-                or on_ramp_rejection_locked(viewer.user)):
+                or on_ramp_rejection_locked(viewer.user)
+                or (country == 'VE' and _ve_topup(viewer, country) != 'live')):
             return None
         step = _for_country(STEPS['top_up'], topup_entry(country, viewer.user, request_meta))
         return step.chips[0].trail

@@ -2,7 +2,7 @@
 // whole screen. When they answer, the pet shrinks into its corner and the
 // conversation carries on in a speech bubble over the real Inicio.
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, BackHandler, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Animated, BackHandler, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../components/common/AppText';
@@ -62,7 +62,11 @@ export default function GuideOpening({ guide, profile, collapse, landing, leavin
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents={leaving ? 'none' : 'auto'}>
       <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: Animated.multiply(appear, backdrop) }]} />
-      <Animated.View style={[styles.content, { paddingTop: insets.top + PET_TOP + PET_SIZE + 20, paddingBottom: insets.bottom + 16, opacity: Animated.multiply(appear, fadeOut) }]}>
+      <Animated.View style={[styles.fill, { opacity: Animated.multiply(appear, fadeOut) }]}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingTop: insets.top + PET_TOP + PET_SIZE + 20, paddingBottom: insets.bottom + 16 }]}
+          showsVerticalScrollIndicator={false}
+        >
         <Text style={styles.text}>{guide.text}</Text>
         <View style={styles.answers}>
           {answers.map((chip) => (
@@ -82,6 +86,7 @@ export default function GuideOpening({ guide, profile, collapse, landing, leavin
             <Text style={styles.laterText}>{dismiss.label}</Text>
           </Pressable>
         ) : null}
+        </ScrollView>
       </Animated.View>
       <Animated.View
         pointerEvents="none"
@@ -106,7 +111,8 @@ export default function GuideOpening({ guide, profile, collapse, landing, leavin
 const styles = StyleSheet.create({
   // Pale on purpose: the pet is often this green, and any pet color must stand out.
   backdrop: { backgroundColor: colors.primarySoft },
-  content: { flex: 1, paddingHorizontal: 20 },
+  fill: { flex: 1 },
+  content: { paddingHorizontal: 20 },
   text: { fontSize: 22, lineHeight: 29, fontWeight: '700', color: colors.text.primary, textAlign: 'center' },
   answers: { gap: 8, marginTop: 22 },
   answer: {

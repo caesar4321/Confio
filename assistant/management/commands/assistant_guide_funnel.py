@@ -11,7 +11,7 @@ from django.db.models import Min
 from django.utils import timezone
 
 from assistant import conf
-from assistant.guide import PERP_OPENED_STATES
+from assistant.guide import PAID_ORDER_STATUSES, PERP_OPENED_STATES
 from assistant.models import AssistantGuideEvent
 
 EVENT_ORDER = ('shown', 'replied', 'dismissed', 'accepted', 'opened', 'pointer_shown', 'pointer_missing',
@@ -42,13 +42,15 @@ def outcomes(first_shown):
                             .values_list('actor_user_id', 'completed_at')),
         'funded': after(unified.filter(counterparty_user_id__in=ids).exclude(is_invitation=True, invitation_claimed=False)
                         .values_list('counterparty_user_id', 'created_at')),
-        'sent or paid': after(unified.filter(sender_user_id__in=ids, transaction_type__in=('send', 'payment'))
+        'sent or paid': after(unified.filter(sender_user_id__in=ids, sender_business__isnull=True,
+                                              transaction_type__in=('send', 'payment'))
                               .values_list('sender_user_id', 'created_at')),
         'bought stocks': after(batches.filter(kind='stock_buy').values_list('user_id', 'created_at')),
         'bought gold or bitcoin': after(batches.filter(kind='crypto_buy').values_list('user_id', 'created_at')),
         'opened a future': after(PerpPosition.objects.filter(user_id__in=ids, state__in=PERP_OPENED_STATES)
                                  .values_list('user_id', 'created_at')),
-        'bought in Comprar': after(Order.objects.filter(buyer_id__in=ids).values_list('buyer_id', 'created_at')),
+        'bought in Comprar': after(Order.objects.filter(buyer_id__in=ids, status__in=PAID_ORDER_STATUSES)
+                                   .values_list('buyer_id', 'created_at')),
     }
 
 

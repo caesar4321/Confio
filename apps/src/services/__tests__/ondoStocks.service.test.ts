@@ -201,14 +201,16 @@ describe('Ondo Stocks fee policy (fee unification)', () => {
 
     const result = await buyStockWithSavings({ symbol: 'TSLAon', grossAmountUsd: 100 });
 
-    // The binding request is for $100 minus the 0.9% exit fee.
-    expect(mockMutate.mock.calls[0][0].variables.notionalValue).toBe('99.1');
+    // The binding request is for $100 minus the exit buffer and the 0.9% fee.
+    expect(mockMutate.mock.calls[0][0].variables.notionalValue).toMatch(/^99\.0504/);
     const [, shares, signedSpend, minUsdt, maxFee] = abi.encodeBuyStockCall.mock.calls[0];
     expect(maxFee).toBe(90n);
     expect(signedSpend).toBe(spend);
     expect(minUsdt).toBe(spend);
-    expect(shares).toBe(100n * WAD); // redeems the full $100 gross
-    expect(result.feeWei).toBe(9n * 10n ** 17n);
+    // The full $100 gross plus the 5 bps exit buffer; the router returns any excess.
+    expect(shares).toBe(10005n * WAD / 100n);
+    // 0.9% of the whole 100.05 exit, buffer included.
+    expect(result.feeWei).toBe(90045n * 10n ** 13n);
   });
 
   it('an older server without stockFeePolicy falls back to the legacy 30 bps router math', async () => {

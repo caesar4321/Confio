@@ -24,6 +24,7 @@ import {
   type AssistantGuideChip,
   type AssistantGuideTrailStop,
 } from './api';
+import { navigationRef } from '../navigation/RootNavigation';
 import { openDestination, resolveNavigate } from './destinations';
 import {
   measureGuideAnchor,
@@ -227,6 +228,13 @@ export default function AssistantGuideCard() {
     // Tab icons can't report a tap: moving on means it happened.
     if (walk.pointing && walk.pointing !== stop.pointer) {
       record(walk.step, 'pointer_tapped', undefined, `${walk.detail}:${walk.pointing}`);
+    }
+    // Comunidad may be the open segment: Invertir's cards live on the other one.
+    if (stop.route === 'Invest') {
+      (navigationRef as any).navigate('Main', {
+        screen: 'BottomTabs',
+        params: { screen: 'Invest', params: { segment: 'invest', at: Date.now() } },
+      });
     }
     walk.pointing = stop.pointer;
     setGuidePointer({ id: stop.pointer, text: stop.text, step: walk.step, detail: walk.detail });
@@ -443,6 +451,9 @@ export default function AssistantGuideCard() {
           // Closed, moved or switched account meanwhile: the next visit shows it.
           if (next && guideRef.current?.step === guide.step && guideAllowedOn(routeRef.current)) {
             seen.current.add(next.step);
+            setReply(null);
+            setReplyChips([]);
+            setReplyWalks([]);
             setGuide(next);
             record(next.step, 'shown');
           }

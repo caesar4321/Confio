@@ -30,9 +30,12 @@ import { getActiveEvmWallet } from './secureDeterministicWallet';
 import {
   buyRequirement,
   buySpendForGross,
+  exitFee,
   sellFee,
   StockFeeMode,
   StockFeePolicy,
+  withExitBuffer,
+  withoutExitBuffer,
 } from './stockFeeMath';
 import {
   createSponsoredRequestId,
@@ -322,23 +325,25 @@ export const buyStockWithSavings = async (params: {
   requireDisplayedFee(config, params.expectedFeeBps);
   const grossTarget = usdToWei(params.grossAmountUsd);
   const requestId = params.requestId || createSponsoredRequestId();
-  const requestedSpend = buySpendForGross(grossTarget, config.fee);
+  const [{ pPlusWad, oraclePriceWad }, ownedShares] = await Promise.all([
+    getVaultPrices(config.vaultAddress),
+    getVaultShares(config.vaultAddress, wallet.address),
+  ]);
+  const ownedGross = predictRedeemUsdtOut(ownedShares, pPlusWad, oraclePriceWad);
+  const affordableGross = grossTarget < ownedGross ? grossTarget : ownedGross;
+  // The buffer comes out of what they entered: never more than that leaves savings.
+  const requestedSpend = buySpendForGross(withoutExitBuffer(affordableGross), config.fee);
   const quote = await requestQuote(true, params.symbol, 'buy', requestedSpend, 'short', `${requestId}_q0`);
   if (params.minTokenAmountWei && BigInt(quote.tokenAmount) < params.minTokenAmountWei) {
     throw new Error('El precio cambió más de 1%. Revisa la nueva cotización antes de continuar.');
   }
   const spend = BigInt(quote.notionalWei);
-  const {
-    requiredGrossWei: requiredGross,
-    feeWei: fee,
-    minUsdtOutWei,
-  } = buyRequirement(spend, config.fee);
+  const { requiredGrossWei: requiredGross, minUsdtOutWei } = buyRequirement(spend, config.fee);
+  const exitGross = withExitBuffer(requiredGross);
+  // The vault charges its fee on the whole exit, buffer included.
+  const fee = exitFee(exitGross, spend, config.fee);
 
-  const [{ pPlusWad, oraclePriceWad }, ownedShares] = await Promise.all([
-    getVaultPrices(config.vaultAddress),
-    getVaultShares(config.vaultAddress, wallet.address),
-  ]);
-  let shares = sharesForUsdtOut(requiredGross, pPlusWad);
+  let shares = sharesForUsdtOut(exitGross, pPlusWad);
   // The ceiling helper can ask for one share above the wallet balance at MAX.
   // Use the complete position when its live redemption value still covers the
   // attested debit; otherwise preserve the insufficient-balance failure.

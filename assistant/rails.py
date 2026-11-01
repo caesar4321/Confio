@@ -36,12 +36,12 @@ BOLIVIA_QR_ENTRY = TopupEntry(name='QR Bolivia', pointer='bo_qr_receive', chip='
 
 
 def topup_entry(country, user, request_meta):
-    country = (country or '').upper()
-    if country == 'BO':
-        from ramps.bolivia_qr import koywe_replaced
-        if koywe_replaced(user, request_meta or {})['top_up']:
-            return BOLIVIA_QR_ENTRY
-    return TOPUP_ENTRIES.get(country, DEFAULT_TOPUP_ENTRY)
+    # Decided by the person's rail, not where they live: Recibir hides Recargar
+    # ahora for anyone QR Bolivia replaces it for.
+    from ramps.bolivia_qr import koywe_replaced
+    if koywe_replaced(user, request_meta or {})['top_up']:
+        return BOLIVIA_QR_ENTRY
+    return TOPUP_ENTRIES.get((country or '').upper(), DEFAULT_TOPUP_ENTRY)
 
 
 def topup_route(country):

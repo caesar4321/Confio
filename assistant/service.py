@@ -339,7 +339,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             reserve_news=_tool_reserver(user, turn, 'search_market_news', news_searches_left),
             can_navigate=can_navigate,
             waiting_for_team=bool(waiting),
-            guide_note='' if waiting else guide.steering_note(guide_step),
+            guide_note='' if waiting else guide.steering_note(guide_step, country_of(user)),
         )
     except AssistantUnavailable as exc:
         logger.warning('Confio Assistant unavailable: %s', exc)
