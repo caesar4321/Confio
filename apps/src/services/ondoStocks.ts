@@ -30,6 +30,7 @@ import { getActiveEvmWallet } from './secureDeterministicWallet';
 import {
   buyRequirement,
   buySpendForGross,
+  exitBufferBps,
   exitFee,
   sellFee,
   StockFeeMode,
@@ -61,6 +62,12 @@ const STOCK_CONFIG = gql`
 
 // Isolated query: servers that predate it fail only this request, and the
 // client then falls back to the legacy field above.
+const STOCK_EXIT_BUFFER = gql`
+  query StockExitBuffer {
+    stockExitBufferBps
+  }
+`;
+
 const STOCK_FEE_POLICY = gql`
   query StockFeePolicy {
     stockFeePolicy {
@@ -145,6 +152,16 @@ const readLegacyFeeField = async (): Promise<bigint | null> => {
     return bps != null ? BigInt(bps) : null;
   } catch {
     return null;
+  }
+};
+
+const readExitBuffer = async (): Promise<bigint> => {
+  const { apolloClient } = await import('../apollo/client');
+  try {
+    const { data } = await apolloClient.query({ query: STOCK_EXIT_BUFFER, fetchPolicy: 'no-cache' });
+    return exitBufferBps(data?.stockExitBufferBps);
+  } catch {
+    return exitBufferBps(undefined);  // an older server, or the network: the safe default
   }
 };
 
@@ -325,21 +342,22 @@ export const buyStockWithSavings = async (params: {
   requireDisplayedFee(config, params.expectedFeeBps);
   const grossTarget = usdToWei(params.grossAmountUsd);
   const requestId = params.requestId || createSponsoredRequestId();
-  const [{ pPlusWad, oraclePriceWad }, ownedShares] = await Promise.all([
+  const [{ pPlusWad, oraclePriceWad }, ownedShares, bufferBps] = await Promise.all([
     getVaultPrices(config.vaultAddress),
     getVaultShares(config.vaultAddress, wallet.address),
+    readExitBuffer(),
   ]);
   const ownedGross = predictRedeemUsdtOut(ownedShares, pPlusWad, oraclePriceWad);
   const affordableGross = grossTarget < ownedGross ? grossTarget : ownedGross;
   // The buffer comes out of what they entered: never more than that leaves savings.
-  const requestedSpend = buySpendForGross(withoutExitBuffer(affordableGross), config.fee);
+  const requestedSpend = buySpendForGross(withoutExitBuffer(affordableGross, bufferBps), config.fee);
   const quote = await requestQuote(true, params.symbol, 'buy', requestedSpend, 'short', `${requestId}_q0`);
   if (params.minTokenAmountWei && BigInt(quote.tokenAmount) < params.minTokenAmountWei) {
     throw new Error('El precio cambió más de 1%. Revisa la nueva cotización antes de continuar.');
   }
   const spend = BigInt(quote.notionalWei);
   const { requiredGrossWei: requiredGross, minUsdtOutWei } = buyRequirement(spend, config.fee);
-  const exitGross = withExitBuffer(requiredGross);
+  const exitGross = withExitBuffer(requiredGross, bufferBps);
   // The vault charges its fee on the whole exit, buffer included.
   const fee = exitFee(exitGross, spend, config.fee);
 

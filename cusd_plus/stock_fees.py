@@ -22,6 +22,17 @@ MODE_ROUTER = 'router'  # v1 math: 30 bps accrued by the router
 MODE_PERIMETER = 'perimeter'  # v2 math: cUSD's fee on the cUSD+ exit/entry
 
 
+MIN_EXIT_BUFFER_BPS = 1
+MAX_EXIT_BUFFER_BPS = 50
+
+
+def exit_buffer_bps() -> int:
+    """Clamped: too much would pull extra out of savings, and none would bring
+    back the failed purchases of 2026-11-01."""
+    value = int(getattr(settings, 'CUSD_PLUS_STOCK_EXIT_BUFFER_BPS', 5) or 0)
+    return max(MIN_EXIT_BUFFER_BPS, min(value, MAX_EXIT_BUFFER_BPS))
+
+
 def conversion_fee_bps() -> int:
     """cUSD's fee as configured for router v2; 0 until v2 is live."""
     return int(getattr(settings, 'CUSD_PLUS_STOCK_CONVERSION_FEE_BPS', 0) or 0)

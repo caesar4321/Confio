@@ -1,4 +1,4 @@
-import { withExitBuffer, withoutExitBuffer } from '../stockFeeMath';
+import { exitBufferBps, withExitBuffer, withoutExitBuffer } from '../stockFeeMath';
 import {
   buyRequirement,
   buySpendForGross,
@@ -63,5 +63,22 @@ describe('exit buffer', () => {
   it('keeps a whole-balance purchase inside the balance', () => {
     const balance = 100n * 10n ** 18n;
     expect(withExitBuffer(withoutExitBuffer(balance))).toBeLessThanOrEqual(balance + 1n);
+  });
+});
+
+describe('server exit buffer', () => {
+  it('follows the server and uses the default for anything unsafe', () => {
+    expect(exitBufferBps(12)).toBe(12n);
+    expect(exitBufferBps(0)).toBe(5n);
+    expect(exitBufferBps(51)).toBe(5n);
+    expect(exitBufferBps(-1)).toBe(5n);
+    expect(exitBufferBps(1.5)).toBe(5n);
+    expect(exitBufferBps(undefined)).toBe(5n);
+    expect(exitBufferBps('20')).toBe(5n);
+  });
+
+  it('changes how much is redeemed', () => {
+    expect(withExitBuffer(10_000n, 20n)).toBe(10_020n);
+    expect(withoutExitBuffer(10_020n, 20n)).toBe(10_000n);
   });
 });

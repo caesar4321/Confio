@@ -579,6 +579,7 @@ class Query(graphene.ObjectType):
     # Isolated on purpose: queried alone by current builds so older servers
     # that lack it never fail a shared query.
     stock_fee_policy = graphene.Field(StockFeePolicyType)
+    stock_exit_buffer_bps = graphene.Int(description='Extra cUSD+ a stock buy redeems; own query for older servers')
     public_fees = graphene.Field(
         PublicFeesType,
         description='Public, unauthenticated; cached 10 min. Queried alone by the website.',
@@ -760,6 +761,14 @@ class Query(graphene.ObjectType):
             updated_at=updated_at,
             assets=assets,
         )
+
+    def resolve_stock_exit_buffer_bps(self, info):
+        from .stock_fees import exit_buffer_bps
+
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        return exit_buffer_bps()
 
     def resolve_stock_fee_policy(self, info):
         from .stock_fees import client_fee_policy
