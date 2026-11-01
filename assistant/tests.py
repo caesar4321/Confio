@@ -1899,6 +1899,13 @@ class ConversationReviewFixTests(TestCase):
         self.assertIn('Ethereum (ERC20)', FAQ)
         self.assertIn('sin prometer una recuperación', FAQ)
 
+    def test_faq_answers_the_questions_it_got_wrong(self):
+        self.assertIn('ya descuenta esa parte', FAQ)
+        self.assertIn('se paga con cUSD o con Confío Dollar+', FAQ)
+        self.assertIn('En Bolivia el mínimo para recargar es de 350 Bs', FAQ)
+        self.assertIn('Es solo el mínimo de recarga', FAQ)
+        self.assertIn('Confío no tiene edad mínima', FAQ)
+
     def test_hint_echo_on_silence_is_an_empty_note(self):
         from .prompts import TRANSCRIBE_HINTS, prompt_echo
         self.assertTrue(prompt_echo(TRANSCRIBE_HINTS['es']))

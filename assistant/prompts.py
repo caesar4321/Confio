@@ -149,7 +149,8 @@ def _paid_offer_sections(destinations, ia_plus_bundled=False):
 # Phone countries with no Recargar/Retirar in the app (faq.md): said per user, so
 # a generic "recarga y retira con medios locales" never reaches them.
 # Ecuador too (2026-10-26): no local top-up there, and Kleber was sent to Recargar.
-NO_RAMP_COUNTRIES = {'VE', 'NI', 'PA', 'CU', 'EC'}
+# Honduras and its neighbours too (2026-11-01): Adán was told to withdraw to a bank.
+NO_RAMP_COUNTRIES = {'VE', 'NI', 'PA', 'CU', 'EC', 'HN', 'GT', 'SV', 'CR', 'DO', 'UY', 'PY'}
 BO_RAILS_NOTE = ('En Bolivia hoy no se puede retirar a bolivianos ni pagar QR locales: si abres Pagar o hablas de '
                  'retirar, dilo en una frase y agrega que llegará muy pronto (sin fecha). Pagar sí sirve para QR de '
                  'cobro de Confío.\n')
