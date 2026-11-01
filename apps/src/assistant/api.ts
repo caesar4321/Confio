@@ -162,6 +162,7 @@ export const GET_ASSISTANT_GUIDE = gql`
       stage
       text
       pointerText
+      presentation
       chips { label kind destination pointer answer trail { route text pointer } }
     }
   }
@@ -187,6 +188,7 @@ export type AssistantGuide = {
   stage: string;
   text: string;
   pointerText: string;
+  presentation: string;
   chips: AssistantGuideChip[];
 };
 

@@ -3,7 +3,7 @@
 // comes from the server, so new situations need no build. Chips of an unknown
 // kind are not drawn. The assistant never moves the app by itself: a tap does.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Keyboard, Pressable, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +26,7 @@ import {
 import { openDestination, resolveNavigate } from './destinations';
 import { measureGuideAnchor, setGuidePointer, setGuideTapListener, useGuidePointer } from './guidePointer';
 import { TAB_ROUTES } from './suggestions';
+import GuideOpening from './GuideOpening';
 
 const HOME_ROUTE = 'Home';
 const OPEN_DELAY_MS = 1200;
@@ -36,7 +37,20 @@ const LAST_TAP = 'asset_confirm';
 const LOWER_SCREEN_RATIO = 0.6;
 const CHIP_KINDS = new Set(['navigate', 'probe', 'dismiss']);
 const TAB_BAR_HEIGHT = 64;
+// Pagar rises above the tab bar: the bubble keeps clear of it.
+const PAGAR_CLEARANCE = 14;
 const GAP = 8;
+const PET_SIZE = 46;
+const COLLAPSE_MS = 520;
+const NEXT_STEP_LIMIT_MS = 8000;
+
+// A stuck network must never leave the waiting bubble on screen for good.
+function withinLimit<T>(work: Promise<T>): Promise<T | null> {
+  return Promise.race([
+    work,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), NEXT_STEP_LIMIT_MS)),
+  ]);
+}
 
 type ReplyChip = { key: string; label: string; ticker?: string };
 type Trail = { step: string; detail: string; stops: AssistantGuideTrailStop[]; started: boolean };
@@ -55,12 +69,19 @@ export default function AssistantGuideCard() {
   const [replyChips, setReplyChips] = useState<ReplyChip[]>([]);
   const [thinking, setThinking] = useState(false);
   const [keyboard, setKeyboard] = useState(0);
+  // The full-screen first meeting, kept until the pet has landed.
+  const [opening, setOpening] = useState<AssistantGuide | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const collapse = useRef(new Animated.Value(0)).current;
   // One card per session: what was already shown stays closed until next time.
   const seen = useRef(new Set<string>());
   const pointerRoute = useRef<string | undefined>(undefined);
   const pointerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerLogged = useRef(false);
   const trail = useRef<Trail | null>(null);
+  const flowRef = useRef(0);
   const [stripOnTop, setStripOnTop] = useState(false);
   const routeRef = useRef(route);
   routeRef.current = route;
@@ -75,6 +96,14 @@ export default function AssistantGuideCard() {
     fetchPolicy: 'network-only',
     errorPolicy: 'ignore',
   });
+  // Only for the person's own pet and its color.
+  const { data: threadData } = useQuery(GET_ASSISTANT_THREAD, {
+    variables: { limit: 1, contextKey },
+    skip: !ready,
+    fetchPolicy: 'cache-first',
+    errorPolicy: 'ignore',
+  });
+  const profile = threadData?.assistantThread?.profile;
   const [recordEvent] = useMutation(RECORD_ASSISTANT_GUIDE_EVENT, { errorPolicy: 'ignore' });
   const [ask] = useMutation(ASK_ASSISTANT_IN_GUIDE);
 
@@ -84,25 +113,36 @@ export default function AssistantGuideCard() {
 
   useEffect(() => {
     const next: AssistantGuide | null | undefined = data?.assistantGuide;
-    if (!next || seen.current.has(next.step) || guide || route !== HOME_ROUTE || isOpen || inCall) {
+    if (!next || seen.current.has(next.step) || guide || opening || pending || route !== HOME_ROUTE || isOpen || inCall) {
       return undefined;
     }
     const timer = setTimeout(() => {
       seen.current.add(next.step);
       setReply(null);
       setReplyChips([]);
-      setGuide(next);
+      setTyping(false);
+      if (next.presentation === 'full') {
+        collapse.setValue(0);
+        setOpening(next);
+      } else {
+        setGuide(next);
+      }
       record(next.step, 'shown');
     }, OPEN_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [data, guide, route, isOpen, inCall, record]);
+  }, [data, guide, opening, pending, route, isOpen, inCall, record, collapse]);
 
   const clear = useCallback(() => {
+    flowRef.current += 1;
     if (pointerTimer.current) {
       clearTimeout(pointerTimer.current);
       pointerTimer.current = null;
     }
     setGuide(null);
+    setOpening(null);
+    setLeaving(false);
+    setPending(false);
+    setTyping(false);
     setReply(null);
     setReplyChips([]);
     trail.current = null;
@@ -121,6 +161,8 @@ export default function AssistantGuideCard() {
   useEffect(() => {
     if (route !== HOME_ROUTE) {
       setGuide(null);
+      setOpening(null);
+      setPending(false);
     }
   }, [route]);
 
@@ -205,30 +247,73 @@ export default function AssistantGuideCard() {
     };
   }, [pointedId, pointedStep, pointedDetail, height, record]);
 
-  const shown = !!guide || !!pointer;
+  const shown = !!guide || !!pointer || !!opening || pending;
   useEffect(() => setGuideShown(shown), [shown, setGuideShown]);
 
   const close = useCallback(() => {
-    if (guide) {
-      record(guide.step, 'dismissed');
+    const current = opening ?? guide;
+    if (current) {
+      record(current.step, 'dismissed');
     } else if (pointer) {
       record(pointer.step, 'pointer_closed');
     }
     clear();
-  }, [guide, pointer, record, clear]);
+  }, [guide, opening, pointer, record, clear]);
+
+  // The pet shrinks into its corner while Inicio appears behind it.
+  const land = useCallback((done?: () => void) => {
+    setLeaving(true);
+    Animated.timing(collapse, {
+      toValue: 1,
+      duration: COLLAPSE_MS,
+      easing: Easing.inOut(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setOpening(null);
+      setLeaving(false);
+      done?.();
+    });
+  }, [collapse]);
 
   const press = useCallback(async (chip: AssistantGuideChip) => {
-    if (!guide) {
+    // While the pet lands the next step's bubble is already live: it comes first.
+    const current = guide ?? opening;
+    if (!current) {
       return;
     }
     if (chip.kind === 'dismiss') {
-      close();
+      if (!guide && opening) {
+        record(current.step, 'dismissed');
+        land();
+      } else {
+        close();
+      }
       return;
     }
     if (chip.kind === 'probe') {
-      await record(guide.step, 'accepted', chip.answer);
+      const flow = flowRef.current;
+      setPending(true);
       setGuide(null);
-      refetch().catch(() => undefined);
+      if (opening) {
+        land();
+      }
+      const next = await withinLimit((async () => {
+        await record(current.step, 'accepted', chip.answer);
+        const result = await refetch().catch(() => null);
+        return result?.data?.assistantGuide as AssistantGuide | null | undefined;
+      })());
+      if (flow !== flowRef.current) {
+        return;  // cleared or another account meanwhile
+      }
+      setPending(false);
+      if (next && !seen.current.has(next.step) && routeRef.current === HOME_ROUTE) {
+        seen.current.add(next.step);
+        setGuide(next);
+        record(next.step, 'shown');
+      }
+      return;
+    }
+    if (!guide) {
       return;
     }
     record(guide.step, 'accepted', undefined, chip.answer);
@@ -262,7 +347,7 @@ export default function AssistantGuideCard() {
         }
       }, NAVIGATION_SETTLE_MS);
     }
-  }, [guide, close, record, refetch]);
+  }, [guide, opening, close, land, record, refetch]);
 
   const send = useCallback(async () => {
     const body = draft.trim();
@@ -323,13 +408,21 @@ export default function AssistantGuideCard() {
     return null;
   }
   const onTab = !!route && TAB_ROUTES.has(route);
-  const bottom = keyboard ? keyboard + GAP : insets.bottom + GAP + (onTab ? TAB_BAR_HEIGHT : 0);
+  const bottom = keyboard
+    ? keyboard + GAP
+    : insets.bottom + GAP + (onTab ? TAB_BAR_HEIGHT + PAGAR_CLEARANCE : 0);
+  const pet = (size: number, hidden = false) => (
+    <View style={hidden ? styles.hidden : undefined}>
+      <AssistantMascot kind={profile?.mascot} imageUrl={profile?.customPetUrl} color={profile?.mascotColor}
+        size={size} mood="talking" />
+    </View>
+  );
 
-  if (!guide) {
+  if (!guide && !opening && !pending) {
     return (
-      <View style={[styles.card, styles.compact, stripOnTop ? { top: insets.top + GAP } : { bottom }]}>
-        <AssistantMascot size={26} animated={false} />
-        <Text style={styles.compactText}>{pointer?.text}</Text>
+      <View style={[styles.strip, stripOnTop ? { top: insets.top + GAP } : { bottom }]}>
+        {pet(28)}
+        <Text style={styles.stripText}>{pointer?.text}</Text>
         <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cerrar">
           <Icon name="x" size={18} color={colors.text.secondary} />
         </Pressable>
@@ -337,70 +430,115 @@ export default function AssistantGuideCard() {
     );
   }
 
+  const chips = (guide?.chips ?? opening?.chips ?? []).filter((c) => CHIP_KINDS.has(c.kind));
   return (
-    <View style={[styles.card, { bottom }]}>
-      <View style={styles.header}>
-        <AssistantMascot size={30} animated={false} />
-        <Text style={styles.text}>{reply ?? guide.text}</Text>
-        <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cerrar">
-          <Icon name="x" size={18} color={colors.text.secondary} />
-        </Pressable>
-      </View>
-      <View style={styles.chips}>
-        {replyChips.map((chip) => (
-          <Pressable key={chip.key} onPress={() => pressReplyChip(chip)} accessibilityRole="button"
-            style={[styles.chip, styles.chipPrimary]}>
-            <Text style={styles.chipText}>{chip.label}</Text>
-          </Pressable>
-        ))}
-        {guide.chips.filter((c) => CHIP_KINDS.has(c.kind)).map((chip, index) => (
-          <Pressable
-            key={chip.label}
-            onPress={() => press(chip)}
-            accessibilityRole="button"
-            style={[styles.chip, index === 0 && chip.kind !== 'dismiss' && styles.chipPrimary]}
-          >
-            <Text style={styles.chipText}>{chip.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <View style={styles.inputRow}>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          onSubmitEditing={send}
-          placeholder="Escribe o pregúntame"
-          placeholderTextColor={colors.text.light}
-          returnKeyType="send"
-          maxLength={500}
-          style={styles.input}
+    <>
+      {guide || pending ? (
+        <View style={[styles.bubbleRow, { bottom }]}>
+          {pet(PET_SIZE, !!opening)}
+          <View style={styles.speech}>
+            {guide ? (
+              <>
+                <View style={styles.header}>
+                  <Text style={styles.text}>{reply ?? guide.text}</Text>
+                  <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cerrar">
+                    <Icon name="x" size={16} color={colors.text.secondary} />
+                  </Pressable>
+                </View>
+                <View style={styles.chips}>
+                  {replyChips.map((chip) => (
+                    <Pressable key={chip.key} onPress={() => pressReplyChip(chip)} accessibilityRole="button"
+                      style={[styles.chip, styles.chipPrimary]}>
+                      <Text style={styles.chipText}>{chip.label}</Text>
+                    </Pressable>
+                  ))}
+                  {chips.map((chip) => (
+                    <Pressable
+                      key={chip.label}
+                      onPress={() => press(chip)}
+                      accessibilityRole="button"
+                      style={[styles.chip, chip.kind === 'navigate' && styles.chipPrimary]}
+                    >
+                      <Text style={styles.chipText}>{chip.label}</Text>
+                    </Pressable>
+                  ))}
+                  {!typing ? (
+                    <Pressable onPress={() => setTyping(true)} hitSlop={8} accessibilityRole="button"
+                      accessibilityLabel="Escribir" style={styles.typeButton}>
+                      <Icon name="message-circle" size={18} color={colors.text.secondary} />
+                    </Pressable>
+                  ) : null}
+                </View>
+                {typing ? (
+                  <View style={styles.inputRow}>
+                    <TextInput
+                      autoFocus
+                      value={draft}
+                      onChangeText={setDraft}
+                      onSubmitEditing={send}
+                      placeholder="Escribe o pregúntame"
+                      placeholderTextColor={colors.text.light}
+                      returnKeyType="send"
+                      maxLength={500}
+                      style={styles.input}
+                    />
+                    {thinking ? <ActivityIndicator size="small" color={colors.primaryDark} /> : (
+                      <Pressable onPress={() => open()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Abrir el chat">
+                        <Icon name="chevron-up" size={20} color={colors.text.secondary} />
+                      </Pressable>
+                    )}
+                  </View>
+                ) : null}
+              </>
+            ) : <ActivityIndicator size="small" color={colors.primaryDark} />}
+          </View>
+        </View>
+      ) : null}
+      {opening ? (
+        <GuideOpening
+          guide={opening}
+          profile={profile}
+          collapse={collapse}
+          leaving={leaving}
+          chips={chips}
+          onChip={press}
+          landing={{ x: GAP + PET_SIZE / 2, y: height - bottom - PET_SIZE / 2, size: PET_SIZE }}
         />
-        {thinking ? <ActivityIndicator size="small" color={colors.primaryDark} /> : (
-          <Pressable onPress={() => open()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Abrir el chat">
-            <Icon name="chevron-up" size={20} color={colors.text.secondary} />
-          </Pressable>
-        )}
-      </View>
-    </View>
+      ) : null}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  hidden: { opacity: 0 },
+  strip: {
     position: 'absolute',
     left: 8,
     right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  stripText: { flex: 1, fontSize: 14, color: colors.text.primary },
+  bubbleRow: { position: 'absolute', left: GAP, right: GAP, flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  speech: {
+    flex: 1,
     padding: 12,
     backgroundColor: colors.white,
     borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: colors.primaryDark,
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  compact: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
-  compactText: { flex: 1, fontSize: 14, color: colors.text.primary },
-  header: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  header: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   text: { flex: 1, fontSize: 15, lineHeight: 21, color: colors.text.primary },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 10 },
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -410,6 +548,7 @@ const styles = StyleSheet.create({
   },
   chipPrimary: { backgroundColor: colors.flowIn.chip, borderColor: colors.primaryDark },
   chipText: { fontSize: 13, color: colors.text.primary },
+  typeButton: { padding: 4 },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',

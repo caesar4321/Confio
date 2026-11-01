@@ -23,7 +23,7 @@ from security.geo import country_of
 
 from . import conf
 from .rails import topup_entry, topup_route
-from .suggestions import GUIDE_ANSWERS, PROBE_ID, _didit_stage, _state, record_probe_answer
+from .suggestions import GUIDE_ANSWERS, GUIDE_ANSWERS_SHORT, PROBE_ID, _didit_stage, _state, record_probe_answer
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ STEPS = {
     'opening': Step(
         'opening', '¿Para qué te gustaría usar Confío?',
         brief='Salúdala por su nombre, di que eres su asistente y pregúntale para qué le gustaría usar Confío.',
-        chips=tuple(Chip(label, 'probe', answer=key) for key, label in GUIDE_ANSWERS)),
+        chips=(*(Chip(label, 'probe', answer=key) for key, label in GUIDE_ANSWERS), Chip(LATER, 'dismiss'))),
     'verify': Step(
         'verify', 'Para recargar, primero necesitas verificar tu identidad.',
         brief='Dile que para recargar primero debe verificar su identidad y pregúntale si empiezan ahora.',
@@ -170,6 +170,7 @@ class Guide:
     text: str
     chips: tuple
     pointer_text: str
+    presentation: str = 'bubble'  # full | bubble; the app treats anything else as bubble
 
 
 def _resting(row, now):
@@ -363,6 +364,16 @@ def _text(viewer, key, step, **context):
     return text or step.text
 
 
+def _first_meeting(viewer):
+    """The full screen happens once, ever. Stored here, so a reinstall or a new
+    phone doesn't repeat it. Test accounts see it every time."""
+    from .models import AssistantGuideStep
+
+    if is_preview_user(viewer.user.pk):
+        return True
+    return not AssistantGuideStep.objects.filter(user=viewer.user, step='opening', shown_count__gt=0).exists()
+
+
 def _for_country(step, entry):
     chip = step.chips[0]
     label = entry.chip if chip.label == 'Sí, ir a Recargar' else chip.label
@@ -377,17 +388,23 @@ def current(viewer, request_meta, **context):
     if key is None:
         return None
     step = STEPS[key]
+    presentation = 'bubble'
     if key in COUNTRY_ENTRY_STEPS:
         step = _for_country(step, topup_entry(context.get('country'), viewer.user, request_meta))
     if key == 'opening':
         state = _state(viewer, request_meta)
         hidden = {job for job in ('invest', 'comprar') if not _ladder_usable(viewer, state, job)}
-        step = replace(step, chips=tuple(c for c in step.chips if c.answer not in hidden))
+        chips = tuple(c for c in step.chips if c.answer not in hidden)
+        if _first_meeting(viewer):
+            presentation = 'full'
+        else:
+            chips = tuple(replace(c, label=GUIDE_ANSWERS_SHORT.get(c.answer, c.label)) for c in chips)
+        step = replace(step, chips=chips)
     if key == 'invest':
         options = _invest_options(viewer, _state(viewer, request_meta))
         step = replace(step, chips=(*(INVEST_OPTIONS[o] for o in options), Chip(LATER, 'dismiss')))
     return Guide(key=key, stage=step.stage, text=_text(viewer, key, step, **context), chips=step.chips,
-                 pointer_text=step.pointer_text)
+                 pointer_text=step.pointer_text, presentation=presentation)
 
 
 def steering_note(key):
@@ -427,3 +444,6 @@ def record_event(viewer, key, event, *, answer=None, funded=False, detail=''):
         AssistantGuideStep.objects.filter(pk=row.pk).update(accepted_at=now)
         if key == 'opening' and answer:
             record_probe_answer(viewer.user, PROBE_ID, answer, funded=funded)
+            # A test account walks on from the first meeting to the bubble.
+            if is_preview_user(viewer.user.pk) and cache.get(_preview_key(viewer.user.pk)) == 'opening':
+                set_preview(viewer.user.pk, 'top_up')

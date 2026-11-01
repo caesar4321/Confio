@@ -45,6 +45,9 @@ GUIDE_ANSWERS = [
     ('comprar', 'Comprar'),
     ('usdt', 'Ya tengo dólares (Binance u otra)'),
 ]
+# The same answers where room is short: the speech bubble keeps Enviar and
+# Recibir in sight.
+GUIDE_ANSWERS_SHORT = {'savings': 'Ahorrar', 'family': 'Enviar', 'usdt': 'Ya tengo USDT'}
 PROBE_KEYS = {key for key, _ in PROBE_ANSWERS + GUIDE_ANSWERS}
 # An unfinished identity verification is worth a nudge for this long.
 VERIFICATION_NUDGE_DAYS = 14

@@ -2423,7 +2423,7 @@ class GuideStepTests(TestCase):
     def test_opening_offers_each_job_once_and_only_where_it_exists(self):
         from . import guide
         answers = [c.answer for c in guide.STEPS['opening'].chips]
-        self.assertEqual(answers, ['savings', 'family', 'invest', 'comprar', 'usdt'])
+        self.assertEqual(answers, ['savings', 'family', 'invest', 'comprar', 'usdt', ''])
         state = SimpleNamespace(personal=True, employee=False, funded=False, country='GT', ondo_eligible=False,
                                 topup_in_progress=False)
         with patch.object(guide, '_state', return_value=state), \
@@ -2431,8 +2431,14 @@ class GuideStepTests(TestCase):
                 patch.object(guide, '_text', return_value='x'), \
                 patch.object(guide, '_invest_options', return_value=['crypto']), \
                 patch('marketplace.checkout.live_city_names', return_value=[]):
-            chips = guide.current(self._viewer(), {}).chips
-        self.assertEqual([c.answer for c in chips], ['savings', 'family', 'invest', 'usdt'])
+            found = guide.current(self._viewer(), {})
+            self.assertEqual([c.answer for c in found.chips], ['savings', 'family', 'invest', 'usdt', ''])
+            self.assertEqual(found.presentation, 'full')
+            self.assertEqual(found.chips[0].label, 'Ahorrar en dólares')
+            guide.record_event(self._viewer(), 'opening', 'shown')
+            later = guide.current(self._viewer(), {})
+        self.assertEqual(later.presentation, 'bubble')
+        self.assertEqual(later.chips[0].label, 'Ahorrar')
 
     def test_invest_never_goes_through_the_model(self):
         from . import guide

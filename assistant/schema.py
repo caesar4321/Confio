@@ -214,6 +214,7 @@ class AssistantGuideType(graphene.ObjectType):
     stage = graphene.String(required=True)
     text = graphene.String(required=True)
     pointer_text = graphene.String(required=True)
+    presentation = graphene.String(required=True, description='full | bubble; anything unknown is a bubble')
     chips = graphene.List(graphene.NonNull(AssistantGuideChipType), required=True)
 
 
@@ -244,6 +245,7 @@ class Query(graphene.ObjectType):
             return None
         return AssistantGuideType(
             step=found.key, stage=found.stage, text=found.text, pointer_text=found.pointer_text,
+            presentation=found.presentation,
             chips=[AssistantGuideChipType(
                 label=c.label, kind=c.kind, destination=c.destination, pointer=c.pointer, answer=c.answer,
                 trail=[AssistantGuideTrailStopType(route=t.route, text=t.text, pointer=t.pointer) for t in c.trail])
