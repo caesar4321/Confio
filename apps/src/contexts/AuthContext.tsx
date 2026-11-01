@@ -55,6 +55,7 @@ const markOnboarded = (client: { mutate: (options: any) => Promise<any> }, attem
     .catch(retry);
 };
 import { navigate as rootNavigate } from '../navigation/RootNavigation';
+import { alertAboveLock } from '../setup/appLockGuard';
 
 const openLinkClaim = (link: { publicRef: string; keyHex: string }) => {
   rootNavigate('Main', { screen: 'LinkClaim', params: link });
@@ -172,7 +173,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const explainSessionEnded = () => Alert.alert(
+const explainSessionEnded = () => alertAboveLock(
   'Vuelve a iniciar sesión',
   'Tu sesión ya no está disponible. Continúa con la misma cuenta de Google o Apple que usaste para crear tu cuenta de Confío.',
   [{ text: 'Entendido' }],
@@ -202,13 +203,21 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // Last known "the phone has a lock set up for Confío"; null until read.
   const deviceLockEnrolledRef = useRef<boolean | null>(null);
   const [isLocked, setIsLocked] = useState(false);
-  // Failed/cancelled device-auth unlock: unmount Main (which also dismisses
-  // any open modal) but KEEP the stored session, so the lock screen can retry
-  // instead of forcing a Google/Apple re-login.
+  const isLockedRef = useRef(false);
+  isLockedRef.current = isLocked;
+  // Failed/cancelled device-auth unlock at startup: nothing is mounted yet, but
+  // KEEP the stored session, so the lock screen can retry instead of forcing a
+  // Google/Apple re-login.
   const lockApp = () => {
     resetAuthReady();
     setIsAuthenticated(false);
     setProfileData(null);
+    setIsLocked(true);
+  };
+  // Resume lock: cover Main without unmounting it, so unlocking lands exactly
+  // where the user was. Open Modals are hidden by setup/appLockGuard.
+  const coverApp = () => {
+    isLockedRef.current = true;
     setIsLocked(true);
   };
   const deferredBootstrapOnActiveRef = useRef(false);
@@ -372,44 +381,47 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
         // After navigating to Main, process any pending push notifications
         if (screenName === 'Main') {
-          setTimeout(() => {
-            pushNotificationService.processPendingNotification();
-            deepLinkHandler.checkDeferredLinks().catch(error => {
-              console.error('[AuthContext] Failed to process deferred deep link:', error);
-            });
-            // Arriving at Home ends signup (User.onboarded_at); the server
-            // counts it once the wallet exists and ignores repeats.
-            markOnboarded(apolloClient);
-            // Residence by device location: daily, only with permission
-            // already granted, never a prompt (services/location.ts).
-            import('../services/location')
-              .then(({ reportResidenceLocation }) => reportResidenceLocation(apolloClient))
-              .catch(() => {});
-            // A link send opened before sign-in (new users install from it),
-            // else one the web page copied before the app was installed.
-            takePendingLink()
-              .then(async link => {
-                const found = link || await takeClipboardLink();
-                if (found) openLinkClaim(found);
-              })
-              .catch(() => {});
-            // A store-review link opened before sign-in.
-            takePendingReviewLink()
-              .then(link => (link ? applyReviewLink(apolloClient, link, refreshActiveProfile, setReviewSwitching) : undefined))
-              .catch(() => {});
-            import('../services/messagingService')
-              .then(({ default: messagingService }) => {
-                messagingService.processPendingNotification();
-              })
-              .catch(error => {
-                console.error('[AuthContext] Failed to process messagingService pending notification:', error);
-              });
-          }, 1000); // Give time for Main navigator to mount
+          setTimeout(processEntryWork, 1000); // Give time for Main navigator to mount
         }
       } catch (error) {
         console.error(`[NAV] Navigation error:`, error);
       }
     }, 0);
+  };
+
+  // Anything that waited for Main: on entry, and after an in-place unlock.
+  const processEntryWork = () => {
+    pushNotificationService.processPendingNotification();
+    deepLinkHandler.checkDeferredLinks().catch(error => {
+      console.error('[AuthContext] Failed to process deferred deep link:', error);
+    });
+    // Arriving at Home ends signup (User.onboarded_at); the server
+    // counts it once the wallet exists and ignores repeats.
+    markOnboarded(apolloClient);
+    // Residence by device location: daily, only with permission
+    // already granted, never a prompt (services/location.ts).
+    import('../services/location')
+      .then(({ reportResidenceLocation }) => reportResidenceLocation(apolloClient))
+      .catch(() => {});
+    // A link send opened before sign-in (new users install from it),
+    // else one the web page copied before the app was installed.
+    takePendingLink()
+      .then(async link => {
+        const found = link || await takeClipboardLink();
+        if (found) openLinkClaim(found);
+      })
+      .catch(() => {});
+    // A store-review link opened before sign-in.
+    takePendingReviewLink()
+      .then(link => (link ? applyReviewLink(apolloClient, link, refreshActiveProfile, setReviewSwitching) : undefined))
+      .catch(() => {});
+    import('../services/messagingService')
+      .then(({ default: messagingService }) => {
+        messagingService.processPendingNotification();
+      })
+      .catch(error => {
+        console.error('[AuthContext] Failed to process messagingService pending notification:', error);
+      });
   };
 
   // Fetch profile from server based on account type
@@ -614,6 +626,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           resetAuthReady();
           setIsAuthenticated(false);
           setProfileData(null);
+          setIsLocked(false);
           // A server-ended session is a sign-out too: the next person must
           // not see this one's cached data.
           void clearSignedOutCache();
@@ -677,7 +690,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           return;
         }
         const lastInactive = lastInactiveAtRef.current;
-        const awayLong = isAuthenticated && !!lastInactive && Date.now() - lastInactive > 10000;
+        // Already locked: the lock screen's button retries, and the OS prompt
+        // itself trips this listener, so prompting here would loop.
+        const awayLong = isAuthenticated && !isLockedRef.current && !!lastInactive && Date.now() - lastInactive > 10000;
         if (awayLong) {
           if (isAuthenticating) return;
           isAuthenticating = true;
@@ -691,7 +706,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         const coverNow = awayLong && deviceLockEnrolledRef.current !== false;
         if (coverNow) {
           resumeAuthenticationRef.current = true;
-          lockApp();
+          coverApp();
         }
         const needsUnlock = coverNow || (awayLong && await deviceLockEnrolled());
         if (awayLong && !needsUnlock) isAuthenticating = false;
@@ -699,7 +714,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           // Cover Main before the Keychain/network awaits below. Offline refresh
           // must never leave the previous authenticated screen interactive.
           resumeAuthenticationRef.current = true;
-          lockApp();
+          coverApp();
         }
         try {
           const creds = await Keychain.getGenericPassword({
@@ -758,20 +773,14 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               const ok = await deviceUnlock();
               isAuthenticating = false;
 
-              if (!ok) {
-                lockApp();
-                return;
-              }
-              if (ok) {
-                lastBiometricSuccessRef.current = Date.now();
-                await checkAuthState({ unlocked: true });
-                setIsLocked(false);
-              }
+              if (!ok) return;
+              lastBiometricSuccessRef.current = Date.now();
+              setIsLocked(false);
+              setTimeout(processEntryWork, 1000);
             }
           }
         } catch (e) {
           isAuthenticating = false;
-          if (needsUnlock) lockApp();
           console.error('[AuthContext] Refresh-on-resume failed:', e);
         } finally {
           isAuthenticating = false;
@@ -1411,6 +1420,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     if (!result.ok) return false;
     lastBiometricSuccessRef.current = Date.now();
     setIsLocked(false);
+    // Resume lock: Main is still mounted underneath, so just uncover it.
+    if (isAuthenticated) {
+      setTimeout(processEntryWork, 1000);
+      return true;
+    }
     setIsLoading(true);
     await checkAuthState({ unlocked: true });
     return true;
@@ -1431,10 +1445,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     // Resume can still be refreshing/persisting this account's tokens. Do not
     // let an account switch race that work and resurrect the old session.
     if (resumeAuthenticationRef.current) {
-      Alert.alert('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta.');
+      alertAboveLock('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta.');
       return;
     }
-    setIsLocked(false);
     try {
       resetAuthReady();
       const authService = AuthService.getInstance();
@@ -1449,6 +1462,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       resetAuthReady();
       setIsAuthenticated(false);
       setProfileData(null);
+    } finally {
+      // Only now: Main stays covered until the session is really gone.
+      setIsLocked(false);
     }
   };
 

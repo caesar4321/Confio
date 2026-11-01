@@ -77,8 +77,7 @@ export const MarketProductEditScreen = () => {
 
   const addPhoto = async () => {
     setPhotoError(null);
-    // Through the picker guard: a slow pick must not trip the resume lock,
-    // whose unlock lands on Home and throws away this form mid-upload.
+    // Through the picker guard: a slow pick must not trip the resume lock.
     const res = await pickFromLibrary({
       mediaType: 'photo', selectionLimit: MAX_PHOTOS - photos.length, quality: 0.8,
       maxWidth: PHOTO_MAX_SIDE, maxHeight: PHOTO_MAX_SIDE,

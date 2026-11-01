@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  BackHandler,
   Image,
   Platform,
   ScrollView,
@@ -14,6 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { colors } from '../config/theme';
 import { useEmergencyExitOpen } from '../hooks/useEmergencyExitOpen';
+import { alertAboveLock } from '../setup/appLockGuard';
 
 interface AppLockScreenProps {
   visible: boolean;
@@ -27,9 +28,9 @@ interface AppLockScreenProps {
  * The session stays in the Keychain, so the user can simply retry instead of
  * being sent back through Google/Apple sign-in.
  *
- * A plain overlay, not a <Modal>: locking unmounts Main (dismissing every
- * screen modal), and on iOS a <Modal> silently fails to present while another
- * one is still up.
+ * A plain overlay, not a <Modal>: on iOS a <Modal> silently fails to present
+ * while another one is still up. On resume Main stays mounted underneath, with
+ * its modals hidden (setup/appLockGuard), so unlocking lands where the user was.
  */
 export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }: AppLockScreenProps) {
   const [busy, setBusy] = useState(false);
@@ -41,6 +42,13 @@ export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }:
   // Stays mounted across lock sessions; don't carry a previous failure over.
   useEffect(() => {
     if (!visible) setFailed(false);
+  }, [visible]);
+
+  // Main can be mounted underneath: Back must not pop the screen being kept.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => sub.remove();
   }, [visible]);
 
   const handleUnlock = async () => {
@@ -55,7 +63,7 @@ export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }:
   };
 
   const handleSignOut = () => {
-    Alert.alert(
+    alertAboveLock(
       '¿Usar otra cuenta?',
       'Tendrás que iniciar sesión de nuevo con Google o Apple.',
       [

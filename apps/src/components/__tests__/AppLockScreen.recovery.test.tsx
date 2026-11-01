@@ -3,7 +3,7 @@ jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 const mockReadHeartbeat = jest.fn();
 jest.mock('../../services/emergencyExit/heartbeat', () => ({ readHeartbeat: () => mockReadHeartbeat() }));
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
-import { Text, TouchableOpacity } from 'react-native';
+import { BackHandler, Text, TouchableOpacity } from 'react-native';
 import { AppLockScreen } from '../AppLockScreen';
 
 // Salida de emergencia is not a fallback for a failed unlock: it appears on
@@ -35,6 +35,16 @@ it('offers recovery once the exit is open, without unlocking or deleting the ses
   expect(onUnlock).not.toHaveBeenCalled();
   expect(onSignOut).not.toHaveBeenCalled();
   act(() => view.unmount());
+});
+
+// protects=Back cannot pop the screen kept under the lock; fails_when=no handler consumes it; no_claim=native dispatch order
+it('consumes Android Back while visible', async () => {
+  const add = jest.spyOn(BackHandler, 'addEventListener');
+  const { view } = await renderLock('alive');
+  const handler = add.mock.calls.find(([event]) => event === 'hardwareBackPress')?.[1];
+  expect(handler?.()).toBe(true);
+  act(() => view.unmount());
+  add.mockRestore();
 });
 
 it('a failed heartbeat read keeps the exit hidden', async () => {

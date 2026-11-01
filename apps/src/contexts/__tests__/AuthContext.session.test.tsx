@@ -1,4 +1,5 @@
-const mockClient = { query: jest.fn(), mutate: jest.fn() };
+const mockClient = { query: jest.fn(), mutate: jest.fn(), clearStore: jest.fn() };
+const mockAuthSignOut = jest.fn(async () => {});
 jest.mock('@apollo/client', () => ({
   ...jest.requireActual('@apollo/client'),
   useApolloClient: () => mockClient,
@@ -8,10 +9,17 @@ jest.mock('../../apollo/client', () => ({
 }));
 jest.mock('../../apollo/queries', () => ({ GET_ME: 'me', GET_BUSINESS_PROFILE: 'business', GET_USER_ACCOUNTS: 'accounts' }));
 jest.mock('../../services/authService', () => ({
-  AuthService: { getInstance: () => ({ getActiveAccountContext: async () => ({ type: 'personal', index: 0 }) }) },
+  AuthService: { getInstance: () => ({
+    getActiveAccountContext: async () => ({ type: 'personal', index: 0 }),
+    signOut: () => mockAuthSignOut(),
+  }) },
   ensureBscAddressRegistered: jest.fn(),
 }));
 jest.mock('react-native-keychain', () => ({ getGenericPassword: jest.fn() }));
+jest.mock('../../navigation/RootNavigation', () => ({ navigationRef: { current: null } }));
+jest.mock('../../services/linkSend', () => ({
+  setLinkOpener: jest.fn(), takeClipboardLink: jest.fn(), takePendingLink: jest.fn(),
+}));
 let mockExpired = false;
 jest.mock('jwt-decode', () => ({ jwtDecode: () => ({ exp: Date.now() / 1000 + (mockExpired ? -1 : 3600) }) }));
 const mockAuthenticate = jest.fn(async (..._args: unknown[]) => true);
@@ -167,7 +175,8 @@ describe('session loss after biometric unlock', () => {
     expect(navigationRef.current.reset).toHaveBeenCalledWith(expect.objectContaining({ routes: [expect.objectContaining({ name: 'Main' })] }));
   });
 
-  it('locks on a failed resume unlock without clearing the session, then re-enters Main', async () => {
+  // protects=unlocking resumes the screen the user was on; fails_when=the lock unmounts Main or the unlock resets to it; no_claim=native Modal rendering
+  it('keeps Main mounted through a failed resume unlock, then uncovers it in place', async () => {
     const handlers: Array<(state: string) => unknown> = [];
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
       handlers.push(handler);
@@ -187,12 +196,9 @@ describe('session loss after biometric unlock', () => {
     nowSpy.mockRestore();
 
     expect(authState!.isLocked).toBe(true);
-    expect(authState!.isAuthenticated).toBe(false);
-    expect(authState!.profileData).toBeNull();
+    expect(authState!.isAuthenticated).toBe(true);
+    expect(authState!.profileData).not.toBeNull();
     expect(await Keychain.getGenericPassword()).toBeTruthy();
-    expect(navigationRef.current.reset).not.toHaveBeenCalledWith(
-      expect.objectContaining({ routes: [expect.objectContaining({ name: 'Auth' })] }),
-    );
 
     const promptsBeforeUnlock = mockAuthenticate.mock.calls.length;
     await act(async () => { await authState!.unlockApp(); });
@@ -201,6 +207,80 @@ describe('session loss after biometric unlock', () => {
     expect(mockAuthenticate.mock.calls.length - promptsBeforeUnlock).toBe(1);
     expect(authState!.isLocked).toBe(false);
     expect(authState!.isAuthenticated).toBe(true);
+    expect(authenticatedStates.slice(authenticatedStates.indexOf(true))).not.toContain(false);
+    expect(navigationRef.current.reset).not.toHaveBeenCalled();
+  });
+
+  it('does not prompt again when the OS prompt itself resumes a locked app', async () => {
+    const handlers = new Set<(state: string) => unknown>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+      handlers.add(handler);
+      return { remove: () => handlers.delete(handler) };
+    }) as any);
+    await mount();
+    mockAuthenticate.mockResolvedValueOnce(false);
+    const nowSpy = jest.spyOn(Date, 'now');
+    let t = Date.now();
+    const go = async (state: string, advance = 60_000) => {
+      nowSpy.mockReturnValue(t += advance);
+      await act(async () => { await Promise.all([...handlers].map(h => h(state))); });
+    };
+    await go('background');
+    await go('active');
+    const prompts = mockAuthenticate.mock.calls.length;
+    await go('inactive');
+    await go('active');
+    nowSpy.mockRestore();
+    expect(mockAuthenticate.mock.calls.length).toBe(prompts);
+    expect(authState!.isLocked).toBe(true);
+  });
+
+  // protects=sign-out never uncovers the wallet; fails_when=the lock drops before the session is gone; no_claim=server sign-out
+  it('keeps Main covered until sign-out has finished', async () => {
+    const handlers = new Set<(state: string) => unknown>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+      handlers.add(handler);
+      return { remove: () => handlers.delete(handler) };
+    }) as any);
+    await mount();
+    mockAuthenticate.mockResolvedValueOnce(false);
+    const nowSpy = jest.spyOn(Date, 'now');
+    const t0 = Date.now();
+    nowSpy.mockReturnValue(t0);
+    await act(async () => { await Promise.all([...handlers].map(h => h('background'))); });
+    nowSpy.mockReturnValue(t0 + 60_000);
+    await act(async () => { await Promise.all([...handlers].map(h => h('active'))); });
+    nowSpy.mockRestore();
+    let finishSignOut!: () => void;
+    mockAuthSignOut.mockImplementationOnce(() => new Promise<void>(resolve => { finishSignOut = resolve; }));
+    let signingOut!: Promise<void>;
+    await act(async () => { signingOut = authState!.signOut(); });
+    expect(authState!.isLocked).toBe(true);
+    await act(async () => { finishSignOut(); await signingOut; });
+    expect(authState!.isLocked).toBe(false);
+    expect(authState!.isAuthenticated).toBe(false);
+  });
+
+  it('leaves the lock for login when the session ends while locked', async () => {
+    const handlers = new Set<(state: string) => unknown>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+      handlers.add(handler);
+      return { remove: () => handlers.delete(handler) };
+    }) as any);
+    await mount();
+    mockAuthenticate.mockResolvedValueOnce(false);
+    const nowSpy = jest.spyOn(Date, 'now');
+    const t0 = Date.now();
+    nowSpy.mockReturnValue(t0);
+    await act(async () => { await Promise.all([...handlers].map(h => h('background'))); });
+    nowSpy.mockReturnValue(t0 + 60_000);
+    await act(async () => { await Promise.all([...handlers].map(h => h('active'))); });
+    nowSpy.mockRestore();
+    expect(authState!.isLocked).toBe(true);
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    expect(authState!.isAuthenticated).toBe(false);
+    expect(authState!.isLocked).toBe(false);
   });
 
   it('covers Main before resume refresh and remains locked when refresh fails offline', async () => {
@@ -220,13 +300,12 @@ describe('session loss after biometric unlock', () => {
     let resume!: Promise<unknown[]>;
     await act(async () => { resume = Promise.all([...handlers].map(h => h('active'))); });
     expect(authState!.isLocked).toBe(true);
-    expect(authState!.isAuthenticated).toBe(false);
+    expect(authState!.isAuthenticated).toBe(true);
     await act(async () => { await authState!.signOut(); });
     expect(Alert.alert).toHaveBeenCalledWith('Verificación en curso', expect.any(String));
     expect(await Keychain.getGenericPassword()).toBeTruthy();
     await act(async () => { rejectRefresh(new Error('offline')); await resume; });
     expect(authState!.isLocked).toBe(true);
-    expect(authState!.isAuthenticated).toBe(false);
     expect(await Keychain.getGenericPassword()).toBeTruthy();
   });
 

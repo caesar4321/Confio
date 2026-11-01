@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar, StyleSheet, View, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { Keyboard, StatusBar, StyleSheet, View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Text } from './components/common/AppText';
 import { getAnalytics, logScreenView } from '@react-native-firebase/analytics';
 import { colors } from './config/theme';
@@ -29,6 +29,7 @@ import { PushNotificationProvider } from './hooks/usePushNotificationContext';
 import { FaceCheckProvider } from './components/FaceCheckProvider';
 import { BrandSplash } from './components/BrandSplash';
 import { AppLockScreen } from './components/AppLockScreen';
+import { setAppLocked } from './setup/appLockGuard';
 import { biometricAuthService } from './services/biometricAuthService';
 import { logBreadcrumb } from './services/crashLog';
 import { NumberLocaleProvider } from './contexts/NumberLocaleProvider';
@@ -56,6 +57,13 @@ const Navigation: React.FC = () => {
   const { isAuthenticated, isLoading, isLocked, unlockApp, signOut } = useAuth();
   console.log('Navigation render:', { isAuthenticated, isLoading });
 
+  // Main can stay mounted under the lock: nothing beneath it stays reachable.
+  const lockVisible = isLocked && !recoveryOnly;
+  React.useLayoutEffect(() => {
+    setAppLocked(lockVisible, { dropHeldAlerts: !isAuthenticated || recoveryOnly });
+    if (lockVisible) Keyboard.dismiss();
+  }, [lockVisible]);
+
   useEffect(() => {
     if (isAuthenticated) {
       // Initialize messaging service when user is authenticated
@@ -77,6 +85,11 @@ const Navigation: React.FC = () => {
 
   return (
     <View style={{ flex: 1 }}>
+      <View
+        style={{ flex: 1 }}
+        accessibilityElementsHidden={lockVisible}
+        importantForAccessibility={lockVisible ? 'no-hide-descendants' : 'auto'}
+      >
       {/* Always mount the navigator to avoid tree swap on Android */}
       <Stack.Navigator
         screenOptions={{
@@ -94,9 +107,10 @@ const Navigation: React.FC = () => {
           <Stack.Screen name="Main" component={MainNavigator} />
         )}
       </Stack.Navigator>
+      </View>
       {/* Loading overlay — covers navigator while auth resolves, then disappears */}
       {isLoading && !recoveryOnly && <LoadingOverlay onEmergencyExit={() => setRecoveryOnly(true)} />}
-      <AppLockScreen visible={isLocked && !recoveryOnly} onUnlock={unlockApp} onSignOut={signOut}
+      <AppLockScreen visible={lockVisible} onUnlock={unlockApp} onSignOut={signOut}
         onEmergencyExit={() => setRecoveryOnly(true)} />
     </View>
   );

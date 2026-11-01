@@ -1,8 +1,7 @@
 /**
  * The OS photo picker is a separate app: while it is open Confío is in the
- * background, and the resume lock (AuthContext: away > 10 s locks, and the
- * unlock lands on Home) used to fire on the way back. Picking a photo slowly
- * then dumped people on Home and lost what they were doing.
+ * background, and the resume lock (AuthContext: away > 10 s locks) used to
+ * fire on the way back, hiding the screen behind a prompt for every slow pick.
  *
  * Like the face-capture exemption, an open picker is not "leaving the app",
  * but only for a bounded time: a phone left sitting in the picker still
