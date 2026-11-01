@@ -317,6 +317,7 @@ export interface PerpPosition {
 
 const ERROR_COPY: Record<string, string> = {
   trade_not_available: 'Los futuros no están disponibles para tu cuenta en este momento.',
+  review_amount_cap: 'En modo revisión el máximo por operación es US$20.',
   order_resting: 'Tu orden límite sigue esperando su precio. Cancélala para traer tu dinero o para abrir de otra forma.',
   limit_too_far: 'Ese precio está demasiado lejos del mercado. Elige uno más cercano.',
   bad_order_type: 'Ese tipo de orden no está disponible.',

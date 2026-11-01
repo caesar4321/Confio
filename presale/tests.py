@@ -226,6 +226,12 @@ class BscPurchaseFlowTest(TestCase):
              mock.patch.object(bsc_flow, '_plan_funding', return_value=funding):
             return bsc_flow.prepare_purchase(self.user, self.account, amount, **defaults)
 
+    @override_settings(REVIEW_EXEMPT_MAX_USD=0)
+    def test_exempt_purchase_above_the_review_cap_is_refused(self):
+        # protects=presale entries are capped for exempt accounts; fails_when=the amount is not checked; no_claim=submit-time rechecks
+        with mock.patch('security.geo.store_review_exempt', return_value=True):
+            self.assertEqual(self._prepare()['error'], 'review_amount_cap')
+
     def test_prepare_gates(self):
         res = self._prepare(accepted_terms=False)
         self.assertEqual(res['error'], 'terms_acceptance_required')

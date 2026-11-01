@@ -196,6 +196,13 @@ class OpenFlowTests(TestCase):
                 mock.patch('security.geo.country_of', return_value='VE'):
             return perps_flow.prepare_open(self.user, self.wallet, {}, 'BTC', 'long', leverage, margin)
 
+    @override_settings(REVIEW_EXEMPT_MAX_USD=20)
+    def test_exempt_margin_above_the_review_cap_is_refused(self, *_):
+        # protects=perps entries are capped for exempt accounts; fails_when=margin is not checked; no_claim=notional after leverage
+        with mock.patch('security.geo.store_review_exempt', return_value=True), \
+                self.assertRaisesMessage(perps_flow.FlowError, 'review_amount_cap'):
+            self._prepare(margin='20.18')
+
     def test_open_issues_exit_plus_relay_deposit_and_the_relay_accepts_only_it(self, *_):
         from cusd_plus import sponsor_7702
 

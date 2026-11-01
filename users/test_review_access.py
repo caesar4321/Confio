@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from security.geo import store_review_exempt
+from security.geo import review_cap_exceeded, review_cap_exceeded_wei, store_review_exempt
 from users.models_review_access import ReviewAccess
 from users.review_access import apply_review_access
 
@@ -75,3 +75,22 @@ class ReviewAccessTests(TestCase):
         self.assertTrue(refresh_residence_country(self.user))
         self.user.refresh_from_db()
         self.assertEqual((self.user.country, self.user.country_source), ('US', 'signup_ip'))
+
+
+@override_settings(REVIEW_LINK_TOKEN=TOKEN, REVIEW_EXEMPT_MAX_USD=20)
+@patch('users.review_access._alert')
+class ReviewAmountCapTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(username='capped', firebase_uid='capped')
+
+    def test_only_a_geo_exempt_account_is_capped(self, _alert):
+        # protects=a leaked link moves at most the cap per entry; fails_when=the cap reaches ordinary users or misses exempt ones; no_claim=each caller's wiring
+        self.assertFalse(review_cap_exceeded(self.user, '20.01'))
+        apply_review_access(self.user, 'AR', TOKEN)
+        self.assertFalse(review_cap_exceeded(self.user, '20'))
+        self.assertTrue(review_cap_exceeded(self.user, '20.01'))
+        self.assertFalse(review_cap_exceeded_wei(self.user, 20 * 10 ** 18))
+        self.assertTrue(review_cap_exceeded_wei(self.user, 20 * 10 ** 18 + 1))
+        apply_review_access(self.user, 'US', TOKEN)
+        self.assertFalse(review_cap_exceeded(self.user, '100'))

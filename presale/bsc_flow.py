@@ -247,6 +247,9 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
         return {'success': False, 'error': 'below_minimum'}
     if amount_usd > phase.max_purchase:
         return {'success': False, 'error': 'above_maximum'}
+    from security.geo import review_cap_exceeded
+    if review_cap_exceeded(user, amount_usd):
+        return {'success': False, 'error': 'review_amount_cap'}
 
     # Create the row used for the authoritative lock below. Do not reject on
     # the user's entered ceiling here: tail-inventory clamping can make the

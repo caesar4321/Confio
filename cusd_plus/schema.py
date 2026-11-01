@@ -1710,6 +1710,10 @@ class SubmitBscTransaction(graphene.Mutation):
         REDEEM_TO_USDT_SELECTOR = 'f4794519'  # redeemToUsdt(uint256,uint256,address)
         if vault_addr and to_addr == vault_addr:
             data_hex = fields[5].hex()
+            if data_hex.startswith(_SEL_WRAP_CUSD) and len(data_hex) >= 72:
+                from security.geo import review_cap_exceeded_wei
+                if review_cap_exceeded_wei(user, int(data_hex[8:72], 16)):
+                    return SubmitBscTransaction(success=False, error='review_amount_cap')
             if data_hex.startswith(REDEEM_TO_USDT_SELECTOR):
                 if len(data_hex) < 8 + 192:
                     return SubmitBscTransaction(success=False, error='bad_redeem_calldata')
@@ -1739,6 +1743,12 @@ class SubmitBscTransaction(graphene.Mutation):
                 # address recipient) — first word, from calldata we validated,
                 # never from the client. Recorded after broadcast.
                 mint_amount_wei = int(data_hex[8:72], 16)
+                from security.geo import review_cap_exceeded_wei
+                if review_cap_exceeded_wei(user, mint_amount_wei):
+                    from .tasks import mark_saga_delivered_as_usdt
+                    mark_saga_delivered_as_usdt(
+                        _active_bsc_address(info) or '', mint_amount_wei)
+                    return SubmitBscTransaction(success=False, error='review_amount_cap')
                 from .vault import incoming_local_arrival_in_flight, is_safe_mint_amount
                 if incoming_local_arrival_in_flight(active_addr):
                     # A local pay-in is still bridging; retried next foreground.
@@ -2011,6 +2021,13 @@ class SponsorBscBatch(graphene.Mutation):
             # calls are an ordinary mint (cusd_plus/perps_flow.return_kind).
             stored_kind = (perps_replay.kind if perps_replay is not None
                            else _perps_flow.return_kind(kind, norm_calls, request_id, user))
+            # A Futuros return is an exit that happens to mint, so it is not
+            # capped; that is why this waits for the stored kind.
+            if mint_call is not None and mint_refusal_error is None and stored_kind != 'perps_return':
+                from security.geo import review_cap_exceeded_wei
+                if review_cap_exceeded_wei(user, mint_amount_wei):
+                    mint_refusal_error = 'review_amount_cap'
+                    mint_refusal_amount = mint_amount_wei
             if kind in _perps_flow.PERPS_KINDS and perps_replay is None:
                 from . import perps_risk
                 refusal = (perps_risk.open_gate(user, getattr(info.context, 'META', {}))
@@ -2022,14 +2039,22 @@ class SponsorBscBatch(graphene.Mutation):
                 from .crypto_policy import decode_crypto_call
                 # validate_policy already decoded and accepted the one router
                 # call; read its dollar for the destination gate.
-                crypto_dollar = next(
-                    (a['dollar'] for c in norm_calls
+                crypto_action = next(
+                    (a for c in norm_calls
                      if (a := decode_crypto_call(c, historical=True)) is not None),
                     None)
+                crypto_dollar = crypto_action['dollar'] if crypto_action else None
                 refusal = crypto_risk.sponsor_gate(
                     kind, user, getattr(info.context, 'META', {}), dollar=crypto_dollar)
                 if refusal:
                     return SponsorBscBatch(success=False, error=refusal)
+                if kind == 'crypto_buy' and crypto_action:
+                    from security.geo import review_cap_exceeded_wei, store_review_exempt
+                    from .crypto_policy import expected_exit_usdt
+                    if store_review_exempt(user):
+                        gross_wei, _net = expected_exit_usdt(crypto_dollar, crypto_action['amount_in'])
+                        if review_cap_exceeded_wei(user, gross_wei):
+                            return SponsorBscBatch(success=False, error='review_amount_cap')
             if kind in ('stock_buy', 'stock_sell'):
                 meta = getattr(info.context, 'META', {})
                 if not _stock_issuer_eligible(user, meta):
@@ -2043,6 +2068,12 @@ class SponsorBscBatch(graphene.Mutation):
                     if (complex_products.buys_complex_product(norm_calls)
                             and not complex_products.acknowledged(user)):
                         return SponsorBscBatch(success=False, error='complex_product_ack_required')
+                    from security.geo import review_cap_exceeded_wei
+                    stock_debit = sum(
+                        a['history_amount_wei'] for c in norm_calls
+                        if (a := sponsor_7702._decode_stock_call(c, historical=True)) is not None)
+                    if review_cap_exceeded_wei(user, stock_debit):
+                        return SponsorBscBatch(success=False, error='review_amount_cap')
             intent_id = sponsor_7702.intent_id_for(
                 kind, client_request_id=request_id or None)
             digest = sponsor_7702.intent_digest(

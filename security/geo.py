@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Callable, Mapping
 
+from django.conf import settings
+
 from security.request_utils import came_through_cloudflare
 
 logger = logging.getLogger(__name__)
@@ -259,6 +261,23 @@ def store_review_exempt(user) -> bool:
     except Exception:  # noqa: BLE001
         logger.exception('[GEO] reviewer exemption check failed')
         return False
+
+
+def review_cap_exceeded(user, amount_usd) -> bool:
+    """True when a geo-exempt review account enters a product above the cap.
+    Only entries the exemption unlocks are capped; exits never are. An account
+    that is not exempt has the country and IP policies instead."""
+    from decimal import Decimal
+
+    return (Decimal(str(amount_usd)) > Decimal(str(settings.REVIEW_EXEMPT_MAX_USD))
+            and store_review_exempt(user))
+
+
+def review_cap_exceeded_wei(user, amount_wei: int) -> bool:
+    """review_cap_exceeded for an 18-decimal dollar amount (USDT and cUSD on BSC)."""
+    from decimal import Decimal
+
+    return review_cap_exceeded(user, Decimal(amount_wei) / 10 ** 18)
 
 
 @dataclass(frozen=True)

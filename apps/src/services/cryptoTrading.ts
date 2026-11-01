@@ -218,6 +218,7 @@ export const SAVINGS_MINT_TOO_SMALL_MESSAGE =
 const ERROR_COPY: Record<string, string> = {
   crypto_ack_required: 'Antes de tu primera compra confirma que entiendes los riesgos.',
   trade_not_available: 'Esta operación no está disponible para tu cuenta en este momento.',
+  review_amount_cap: 'En modo revisión el máximo por operación es US$20.',
   savings_not_available: 'No puedes recibir esta venta en Confío Dollar+. Recíbela en Confío Dollar.',
   savings_mint_too_small: SAVINGS_MINT_TOO_SMALL_MESSAGE,
   crypto_order_too_large: 'El monto supera el máximo por operación para este activo. Prueba con uno menor.',

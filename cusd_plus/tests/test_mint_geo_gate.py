@@ -43,6 +43,8 @@ from cusd_plus.tests.test_sponsor_7702 import (
 )
 from cusd_plus.tests.test_bnb_autoconvert_relay import SIGNER_ADDR, _legacy_tx
 
+from cusd_plus.tests.test_crypto import ROUTER as CRYPTO_ROUTER, _buy_data
+
 USDT = sponsor_7702.USDT_BSC
 
 
@@ -129,6 +131,18 @@ class LegacyRelayGateTests(SimpleTestCase):
 
     def _mint_raw(self, amount=2 * 10**18):
         return _legacy_tx(VAULT, 0, bytes.fromhex(_mint_data(amount=amount)[2:]))
+
+    @override_settings(REVIEW_EXEMPT_MAX_USD=20)
+    def test_exempt_mint_and_wrap_above_the_review_cap_are_refused(self):
+        # protects=the legacy relay caps both entries into cUSD+; fails_when=wrap skips the cap; no_claim=daily totals
+        amount = 20 * 10**18 + 1
+        wrap = _legacy_tx(VAULT, 0, bytes.fromhex(_wrap_data(amount=amount)[2:]))
+        with mock.patch('security.geo.store_review_exempt', return_value=True), \
+             mock.patch('cusd_plus.tasks._rpc') as rpc, \
+             mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt'):
+            self.assertEqual(self._submit(self._mint_raw(amount=amount), _user('VE', uid=41)).error, 'review_amount_cap')
+            self.assertEqual(self._submit(wrap, _user('VE', uid=42)).error, 'review_amount_cap')
+        rpc.assert_not_called()
 
     def test_mint_refused_for_blocked_phone(self):
         with mock.patch('cusd_plus.tasks._rpc') as rpc:
@@ -283,6 +297,55 @@ class SponsoredRailGateTests(SimpleTestCase):
             return SponsorBscBatch.mutate(
                 None, _info(user), gql_calls, '0', self.deadline,
                 '0x' + '00' * 65, None, request_id)
+
+    def _exempt(self):
+        return mock.patch('security.geo.store_review_exempt', return_value=True)
+
+    @override_settings(REVIEW_EXEMPT_MAX_USD=20)
+    def test_exempt_mint_above_the_review_cap_is_refused_at_the_cap_it_passes(self):
+        # protects=a leaked review link mints at most the cap per entry; fails_when=the amount is ignored or the cap itself is refused; no_claim=daily totals
+        over = [_call(USDT, _approve_data()), _call(VAULT, _mint_data(amount=20 * 10**18 + 1))]
+        at = [_call(USDT, _approve_data()), _call(VAULT, _mint_data(amount=20 * 10**18))]
+        with self._exempt(), mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt') as close, \
+                mock.patch('payment_accounts.activity.local_mint_journey_id', return_value=None):
+            self.assertEqual(self._mutate(over, _user('VE', uid=33)).error, 'review_amount_cap')
+            close.assert_called_once()
+            self.assertNotEqual(self._mutate(at, _user('VE', uid=34)).error, 'review_amount_cap')
+
+    @override_settings(REVIEW_EXEMPT_MAX_USD=20)
+    def test_exempt_futuros_return_above_the_cap_is_not_refused(self):
+        # protects=money coming back from Futuros always lands; fails_when=the mint leg of an exit is capped; no_claim=the return's own checks
+        calls = [_call(USDT, _approve_data()), _call(VAULT, _mint_data(amount=500 * 10**18))]
+        with self._exempt(), mock.patch('cusd_plus.perps_flow.return_kind', return_value='perps_return'):
+            self.assertNotEqual(self._mutate(calls, _user('VE', uid=37)).error, 'review_amount_cap')
+
+    @override_settings(REVIEW_EXEMPT_MAX_USD=20, CRYPTO_SWAP_ROUTER_ADDRESS=CRYPTO_ROUTER)
+    def test_exempt_crypto_buy_is_capped_on_the_gross_debit_not_the_floor(self):
+        # protects=a low slippage floor cannot hide a large buy; fails_when=the cap reads min_usdt; no_claim=live quotes
+        from cusd_plus.crypto_policy import DOLLAR_PLUS
+        buy = _buy_data(dollar=DOLLAR_PLUS, amount=100 * 10**18, min_usdt=10**18)
+        calls = [_call(VAULT, '0x' + sponsor_7702.SEL_APPROVE + _word(CRYPTO_ROUTER) + _word(2**256 - 1)),
+                 _call(CRYPTO_ROUTER, buy)]
+        with self._exempt(), \
+             mock.patch('cusd_plus.sponsor_7702.validate_policy'), \
+             mock.patch('cusd_plus.crypto_risk.sponsor_gate', return_value=None), \
+             mock.patch('cusd_plus.crypto_policy.expected_exit_usdt', return_value=(21 * 10**18, 20 * 10**18)):
+            self.assertEqual(self._mutate(calls, _user('VE', uid=38)).error, 'review_amount_cap')
+
+    @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        REVIEW_EXEMPT_MAX_USD=0,
+    )
+    def test_exempt_stock_buy_above_the_cap_is_refused_and_a_sell_is_not(self):
+        # protects=stock entries are capped, exits are not; fails_when=a sell is refused or a buy passes; no_claim=quote screens
+        approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        buy = [_call(VAULT, approve), _call(ROUTER, _stock_data(0))]
+        sell = [_call(VAULT, approve), _call(ROUTER, _stock_data(1))]
+        with self._exempt():
+            self.assertEqual(self._mutate(buy, _user('VE', uid=35)).error, 'review_amount_cap')
+            self.assertNotEqual(self._mutate(sell, _user('VE', uid=36)).error, 'review_amount_cap')
 
     def test_mint_batch_refused_for_ineligible(self):
         calls = [_call(USDT, _approve_data()), _call(VAULT, _mint_data())]

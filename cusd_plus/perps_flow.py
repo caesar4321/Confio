@@ -419,6 +419,9 @@ def prepare_open(user, wallet: str, meta, coin: str, side: str, leverage: int, m
         margin = _d(margin_usd).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
     except ArithmeticError as exc:
         raise FlowError('bad_amount') from exc
+    from security.geo import review_cap_exceeded
+    if review_cap_exceeded(user, margin):
+        raise FlowError('review_amount_cap')
     _wallet_lock(wallet)
     # One quote at a time per member: a new one replaces any unsigned one.
     _cancel_quotes(wallet)
@@ -514,6 +517,9 @@ def prepare_margin_add(user, wallet: str, meta, position_id, amount_usd) -> dict
         raise FlowError('bad_amount') from exc
     if amount < RETURN_MIN_USD:
         raise FlowError('margin_too_small')
+    from security.geo import review_cap_exceeded
+    if review_cap_exceeded(user, amount):
+        raise FlowError('review_amount_cap')
     _wallet_lock(position.wallet)
     _cancel_quotes(position.wallet)
     if wallet_busy(position.wallet) is not None:
