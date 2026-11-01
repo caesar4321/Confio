@@ -63,8 +63,10 @@ pragma solidity ^0.8.24;
  *  - USDY_InstantManager (BNB): 0x9bA360087075A4Cef548eeD71Eed197bf4cFA4E2
  *    (rwaToken() == USDY below; deposit/receive token is USDT on BNB)
  *  - USDY (BNB, accumulating, 18dp): 0x608593d17a2decbbc4399e4185be4922f97ed32e
- *  - USDY Price Oracle (BNB): 0x8aaa843b848c2E3c83956Bc09aFBE4D9Dcf297b7
- *    (getPrice() 1e18 semantics verified on-chain: 1.13863392 on 07-07)
+ *  - USDY Price Oracle (BNB): 0x1B508f3eF4a0c26fE9659eB1011BFb8E5e0c7782
+ *    (Ondo's USDYOracleWrapper, the source the Instant Manager prices from.
+ *    Replaced the daily-step 0x8aaa843b848c2E3c83956Bc09aFBE4D9Dcf297b7,
+ *    which Ondo left behind at 2026-11-01 00:00 UTC)
  *  - USDT (Binance-Peg BSC-USD, 18dp): 0x55d398326f99059fF775485246999027B3197955
  *  REMAINING before deploy: Primary Purchaser whitelisting of the vault
  *  proxy address (contract whitelisting confirmed possible). USDY transfers
@@ -147,6 +149,10 @@ contract CusdPlusVault is
     /// accepted automatically as yield — it awaits an evidence-backed owner
     /// verdict (accept = real growth, 85/15; rebaseline = fault).
     uint256 public constant MAX_ACCRUAL_JUMP_BPS = 200;
+
+    /// Upper bound, exclusive, on the one-time baseline move in
+    /// initializeContinuousOracle(). One day of yield is about 1 bps.
+    uint256 public constant MAX_ORACLE_MIGRATION_GAP_BPS = 2;
 
     // ── Accrual state ───────────────────────────────────────────────────
     /// cUSD+ share price in USD, 1e18. Starts at $1.00, only ever rises.
@@ -239,6 +245,7 @@ contract CusdPlusVault is
     // ── Events ──────────────────────────────────────────────────────────
     event Accrued(uint256 oraclePrice, uint256 newPPlus);
     event OracleJumpGuard(uint256 lastPrice, uint256 newPrice);
+    event OracleMigrated(uint256 previousBaseline, uint256 newBaseline);
     event OracleGrowthAccepted(
         uint256 oldPrice, uint256 guardedPrice, uint256 resolvedPrice, bytes32 indexed evidenceHash
     );
@@ -292,6 +299,29 @@ contract CusdPlusVault is
         require(ICusdVault(cusdVault).backingToken() == address(USDT), "cusd backing mismatch");
         CUSD = ICusdVault(cusdVault);
         emit CusdVaultSet(address(0), cusdVault);
+    }
+
+    /// Must be included in the Safe's upgradeToAndCall transaction that moves
+    /// ORACLE from Ondo's daily-step oracle to its continuous USDY wrapper
+    /// (Ondo's own cutover: 2026-11-01 00:00 UTC). The step oracle adds each
+    /// day's interest at 00:00 UTC while the continuous one earns it through
+    /// that day, so the old baseline can sit above the new read by up to one
+    /// day of yield, and accrue() would trip on that as a price drop. Moving
+    /// the baseline down re-credits that gap once, paid from surplus, because
+    /// pPlus never falls; the cap keeps this from masking a real price fault.
+    function initializeContinuousOracle() external reinitializer(3) onlyOwner {
+        require(!oracleGuardTripped, "oracle guard tripped");
+        uint256 p = ORACLE.getPrice();
+        uint256 last = lastOraclePrice;
+        require(p > 0, "invalid oracle price");
+        if (p >= last) {
+            accrue();
+            require(!oracleGuardTripped, "oracle guard tripped");
+        } else {
+            require(Math.mulDiv(last - p, BPS, last) < MAX_ORACLE_MIGRATION_GAP_BPS, "oracle gap too wide");
+            lastOraclePrice = p;
+        }
+        emit OracleMigrated(last, lastOraclePrice);
     }
 
     /// cusd.py's update(): Assert(sender == admin) — here onlyOwner.

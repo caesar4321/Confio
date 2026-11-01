@@ -29,11 +29,11 @@ SEL_TOTAL_SUPPLY = _sel('totalSupply()')
 SEL_BACKING = _sel('backingRatioBps()')
 SEL_TOTAL_OWED = _sel('totalOwedUsd()')
 SEL_SURPLUS_USDY = _sel('surplusUsdy(uint256)')
-SEL_RANGES = _sel('ranges(uint256)')  # Ondo RWADynamicOracle rate schedule
+SEL_CURRENT_APY = _sel('getCurrentAPY()')  # Ondo ContinuousPriceOracle, 1e12 = 100%
 SEL_GET_PRICE = _sel('getPrice()')     # oracle: USD per USDY, 1e18
 SEL_YIELD_SHARE = _sel('CONFIO_YIELD_SHARE_BPS()')
 
-RAY = 10 ** 27  # oracle dailyInterestRate scale
+APY_PRECISION = 10 ** 12  # oracle getCurrentAPY scale
 
 # Ondo's InstantManager rejects a redemption whose USDT output is below
 # exactly $1. A $1 subscribe can mint a position worth 1 wei less after the
@@ -56,6 +56,10 @@ def vault_address() -> str | None:
 
 def oracle_address() -> str | None:
     return getattr(settings, 'CUSD_PLUS_ORACLE_ADDRESS', None)
+
+
+def rate_oracle_address() -> str | None:
+    return getattr(settings, 'CUSD_PLUS_RATE_ORACLE_ADDRESS', None)
 
 
 def _rpc(method: str, params: list, timeout: int = 12):
@@ -445,44 +449,20 @@ def confio_yield_share_bps() -> int:
 
 
 def usdy_daily_rate() -> float:
-    """USDY's forward daily accrual rate from the oracle's on-chain rate
-    schedule: dailyInterestRate (RAY) of the ranges[] entry covering now.
-
-    Returns 0.0 when now falls outside every posted range — the oracle
-    price is genuinely flat there until Ondo posts the next range, so 0
-    is the honest forward rate, not an error."""
-    oracle = oracle_address()
+    """USDY's forward daily accrual rate, from the APY Ondo's continuous
+    oracle publishes on-chain. Returns 0.0 when no rate oracle is wired; a
+    failed read raises so the caller serves last-known, not 0%."""
+    oracle = rate_oracle_address()
     if not oracle:
         return 0.0
-    now = int(time.time())
-    current = None
-    # No length getter on the deployed oracle: walk ranges(i) until the
-    # index reverts. Ondo posts roughly one range a month, so the walk is
-    # a handful of calls; cap it against a pathological node.
-    for i in range(500):
-        try:
-            res = _rpc('eth_call', [
-                {'to': oracle, 'data': SEL_RANGES + hex(i)[2:].rjust(64, '0')},
-                'latest',
-            ])
-        except RuntimeError as exc:
-            if 'revert' in str(exc).lower():
-                break  # out-of-bounds index reverts — that's the length probe
-            raise  # real node fault: let the caller serve last-known, not 0%
-        if not res or res == '0x' or len(res) < 2 + 3 * 64:
-            break
-        words = res[2:]
-        start = int(words[0:64], 16)
-        end = int(words[64:128], 16)
-        daily_ir = int(words[128:192], 16)
-        if start <= now < end:
-            current = daily_ir
-    if current is None:
-        return 0.0
-    return current / RAY - 1.0
+    res = _rpc('eth_call', [{'to': oracle, 'data': SEL_CURRENT_APY}, 'latest'])
+    if not res or res == '0x':
+        raise RuntimeError('empty USDY oracle APY read')
+    apy = int(res, 16) / APY_PRECISION  # 0 is real: Ondo froze the price
+    return (1.0 + apy) ** (1.0 / 365.0) - 1.0
 
 
-# APY moves only when Ondo posts a new range (~monthly); an hour of cache
+# APY moves only when Ondo changes the rate; an hour of cache
 # keeps summary queries free while still tracking rate changes same-day.
 APY_TTL = 3600
 APY_LAST_TTL = 7 * 24 * 3600
@@ -494,15 +474,14 @@ def apy_split() -> tuple[float, float]:
     """(gross, net) APY in %, derived live from the chain — never hardcoded
     (locked design rule; rates float with US Treasuries).
 
-    Gross compounds the oracle's daily rate over a year. Net mirrors
-    accrue() exactly: the oracle price steps once per UTC day by
-    dailyInterestRate, and the vault keeps (1 − CONFIO_YIELD_SHARE) of
-    each step, so a year of holding compounds to (1 + kept·daily)^365.
+    Gross compounds the oracle's daily rate over a year. Net: the vault
+    keeps (1 − CONFIO_YIELD_SHARE) of each accrual, so a year of holding
+    with roughly daily accruals compounds to (1 + kept·daily)^365.
 
     On RPC failure serves the last good value, then the settings fallback
     (default 0.0 — an honest 0% beats a made-up rate)."""
     fallback = (0.0, getattr(settings, 'CUSD_PLUS_NET_APY_PCT', 0.0))
-    if not oracle_address():
+    if not rate_oracle_address():
         return fallback
     cached = cache.get('cusd_plus_apy')
     if cached is not None:

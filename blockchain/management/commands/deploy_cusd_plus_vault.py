@@ -35,7 +35,7 @@ from django.core.management.base import BaseCommand, CommandError
 USDY = "0x608593d17A2decBbc4399e4185bE4922F97eD32E"
 USDT = "0x55d398326f99059fF775485246999027B3197955"
 IM = "0x9bA360087075A4Cef548eeD71Eed197bf4cFA4E2"
-ORACLE = "0x8aaa843b848c2E3c83956Bc09aFBE4D9Dcf297b7"
+ORACLE = "0x1B508f3eF4a0c26fE9659eB1011BFb8E5e0c7782"
 SAFE = "0xF29A418744E793973BF4eEc676F8a30B2793b623"  # 3-of-5, owner + treasury
 CONFIO_YIELD_SHARE_BPS = 1500
 
@@ -158,7 +158,7 @@ class Command(BaseCommand):
             raise CommandError(f"impl address mismatch: {got_impl} != {impl_addr}")
         if impl_only:
             self.stdout.write(self.style.SUCCESS(f"\nDEPLOYED. New implementation: {got_impl}"))
-            self.stdout.write("Next: Safe executes upgradeToAndCall(newImpl, \"\") on the proxy, then BscScan verify.")
+            self.stdout.write("Next: Safe executes upgradeToAndCall(newImpl, initializeContinuousOracle()) on the proxy, then BscScan verify.")
             return
         got_proxy = send(nonce + 1, "0x" + proxy_data.hex(), 1_200_000, "proxy")
 

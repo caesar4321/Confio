@@ -2947,11 +2947,14 @@ def mirror_gm_logos():
 # CusdPlusVault.sol) — sending accrue() past this bound would trip the
 # guard on-chain, so the keeper alerts and holds instead.
 MAX_ACCRUAL_JUMP_BPS = 200
+# Ondo's oracle moves every second, so any read shows growth. Value paths
+# accrue on their own; the keeper only sends once a day's yield is pending.
+MIN_KEEPER_ACCRUAL_BPS = 1
 
 SEL_ACCRUE = '0xf8ba4cff'            # accrue()
 SEL_LAST_ORACLE_PRICE = '0x349f7173' # lastOraclePrice()
 SEL_GUARD_TRIPPED = '0x49e7362a'     # oracleGuardTripped()
-SEL_GET_PRICE = '0x98d5fdca'         # getPrice() — Ondo RWADynamicOracle
+SEL_GET_PRICE = '0x98d5fdca'         # getPrice() — Ondo USDYOracleWrapper
 
 
 def _call_uint(to: str, data: str) -> int:
@@ -2962,9 +2965,9 @@ def _call_uint(to: str, data: str) -> int:
 @shared_task(name='cusd_plus.accrue_vault')
 def accrue_vault():
     """Keeper poke for CusdPlusVault.accrue() (permissionless), signed by
-    the BSC sponsor via KMS. Reads first, sends only when the oracle has
-    actually stepped since the last accrual — the oracle moves once per
-    UTC day, so this lands ~1 cheap tx/day and is a pure no-op otherwise.
+    the BSC sponsor via KMS. Reads first, sends only when about a day of
+    yield is pending, so this lands at most ~1 cheap tx/day and is a pure
+    no-op otherwise.
 
     Never sends into a fault: a tripped guard or a jump past the contract
     bound is logged loudly and left for the Safe (resetOracleBaseline),
@@ -2994,11 +2997,13 @@ def accrue_vault():
         logger.warning('cUSD+ accrue keeper: zero read (last=%s p=%s)', last, p)
         return {'skipped': 'zero_read'}
     if p == last:
-        return {'skipped': 'no_step'}  # oracle hasn't stepped yet — free no-op
+        return {'skipped': 'no_step'}  # oracle hasn't moved — free no-op
     if p < last or ((p - last) * 10_000) // last > MAX_ACCRUAL_JUMP_BPS:
         logger.error('cUSD+ accrue keeper: oracle move would trip the jump '
                      'guard (last=%s new=%s) — holding for investigation', last, p)
         return {'skipped': 'would_trip_guard', 'last': last, 'price': p}
+    if ((p - last) * 10_000) // last < MIN_KEEPER_ACCRUAL_BPS:
+        return {'skipped': 'below_keeper_step'}
 
     try:
         from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
