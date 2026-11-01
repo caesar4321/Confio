@@ -1,5 +1,26 @@
 # cUSD+ deployment record — BSC mainnet
 
+## CusdPlusVault v6 — continuous oracle (LIVE 2026-11-01, Safe nonce 26)
+
+Ondo's `ScheduledOracleSwitch` moved USDY pricing from the daily-step
+`RWADynamicOracle` to a per-second `ContinuousPriceOracle` at 2026-11-01
+00:00 UTC. The vault still read the step oracle, so exits settled up to about
+1 bps below its price, and that oracle's last range ends 2026-12-01.
+
+- Implementation: `0x9A3BC52D65bCB32efCAC8814Aa0dFAA6cbB6F0f0`, commit
+  `ec034eeaa`. Deployed bytecode matches the build apart from immutables.
+- ORACLE is now Ondo's `USDYOracleWrapper`, the Instant Manager's price source.
+- Execution, one atomic CALL: `upgradeToAndCall(impl,
+  initializeContinuousOracle())`, tx
+  `0x3ce9a12b8cc3c3f15de23ddd89e68c99b8297d3bfea87d526636a81f726e2787`, block
+  131075080. Signers 1/3/5.
+- Baseline moved from 1.15167847 to 1.151638459446088980. That re-credits the
+  0.35 bps gap once, paid from surplus. pPlus unchanged. Backing 10036 bps.
+- No storage change. Initialized version 3.
+- `test/UpgradeRehearsalV6.fork.t.sol` 6/6 against the live proxy before
+  execution. BscScan source verified and proxy re-linked.
+- Server ships alongside: APY from `getCurrentAPY()`, keeper waits for 1 bps.
+
 ## CONFIO v2 and cUSD freeze — PREPARED 2026-10-30, NOT DEPLOYED
 
 Adds address freeze and delayed recovery to CONFIO, address freeze to cUSD,
@@ -347,7 +368,7 @@ Execution:
 | USDY | `0x608593d17A2decBbc4399e4185bE4922F97eD32E` |
 | USDT (BSC-USD, 18dp) | `0x55d398326f99059fF775485246999027B3197955` |
 | Instant Manager | `0x9bA360087075A4Cef548eeD71Eed197bf4cFA4E2` |
-| RWA price oracle | `0x8aaa843b848c2E3c83956Bc09aFBE4D9Dcf297b7` |
+| RWA price oracle | `0x1B508f3eF4a0c26fE9659eB1011BFb8E5e0c7782` (v6; was `0x8aaa843b848c2E3c83956Bc09aFBE4D9Dcf297b7`) |
 | CONFIO_YIELD_SHARE_BPS | 1500 (15%) |
 
 Post-deploy reads: `name()` = "Confio Dollar+", `symbol()` = "cUSD+",
