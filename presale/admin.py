@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.db.models import Sum, Count
 from decimal import Decimal
 
-from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist, PresaleMigrationCredit
+from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist, PresaleMigrationCredit, PresaleCountryAccess
 
 
 class PresalePhaseAdminForm(forms.ModelForm):
@@ -1518,16 +1518,25 @@ class UserPresaleLimitAdmin(admin.ModelAdmin):
         return False
 
 
+@admin.register(PresaleCountryAccess)
+class PresaleCountryAccessAdmin(admin.ModelAdmin):
+    """Per-country presale access, live. No row = open. An emptied table
+    falls back to the failsafe blocks (US, KR, GB), never to open."""
+    list_display = ['country', 'access', 'updated_at']
+    list_editable = ['access']
+    readonly_fields = ['updated_at']
+
+
 @admin.register(PresaleSettings)
 class PresaleSettingsAdmin(admin.ModelAdmin):
-    list_display = ['is_presale_active', 'is_presale_claims_unlocked', 'us_access', 'presale_finished_at', 'claims_unlocked_at', 'updated_at']
+    list_display = ['is_presale_active', 'is_presale_claims_unlocked', 'presale_finished_at', 'claims_unlocked_at', 'updated_at']
     readonly_fields = ['created_at', 'updated_at', 'presale_finished_at', 'claims_unlocked_at']
     
     fieldsets = (
         (
             'Global Presale Control',
             {
-                'fields': ('is_presale_active', 'is_presale_claims_unlocked', 'us_access', 'presale_finished_at', 'claims_unlocked_at'),
+                'fields': ('is_presale_active', 'is_presale_claims_unlocked', 'presale_finished_at', 'claims_unlocked_at'),
                 'description': 'Master switches. Use the action below to finish presale and unlock claims safely.'
             }
         ),
@@ -1641,14 +1650,14 @@ class PresaleWaitlistAdmin(admin.ModelAdmin):
         from notifications.models import Notification, NotificationType
         from notifications.fcm_service import send_push_notification
 
-        # Get ALL unnotified launch entries (ignore queryset selection). The
-        # US waitlist is still blocked from buying; this message is not theirs.
-        # A user on both lists counts as US.
-        us_users = PresaleWaitlist.objects.filter(
-            region=PresaleWaitlist.REGION_US).values('user_id')
+        # Get ALL unnotified launch entries (ignore queryset selection). A
+        # country waitlist is still refused the purchase; this message is not
+        # theirs, so a user on any country list is left out.
+        country_users = PresaleWaitlist.objects.exclude(
+            region=PresaleWaitlist.REGION_LAUNCH).values('user_id')
         all_unnotified = PresaleWaitlist.objects.filter(
             notified=False, region=PresaleWaitlist.REGION_LAUNCH,
-        ).exclude(user_id__in=us_users).select_related('user')
+        ).exclude(user_id__in=country_users).select_related('user')
 
         if not all_unnotified.exists():
             self.message_user(request, "No users to notify - all waitlist users have already been notified.", level='warning')
@@ -1697,7 +1706,7 @@ class PresaleWaitlistAdmin(admin.ModelAdmin):
         else:
             self.message_user(request, f"Successfully sent notifications to {success_count} user(s).")
 
-    send_notification.short_description = "Send presale notifications to ALL unnotified launch waitlist users (not US)"
+    send_notification.short_description = "Send presale notifications to ALL unnotified launch waitlist users (no country lists)"
 
 
 @admin.register(PresaleMigrationCredit)

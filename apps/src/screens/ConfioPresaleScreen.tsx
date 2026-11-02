@@ -27,7 +27,7 @@ type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackPara
 
 export const ConfioPresaleScreen = () => {
   const navigation = useNavigation<ConfioPresaleScreenNavigationProp>();
-  const { access, usOpen, checkCanBuy } = usePresaleAccess();
+  const { access, usOpen, checkCanBuy, waitlistNotice } = usePresaleAccess();
   const { activeAccount } = useAccount();
   // The server prepares purchases for personal accounts only
   // (personal_account_required), so business owners and employees get the
@@ -79,13 +79,13 @@ export const ConfioPresaleScreen = () => {
     return `$${formatNumber(value / 1000, countryCode, { maximumFractionDigits: 0 })} mil`;
   };
 
-  // While the US is waitlist-only (the server's call), US residents get the
-  // waitlist where everyone else gets the purchase button.
-  const isUsResident = access === 'us_waitlist';
+  // A country the server keeps waitlist-only gets the waitlist where
+  // everyone else gets the purchase button.
+  const isWaitlisted = access === 'waitlist';
 
   const handleJoinWaitlist = async () => {
     // The server decides which waitlist (launch or US) and refuses the rest.
-    if (!isUsResident && !checkCanBuy()) return;
+    if (!isWaitlisted && !checkCanBuy()) return;
 
     try {
       const { data } = await apollo.mutate({
@@ -244,7 +244,7 @@ export const ConfioPresaleScreen = () => {
               </Text>
               <View style={styles.heroBadge}>
                 <Text style={styles.heroBadgeText}>
-                  {activePresaleData?.activePresalePhase && !isUsResident
+                  {activePresaleData?.activePresalePhase && !isWaitlisted
                     ? `Preventa abierta · $${formatPrice(currentPrice)}`
                     : 'Acceso anticipado'}
                 </Text>
@@ -435,13 +435,11 @@ export const ConfioPresaleScreen = () => {
               : 'No compras una promesa de ganancia. Te sumas desde el principio a una red de confianza para Latinoamérica.'}
           </Text>
 
-          {!isClaimsUnlocked && isUsResident ? (
+          {!isClaimsUnlocked && isWaitlisted ? (
             <>
               <View style={styles.accountNotice}>
                 <Icon name="clock" size={18} color={colors.secondary} />
-                <Text style={styles.accountNoticeText}>
-                  La preventa aún no está abierta para residentes de EE. UU. Únete a la lista de espera y te avisaremos si se abre.
-                </Text>
+                <Text style={styles.accountNoticeText}>{waitlistNotice}</Text>
               </View>
               <Button
                 title="Unirme a la lista de espera"

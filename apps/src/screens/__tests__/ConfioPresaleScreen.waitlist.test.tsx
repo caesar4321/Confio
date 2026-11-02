@@ -146,8 +146,24 @@ it('shows no waitlist when the server blocks the US outright', async () => {
 
 it('follows the server over the built-in rules', async () => {
   // Waitlist by IP for a non-US resident: only the server can know.
-  await mount('AR', undefined, { access: 'us_waitlist', message: 'x', usAccess: 'waitlist', notUsAttestationRequired: true });
+  await mount('AR', undefined, { access: 'waitlist', message: 'x', usAccess: 'waitlist', notUsAttestationRequired: true, waitlistCountry: 'US', waitlistNotice: null });
 
   expect(button('Participar en la Preventa')).toBeUndefined();
+  expect(button('Unirme a la lista de espera')).toBeDefined();
+});
+
+it('shows the waitlist copy for whichever country the server names', async () => {
+  const notice = 'La preventa aún no está abierta para residentes de Corea del Sur. Únete a la lista de espera y te avisaremos si se abre.';
+  await mount('KR', undefined, { access: 'waitlist', message: 'x', usAccess: 'waitlist', notUsAttestationRequired: true, waitlistCountry: 'KR', waitlistNotice: notice });
+
+  expect(button('Participar en la Preventa')).toBeUndefined();
+  expect(texts()).toContain(notice);
+  await act(async () => { await button('Unirme a la lista de espera').props.onPress(); });
+  expect(mockMutate).toHaveBeenCalledTimes(1);
+});
+
+it('still understands the short-lived us_waitlist value', async () => {
+  await mount('US', undefined, { access: 'us_waitlist', message: 'x', usAccess: 'waitlist', notUsAttestationRequired: true });
+
   expect(button('Unirme a la lista de espera')).toBeDefined();
 });

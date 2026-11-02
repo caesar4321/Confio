@@ -229,7 +229,8 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
         return {'success': False, 'error': 'terms_acceptance_required'}
     # Not asked once the US is open: a US buyer could not truthfully give it.
     from .geo_utils import us_access
-    if not not_us_attestation and us_access() != PresaleSettings.US_ACCESS_OPEN:
+    from .models import PresaleCountryAccess
+    if not not_us_attestation and us_access() != PresaleCountryAccess.ACCESS_OPEN:
         return {'success': False, 'error': 'not_us_attestation_required'}
 
     settings_obj = PresaleSettings.get_settings()

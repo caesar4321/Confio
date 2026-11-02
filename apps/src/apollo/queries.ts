@@ -4251,6 +4251,8 @@ export const GET_PRESALE_ACCESS = gql`
       message
       usAccess
       notUsAttestationRequired
+      waitlistCountry
+      waitlistNotice
     }
   }
 `;

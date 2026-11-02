@@ -9,13 +9,25 @@ behaviour-preserving on two legal controls.
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TestCase
 
 from security.geo import GeoDecision
 
 
 def _user(country, phone_key=None):
     return SimpleNamespace(id=1, phone_country=country, phone_key=phone_key)
+
+
+def _rule(access):
+    from presale.geo_utils import CountryRule
+    return CountryRule(access)
+
+
+def _rules(rules):
+    """Pin the presale admin table (these tests have no database; without a
+    pin the failsafe rules apply: US, KR, GB blocked)."""
+    from types import MappingProxyType
+    return mock.patch('presale.geo_utils.country_rules', return_value=MappingProxyType(rules))
 
 
 def _no_ip(country=None):
@@ -82,28 +94,26 @@ class PresalePolicyTests(SimpleTestCase):
         with _no_ip():
             self.assertTrue(self.policy.evaluate(_user(None)).allowed)
 
-    @override_settings(PRESALE_IP_BLOCKED_COUNTRIES=['US'])
     def test_blocked_ip_refused_with_the_us_copy(self):
         with _no_ip('US'):
             decision = self.policy.evaluate(_user('VE'))
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.message, self.us_msg)
 
-    @override_settings(PRESALE_IP_BLOCKED_COUNTRIES=[])
-    def test_empty_ip_list_skips_the_ip_check(self):
-        with _no_ip('US'):
+    def test_open_country_skips_the_ip_check(self):
+        with _rules({'US': _rule('open')}), _no_ip('US'):
             self.assertTrue(self.policy.evaluate(_user('VE')).allowed)
 
-    @override_settings(PRESALE_IP_BLOCKED_COUNTRIES=['BR'])
-    def test_ip_list_is_read_at_call_time(self):
-        # It comes from a Django setting, so it must not be frozen at import.
-        with _no_ip('BR'):
+    def test_rules_are_read_at_call_time(self):
+        # They come from the admin table, so they must not be frozen at import.
+        with _rules({'BR': _rule('blocked')}), _no_ip('BR'):
             self.assertFalse(self.policy.evaluate(_user('VE')).allowed)
 
-    def test_ip_list_is_separate_from_the_phone_list(self):
-        # KR blocks by phone but is NOT in the default IP list.
-        with override_settings(PRESALE_IP_BLOCKED_COUNTRIES=['US']), _no_ip('KR'):
-            self.assertTrue(self.policy.evaluate(_user('VE')).allowed)
+    def test_every_country_rule_covers_the_ip_too(self):
+        # KR included: it used to block by country only.
+        with _no_ip('KR'):
+            self.assertFalse(self.policy.evaluate(_user('VE')).allowed)
+            self.assertFalse(self.policy.evaluate(_user('KR')).allowed)
 
     def test_resolver_raising_PROPAGATES(self):
         # Preserved: presale never swallowed a resolver error.

@@ -38,21 +38,10 @@ class PresaleSettings(models.Model):
         default='',
         help_text="Invite URL for the private Telegram group (e.g. https://t.me/+AbCdEfGhIjK)"
     )
-    US_ACCESS_BLOCKED = 'blocked'
-    US_ACCESS_WAITLIST = 'waitlist'
-    US_ACCESS_OPEN = 'open'
-    US_ACCESS_CHOICES = [
-        (US_ACCESS_BLOCKED, 'Blocked'),
-        (US_ACCESS_WAITLIST, 'Waitlist only'),
-        (US_ACCESS_OPEN, 'Open'),
-    ]
-    us_access = models.CharField(
-        max_length=16,
-        choices=US_ACCESS_CHOICES,
-        default=US_ACCESS_WAITLIST,
-        help_text="US residents (by country or IP): blocked, waitlist only, or open to buy. "
-                  "Open also drops the not-US attestation."
-    )
+    # UNUSED since 0016 (PresaleCountryAccess decides). Kept one release so
+    # workers still running the old code can read the row mid-deploy; drop
+    # it in a later migration.
+    us_access = models.CharField(max_length=16, default='waitlist', editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -73,6 +62,42 @@ class PresaleSettings(models.Model):
         """Get or create the singleton settings instance"""
         settings, created = cls.objects.get_or_create(id=1)
         return settings
+
+
+class PresaleCountryAccess(models.Model):
+    """Who may join the presale, per country, edited live in the admin.
+    A country with no row is open. Each row applies to the user's country
+    (User.country: GPS, then IP majority, then signup IP) and to the IP the
+    request comes from."""
+    ACCESS_BLOCKED = 'blocked'
+    ACCESS_WAITLIST = 'waitlist'
+    ACCESS_OPEN = 'open'
+    ACCESS_CHOICES = [
+        (ACCESS_BLOCKED, 'Blocked'),
+        (ACCESS_WAITLIST, 'Waitlist only'),
+        (ACCESS_OPEN, 'Open'),
+    ]
+
+    country = models.CharField(max_length=2, unique=True, help_text="ISO-2, upper case (US, KR, GB)")
+    access = models.CharField(
+        max_length=16, choices=ACCESS_CHOICES, default=ACCESS_BLOCKED,
+        help_text="Blocked: no purchase, no waitlist. Waitlist only: no purchase, may join "
+                  "the country's waitlist. Open: may buy (open US also drops the not-US "
+                  "attestation)."
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['country']
+        verbose_name = "Presale Country Access"
+        verbose_name_plural = "Presale Country Access"
+
+    def save(self, *args, **kwargs):
+        self.country = (self.country or '').strip().upper()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.country}: {self.access}"
 
 
 class PresalePhase(models.Model):
@@ -474,21 +499,17 @@ class PresaleMigrationCredit(models.Model):
 
 class PresaleWaitlist(models.Model):
     """Track users who want to be notified about presale availability"""
+    # 'launch' is the pre-launch list; any other value is the ISO-2 country
+    # of a geo-blocked user waiting for that country to open. The launch
+    # notification never goes to a country list.
     REGION_LAUNCH = 'launch'
-    REGION_US = 'us'
-    REGION_CHOICES = [
-        (REGION_LAUNCH, 'Public launch'),
-        # Geo-blocked US residents, waiting for a US exemption. The launch
-        # notification never goes to them.
-        (REGION_US, 'United States'),
-    ]
 
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
         related_name='presale_waitlist_entries'
     )
-    region = models.CharField(max_length=16, choices=REGION_CHOICES, default=REGION_LAUNCH, db_index=True)
+    region = models.CharField(max_length=16, default=REGION_LAUNCH, db_index=True)
     notified = models.BooleanField(
         default=False,
         help_text="Whether user has been notified about presale availability"

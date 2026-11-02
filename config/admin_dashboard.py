@@ -1183,6 +1183,9 @@ confio_admin_site.register(PresalePurchase, PresalePurchaseAdmin)
 confio_admin_site.register(PresaleStats, PresaleStatsAdmin)
 confio_admin_site.register(UserPresaleLimit, UserPresaleLimitAdmin)
 confio_admin_site.register(PresaleWaitlist, PresaleWaitlistAdmin)
+from presale.models import PresaleCountryAccess
+from presale.admin import PresaleCountryAccessAdmin
+confio_admin_site.register(PresaleCountryAccess, PresaleCountryAccessAdmin)
 confio_admin_site.register(PresaleMigrationCredit, PresaleMigrationCreditAdmin)
 
 # Humanitarian aid models

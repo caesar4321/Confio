@@ -306,8 +306,8 @@ class GeoPolicy:
     #: from each feature's original behaviour — see the module docstring.
     allow_missing_phone: bool = False
     #: IP countries refused. None means "same list as phone_blocked" (Ondo);
-    #: a callable is read at CALL time so a Django setting stays live
-    #: (presale reads PRESALE_IP_BLOCKED_COUNTRIES).
+    #: a callable is read at CALL time so a setting stays live (presale
+    #: reads its admin country table).
     ip_blocked: frozenset | Callable[[], object] | None = None
     #: An unresolvable IP already yields None and is allowed. This covers a
     #: RAISE during resolution: Ondo swallows it (an outage must not strand an

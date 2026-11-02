@@ -248,7 +248,8 @@ class BscPurchaseFlowTest(TestCase):
 
     def test_open_us_records_only_a_given_attestation(self):
         # An open US drops the checkbox; the purchase must not then claim it.
-        PresaleSettings.objects.update(us_access=PresaleSettings.US_ACCESS_OPEN)
+        from presale.models import PresaleCountryAccess
+        PresaleCountryAccess.objects.update_or_create(country='US', defaults={'access': 'open'})
         res = self._prepare(not_us_attestation=False)
         self.assertTrue(res['success'], res)
         purchase = PresalePurchase.objects.get(internal_id=res['purchase_id'])
@@ -445,8 +446,23 @@ class BscRedeemFundingTest(TestCase):
             self.assertEqual(cplus.sweepable_usdt_wei(self.user, BSC_ADDR), 150 * self.WAD)
 
 
-class PresaleUsWaitlistTest(TestCase):
-    """US residents can't buy, but join a separate US waitlist."""
+def _set_access(country, access):
+    from presale.models import PresaleCountryAccess
+    PresaleCountryAccess.objects.update_or_create(country=country, defaults={'access': access})
+
+
+def _seed_access():
+    """Prod's seed: US waitlist, KR and GB blocked."""
+    _set_access('US', 'waitlist')
+    _set_access('KR', 'blocked')
+    _set_access('GB', 'blocked')
+
+
+class PresaleCountryWaitlistTest(TestCase):
+    """Refused users join their country's waitlist when it is waitlist-only."""
+
+    def setUp(self):
+        _seed_access()
 
     def _join(self, user, ip_country=None):
         from types import SimpleNamespace
@@ -470,24 +486,34 @@ class PresaleUsWaitlistTest(TestCase):
         res = self._join(user, ip_country='US')
         self.assertTrue(res.success)
         self.assertFalse(res.already_joined)
+        self.assertIn('EE. UU.', res.message)
         self.assertEqual(
-            list(PresaleWaitlist.objects.filter(user=user).values_list('region', flat=True)),
-            [PresaleWaitlist.REGION_US])
+            list(PresaleWaitlist.objects.filter(user=user).values_list('region', flat=True)), ['US'])
         again = self._join(user, ip_country='US')
         self.assertTrue(again.success)
         self.assertTrue(again.already_joined)
         self.assertEqual(PresaleWaitlist.objects.filter(user=user).count(), 1)
 
-    def test_us_ip_with_eligible_phone_joins_the_us_waitlist(self):
+    def test_us_ip_with_eligible_residence_joins_the_us_waitlist(self):
         from presale.models import PresaleWaitlist
         user = self._user('us-ip', 'AR')
         self.assertTrue(self._join(user, ip_country='US').success)
-        self.assertEqual(PresaleWaitlist.objects.get(user=user).region, PresaleWaitlist.REGION_US)
+        self.assertEqual(PresaleWaitlist.objects.get(user=user).region, 'US')
 
-    def test_other_blocked_countries_stay_refused(self):
+    def test_kr_joins_its_own_waitlist_once_switched(self):
         from presale.models import PresaleWaitlist
-        for name, phone, ip in (('kr', 'KR', None), ('gb', 'GB', None), ('us-gb', 'US', 'GB'), ('ar-gb', 'AR', 'GB')):
-            user = self._user(name, phone)
+        user = self._user('kr-w', 'KR')
+        self.assertFalse(self._join(user).success)
+        _set_access('KR', 'waitlist')
+        res = self._join(user)
+        self.assertTrue(res.success)
+        self.assertIn('Corea del Sur', res.message)
+        self.assertEqual(PresaleWaitlist.objects.get(user=user).region, 'KR')
+
+    def test_blocked_countries_stay_refused(self):
+        from presale.models import PresaleWaitlist
+        for name, home, ip in (('kr', 'KR', None), ('gb', 'GB', None), ('us-gb', 'US', 'GB'), ('ar-gb', 'AR', 'GB')):
+            user = self._user(name, home)
             res = self._join(user, ip_country=ip)
             self.assertFalse(res.success, name)
             self.assertFalse(PresaleWaitlist.objects.filter(user=user).exists(), name)
@@ -496,35 +522,40 @@ class PresaleUsWaitlistTest(TestCase):
         from presale.models import PresaleWaitlist
         user = self._user('ar', 'AR')
         self.assertTrue(self._join(user, ip_country='AR').success)
-        self.assertEqual(PresaleWaitlist.objects.get(user=user).region, PresaleWaitlist.REGION_LAUNCH)
+        self.assertEqual(PresaleWaitlist.objects.get(user=user).region, 'launch')
 
-    def test_buying_stays_blocked_for_us(self):
+    def test_buying_stays_refused_on_a_waitlist(self):
         from presale.geo_utils import check_presale_eligibility
         self.assertFalse(check_presale_eligibility(self._user('us-buy', 'US'))[0])
         self.assertFalse(check_presale_eligibility(self._user('ip-buy', 'AR'), ip_country_hint='US')[0])
 
-    def test_launch_blast_skips_the_us_waitlist(self):
+    def test_launch_blast_skips_every_country_list(self):
         from presale.admin import PresaleWaitlistAdmin
         from presale.models import PresaleWaitlist
         us = self._user('us-n', 'US')
+        kr = self._user('kr-n', 'KR')
         ar = self._user('ar-n', 'AR')
-        PresaleWaitlist.objects.create(user=us, region=PresaleWaitlist.REGION_US)
+        PresaleWaitlist.objects.create(user=us, region='US')
+        PresaleWaitlist.objects.create(user=kr, region='KR')
         PresaleWaitlist.objects.create(user=ar)
-        # Joined from an eligible country first, then from the US.
+        # Joined from an eligible country first, then from a waitlist country.
         both = self._user('both-n', 'AR')
         PresaleWaitlist.objects.create(user=both)
-        PresaleWaitlist.objects.create(user=both, region=PresaleWaitlist.REGION_US)
+        PresaleWaitlist.objects.create(user=both, region='US')
         admin = PresaleWaitlistAdmin(PresaleWaitlist, None)
         admin.message_user = mock.Mock()
         with mock.patch('notifications.fcm_service.send_push_notification'):
             admin.send_notification(None, PresaleWaitlist.objects.none())
         self.assertTrue(PresaleWaitlist.objects.get(user=ar).notified)
-        self.assertFalse(PresaleWaitlist.objects.get(user=us).notified)
-        self.assertFalse(PresaleWaitlist.objects.filter(user=both, notified=True).exists())
+        for user in (us, kr, both):
+            self.assertFalse(PresaleWaitlist.objects.filter(user=user, notified=True).exists())
 
 
-class PresaleUsAccessSwitchTest(TestCase):
-    """PresaleSettings.us_access decides the US, live, without a deploy."""
+class PresaleCountryAccessSwitchTest(TestCase):
+    """PresaleCountryAccess decides each country, live, without a deploy."""
+
+    def setUp(self):
+        _seed_access()
 
     def _user(self, name, country):
         user = _mk_user(name)
@@ -532,60 +563,77 @@ class PresaleUsAccessSwitchTest(TestCase):
         user.save(update_fields=['country'])
         return user
 
-    def _mode(self, mode):
-        s = PresaleSettings.get_settings()
-        s.us_access = mode
-        s.save()
-
-    def test_default_is_waitlist(self):
+    def test_seed_keeps_todays_behaviour(self):
         from presale.geo_utils import presale_access
-        access = presale_access(self._user('us-def', 'US'))
-        self.assertEqual(access['access'], 'us_waitlist')
-        self.assertEqual(access['us_access'], 'waitlist')
-        self.assertTrue(access['not_us_attestation_required'])
+        us = presale_access(self._user('us-def', 'US'))
+        # 'us_waitlist' for the US: builds from 11-02 know no other value.
+        self.assertEqual((us['access'], us['waitlist_country'], us['us_access']), ('us_waitlist', 'US', 'waitlist'))
+        self.assertIn('EE. UU.', us['waitlist_notice'])
+        self.assertTrue(us['not_us_attestation_required'])
+        self.assertEqual(presale_access(self._user('kr-d', 'KR'))['access'], 'blocked')
+        self.assertEqual(presale_access(self._user('gb-d', 'GB'))['access'], 'blocked')
+        # Every row covers the request IP too, KR included.
+        self.assertEqual(presale_access(self._user('ar-kr', 'AR'), ip_country_hint='KR')['access'], 'blocked')
+        self.assertEqual(presale_access(self._user('ar-gb', 'AR'), ip_country_hint='GB')['access'], 'blocked')
 
     def test_blocked_has_no_waitlist(self):
         from presale.geo_utils import presale_access
-        self._mode('blocked')
+        _set_access('US', 'blocked')
         self.assertEqual(presale_access(self._user('us-b', 'US'))['access'], 'blocked')
         self.assertEqual(presale_access(self._user('ip-b', 'AR'), ip_country_hint='US')['access'], 'blocked')
 
     def test_open_lets_us_buy_and_drops_the_attestation(self):
         from presale.geo_utils import presale_access, check_presale_eligibility
-        self._mode('open')
-        us = self._user('us-o', 'US')
-        access = presale_access(us, ip_country_hint='US')
+        _set_access('US', 'open')
+        access = presale_access(self._user('us-o', 'US'), ip_country_hint='US')
         self.assertEqual(access['access'], 'buy')
         self.assertFalse(access['not_us_attestation_required'])
         self.assertTrue(check_presale_eligibility(self._user('ip-o', 'AR'), ip_country_hint='US')[0])
 
-    def test_open_keeps_other_blocks(self):
+    def test_gb_and_kr_open_independently(self):
         from presale.geo_utils import presale_access
-        self._mode('open')
-        for name, country, ip in (('kr-o', 'KR', None), ('gb-o', 'GB', None), ('us-gb', 'US', 'GB')):
-            self.assertEqual(presale_access(self._user(name, country), ip_country_hint=ip)['access'], 'blocked', name)
+        _set_access('GB', 'open')
+        self.assertEqual(presale_access(self._user('gb-o', 'GB'), ip_country_hint='GB')['access'], 'buy')
+        self.assertEqual(presale_access(self._user('kr-o', 'KR'))['access'], 'blocked')
+        self.assertEqual(presale_access(self._user('us-o2', 'US'))['access'], 'us_waitlist')
+        _set_access('KR', 'open')
+        self.assertEqual(presale_access(self._user('kr-o2', 'KR'))['access'], 'buy')
 
-    def test_unreadable_setting_blocks_the_us(self):
+    def test_any_new_country_can_be_restricted(self):
+        from presale.geo_utils import presale_access
+        _set_access('BR', 'waitlist')
+        access = presale_access(self._user('br', 'BR'))
+        self.assertEqual((access['access'], access['waitlist_country']), ('waitlist', 'BR'))
+        self.assertIn('tu país', access['waitlist_notice'])
+
+    def test_unreadable_or_empty_table_fails_closed(self):
         from presale.geo_utils import presale_access, us_access
-        with mock.patch('presale.models.PresaleSettings.get_settings', side_effect=RuntimeError('db down')):
+        from presale.models import PresaleCountryAccess
+        with mock.patch('presale.models.PresaleCountryAccess.objects') as objects:
+            objects.all.side_effect = RuntimeError('db down')
             self.assertEqual(us_access(), 'blocked')
             self.assertEqual(presale_access(self._user('us-x', 'US'))['access'], 'blocked')
+        PresaleCountryAccess.objects.all().delete()
+        self.assertEqual(presale_access(self._user('us-e', 'US'))['access'], 'blocked')
+        self.assertEqual(presale_access(self._user('gb-e', 'GB'))['access'], 'blocked')
+        self.assertEqual(presale_access(self._user('ar-e', 'AR'))['access'], 'buy')
 
-    def test_legacy_rail_stays_closed_to_the_us(self):
+    def test_legacy_rail_never_opens(self):
         from presale.geo_utils import check_legacy_presale_eligibility
-        self._mode('open')
+        for country in ('US', 'KR', 'GB'):
+            _set_access(country, 'open')
         self.assertFalse(check_legacy_presale_eligibility(self._user('us-l', 'US'))[0])
-        self.assertFalse(check_legacy_presale_eligibility(self._user('ip-l', 'AR'), ip_country_hint='US')[0])
+        self.assertFalse(check_legacy_presale_eligibility(self._user('kr-l', 'KR'))[0])
+        self.assertFalse(check_legacy_presale_eligibility(self._user('ip-l', 'AR'), ip_country_hint='GB')[0])
         self.assertTrue(check_legacy_presale_eligibility(self._user('ar-l', 'AR'), ip_country_hint='AR')[0])
 
-    def test_purchase_attestation_follows_the_switch(self):
+    def test_purchase_attestation_follows_the_us_row(self):
         from presale.bsc_flow import prepare_purchase
         user = self._user('ar-att', 'AR')
         account = user.accounts.first()
         with mock.patch('presale.bsc_flow.presale_vault_address', return_value=VAULT):
             res = prepare_purchase(user, account, '10', accepted_terms=True, not_us_attestation=False)
             self.assertEqual(res['error'], 'not_us_attestation_required')
-            self._mode('open')
+            _set_access('US', 'open')
             res = prepare_purchase(user, account, '10', accepted_terms=True, not_us_attestation=False)
             self.assertNotEqual(res.get('error'), 'not_us_attestation_required')
-
