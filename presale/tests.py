@@ -500,6 +500,35 @@ class PresaleCountryWaitlistTest(TestCase):
         self.assertTrue(self._join(user, ip_country='US').success)
         self.assertEqual(PresaleWaitlist.objects.get(user=user).region, 'US')
 
+    def test_join_records_where_the_user_was(self):
+        from presale.models import PresaleWaitlist
+        user = self._user('ev', 'AR')
+        # Not through Cloudflare, so the country header is not trusted for
+        # the record: the IP itself is resolved.
+        with mock.patch('security.geo.get_country_for_ip', return_value='US') as lookup:
+            self.assertTrue(self._join(user, ip_country='US').success)
+        lookup.assert_any_call('203.0.113.9', None)
+        entry = PresaleWaitlist.objects.get(user=user)
+        self.assertEqual((entry.region, entry.ip_address, entry.ip_country, entry.user_country),
+                         ('US', '203.0.113.9', 'US', 'AR'))
+
+    def test_join_survives_missing_evidence(self):
+        from types import SimpleNamespace
+        from presale.models import PresaleWaitlist
+        from presale.schema import JoinPresaleWaitlist
+        user = self._user('ev-none', 'US')
+        info = SimpleNamespace(context=SimpleNamespace(user=user, META={'REMOTE_ADDR': 'not-an-ip', 'HTTP_CF_IPCOUNTRY': 'US'}))
+        self.assertTrue(JoinPresaleWaitlist.mutate.__wrapped__(None, info).success)
+        entry = PresaleWaitlist.objects.get(user=user)
+        self.assertEqual((entry.ip_address, entry.ip_country, entry.user_country), (None, '', 'US'))
+
+    def test_join_stores_only_real_country_codes(self):
+        from presale.models import PresaleWaitlist
+        user = self._user('ev-zz', 'US')
+        with mock.patch('security.geo.get_country_for_ip', return_value='ZZ'):
+            self.assertTrue(self._join(user).success)
+        self.assertEqual(PresaleWaitlist.objects.get(user=user).ip_country, '')
+
     def test_kr_joins_its_own_waitlist_once_switched(self):
         from presale.models import PresaleWaitlist
         user = self._user('kr-w', 'KR')

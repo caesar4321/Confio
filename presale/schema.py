@@ -515,6 +515,34 @@ class PurchasePresaleTokens(graphene.Mutation):
         raise GraphQLError("Use WebSocket /ws/presale_session for presale purchases (prepare + submit)")
 
 
+def _join_evidence(user, meta) -> dict:
+    """Where the user was when they joined: client IP, its country, and the
+    country the gate judged them by. Best effort: a lookup failure never
+    blocks a join. Only real ISO-3166 codes are stored."""
+    import ipaddress
+    from security.geo import country_of, get_country_for_ip, normalize_country, to_iso3
+    from security.request_utils import came_through_cloudflare, extract_client_ip_from_meta
+
+    def iso2(code) -> str:
+        code = normalize_country(code)
+        return code if code and to_iso3(code) else ''
+
+    meta = meta or {}
+    evidence = {'ip_address': None, 'ip_country': '', 'user_country': iso2(country_of(user))}
+    ip = extract_client_ip_from_meta(meta)
+    try:
+        evidence['ip_address'] = str(ipaddress.ip_address(ip))
+    except ValueError:
+        return evidence
+    try:
+        # The CF country header counts only on a request that came through Cloudflare.
+        header = meta.get('HTTP_CF_IPCOUNTRY') if came_through_cloudflare(meta) else None
+        evidence['ip_country'] = iso2(get_country_for_ip(evidence['ip_address'], header))
+    except Exception:  # noqa: BLE001
+        logger.exception('[PRESALE] waitlist IP country lookup failed user_id=%s', getattr(user, 'id', None))
+    return evidence
+
+
 class JoinPresaleWaitlist(graphene.Mutation):
     """Mutation to join the presale waitlist"""
 
@@ -550,7 +578,8 @@ class JoinPresaleWaitlist(graphene.Mutation):
         # No unique constraint on (user, region): old rows may repeat.
         created = not PresaleWaitlist.objects.filter(user=user, region=region).exists()
         if created:
-            PresaleWaitlist.objects.create(user=user, region=region)
+            PresaleWaitlist.objects.create(
+                user=user, region=region, **_join_evidence(user, getattr(request, 'META', None)))
         if region != PresaleWaitlist.REGION_LAUNCH:
             residents = residents_of(region)
             message = (f"Ya estás en la lista de espera. Te avisaremos si la preventa se abre para residentes {residents}."

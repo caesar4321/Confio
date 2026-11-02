@@ -1608,18 +1608,24 @@ class PresaleWaitlistAdmin(admin.ModelAdmin):
     list_display = [
         'user_link',
         'region',
+        'user_country',
+        'ip_country',
+        'ip_address',
         'created_at',
         'notified',
         'notified_at',
     ]
     list_filter = ['region', 'notified', 'created_at']
     search_fields = ['user__username', 'user__email', 'user__phone_number']
-    readonly_fields = ['user', 'created_at', 'notified_at']
+    readonly_fields = ['user', 'created_at', 'notified_at', 'ip_address', 'ip_country', 'user_country']
     date_hierarchy = 'created_at'
 
     fieldsets = (
         ('Waitlist Entry', {
             'fields': ('user', 'region', 'created_at')
+        }),
+        ('Evidence at join', {
+            'fields': ('user_country', 'ip_country', 'ip_address')
         }),
         ('Notification Status', {
             'fields': ('notified', 'notified_at')

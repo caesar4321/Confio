@@ -516,6 +516,12 @@ class PresaleWaitlist(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     notified_at = models.DateTimeField(null=True, blank=True)
+    # Evidence of where the user was when they joined (compliance records).
+    ip_address = models.GenericIPAddressField(null=True, blank=True, help_text="Client IP at join")
+    ip_country = models.CharField(max_length=2, blank=True, help_text="Country of that IP at join")
+    user_country = models.CharField(
+        max_length=2, blank=True,
+        help_text="Country the gate judged by at join (User.country, else a legacy phone country)")
 
     class Meta:
         ordering = ['-created_at']
