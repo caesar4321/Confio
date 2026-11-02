@@ -150,19 +150,32 @@ def _format_maximum_amount_error(exc: 'KoyweMaximumAmountError', direction: str)
 
 _KOYWE_UNSUPPORTED_OPERATION_RE = re.compile(
     r'operation type (\w+) is not supported for currency (\w+)', re.IGNORECASE)
+# Prod 2026-11-02: Koywe emptied the USDT BSC token's currencies, so every
+# quote in every country came back as this sentence.
+_KOYWE_UNSUPPORTED_TICKER_RE = re.compile(
+    r'ticker not supported for currency:?\s*(\w+)', re.IGNORECASE)
 
 
-def _format_koywe_error(exc: 'KoyweError') -> str:
+def _koywe_unavailable_message(action: str, currency: str) -> str:
+    article = 'Los' if action == 'retiros' else 'Las'
+    return (
+        f'{article} {action} en {currency.upper()} no están disponibles '
+        f'temporalmente. Inténtalo más tarde.'
+    )
+
+
+def _format_koywe_error(exc: 'KoyweError', direction: str = '') -> str:
     """Koywe's account-level rail switches come back as English sentences;
     users get Spanish. Anything unrecognized passes through unchanged."""
     text = str(exc)
     match = _KOYWE_UNSUPPORTED_OPERATION_RE.search(text)
     if match:
         action = 'recargas' if match.group(1).lower() == 'onramp' else 'retiros'
-        return (
-            f'Las {action} en {match.group(2).upper()} no están disponibles '
-            f'por el momento. Inténtalo más tarde.'
-        )
+        return _koywe_unavailable_message(action, match.group(2))
+    match = _KOYWE_UNSUPPORTED_TICKER_RE.search(text)
+    if match:
+        action = 'retiros' if direction == 'OFF_RAMP' else 'recargas'
+        return _koywe_unavailable_message(action, match.group(1))
     return text
 
 
@@ -1498,7 +1511,7 @@ class CreateRampOrder(graphene.Mutation):
                 address_reservation, account_id=current_account.pk)
             release_on_ramp_check(face_claim_id)
             logger.warning('Koywe ramp order failed: %s', exc)
-            return RampOrderType(success=False, error=_format_koywe_error(exc))
+            return RampOrderType(success=False, error=_format_koywe_error(exc, normalized_direction))
         except Exception as exc:
             # Unknown application failures may happen after Koywe accepted the
             # POST. Fail closed exactly like a transport timeout.
@@ -2055,7 +2068,7 @@ class Query(graphene.ObjectType):
                 resolved_country_code,
                 exc,
             )
-            raise ValidationError(_format_koywe_error(exc))
+            raise ValidationError(_format_koywe_error(exc, normalized_direction))
 
         if fee_enabled and normalized_direction == 'ON_RAMP':
             try:

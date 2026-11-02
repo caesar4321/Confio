@@ -253,6 +253,42 @@ class KoyweFundingPrecisionTests(SimpleTestCase):
                 result = self.status(ramp, {'amountIn': '50', 'depositAddress': ADDRESS})
                 self.assertNotIn('confioDepositAddress', result.payment_details)
 
+    def test_quote_translates_koywe_rail_disabled_error(self):
+        # Prod 2026-10-25: Koywe disabled COP on-ramp on our account and the
+        # English sentence reached the Recargar summary card verbatim.
+        from ramps.koywe_client import KoyweError
+        info = SimpleNamespace(context=SimpleNamespace(user=None))
+        client = mock.Mock(is_configured=True)
+        client.get_ramp_quote.side_effect = KoyweError(
+            'Operation type OnRamp is not supported for currency COP in country COL')
+        with mock.patch.object(schema, '_resolve_ramp_country_code', return_value='CO'), \
+             mock.patch.object(schema, 'KoyweClient', return_value=client), \
+             mock.patch.object(schema, '_validate_koywe_on_ramp_quote_limits'), \
+             self.assertRaises(ValidationError) as ctx:
+            schema.Query().resolve_ramp_quote(
+                info, direction='ON_RAMP', amount='200000', country_code='CO',
+                fiat_currency='COP', payment_method_code='PSE')
+        self.assertEqual(
+            ctx.exception.messages,
+            ['Las recargas en COP no están disponibles temporalmente. Inténtalo más tarde.'])
+
+    def test_unrecognized_koywe_error_passes_through(self):
+        from ramps.koywe_client import KoyweError
+        self.assertEqual(schema._format_koywe_error(KoyweError('Otro error')), 'Otro error')
+        self.assertIn('Los retiros en COP', schema._format_koywe_error(
+            KoyweError('Operation type OffRamp is not supported for currency COP in country COL')))
+
+    def test_ticker_unsupported_error_names_direction(self):
+        # Prod 2026-11-02: USDT BSC lost all currencies at Koywe.
+        from ramps.koywe_client import KoyweError
+        exc = KoyweError('Ticker not supported for currency: BOB')
+        self.assertEqual(
+            schema._format_koywe_error(exc, 'ON_RAMP'),
+            'Las recargas en BOB no están disponibles temporalmente. Inténtalo más tarde.')
+        self.assertEqual(
+            schema._format_koywe_error(exc, 'OFF_RAMP'),
+            'Los retiros en BOB no están disponibles temporalmente. Inténtalo más tarde.')
+
     @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
     def test_quote_rejects_nonfinite_amount_before_provider_or_preview(self):
         info = SimpleNamespace(context=SimpleNamespace(user=None))
