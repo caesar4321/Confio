@@ -451,8 +451,8 @@ class PresaleUsWaitlistTest(TestCase):
 
     def _user(self, name, country):
         user = _mk_user(name)
-        user.phone_country = country
-        user.save(update_fields=['phone_country'])
+        user.country = country
+        user.save(update_fields=['country'])
         return user
 
     def test_us_resident_joins_the_us_waitlist(self):
