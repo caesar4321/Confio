@@ -122,6 +122,15 @@ test('iOS binary: the same amount under "Otros", so the profile still adds up', 
   expect(textOf(tree)).not.toContain('Oro y Bitcoin');
 });
 
+test('iOS binary: only certain stock rows in Abiertas and Cerradas, even from an older server', () => {
+  mockFeatures.DEX_TRADING_UI_ENABLED = false;
+  const { isBundledStockRow } = require('../CommunityPortfolioSection');
+  expect(isBundledStockRow('TSLA', 'Tesla')).toBe(true);
+  expect(isBundledStockRow('TSLA', 'TSLA · Largo 5x')).toBe(false);   // a Futuros label
+  expect(isBundledStockRow('BTC', 'Bitcoin')).toBe(false);            // not an Ondo stock
+  expect(isBundledStockRow('NEAR', 'NEAR')).toBe(false);              // a crypto symbol too: unsure, left out
+});
+
 describe('positionDestination', () => {
   const { positionDestination } = require('../CommunityPortfolioSection');
   it('opens the stock page for an Ondo token and the asset page for Bitcoin & gold', () => {

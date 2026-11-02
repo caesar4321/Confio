@@ -296,8 +296,14 @@ class TeamsQuery(graphene.ObjectType):
         team = TeamsQuery._team(team_id)
         if team is None or viewer_access(info.context.user) != community.ACCESS_OPEN:
             return []
+        from cusd_plus import crypto_risk, perps_risk
+
         exclude = community.block_relation_ids(info.context.user)
-        return [TeamPositionType(**p) for p in data.positions(team, exclude=exclude)]
+        meta = getattr(info.context, 'META', None)
+        dex = crypto_risk.platform_allowed(meta) and perps_risk.platform_allowed(meta)
+        # The iOS app lists stock holdings only (Bitcoin & gold are not offered there).
+        return [TeamPositionType(**p) for p in data.positions(team, exclude=exclude)
+                if dex or p['asset'] == 'stock']
 
     @login_required
     def resolve_team_plays(self, info, team_id):

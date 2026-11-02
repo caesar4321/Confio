@@ -132,8 +132,8 @@ def require_staff_user(info):
     return user
 
 
-def get_visible_content_queryset(membership: ChannelMembership):
-    queryset = membership.channel.content_items.filter(
+def get_visible_content_queryset(membership: ChannelMembership, meta=None):
+    queryset = _hide_unoffered(membership.channel.content_items.all(), meta).filter(
         community.READABLE,
         Q(published_at__gte=membership.joined_at)
         | Q(visibility_policy__in=[VisibilityPolicy.BACKLOG, VisibilityPolicy.PINNED]),
@@ -462,16 +462,28 @@ def build_portal_content_payload(item: ContentItem, poll_payloads=None):
     )
 
 
-def _without_unoffered_trades(queryset, info):
-    """Posts of Bitcoin & gold or Futuros trades stay out of feeds where the
-    app doesn't offer them (the iOS app). A post has no total to keep whole,
-    so it is left out rather than relabeled."""
+def _dex_offered(meta) -> bool:
     from cusd_plus import crypto_risk, perps_risk
 
-    meta = getattr(info.context, 'META', None)
-    kinds = ((() if crypto_risk.platform_allowed(meta) else activity_share.CRYPTO_KINDS)
-             + (() if perps_risk.platform_allowed(meta) else activity_share.PERPS_KINDS))
-    return queryset.exclude(activity_share__kind__in=kinds) if kinds else queryset
+    return crypto_risk.platform_allowed(meta) and perps_risk.platform_allowed(meta)
+
+
+def _hide_unoffered(queryset, meta):
+    """Where Oro y Bitcoin / Futuros are not offered (the iOS app): no posts
+    of those trades, and no official post marked metadata.hidden_on_ios (a
+    release note announcing them). A post has no total to keep whole, so it
+    is left out rather than relabeled."""
+    from cusd_plus import crypto_risk, perps_risk
+
+    crypto_ok, perps_ok = crypto_risk.platform_allowed(meta), perps_risk.platform_allowed(meta)
+    if crypto_ok and perps_ok:
+        return queryset
+    kinds = (() if crypto_ok else activity_share.CRYPTO_KINDS) + (() if perps_ok else activity_share.PERPS_KINDS)
+    return queryset.exclude(activity_share__kind__in=kinds).exclude(metadata__has_key='hidden_on_ios')
+
+
+def _without_unoffered_trades(queryset, info):
+    return _hide_unoffered(queryset, getattr(info.context, 'META', None))
 
 
 def build_discover_feed_item_payload(
@@ -611,15 +623,16 @@ def get_accessible_content_item(info, content_item_id):
         membership_filter.update({'account': account, 'business__isnull': True})
 
     membership = ChannelMembership.objects.filter(**membership_filter).first()
-    if membership is None or not get_visible_content_queryset(membership).filter(id=item.id).exists():
+    meta = getattr(info.context, 'META', None)
+    if membership is None or not get_visible_content_queryset(membership, meta).filter(id=item.id).exists():
         raise GraphQLError('Content item not available in this context')
 
     return item, user, account, business
 
 
-def build_editorial_channel_payload(membership: ChannelMembership):
+def build_editorial_channel_payload(membership: ChannelMembership, meta=None):
     visible_items = list(
-        get_visible_content_queryset(membership).prefetch_related('reactions__reaction_type')[:20]
+        get_visible_content_queryset(membership, meta).prefetch_related('reactions__reaction_type')[:20]
     )
     latest_item = visible_items[0] if visible_items else None
 
@@ -631,11 +644,11 @@ def build_editorial_channel_payload(membership: ChannelMembership):
         time_label = ''
 
     if membership.last_seen_at:
-        unread_count = get_visible_content_queryset(membership).filter(
+        unread_count = get_visible_content_queryset(membership, meta).filter(
             published_at__gt=membership.last_seen_at
         ).count()
     else:
-        unread_count = get_visible_content_queryset(membership).count()
+        unread_count = get_visible_content_queryset(membership, meta).count()
 
     poll_payloads = build_poll_payloads(visible_items, membership.user_id)
     messages = []
@@ -759,17 +772,17 @@ def build_editorial_message_payload(item: ContentItem, membership: ChannelMember
     return MessageThreadItemType(**message_payload)
 
 
-def build_editorial_channel_thread_page(membership: ChannelMembership, offset=0, limit=20):
+def build_editorial_channel_thread_page(membership: ChannelMembership, offset=0, limit=20, meta=None):
     offset = max(offset or 0, 0)
     limit = min(max(limit or 20, 1), 50)
-    queryset = get_visible_content_queryset(membership).prefetch_related('reactions__reaction_type')
+    queryset = get_visible_content_queryset(membership, meta).prefetch_related('reactions__reaction_type')
     page_items = list(queryset[offset:offset + limit + 1])
     has_more = len(page_items) > limit
     if has_more:
         page_items = page_items[:limit]
 
     poll_payloads = build_poll_payloads(page_items, membership.user_id)
-    base_channel = build_editorial_channel_payload(membership)
+    base_channel = build_editorial_channel_payload(membership, meta)
     return MessageChannelThreadPageType(
         channel=MessageChannelType(
             id=base_channel.id,
@@ -908,7 +921,8 @@ def build_message_inbox_payload(info):
         .order_by('channel__sort_order', 'channel__title')
     )
 
-    channels = [build_editorial_channel_payload(membership) for membership in memberships]
+    channels = [build_editorial_channel_payload(membership, getattr(info.context, 'META', None))
+                for membership in memberships]
     channels.append(build_support_channel_payload(user, account, business))
     total_unread_count = sum(channel.unread_count for channel in channels)
 
@@ -1232,13 +1246,22 @@ def _rolling_gain(target):
     return result.gain if result is not None else None
 
 
-def build_member_portfolio(viewer, user_id):
+def _is_dex_symbol(symbol: str) -> bool:
+    """A Bitcoin & gold or Futuros row (the iOS app lists neither; their
+    value stays in the profile's totals, shown there as "Otros")."""
+    from cusd_plus.crypto_catalog import by_symbol
+
+    return symbol.startswith(PERP_SYMBOL_PREFIX) or by_symbol(symbol, include_unlisted=True) is not None
+
+
+def build_member_portfolio(viewer, user_id, meta=None):
     target = _portfolio_target(viewer, user_id)
     if target is None:
         return None
     portfolio = member_portfolio.build_portfolio(target)
     if portfolio is None:
         return None
+    dex_offered = _dex_offered(meta)
     return CommunityMemberPortfolioType(
         user_id=str(target.id),
         is_self=target.id == viewer.id,
@@ -1265,7 +1288,7 @@ def build_member_portfolio(viewer, user_id):
                 avg_entry_usd=None if p.avg_entry_usd is None else format(p.avg_entry_usd.quantize(member_portfolio.Decimal('0.0001')), 'f'),
                 pnl_usd=_money(p.pnl_usd), pnl_pct=_pct(p.pnl_pct), day_change_pct=_pct(p.day_change_pct),
             )
-            for p in portfolio.open_positions
+            for p in portfolio.open_positions if dex_offered or not _is_dex_symbol(p.symbol)
         ],
         closed_positions=None if portfolio.closed_positions is None else [
             PortfolioClosedPositionType(
@@ -1273,7 +1296,7 @@ def build_member_portfolio(viewer, user_id):
                 proceeds_usd=_money(c.proceeds_usd), pnl_usd=_money(c.pnl_usd), pnl_pct=_pct(c.pnl_pct),
                 closed_on=c.closed_on,
             )
-            for c in portfolio.closed_positions
+            for c in portfolio.closed_positions if dex_offered or not _is_dex_symbol(c.symbol)
         ],
     )
 
@@ -2204,7 +2227,8 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
         if membership is None:
             raise GraphQLError('Channel not found')
 
-        return build_editorial_channel_thread_page(membership, offset=offset, limit=limit)
+        return build_editorial_channel_thread_page(membership, offset=offset, limit=limit,
+                                                   meta=getattr(info.context, 'META', None))
 
     @login_required
     def resolve_discover_post(self, info, content_item_id):
@@ -2326,7 +2350,7 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
 
     @login_required
     def resolve_community_member_portfolio(self, info, user_id):
-        return build_member_portfolio(info.context.user, user_id)
+        return build_member_portfolio(info.context.user, user_id, meta=getattr(info.context, 'META', None))
 
     @login_required
     def resolve_investor_profile(self, info, user_id):

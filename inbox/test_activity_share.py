@@ -329,6 +329,56 @@ class ShareActivityTests(CommunityTestBase):
                 self.assertEqual(feeds('ios'), (0, 0, 0, 0, False), kind)
                 self.assertEqual(feeds('android'), (1, 1, 1, 1, True), kind)
 
+    def test_a_post_marked_hidden_on_ios_stays_out_of_iphone_feeds_only(self):
+        # e.g. a release note announcing Oro y Bitcoin (official post 116).
+        from django.conf import settings
+
+        from inbox.models import ContentItem
+        from inbox.schema import _hide_unoffered
+
+        item = self.share()
+        ContentItem.objects.filter(id=item.id).update(metadata={**item.metadata, 'hidden_on_ios': True})
+        everything = ContentItem.objects.filter(id=item.id)
+        with override_settings():
+            del settings.CRYPTO_IOS_ENABLED
+            del settings.PERPS_IOS_ENABLED  # the code defaults
+            self.assertFalse(_hide_unoffered(everything, {'HTTP_X_CONFIO_PLATFORM': 'ios'}).exists())
+            self.assertTrue(_hide_unoffered(everything, {'HTTP_X_CONFIO_PLATFORM': 'android'}).exists())
+            self.assertTrue(_hide_unoffered(everything, None).exists())
+
+    def test_the_iphone_profile_lists_no_bitcoin_gold_or_futuros_rows_but_keeps_the_total(self):
+        from decimal import Decimal
+        from types import SimpleNamespace
+
+        from django.conf import settings
+
+        from inbox import schema as inbox_schema
+
+        open_rows = [SimpleNamespace(symbol=s, ticker=t, name=t, units=Decimal('1'), value_usd=Decimal('5'),
+                                     invested_usd=None, avg_entry_usd=None, pnl_usd=None, pnl_pct=None,
+                                     day_change_pct=None)
+                     for s, t in (('NVDAon', 'NVDA'), ('BTCB', 'BTC'), ('perp:BTC', 'BTC'))]
+        closed_rows = [SimpleNamespace(symbol=s, ticker=t, name=t, invested_usd=Decimal('1'), proceeds_usd=Decimal('2'),
+                                       pnl_usd=Decimal('1'), pnl_pct=None, closed_on='2026-10-01')
+                       for s, t in (('TSLAon', 'TSLA'), ('XAUT', 'XAUT'))]
+        fake = SimpleNamespace(total_usd=Decimal('15'), dollars_usd=Decimal('0'), stocks_usd=Decimal('5'),
+                               crypto_usd=Decimal('5'), presale_confio=None, presale_invested_usd=None,
+                               trade_count=3, avg_hold_seconds=None, member_since=None,
+                               open_positions=open_rows, closed_positions=closed_rows)
+        with patch.object(inbox_schema, '_portfolio_target', return_value=self.member), \
+                patch.object(inbox_schema.member_portfolio, 'build_portfolio', return_value=fake), \
+                patch.object(inbox_schema, '_rolling_gain', return_value=None), override_settings():
+            del settings.CRYPTO_IOS_ENABLED
+            del settings.PERPS_IOS_ENABLED
+            ios = inbox_schema.build_member_portfolio(self.member, self.member.id, meta={'HTTP_X_CONFIO_PLATFORM': 'ios'})
+            android = inbox_schema.build_member_portfolio(self.member, self.member.id,
+                                                          meta={'HTTP_X_CONFIO_PLATFORM': 'android'})
+        self.assertEqual([p.ticker for p in ios.open_positions], ['NVDA'])
+        self.assertEqual([c.ticker for c in ios.closed_positions], ['TSLA'])
+        self.assertEqual(ios.total_usd, android.total_usd)
+        self.assertEqual(len(android.open_positions), 3)
+        self.assertEqual(len(android.closed_positions), 2)
+
     def test_coarse_labels(self):
         today = timezone.now().astimezone(activity_share.DISPLAY_TZ).date()
         label = activity_share.coarse_time_label

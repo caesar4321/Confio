@@ -318,6 +318,24 @@ class IosCopyTests(TeamTestBase):
         notify.assert_not_called()
 
 
+class IosPositionsTests(TeamTestBase):
+    def test_the_iphone_app_lists_stock_holdings_only(self):
+        from django.conf import settings
+        from django.test import override_settings
+
+        team, captain = self.create()
+        rows = [{'symbol': 'NVDAon', 'asset': 'stock', 'ticker': 'NVDA', 'name': 'NVIDIA', 'holders': 2},
+                {'symbol': 'BTCB', 'asset': 'crypto', 'ticker': 'BTC', 'name': 'Bitcoin', 'holders': 1}]
+        info = MockInfo(captain)
+        with patch('teams.data.positions', return_value=rows), override_settings():
+            del settings.CRYPTO_IOS_ENABLED
+            del settings.PERPS_IOS_ENABLED
+            info.context.META = {'HTTP_X_CONFIO_PLATFORM': 'ios'}
+            self.assertEqual([p.ticker for p in TeamsQuery().resolve_team_positions(info, str(team.id))], ['NVDA'])
+            info.context.META = {'HTTP_X_CONFIO_PLATFORM': 'android'}
+            self.assertEqual(len(TeamsQuery().resolve_team_positions(info, str(team.id))), 2)
+
+
 class GoalTests(TeamTestBase):
     def test_only_the_captain_sets_a_goal_and_it_freezes_when_reached(self):
         team, captain = self.create()

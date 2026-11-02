@@ -120,7 +120,10 @@ export const TeamScreen = () => {
       if (generation.current !== requested) return;
       const next: Row[] =
         which === 'members' ? (data?.teamMembers ?? []).map((m: Member) => ({ key: `m${m.userId}`, member: m }))
-        : which === 'positions' ? (data?.teamPositions ?? []).map((p: Position) => ({ key: `p${p.symbol}`, position: p }))
+        : which === 'positions' ? (data?.teamPositions ?? [])
+          // No DEX surfaces in this binary: stock holdings only.
+          .filter((p: Position) => DEX_TRADING_UI_ENABLED || p.asset === 'stock')
+          .map((p: Position) => ({ key: `p${p.symbol}`, position: p }))
         : which === 'plays' ? (data?.teamPlays ?? [])
           // No DEX surfaces in this binary: only stock plays (a list, not a total).
           .filter((p: Play) => DEX_TRADING_UI_ENABLED || p.asset === 'stock')

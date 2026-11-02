@@ -1,3 +1,5 @@
+import { BUNDLED_CRYPTO_TOKENS } from '../config/cryptoTokens.generated';
+import { BUNDLED_ONDO_STOCK_TOKENS } from '../config/ondoStockTokens.generated';
 import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
@@ -46,6 +48,14 @@ export const positionDestination = (position: Pick<PortfolioOpenPosition, 'symbo
   // but there is no asset page to open.
   return DEX_TRADING_UI_ENABLED ? { route: 'CryptoDetail', params: { symbol: position.symbol } } : null;
 };
+
+// A closed row carries no symbol. Without the DEX surfaces only rows that are
+// certainly a stock stay (bundled Ondo ticker, not a bundled crypto symbol, not
+// a Futuros label like "TSLA · Largo 5x"): an unsure row is left out.
+const STOCK_TICKERS = new Set(BUNDLED_ONDO_STOCK_TOKENS.map((t) => t.symbol.replace(/on$/, '')));
+const CRYPTO_SYMBOLS = new Set(BUNDLED_CRYPTO_TOKENS.map((t) => t.symbol));
+export const isBundledStockRow = (ticker: string, name: string) =>
+  STOCK_TICKERS.has(ticker) && !CRYPTO_SYMBOLS.has(ticker) && !name.includes(' · ');
 
 export type PortfolioClosedPosition = {
   ticker: string;
@@ -120,8 +130,12 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
   const showConfio = Boolean(portfolio.presaleConfio) && !isZeroAmount(portfolio.presaleConfio);
   const confioAmount = showConfio ? formatAmount(portfolio.presaleConfio) : null;
   const confioInvested = formatUsd(portfolio.presaleInvestedUsd);
-  const openPositions = portfolio.openPositions || [];
-  const closedPositions = portfolio.closedPositions || [];
+  // No DEX surfaces in this binary: stock rows only (an older server may still
+  // send Bitcoin & gold or Futuros rows; their value stays in "Otros").
+  const openPositions = (portfolio.openPositions || [])
+    .filter((p) => DEX_TRADING_UI_ENABLED || (!!p.symbol && p.symbol === `${p.ticker}on`));
+  const closedPositions = (portfolio.closedPositions || [])
+    .filter((c) => DEX_TRADING_UI_ENABLED || isBundledStockRow(c.ticker, c.name));
 
   return (
     <View style={styles.section}>
