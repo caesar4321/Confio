@@ -5,6 +5,7 @@
 import { useMemo } from 'react';
 import { gql, useQuery } from '@apollo/client';
 
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import { useAuthReady } from '../contexts/AuthContext';
 import {
   CryptoAsset,
@@ -16,30 +17,37 @@ import {
 } from '../services/cryptoTrading';
 import { GmRange, gmApiRangeFor, gmOhlcState } from './useGmMarket';
 
+/** Apollo's refetch() runs even for a skipped query: a binary without the DEX
+ *  surfaces hands out this instead, so it never sends these queries at all. */
+const noRefetch = (): Promise<any> => Promise.resolve(undefined);
+
 export const useCryptoCapabilities = (skip = false) => {
   const authReady = useAuthReady();
   const { data, loading, refetch } = useQuery(GET_CRYPTO_CAPABILITIES, {
     fetchPolicy: 'cache-and-network',
-    skip: skip || !authReady,
+    // No DEX UI in this binary: never even ask (every consumer reads null).
+    skip: skip || !authReady || !DEX_TRADING_UI_ENABLED,
   });
   const capabilities: CryptoCapabilities | null = data?.cryptoCapabilities ?? null;
-  return { capabilities, loading: loading && !data, refetch };
+  return { capabilities, loading: loading && !data, refetch: DEX_TRADING_UI_ENABLED ? refetch : noRefetch };
 };
 
 export const useCryptoMarket = (enabled: boolean) => {
   const { data, loading, refetch } = useQuery(GET_CRYPTO_MARKET, {
     fetchPolicy: 'cache-and-network',
-    pollInterval: enabled ? 60_000 : 0,
-    skip: !enabled,
+    pollInterval: enabled && DEX_TRADING_UI_ENABLED ? 60_000 : 0,
+    skip: !enabled || !DEX_TRADING_UI_ENABLED,
   });
   const assets: CryptoAsset[] = useMemo(() => data?.cryptoMarket?.assets ?? [], [data]);
   const bySymbol = (symbol: string) => assets.find((a) => a.symbol === symbol);
-  return { assets, bySymbol, loading: loading && !data, refetch };
+  return { assets, bySymbol, loading: loading && !data, refetch: DEX_TRADING_UI_ENABLED ? refetch : noRefetch };
 };
 
 /** `holdings` is null while unknown (not loaded, scan failed): never zero. */
 export const useCryptoHoldings = (skip = false, pollMs = 60_000) => {
   const authReady = useAuthReady();
+  // Read in every binary: what a member holds is their money, and Home's
+  // total stays whole (an iOS binary names it "otros").
   const { data, loading, refetch } = useQuery(GET_CRYPTO_HOLDINGS, {
     fetchPolicy: 'cache-and-network',
     pollInterval: skip ? 0 : pollMs,
@@ -65,7 +73,7 @@ export const useCryptoOhlc = (symbol: string | undefined, range: GmRange, enable
   const authReady = useAuthReady();
   const { data, loading, error } = useQuery(GET_CRYPTO_OHLC, {
     variables: { symbol, range: gmApiRangeFor(range) },
-    skip: !enabled || !symbol || !authReady,
+    skip: !enabled || !symbol || !authReady || !DEX_TRADING_UI_ENABLED,
     fetchPolicy: 'cache-and-network',
     pollInterval: 300_000,
   });

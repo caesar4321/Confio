@@ -307,10 +307,11 @@ def _types_this_build_cannot_open(info) -> list:
     with Futuros on a newer phone still opens Confío on an older one)."""
     from users.paid_offers import _at_least
 
-    from .fcm_service import MIN_BUILD_SETTING
+    from .fcm_service import MIN_BUILD_SETTING, platform_can_open
 
     meta = getattr(info.context, 'META', {}) or {}
-    return [kind for kind, setting in MIN_BUILD_SETTING.items() if not _at_least(meta, setting)]
+    return [kind for kind, setting in MIN_BUILD_SETTING.items()
+            if not _at_least(meta, setting) or not platform_can_open(kind, meta)]
 
 
 class Query(graphene.ObjectType):

@@ -279,6 +279,27 @@ class CryptoGateTests(TestCase):
         with mock.patch('security.geo.country_of', return_value='VE'):
             return crypto_risk.sponsor_gate(kind, self.user, {}, dollar=dollar)
 
+    def test_ios_is_off_by_default_ahead_of_any_country_and_never_blocks_sells(self):
+        # App Review 3.1.5(iii), 2026-11-02: no PancakeSwap surfaces on iOS.
+        from django.conf import settings
+
+        from cusd_plus import crypto_risk
+
+        crypto_risk.acknowledge(self.user)
+        ios = {'HTTP_X_CONFIO_PLATFORM': 'ios'}
+        android = {'HTTP_X_CONFIO_PLATFORM': 'android'}
+        with override_settings():
+            del settings.CRYPTO_IOS_ENABLED  # the code default, not a test value
+            with mock.patch('security.geo.country_of', return_value='AR'):
+                self.assertFalse(crypto_risk.surfaces_enabled(self.user, ios))
+                self.assertFalse(crypto_risk.buy_enabled(self.user, ios), 'the assistant offers only buy_enabled')
+                self.assertEqual(crypto_risk.sponsor_gate('crypto_buy', self.user, ios), 'trade_not_available')
+                self.assertIsNone(crypto_risk.sponsor_gate('crypto_sell', self.user, ios), 'a holder can always leave')
+                self.assertTrue(crypto_risk.buy_enabled(self.user, android))
+        with override_settings(CRYPTO_IOS_ENABLED=True), \
+                mock.patch('security.geo.country_of', return_value='AR'):
+            self.assertTrue(crypto_risk.buy_enabled(self.user, ios))
+
     def test_canary_allowlist_and_kill_switches(self):
         from cusd_plus import crypto_risk
 

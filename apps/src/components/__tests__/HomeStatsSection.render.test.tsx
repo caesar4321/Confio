@@ -58,6 +58,21 @@ jest.mock('../../hooks/usePerps', () => ({ usePerpsCapabilities: () => ({ capabi
 
 import { HomeStatsSection } from '../HomeStatsSection';
 
+
+// These suites describe the Android build; DEX_TRADING_UI_ENABLED is
+// Platform-derived and the Jest preset runs as iOS. Flip per test for the iOS binary.
+const mockFeatures = { DEX_TRADING_UI_ENABLED: true };
+jest.mock('../../config/features', () => {
+  const mocked = { __esModule: true, ...jest.requireActual('../../config/features') };
+  // A live getter, read at render time (a spread would copy one value at load).
+  Object.defineProperty(mocked, 'DEX_TRADING_UI_ENABLED', {
+    enumerable: true,
+    get: () => mockFeatures.DEX_TRADING_UI_ENABLED,
+  });
+  return mocked;
+});
+afterEach(() => { mockFeatures.DEX_TRADING_UI_ENABLED = true; });
+
 // A TouchableOpacity surfaces through several composite+host layers that all
 // carry the same props, so count DISTINCT accessibility labels instead of
 // nodes — that is the thing a screen reader (and the user) actually sees.

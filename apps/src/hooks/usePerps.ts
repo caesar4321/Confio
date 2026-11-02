@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { AppState } from 'react-native';
 import { useQuery } from '@apollo/client';
 
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import { useAuthReady } from '../contexts/AuthContext';
 import {
   GET_PERPS_CANDLES,
@@ -20,9 +21,12 @@ import {
   PerpsCapabilities,
 } from '../services/perps';
 
-/** Back in the foreground: read again at once (prices moved while away;
- *  polls don't run in the background), not at the next poll tick. */
-const useRefetchOnForeground = (refetch: () => Promise<unknown>, enabled: boolean) => {
+/** Apollo's refetch() runs even for a skipped query: a binary without the DEX
+ *  surfaces hands out this instead, so it never sends these queries at all. */
+const noRefetch = (): Promise<any> => Promise.resolve(undefined);
+
+/** Back in the foreground: read a balance again at once, in every binary. */
+const useBalanceRefetchOnForeground = (refetch: () => Promise<unknown>, enabled: boolean) => {
   const latest = useRef(refetch);
   latest.current = refetch;
   useEffect(() => {
@@ -34,26 +38,41 @@ const useRefetchOnForeground = (refetch: () => Promise<unknown>, enabled: boolea
   }, [enabled]);
 };
 
+/** Back in the foreground: read again at once (prices moved while away;
+ *  polls don't run in the background), not at the next poll tick. */
+const useRefetchOnForeground = (refetch: () => Promise<unknown>, enabled: boolean) => {
+  const latest = useRef(refetch);
+  latest.current = refetch;
+  useEffect(() => {
+    if (!enabled || !DEX_TRADING_UI_ENABLED) return undefined;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') latest.current().catch(() => {});
+    });
+    return () => sub.remove();
+  }, [enabled]);
+};
+
 export const usePerpsCapabilities = (skip = false) => {
   const authReady = useAuthReady();
   const { data, loading, refetch } = useQuery(GET_PERPS_CAPABILITIES, {
     fetchPolicy: 'cache-and-network',
-    skip: skip || !authReady,
+    // No DEX UI in this binary: never even ask (every consumer reads null).
+    skip: skip || !authReady || !DEX_TRADING_UI_ENABLED,
   });
   const capabilities: PerpsCapabilities | null = data?.perpsCapabilities ?? null;
-  return { capabilities, loading: loading && !data, refetch };
+  return { capabilities, loading: loading && !data, refetch: DEX_TRADING_UI_ENABLED ? refetch : noRefetch };
 };
 
 export const usePerpsMarkets = (enabled: boolean) => {
   const { data, loading, refetch } = useQuery(GET_PERPS_MARKETS, {
     fetchPolicy: 'cache-and-network',
-    pollInterval: enabled ? 15_000 : 0,
-    skip: !enabled,
+    pollInterval: enabled && DEX_TRADING_UI_ENABLED ? 15_000 : 0,
+    skip: !enabled || !DEX_TRADING_UI_ENABLED,
   });
   useRefetchOnForeground(refetch, enabled);
   const markets: PerpMarket[] = useMemo(() => data?.perpsMarkets ?? [], [data]);
   const byCoin = (coin: string) => markets.find((m) => m.coin === coin);
-  return { markets, byCoin, loading: loading && !data, refetch };
+  return { markets, byCoin, loading: loading && !data, refetch: DEX_TRADING_UI_ENABLED ? refetch : noRefetch };
 };
 
 /** `positions` is null while unknown (not loaded, Hyperliquid unreadable). */
@@ -63,12 +82,14 @@ export const usePerpsPositions = (enabled: boolean, { includeDone = false, pollM
   // doneLimit: closed positions too, only the N most recent.
   const { data: current, previousData, loading, error, refetch } = useQuery(
     doneLimit != null ? GET_PERPS_RECENT_POSITIONS : GET_PERPS_POSITIONS, {
+    // Read in every binary: an open position is the member's money, and
+    // Home's total stays whole (an iOS binary names it "otros").
     variables: doneLimit != null ? { doneLimit } : { includeDone },
     fetchPolicy: 'cache-and-network',
     pollInterval: enabled ? pollMs : 0,
     skip: !enabled || !authReady,
   });
-  useRefetchOnForeground(refetch, enabled && authReady);
+  useBalanceRefetchOnForeground(refetch, enabled && authReady);
   // A longer page keeps showing the shorter one until it lands.
   const data = current ?? (loading ? previousData : undefined);
   const positions: PerpPosition[] | null = data ? data.perpsPositions ?? null : null;
@@ -103,14 +124,17 @@ export const usePerpsOhlc = (coin: string | undefined, interval: OhlcInterval, e
   const authReady = useAuthReady();
   const { data, loading, error, refetch } = useQuery(GET_PERPS_OHLC, {
     variables: { coin, interval },
-    skip: !coin || !authReady || !enabled,
+    skip: !coin || !authReady || !enabled || !DEX_TRADING_UI_ENABLED,
     fetchPolicy: 'cache-and-network',
     pollInterval: enabled ? 60_000 : 0,
   });
   return useMemo(() => {
     // Another interval's candles never stand in: a switch shows loading.
     const rows: PerpOhlc[] | null | undefined = data?.perpsOhlc;
-    return { candles: rows ?? [], loading: loading && !data, failed: Boolean(error) || rows === null, refetch };
+    return {
+      candles: rows ?? [], loading: loading && !data, failed: Boolean(error) || rows === null,
+      refetch: DEX_TRADING_UI_ENABLED ? refetch : noRefetch,
+    };
   }, [data, loading, error, refetch]);
 };
 
@@ -118,7 +142,7 @@ export const usePerpsCandles = (coin: string | undefined, range: PerpsRange) => 
   const authReady = useAuthReady();
   const { data, loading, error } = useQuery(GET_PERPS_CANDLES, {
     variables: { coin, range },
-    skip: !coin || !authReady,
+    skip: !coin || !authReady || !DEX_TRADING_UI_ENABLED,
     fetchPolicy: 'cache-and-network',
     pollInterval: 60_000,
   });

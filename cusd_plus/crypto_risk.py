@@ -39,12 +39,21 @@ def acknowledge(user) -> None:
         user=user, defaults={'version': ACK_VERSION, 'acknowledged_at': timezone.now()})
 
 
+def platform_allowed(meta) -> bool:
+    """CRYPTO_IOS_ENABLED (default off): no PancakeSwap surfaces on iOS. Read
+    before the country policy, so no reviewer link or override reaches it."""
+    from .perps_risk import _is_ios
+
+    return bool(getattr(settings, 'CRYPTO_IOS_ENABLED', False)) or not _is_ios(meta)
+
+
 def surfaces_enabled(user, meta) -> bool:
-    """Discovery: the global switch plus the crypto country policy."""
+    """Discovery: the global switch, the platform switch, the country policy."""
     from .eligibility import CRYPTO_POLICY
 
     return bool(
         getattr(settings, 'CRYPTO_ENABLED', False)
+        and platform_allowed(meta)
         and CRYPTO_POLICY.evaluate(user, meta or {}).allowed
     )
 

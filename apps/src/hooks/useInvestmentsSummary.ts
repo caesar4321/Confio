@@ -9,7 +9,7 @@
 
 import { useMemo } from 'react';
 
-import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
+import { CRYPTO_TRADING_UI_ENABLED, DEX_TRADING_UI_ENABLED } from '../config/features';
 import type { CryptoAsset, CryptoHolding } from '../services/cryptoTrading';
 import type { PerpPosition } from '../services/perps';
 import { positionValueUsd } from '../utils/perpsPresentation';
@@ -32,6 +32,9 @@ export interface InvestmentsSummaryInput {
   /** Asked and not answered: the server said a held position is unreadable
    *  (Hyperliquid down), or the query failed. Never "no Futuros". */
   perpsUnreadable?: boolean;
+  /** False in a binary without the DEX surfaces: held crypto and Futuros
+   *  still count, named "otros". */
+  namesDex?: boolean;
 }
 
 /** Steps whose money already sits in the member's BSC USDT (counted with
@@ -94,10 +97,12 @@ export const summarizeInvestments = (input: InvestmentsSummaryInput): Investment
 
   let subtitle: string;
   if (holds) {
+    const namesDex = input.namesDex !== false;
     subtitle = [
       stockCount > 0 ? `${stockCount} ${stockCount === 1 ? 'acción' : 'acciones'}` : null,
-      ...unique(held.map(label)),
-      holdsPerps ? 'futuros' : null,
+      ...(namesDex ? unique(held.map(label)) : []),
+      namesDex && holdsPerps ? 'futuros' : null,
+      !namesDex && (holdsCrypto || holdsPerps) ? 'otros' : null,
     ].filter(Boolean).join(' · ') || 'Tus inversiones';
   } else {
     const offered = [
@@ -140,6 +145,7 @@ export const useInvestmentsSummary = (): InvestmentsSummary => {
       cryptoAssets: assets,
       perpsPositions,
       perpsUnreadable,
+      namesDex: DEX_TRADING_UI_ENABLED,
     }),
     [stocks.enabled, stocks.positions.length, stocks.totalUsd, cryptoEnabled, holdings, assets, perpsPositions,
       perpsUnreadable],

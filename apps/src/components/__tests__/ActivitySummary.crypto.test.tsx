@@ -12,6 +12,21 @@ jest.mock('../svg/GoldMark', () => 'GoldMark');
 import { ActivitySummary, activityDestination, cryptoCategoryOf, tradeSide } from '../ActivitySummary';
 import { headlineFor, chipsFor } from '../CommunityShareProvider';
 
+
+// These suites describe the Android build; DEX_TRADING_UI_ENABLED is
+// Platform-derived and the Jest preset runs as iOS. Flip per test for the iOS binary.
+const mockFeatures = { DEX_TRADING_UI_ENABLED: true };
+jest.mock('../../config/features', () => {
+  const mocked = { __esModule: true, ...jest.requireActual('../../config/features') };
+  // A live getter, read at render time (a spread would copy one value at load).
+  Object.defineProperty(mocked, 'DEX_TRADING_UI_ENABLED', {
+    enumerable: true,
+    get: () => mockFeatures.DEX_TRADING_UI_ENABLED,
+  });
+  return mocked;
+});
+afterEach(() => { mockFeatures.DEX_TRADING_UI_ENABLED = true; });
+
 jest.mock('../CommunityRulesSheet', () => ({ CommunityRulesSheet: 'CommunityRulesSheet' }));
 jest.mock('../PostByline', () => ({ PostByline: 'PostByline' }));
 jest.mock('../../navigation/RootNavigation', () => ({ navigate: jest.fn(), navigationRef: {} }));
@@ -69,6 +84,14 @@ describe('Bitcoin & gold Comunidad posts', () => {
     // An asset no longer listed: the Invertir tab, never a broken page.
     expect(activityDestination(post({ kind: 'crypto_buy', ticker: 'DOGE' }) as any, assets))
       .toMatchObject({ route: 'BottomTabs' });
+  });
+
+  it('iOS binary: crypto and Futuros posts keep their numbers but offer no door', () => {
+    mockFeatures.DEX_TRADING_UI_ENABLED = false;
+    const assets = [{ symbol: 'BTCB', ticker: 'BTC', name: 'Bitcoin' }];
+    expect(activityDestination(post({ kind: 'crypto_buy', ticker: 'BTC' }) as any, assets)).toBeNull();
+    expect(activityDestination(post({ kind: 'perps_open', category: 'perp', ticker: 'BTC' }) as any)).toBeNull();
+    expect(activityDestination(post({ kind: 'stock_buy', category: null, ticker: 'NVDA' }) as any)?.route).toBe('StockDetail');
   });
 
   it('opens Invertir (not a stock page) for a crypto post of either spelling', async () => {

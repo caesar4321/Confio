@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import { transactionDetailRoute } from '../utils/transactionRoutes';
 import { AuthorizationStatus, getAPNSToken, getInitialNotification, getMessaging, getToken, hasPermission, isDeviceRegisteredForRemoteMessages, onMessage, onNotificationOpenedApp, onTokenRefresh, registerDeviceForRemoteMessages, requestPermission } from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, AndroidStyle, EventType } from '@notifee/react-native';
@@ -913,7 +914,9 @@ class MessagingService {
           });
           return;
         case 'FuturesPosition':
-          // Futuros notices: only ever about the member's own position.
+          // Futuros notices: only ever about the member's own position. A
+          // binary without the DEX surfaces has nowhere to go: open Home.
+          if (!DEX_TRADING_UI_ENABLED) return;
           this.navigateInsideMain('FuturesPosition', { positionId: rawParam });
           return;
         case 'ActiveTrade':

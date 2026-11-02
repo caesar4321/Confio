@@ -305,12 +305,16 @@ class TeamsQuery(graphene.ObjectType):
         team = TeamsQuery._team(team_id)
         if team is None or viewer_access(viewer) != community.ACCESS_OPEN:
             return []
+        from cusd_plus import crypto_risk
+
         blocked = community.block_relation_ids(viewer)
         rows = data.plays(team, exclude=blocked)
+        crypto_copyable = crypto_risk.platform_allowed(getattr(info.context, 'META', None))
         avatars = profile_pictures.picture_urls([p['user'].id for p in rows])
         return [TeamPlayType(id=str(p['id']), **_member(p['user'], avatars), side=p['side'], symbol=p['symbol'],
                              asset=p['asset'], ticker=p['ticker'], name=p['name'], at=p['at'],
-                             copyable=p['copyable'] and p['user'].id != viewer.id)
+                             copyable=(p['copyable'] and p['user'].id != viewer.id
+                                       and (p['asset'] == 'stock' or crypto_copyable)))
                 for p in rows if p['user'].id not in blocked]
 
     @login_required
@@ -609,7 +613,7 @@ class CopyPlay(graphene.Mutation):
     def mutate(cls, root, info, play_id):
         user = info.context.user
         try:
-            result = data.copy_play(user, int(play_id))
+            result = data.copy_play(user, int(play_id), meta=getattr(info.context, 'META', None))
         except (TypeError, ValueError):
             return CopyPlay(success=False, error='Esta jugada ya no se puede copiar.', code='not_available')
         except CommunityPostError as error:

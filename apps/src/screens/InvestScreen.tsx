@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { Text } from '../components/common/AppText';
@@ -160,7 +161,7 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
 
   // Live results while the tab is on screen (prices on leverage move fast).
   // Before any early return: hooks run in the same order every render.
-  const perpsMids = useLiveMids(isFocused && !isEmployee
+  const perpsMids = useLiveMids(isFocused && !isEmployee && DEX_TRADING_UI_ENABLED
     ? (perpsPositions ?? []).filter(p => p.state !== 'done').map(p => p.coin) : []);
 
   if (isEmployee) {
@@ -313,7 +314,7 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
             </View>
           )}
 
-          {cryptoRows.length > 0 && (cryptoEnabled || holdsCrypto) && (
+          {DEX_TRADING_UI_ENABLED && cryptoRows.length > 0 && (cryptoEnabled || holdsCrypto) && (
             <View ref={cryptoAnchor} collapsable={false} style={styles.card} testID="invest-crypto-card">
               <View style={styles.cardHead}>
                 <View style={styles.cryptoHeadMarks}>
@@ -382,7 +383,7 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
             </View>
           )}
 
-          {(perpsEnabled || livePerps.length > 0 || perpsUnknown) && (
+          {DEX_TRADING_UI_ENABLED && (perpsEnabled || livePerps.length > 0 || perpsUnknown) && (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Futuros. ${venueA11y('hyperliquid')}`}

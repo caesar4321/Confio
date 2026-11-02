@@ -462,6 +462,18 @@ def build_portal_content_payload(item: ContentItem, poll_payloads=None):
     )
 
 
+def _without_unoffered_trades(queryset, info):
+    """Posts of Bitcoin & gold or Futuros trades stay out of feeds where the
+    app doesn't offer them (the iOS app). A post has no total to keep whole,
+    so it is left out rather than relabeled."""
+    from cusd_plus import crypto_risk, perps_risk
+
+    meta = getattr(info.context, 'META', None)
+    kinds = ((() if crypto_risk.platform_allowed(meta) else activity_share.CRYPTO_KINDS)
+             + (() if perps_risk.platform_allowed(meta) else activity_share.PERPS_KINDS))
+    return queryset.exclude(activity_share__kind__in=kinds) if kinds else queryset
+
+
 def build_discover_feed_item_payload(
     item: ContentItem, user, account, business, poll_payloads=None, official_ids=None, avatar_urls=None,
 ):
@@ -2197,6 +2209,9 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
     @login_required
     def resolve_discover_post(self, info, content_item_id):
         item, user, account, business = get_accessible_content_item(info, content_item_id)
+        # A link or notice to a post the feeds leave out here reads as missing.
+        if not _without_unoffered_trades(ContentItem.objects.filter(id=item.id), info).exists():
+            raise GraphQLError('Content item not found')
         return build_discover_feed_item_payload(item, user, account, business)
 
     @login_required
@@ -2226,6 +2241,7 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
             queryset = queryset.filter(channel_id__in=all_official_channel_ids()).exclude(USER_AUTHORED)
         elif section == 'community':
             queryset = queryset.filter(USER_AUTHORED)
+        queryset = _without_unoffered_trades(queryset, info)
         page_items = list(queryset[offset:offset + limit + 1])
         has_more = len(page_items) > limit
         if has_more:
@@ -2260,8 +2276,9 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
             except (TypeError, ValueError):
                 continue
         blocked = community.block_relation_ids(user)
+        queryset = _without_unoffered_trades(published_discover_items().filter(id__in=ids), info)
         items = [
-            item for item in published_discover_items().filter(id__in=ids).select_related('owner_user').distinct()
+            item for item in queryset.select_related('owner_user').distinct()
             if not (item.owner_type == OwnerType.USER and item.owner_user_id in blocked)
         ]
         activities = activity_share.activity_payloads(items)
@@ -2349,6 +2366,7 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
             .distinct()
             .order_by('-published_at', '-id')
         )
+        queryset = _without_unoffered_trades(queryset, info)
         page_items = list(queryset[offset:offset + limit + 1])
         has_more = len(page_items) > limit
         page_items = page_items[:limit]
@@ -2377,7 +2395,7 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
         offset = max(offset or 0, 0)
         # The app re-reads its whole loaded range (offset 0, growing limit).
         limit = min(max(limit or 20, 1), 500)
-        items = list(own_community_items(info.context.user)[offset:offset + limit])
+        items = list(_without_unoffered_trades(own_community_items(info.context.user), info)[offset:offset + limit])
         counts = dict(
             community.visible_comments_any_post()
             .filter(content_item_id__in=[item.id for item in items])
@@ -2390,7 +2408,8 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
 
     @login_required
     def resolve_my_community_post(self, info, content_item_id):
-        item = own_community_items(info.context.user).filter(id=content_item_id).first()
+        item = (_without_unoffered_trades(own_community_items(info.context.user), info)
+                .filter(id=content_item_id).first())
         return build_community_post_payload(item) if item else None
 
     @login_required

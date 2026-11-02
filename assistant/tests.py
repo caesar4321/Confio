@@ -2128,6 +2128,20 @@ class FaqTextTests(TestCase):
 
         from .prompts import faq_text
         self.assertIn('costo único de US$10;', faq_text())
+        # App Review 3.1.5(iii): where Oro y Bitcoin and Futuros are not offered
+        # (the iOS app), the assistant neither describes nor suggests them.
+        ios = faq_text(dex=False)
+        for gone in ('## Oro y Bitcoin', '## Futuros', 'Hyperliquid', 'PancakeSwap', 'que actualice'):
+            self.assertNotIn(gone, ios)
+        self.assertIn('no se ofrecen Oro y Bitcoin ni Futuros', ios)
+        self.assertIn('Ahorrar e invertir son distintos', ios)   # general notes outside the block stay
+        self.assertIn('## Oro y Bitcoin', faq_text())
+        self.assertNotIn('[[', faq_text() + ios)
+        from .prompts import dex_offered
+
+        self.assertTrue(dex_offered({'HTTP_X_CONFIO_PLATFORM': 'android'}))
+        with self.settings(PERPS_IOS_ENABLED=False, CRYPTO_IOS_ENABLED=False):
+            self.assertFalse(dex_offered({'HTTP_X_CONFIO_PLATFORM': 'ios'}))
         self.assertNotIn('{local_account_fee}', faq_text())
         with patch('payment_accounts.activation.FEE', Decimal('7.50')):
             self.assertIn('US$7,50', faq_text())

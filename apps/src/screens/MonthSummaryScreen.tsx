@@ -9,6 +9,7 @@
 // sections below are revealed together (once their queries answer), so nothing moves under
 // the user's finger. Amounts always US$, masked with the balance. A month with
 // no movements still shows the insight cards, with the empty message below.
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -448,12 +449,12 @@ function MonthBody({ summary, masked, isCurrent, business, insights, runKey, sto
               settlingPhase={stocksPhase} onOpenStocks={onOpenStocks} onOpenStock={onOpenStock} />
           )}
           {insights.stocks?.state === 'none' && insights.stocks.canBuy && <StocksInvite onOpen={onOpenStocks} />}
-          {insights.crypto && insights.crypto.state !== 'none' && (
+          {DEX_TRADING_UI_ENABLED && insights.crypto && insights.crypto.state !== 'none' && (
             // Same states as stocks; 'none' draws nothing (no invitation).
             <CryptoCard value={insights.crypto} month={summary.month} isCurrent={isCurrent} masked={masked}
               settlingPhase={cryptoPhase} onOpenAll={onOpenCrypto} onOpenAsset={onOpenCryptoAsset} />
           )}
-          {insights.perps && insights.perps.state !== 'none' && (
+          {DEX_TRADING_UI_ENABLED && insights.perps && insights.perps.state !== 'none' && (
             // gain · settling (money on the bridge); 'none' draws nothing (no invitation).
             <PerpsCard value={insights.perps} month={summary.month} isCurrent={isCurrent} masked={masked}
               settlingPhase={perpsPhase} onOpen={onOpenPerps} />

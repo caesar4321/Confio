@@ -56,6 +56,21 @@ import {
   comprarMonthRows, MonthSummaryScreen, SETTLING_FAST_TRIES, SETTLING_MAX_TRIES, SETTLING_POLL_MS, SETTLING_SLOW_MS,
 } from '../MonthSummaryScreen';
 
+
+// These suites describe the Android build; DEX_TRADING_UI_ENABLED is
+// Platform-derived and the Jest preset runs as iOS. Flip per test for the iOS binary.
+const mockFeatures = { DEX_TRADING_UI_ENABLED: true };
+jest.mock('../../config/features', () => {
+  const mocked = { __esModule: true, ...jest.requireActual('../../config/features') };
+  // A live getter, read at render time (a spread would copy one value at load).
+  Object.defineProperty(mocked, 'DEX_TRADING_UI_ENABLED', {
+    enumerable: true,
+    get: () => mockFeatures.DEX_TRADING_UI_ENABLED,
+  });
+  return mocked;
+});
+afterEach(() => { mockFeatures.DEX_TRADING_UI_ENABLED = true; });
+
 const totals = (spending: string, count: number) => ({
   incomeUsd: '215.00', spendingUsd: spending, topUpsUsd: '0', withdrawalsUsd: '0', savingsNetUsd: '0',
   investmentNetUsd: '0', movementCount: count, spendingByCategory: count ? [{ category: 'food', amountUsd: spending }] : [],

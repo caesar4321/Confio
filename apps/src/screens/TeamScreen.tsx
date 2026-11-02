@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -120,7 +121,10 @@ export const TeamScreen = () => {
       const next: Row[] =
         which === 'members' ? (data?.teamMembers ?? []).map((m: Member) => ({ key: `m${m.userId}`, member: m }))
         : which === 'positions' ? (data?.teamPositions ?? []).map((p: Position) => ({ key: `p${p.symbol}`, position: p }))
-        : which === 'plays' ? (data?.teamPlays ?? []).map((p: Play) => ({ key: `j${p.id}`, play: p }))
+        : which === 'plays' ? (data?.teamPlays ?? [])
+          // No DEX surfaces in this binary: only stock plays (a list, not a total).
+          .filter((p: Play) => DEX_TRADING_UI_ENABLED || p.asset === 'stock')
+          .map((p: Play) => ({ key: `j${p.id}`, play: p }))
         : (data?.teamJoinRequests ?? []).map((r: JoinRequest) => ({ key: `r${r.id}`, request: r }));
       setRows(next);
     } catch {
@@ -278,7 +282,9 @@ export const TeamScreen = () => {
           text: 'Continuar',
           onPress: () => (asset === 'stock'
             ? navigation.navigate('BuyStock', { ticker: tickerOfSymbol(symbol) })
-            : navigation.navigate('BuyCrypto', { symbol })),
+            : DEX_TRADING_UI_ENABLED
+              ? navigation.navigate('BuyCrypto', { symbol })
+              : Alert.alert('No disponible', 'Esta opción no está disponible en esta versión de la app.')),
         },
       ]);
     } catch {

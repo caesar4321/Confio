@@ -27,7 +27,7 @@ from users.models_cashflow import CATEGORY_CHOICES
 
 from . import conf, market
 from .destinations import DESTINATIONS, FALLBACKS, OWNER_ONLY, PAID_OFFERS, PERSONAL_ONLY
-from .prompts import ANALYSIS_PROMPT, build_system_prompt
+from .prompts import ANALYSIS_PROMPT, build_system_prompt, dex_offered
 
 logger = logging.getLogger(__name__)
 
@@ -1440,6 +1440,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
         identity=_identity_status(viewer),
         ve_topup=_ve_topup(viewer, country),
+        dex=dex_offered(viewer.request_meta),
     )
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE

@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -134,6 +135,8 @@ export function CommunityShareProvider() {
       setActivityShareListener((next) => {
         // One sheet at a time; business and employee accounts never see it.
         if (currentRef.current || businessRef.current) return false;
+        // A binary without the DEX surfaces never offers those shares.
+        if (!DEX_TRADING_UI_ENABLED && (next.group === 'crypto' || next.group === 'perps')) return false;
         currentRef.current = next;
         setRequest(next);
         return true;

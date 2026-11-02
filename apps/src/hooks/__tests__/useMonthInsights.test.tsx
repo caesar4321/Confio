@@ -12,6 +12,13 @@ import {
   mergeValues, REVEAL_HANG_GUARD_MS, useMonthInsights,
 } from '../useMonthInsights';
 
+
+// This suite describes the Android build (all three investment cards). The
+// Jest preset runs as iOS, and SLOTS reads the flag once at module load.
+jest.mock('../../config/features', () => ({
+  __esModule: true, ...jest.requireActual('../../config/features'), DEX_TRADING_UI_ENABLED: true,
+}));
+
 const insights = (keys: string[]) => ({
   previousMonthSpendingUsd: '390.00',
   recurring: keys.map((k, i) => ({ counterpartyKey: k, name: k, expectedDay: 5 + i, expectedAmountUsd: '100.00', category: null })),

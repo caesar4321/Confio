@@ -121,3 +121,21 @@ describe('Futuros', () => {
     expect(summarizeInvestments({ ...base, perpsPositions: [] }).visible).toBe(false);
   });
 });
+
+describe('a binary without the DEX surfaces (iOS)', () => {
+  const pos = { id: '1', state: 'open', valueUsd: 50, marginUsd: 40, marginUsedUsd: null } as any;
+  it('counts held crypto and Futuros in the total, named "otros"', () => {
+    const s = summarizeInvestments({
+      ...base, stocksEnabled: true, stockPositionCount: 2, stocksTotalUsd: 10,
+      cryptoHoldings: [btc(20), gold(5)], perpsPositions: [pos], namesDex: false,
+    });
+    expect(s.totalUsd).toBe(85);
+    expect(s.subtitle).toBe('2 acciones · otros');
+  });
+
+  it('never invites to them, and stocks-only reads as before', () => {
+    expect(summarizeInvestments({ ...base, namesDex: false }).visible).toBe(false);
+    expect(summarizeInvestments({ ...base, stocksEnabled: true, stockPositionCount: 1, stocksTotalUsd: 3, namesDex: false })
+      .subtitle).toBe('1 acción');
+  });
+});

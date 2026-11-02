@@ -16,7 +16,23 @@ from .rails import topup_route
 FAQ = re.sub(r'<!--.*?-->', '', Path(__file__).with_name('faq.md').read_text(encoding='utf-8'), flags=re.S).strip()
 
 
-def faq_text():
+# Where Oro y Bitcoin and Futuros are not offered (the iOS app, App Review
+# 3.1.5(iii)), the assistant must neither describe nor suggest them — and
+# never point to another platform or an update (App Review 2.3.10).
+DEX_NOT_OFFERED_FAQ = ('## Oro, Bitcoin y futuros\n'
+                       '- En esta app no se ofrecen Oro y Bitcoin ni Futuros. Si preguntan, di solo que no están '
+                       'disponibles en esta app; no sugieras actualizar ni otra forma de usarlos, y no los recomiendes.\n')
+_DEX_BLOCK = re.compile(r'^\[\[dex\]\]\n.*?^\[\[/dex\]\]\n', re.S | re.M)
+
+
+def dex_offered(meta) -> bool:
+    """The same platform gates the API applies (iOS: off by default)."""
+    from cusd_plus import crypto_risk, perps_risk
+
+    return crypto_risk.platform_allowed(meta) and perps_risk.platform_allowed(meta)
+
+
+def faq_text(*, dex=True):
     """The FAQ with values that live in code filled in, so a policy change
     (the local-account opening fee) never needs a second edit here."""
     from payment_accounts.activation import FEE
@@ -24,7 +40,9 @@ def faq_text():
     amount = f'{FEE:.2f}'.replace('.', ',').removesuffix(',00')
     fee = (f'Abrir cada cuenta local tiene un costo único de US${amount}; la app te lo muestra antes de confirmar.'
            if FEE > 0 else 'Abrir una cuenta local no tiene costo.')
-    return FAQ.replace('{local_account_fee}', fee)
+    text = FAQ if dex else _DEX_BLOCK.sub(DEX_NOT_OFFERED_FAQ, FAQ)
+    text = text.replace('[[dex]]\n', '').replace('[[/dex]]\n', '')
+    return text.replace('{local_account_fee}', fee)
 
 SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 
@@ -200,9 +218,9 @@ IDENTITY_NOTES = {
 
 
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
-                        ia_plus_bundled=False, identity=None, ve_topup=None):
+                        ia_plus_bundled=False, identity=None, ve_topup=None, dex=True):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
-    prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text())
+    prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text(dex=dex))
               + _paid_offer_sections(destinations, ia_plus_bundled)
               + DESTINATIONS_SECTION.format(destinations=lines))
     if not can_navigate:

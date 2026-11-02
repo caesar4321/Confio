@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useAccount } from '../contexts/AccountContext';
@@ -38,9 +39,12 @@ export type PortfolioOpenPosition = {
  * plus "on": PBR → PBRon) or the Bitcoin & gold asset page. */
 export const positionDestination = (position: Pick<PortfolioOpenPosition, 'symbol' | 'ticker'>) => {
   if (!position.symbol || !position.ticker) return null;
-  return position.symbol === `${position.ticker}on`
-    ? { route: 'StockDetail', params: { ticker: position.ticker } }
-    : { route: 'CryptoDetail', params: { symbol: position.symbol } };
+  if (position.symbol === `${position.ticker}on`) {
+    return { route: 'StockDetail', params: { ticker: position.ticker } };
+  }
+  // No DEX surfaces in this binary: the row stays (the totals must add up),
+  // but there is no asset page to open.
+  return DEX_TRADING_UI_ENABLED ? { route: 'CryptoDetail', params: { symbol: position.symbol } } : null;
 };
 
 export type PortfolioClosedPosition = {
@@ -190,7 +194,7 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
               <BreakdownRow icon="trending-up" tint={colors.infoLight} iconColor={colors.accent} label="Acciones de EE.UU." value={stocks} />
             ) : null}
             {crypto ? (
-              <BreakdownRow icon="hexagon" tint={colors.warning.background} iconColor={colors.warning.icon} label="Oro y Bitcoin" value={crypto} />
+              <BreakdownRow icon="hexagon" tint={colors.warning.background} iconColor={colors.warning.icon} label={DEX_TRADING_UI_ENABLED ? 'Oro y Bitcoin' : 'Otros'} value={crypto} />
             ) : null}
             {showConfio && confioAmount ? (
               <BreakdownRow

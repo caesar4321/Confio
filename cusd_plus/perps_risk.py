@@ -51,8 +51,9 @@ def _is_ios(meta) -> bool:
 
 
 def platform_allowed(meta) -> bool:
-    """PERPS_IOS_ENABLED is the store-review kill switch for new iOS opens."""
-    return bool(getattr(settings, 'PERPS_IOS_ENABLED', True)) or not _is_ios(meta)
+    """PERPS_IOS_ENABLED (default off): no Hyperliquid surfaces or opens on
+    iOS. Read before the country policy, so no reviewer link reaches it."""
+    return bool(getattr(settings, 'PERPS_IOS_ENABLED', False)) or not _is_ios(meta)
 
 
 def country_allowed(user, meta) -> bool:

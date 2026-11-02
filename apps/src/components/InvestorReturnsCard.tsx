@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, LayoutChangeEvent, Pressable, StyleSheet, View } from 'react-native';
 import { useApolloClient } from '@apollo/client';
@@ -156,8 +157,8 @@ export function InvestorReturnsCard({ userId, refreshKey = 0 }: Props) {
           )}
           <Text style={styles.note}>
             {range === 'all'
-              ? 'Lo ganado y perdido en acciones, Bitcoin y oro desde la primera compra, vendido o no. No cuenta los dólares.'
-              : 'Sobre lo invertido en acciones, Bitcoin y oro. No cuenta tus dólares.'}
+              ? `Lo ganado y perdido en ${DEX_TRADING_UI_ENABLED ? 'acciones, Bitcoin y oro' : 'acciones y otras inversiones'} desde la primera compra, vendido o no. No cuenta los dólares.`
+              : `Sobre lo invertido en ${DEX_TRADING_UI_ENABLED ? 'acciones, Bitcoin y oro' : 'acciones y otras inversiones'}. No cuenta tus dólares.`}
           </Text>
         </>
       )}

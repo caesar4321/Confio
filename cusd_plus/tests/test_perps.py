@@ -239,6 +239,20 @@ class PerpsGateTests(TestCase):
             self.assertEqual(self._gate('VE', ios), 'trade_not_available')
             self.assertIsNone(self._gate('VE', android))
 
+    def test_ios_is_off_by_default(self):
+        # App Review 3.1.5(iii), 2026-11-02: no Hyperliquid surfaces on iOS.
+        from django.conf import settings
+
+        from cusd_plus import perps_risk
+
+        perps_risk.acknowledge(self.user)
+        ios = {'HTTP_X_CONFIO_PLATFORM': 'ios'}
+        with override_settings():
+            del settings.PERPS_IOS_ENABLED  # the code default, not a test value
+            self.assertEqual(self._gate('VE', ios), 'trade_not_available')
+            self.assertIsNone(self._gate('VE', {'HTTP_X_CONFIO_PLATFORM': 'android'}))
+            self.assertIsNone(perps_risk.exit_gate(), 'closes stay open')
+
     def test_closes_depend_only_on_the_execution_switch(self):
         # Codex P2: BSC sponsorship settings must not block a Hyperliquid close.
         from cusd_plus import perps_risk

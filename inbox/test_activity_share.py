@@ -1,3 +1,4 @@
+from graphql import GraphQLError
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -290,6 +291,43 @@ class ShareActivityTests(CommunityTestBase):
         self.assertEqual((extras.activity.kind, extras.activity.amount_usd, extras.note),
                          (STOCK_BUY, '5.00', ''))
         self.assertEqual(extras.author_id, str(self.member.id))
+
+    def test_the_iphone_app_feeds_carry_no_bitcoin_gold_or_futuros_posts(self):
+        # App Review 3.1.5(iii): left out (not relabeled) where not offered.
+        from django.conf import settings
+
+        from inbox.models import CommunityActivityShare
+
+        item = self.share()
+        viewer = make_user()
+        context = (viewer, Account.objects.get(user=viewer), None, {})
+
+        def feeds(platform):
+            info = MockInfo(viewer)
+            info.context.META = {'HTTP_X_CONFIO_PLATFORM': platform}
+            with patch.object(activity_share, '_wallet_trades', return_value=[]), \
+                    patch.object(activity_share, '_price_map', return_value={}), \
+                    patch('inbox.schema.get_context_models', return_value=context):
+                own = MockInfo(self.member)
+                own.context.META = info.context.META
+                try:
+                    opened = Query().resolve_discover_post(info, str(item.id)) is not None
+                except GraphQLError:
+                    opened = False
+                return (len(Query().resolve_discover_feed(info, limit=20, section='community').items),
+                        len(Query().resolve_community_member_posts(info, str(self.member.id)).items),
+                        len(Query().resolve_community_post_extras(info, [str(item.id)])),
+                        len(Query().resolve_my_community_posts(own)),
+                        opened)
+
+        with override_settings():
+            del settings.CRYPTO_IOS_ENABLED
+            del settings.PERPS_IOS_ENABLED  # the code defaults
+            self.assertEqual(feeds('ios'), (1, 1, 1, 1, True))  # a stock post stays everywhere
+            for kind in ('crypto_buy', 'perps_open'):
+                CommunityActivityShare.objects.filter(content_item=item).update(kind=kind)
+                self.assertEqual(feeds('ios'), (0, 0, 0, 0, False), kind)
+                self.assertEqual(feeds('android'), (1, 1, 1, 1, True), kind)
 
     def test_coarse_labels(self):
         today = timezone.now().astimezone(activity_share.DISPLAY_TZ).date()

@@ -286,6 +286,38 @@ class ReciprocityTests(TeamTestBase):
             data.copy_play(viewer, 999999)
 
 
+class IosCopyTests(TeamTestBase):
+    def test_a_crypto_play_is_not_copyable_from_the_iphone_app_and_leaves_no_trace(self):
+        # App Review 3.1.5(iii): no PancakeSwap on iOS. Refused before the
+        # CopiedPlay row and the push to the investor who made the play.
+        from django.conf import settings
+        from django.test import override_settings
+
+        from blockchain.models import SponsoredBatch
+        from users.models import Account
+
+        from .models import CopiedPlay
+
+        owner, viewer = make_user(), make_user()
+        Account.objects.filter(user=owner, account_type='personal').update(bsc_address='0x' + 'ab' * 20)
+        batch = SponsoredBatch.objects.create(
+            user=owner, user_bsc_address='0x' + 'ab' * 20, kind='crypto_buy', status='confirmed',
+            tx_hash='0x' + '1' * 64, calls_json='[]', num_calls=1, source_id=1, gas_limit=1,
+            max_fee_wei='1', client_request_id='ios-copy-1')
+        ios = {'HTTP_X_CONFIO_PLATFORM': 'ios'}
+        with override_settings(), \
+                patch('teams.eligibility.canonical_wallets', return_value={owner.id: '0x' + 'ab' * 20}), \
+                patch('teams.eligibility.eligible_user_ids', return_value={owner.id}), \
+                patch('inbox.community.portfolio_access', return_value=community.ACCESS_OPEN), \
+                patch('teams.data._notify_copied') as notify:
+            del settings.CRYPTO_IOS_ENABLED  # the code default
+            with self.assertRaises(community.CommunityPostError) as refused:
+                data.copy_play(viewer, batch.id, meta=ios)
+        self.assertEqual(refused.exception.code, 'not_available')
+        self.assertFalse(CopiedPlay.objects.exists())
+        notify.assert_not_called()
+
+
 class GoalTests(TeamTestBase):
     def test_only_the_captain_sets_a_goal_and_it_freezes_when_reached(self):
         team, captain = self.create()

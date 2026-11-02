@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -112,7 +113,7 @@ function titleFor(a: ActivityShare): string {
 }
 
 function detailFor(a: ActivityShare): string | null {
-  if (isPerps(a)) return 'Futuros en Hyperliquid';
+  if (isPerps(a)) return DEX_TRADING_UI_ENABLED ? 'Futuros en Hyperliquid' : 'Otros';
   if (tradeSide(a)) {
     return a.name && a.name !== a.ticker ? a.name : null;
   }
@@ -160,12 +161,13 @@ export function activityDestination(
 ): { route: string; params?: object; label: string } | null {
   // Futuros: the market list (a post carries the ticker, not the venue coin).
   if (isPerps(activity)) {
-    return { route: 'FuturesMarkets', label: 'Ver futuros' };
+    return DEX_TRADING_UI_ENABLED ? { route: 'FuturesMarkets', label: 'Ver futuros' } : null;
   }
   // Bitcoin & gold: the asset's own page, like a stock. A post carries the
   // ticker; the market list maps it to the symbol the page needs. Until the
   // list is loaded (or for an asset no longer listed), the Invertir tab.
   if (tradeSide(activity) && cryptoCategoryOf(activity)) {
+    if (!DEX_TRADING_UI_ENABLED) return null;
     const ticker = (activity.ticker || '').toUpperCase();
     const asset = ticker
       ? cryptoAssets.find((a) => a.ticker.toUpperCase() === ticker || a.symbol.toUpperCase() === ticker)
@@ -290,7 +292,7 @@ export function useActivityDestination(activity: ActivityShare | null | undefine
   const { activeAccount } = useAccount();
   const isEmployee = Boolean((activeAccount as { isEmployee?: boolean } | null)?.isEmployee);
   const isCrypto = Boolean(activity && tradeSide(activity) && cryptoCategoryOf(activity));
-  const assets = useCryptoTickers(isCrypto && !isEmployee);
+  const assets = useCryptoTickers(isCrypto && !isEmployee && DEX_TRADING_UI_ENABLED);
   // An employee never reaches the asset page (it trades): the Invertir tab
   // tells them the owner manages the account's investments.
   const target = activity ? activityDestination(activity, isEmployee ? [] : assets) : null;

@@ -3,6 +3,21 @@ import renderer, { act } from 'react-test-renderer';
 import { Pressable, Switch } from 'react-native';
 import { CommunityMemberPortfolio, CommunityPortfolioSection } from '../CommunityPortfolioSection';
 
+
+// These suites describe the Android build; DEX_TRADING_UI_ENABLED is
+// Platform-derived and the Jest preset runs as iOS. Flip per test for the iOS binary.
+const mockFeatures = { DEX_TRADING_UI_ENABLED: true };
+jest.mock('../../config/features', () => {
+  const mocked = { __esModule: true, ...jest.requireActual('../../config/features') };
+  // A live getter, read at render time (a spread would copy one value at load).
+  Object.defineProperty(mocked, 'DEX_TRADING_UI_ENABLED', {
+    enumerable: true,
+    get: () => mockFeatures.DEX_TRADING_UI_ENABLED,
+  });
+  return mocked;
+});
+afterEach(() => { mockFeatures.DEX_TRADING_UI_ENABLED = true; });
+
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mockNavigate }) }));
@@ -98,6 +113,15 @@ test('Bitcoin & gold get their own row; never a $0 row, never on an older server
   }
 });
 
+test('iOS binary: the same amount under "Otros", so the profile still adds up', () => {
+  mockFeatures.DEX_TRADING_UI_ENABLED = false;
+  let tree!: renderer.ReactTestRenderer;
+  act(() => { tree = renderer.create(<CommunityPortfolioSection portfolio={{ ...base, cryptoUsd: '0.99' }} />); });
+  expect(textOf(tree)).toContain('Otros');
+  expect(textOf(tree)).toContain('$0.99');
+  expect(textOf(tree)).not.toContain('Oro y Bitcoin');
+});
+
 describe('positionDestination', () => {
   const { positionDestination } = require('../CommunityPortfolioSection');
   it('opens the stock page for an Ondo token and the asset page for Bitcoin & gold', () => {
@@ -105,5 +129,10 @@ describe('positionDestination', () => {
     expect(positionDestination({ symbol: 'BTCB', ticker: 'BTC' })).toEqual({ route: 'CryptoDetail', params: { symbol: 'BTCB' } });
     expect(positionDestination({ symbol: 'TON', ticker: 'TON' })).toEqual({ route: 'CryptoDetail', params: { symbol: 'TON' } });
     expect(positionDestination({ symbol: '', ticker: 'X' })).toBeNull();
+  });
+  it('iOS binary: a stock still opens, a Bitcoin or gold row has no page to open', () => {
+    mockFeatures.DEX_TRADING_UI_ENABLED = false;
+    expect(positionDestination({ symbol: 'PBRon', ticker: 'PBR' })).toEqual({ route: 'StockDetail', params: { ticker: 'PBR' } });
+    expect(positionDestination({ symbol: 'BTCB', ticker: 'BTC' })).toBeNull();
   });
 });

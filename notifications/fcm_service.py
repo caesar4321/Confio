@@ -178,7 +178,7 @@ def send_user_push(
     # A Futuros notice opens a screen only builds with Futuros have: never
     # to a device on an older build (same member, another phone).
     if notification.notification_type in MIN_BUILD_SETTING:
-        token_data = _tokens_on_builds(token_data, MIN_BUILD_SETTING[notification.notification_type])
+        token_data = _tokens_that_can_open(token_data, notification.notification_type)
     
     logger.info(f"Found {len(token_data)} active FCM tokens for user {user.id}")
     
@@ -218,8 +218,8 @@ def send_user_push(
     if not hidden:
         return send(token_data, unread_count)
     supported = set(token_data)
-    for setting in set(MIN_BUILD_SETTING.values()):
-        supported &= set(_tokens_on_builds(token_data, setting))
+    for kind in MIN_BUILD_SETTING:
+        supported &= set(_tokens_that_can_open(token_data, kind))
     older = [pair for pair in token_data if pair not in supported]
     results = [send(group, badge) for group, badge in
                ((list(supported), unread_count), (older, unread_count - hidden)) if group]
@@ -236,6 +236,24 @@ def send_user_push(
 
 
 MIN_BUILD_SETTING = {'PERPS_POSITION_UPDATE': 'PERPS_SHARE_MIN_APP_VERSION'}
+
+
+def platform_can_open(kind: str, meta) -> bool:
+    """Futuros notices open a screen the iOS app does not have (App Review
+    3.1.5(iii)): the same platform gate the API applies."""
+    if kind == 'PERPS_POSITION_UPDATE':
+        from cusd_plus import perps_risk
+
+        return perps_risk.platform_allowed(meta)
+    return True
+
+
+def _tokens_that_can_open(token_data, kind: str):
+    """Tokens on a build that has the notice's screen, on a platform that offers it."""
+    devices = dict(FCMDeviceToken.objects.filter(id__in=[i for _t, i in token_data])
+                   .values_list('id', 'device_type'))
+    return [(t, i) for t, i in _tokens_on_builds(token_data, MIN_BUILD_SETTING[kind])
+            if platform_can_open(kind, {'HTTP_X_CONFIO_PLATFORM': devices.get(i) or ''})]
 
 
 def _tokens_on_builds(token_data, setting: str):

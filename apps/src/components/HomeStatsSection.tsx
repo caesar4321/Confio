@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useEffect, useMemo, useRef } from 'react';
 import {
   AppState,
@@ -257,7 +258,8 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
           // One short word like its neighbours (Movido); the detail is for
           // screen readers and the breakdown, never a visible subline.
           label: 'Invertido',
-          descriptor: perpsInTotal ? 'Acciones, oro, bitcoin y futuros' : 'Acciones, oro y bitcoin',
+          descriptor: !DEX_TRADING_UI_ENABLED ? 'Acciones y otros'
+            : perpsInTotal ? 'Acciones, oro, bitcoin y futuros' : 'Acciones, oro y bitcoin',
           onPress: () => navigation.navigate('StocksActivity'),
         }
         : !stocksEnabled

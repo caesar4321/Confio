@@ -36,6 +36,7 @@ import { FuturesMarketsScreen } from '../screens/FuturesMarketsScreen';
 import { FuturesMarketScreen } from '../screens/FuturesMarketScreen';
 import { FuturesOrderScreen } from '../screens/FuturesOrderScreen';
 import { FuturesPositionScreen } from '../screens/FuturesPositionScreen';
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import { FinancierasScreen } from '../screens/FinancierasScreen';
 import { FinancieraDetailScreen } from '../screens/FinancieraDetailScreen';
 import { FinancieraReviewScreen } from '../screens/FinancieraReviewScreen';
@@ -515,6 +516,7 @@ export const MainNavigator = () => {
             headerShown: false,
           }}
         />
+        {DEX_TRADING_UI_ENABLED && (<>
         <Stack.Screen
           name="CryptoDetail"
           component={CryptoDetailScreen}
@@ -540,6 +542,7 @@ export const MainNavigator = () => {
         <Stack.Screen name="FuturesMarket" component={FuturesMarketScreen} options={{ headerShown: false }} />
         <Stack.Screen name="FuturesOrder" component={FuturesOrderScreen} options={{ headerShown: false }} />
         <Stack.Screen name="FuturesPosition" component={FuturesPositionScreen} options={{ headerShown: false }} />
+        </>)}
         <Stack.Screen
           name="Financieras"
           component={FinancierasScreen}

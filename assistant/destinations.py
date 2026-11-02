@@ -19,7 +19,7 @@ DESTINATIONS = {
     'tokenomics': 'Tokenomics de $CONFIO: suministro, distribución y liberación (vesting).',
     'presale': 'Preventa de $CONFIO.',
     'discover': 'Comunidad (dentro de Invertir): lo que comparten otros miembros sobre su dinero.',
-    'community': 'Comunidad (dentro de Invertir): lo que comparten otros miembros sobre recargas, retiros, acciones, cripto y oro.',
+    'community': 'Comunidad (dentro de Invertir): lo que comparten otros miembros sobre recargas, retiros e inversiones.',
     'comprar': 'Comprar: productos de vendedores verificados de tu ciudad, con pago protegido y envío por Yango.',
     'my_store': 'Mi tienda: abrir tu tienda en Comprar y publicar productos (cuenta personal verificada).',
     'market_orders': 'Mis compras y ventas en Comprar.',

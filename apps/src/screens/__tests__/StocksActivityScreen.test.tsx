@@ -49,6 +49,21 @@ jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 
 import { StocksActivityScreen, typicalPurchaseLabel } from '../StocksActivityScreen';
 
+
+// These suites describe the Android build; DEX_TRADING_UI_ENABLED is
+// Platform-derived and the Jest preset runs as iOS. Flip per test for the iOS binary.
+const mockFeatures = { DEX_TRADING_UI_ENABLED: true };
+jest.mock('../../config/features', () => {
+  const mocked = { __esModule: true, ...jest.requireActual('../../config/features') };
+  // A live getter, read at render time (a spread would copy one value at load).
+  Object.defineProperty(mocked, 'DEX_TRADING_UI_ENABLED', {
+    enumerable: true,
+    get: () => mockFeatures.DEX_TRADING_UI_ENABLED,
+  });
+  return mocked;
+});
+afterEach(() => { mockFeatures.DEX_TRADING_UI_ENABLED = true; });
+
 const STATS = {
   totalUsd: 3424.6, buyUsd: 1900, sellUsd: 1524.6, buyCount: 140, sellCount: 104, traderCount: 18,
   medianBuyUsd: 2.4, since: '2026-08-05T00:00:00Z',
@@ -152,6 +167,22 @@ describe('StocksActivityScreen as Inversiones en movimiento', () => {
     expect(text(closed)).toContain('OPERADO EN ACCIONES, ORO, BITCOIN Y FUTUROS');
     mockPerpsEnabled = null;
     expect(text(render())).toContain('OPERADO EN ACCIONES, ORO Y BITCOIN');
+  });
+
+  it('iOS binary: the same combined total as "acciones y otros", only stock rows and doors', () => {
+    mockFeatures.DEX_TRADING_UI_ENABLED = false;
+    // The real iOS hooks never ask, so both capabilities read null there.
+    mockPerpsEnabled = null;
+    mockCryptoEnabled = false;
+    mockStats = { ...INVEST, topAssets: [...INVEST.topAssets,
+      { symbol: 'xyz:GOLD', ticker: 'GOLD', name: 'Oro', tradeCount: 5, traderCount: 3, assetKind: 'perps' }] };
+    const all = text(render());
+    expect(all).toContain('OPERADO EN ACCIONES Y OTROS');
+    expect(all).toContain('NVDA');
+    for (const hidden of ['BTC', 'GOLD', 'Futuros', 'ORO', 'bitcoin', 'Ver oro y bitcoin', 'Ver futuros', 'apalancado']) {
+      expect(all).not.toContain(hidden);
+    }
+    mockCryptoEnabled = true;
   });
 
   it('a crypto-only member cannot open a stock or the stock explorer', () => {

@@ -87,6 +87,24 @@ class PushBuildTests(TestCase):
         pairs = [(t.token, t.id) for t in (old, new, blank)]
         self.assertEqual(_tokens_on_builds(pairs, 'PERPS_SHARE_MIN_APP_VERSION'), [('new', new.id)])
 
+    def test_futuros_notices_never_reach_an_iphone(self):
+        # App Review 3.1.5(iii): the iOS app has no Futuros screen to open.
+        from django.conf import settings
+
+        from notifications.fcm_service import _tokens_that_can_open
+        from notifications.models import FCMDeviceToken
+        from users.models import User
+
+        user = User.objects.create_user(username='pob-3', email='pob3@example.com', firebase_uid='pob-3')
+        iphone = FCMDeviceToken.objects.create(user=user, token='iphone', device_type='ios', device_id='a',
+                                               app_version='5.3.4')
+        android = FCMDeviceToken.objects.create(user=user, token='android', device_type='android', device_id='b',
+                                                app_version='5.3.4')
+        pairs = [(t.token, t.id) for t in (iphone, android)]
+        with override_settings():
+            del settings.PERPS_IOS_ENABLED  # the code default
+            self.assertEqual(_tokens_that_can_open(pairs, 'PERPS_POSITION_UPDATE'), [('android', android.id)])
+
 
 @override_settings(PERPS_SHARE_MIN_APP_VERSION='5.2.9')
 class InboxTypesTests(SimpleTestCase):
@@ -97,6 +115,18 @@ class InboxTypesTests(SimpleTestCase):
         self.assertEqual(_types_this_build_cannot_open(info(OLD)), ['PERPS_POSITION_UPDATE'])
         self.assertEqual(_types_this_build_cannot_open(info({})), ['PERPS_POSITION_UPDATE'])
         self.assertEqual(_types_this_build_cannot_open(info(NEW)), [])
+
+    def test_the_iphone_app_lists_no_futuros_notices(self):
+        from django.conf import settings
+
+        from notifications.schema import _types_this_build_cannot_open
+
+        info = lambda meta: SimpleNamespace(context=SimpleNamespace(META=meta))  # noqa: E731
+        with override_settings():
+            del settings.PERPS_IOS_ENABLED  # the code default
+            self.assertEqual(_types_this_build_cannot_open(info({**NEW, 'HTTP_X_CONFIO_PLATFORM': 'ios'})),
+                             ['PERPS_POSITION_UPDATE'])
+            self.assertEqual(_types_this_build_cannot_open(info({**NEW, 'HTTP_X_CONFIO_PLATFORM': 'android'})), [])
 
 
 class ReconcileLockTests(SimpleTestCase):
@@ -127,7 +157,7 @@ class BadgeTests(TestCase):
         user = User.objects.create_user(username='pob-2', email='pob2@example.com', firebase_uid='pob-2')
         FCMDeviceToken.objects.create(user=user, token='old', device_type='android', device_id='a',
                                       app_version='5.2.8')
-        FCMDeviceToken.objects.create(user=user, token='new', device_type='ios', device_id='b',
+        FCMDeviceToken.objects.create(user=user, token='new', device_type='android', device_id='b',
                                       app_version='5.2.9')
         Notification.objects.create(user=user, notification_type='PERPS_POSITION_UPDATE', title='t', message='m')
         note = Notification.objects.create(user=user, notification_type='SEND_RECEIVED', title='t', message='m')

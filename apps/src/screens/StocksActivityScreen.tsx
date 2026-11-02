@@ -25,7 +25,7 @@ import { formatDecimal } from '../utils/numberLocale';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { usePerpsCapabilities } from '../hooks/usePerps';
 import { useCryptoCapabilities } from '../hooks/useCrypto';
-import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
+import { CRYPTO_TRADING_UI_ENABLED, DEX_TRADING_UI_ENABLED } from '../config/features';
 
 export const GM_TRADING_STATS = gql`
   query GmTradingStats {
@@ -168,7 +168,10 @@ export const StocksActivityScreen = () => {
   const buyOps = stats?.buyCount ?? 0;
   const sellOps = stats?.sellCount ?? 0;
   const sells = stats?.sellUsd ?? 0;
-  const top: TopAsset[] = stats?.topAssets ?? [];
+  // Totals stay combined (the network fact); a binary without the DEX
+  // surfaces lists only rows it can open or name.
+  const top: TopAsset[] = (stats?.topAssets ?? [])
+    .filter((a: TopAsset) => DEX_TRADING_UI_ENABLED || a.assetKind === 'stock' || a.assetKind == null);
   const maxTrades = top.reduce((m, a) => Math.max(m, a.tradeCount), 0);
   const operations = (stats?.buyCount ?? 0) + (stats?.sellCount ?? 0);
 
@@ -201,6 +204,7 @@ export const StocksActivityScreen = () => {
             <View style={styles.fieldInner}>
               <Text style={styles.fieldEyebrow}>
                 {!investMode ? 'OPERADO EN ACCIONES DE EE.UU.'
+                  : !DEX_TRADING_UI_ENABLED ? 'OPERADO EN ACCIONES Y OTROS'
                   : perpsInTotal ? 'OPERADO EN ACCIONES, ORO, BITCOIN Y FUTUROS' : 'OPERADO EN ACCIONES, ORO Y BITCOIN'}
               </Text>
               <Text style={styles.fieldStat}>
@@ -259,7 +263,7 @@ export const StocksActivityScreen = () => {
                   La mitad de las compras fue de {typicalPurchaseLabel(stats.medianBuyUsd)} o menos
                 </Text>
                 <Text style={styles.factSub}>
-                  {whole(stats.traderCount)} personas ya invierten {investMode ? 'en acciones, oro y bitcoin' : 'en acciones de EE.UU.'} desde Confío, empezando con poco.
+                  {whole(stats.traderCount)} personas ya invierten{investMode ? (DEX_TRADING_UI_ENABLED ? ' en acciones, oro y bitcoin' : '') : ' en acciones de EE.UU.'} desde Confío, empezando con poco.
                 </Text>
               </View>
             </View>
@@ -344,8 +348,9 @@ export const StocksActivityScreen = () => {
           <View style={styles.card}>
             <Text style={styles.howTitle}>Cómo lo contamos</Text>
             <Text style={styles.howText}>
-              Sumamos cada compra y venta {investMode ? 'de acciones de EE.UU., oro y bitcoin' : 'de acciones de EE.UU.'} completada en Confío, por el monto
-              exacto que se cobró o se pagó.{investMode && perpsInTotal
+              Sumamos cada compra y venta {!investMode ? 'de acciones de EE.UU.'
+                : DEX_TRADING_UI_ENABLED ? 'de acciones de EE.UU., oro y bitcoin' : 'de acciones de EE.UU. y otras inversiones'} completada en Confío, por el monto
+              exacto que se cobró o se pagó.{investMode && perpsInTotal && DEX_TRADING_UI_ENABLED
                 ? ' En Futuros contamos tu dinero: el margen al abrir y lo que vuelve al cerrar, nunca el tamaño apalancado.'
                 : ''} No incluye depósitos ni retiros (esos están en Dinero en
               movimiento). El total es acumulado desde el inicio y no muestra a nadie en particular.

@@ -407,7 +407,7 @@ def set_goal(captain, team, kind: str, target, deadline=None):
 
 # ── copy play (#8) ───────────────────────────────────────────────────────
 
-def copy_play(viewer, batch_id):
+def copy_play(viewer, batch_id, meta=None):
     """Record that the viewer is copying a member's recent buy and return
     what the buy screen needs. Attribution only: normal fees, nobody paid.
     Raises CommunityPostError when it can't be copied."""
@@ -449,6 +449,11 @@ def copy_play(viewer, batch_id):
         if not symbol or symbol.startswith('?') or symbol not in _names():
             raise CommunityPostError('not_tradable', 'No disponible')
     else:
+        from cusd_plus import crypto_risk
+
+        # Refused before any record or notice: this app can't buy it.
+        if not crypto_risk.platform_allowed(meta):
+            raise CommunityPostError('not_available', 'Esta jugada no se puede copiar en esta app.')
         symbol = CryptoTrade.objects.filter(batch=batch).values_list('symbol', flat=True).first() or ''
         asset = 'crypto'
         if not symbol:

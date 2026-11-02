@@ -16,6 +16,7 @@
 //   but no card or row is added, removed or swapped until the next view
 //   (month switch or screen re-entry).
 // - Answers are dropped when they belong to an earlier month or account.
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApolloClient } from '@apollo/client';
 import {
@@ -43,7 +44,8 @@ export type InsightData = {
 
 /** The investment cards: each its own query, merge and settling poll. */
 export type InvestmentSlot = 'stocks' | 'crypto' | 'perps';
-const SLOTS: InvestmentSlot[] = ['stocks', 'crypto', 'perps'];
+// A binary without the DEX surfaces never asks for those months (their cards don't exist there).
+const SLOTS: InvestmentSlot[] = DEX_TRADING_UI_ENABLED ? ['stocks', 'crypto', 'perps'] : ['stocks'];
 type Investment = { state: StockMonth['state']; canBuy?: boolean };
 
 const QUERIES = {

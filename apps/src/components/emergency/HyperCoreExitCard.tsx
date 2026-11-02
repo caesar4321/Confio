@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../../config/features';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -65,9 +66,14 @@ export function HyperCoreExitCard({
       <View style={styles.card}>
         <View style={styles.head}>
           <Icon name="trending-up" size={16} color={colors.text.primary} />
-          <Text style={styles.title}>Tus futuros en Hyperliquid</Text>
+          {/* Unknown is not "you hold futures": a binary without Futuros names no venue here. */}
+          <Text style={styles.title}>{DEX_TRADING_UI_ENABLED ? 'Tus futuros en Hyperliquid' : 'Otros fondos'}</Text>
         </View>
-        <Text style={styles.body}>No pudimos consultar Hyperliquid ahora. Si tienes futuros, tu dinero sigue ahí, a tu nombre.</Text>
+        <Text style={styles.body}>
+          {DEX_TRADING_UI_ENABLED
+            ? 'No pudimos consultar Hyperliquid ahora. Si tienes futuros, tu dinero sigue ahí, a tu nombre.'
+            : 'No pudimos consultar otra red ahora. Si tienes fondos ahí, siguen a tu nombre.'}
+        </Text>
         <TouchableOpacity style={styles.btn} onPress={() => setAttempt((n) => n + 1)} accessibilityRole="button">
           <Text style={styles.btnText}>Volver a consultar</Text>
         </TouchableOpacity>

@@ -1,3 +1,4 @@
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -178,7 +179,8 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
     const pct = formatPctSigned(item.pct);
     const pnl = formatUsd(item.pnlUsd, { signed: true, usMark: true });
     const up = !(item.pnlUsd ?? item.pct).startsWith('-');
-    const risk = [
+    // Futuros risk (leverage, liquidations): only where Futuros exist in this binary.
+    const risk = !DEX_TRADING_UI_ENABLED ? [] : [
       item.avgLeverage != null ? `${formatDecimalShort(item.avgLeverage)}x prom.` : null,
       item.liquidations ? `${item.liquidations} ${item.liquidations === 1 ? 'liquidación' : 'liquidaciones'}` : null,
     ].filter(Boolean) as string[];
@@ -256,7 +258,9 @@ export function LeagueContent({ initialKind = 'teams', active = true }: Props) {
             : 'Gana quien tenga mejor rentabilidad en su portafolio, no quien más invierte.')
           : kind === 'teams'
             ? 'Gana el equipo que más gana por miembro, en dólares: un promedio, así ser más grande no da ventaja. Cuentan los equipos con 5 miembros o más.'
-            : 'Gana quien más gana en dólares en el periodo, contando lo que vendió y lo que aún tiene. Al lado ves el %, y en futuros el apalancamiento y las liquidaciones. Clasificas con $20 invertidos en promedio.'}
+            : DEX_TRADING_UI_ENABLED
+              ? 'Gana quien más gana en dólares en el periodo, contando lo que vendió y lo que aún tiene. Al lado ves el %, y en futuros el apalancamiento y las liquidaciones. Clasificas con $20 invertidos en promedio.'
+              : 'Gana quien más gana en dólares en el periodo, contando lo que vendió y lo que aún tiene. Al lado ves el %. Clasificas con $20 invertidos en promedio.'}
         {range === 'all' ? ' Total suma los días seguidos con historial y clasifica desde 30 días.' : ''}
         {' '}Solo insignias, sin premios en dinero.
       </Text>
