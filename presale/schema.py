@@ -505,36 +505,37 @@ class JoinPresaleWaitlist(graphene.Mutation):
     def mutate(self, info):
         user = info.context.user
         
-        from .geo_utils import check_presale_eligibility
+        from .geo_utils import check_presale_eligibility, check_us_waitlist_eligibility
         from security.request_utils import extract_client_ip_from_meta
         request = info.context
         client_ip = extract_client_ip_from_meta(getattr(request, 'META', None))
         ip_country_hint = (getattr(request, 'META', None) or {}).get('HTTP_CF_IPCOUNTRY')
         is_eligible, error_msg = check_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
+        region = PresaleWaitlist.REGION_LAUNCH
         if not is_eligible:
-            return JoinPresaleWaitlist(
-                success=False,
-                message=error_msg,
-                already_joined=False
-            )
+            # Blocked only for being in the US: wait for a US exemption.
+            us_ok, _ = check_us_waitlist_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
+            if not us_ok:
+                return JoinPresaleWaitlist(
+                    success=False,
+                    message=error_msg,
+                    already_joined=False
+                )
+            region = PresaleWaitlist.REGION_US
 
-        # Check if user already joined
-        existing = PresaleWaitlist.objects.filter(user=user).first()
-        if existing:
-            return JoinPresaleWaitlist(
-                success=True,
-                message="Ya estás en la lista de espera. Te notificaremos cuando la preventa esté disponible.",
-                already_joined=True
-            )
-
-        # Create new waitlist entry
-        PresaleWaitlist.objects.create(user=user)
-
-        return JoinPresaleWaitlist(
-            success=True,
-            message="¡Te has unido a la lista de espera! Te notificaremos cuando la preventa esté disponible.",
-            already_joined=False
-        )
+        # No unique constraint on (user, region): old rows may repeat.
+        created = not PresaleWaitlist.objects.filter(user=user, region=region).exists()
+        if created:
+            PresaleWaitlist.objects.create(user=user, region=region)
+        if region == PresaleWaitlist.REGION_US:
+            message = ("Ya estás en la lista de espera para EE. UU. Te avisaremos si la preventa se abre para residentes de Estados Unidos."
+                       if not created else
+                       "¡Te uniste a la lista de espera para EE. UU.! Te avisaremos si la preventa se abre para residentes de Estados Unidos.")
+        else:
+            message = ("Ya estás en la lista de espera. Te notificaremos cuando la preventa esté disponible."
+                       if not created else
+                       "¡Te has unido a la lista de espera! Te notificaremos cuando la preventa esté disponible.")
+        return JoinPresaleWaitlist(success=True, message=message, already_joined=not created)
 
 
 class PresaleMutations(graphene.ObjectType):

@@ -1598,18 +1598,19 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
 class PresaleWaitlistAdmin(admin.ModelAdmin):
     list_display = [
         'user_link',
+        'region',
         'created_at',
         'notified',
         'notified_at',
     ]
-    list_filter = ['notified', 'created_at']
+    list_filter = ['region', 'notified', 'created_at']
     search_fields = ['user__username', 'user__email', 'user__phone_number']
     readonly_fields = ['user', 'created_at', 'notified_at']
     date_hierarchy = 'created_at'
 
     fieldsets = (
         ('Waitlist Entry', {
-            'fields': ('user', 'created_at')
+            'fields': ('user', 'region', 'created_at')
         }),
         ('Notification Status', {
             'fields': ('notified', 'notified_at')
@@ -1640,8 +1641,14 @@ class PresaleWaitlistAdmin(admin.ModelAdmin):
         from notifications.models import Notification, NotificationType
         from notifications.fcm_service import send_push_notification
 
-        # Get ALL unnotified waitlist entries (ignore queryset selection)
-        all_unnotified = PresaleWaitlist.objects.filter(notified=False).select_related('user')
+        # Get ALL unnotified launch entries (ignore queryset selection). The
+        # US waitlist is still blocked from buying; this message is not theirs.
+        # A user on both lists counts as US.
+        us_users = PresaleWaitlist.objects.filter(
+            region=PresaleWaitlist.REGION_US).values('user_id')
+        all_unnotified = PresaleWaitlist.objects.filter(
+            notified=False, region=PresaleWaitlist.REGION_LAUNCH,
+        ).exclude(user_id__in=us_users).select_related('user')
 
         if not all_unnotified.exists():
             self.message_user(request, "No users to notify - all waitlist users have already been notified.", level='warning')
@@ -1690,7 +1697,7 @@ class PresaleWaitlistAdmin(admin.ModelAdmin):
         else:
             self.message_user(request, f"Successfully sent notifications to {success_count} user(s).")
 
-    send_notification.short_description = "Send presale notifications to ALL unnotified waitlist users"
+    send_notification.short_description = "Send presale notifications to ALL unnotified launch waitlist users (not US)"
 
 
 @admin.register(PresaleMigrationCredit)

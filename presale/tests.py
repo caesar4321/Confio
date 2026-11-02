@@ -434,3 +434,81 @@ class BscRedeemFundingTest(TestCase):
         with mock.patch.object(cplus, 'usdt_balance_raw', return_value=150 * self.WAD):
             self.assertEqual(cplus.reserved_usdt_wei(self.user, BSC_ADDR), 0)
             self.assertEqual(cplus.sweepable_usdt_wei(self.user, BSC_ADDR), 150 * self.WAD)
+
+
+class PresaleUsWaitlistTest(TestCase):
+    """US residents can't buy, but join a separate US waitlist."""
+
+    def _join(self, user, ip_country=None):
+        from types import SimpleNamespace
+        from presale.schema import JoinPresaleWaitlist
+        meta = {'REMOTE_ADDR': '203.0.113.9'}
+        if ip_country:
+            meta['HTTP_CF_IPCOUNTRY'] = ip_country
+        info = SimpleNamespace(context=SimpleNamespace(user=user, META=meta))
+        # Past @login_required, which needs a real ResolveInfo.
+        return JoinPresaleWaitlist.mutate.__wrapped__(None, info)
+
+    def _user(self, name, country):
+        user = _mk_user(name)
+        user.phone_country = country
+        user.save(update_fields=['phone_country'])
+        return user
+
+    def test_us_resident_joins_the_us_waitlist(self):
+        from presale.models import PresaleWaitlist
+        user = self._user('us-res', 'US')
+        res = self._join(user, ip_country='US')
+        self.assertTrue(res.success)
+        self.assertFalse(res.already_joined)
+        self.assertEqual(
+            list(PresaleWaitlist.objects.filter(user=user).values_list('region', flat=True)),
+            [PresaleWaitlist.REGION_US])
+        again = self._join(user, ip_country='US')
+        self.assertTrue(again.success)
+        self.assertTrue(again.already_joined)
+        self.assertEqual(PresaleWaitlist.objects.filter(user=user).count(), 1)
+
+    def test_us_ip_with_eligible_phone_joins_the_us_waitlist(self):
+        from presale.models import PresaleWaitlist
+        user = self._user('us-ip', 'AR')
+        self.assertTrue(self._join(user, ip_country='US').success)
+        self.assertEqual(PresaleWaitlist.objects.get(user=user).region, PresaleWaitlist.REGION_US)
+
+    def test_other_blocked_countries_stay_refused(self):
+        from presale.models import PresaleWaitlist
+        for name, phone, ip in (('kr', 'KR', None), ('gb', 'GB', None), ('us-gb', 'US', 'GB'), ('ar-gb', 'AR', 'GB')):
+            user = self._user(name, phone)
+            res = self._join(user, ip_country=ip)
+            self.assertFalse(res.success, name)
+            self.assertFalse(PresaleWaitlist.objects.filter(user=user).exists(), name)
+
+    def test_eligible_user_joins_the_launch_waitlist(self):
+        from presale.models import PresaleWaitlist
+        user = self._user('ar', 'AR')
+        self.assertTrue(self._join(user, ip_country='AR').success)
+        self.assertEqual(PresaleWaitlist.objects.get(user=user).region, PresaleWaitlist.REGION_LAUNCH)
+
+    def test_buying_stays_blocked_for_us(self):
+        from presale.geo_utils import check_presale_eligibility
+        self.assertFalse(check_presale_eligibility(self._user('us-buy', 'US'))[0])
+        self.assertFalse(check_presale_eligibility(self._user('ip-buy', 'AR'), ip_country_hint='US')[0])
+
+    def test_launch_blast_skips_the_us_waitlist(self):
+        from presale.admin import PresaleWaitlistAdmin
+        from presale.models import PresaleWaitlist
+        us = self._user('us-n', 'US')
+        ar = self._user('ar-n', 'AR')
+        PresaleWaitlist.objects.create(user=us, region=PresaleWaitlist.REGION_US)
+        PresaleWaitlist.objects.create(user=ar)
+        # Joined from an eligible country first, then from the US.
+        both = self._user('both-n', 'AR')
+        PresaleWaitlist.objects.create(user=both)
+        PresaleWaitlist.objects.create(user=both, region=PresaleWaitlist.REGION_US)
+        admin = PresaleWaitlistAdmin(PresaleWaitlist, None)
+        admin.message_user = mock.Mock()
+        with mock.patch('notifications.fcm_service.send_push_notification'):
+            admin.send_notification(None, PresaleWaitlist.objects.none())
+        self.assertTrue(PresaleWaitlist.objects.get(user=ar).notified)
+        self.assertFalse(PresaleWaitlist.objects.get(user=us).notified)
+        self.assertFalse(PresaleWaitlist.objects.filter(user=both, notified=True).exists())

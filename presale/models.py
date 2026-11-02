@@ -459,11 +459,21 @@ class PresaleMigrationCredit(models.Model):
 
 class PresaleWaitlist(models.Model):
     """Track users who want to be notified about presale availability"""
+    REGION_LAUNCH = 'launch'
+    REGION_US = 'us'
+    REGION_CHOICES = [
+        (REGION_LAUNCH, 'Public launch'),
+        # Geo-blocked US residents, waiting for a US exemption. The launch
+        # notification never goes to them.
+        (REGION_US, 'United States'),
+    ]
+
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
         related_name='presale_waitlist_entries'
     )
+    region = models.CharField(max_length=16, choices=REGION_CHOICES, default=REGION_LAUNCH, db_index=True)
     notified = models.BooleanField(
         default=False,
         help_text="Whether user has been notified about presale availability"

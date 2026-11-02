@@ -69,3 +69,24 @@ def check_presale_eligibility(user, client_ip: str | None = None, ip_country_hin
     decision = PRESALE_POLICY.evaluate(
         user, client_ip=client_ip, ip_country_hint=ip_country_hint)
     return decision.allowed, decision.message
+
+
+# The presale policy with the US lifted and every other block kept: who may
+# join the US waitlist. Buying stays blocked by PRESALE_POLICY.
+US_WAITLIST_POLICY = GeoPolicy(
+    name='presale_us_waitlist',
+    phone_blocked=PRESALE_POLICY.phone_blocked - {'US'},
+    message=IP_BLOCK_MSG,
+    phone_messages=PRESALE_POLICY.phone_messages,
+    allow_missing_phone=True,
+    ip_blocked=lambda: [c for c in PRESALE_POLICY.ip_blocked() if c != 'US'],
+    ip_fails_open_on_error=False,
+    bypass=is_presale_test_account,
+)
+
+
+def check_us_waitlist_eligibility(user, client_ip: str | None = None, ip_country_hint: str | None = None):
+    """Same contract as check_presale_eligibility, for the US waitlist."""
+    decision = US_WAITLIST_POLICY.evaluate(
+        user, client_ip=client_ip, ip_country_hint=ip_country_hint)
+    return decision.allowed, decision.message
