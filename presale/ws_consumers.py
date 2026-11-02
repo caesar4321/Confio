@@ -338,8 +338,8 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
 
         # Geo-blocking check (phone country + IP country; test accounts bypass)
-        from .geo_utils import check_presale_eligibility, get_country_for_ip
-        is_eligible, error_msg = check_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
+        from .geo_utils import check_legacy_presale_eligibility, get_country_for_ip
+        is_eligible, error_msg = check_legacy_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
         if not is_eligible:
             return {"success": False, "error": error_msg}
 
@@ -607,8 +607,8 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
 
         # Geo-blocking check (same gate as purchase prepare; test accounts bypass)
-        from .geo_utils import check_presale_eligibility
-        is_eligible, error_msg = check_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
+        from .geo_utils import check_legacy_presale_eligibility
+        is_eligible, error_msg = check_legacy_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
         if not is_eligible:
             return {"success": False, "error": error_msg}
 

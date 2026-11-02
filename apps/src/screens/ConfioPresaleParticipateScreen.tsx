@@ -8,7 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { formatNumber } from '../utils/numberFormatting';
-import { useCountry } from '../contexts/CountryContext';
+import { usePresaleAccess } from '../hooks/usePresaleAccess';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery } from '@apollo/client';
 import { GET_PRESALE_PARTICIPATE_DATA, GET_BSC_CONFIO_DOLLAR_BALANCE, GET_MY_BALANCES } from '../apollo/queries';
@@ -28,7 +28,7 @@ type ConfioPresaleParticipateScreenNavigationProp = NativeStackNavigationProp<Ma
 
 export const ConfioPresaleParticipateScreen = () => {
   const navigation = useNavigation<ConfioPresaleParticipateScreenNavigationProp>();
-  const { selectedCountry } = useCountry();
+  const { checkCanBuy, notUsAttestationRequired: bscAttestationRequired } = usePresaleAccess();
   const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const [amount, setAmount] = useState('');
@@ -59,6 +59,8 @@ export const ConfioPresaleParticipateScreen = () => {
   // Purchase-flow chain: 'bsc' = sponsored 7702 buys against the curve
   // vault (no Algorand session/opt-in at all); 'algorand' = legacy WS flow.
   const isBscFlow = data?.presaleChain === 'bsc';
+  // The US switch opens only the BSC rail; the legacy rail always asks.
+  const notUsAttestationRequired = bscAttestationRequired || !isBscFlow;
   const canPrepare = !!data?.activePresalePhase;
   // Which wallet the backup gate must verify. A BSC purchase settles against
   // the curve vault with the registered EVM wallet; an account migrated to
@@ -161,7 +163,7 @@ export const ConfioPresaleParticipateScreen = () => {
     && !activeBalanceError
     && !exceedsBalance
     && hasAcceptedTerms
-    && hasAttestedNotUs
+    && (hasAttestedNotUs || !notUsAttestationRequired)
     && !busy;
 
   // Ensure user is opted into the presale app (explicit opt-in on enter and before swap)
@@ -243,7 +245,7 @@ export const ConfioPresaleParticipateScreen = () => {
       // ── BSC flow: sponsored 7702 batch against the curve vault ──
       if (isBscFlow) {
         const { buyPresaleBsc } = await import('../services/presaleBsc');
-        await buyPresaleBsc(amountCanonical);
+        await buyPresaleBsc(amountCanonical, { notUsAttestation: hasAttestedNotUs });
         setBusy(false);
         setAmount('');
         refetch();
@@ -271,13 +273,13 @@ export const ConfioPresaleParticipateScreen = () => {
       // 1) Prepare purchase
       let pack: any;
       try {
-        pack = await session.preparePurchase(amountCanonical);
+        pack = await session.preparePurchase(amountCanonical, undefined, hasAttestedNotUs);
       } catch (e: any) {
         // If the server requires opt-in, perform it silently, then retry
         if (String(e?.message || '').includes('requires_presale_app_optin')) {
           await ensureOptedIn(session);
           // Retry purchase prepare after opt-in
-          pack = await session.preparePurchase(amountCanonical);
+          pack = await session.preparePurchase(amountCanonical, undefined, hasAttestedNotUs);
         } else {
           throw e;
         }
@@ -304,7 +306,7 @@ export const ConfioPresaleParticipateScreen = () => {
           // Ensure opt-in
           await ensureOptedIn(session);
           // Rebuild group and resubmit
-          const retryPack = await session.preparePurchase(amountCanonical);
+          const retryPack = await session.preparePurchase(amountCanonical, undefined, hasAttestedNotUs);
           const retryTxns = Array.isArray(retryPack?.transactions) ? retryPack.transactions : [];
           const retrySponsorTxns = (retryPack?.sponsor_transactions || []).slice();
           const retryUserToSign = retryTxns.find((t: any) => t?.index === 1 && (t?.needs_signature || !t?.signed));
@@ -350,19 +352,7 @@ export const ConfioPresaleParticipateScreen = () => {
       return;
     }
 
-    const iso = selectedCountry?.[2];
-    if (iso === 'US') {
-      Alert.alert('Restricción', 'Lo sentimos, los residentes de Estados Unidos no pueden participar en la preventa.');
-      return;
-    }
-    if (iso === 'KR') {
-      Alert.alert('Restricción', 'Lo sentimos, la preventa no está disponible en tu país.');
-      return;
-    }
-    if (iso === 'GB') {
-      Alert.alert('Restricción', 'Lo sentimos, los residentes del Reino Unido no pueden participar en la preventa.');
-      return;
-    }
+    if (!checkCanBuy()) return;
 
     if (!isValidAmount) {
       Alert.alert('Error', `Monto debe estar entre $${minAmount} y $${formatWithLocale(maxAmount)}`);
@@ -376,7 +366,7 @@ export const ConfioPresaleParticipateScreen = () => {
       Alert.alert('Confirmación requerida', 'Debes aceptar los Términos de la preventa antes de continuar.');
       return;
     }
-    if (!hasAttestedNotUs) {
+    if (notUsAttestationRequired && !hasAttestedNotUs) {
       Alert.alert('Confirmación requerida', 'Debes confirmar que no vives en Estados Unidos antes de continuar.');
       return;
     }
@@ -617,20 +607,22 @@ export const ConfioPresaleParticipateScreen = () => {
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.checkboxRow}
-              activeOpacity={0.85}
-              onPress={() => setHasAttestedNotUs(current => !current)}
-            >
-              <Icon
-                name={hasAttestedNotUs ? 'check-square' : 'square'}
-                size={20}
-                color={hasAttestedNotUs ? colors.primary : colors.text.light}
-              />
-              <Text style={styles.checkboxText}>
-                Confirmo que no vivo en Estados Unidos.
-              </Text>
-            </TouchableOpacity>
+            {notUsAttestationRequired && (
+              <TouchableOpacity
+                style={styles.checkboxRow}
+                activeOpacity={0.85}
+                onPress={() => setHasAttestedNotUs(current => !current)}
+              >
+                <Icon
+                  name={hasAttestedNotUs ? 'check-square' : 'square'}
+                  size={20}
+                  color={hasAttestedNotUs ? colors.primary : colors.text.light}
+                />
+                <Text style={styles.checkboxText}>
+                  Confirmo que no vivo en Estados Unidos.
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 

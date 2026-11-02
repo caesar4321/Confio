@@ -11,6 +11,7 @@ const mockNavigate = jest.fn();
 const mockMutate = jest.fn();
 let mockCountry: any;
 let mockSelected: any;
+let mockAccess: any;
 
 jest.mock('@react-navigation/native', () => {
   const navigation = { goBack: jest.fn(), navigate: (...a: any[]) => mockNavigate(...a) };
@@ -35,6 +36,7 @@ jest.mock('@apollo/client', () => ({
     }
     if (query === 'active') return { data: { activePresalePhase: { phaseNumber: 1 } } };
     if (query === 'status') return { data: { isPresaleClaimsUnlocked: false } };
+    if (query === 'access') return { data: mockAccess ? { presaleAccess: mockAccess } : undefined };
     return {};
   },
 }));
@@ -43,6 +45,7 @@ jest.mock('../../apollo/queries', () => ({
   GET_ACTIVE_PRESALE: 'active',
   GET_PRESALE_STATUS: 'status',
   GET_MY_PRESALE_ONCHAIN_INFO: 'onchain',
+  GET_PRESALE_ACCESS: 'access',
 }));
 jest.mock('../../services/presaleWs', () => ({ PresaleWsSession: class {} }));
 jest.mock('../../services/algorandService', () => ({ __esModule: true, default: {} }));
@@ -67,7 +70,8 @@ jest.mock('../../assets/png/CONFIO.png', () => 1);
 import { ConfioPresaleScreen } from '../ConfioPresaleScreen';
 
 let tree: renderer.ReactTestRenderer;
-const mount = async (iso: string, pickerIso?: string) => {
+const mount = async (iso: string, pickerIso?: string, server?: any) => {
+  mockAccess = server;
   mockCountry = ['', '', iso];
   mockSelected = pickerIso ? ['', '', pickerIso] : undefined;
   await act(async () => { tree = renderer.create(<ConfioPresaleScreen />); });
@@ -117,4 +121,33 @@ it('still refuses other blocked countries', async () => {
   await act(async () => { button('Participar en la Preventa').props.onPress(); });
   expect(mockNavigate).not.toHaveBeenCalled();
   expect(Alert.alert).toHaveBeenCalledWith('Restricción', expect.stringContaining('Reino Unido'));
+});
+
+const texts = () => tree.root.findAll(node => typeof node.props.children === 'string' || Array.isArray(node.props.children))
+  .map(node => [].concat(node.props.children).join(''));
+
+it('lets US residents buy once the server opens the US', async () => {
+  await mount('US', undefined, { access: 'buy', message: null, usAccess: 'open', notUsAttestationRequired: false });
+
+  expect(button('Unirme a la lista de espera')).toBeUndefined();
+  await act(async () => { button('Participar en la Preventa').props.onPress(); });
+  expect(mockNavigate).toHaveBeenCalledWith('ConfioPresaleParticipate');
+  expect(texts().some(t => t.includes('No disponible para residentes de EE. UU.'))).toBe(false);
+});
+
+it('shows no waitlist when the server blocks the US outright', async () => {
+  await mount('US', undefined, { access: 'blocked', message: 'bloqueado', usAccess: 'blocked', notUsAttestationRequired: true });
+
+  expect(button('Unirme a la lista de espera')).toBeUndefined();
+  await act(async () => { button('Participar en la Preventa').props.onPress(); });
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(Alert.alert).toHaveBeenCalledWith('Restricción', 'bloqueado');
+});
+
+it('follows the server over the built-in rules', async () => {
+  // Waitlist by IP for a non-US resident: only the server can know.
+  await mount('AR', undefined, { access: 'us_waitlist', message: 'x', usAccess: 'waitlist', notUsAttestationRequired: true });
+
+  expect(button('Participar en la Preventa')).toBeUndefined();
+  expect(button('Unirme a la lista de espera')).toBeDefined();
 });

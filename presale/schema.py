@@ -84,6 +84,13 @@ class PresaleCurveStatsType(graphene.ObjectType):
     participants = graphene.Int()
 
 
+class PresaleAccessType(graphene.ObjectType):
+    access = graphene.String(description="'buy', 'us_waitlist' or 'blocked'")
+    message = graphene.String(description="Refusal copy when not 'buy'")
+    us_access = graphene.String(description="Admin US switch: 'blocked', 'waitlist' or 'open'")
+    not_us_attestation_required = graphene.Boolean()
+
+
 class PresaleQueries(graphene.ObjectType):
     """Queries for presale data"""
     
@@ -113,6 +120,21 @@ class PresaleQueries(graphene.ObjectType):
     )
     my_presale_onchain_info = graphene.Field(PresaleOnchainInfo)
     presale_telegram_group = graphene.Field(PresaleTelegramGroupType)
+    presale_access = graphene.Field(
+        PresaleAccessType,
+        description="What the viewer may do in the presale, by country and IP; the app shows this"
+    )
+
+    @login_required
+    def resolve_presale_access(self, info):
+        from security.request_utils import extract_client_ip_from_meta
+        from .geo_utils import presale_access
+        meta = getattr(info.context, 'META', None) or {}
+        return PresaleAccessType(**presale_access(
+            info.context.user,
+            client_ip=extract_client_ip_from_meta(meta),
+            ip_country_hint=meta.get('HTTP_CF_IPCOUNTRY'),
+        ))
     
     def resolve_is_presale_active(self, info):
         """Check if presale is globally enabled - no login required for this check"""

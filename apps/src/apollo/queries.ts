@@ -4242,6 +4242,19 @@ export const GET_PRESALE_STATUS = gql`
   }
 `;
 
+// Its own query: an older server without presaleAccess fails only this one,
+// and the screens fall back to their built-in country rules.
+export const GET_PRESALE_ACCESS = gql`
+  query GetPresaleAccess {
+    presaleAccess {
+      access
+      message
+      usAccess
+      notUsAttestationRequired
+    }
+  }
+`;
+
 // Presale spendable funds on BSC: cUSD plus savings. Raw USDT is transient
 // and cannot bypass the universal conversion perimeter.
 export const GET_BSC_CONFIO_DOLLAR_BALANCE = gql`

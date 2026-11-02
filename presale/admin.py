@@ -1520,14 +1520,14 @@ class UserPresaleLimitAdmin(admin.ModelAdmin):
 
 @admin.register(PresaleSettings)
 class PresaleSettingsAdmin(admin.ModelAdmin):
-    list_display = ['is_presale_active', 'is_presale_claims_unlocked', 'presale_finished_at', 'claims_unlocked_at', 'updated_at']
+    list_display = ['is_presale_active', 'is_presale_claims_unlocked', 'us_access', 'presale_finished_at', 'claims_unlocked_at', 'updated_at']
     readonly_fields = ['created_at', 'updated_at', 'presale_finished_at', 'claims_unlocked_at']
     
     fieldsets = (
         (
             'Global Presale Control',
             {
-                'fields': ('is_presale_active', 'is_presale_claims_unlocked', 'presale_finished_at', 'claims_unlocked_at'),
+                'fields': ('is_presale_active', 'is_presale_claims_unlocked', 'us_access', 'presale_finished_at', 'claims_unlocked_at'),
                 'description': 'Master switches. Use the action below to finish presale and unlock claims safely.'
             }
         ),

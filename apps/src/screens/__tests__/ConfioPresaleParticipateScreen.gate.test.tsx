@@ -21,6 +21,7 @@ const mockFace = jest.fn();
 const mockWsOpen = jest.fn();
 const mockGoBack = jest.fn();
 let mockQueryData: any;
+let mockAccess: any;
 
 jest.mock('@react-navigation/native', () => {
   // Stable, like the real navigation object: a new one per render re-fires
@@ -36,6 +37,7 @@ jest.mock('../../apollo/queries', () => ({
   GET_PRESALE_PARTICIPATE_DATA: 'participate',
   GET_BSC_CONFIO_DOLLAR_BALANCE: 'bscBalance',
   GET_MY_BALANCES: 'legacyBalance',
+  GET_PRESALE_ACCESS: 'access',
 }));
 jest.mock('../../hooks/useBackupEnforcement', () => {
   // One stable object, like the real hook's memoized callback: a new identity
@@ -59,7 +61,9 @@ jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
 jest.mock('../../components/LoadingOverlay', () => ({ LoadingOverlay: () => null }));
 jest.mock('../../components/TelegramGroupModal', () => ({ TelegramGroupModal: () => null }));
 jest.mock('../../components/common/BrandFieldBackground', () => ({ BrandFieldBackground: ({ children }: any) => children }));
-jest.mock('../../contexts/CountryContext', () => ({ useCountry: () => ({ selectedCountry: ['Honduras', '+504', 'HN'] }) }));
+jest.mock('../../contexts/CountryContext', () => ({
+  useCountry: () => ({ selectedCountry: ['Honduras', '+504', 'HN'], userCountry: ['Honduras', '+504', 'HN'] }),
+}));
 jest.mock('../../contexts/NumberLocaleProvider', () => ({ useNumberLocale: () => undefined }));
 jest.mock('../../utils/numberLocale', () => ({
   ...jest.requireActual('../../utils/numberLocale'),
@@ -82,6 +86,7 @@ const mountScreen = async (presaleChain: string, participate?: any) => {
   mockQueryData = (query: any) => {
     if (query === 'participate') return participate
       ?? { data: participateData(presaleChain), loading: false, error: undefined, refetch: jest.fn() };
+    if (query === 'access') return { data: mockAccess ? { presaleAccess: mockAccess } : undefined };
     if (query === 'bscBalance') return { data: { cusdPlusSummary: { cusdBalanceUsd: 500, balanceUsd: 0 } }, loading: false, error: undefined };
     return { data: { myBalances: { cusd: '500' } }, loading: false, error: undefined };
   };
@@ -91,6 +96,7 @@ const mountScreen = async (presaleChain: string, participate?: any) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockAccess = undefined;
   jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   mockEnforcement.mockResolvedValue(true);
   mockFace.mockResolvedValue(true);
@@ -130,7 +136,7 @@ it('verifies the BSC wallet at every gate when the presale settles on BSC', asyn
   // Gates 2 and 3: the swap button and the confirmed purchase. Exactly three,
   // so a gate that stopped running would fail here rather than pass quietly.
   expect(mockEnforcement.mock.calls).toEqual([['presale_bsc'], ['presale_bsc'], ['presale_bsc']]);
-  expect(mockBuyPresaleBsc).toHaveBeenCalledWith('100');
+  expect(mockBuyPresaleBsc).toHaveBeenCalledWith('100', { notUsAttestation: true });
   // An allowed entry stays on the screen.
   expect(mockGoBack).not.toHaveBeenCalled();
 });
@@ -191,4 +197,22 @@ it('leaves the screen when entry is refused, instead of showing the form', async
   expect(mockGoBack).toHaveBeenCalled();
   expect(mockBuyPresaleBsc).not.toHaveBeenCalled();
   expect(mockFace).not.toHaveBeenCalled();
+});
+
+it('drops the not-US checkbox once the server opens the US', async () => {
+  const hasAttestation = () => tree.root.findAll(node => node.props.children === 'Confirmo que no vivo en Estados Unidos.').length > 0;
+  await mountScreen('bsc');
+  expect(hasAttestation()).toBe(true);
+  act(() => { tree.unmount(); });
+
+  mockAccess = { access: 'buy', message: null, usAccess: 'open', notUsAttestationRequired: false };
+  await mountScreen('bsc');
+  expect(hasAttestation()).toBe(false);
+});
+
+it('keeps the not-US checkbox on the legacy rail even with the US open', async () => {
+  mockWsOpen.mockRejectedValue(new Error('legacy session unavailable in tests'));
+  mockAccess = { access: 'buy', message: null, usAccess: 'open', notUsAttestationRequired: false };
+  await mountScreen('algorand');
+  expect(tree.root.findAll(node => node.props.children === 'Confirmo que no vivo en Estados Unidos.').length).toBeGreaterThan(0);
 });

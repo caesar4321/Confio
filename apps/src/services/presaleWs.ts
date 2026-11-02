@@ -70,12 +70,14 @@ export class PresaleWsSession {
   private resolve(key: string, v: any) { const r = this.resolvers[key]; if (r) { r(v); delete this.resolvers[key]; delete this.rejectors[key]; } }
   private rejectAll(err: any) { Object.values(this.rejectors).forEach(r => r(err)); this.resolvers = {}; this.rejectors = {}; }
 
-  async preparePurchase(amount: string | number, timeout = 15000): Promise<PreparePurchasePack> {
+  // The legacy rail always requires the attestation: it stays closed to the
+  // US whatever the admin switch says, so send only what the user ticked.
+  async preparePurchase(amount: string | number, timeout = 15000, notUsAttestation = true): Promise<PreparePurchasePack> {
     await this.open(); if (!this.ws) throw new Error('not_open');
     return new Promise((resolve, reject) => {
       this.resolvers['prepare'] = resolve as any; this.rejectors['prepare'] = reject as any;
       const t = setTimeout(() => { if (this.rejectors['prepare']) { this.rejectors['prepare'](new Error('prepare_timeout')); delete this.rejectors['prepare']; delete this.resolvers['prepare']; } }, timeout);
-      try { this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: String(amount), platform: Platform.OS, accepted_terms: true, not_us_attestation: true })); } catch (e) { clearTimeout(t); reject(e); }
+      try { this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: String(amount), platform: Platform.OS, accepted_terms: true, not_us_attestation: notUsAttestation })); } catch (e) { clearTimeout(t); reject(e); }
     });
   }
 

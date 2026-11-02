@@ -38,6 +38,21 @@ class PresaleSettings(models.Model):
         default='',
         help_text="Invite URL for the private Telegram group (e.g. https://t.me/+AbCdEfGhIjK)"
     )
+    US_ACCESS_BLOCKED = 'blocked'
+    US_ACCESS_WAITLIST = 'waitlist'
+    US_ACCESS_OPEN = 'open'
+    US_ACCESS_CHOICES = [
+        (US_ACCESS_BLOCKED, 'Blocked'),
+        (US_ACCESS_WAITLIST, 'Waitlist only'),
+        (US_ACCESS_OPEN, 'Open'),
+    ]
+    us_access = models.CharField(
+        max_length=16,
+        choices=US_ACCESS_CHOICES,
+        default=US_ACCESS_WAITLIST,
+        help_text="US residents (by country or IP): blocked, waitlist only, or open to buy. "
+                  "Open also drops the not-US attestation."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

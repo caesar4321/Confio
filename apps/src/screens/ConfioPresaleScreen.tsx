@@ -12,7 +12,7 @@ import { GET_PRESALE_CURVE_STATS, GET_ACTIVE_PRESALE, GET_PRESALE_STATUS, GET_MY
 import { PresaleWsSession } from '../services/presaleWs';
 import algorandService from '../services/algorandService';
 import { formatNumber } from '../utils/numberFormatting';
-import { useCountry } from '../contexts/CountryContext';
+import { usePresaleAccess } from '../hooks/usePresaleAccess';
 import { useAccount } from '../contexts/AccountContext';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
@@ -27,7 +27,7 @@ type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackPara
 
 export const ConfioPresaleScreen = () => {
   const navigation = useNavigation<ConfioPresaleScreenNavigationProp>();
-  const { selectedCountry, userCountry } = useCountry();
+  const { access, usOpen, checkCanBuy } = usePresaleAccess();
   const { activeAccount } = useAccount();
   // The server prepares purchases for personal accounts only
   // (personal_account_required), so business owners and employees get the
@@ -79,31 +79,13 @@ export const ConfioPresaleScreen = () => {
     return `$${formatNumber(value / 1000, countryCode, { maximumFractionDigits: 0 })} mil`;
   };
 
-  // US residents can't buy yet, but may wait for a US exemption: they get
-  // the waitlist where everyone else gets the purchase button.
-  // Residence, not selectedCountry: the exchange pickers change that one.
-  const isUsResident = userCountry?.[2] === 'US';
-
-  const checkEligibility = () => {
-    const iso = selectedCountry?.[2];
-    if (iso === 'US') {
-      Alert.alert('Restricción', 'Lo sentimos, los residentes de Estados Unidos no pueden participar en la preventa.');
-      return false;
-    }
-    if (iso === 'KR') {
-      Alert.alert('Restricción', 'Lo sentimos, la preventa no está disponible en tu país.');
-      return false;
-    }
-    if (iso === 'GB') {
-      Alert.alert('Restricción', 'Lo sentimos, los residentes del Reino Unido no pueden participar en la preventa.');
-      return false;
-    }
-    return true;
-  };
+  // While the US is waitlist-only (the server's call), US residents get the
+  // waitlist where everyone else gets the purchase button.
+  const isUsResident = access === 'us_waitlist';
 
   const handleJoinWaitlist = async () => {
     // The server decides which waitlist (launch or US) and refuses the rest.
-    if (!isUsResident && !checkEligibility()) return;
+    if (!isUsResident && !checkCanBuy()) return;
 
     try {
       const { data } = await apollo.mutate({
@@ -481,7 +463,7 @@ export const ConfioPresaleScreen = () => {
               title="Participar en la Preventa"
               loading={busy}
               onPress={() => {
-                if (!checkEligibility()) return;
+                if (!checkCanBuy()) return;
                 // Navigate immediately. This button used to run the ENTIRE
                 // Algorand opt-in pre-flight first (open a socket, and on the
                 // server possibly send an MBR funding tx and wait for its
@@ -532,7 +514,7 @@ export const ConfioPresaleScreen = () => {
                 <Text style={styles.tokenomicsButtonText}>Distribución, reglas y riesgos</Text>
               </TouchableOpacity>
               <Text style={styles.ctaFinePrint}>
-                Puedes perder parte o todo lo que aportes. No disponible para residentes de EE. UU.
+                Puedes perder parte o todo lo que aportes.{usOpen ? '' : ' No disponible para residentes de EE. UU.'}
               </Text>
             </>
           )}

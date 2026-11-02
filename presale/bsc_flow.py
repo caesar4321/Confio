@@ -227,7 +227,9 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
     # The BSC flow is new — no legacy clients to tolerate: both boxes required.
     if not accepted_terms:
         return {'success': False, 'error': 'terms_acceptance_required'}
-    if not not_us_attestation:
+    # Not asked once the US is open: a US buyer could not truthfully give it.
+    from .geo_utils import us_access
+    if not not_us_attestation and us_access() != PresaleSettings.US_ACCESS_OPEN:
         return {'success': False, 'error': 'not_us_attestation_required'}
 
     settings_obj = PresaleSettings.get_settings()
@@ -358,8 +360,10 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
                 accepted_terms_at=timezone.now(),
                 accepted_terms_ip=client_ip,
                 accepted_terms_user_agent=(user_agent or '')[:1000],
-                attested_not_us_resident=True,
-                attested_not_us_at=timezone.now(),
+                # What the user actually confirmed: once the US is open the
+                # box is gone, and a US buyer must not be recorded as not-US.
+                attested_not_us_resident=bool(not_us_attestation),
+                attested_not_us_at=timezone.now() if not_us_attestation else None,
                 ip_country=(get_country_for_ip(client_ip, ip_country_hint) or ''),
                 notes=json.dumps({
                     'bsc_calls': calls,

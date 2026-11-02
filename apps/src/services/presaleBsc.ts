@@ -72,6 +72,9 @@ export interface BscPresaleQuote {
 
 export const buyPresaleBsc = async (
   amountUsd: string | number,
+  // What the user actually ticked. The server only requires it while the
+  // US is closed; older callers keep the old always-true.
+  { notUsAttestation = true }: { notUsAttestation?: boolean } = {},
 ): Promise<{ txHash: string; quote: BscPresaleQuote }> => {
   const { apolloClient } = await import('../apollo/client');
   const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
@@ -90,7 +93,7 @@ export const buyPresaleBsc = async (
     variables: {
       amountUsd: String(amountUsd),
       acceptedTerms: true,
-      notUsAttestation: true,
+      notUsAttestation,
     },
   });
   const prep = data?.prepareBscPresalePurchase;

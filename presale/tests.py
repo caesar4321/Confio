@@ -246,6 +246,15 @@ class BscPurchaseFlowTest(TestCase):
         res = self._prepare()
         self.assertEqual(res['error'], 'no_bsc_address')
 
+    def test_open_us_records_only_a_given_attestation(self):
+        # An open US drops the checkbox; the purchase must not then claim it.
+        PresaleSettings.objects.update(us_access=PresaleSettings.US_ACCESS_OPEN)
+        res = self._prepare(not_us_attestation=False)
+        self.assertTrue(res['success'], res)
+        purchase = PresalePurchase.objects.get(internal_id=res['purchase_id'])
+        self.assertFalse(purchase.attested_not_us_resident)
+        self.assertIsNone(purchase.attested_not_us_at)
+
     def test_prepare_records_and_builds_exact_batch(self):
         from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PRESALE_BUY
         res = self._prepare()
@@ -512,3 +521,71 @@ class PresaleUsWaitlistTest(TestCase):
         self.assertTrue(PresaleWaitlist.objects.get(user=ar).notified)
         self.assertFalse(PresaleWaitlist.objects.get(user=us).notified)
         self.assertFalse(PresaleWaitlist.objects.filter(user=both, notified=True).exists())
+
+
+class PresaleUsAccessSwitchTest(TestCase):
+    """PresaleSettings.us_access decides the US, live, without a deploy."""
+
+    def _user(self, name, country):
+        user = _mk_user(name)
+        user.country = country
+        user.save(update_fields=['country'])
+        return user
+
+    def _mode(self, mode):
+        s = PresaleSettings.get_settings()
+        s.us_access = mode
+        s.save()
+
+    def test_default_is_waitlist(self):
+        from presale.geo_utils import presale_access
+        access = presale_access(self._user('us-def', 'US'))
+        self.assertEqual(access['access'], 'us_waitlist')
+        self.assertEqual(access['us_access'], 'waitlist')
+        self.assertTrue(access['not_us_attestation_required'])
+
+    def test_blocked_has_no_waitlist(self):
+        from presale.geo_utils import presale_access
+        self._mode('blocked')
+        self.assertEqual(presale_access(self._user('us-b', 'US'))['access'], 'blocked')
+        self.assertEqual(presale_access(self._user('ip-b', 'AR'), ip_country_hint='US')['access'], 'blocked')
+
+    def test_open_lets_us_buy_and_drops_the_attestation(self):
+        from presale.geo_utils import presale_access, check_presale_eligibility
+        self._mode('open')
+        us = self._user('us-o', 'US')
+        access = presale_access(us, ip_country_hint='US')
+        self.assertEqual(access['access'], 'buy')
+        self.assertFalse(access['not_us_attestation_required'])
+        self.assertTrue(check_presale_eligibility(self._user('ip-o', 'AR'), ip_country_hint='US')[0])
+
+    def test_open_keeps_other_blocks(self):
+        from presale.geo_utils import presale_access
+        self._mode('open')
+        for name, country, ip in (('kr-o', 'KR', None), ('gb-o', 'GB', None), ('us-gb', 'US', 'GB')):
+            self.assertEqual(presale_access(self._user(name, country), ip_country_hint=ip)['access'], 'blocked', name)
+
+    def test_unreadable_setting_blocks_the_us(self):
+        from presale.geo_utils import presale_access, us_access
+        with mock.patch('presale.models.PresaleSettings.get_settings', side_effect=RuntimeError('db down')):
+            self.assertEqual(us_access(), 'blocked')
+            self.assertEqual(presale_access(self._user('us-x', 'US'))['access'], 'blocked')
+
+    def test_legacy_rail_stays_closed_to_the_us(self):
+        from presale.geo_utils import check_legacy_presale_eligibility
+        self._mode('open')
+        self.assertFalse(check_legacy_presale_eligibility(self._user('us-l', 'US'))[0])
+        self.assertFalse(check_legacy_presale_eligibility(self._user('ip-l', 'AR'), ip_country_hint='US')[0])
+        self.assertTrue(check_legacy_presale_eligibility(self._user('ar-l', 'AR'), ip_country_hint='AR')[0])
+
+    def test_purchase_attestation_follows_the_switch(self):
+        from presale.bsc_flow import prepare_purchase
+        user = self._user('ar-att', 'AR')
+        account = user.accounts.first()
+        with mock.patch('presale.bsc_flow.presale_vault_address', return_value=VAULT):
+            res = prepare_purchase(user, account, '10', accepted_terms=True, not_us_attestation=False)
+            self.assertEqual(res['error'], 'not_us_attestation_required')
+            self._mode('open')
+            res = prepare_purchase(user, account, '10', accepted_terms=True, not_us_attestation=False)
+            self.assertNotEqual(res.get('error'), 'not_us_attestation_required')
+
