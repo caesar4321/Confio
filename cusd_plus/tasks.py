@@ -215,6 +215,48 @@ def _rpc_single(url, method, params, timeout=15):
     return body['result']
 
 
+# SLOW-ENDPOINT DEMOTION (2026-11-02): publicnode intermittently hangs for
+# the whole read timeout or answers 403 while still leading the pool, and
+# nothing pushed it down, so user requests on daphne sat 15 s per stalled
+# call (a sponsored subscribe took 32 s: two of them). An endpoint that fails
+# at the TRANSPORT level (timeout, connection error, HTTP 403/429/5xx) now
+# goes to the back of the pool for a while. A JSON-RPC error does not: the
+# endpoint answered, and the error is usually about the request (a getLogs
+# range past head).
+_DOWN_KEY = 'cusd_plus_bsc_rpc_down:'
+RPC_DEMOTE_SECONDS = 120
+# While another endpoint is left to try, cheap reads give up after this long
+# instead of the caller's full timeout: a healthy node answers them in well
+# under a second. getLogs can be legitimately slow, and a rebroadcast of a
+# raw tx that did land only turns into a confusing error, so both keep the
+# caller's timeout on every attempt.
+RPC_FAILOVER_TIMEOUT = 4
+_FULL_TIMEOUT_METHODS = frozenset({'eth_getLogs', 'eth_sendRawTransaction'})
+
+
+def _down_key(url):
+    return _DOWN_KEY + _redact(url)
+
+
+def _demoted_urls(urls):
+    from django.core.cache import cache
+
+    try:
+        down = cache.get_many([_down_key(u) for u in urls])
+    except Exception:  # noqa: BLE001 — no cache means no demotion, never no RPC
+        return set()
+    return {u for u in urls if down.get(_down_key(u))}
+
+
+def _demote(url):
+    from django.core.cache import cache
+
+    try:
+        cache.set(_down_key(url), 1, RPC_DEMOTE_SECONDS)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _rpc_preferred_only(method, params, timeout):
     """ONE shot at the endpoint most likely to answer — NO rotation.
 
@@ -231,18 +273,29 @@ def _rpc_preferred_only(method, params, timeout):
     from django.core.cache import cache
 
     preferred = cache.get('cusd_plus_bsc_rpc_preferred')
-    url = preferred if preferred in BSC_RPC_URLS else BSC_RPC_URLS[0]
-    return _rpc_single(url, method, params, timeout)
+    demoted = _demoted_urls(BSC_RPC_URLS)
+    if preferred in BSC_RPC_URLS and preferred not in demoted:
+        url = preferred
+    else:
+        healthy = [u for u in BSC_RPC_URLS if u not in demoted]
+        keyless = [u for u in healthy if not _is_metered(u)]
+        url = (keyless or healthy or BSC_RPC_URLS)[0]
+    try:
+        return _rpc_single(url, method, params, timeout)
+    except requests.RequestException:
+        _demote(url)
+        raise
 
 
 def _rpc(method, params, timeout=15):
     """Try the pool in preference order; remember the last URL that worked
-    so steady state is one request, not a failover cascade.
+    so steady state is one request, not a failover cascade. Endpoints that
+    recently failed at the transport level go last.
 
-    NOTE for latency-sensitive callers: worst case is timeout x len(pool),
-    since every endpoint may hang for the full timeout before the next is
-    tried. Use _rpc_preferred_only when a bounded wall clock matters more
-    than eventually succeeding."""
+    Worst case for a cheap read is RPC_FAILOVER_TIMEOUT per endpoint plus
+    `timeout` on the last one; for getLogs and sendRawTransaction it is
+    timeout x len(pool). Use _rpc_preferred_only when a bounded wall clock
+    matters more than eventually succeeding."""
     from django.core.cache import cache
 
     preferred = cache.get('cusd_plus_bsc_rpc_preferred')
@@ -250,10 +303,21 @@ def _rpc(method, params, timeout=15):
     if preferred in ordered:
         ordered.remove(preferred)
         ordered.insert(0, preferred)
+    demoted = _demoted_urls(ordered)
+    if demoted:
+        # While the lead is benched, a keyless endpoint takes its place; the
+        # metered one still only catches what the keyless ones fail.
+        healthy = [u for u in ordered if u not in demoted]
+        ordered = ([u for u in healthy if not _is_metered(u)]
+                   + [u for u in healthy if _is_metered(u)]
+                   + [u for u in ordered if u in demoted])
     last_exc = None
-    for url in ordered:
+    for i, url in enumerate(ordered):
+        attempt_timeout = timeout
+        if i < len(ordered) - 1 and method not in _FULL_TIMEOUT_METHODS:
+            attempt_timeout = min(timeout, RPC_FAILOVER_TIMEOUT)
         try:
-            result = _rpc_single(url, method, params, timeout)
+            result = _rpc_single(url, method, params, attempt_timeout)
             if url != preferred and not _is_metered(url):
                 # A keyless endpoint that answered leads for a while. The
                 # metered one never does: it answers the call that failed
@@ -264,6 +328,8 @@ def _rpc(method, params, timeout=15):
             return result
         except Exception as exc:  # noqa: BLE001 — try the next endpoint
             last_exc = exc
+            if isinstance(exc, requests.RequestException):
+                _demote(url)
             logger.info('bsc rpc %s failed on %s: %s', method, _redact(url), _redact(str(exc)))
     raise RuntimeError(f'all {len(ordered)} BSC RPC endpoints failed: {_redact(str(last_exc))}')
 
