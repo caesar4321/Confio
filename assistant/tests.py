@@ -1090,6 +1090,35 @@ class MarketToolTests(TestCase):
         self.assertEqual(market.stock_quote('Alphabet')['ticker'], 'GOOGL')
         self.assertIsNone(market.listed_asset('S&P 500'))  # one letter is never a ticker
 
+    @patch('cusd_plus.gm_api.market_status', return_value={'marketStatus': 'regular'})
+    @patch('cusd_plus.gm_api.ohlc', return_value=CANDLES)
+    @patch('cusd_plus.gm_api.all_market', return_value=MARKET)
+    def test_quote_carries_their_own_position(self, *_):
+        # 2026-11-01: the per-share price was read as their position's value.
+        account = Account.objects.create(user=self.user, account_type='personal', account_index=0,
+                                         bsc_address='0xabc')
+        viewer = Viewer(user=self.user, account=account, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0, reserve_news=lambda: True)
+        rows = [{'ticker': 'AAPL', 'nombre': 'Apple', 'valor_usd': '4.97'}]
+        with patch('assistant.engine._holdings', return_value=rows):
+            quote = belt.call('get_stock_quote', {'query': 'Apple'})
+            self.assertEqual((quote['precio_por_accion_usd'], quote['tu_posicion']['valor_usd']), (180.5, '4.97'))
+            self.assertEqual(belt.call('get_stock_quote', {'query': 'APP'})['tu_posicion'], 'no tiene esta acción')
+        with patch('assistant.engine._holdings', return_value=rows) as holdings:
+            belt.call('get_stock_quote', {'query': 'Apple'})
+        holdings.assert_called_once_with('0xabc', limit=None)  # never cut to the top 15
+        for broken in ({'return_value': 'desconocido'}, {'side_effect': RuntimeError('cache down')}):
+            with patch('assistant.engine._holdings', **broken):
+                quote = belt.call('get_stock_quote', {'query': 'Apple'})
+            self.assertEqual((quote['ticker'], 'tu_posicion' in quote), ('AAPL', False))  # the quote stands
+        employee = Viewer(user=self.user, account=account, account_type='business', business_id=1,
+                          is_business_owner=False, tz=ZoneInfo('UTC'))
+        with patch('assistant.engine._holdings') as holdings:
+            Toolbelt(employee, TurnResult(reply=''), analyses_left=0,
+                     reserve_news=lambda: True).call('get_stock_quote', {'query': 'Apple'})
+        holdings.assert_not_called()  # an employee never sees the owner's stocks
+
     @patch('cusd_plus.gm_api.all_market', return_value=MARKET)
     def test_news_requires_cited_completed_search(self, _market):
         ok = {'status': 'completed', 'usage': {'input_tokens': 10, 'output_tokens': 5}, 'output': [

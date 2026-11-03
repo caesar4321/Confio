@@ -133,7 +133,7 @@ def stock_quote(query, user=None):
         'encontrado': True,
         'ticker': ticker,
         'nombre': name,
-        'precio_usd': round(price, 2),
+        'precio_por_accion_usd': round(price, 2),
         'cambio_24h_pct': round(float(pm.get('priceChangePct24h') or 0), 2),
         'cambio_1_mes_pct': month,
         'sesion_mercado': session,

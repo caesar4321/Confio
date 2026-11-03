@@ -667,7 +667,7 @@ def _trade_books(address):
         return None
 
 
-def _holdings(address):
+def _holdings(address, limit=15):
     from cusd_plus import gm_api
     from inbox.member_portfolio import UNITS_TOLERANCE
     from cusd_plus.gm_holdings import known_holdings_units
@@ -707,7 +707,7 @@ def _holdings(address):
             row['ganancia_pct'] = f'{pct + 0:f}'  # never "-0.0"
         rows.append(row)
     rows.sort(key=lambda r: Decimal(r['valor_usd'].replace(',', '')), reverse=True)
-    return rows[:15]
+    return rows[:limit] if limit else rows
 
 
 def categorize_movements(viewer: Viewer, movement_ids, category, apply_to, *, dry_run=False):
@@ -1000,7 +1000,9 @@ class Toolbelt:
                     'name': 'get_stock_quote',
                     'description': (
                         'Precio actual, cambio de 24 horas y de 1 mes de una acción o ETF de EE.UU. que muestra '
-                        'Confío (fuente: Ondo Global Markets). query = ticker o nombre, p. ej. "AAPL" o "Apple".'
+                        'Confío (fuente: Ondo Global Markets). query = ticker o nombre, p. ej. "AAPL" o "Apple". '
+                        'precio_por_accion_usd es el precio de UNA acción completa, no lo que vale lo suyo: si '
+                        'tiene esa acción, tu_posicion trae su valor de hoy (valor_usd) y lo que pagó.'
                     ),
                     'parameters': {
                         'type': 'object',
@@ -1230,7 +1232,21 @@ class Toolbelt:
         return result
 
     def get_stock_quote(self, query):
-        return market.stock_quote(query, user=self.viewer.user)
+        result = market.stock_quote(query, user=self.viewer.user)
+        # Asked "si lo vendo, ¿está a 4,97?", the quote alone (US$240,86 a
+        # share) made the model retract a correct position value (2026-11-01).
+        # Their own holding of this stock rides along with its price.
+        address = getattr(self.viewer.account, 'bsc_address', '') or ''
+        if result.get('encontrado') and address and not self.viewer.is_employee:
+            try:
+                held = _holdings(address, limit=None)  # a 16th holding is still theirs
+            except Exception:  # noqa: BLE001 - the quote stands without it
+                logger.warning('Confio Assistant: holdings unavailable for a quote', exc_info=True)
+                held = None
+            if isinstance(held, list):
+                mine = next((r for r in held if r['ticker'] == result['ticker']), None)
+                result['tu_posicion'] = mine or 'no tiene esta acción'
+        return result
 
     def search_market_news(self, topic, timeframe='esta semana', language='español'):
         if market.resolve_topic(topic) is None:
