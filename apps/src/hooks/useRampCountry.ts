@@ -60,12 +60,30 @@ export const useRampCountry = () => {
   const loading = !countryCode && (Boolean(isUserProfileLoading) || meLoading || railLoading);
 
   // The user picked another country in Recargar/Retirar: it leads from now on.
+  // Once the server saved it, the pick IS the first rail country, so the
+  // cache says so right away. The refetch only fills in the rest of the
+  // order: on a slow connection it timed out and the screen reported a
+  // change that had already happened (prod 2026-11-03).
   const setRampCountry = useCallback(async (iso: string) => {
-    const result = await setPreferredRailCountry({ variables: { country: iso } });
+    const picked = String(iso || '').trim().toUpperCase();
+    const result = await setPreferredRailCountry({
+      variables: { country: iso },
+      update: (cache, { data }) => {
+        if (!data?.setPreferredRailCountry?.success) return;
+        cache.updateQuery({ query: GET_RAIL_COUNTRIES }, (current: any) => ({
+          railCountries: [
+            picked,
+            ...((current?.railCountries || []) as string[]).filter(
+              code => String(code || '').trim().toUpperCase() !== picked,
+            ),
+          ],
+        }));
+      },
+    });
     if (!result.data?.setPreferredRailCountry?.success) {
       throw new Error(result.data?.setPreferredRailCountry?.error || 'No pudimos cambiar el país');
     }
-    await refetchRail();
+    refetchRail().catch(() => {});
   }, [refetchRail, setPreferredRailCountry]);
   const isBlocked = isRampBlockedCountry(countryCode);
 
