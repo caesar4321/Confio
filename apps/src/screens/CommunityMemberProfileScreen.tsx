@@ -29,6 +29,7 @@ import {
   GET_COMMUNITY_COMMENT_COUNTS,
   GET_COMMUNITY_MEMBER_PORTFOLIO,
   GET_COMMUNITY_MEMBER_CRYPTO_USD,
+  GET_COMMUNITY_MEMBER_PERPS_USD,
   GET_COMMUNITY_MEMBER_POSTS,
   GET_COMMUNITY_MEMBER_PROFILE,
   GET_INVESTOR_PROFILE,
@@ -216,6 +217,16 @@ export const CommunityMemberProfileScreen = () => {
           if (!mounted.current || portfolioGeneration.current !== requested || currentUserId.current !== forUser) return;
           const cryptoUsd = cryptoData?.communityMemberCryptoUsd ?? null;
           setPortfolio((current) => (current && String(current.userId) === forUser ? { ...current, cryptoUsd } : current));
+        }).catch(() => {});
+        // Futuros: the same, from its own read.
+        client.query({
+          query: GET_COMMUNITY_MEMBER_PERPS_USD,
+          variables: { userId: forUser },
+          fetchPolicy: 'network-only',
+        }).then(({ data: perpsData }) => {
+          if (!mounted.current || portfolioGeneration.current !== requested || currentUserId.current !== forUser) return;
+          const perpsUsd = perpsData?.communityMemberPerpsUsd ?? null;
+          setPortfolio((current) => (current && String(current.userId) === forUser ? { ...current, perpsUsd } : current));
         }).catch(() => {});
       }
     } catch {

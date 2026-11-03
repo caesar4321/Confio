@@ -122,6 +122,28 @@ test('iOS binary: the same amount under "Otros", so the profile still adds up', 
   expect(textOf(tree)).not.toContain('Oro y Bitcoin');
 });
 
+test('Futuros get their own row; never a $0 row, never on an older server', () => {
+  let tree!: renderer.ReactTestRenderer;
+  act(() => { tree = renderer.create(<CommunityPortfolioSection portfolio={{ ...base, perpsUsd: '107.27' }} />); });
+  expect(textOf(tree)).toContain('Futuros');
+  expect(textOf(tree)).toContain('$107.27');
+  for (const perpsUsd of ['0.00', null, undefined]) {
+    act(() => { tree.update(<CommunityPortfolioSection portfolio={{ ...base, perpsUsd }} />); });
+    expect(textOf(tree)).not.toContain('Futuros');
+  }
+});
+
+test('iOS binary: no Futuros row, their value joins "Otros"', () => {
+  mockFeatures.DEX_TRADING_UI_ENABLED = false;
+  let tree!: renderer.ReactTestRenderer;
+  act(() => { tree = renderer.create(<CommunityPortfolioSection portfolio={{ ...base, cryptoUsd: '0.99', perpsUsd: '107.27' }} />); });
+  expect(textOf(tree)).not.toContain('Futuros');
+  expect(textOf(tree)).toContain('Otros');
+  expect(textOf(tree)).toContain('$108.26');
+  act(() => { tree.update(<CommunityPortfolioSection portfolio={{ ...base, perpsUsd: '107.27' }} />); });
+  expect(textOf(tree)).toContain('$107.27');
+});
+
 test('iOS binary: only certain stock rows in Abiertas and Cerradas, even from an older server', () => {
   mockFeatures.DEX_TRADING_UI_ENABLED = false;
   const { isBundledStockRow } = require('../CommunityPortfolioSection');

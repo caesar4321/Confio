@@ -76,6 +76,8 @@ export type CommunityMemberPortfolio = {
   stocksUsd?: string | null;
   /** Bitcoin & gold (its own query; absent on older servers). */
   cryptoUsd?: string | null;
+  /** Futuros (its own query; absent on older servers). */
+  perpsUsd?: string | null;
   stocksChange24hUsd?: string | null;
   presaleConfio?: string | null;
   presaleInvestedUsd?: string | null;
@@ -85,6 +87,12 @@ export type CommunityMemberPortfolio = {
   /** Null when holdings or history couldn't be read: unavailable, never empty. */
   openPositions: PortfolioOpenPosition[] | null;
   closedPositions: PortfolioClosedPosition[] | null;
+};
+
+/** Two-decimal amounts added in cents; null when neither is known. */
+const sumUsd = (a: string | null, b: string | null) => {
+  if (!a || !b) return a || b;
+  return ((Math.round(parseFloat(a) * 100) + Math.round(parseFloat(b) * 100)) / 100).toFixed(2);
 };
 
 const GAIN = colors.successText;
@@ -126,7 +134,12 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
   const dollars = formatUsd(portfolio.dollarsUsd);
   const stocks = formatUsd(portfolio.stocksUsd);
   // A zero row would read as "holds some": shown only when something is held.
-  const crypto = portfolio.cryptoUsd && !isZeroAmount(portfolio.cryptoUsd) ? formatUsd(portfolio.cryptoUsd) : null;
+  const shown = (value?: string | null) => (value && !isZeroAmount(value) ? value : null);
+  // No Futuros in this binary: their value joins "Otros", so the rows still
+  // add up to the total.
+  const otherUsd = DEX_TRADING_UI_ENABLED ? shown(portfolio.cryptoUsd) : sumUsd(shown(portfolio.cryptoUsd), shown(portfolio.perpsUsd));
+  const crypto = otherUsd ? formatUsd(otherUsd) : null;
+  const perps = DEX_TRADING_UI_ENABLED && shown(portfolio.perpsUsd) ? formatUsd(portfolio.perpsUsd) : null;
   const showConfio = Boolean(portfolio.presaleConfio) && !isZeroAmount(portfolio.presaleConfio);
   const confioAmount = showConfio ? formatAmount(portfolio.presaleConfio) : null;
   const confioInvested = formatUsd(portfolio.presaleInvestedUsd);
@@ -199,7 +212,7 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
           </Text>
         ) : null}
 
-        {dollars || stocks || crypto || showConfio ? (
+        {dollars || stocks || crypto || perps || showConfio ? (
           <View style={styles.breakdown}>
             {dollars ? (
               <BreakdownRow icon="dollar-sign" tint={colors.primarySoft} iconColor={colors.successText} label="Dólares" value={dollars} />
@@ -209,6 +222,9 @@ export const CommunityPortfolioSection = ({ portfolio, onToggleHidden, hiddenBus
             ) : null}
             {crypto ? (
               <BreakdownRow icon="hexagon" tint={colors.warning.background} iconColor={colors.warning.icon} label={DEX_TRADING_UI_ENABLED ? 'Oro y Bitcoin' : 'Otros'} value={crypto} />
+            ) : null}
+            {perps ? (
+              <BreakdownRow icon="activity" tint={colors.borderLight} iconColor={colors.textSecondary} label="Futuros" value={perps} />
             ) : null}
             {showConfio && confioAmount ? (
               <BreakdownRow

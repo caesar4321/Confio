@@ -116,6 +116,16 @@ class PortfolioVisibilityTests(CommunityTestBase):
         self.assertEqual(result.stocks_change_24h_usd, '-17.35')
         rolling.assert_called_once_with('0xabc')
 
+    def test_the_futuros_row_is_its_own_read_under_the_same_visibility(self):
+        from types import SimpleNamespace
+
+        member, viewer = self.published_member(), make_user()
+        with patch.object(member_portfolio, 'personal_wallet', return_value='0xabc'), \
+                patch('cusd_plus.perps_portfolio.live_part', return_value=SimpleNamespace(total=Decimal('107.274'))):
+            self.assertEqual(Query().resolve_community_member_perps_usd(MockInfo(viewer), str(member.id)), '107.27')
+            SetCommunityPortfolioHidden.mutate(None, MockInfo(member), hidden=True)
+            self.assertIsNone(Query().resolve_community_member_perps_usd(MockInfo(viewer), str(member.id)))
+
     def test_public_by_default_and_hidden_by_the_members_own_switch(self):
         member = self.published_member()
         viewer = make_user()

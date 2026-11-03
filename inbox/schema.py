@@ -2168,6 +2168,9 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
     # Its own field: added to the portfolio type, a new app would break that
     # whole query against older servers. Same visibility rules.
     community_member_crypto_usd = graphene.String(user_id=graphene.ID(required=True))
+    # The member's Futuros value (the profile's "Futuros" row), in the total
+    # since the start. Its own field for the same reason.
+    community_member_perps_usd = graphene.String(user_id=graphene.ID(required=True))
     investor_profile = graphene.Field(InvestorProfileType, user_id=graphene.ID(required=True))
     # Its own field for the same reason. range: '24h' | '7d' | '30d'.
     investor_returns = graphene.Field(InvestorReturnsType, user_id=graphene.ID(required=True),
@@ -2373,6 +2376,18 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
         if not wallet:
             return None
         return _money(member_portfolio.crypto_part(wallet, dj_tz.now()).total)
+
+    @login_required
+    def resolve_community_member_perps_usd(self, info, user_id):
+        from django.utils import timezone as dj_tz
+
+        from cusd_plus.perps_portfolio import live_part
+
+        target = _portfolio_target(info.context.user, user_id)
+        wallet = member_portfolio.personal_wallet(target) if target is not None else None
+        if not wallet:
+            return None
+        return _money(live_part(wallet, dj_tz.now()).total)
 
     @login_required
     def resolve_community_member_posts(self, info, user_id, offset=0, limit=10):

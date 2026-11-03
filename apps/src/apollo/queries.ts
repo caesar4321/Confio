@@ -5041,6 +5041,14 @@ export const GET_COMMUNITY_MEMBER_CRYPTO_USD = gql`
   }
 `;
 
+// The profile's "Futuros" value (on iOS, part of "Otros"). Its own query for
+// the same reason.
+export const GET_COMMUNITY_MEMBER_PERPS_USD = gql`
+  query GetCommunityMemberPerpsUsd($userId: ID!) {
+    communityMemberPerpsUsd(userId: $userId)
+  }
+`;
+
 // Perfil inversor header (bio, cover, who can see what): its own query, so an
 // older server only loses the new header, never the profile.
 export const GET_INVESTOR_PROFILE = gql`
