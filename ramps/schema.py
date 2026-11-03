@@ -164,6 +164,36 @@ def _koywe_unavailable_message(action: str, currency: str) -> str:
     )
 
 
+def _koywe_error_kind(exc) -> str:
+    """A fixed label, never the provider's text: it can echo account data."""
+    text = str(exc)
+    if _KOYWE_UNSUPPORTED_OPERATION_RE.search(text):
+        return 'rail_disabled'
+    if _KOYWE_UNSUPPORTED_TICKER_RE.search(text):
+        return 'ticker_unsupported'
+    return 'other'
+
+
+def _note_ramp_quote(user, direction, country_code, outcome, *, amount=None, fiat=None, error_kind=''):
+    """Per user, the first quote of each outcome per day: the guide funnel lost
+    six people on Recargar ahora (2026-11-03) and nothing said what they saw.
+    Never raises: analytics must not cost anyone a quote."""
+    if not user or not getattr(user, 'is_authenticated', False):
+        return
+    from users.funnel import emit_once
+
+    day = timezone.now().date().isoformat()
+    properties = {'direction': direction, 'outcome': outcome, 'provider': 'koywe'}
+    if amount is not None:
+        properties['amount'] = format(amount, 'f')
+    if fiat:
+        properties['fiat'] = str(fiat).upper()[:8]
+    if error_kind:
+        properties['error_kind'] = error_kind
+    emit_once('ramp_quote', user=user, country=country_code or '', source_type='server', properties=properties,
+              dedupe_key=f'{direction}:{outcome}:{country_code or ""}:{day}')
+
+
 def _format_koywe_error(exc: 'KoyweError', direction: str = '') -> str:
     """Koywe's account-level rail switches come back as English sentences;
     users get Spanish. Anything unrecognized passes through unchanged."""
@@ -1986,6 +2016,7 @@ class Query(graphene.ObjectType):
 
     def resolve_ramp_quote(self, info, direction, amount, country_code=None, fiat_currency=None, payment_method_code=None, destination=None):
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
+        user = getattr(info.context, "user", None)
         normalized_direction = (direction or "").strip().upper()
         if normalized_direction not in {"ON_RAMP", "OFF_RAMP"}:
             raise ValidationError("direction must be ON_RAMP or OFF_RAMP")
@@ -2020,6 +2051,7 @@ class Query(graphene.ObjectType):
         if not client.is_configured:
             raise ValidationError("Koywe credentials are not configured on the server")
 
+        resolved_fiat_symbol = fiat_currency  # until the country's currency is known
         try:
             resolved_fiat_symbol = fiat_currency or _get_country_fiat_currency(resolved_country_code)
             if normalized_direction == "ON_RAMP":
@@ -2038,7 +2070,6 @@ class Query(graphene.ObjectType):
                         resolved_country_code,
                         exc,
                     )
-            user = getattr(info.context, "user", None)
             koywe_email = _get_koywe_auth_email(
                 user=user,
                 country_code=resolved_country_code,
@@ -2057,6 +2088,8 @@ class Query(graphene.ObjectType):
                 resolved_country_code,
                 exc,
             )
+            _note_ramp_quote(user, normalized_direction, resolved_country_code, 'below_minimum',
+                             amount=decimal_amount, fiat=getattr(exc, 'currency', None) or resolved_fiat_symbol)
             raise ValidationError(_format_minimum_amount_error(exc, normalized_direction))
         except KoyweMaximumAmountError as exc:
             logger.info(
@@ -2065,6 +2098,8 @@ class Query(graphene.ObjectType):
                 resolved_country_code,
                 exc,
             )
+            _note_ramp_quote(user, normalized_direction, resolved_country_code, 'above_maximum',
+                             amount=decimal_amount, fiat=getattr(exc, 'currency', None) or resolved_fiat_symbol)
             raise ValidationError(_format_maximum_amount_error(exc, normalized_direction))
         except KoyweError as exc:
             logger.warning(
@@ -2073,6 +2108,8 @@ class Query(graphene.ObjectType):
                 resolved_country_code,
                 exc,
             )
+            _note_ramp_quote(user, normalized_direction, resolved_country_code, 'provider_error',
+                             amount=decimal_amount, fiat=resolved_fiat_symbol, error_kind=_koywe_error_kind(exc))
             raise ValidationError(_format_koywe_error(exc, normalized_direction))
 
         if fee_enabled and normalized_direction == 'ON_RAMP':
@@ -2098,7 +2135,7 @@ class Query(graphene.ObjectType):
         def _plain(value):
             return format(Decimal(value), 'f')
 
-        return RampQuoteType(
+        result = RampQuoteType(
             direction=quote["direction"],
             country_code=quote.get("country_code") or resolved_country_code,
             fiat_currency=quote.get("fiat_currency") or (fiat_currency or _get_country_fiat_currency(resolved_country_code)),
@@ -2120,6 +2157,9 @@ class Query(graphene.ObjectType):
             gross_crypto_amount=_plain(gross_crypto),
             net_crypto_amount=_plain(net_crypto),
         )
+        _note_ramp_quote(user, normalized_direction, resolved_country_code, 'ok',
+                         amount=decimal_amount, fiat=result.fiat_currency)
+        return result
 
     def resolve_ramp_order_status(self, info, order_id, country_code=None):
         user = getattr(info.context, "user", None)

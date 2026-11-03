@@ -272,6 +272,49 @@ class KoyweFundingPrecisionTests(SimpleTestCase):
             ctx.exception.messages,
             ['Las recargas en COP no están disponibles temporalmente. Inténtalo más tarde.'])
 
+    def test_quote_outcomes_are_noted_per_user(self):
+        # 2026-11-03: six people reached Recargar ahora and nothing said what they saw.
+        from ramps.koywe_client import KoyweError
+        user = SimpleNamespace(id=7, is_authenticated=True)
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        client = mock.Mock(is_configured=True)
+        client.get_ramp_quote.side_effect = KoyweError(
+            'Operation type OnRamp is not supported for currency COP in country COL for ana@mail.com')
+        with mock.patch.object(schema, '_resolve_ramp_country_code', return_value='CO'), \
+             mock.patch.object(schema, 'KoyweClient', return_value=client), \
+             mock.patch.object(schema, '_validate_koywe_on_ramp_quote_limits'), \
+             mock.patch.object(schema, '_get_koywe_auth_email', return_value=None), \
+             mock.patch('users.funnel.emit_once') as emit, \
+             self.assertRaises(ValidationError):
+            schema.Query().resolve_ramp_quote(
+                info, direction='ON_RAMP', amount='200000', country_code='CO',
+                fiat_currency='COP', payment_method_code='PSE')
+        props = emit.call_args.kwargs['properties']
+        self.assertEqual((emit.call_args.args[0], props['outcome'], props['amount'], props['fiat'], props['error_kind']),
+                         ('ramp_quote', 'provider_error', '200000', 'COP', 'rail_disabled'))
+        self.assertNotIn('ana@mail.com', str(props))  # a label, never the provider's text
+        self.assertTrue(emit.call_args.kwargs['dedupe_key'].startswith('ON_RAMP:provider_error:CO:'))
+        self.assertEqual(schema._koywe_error_kind(KoyweError('Ana Perez, cuenta 123')), 'other')
+        # A quote that fails after the provider answered is never noted as ok.
+        client.get_ramp_quote.side_effect = None
+        client.get_ramp_quote.return_value = dict(amount_out='10', amount_in='40000')
+        with mock.patch.object(schema, '_resolve_ramp_country_code', return_value='CO'), \
+             mock.patch.object(schema, 'KoyweClient', return_value=client), \
+             mock.patch.object(schema, '_validate_koywe_on_ramp_quote_limits'), \
+             mock.patch.object(schema, '_get_koywe_auth_email', return_value=None), \
+             override_settings(CUSD_CONVERSION_FEE_ENABLED=True), \
+             mock.patch('cusd_plus.cusd_vault.preview_mint_wei', side_effect=RuntimeError('rpc')), \
+             mock.patch('users.funnel.emit_once') as emit, \
+             self.assertRaises(ValidationError):
+            schema.Query().resolve_ramp_quote(
+                info, direction='ON_RAMP', amount='40000', country_code='CO',
+                payment_method_code='PSE', destination='cusd_plus')
+        emit.assert_not_called()
+        with mock.patch('users.funnel.emit_once') as emit:
+            schema._note_ramp_quote(SimpleNamespace(is_authenticated=False), 'ON_RAMP', 'CO', 'ok')
+            schema._note_ramp_quote(None, 'ON_RAMP', 'CO', 'ok')
+        emit.assert_not_called()  # anonymous quotes are not tied to anyone
+
     def test_unrecognized_koywe_error_passes_through(self):
         from ramps.koywe_client import KoyweError
         self.assertEqual(schema._format_koywe_error(KoyweError('Otro error')), 'Otro error')

@@ -496,12 +496,19 @@ def walk_trail(viewer, key, request_meta):
     country = (country_of(viewer.user) or '').upper()
     state = _state(viewer, request_meta)
     if key == 'top_up':
-        from .engine import _ve_topup
+        from .engine import _identity_status, _ve_topup
 
         if (topup_route(country) != 'local' or on_ramp_paused(country)
                 or on_ramp_rejection_locked(viewer.user)
                 or (country == 'VE' and _ve_topup(viewer, country) != 'live')):
             return None
+        # Recargar needs a verified identity: three unverified people were walked
+        # to a top-up screen they could not use (2026-11-03). Verification first,
+        # with the same rule as the guide's own ladder (_unfunded_key).
+        identity = _identity_status(viewer)
+        can_top_up = identity == 'verified' or (identity == 'other_country' and country == 'VE')
+        if identity is not None and not can_top_up:
+            return STEPS['verify'].chips[0].trail
         step = _for_country(STEPS['top_up'], topup_entry(country, viewer.user, request_meta))
         return step.chips[0].trail
     if key == 'usdt':

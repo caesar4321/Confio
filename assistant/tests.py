@@ -2464,9 +2464,18 @@ class GuideStepTests(TestCase):
                 patch('ramps.koywe.on_ramp_paused', return_value=False), \
                 patch('ramps.koywe.on_ramp_rejection_locked', return_value=False), \
                 patch.object(guide, 'topup_entry', return_value=guide.topup_entry.__globals__['DEFAULT_TOPUP_ENTRY']), \
-                patch.object(guide, '_invest_options', return_value=['crypto']):
+                patch.object(guide, '_invest_options', return_value=['crypto']), \
+                patch('assistant.engine._identity_status', return_value='verified') as identity:
             viewer = self._viewer()
             self.assertEqual(guide.walk_trail(viewer, 'top_up', {})[0].pointer, 'home_receive')
+            # 2026-11-03: unverified people were walked to a top-up screen they could not use.
+            identity.return_value = 'unverified'
+            self.assertEqual(guide.walk_trail(viewer, 'top_up', {}), guide.STEPS['verify'].chips[0].trail)
+            identity.return_value = 'other_country'  # Bolivia needs a Bolivian document
+            self.assertEqual(guide.walk_trail(viewer, 'top_up', {}), guide.STEPS['verify'].chips[0].trail)
+            identity.return_value = None  # unknown: never sent to verify on a guess
+            self.assertEqual(guide.walk_trail(viewer, 'top_up', {})[0].pointer, 'home_receive')
+            identity.return_value = 'verified'
             self.assertEqual(guide.walk_trail(viewer, 'pay_qr', {})[0].pointer, 'tab_pay')
             self.assertIsNone(guide.walk_trail(viewer, 'withdraw', {}))
             self.assertIsNone(guide.walk_trail(viewer, 'stocks', {}))
