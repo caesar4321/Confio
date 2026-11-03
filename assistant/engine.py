@@ -827,7 +827,9 @@ class Toolbelt:
                 'name': 'show_steps',
                 'description': 'Agrega un botón "Muéstrame": al tocarlo, un lápiz señala en la app, paso a paso, los '
                                'botones reales. Úsalo cuando pregunte cómo hacer algo de esta lista o pida que se lo '
-                               'muestres, y dile que puede tocar el botón. No abras además esa pantalla con `navigate`: '
+                               'muestres, y dile que puede tocar el botón. Responde igual la pregunta en una o dos '
+                               'frases (los pasos en palabras): el botón es un extra, no la respuesta. '
+                               'No abras además esa pantalla con `navigate`: '
                                'la idea es que aprenda el camino. Opciones: ' + '; '.join(
                                    f'{k}: {WALKS[k]}' for k in self._walks()),
                 'parameters': {

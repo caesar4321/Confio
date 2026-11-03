@@ -1164,6 +1164,15 @@ class MarketToolTests(TestCase):
             self.assertFalse(market.market_news('ana@mail.com')['encontrado'])
         post.assert_not_called()
 
+    def test_show_steps_still_asks_for_an_answer_in_words(self):
+        # 2026-11-03: "¿Cómo recibo dólares?" got only "Toca Muéstrame".
+        account = Account.objects.create(user=self.user, account_type='personal', account_index=0)
+        viewer = Viewer(user=self.user, account=account, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        with patch('assistant.engine.Toolbelt._walks', return_value=['top_up']):
+            specs = {s['name']: s for s in Toolbelt(viewer, TurnResult(reply=''), analyses_left=0).specs()}
+        self.assertIn('el botón es un extra, no la respuesta', specs['show_steps']['description'])
+
     @patch('cusd_plus.gm_api.all_market', return_value=MARKET)
     def test_market_tools_only_when_news_is_metered(self, _market):
         account = Account.objects.create(user=self.user, account_type='personal', account_index=0)
