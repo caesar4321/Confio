@@ -103,7 +103,7 @@
 
 - Para un límite mayor en cuentas locales se pide un comprobante de domicilio y unas preguntas sobre tus ingresos y el origen de tus fondos.
 - Si tu documento venció, la verificación deja de valer: verifícate de nuevo con un documento vigente.
-- Confío no tiene edad mínima; solo algunos productos de Comprar son para mayores de 18.
+- Verificar la identidad es solo para mayores de 18 años. Sin verificarte puedes guardar, enviar y recibir dinero entre usuarios de Confío; recargar, retirar, ahorrar en Confío Dollar+, invertir y algunos productos de Comprar no están disponibles para menores de 18.
 - El país de tu cuenta se estima según dónde usas la app habitualmente y no se cambia desde la app. En Recargar y Retirar sí eliges el país de cada operación. Qué productos tienes (por ejemplo Confío Dollar+ y acciones) depende de ese país y de desde dónde te conectas, por reglas del emisor: cambiar de país no es una forma de habilitarlos. No lo pases al equipo por eso.
 
 - Fotografía tu documento original (no una foto de pantalla ni un escaneo) y evita reflejos sobre el holograma.

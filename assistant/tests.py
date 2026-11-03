@@ -1933,7 +1933,9 @@ class ConversationReviewFixTests(TestCase):
         self.assertIn('se paga con cUSD o con Confío Dollar+', FAQ)
         self.assertIn('En Bolivia el mínimo para recargar es de 350 Bs', FAQ)
         self.assertIn('Es solo el mínimo de recarga', FAQ)
-        self.assertIn('Confío no tiene edad mínima', FAQ)
+        # 2026-11-03: verification is 18+; "no tiene edad mínima" was the old answer.
+        self.assertIn('Verificar la identidad es solo para mayores de 18 años', FAQ)
+        self.assertNotIn('no tiene edad mínima', FAQ)
 
     def test_hint_echo_on_silence_is_an_empty_note(self):
         from .prompts import TRANSCRIBE_HINTS, prompt_echo
