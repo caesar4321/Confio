@@ -173,6 +173,12 @@ def _preflight(info, direction: str):
     from security.identity_status import is_identity_verified
     if not is_identity_verified(user):
         raise VePagoMovilError('Verifica tu identidad para usar Pago Móvil.', 'verification')
+    # Known minors: no Pago Móvil top-ups or sends (security/minors.py).
+    # No next_step: the app has no screen to send a minor to.
+    from security.minors import minor_refusal
+    minor_error = minor_refusal(user)
+    if minor_error:
+        raise VePagoMovilError(minor_error)
     if not getattr(account, 'bsc_address', None):
         raise VePagoMovilError('Tu cuenta aún no está activada en este dispositivo. '
                                'Actualiza la app e inicia sesión de nuevo.')
@@ -333,6 +339,12 @@ class StartVePagoMovilSendFunding(graphene.Mutation):
                 raise VePagoMovilError('Envío no encontrado.')
             if not ve_pagomovil.enabled(SEND):
                 raise VePagoMovilError(SEND_UNAVAILABLE)
+            # Re-checked here, not only at creation: an order made before the
+            # minors gate (or before a birth date was on file) never funds.
+            from security.minors import minor_refusal
+            minor_error = minor_refusal(user)
+            if minor_error:
+                raise VePagoMovilError(minor_error)
             # Only the personal account whose wallet the order was made for
             # may fund it (the app signs with the ACTIVE account's wallet, and
             # the funding proof requires the transfer to come from it).

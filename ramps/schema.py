@@ -1080,6 +1080,11 @@ class CreateRampOrder(graphene.Mutation):
         employee_denial = _employee_ramp_denial(info)
         if employee_denial:
             return RampOrderType(success=False, error=employee_denial)
+        # Known minors: no fiat top-ups or withdrawals (security/minors.py).
+        from security.minors import minor_refusal
+        minor_error = minor_refusal(user)
+        if minor_error:
+            return RampOrderType(success=False, error=minor_error)
 
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         normalized_direction = (direction or '').strip().upper()

@@ -237,7 +237,7 @@ def residence_country_for(user, *, days: int = 90) -> str | None:
 class GeoDecision:
     allowed: bool
     message: str | None = None
-    #: 'country' | 'ip' | None — which signal refused, for logs and support.
+    #: 'country' | 'ip' | 'age' | None — which signal refused, for logs and support.
     blocked_by: str | None = None
 
     def __bool__(self) -> bool:
@@ -315,13 +315,25 @@ class GeoPolicy:
     ip_fails_open_on_error: bool = True
     #: Escape hatch evaluated before everything (store-review accounts).
     bypass: Callable[[object], bool] | None = None
+    #: Known minors are refused too (security/minors.py). Opt-in per
+    #: policy: an acquisition gate, never an exit. Callers checking an exit
+    #: through the same policy pass include_age=False.
+    minors_blocked: bool = False
+
+    def _minor_refused(self, user, include_age: bool) -> bool:
+        if not (self.minors_blocked and include_age):
+            return False
+        from security.minors import is_known_minor
+        return is_known_minor(user)
 
     # -- the half-check, named so its partiality is visible at the call site
-    def phone_eligible(self, user) -> bool:
+    def phone_eligible(self, user, *, include_age: bool = True) -> bool:
         """Stored country ONLY. Correct where no request exists (Celery, a
         recipient's eligibility); everywhere else prefer `evaluate`."""
         if self.bypass is not None and self.bypass(user):
             return True
+        if self._minor_refused(user, include_age):
+            return False
         country = country_of(user)
         if not country:
             return self.allow_missing_phone
@@ -333,11 +345,15 @@ class GeoPolicy:
     # -- the full set
     def evaluate(self, user, meta: Mapping | None = None, *,
                  client_ip: str | None = None,
-                 ip_country_hint: str | None = None) -> GeoDecision:
+                 ip_country_hint: str | None = None,
+                 include_age: bool = True) -> GeoDecision:
         """Both signals. Pass a request's META, or an explicit ip/hint for
         callers without one (websocket consumers)."""
         if self.bypass is not None and self.bypass(user):
             return GeoDecision(True)
+        if self._minor_refused(user, include_age):
+            from security.minors import MINOR_MESSAGE
+            return GeoDecision(False, MINOR_MESSAGE, 'age')
 
         country = country_of(user)
         if not country:

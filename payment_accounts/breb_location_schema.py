@@ -42,9 +42,10 @@ class ApplyCobreBreb(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, challenge, location_json, integrity_token):
-        from .schema import _active_account, _verified_identity, _public_error
+        from .schema import _active_account, _public_error, _require_adult, _verified_identity
         from .services import provision_payment_account, create_funding_instruction
         try:
+            _require_adult(info)
             owner = _active_account(info, permission='manage_bank_accounts', owner_only=True)
             identity = _verified_identity(owner)
             permit = breb_location.verify(owner, info.context.META, challenge, location_json, integrity_token)

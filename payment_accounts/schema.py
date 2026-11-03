@@ -59,6 +59,24 @@ def _public_error(exc):
     return 'Unable to complete the payment account request'
 
 
+def _require_adult(info):
+    """Known minors: no Cobre or Infinia local accounts, payouts or
+    payments (security/minors.py). Called where money ENTERS a provider;
+    money coming back to the wallet is never refused."""
+    from security.minors import minor_refusal
+    minor_error = minor_refusal(getattr(getattr(info, 'context', None), 'user', None))
+    if minor_error:
+        raise PaymentAccountError(minor_error)
+
+
+def _is_own_wallet(account, kind, details) -> bool:
+    """A crypto payout to the account's OWN registered wallet: money coming
+    home, which the minors gate never refuses. Any other address is not."""
+    own = str(getattr(account, 'bsc_address', '') or '').strip().lower()
+    address = str((details or {}).get('address') or '').strip().lower()
+    return kind == 'crypto_wallet' and bool(own) and address == own
+
+
 def _active_account(info, *, permission=None, owner_only=False):
     context = get_jwt_business_context_with_validation(info, required_permission=permission)
     if not context:
@@ -419,6 +437,8 @@ class QuotePaymentBridge(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, funding_instruction_id, amount, request_id, direction='to_provider', destination_id=None):
         try:
+            if direction != 'to_wallet':  # bringing money home stays open
+                _require_adult(info)
             account = _active_account(info, permission='send_funds', owner_only=True)
             quote = quote_provider_funding(
                 confio_account=account, funding_instruction_id=funding_instruction_id,
@@ -465,6 +485,15 @@ class SubmitPaymentBridge(graphene.Mutation):
         from .bridge_execution import submit_bridge
         try:
             owner = _active_account(info, permission='send_funds', owner_only=True)
+            # A wallet-funded bridge INTO a provider not yet broadcast is a new
+            # acquisition: re-check the minors gate (a quote made before it
+            # must not fund). Bridges home and already-sent ones are untouched.
+            pending = PaymentBridgeTransfer.objects.select_related('quote').filter(
+                internal_id=transfer_id, quote__confio_account=owner,
+                funding_mode='wallet', status='prepared', source_tx_hash='',
+                quote__source_token_id__startswith='BSC:').first()
+            if pending is not None:
+                _require_adult(info)
             return cls(success=True, transfer=submit_bridge(owner, transfer_id, signature,
                        nonce=nonce, authorization=authorization), errors=[])
         except Exception as exc:
@@ -525,6 +554,7 @@ class ProvisionPaymentAccount(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, provider, country, asset, share_compliance_data=False):
         try:
+            _require_adult(info)
             provider = provider.strip().lower()
             if provider not in {'cobre', 'infinia'}:
                 raise PaymentAccountError('Unsupported provider')
@@ -575,6 +605,7 @@ class CreateReceivingInstruction(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, financial_account_id, kind):
         try:
+            _require_adult(info)
             account = _active_account(info, permission='manage_bank_accounts', owner_only=True)
             financial_account = FinancialAccount.objects.select_related(
                 'provider_profile'
@@ -615,6 +646,8 @@ class CreatePayoutDestination(graphene.Mutation):
             if provider not in {'cobre', 'infinia'}:
                 raise PaymentAccountError('Unsupported provider')
             kwargs['details'] = _destination_details(kwargs.get('details'))
+            if not _is_own_wallet(account, kwargs.get('kind'), kwargs['details']):
+                _require_adult(info)
             destination = create_payout_destination(
                 confio_account=account, provider=provider, **kwargs
             )
@@ -661,6 +694,9 @@ class CreatePaymentPayout(graphene.Mutation):
             ).first()
             if not source or not destination:
                 raise PaymentAccountError('Source account or destination not found')
+            if not _is_own_wallet(account, getattr(destination, 'kind', None),
+                                  getattr(destination, 'details', None)):
+                _require_adult(info)
             _require_breb_location(info, account, source)
             operation = create_and_submit_payout(
                 confio_account=account,
@@ -690,6 +726,7 @@ class CreatePaymentTransfer(graphene.Mutation):
         cls, root, info, source_account_id, destination_account_id, amount, request_id
     ):
         try:
+            _require_adult(info)
             account = _active_account(info, permission='send_funds', owner_only=True)
             owned = FinancialAccount.objects.select_related('provider_profile').filter(
                 provider_profile__confio_account=account,

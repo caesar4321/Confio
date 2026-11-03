@@ -52,13 +52,10 @@ def local_today(country_code: str | None):
 
 def buyer_age(user, today):
     """Whole years since the birth date on the buyer's primary verified
-    document, or None when there is none."""
-    from security.identity_status import current_document
-    doc = current_document(user)
-    born = getattr(doc, 'verified_date_of_birth', None)
-    if born is None:
-        return None
-    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+    document, or None when there is none. Shared with the minors gate
+    (security/minors.py), so Comprar and every other age rule agree."""
+    from security.minors import verified_age
+    return verified_age(user, today)
 
 
 def is_of_age(user, country_code: str | None = None) -> bool:

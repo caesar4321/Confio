@@ -88,10 +88,14 @@ def _stock_surfaces_enabled(user, request_meta) -> bool:
 
 
 def _stock_issuer_eligible(user, request_meta) -> bool:
-    """Ondo's acquisition/redemption policy, independent of UI switches."""
+    """Ondo's acquisition/redemption policy, independent of UI switches.
+
+    Without the minors layer: a known minor who already holds stocks can
+    still see and SELL them. Buys add it back through
+    check_stock_buy_eligibility (security/minors.py)."""
     from .eligibility import ONDO_POLICY
 
-    return ONDO_POLICY.evaluate(user, request_meta or {}).allowed
+    return ONDO_POLICY.evaluate(user, request_meta or {}, include_age=False).allowed
 
 
 def _stock_buy_enabled(user, request_meta) -> bool:
@@ -1087,8 +1091,11 @@ class Query(graphene.ObjectType):
         # mint gate will give.
         request_meta = getattr(info.context, 'META', {})
         eligible = ONDO_POLICY.evaluate(user, request_meta).allowed
+        # Stocks discovery ignores the minors layer (a minor may hold and sell
+        # positions); stocks_buy_enabled below re-applies it.
         stocks_enabled = (
-            eligible and getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False)
+            _stock_issuer_eligible(user, request_meta)
+            and getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False)
         )
         # Real position: shares × pPlus, read live from the deployed vault
         # for the JWT account's bsc_address (0 until PP whitelisting + a
@@ -1406,7 +1413,9 @@ class StartCusdPlusConversion(graphene.Mutation):
         if direction == 'to_savings':
             from .eligibility import is_ondo_eligible, INELIGIBLE_MESSAGE
             if not is_ondo_eligible(user):
-                return StartCusdPlusConversion(success=False, errors=[INELIGIBLE_MESSAGE])
+                from security.minors import minor_refusal
+                return StartCusdPlusConversion(
+                    success=False, errors=[minor_refusal(user) or INELIGIBLE_MESSAGE])
         if amount_usd <= 0 or quoted_receive_usd <= 0:
             return StartCusdPlusConversion(success=False, errors=['bad amount'])
         scope = _actor_filter(info)

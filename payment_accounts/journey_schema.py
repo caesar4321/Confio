@@ -171,8 +171,10 @@ class CreateInfiniaJourney(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, local_account_id, crypto_account_id, bridge_id=None, credit_id=None, destination_id=None, **kwargs):
-        from .schema import _active_account, _public_error
+        from .schema import _active_account, _public_error, _require_adult
         try:
+            if kwargs.get('direction') != 'to_wallet':  # bringing money home stays open
+                _require_adult(info)
             owner = _active_account(info, permission='send_funds', owner_only=True)
             accounts = FinancialAccount.objects.filter(provider_profile__confio_account=owner).select_related('provider_profile')
             local = accounts.get(internal_id=local_account_id)

@@ -360,8 +360,9 @@ class ActivateLocalMoney(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, method_id):
-        from .schema import _public_error
+        from .schema import _public_error, _require_adult
         try:
+            _require_adult(info)
             owner = _owner(info, 'manage_bank_accounts', owner_only=True)
             # A passport-only person has no primary document; the rail picks
             # the verified document this country accepts.
@@ -511,6 +512,8 @@ class PrepareLocalActivation(graphene.Mutation):
         from send.schema import PrepareBscSend, BscSendCallType
         from users.jwt_context import get_jwt_business_context_with_validation
         try:
+            from .schema import _require_adult
+            _require_adult(info)
             owner = _owner(info, 'manage_bank_accounts', owner_only=True)
             from . import breb_location
             breb_location.require_for_country(owner, local_money.get_method(method_id).country, info.context.META)

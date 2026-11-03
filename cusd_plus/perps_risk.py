@@ -56,13 +56,15 @@ def platform_allowed(meta) -> bool:
     return bool(getattr(settings, 'PERPS_IOS_ENABLED', False)) or not _is_ios(meta)
 
 
-def country_allowed(user, meta) -> bool:
+def country_allowed(user, meta, *, include_age: bool = True) -> bool:
     """PERPS_POLICY, failing CLOSED: an IP lookup that raises refuses the
-    open (closes are never country-gated, so nobody is stranded)."""
+    open (closes are never country-gated, so nobody is stranded).
+    include_age=False leaves known minors in: discovery stays visible so
+    a minor who already holds a position can see and close it."""
     from .eligibility import PERPS_POLICY
 
     try:
-        return bool(PERPS_POLICY.evaluate(user, meta or {}).allowed)
+        return bool(PERPS_POLICY.evaluate(user, meta or {}, include_age=include_age).allowed)
     except Exception:  # noqa: BLE001 — money policy fails closed
         logger.warning('perps country check failed for user %s', getattr(user, 'id', None), exc_info=True)
         return False
@@ -73,7 +75,7 @@ def surfaces_enabled(user, meta) -> bool:
     return bool(
         getattr(settings, 'PERPS_ENABLED', False)
         and platform_allowed(meta)
-        and country_allowed(user, meta)
+        and country_allowed(user, meta, include_age=False)
     )
 
 
@@ -97,7 +99,15 @@ def open_enabled(user, meta) -> bool:
         and surfaces_enabled(user, meta)
         and getattr(settings, 'PERPS_OPEN_ENABLED', True)
         and _canary_allows(user)
+        and not _verified_minor(user)
     )
+
+
+def _verified_minor(user) -> bool:
+    """Opens and margin adds are adults-only (security/minors.py); closes
+    never read this."""
+    from security.minors import is_known_minor
+    return is_known_minor(user)
 
 
 def open_gate(user, meta) -> str | None:

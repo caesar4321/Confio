@@ -109,6 +109,8 @@ _COPY = MappingProxyType({'US': US_BLOCK_MSG, 'KR': KR_BLOCK_MSG, 'GB': GB_BLOCK
 
 PRESALE_POLICY = GeoPolicy(
     name='presale',
+    # Known minors cannot buy $CONFIO (security/minors.py).
+    minors_blocked=True,
     phone_blocked=lambda: _restricted(),
     # IP blocks: the IP country may be any on the list, so no country named.
     message=IP_BLOCK_MSG,
@@ -154,6 +156,8 @@ _LEGACY_BLOCKED = frozenset({'US', 'KR', 'GB'})
 
 LEGACY_PRESALE_POLICY = GeoPolicy(
     name='presale_legacy',
+    # Known minors cannot buy $CONFIO (security/minors.py).
+    minors_blocked=True,
     phone_blocked=lambda: _LEGACY_BLOCKED | _restricted(),
     message=IP_BLOCK_MSG,
     phone_messages=_COPY,

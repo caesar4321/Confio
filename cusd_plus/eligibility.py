@@ -58,6 +58,9 @@ CUSD_BSC_LEGACY_UPDATE_MESSAGE = (
 # value means we cannot attest a jurisdiction.
 ONDO_POLICY = GeoPolicy(
     name='ondo',
+    # Known minors: acquisitions refused (security/minors.py); exits
+    # that read this policy pass include_age=False.
+    minors_blocked=True,
     bypass=store_review_exempt,
     phone_blocked=ONDO_BLOCKED,
     message=INELIGIBLE_MESSAGE,
@@ -168,6 +171,9 @@ def _perps_blocked_countries():
 
 PERPS_POLICY = GeoPolicy(
     name='perps',
+    # Known minors: acquisitions refused (security/minors.py); exits
+    # that read this policy pass include_age=False.
+    minors_blocked=True,
     bypass=store_review_exempt,
     phone_blocked=_perps_blocked_countries,
     message=PERPS_INELIGIBLE_MESSAGE,

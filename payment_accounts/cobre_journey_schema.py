@@ -61,8 +61,10 @@ class CreateCobreJourney(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, local_account_id, crypto_account_id, copco_account_id, bridge_id=None, credit_id=None, destination_id=None, **kwargs):
-        from .schema import _active_account, _public_error
+        from .schema import _active_account, _public_error, _require_adult
         try:
+            if kwargs.get('direction') != 'to_wallet':  # bringing money home stays open
+                _require_adult(info)
             owner = _active_account(info, permission='send_funds', owner_only=True)
             from .breb_location import require_location_pass
             require_location_pass(owner, info.context.META)  # Cobre is Colombia's Bre-B rail

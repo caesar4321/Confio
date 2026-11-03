@@ -689,6 +689,11 @@ def guardarian_transaction_proxy(request):
                 user_id, payload.get('business_id'),
             )
             return JsonResponse({'error': RAMP_OWNER_ONLY_MESSAGE}, status=403)
+    # Known minors: no fiat top-ups or withdrawals (security/minors.py).
+    from security.minors import MINOR_CODE, minor_refusal
+    minor_error = minor_refusal(user)
+    if minor_error:
+        return JsonResponse({'error': minor_error, 'code': MINOR_CODE}, status=403)
 
     try:
         body = json.loads(request.body or '{}')

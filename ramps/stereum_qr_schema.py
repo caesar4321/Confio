@@ -55,7 +55,9 @@ class PayStereumQr(graphene.Mutation):
     @staticmethod
     def mutate(root, info, request_id, decode_request_id, amount):
         try:
-            return payment_result(stereum_qr.pay(stereum_qr.require_operator(info), request_id, decode_request_id, amount))
+            from .stereum_schema import adult_user
+            user = adult_user(stereum_qr.require_operator(info))
+            return payment_result(stereum_qr.pay(user, request_id, decode_request_id, amount))
         except StereumError as exc:
             raise GraphQLError(str(exc)) from None
 

@@ -163,6 +163,12 @@ def _preflight(info, direction: str):
     from security.identity_status import is_identity_verified
     if not is_identity_verified(user):
         raise BoliviaQrError('Verifica tu identidad para usar QR Bolivia.', 'verification')
+    # Known minors: no Bolivia QR receive or send (security/minors.py).
+    # No next_step: the app has no screen to send a minor to.
+    from security.minors import minor_refusal
+    minor_error = minor_refusal(user)
+    if minor_error:
+        raise BoliviaQrError(minor_error)
     if not getattr(account, 'bsc_address', None):
         raise BoliviaQrError('Tu cuenta aún no está activada en este dispositivo. '
                              'Actualiza la app e inicia sesión de nuevo.')
@@ -283,6 +289,11 @@ class StartBoliviaQrSendFunding(graphene.Mutation):
                 raise BoliviaQrError(NOT_FOUND)
             if not (bolivia_qr.enabled(SEND) or bolivia_qr.is_tester(user)):
                 raise BoliviaQrError(bolivia_qr.UNAVAILABLE[SEND])
+            # Re-checked at funding: an order made before the minors gate never funds.
+            from security.minors import minor_refusal
+            minor_error = minor_refusal(user)
+            if minor_error:
+                raise BoliviaQrError(minor_error)
             account = _get_ramp_account_for_user(info, user)
             wallet = (getattr(account, 'bsc_address', '') or '').strip().lower()
             if (not account or getattr(account, 'account_type', None) != 'personal'

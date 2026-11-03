@@ -18,6 +18,15 @@ def personal_user(info):
     return user
 
 
+def adult_user(user):
+    """Known minors: no Bolivia QR (security/minors.py)."""
+    from security.minors import minor_refusal
+    minor_error = minor_refusal(user)
+    if minor_error:
+        raise StereumError(minor_error)
+    return user
+
+
 class StereumCustomerResult(graphene.ObjectType):
     status = graphene.String(required=True)
     error = graphene.String()
@@ -44,7 +53,7 @@ class OnboardStereumCustomer(graphene.Mutation):
     @staticmethod
     def mutate(root, info, details, consent):
         try:
-            record = onboard(personal_user(info), dict(details), consent=consent)
+            record = onboard(adult_user(personal_user(info)), dict(details), consent=consent)
             return StereumCustomerResult(status=record.status, error=record.error)
         except StereumError as exc:
             raise GraphQLError(str(exc)) from None
@@ -69,7 +78,7 @@ class CreateStereumCustomerQuote(graphene.Mutation):
     @staticmethod
     def mutate(root, info, request_id, side, amount, currency='USDT'):
         try:
-            record = execute(personal_user(info), 'customer_quote',
+            record = execute(adult_user(personal_user(info)), 'customer_quote',
                 {'side': side, 'amount': amount, 'currency': currency}, request_id)
             return StereumQuoteResult(request_id=record.request_id, status=record.status,
                 error=record.error, quote=record.response_data)
