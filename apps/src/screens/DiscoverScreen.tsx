@@ -49,9 +49,14 @@ type DiscoverScreenProps = {
    *  member feed (news and Julian's posts live in the assistant bubble); a
    *  single section hides the chips. */
   sections?: DiscoverSectionKey[];
+  /** Bumped by a host that shows this pane without a navigation focus (the
+   *  Comunidad segment inside Invertir): re-read the top like a focus does. */
+  refreshSignal?: number;
+  /** The posts this pane currently shows, each time that list changes. */
+  onShown?: (posts: { id: string; publishedAt?: string | null }[]) => void;
 };
 
-export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = {}) => {
+export const DiscoverScreen = ({ sections: sectionKeys, refreshSignal, onShown }: DiscoverScreenProps = {}) => {
   const offered = useMemo(
     () => (sectionKeys?.length
       ? DISCOVER_SECTIONS.filter((s) => sectionKeys.includes(s.key))
@@ -96,6 +101,12 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
 
   const items = useMemo<DiscoverItem[]>(() => {
     return (data?.discoverFeed?.items || []).map(toDiscoverItem);
+  }, [data]);
+  const onShownRef = useRef(onShown);
+  onShownRef.current = onShown;
+  useEffect(() => {
+    const raw = data?.discoverFeed?.items;
+    if (raw?.length) onShownRef.current?.(raw.map((i: { id: string | number; publishedAt?: string | null }) => ({ id: String(i.id), publishedAt: i.publishedAt })));
   }, [data]);
 
   // Comment counts for the cards, asked on their own so a server without
@@ -155,6 +166,22 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
   paginating.current = isFetchingMore;
   const focusedOnce = useRef(false);
   const seenBlockVersion = useRef(0);
+  const refreshTop = useCallback(() => {
+    // After blocking someone, re-read from the top even if scrolled deep:
+    // their posts must disappear, and the new generation drops any page
+    // still in flight for the old list.
+    const currentBlockVersion = memberBlockVersion();
+    const blockedSince = currentBlockVersion !== seenBlockVersion.current;
+    if (!blockedSince && (loadedCount.current > PAGE_SIZE || paginating.current)) return;
+    focusRefreshing.current = true;
+    feedGeneration.current += 1;
+    refetch({ offset: 0, limit: PAGE_SIZE })
+      // Marked seen only once the re-read lands: offline, the next focus
+      // tries again instead of leaving the blocked member's posts up.
+      .then(() => { seenBlockVersion.current = currentBlockVersion; })
+      .catch(() => {})
+      .finally(() => { focusRefreshing.current = false; });
+  }, [refetch]);
   useFocusEffect(
     useCallback(() => {
       if (!focusedOnce.current) {
@@ -162,22 +189,16 @@ export const DiscoverScreen = ({ sections: sectionKeys }: DiscoverScreenProps = 
         seenBlockVersion.current = memberBlockVersion();
         return;
       }
-      // After blocking someone, re-read from the top even if scrolled deep:
-      // their posts must disappear, and the new generation drops any page
-      // still in flight for the old list.
-      const currentBlockVersion = memberBlockVersion();
-      const blockedSince = currentBlockVersion !== seenBlockVersion.current;
-      if (!blockedSince && (loadedCount.current > PAGE_SIZE || paginating.current)) return;
-      focusRefreshing.current = true;
-      feedGeneration.current += 1;
-      refetch({ offset: 0, limit: PAGE_SIZE })
-        // Marked seen only once the re-read lands: offline, the next focus
-        // tries again instead of leaving the blocked member's posts up.
-        .then(() => { seenBlockVersion.current = currentBlockVersion; })
-        .catch(() => {})
-        .finally(() => { focusRefreshing.current = false; });
-    }, [refetch]),
+      refreshTop();
+    }, [refreshTop]),
   );
+  // Only a change after mount: mount already fetched.
+  const lastSignal = useRef(refreshSignal);
+  useEffect(() => {
+    if (refreshSignal === lastSignal.current) return;
+    lastSignal.current = refreshSignal;
+    refreshTop();
+  }, [refreshSignal, refreshTop]);
 
   const hasMore = Boolean(data?.discoverFeed?.hasMore);
   const isRefreshing = networkStatus === NetworkStatus.refetch;

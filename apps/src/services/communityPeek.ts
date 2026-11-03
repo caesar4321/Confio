@@ -11,10 +11,14 @@
 import { gql } from '@apollo/client';
 import * as Keychain from 'react-native-keychain';
 import { useSyncExternalStore } from 'react';
+import { AppState } from 'react-native';
 
 const SEEN_SERVICE = 'com.confio.community.seen';
 const SEEN_KEY = 'last_seen_published_at';
 const PEEK_SIZE = 10;
+// How often to look again while the app is open: the badge must catch posts
+// made after launch, not only at launch and on the Invertir tab.
+const POLL_MS = 5 * 60 * 1000;
 
 // Its own query (not the shared feed document): an older server that
 // rejects a field fails only this, never the feed.
@@ -50,7 +54,7 @@ type Seen = { at: number; id: number };
 
 let state: State = { items: [], lastSeenAt: null, lastSeenId: 0, loaded: false };
 
-const publishedMs = (item: PeekItem): number => {
+const publishedMs = (item: { publishedAt?: string | null }): number => {
   const t = item.publishedAt ? Date.parse(item.publishedAt) : NaN;
   return Number.isFinite(t) ? t : 0;
 };
@@ -93,7 +97,9 @@ export const refreshCommunityPeek = (): Promise<void> => {
     try {
       const { apolloClient } = await import('../apollo/client');
       const [{ data }, stored] = await Promise.all([
-        apolloClient.query({ query: GET_COMMUNITY_PEEK, variables: { limit: PEEK_SIZE }, fetchPolicy: 'network-only' }),
+        // no-cache: the Comunidad feed reads the same discoverFeed field;
+        // writing this page there would cut a list the user scrolled down.
+        apolloClient.query({ query: GET_COMMUNITY_PEEK, variables: { limit: PEEK_SIZE }, fetchPolicy: 'no-cache' }),
         readSeen(),
       ]);
       // Merge with what this session already marked: a visit that happened
@@ -111,10 +117,43 @@ export const refreshCommunityPeek = (): Promise<void> => {
   return inFlight;
 };
 
-/** The user opened Comunidad: everything currently known is seen. */
-export const markCommunitySeen = async (): Promise<void> => {
-  const newest = state.items.reduce((max, i) => Math.max(max, publishedMs(i)), state.lastSeenAt || 0);
-  const newestId = state.items.reduce((max, i) => Math.max(max, Number(i.id) || 0), state.lastSeenId);
+/** Keep the badges current for as long as the tabs are mounted: now, every
+ *  time the app comes back to the foreground, and every POLL_MS while it is
+ *  in front (an app left open for days never re-mounts). Returns the stop. */
+export const watchCommunityPeek = (): (() => void) => {
+  void refreshCommunityPeek();
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const start = () => {
+    if (!timer) timer = setInterval(() => { void refreshCommunityPeek(); }, POLL_MS);
+  };
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
+  if (AppState.currentState === 'active') start();
+  const sub = AppState.addEventListener('change', (next) => {
+    if (next === 'active') {
+      void refreshCommunityPeek();
+      start();
+    } else {
+      stop();
+    }
+  });
+  return () => {
+    stop();
+    sub.remove();
+  };
+};
+
+export type ShownPost = { id: string; publishedAt?: string | null };
+
+/** The user is looking at these posts in Comunidad: everything up to the
+ *  newest of them is seen. Only what the feed actually shows: a post the
+ *  peek found but the feed hasn't loaded keeps its badge. */
+export const markCommunitySeen = async (shown: ShownPost[]): Promise<void> => {
+  const newest = shown.reduce((max, i) => Math.max(max, publishedMs(i)), state.lastSeenAt || 0);
+  const newestId = shown.reduce((max, i) => Math.max(max, Number(i.id) || 0), state.lastSeenId);
+  if (newest === state.lastSeenAt && newestId === state.lastSeenId) return;
   emit({ lastSeenAt: newest, lastSeenId: newestId });
   try {
     await Keychain.setInternetCredentials(SEEN_SERVICE, SEEN_KEY, JSON.stringify({ at: newest, id: newestId }));

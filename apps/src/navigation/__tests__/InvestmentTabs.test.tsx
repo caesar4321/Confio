@@ -18,6 +18,7 @@ jest.mock('../../services/communityPeek', () => ({
   useCommunityPeek: () => ({ items: [], lastSeenAt: null, lastSeenId: 0, loaded: false, unread: 0, neverOpened: false }),
   peekBadge: () => null,
   refreshCommunityPeek: jest.fn(),
+  watchCommunityPeek: () => () => {},
 }));
 jest.mock('../../contexts/HeaderContext', () => ({ useHeader: () => ({ profileMenu: { openProfileMenu: jest.fn() } }) }));
 jest.mock('../../contexts/AccountContext', () => ({ useAccount: () => ({ activeAccount: mockAccount }) }));

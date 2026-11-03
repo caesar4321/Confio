@@ -6,7 +6,7 @@ import { colors } from '../config/theme';
 import { InvestScreen } from './InvestScreen';
 import { DiscoverScreen } from './DiscoverScreen';
 import { CommunityPreviewCard } from '../components/CommunityPreviewCard';
-import { markCommunitySeen, refreshCommunityPeek, useCommunityPeek } from '../services/communityPeek';
+import { markCommunitySeen, refreshCommunityPeek, type ShownPost, useCommunityPeek } from '../services/communityPeek';
 
 export type InvestSegment = 'invest' | 'community';
 
@@ -35,16 +35,26 @@ export const InvestTabScreen = ({ route }: { route?: { params?: { segment?: Inve
   const requestedAt = route?.params?.at;
   const peek = useCommunityPeek();
   const isFocused = useIsFocused();
+  // Switching segments is no navigation focus: tell the Comunidad pane to
+  // re-read its top, so the posts the badge counted are there to see.
+  const [communityRefresh, setCommunityRefresh] = useState(0);
+  React.useEffect(() => {
+    if (segment === 'community') setCommunityRefresh((n) => n + 1);
+  }, [segment]);
   // A deep link (or the assistant) can ask for a segment while mounted.
   React.useEffect(() => {
     if (requested) setSegment(requested);
   }, [requested, requestedAt]);
   useFocusEffect(useCallback(() => { void refreshCommunityPeek(); }, []));
   // Looking at Comunidad is what clears the badges — only while it is
-  // actually on screen (this tab focused AND the segment selected).
+  // actually on screen (this tab focused AND the segment selected), and only
+  // for the posts the feed shows: one the peek found but the feed hasn't
+  // loaded (scrolled deep, a failed re-read) keeps its badge.
+  const [shown, setShown] = useState<ShownPost[]>([]);
+  const visible = isFocused && segment === 'community';
   React.useEffect(() => {
-    if (isFocused && segment === 'community' && peek.loaded) void markCommunitySeen();
-  }, [isFocused, segment, peek.loaded, peek.items]);
+    if (visible && shown.length) void markCommunitySeen(shown);
+  }, [visible, shown]);
   const pill = peek.unread > 0 ? (peek.unread >= 10 ? '9+' : String(peek.unread))
     : peek.neverOpened ? 'Nuevo' : null;
 
@@ -84,7 +94,7 @@ export const InvestTabScreen = ({ route }: { route?: { params?: { segment?: Inve
         />
       </View>
       <View style={[styles.pane, segment !== 'community' && styles.hidden]}>
-        <DiscoverScreen sections={['community']} />
+        <DiscoverScreen sections={['community']} refreshSignal={communityRefresh} onShown={setShown} />
       </View>
 
     </View>

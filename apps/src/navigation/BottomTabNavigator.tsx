@@ -18,7 +18,7 @@ import { QrPayIcon } from '../components/QrPayIcon';
 import { useHeader } from '../contexts/HeaderContext';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
-import { peekBadge, refreshCommunityPeek, useCommunityPeek } from '../services/communityPeek';
+import { peekBadge, useCommunityPeek, watchCommunityPeek } from '../services/communityPeek';
 
 // Single navigator instance
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
@@ -32,7 +32,7 @@ export const BottomTabNavigator = () => {
   // New Comunidad posts badge the Invertir tab (Comunidad lives inside it).
   const communityPeek = useCommunityPeek();
   const investBadge = peekBadge(communityPeek);
-  React.useEffect(() => { void refreshCommunityPeek(); }, []);
+  React.useEffect(() => watchCommunityPeek(), []);
   // The message box lives in the floating Confio Assistant bubble (every screen);
   // the Home header no longer has an inbox button.
 
