@@ -14,6 +14,7 @@ import { colors } from '../../config/theme';
 import { GET_COMMUNITY_MEMBER_PORTFOLIO } from '../../apollo/queries';
 import { useAuth } from '../../contexts/AuthContext';
 import { useShareCardDelivery, type ShareTarget } from '../../hooks/useShareCardDelivery';
+import { useLogoGate, useStockLogoUrl } from '../../hooks/useShareLogo';
 import { holdingCardContent, type ActivityCardContent } from '../../utils/activityShareCard';
 import { InvestmentCard } from './ActivityAppShare';
 import { ShareAppButtons } from './ShareAppButtons';
@@ -47,6 +48,10 @@ export function HoldingShareSheet({ visible, onClose, kind, ticker, name, catego
   const [savedCard, setSavedCard] = useState<string | null>(null);
   const shot = useRef<ViewShot>(null);
   const { deliver } = useShareCardDelivery('holding');
+  const stockLogo = useStockLogoUrl(kind === 'stock' ? ticker : null);
+  const logo = useLogoGate();
+  const [capLogo, setCapLogo] = useState<string | undefined>(undefined);
+  const shownLogo = busy ? capLogo : stockLogo;
   const run = useRef(0);
   useEffect(() => {
     if (visible) return undefined;
@@ -71,7 +76,9 @@ export function HoldingShareSheet({ visible, onClose, kind, ticker, name, catego
     const alive = () => run.current === ticket;
     const snapshot = content;
     setBusy(target);
+    setCapLogo(stockLogo);
     try {
+      await logo.wait(stockLogo);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
       const uri = alive() ? await shot.current?.capture?.() : undefined;
       if (!alive()) return;
@@ -102,7 +109,7 @@ export function HoldingShareSheet({ visible, onClose, kind, ticker, name, catego
           <View style={sheet.loading}><ActivityIndicator color={colors.primaryDark} /></View>
         ) : content ? (
           <ViewShot ref={shot} options={{ format: 'png', quality: 1 }}>
-            <InvestmentCard content={content} category={category} />
+            <InvestmentCard content={content} category={category} logoUrl={shownLogo} logoGate={logo} />
           </ViewShot>
         ) : null}
         <View style={sheet.toggle}>

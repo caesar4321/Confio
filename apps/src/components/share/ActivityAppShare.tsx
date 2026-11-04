@@ -15,15 +15,24 @@ import { ShareAppButtons, type ShareApp } from './ShareAppButtons';
 import { activityCardContent, type ActivityCardContent } from '../../utils/activityShareCard';
 import { tickerColor } from '../../utils/perpsPresentation';
 import { useShareCardDelivery } from '../../hooks/useShareCardDelivery';
+import { useLogoGate, useStockLogoUrl } from '../../hooks/useShareLogo';
 
 const CARD_WIDTH = 340;
 
-export function InvestmentCard({ content, category }: { content: ActivityCardContent; category?: string | null }) {
+export function InvestmentCard({ content, category, logoUrl, logoGate }: {
+  content: ActivityCardContent;
+  category?: string | null;
+  /** Stock (and stock-perp) logo from our mirror; the capture waits for it. */
+  logoUrl?: string;
+  logoGate?: { onPending: (url: string) => void; onSettled: (url: string) => void };
+}) {
   const mark = content.kind === 'perps'
-    ? <PerpMarketMark ticker={content.ticker} size={44} />
+    ? <PerpMarketMark ticker={content.ticker} logoUrl={logoUrl} onPending={logoGate?.onPending}
+      onSettled={logoGate?.onSettled} size={44} />
     : content.kind === 'crypto'
       ? <CryptoAssetMark ticker={content.ticker} category={category ?? null} size={44} />
-      : <TickerLogo ticker={content.ticker} color={tickerColor(content.ticker)} size={44} />;
+      : <TickerLogo ticker={content.ticker} color={tickerColor(content.ticker)} logoUrl={logoUrl}
+        onPending={logoGate?.onPending} onSettled={logoGate?.onSettled} size={44} />;
   return (
     <VenueShareCard
       testID="investment-share-card"
@@ -63,6 +72,11 @@ export function ActivityAppShare({ activity, reference, showAmount, disabled }: 
   const shot = useRef<ViewShot>(null);
   const [busy, setBusy] = useState<ShareApp | null>(null);
   const { deliver } = useShareCardDelivery('activity');
+  const stockLogo = useStockLogoUrl(content && content.kind !== 'crypto' ? content.ticker : null);
+  const logo = useLogoGate();
+  // The url this capture waits on is the one the card renders.
+  const [capLogo, setCapLogo] = useState<string | undefined>(undefined);
+  const shownLogo = busy ? capLogo : stockLogo;
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
   if (!content) return null;
@@ -70,7 +84,9 @@ export function ActivityAppShare({ activity, reference, showAmount, disabled }: 
   const go = async (app: ShareApp) => {
     if (busy) return;
     setBusy(app);
+    setCapLogo(stockLogo);
     try {
+      await logo.wait(stockLogo);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
       const uri = await shot.current?.capture?.();
       if (!uri) throw new Error('capture');
@@ -90,7 +106,8 @@ export function ActivityAppShare({ activity, reference, showAmount, disabled }: 
       <ShareAppButtons onPress={(app) => { void go(app); }} busy={busy} disabled={disabled}
         testIDPrefix="activity-app-share" />
       <OffscreenCard shot={shot}>
-        <InvestmentCard content={content} category={cryptoCategoryOf(activity)} />
+        <InvestmentCard content={content} category={cryptoCategoryOf(activity)} logoUrl={shownLogo}
+          logoGate={logo} />
       </OffscreenCard>
     </View>
   );

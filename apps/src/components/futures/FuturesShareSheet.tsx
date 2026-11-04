@@ -14,16 +14,23 @@ import { PerpMarketMark } from './PerpMarketMark';
 import { VenueShareCard } from '../share/VenueShareCard';
 import { ShareAppButtons } from '../share/ShareAppButtons';
 import { useShareCardDelivery, type ShareTarget } from '../../hooks/useShareCardDelivery';
+import { useLogoGate, useStockLogoUrl } from '../../hooks/useShareLogo';
 import type { PerpPosition } from '../../services/perps';
 import { futuresShareContent, FuturesShareContent, FuturesShareKind } from '../../utils/futuresShare';
 
-export function FuturesShareCard({ content }: { content: FuturesShareContent }) {
+export function FuturesShareCard({ content, logoUrl, logoGate }: {
+  content: FuturesShareContent;
+  /** A stock perp's logo from our mirror (none for crypto perps: the ticker disc). */
+  logoUrl?: string;
+  logoGate?: { onPending: (url: string) => void; onSettled: (url: string) => void };
+}) {
   return (
     <VenueShareCard
       testID="futures-share-card"
       product="Futuros"
       venue="hyperliquid"
-      mark={<PerpMarketMark ticker={content.ticker} size={44} />}
+      mark={<PerpMarketMark ticker={content.ticker} logoUrl={logoUrl} onPending={logoGate?.onPending}
+        onSettled={logoGate?.onSettled} size={44} />}
       ticker={content.ticker}
       name={content.name}
       tag={{ icon: content.side === 'long' ? 'trending-up' : 'trending-down', text: content.sideLine }}
@@ -47,6 +54,10 @@ export function FuturesShareSheet({ visible, onClose, position, kind, liveMid = 
 }) {
   const shot = useRef<ViewShot>(null);
   const { deliver } = useShareCardDelivery('futures');
+  const stockLogo = useStockLogoUrl(position.ticker);
+  const logo = useLogoGate();
+  // Frozen with the card: the capture waits on the url the card renders.
+  const [frozenLogo, setFrozenLogo] = useState<string | undefined>(undefined);
   const [showUsd, setShowUsd] = useState(false);
   // What is in progress: the card stays frozen and both buttons wait.
   const [busy, setBusy] = useState<'share' | 'save' | 'whatsapp' | 'instagram' | null>(null);
@@ -80,9 +91,12 @@ export function FuturesShareSheet({ visible, onClose, position, kind, liveMid = 
     const ticket = ++run.current;
     const alive = () => run.current === ticket;
     const snapshot = content;
+    const snapshotLogo = stockLogo;
     setFrozen(snapshot);
+    setFrozenLogo(snapshotLogo);
     setBusy(what);
-    // Let the frozen card render before it is captured.
+    // The logo must be in the image, then the frozen card rendered.
+    await logo.wait(snapshotLogo);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     let uri: string | undefined;
     try {
@@ -141,7 +155,7 @@ export function FuturesShareSheet({ visible, onClose, position, kind, liveMid = 
         <Text style={sheet.sub}>Tú decides dónde publicarla. Confío no publica nada por ti.</Text>
         {content ? (
           <ViewShot ref={shot} options={{ format: 'png', quality: 1 }}>
-            <FuturesShareCard content={content} />
+            <FuturesShareCard content={content} logoUrl={frozen ? frozenLogo : stockLogo} logoGate={logo} />
           </ViewShot>
         ) : (
           <Text style={sheet.sub}>Todavía no hay un resultado para mostrar.</Text>

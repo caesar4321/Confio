@@ -44,7 +44,7 @@ export interface GmStock {
   sparkline24h: number[];
 }
 
-const GM_MARKET = gql`
+export const GM_MARKET = gql`
   query GmMarket {
     gmMarket {
       session

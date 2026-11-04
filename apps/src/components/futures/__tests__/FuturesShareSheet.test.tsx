@@ -25,6 +25,10 @@ jest.mock('react-native-svg', () => {
 });
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'MaterialCommunityIcons');
+jest.mock('../../../hooks/useShareLogo', () => ({
+  useStockLogoUrl: () => 'https://cdn.confio.lat/logos/NVDA.png',
+  useLogoGate: () => ({ onPending: () => {}, onSettled: () => {}, wait: () => Promise.resolve() }),
+}));
 const mockRecord = jest.fn((..._a: any[]) => Promise.resolve({}));
 jest.mock('@apollo/client', () => ({ useMutation: () => [mockRecord, { loading: false }] }));
 jest.mock('../../../apollo/mutations', () => ({ RECORD_EXTERNAL_SHARE: 'RECORD_EXTERNAL_SHARE' }));

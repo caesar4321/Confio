@@ -20,19 +20,24 @@ export function PerpMarketMark({
   size = 40,
   leverage,
   badgeColor = '#0F172A',
+  onPending,
+  onSettled,
 }: {
   ticker: string;
   logoUrl?: string;
   size?: number;
   leverage?: number;
   badgeColor?: string;
+  onPending?: (url: string) => void;
+  onSettled?: (url: string) => void;
 }) {
   const upper = ticker.toUpperCase();
   const mark = upper === 'BTC'
     ? <BitcoinMark size={size} />
     : GOLD_TICKERS.has(upper)
       ? <GoldMark size={size} />
-      : <TickerLogo ticker={upper} color={tickerColor(upper)} logoUrl={logoUrl} size={size} />;
+      : <TickerLogo ticker={upper} color={tickerColor(upper)} logoUrl={logoUrl} size={size} onPending={onPending}
+        onSettled={onSettled} />;
   if (!leverage) return mark;
   return (
     <View style={{ width: size, height: size }}>

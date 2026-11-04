@@ -5,7 +5,7 @@
 // the image fails to load, the branded initial circle takes over — the list
 // never shows a broken-image glyph.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Image, StyleSheet } from 'react-native';
 import { Text } from './common/AppText';
 
@@ -14,19 +14,35 @@ export const TickerLogo = ({
   color,
   logoUrl,
   size = 42,
+  onPending,
+  onSettled,
 }: {
   ticker: string;
   color: string;
   logoUrl?: string;
   size?: number;
+  /** Share cards hold their capture on these: this image's URL is loading
+   * (mounted or changed), then loaded or failed. */
+  onPending?: (url: string) => void;
+  onSettled?: (url: string) => void;
 }) => {
-  const [failed, setFailed] = useState(false);
+  // Failure belongs to one URL: a new URL gets its own try.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = !!logoUrl && failedUrl === logoUrl;
+  useEffect(() => {
+    if (logoUrl && failedUrl !== logoUrl) onPending?.(logoUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logoUrl]);
 
   if (logoUrl && !failed) {
     return (
       <Image
         source={{ uri: logoUrl }}
-        onError={() => setFailed(true)}
+        // A share card is captured right after onLoad; Android fades remote
+        // images in over 300 ms from that moment, which would ship a faded logo.
+        fadeDuration={onSettled ? 0 : undefined}
+        onLoad={() => onSettled?.(logoUrl)}
+        onError={() => { setFailedUrl(logoUrl); onSettled?.(logoUrl); }}
         style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#fff' }}
       />
     );

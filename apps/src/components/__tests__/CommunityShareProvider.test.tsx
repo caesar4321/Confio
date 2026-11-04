@@ -39,11 +39,16 @@ jest.mock('../../navigation/RootNavigation', () => ({
 }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'MaterialCommunityIcons');
+jest.mock('../../hooks/useShareLogo', () => ({
+  useStockLogoUrl: () => 'https://cdn.confio.lat/logos/NVDA.png',
+  useLogoGate: () => ({ onPending: () => {}, onSettled: () => {}, wait: (...a: any[]) => mockLogoWait(...a) }),
+}));
 jest.mock('../../utils/saveImageToGallery', () => ({ saveImageToGallery: jest.fn() }));
 jest.mock('@react-native-camera-roll/camera-roll', () => ({ CameraRoll: { save: jest.fn() } }));
 const mockShareSingle = jest.fn((..._a: any[]) => Promise.resolve({}));
 const mockShareOpen = jest.fn((..._a: any[]) => Promise.resolve({}));
 const mockRecordExternal = jest.fn((..._a: any[]) => Promise.resolve({}));
+const mockLogoWait = jest.fn((..._a: any[]) => Promise.resolve());
 jest.mock('react-native-share', () => ({
   __esModule: true,
   default: { shareSingle: (...a: any[]) => mockShareSingle(...a), open: (...a: any[]) => mockShareOpen(...a) },
@@ -188,6 +193,8 @@ describe('CommunityShareProvider sheet', () => {
     expect(shown).toContain('En alianza con');
     expect(shown).toContain('Ondo Finance');
     expect(shown).not.toContain('Hyperliquid');
+    // The stock's own logo from our mirror, not the initial disc.
+    expect(shown).toContain('https://cdn.confio.lat/logos/NVDA.png');
 
     // Android: the direct WhatsApp route (iOS goes through the share sheet, see utils/shareToApp).
     const { Platform } = require('react-native');
@@ -196,6 +203,9 @@ describe('CommunityShareProvider sheet', () => {
     const rafSpy = jest.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb: any) => { cb(0); return 0; });
     await act(async () => { byTestId(tree, 'activity-app-share-whatsapp')[0].props.onPress(); });
     expect(mockShareSingle).toHaveBeenCalledWith(expect.objectContaining({ social: 'whatsapp', url: 'file:///card.png' }));
+    // The capture waited for the logo the card renders, before anything was shared.
+    expect(mockLogoWait).toHaveBeenCalledWith('https://cdn.confio.lat/logos/NVDA.png');
+    expect(mockLogoWait.mock.invocationCallOrder[0]).toBeLessThan(mockShareSingle.mock.invocationCallOrder[0]);
     const message = (mockShareSingle.mock.calls[0] as any)[0].message;
     expect(message).toContain('Invierto en acciones de EE.UU. desde Confío');
     // The sharer's own invite link, tagged so the signup it brings is credited to the card.
