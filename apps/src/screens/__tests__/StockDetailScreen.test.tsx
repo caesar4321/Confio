@@ -27,6 +27,7 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../../navigation/Header', () => ({Header: 'Header'}));
 jest.mock('../../components/TickerLogo', () => ({TickerLogo: 'TickerLogo'}));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+jest.mock('../../components/share/HoldingShareSheet', () => ({ HoldingShareSheet: 'HoldingShareSheet' }));
 jest.mock('react-native-svg', () => ({
   __esModule: true,
   default: 'Svg',

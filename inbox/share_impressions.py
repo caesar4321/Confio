@@ -67,3 +67,35 @@ def record_outcome(user, group, reference, outcome):
             rows.update(outcome=outcome, closed_at=timezone.now())
     except Exception:  # noqa: BLE001
         logger.exception('share impression: outcome not recorded')
+
+
+# A member tapping share buttons in a loop must not grow the table without
+# bound: past this many taps in a day, further taps are not recorded.
+EXTERNAL_DAILY_CAP = 200
+
+
+def record_external(user, meta, *, surface, product, target, ticker='', reference='', show_amount=False):
+    """A tap on a button that sends an investment card out of Confío.
+    Unknown values are dropped (old or tampered clients), never stored."""
+    from datetime import timedelta
+
+    from .models import ExternalShareTap
+
+    try:
+        if (surface not in ExternalShareTap.SURFACES or product not in ExternalShareTap.PRODUCTS
+                or target not in ExternalShareTap.TARGETS):
+            return False
+        since = timezone.now() - timedelta(days=1)
+        if ExternalShareTap.objects.filter(user=user, created_at__gte=since).count() >= EXTERNAL_DAILY_CAP:
+            return False
+        platform, version = _client(meta)
+        with transaction.atomic():
+            ExternalShareTap.objects.create(
+                user=user, surface=surface, product=product, target=target,
+                ticker=str(ticker or '').strip().upper()[:20], reference=str(reference or '').strip()[:128],
+                show_amount=bool(show_amount), platform=platform, app_version=version[:20])
+        return True
+    except Exception:  # noqa: BLE001 — bookkeeping never breaks sharing
+        logger.exception('share impression: external tap not recorded')
+        return False
+

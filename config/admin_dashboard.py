@@ -782,10 +782,12 @@ ConfioAdminSite.DASH_PAGES = [
     ('community', 'Community', [
         _w(growth.demand),
         _w(growth.community),
+        _w(growth.share_cards),
         _w(sections.content),
     ], [
         'admin/dash/_demand.html',
         'admin/dash/_community.html',
+        'admin/dash/_share_cards.html',
         'admin/dash/_content.html',
     ], {'tools': (
         ('Rail waitlist', 'users_localrailwaitlistentry_changelist', ''),
@@ -887,6 +889,7 @@ from inbox.models import (
     ChannelMembership,
     ActivityShareIntent,
     ActivityShareImpression,
+    ExternalShareTap,
     CommunityActivityShare,
     CommunityBlock,
     CommunityComment,
@@ -921,6 +924,7 @@ from inbox.admin import (
     ChannelMembershipAdmin,
     ActivityShareIntentAdmin,
     ActivityShareImpressionAdmin,
+    ExternalShareTapAdmin,
     CommunityActivityShareAdmin,
     CommunityBlockAdmin,
     CommunityFollowAdmin,
@@ -1248,6 +1252,7 @@ confio_admin_site.register(LeagueSeasonAward, LeagueSeasonAwardAdmin)
 confio_admin_site.register(CopiedPlay, CopiedPlayAdmin)
 confio_admin_site.register(ActivityShareIntent, ActivityShareIntentAdmin)
 confio_admin_site.register(ActivityShareImpression, ActivityShareImpressionAdmin)
+confio_admin_site.register(ExternalShareTap, ExternalShareTapAdmin)
 confio_admin_site.register(CommunityRulesAcceptance, CommunityRulesAcceptanceAdmin)
 confio_admin_site.register(ContentPlatformClick, ContentPlatformClickAdmin)
 confio_admin_site.register(ContentPlatformClickDailyStat, ContentPlatformClickDailyStatAdmin)

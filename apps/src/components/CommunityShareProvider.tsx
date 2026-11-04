@@ -18,6 +18,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Text, TextInput } from './common/AppText';
 import { ActivitySummary, cryptoCategoryOf, isPerps, tradeSide, type ActivityShare } from './ActivitySummary';
 import { CommunityRulesSheet } from './CommunityRulesSheet';
+import { ActivityAppShare } from './share/ActivityAppShare';
 import { PostByline } from './PostByline';
 import { colors } from '../config/theme';
 import {
@@ -294,6 +295,7 @@ function ActivityShareSheet({ request, onClose }: { request: Request; onClose: (
             ) : shareable?.activity ? (
               <Composer
                 shareable={shareable}
+                reference={`${request.group}:${request.reference}`}
                 activity={shareable.activity}
                 avatarUrl={avatarUrl}
                 note={note}
@@ -329,6 +331,7 @@ function ActivityShareSheet({ request, onClose }: { request: Request; onClose: (
 
 type ComposerProps = {
   shareable: Shareable;
+  reference: string;
   activity: ActivityShare;
   avatarUrl: string | null;
   note: string;
@@ -346,6 +349,7 @@ type ComposerProps = {
 
 function Composer({
   shareable,
+  reference,
   activity,
   avatarUrl,
   note,
@@ -452,6 +456,7 @@ function Composer({
           </Text>
         )}
       </Pressable>
+      <ActivityAppShare activity={activity} reference={reference} showAmount={showAmount} disabled={sharing} />
       <Pressable
         style={styles.secondary}
         onPress={onDismiss}

@@ -118,3 +118,54 @@ class OutcomeTests(CommunityTestBase):
         other = make_user()
         RecordActivityShareDismissal.mutate(None, info_for(other), group='stock', reference='0xabc')
         self.assertEqual(self.row().outcome, '')
+
+
+class ExternalShareTapTests(CommunityTestBase):
+    def setUp(self):
+        super().setUp()
+        self.member = make_user()
+
+    def tap(self, meta=ANDROID_524, **kw):
+        args = {'surface': 'activity', 'product': 'stock', 'target': 'whatsapp', 'ticker': 'tsla',
+                'reference': '0xabc', 'show_amount': True}
+        args.update(kw)
+        from .schema import RecordExternalShare
+        return RecordExternalShare.mutate(None, info_for(self.member, meta), **args)
+
+    def test_a_tap_is_recorded_with_its_build(self):
+        from .models import ExternalShareTap
+        self.assertTrue(self.tap().success)
+        row = ExternalShareTap.objects.get(user=self.member)
+        self.assertEqual((row.surface, row.product, row.target, row.ticker, row.reference, row.show_amount,
+                          row.platform, row.app_version),
+                         ('activity', 'stock', 'whatsapp', 'TSLA', '0xabc', True, 'android', '5.2.4'))
+
+    def test_every_tap_is_its_own_row(self):
+        from .models import ExternalShareTap
+        self.tap()
+        self.tap(target='instagram', surface='holding', reference='')
+        self.assertEqual(ExternalShareTap.objects.filter(user=self.member).count(), 2)
+
+    def test_unknown_values_are_dropped_but_the_caller_still_succeeds(self):
+        from .models import ExternalShareTap
+        for bad in ({'surface': 'feed'}, {'product': 'bonds'}, {'target': 'telegram'}):
+            self.assertTrue(self.tap(**bad).success)
+        self.assertFalse(ExternalShareTap.objects.exists())
+
+    def test_daily_cap_stops_recording_not_sharing(self):
+        from .models import ExternalShareTap
+        with patch.object(share_impressions, 'EXTERNAL_DAILY_CAP', 2):
+            for _ in range(4):
+                self.assertTrue(self.tap().success)
+        self.assertEqual(ExternalShareTap.objects.count(), 2)
+
+    def test_a_failed_write_never_fails_the_caller(self):
+        with patch('inbox.models.ExternalShareTap.objects.create', side_effect=RuntimeError('db down')):
+            self.assertTrue(self.tap().success)
+
+    def test_requires_login(self):
+        from django.contrib.auth.models import AnonymousUser
+        from .schema import RecordExternalShare
+        with self.assertRaises(Exception):
+            RecordExternalShare.mutate(None, info_for(AnonymousUser()), surface='activity', product='stock',
+                                       target='whatsapp')

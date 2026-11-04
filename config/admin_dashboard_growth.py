@@ -211,6 +211,99 @@ def community(w):
     }}
 
 
+SHARE_CARD_DAYS = 30
+
+
+def _cohort_milestones(ids):
+    """(funded, verified, invested) among `ids` only: the same definitions as
+    _member_sets, queried for a small cohort instead of all history."""
+    if not ids:
+        return set(), set(), set()
+    from blockchain.models import PerpPosition, SponsoredBatch
+    from ramps.metrics import deposit_events
+    from security.identity_status import verified_user_ids
+
+    ids = list(ids)
+    funded = {user for user, _at in deposit_events(user_ids=ids)}
+    verified = set(verified_user_ids(ids))
+    investors = set(SponsoredBatch.objects.filter(status='confirmed', kind__in=INVEST_KINDS, user_id__in=ids)
+                    .order_by().values_list('user_id', flat=True).distinct())
+    investors |= set(PerpPosition.objects.filter(opened_at__isnull=False, user_id__in=ids)
+                     .order_by().values_list('user_id', flat=True).distinct())
+    return funded, verified, investors
+
+
+def share_cards(w):
+    """Investment share cards sent out of Confío (WhatsApp, Instagram, the
+    phone's share sheet, saved images): taps -> link clicks -> signups ->
+    verified / funded / invested, last 30 days, by where they were sent.
+
+    Taps come from inbox.ExternalShareTap. The card's text carries the
+    sharer's invite link tagged utm_medium=share_card (utm_source = where it
+    was sent, utm_campaign = stock | crypto | perps); the link worker logs the
+    click as referral_link_clicked, and the install referrer / IP match
+    carries the tags into UserReferral.attribution_data at signup. An image
+    alone (Instagram, a saved card) carries no link, so its signups are
+    undercounted by design."""
+    from achievements.models import UserReferral
+    from inbox.models import ExternalShareTap
+    from users.models_analytics import FunnelEvent
+
+    since = timezone.now() - timedelta(days=SHARE_CARD_DAYS)
+    channel_of = {'save': 'image'}
+    taps = defaultdict(int)
+    sharers = defaultdict(set)
+    by_product = Counter()
+    by_surface = Counter()
+    for user, target, product, surface in ExternalShareTap.objects.filter(created_at__gte=since).order_by() \
+            .values_list('user_id', 'target', 'product', 'surface'):
+        channel = channel_of.get(target, target)
+        taps[channel] += 1
+        sharers[channel].add(user)
+        sharers['all'].add(user)
+        by_product[product] += 1
+        by_surface[surface] += 1
+
+    clicks = Counter()
+    for props in FunnelEvent.objects.filter(event_name='referral_link_clicked', created_at__gte=since,
+                                            properties__utm_medium='share_card').order_by() \
+            .values_list('properties', flat=True):
+        clicks[str((props or {}).get('utm_source') or '?')] += 1
+
+    referred = defaultdict(set)
+    for user, data in UserReferral.objects.filter(created_at__gte=since, deleted_at__isnull=True,
+                                                  attribution_data__utm_medium='share_card').order_by() \
+            .values_list('referred_user_id', 'attribution_data'):
+        referred[str((data or {}).get('utm_source') or '?')].add(user)
+
+    funded, verified, investors = _cohort_milestones(set().union(*referred.values()) if referred else set())
+    rows = []
+    channels = sorted(set(taps) | set(clicks) | set(referred), key=lambda c: (-taps.get(c, 0), c))
+    for channel in channels + ['all']:
+        if channel == 'all':
+            tap_n, click_n = sum(taps.values()), sum(clicks.values())
+            people = sharers['all']
+            signed = set().union(*referred.values()) if referred else set()
+        else:
+            tap_n, click_n, people, signed = taps.get(channel, 0), clicks.get(channel, 0), sharers.get(channel, set()), \
+                referred.get(channel, set())
+        rows.append({
+            'label': 'All' if channel == 'all' else channel.capitalize(),
+            'total': channel == 'all',
+            'sharers': len(people), 'taps': tap_n, 'clicks': click_n, 'signups': len(signed),
+            'verified': len(signed & verified), 'funded': len(signed & funded), 'invested': len(signed & investors),
+        })
+    return {'share_cards': {
+        'days': SHARE_CARD_DAYS,
+        'rows': rows,
+        'by_product': [{'label': {'stock': 'Acciones', 'crypto': 'Oro y Bitcoin', 'perps': 'Futuros'}.get(k, k), 'n': n}
+                       for k, n in by_product.most_common()],
+        'by_surface': [{'label': {'activity': 'Right after the trade', 'holding': 'From a holding',
+                                  'futures': 'From a Futuros position'}.get(k, k), 'n': n}
+                       for k, n in by_surface.most_common()],
+    }}
+
+
 def demand(w):
     """What members ask for before it exists: paid-offer doors, local rails,
     waitlists and assistant probes. Decides what gets built next."""

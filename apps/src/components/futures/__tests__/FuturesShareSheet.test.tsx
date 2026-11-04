@@ -24,6 +24,11 @@ jest.mock('react-native-svg', () => {
   return { __esModule: true, default: Stub, Defs: Stub, LinearGradient: Stub, Rect: Stub, Stop: Stub };
 });
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'MaterialCommunityIcons');
+const mockRecord = jest.fn((..._a: any[]) => Promise.resolve({}));
+jest.mock('@apollo/client', () => ({ useMutation: () => [mockRecord, { loading: false }] }));
+jest.mock('../../../apollo/mutations', () => ({ RECORD_EXTERNAL_SHARE: 'RECORD_EXTERNAL_SHARE' }));
+jest.mock('../../../contexts/AuthContext', () => ({ useAuth: () => ({ userProfile: { username: 'ana' } }) }));
 jest.mock('../PerpMarketMark', () => ({ PerpMarketMark: () => null }));
 
 import { FuturesShareSheet } from '../FuturesShareSheet';

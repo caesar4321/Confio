@@ -23,6 +23,7 @@ export interface FuturesShareContent {
   rows: { label: string; value: string }[];
   liquidated: boolean;
   message: string; // the text that rides with the image
+  lead: string; // the same text before its link (the sheet adds the sharer's tagged link)
 }
 
 const pct = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${formatDecimal(Math.abs(v), { decimals: 2 })}%`;
@@ -81,7 +82,8 @@ export const futuresShareContent = (
     : liquidated
       ? `Me liquidaron ${position.ticker} (${sideLine}): ${headline}${usdLine ? ` (${usdLine})` : ''} con todos los costos.`
       : `Cerré ${position.ticker} (${sideLine}): ${headline}${usdLine ? ` (${usdLine})` : ''} con todos los costos.`;
-  const message = `${what}\nOpero futuros desde Confío 💚\n\n${SHARE_LINKS.web.landing}\n\n${SHARE_LINKS.hashtags}`;
+  const lead = `${what}\nOpero futuros desde Confío 💚`;
+  const message = `${lead}\n\n${SHARE_LINKS.web.landing}\n\n${SHARE_LINKS.hashtags}`;
   return {
     kind,
     ticker: position.ticker,
@@ -95,5 +97,6 @@ export const futuresShareContent = (
     rows,
     liquidated: kind === 'result' && liquidated,
     message,
+    lead,
   };
 };

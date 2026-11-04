@@ -16,6 +16,14 @@
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
+    <!-- Sharing a card straight to WhatsApp / Instagram (react-native-share
+         checks the app is installed; Android 11+ hides packages otherwise). -->
+    <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.instagram.android" />
+    </queries>
+
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"

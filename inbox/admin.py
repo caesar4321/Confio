@@ -16,6 +16,7 @@ from security.s3_utils import build_s3_key, upload_object
 from .models import (
     ActivityShareIntent,
     ActivityShareImpression,
+    ExternalShareTap,
     CommunityActivityShare,
     CommunityFollow,
     CommunityProfileSettings,
@@ -1336,6 +1337,22 @@ class ActivityShareIntentAdmin(admin.ModelAdmin):
     readonly_fields = [f.name for f in ActivityShareIntent._meta.fields]
 
     def has_add_permission(self, request):
+        return False
+
+
+@admin.register(ExternalShareTap)
+class ExternalShareTapAdmin(admin.ModelAdmin):
+    list_display = ('user', 'surface', 'product', 'ticker', 'target', 'show_amount', 'platform', 'app_version',
+                    'created_at')
+    list_filter = ('surface', 'product', 'target', 'platform', 'app_version')
+    search_fields = ('user__username', 'ticker', 'reference')
+    list_select_related = ('user',)
+    readonly_fields = [f.name for f in ExternalShareTap._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
 

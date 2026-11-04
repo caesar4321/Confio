@@ -18,7 +18,8 @@ jest.mock('@apollo/client', () => ({
     }
     return { data: undefined, loading: false, startPolling: jest.fn(), stopPolling: jest.fn() };
   },
-  useMutation: (doc: string) => (doc === 'RECORD_ACTIVITY_SHARE_DISMISSAL' ? [mockDismissal, { loading: false }] : [mockShareIntent, { loading: false }]),
+  useMutation: (doc: string) => (doc === 'RECORD_ACTIVITY_SHARE_DISMISSAL' ? [mockDismissal, { loading: false }]
+    : doc === 'RECORD_EXTERNAL_SHARE' ? [mockRecordExternal, { loading: false }] : [mockShareIntent, { loading: false }]),
 }));
 jest.mock('../../apollo/queries', () => ({
   GET_SHARE_SHEET_ACTIVITY: 'GET_SHARE_SHEET_ACTIVITY',
@@ -28,13 +29,33 @@ jest.mock('../../apollo/queries', () => ({
 jest.mock('../../apollo/mutations', () => ({
   SHARE_ACTIVITY_INTENT: 'SHARE_ACTIVITY_INTENT',
   RECORD_ACTIVITY_SHARE_DISMISSAL: 'RECORD_ACTIVITY_SHARE_DISMISSAL',
+  RECORD_EXTERNAL_SHARE: 'RECORD_EXTERNAL_SHARE',
 }));
+jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userProfile: { id: '7', username: 'ana' } }) }));
 jest.mock('../../contexts/AccountContext', () => ({ useAccount: () => ({ activeAccount: { type: mockAccountType } }) }));
 jest.mock('../../navigation/RootNavigation', () => ({
   navigate: (...args: any[]) => mockNavigate(...args),
   navigationRef: { addListener: () => () => {}, getCurrentRoute: () => undefined },
 }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'MaterialCommunityIcons');
+jest.mock('../../utils/saveImageToGallery', () => ({ saveImageToGallery: jest.fn() }));
+jest.mock('@react-native-camera-roll/camera-roll', () => ({ CameraRoll: { save: jest.fn() } }));
+const mockShareSingle = jest.fn((..._a: any[]) => Promise.resolve({}));
+const mockShareOpen = jest.fn((..._a: any[]) => Promise.resolve({}));
+const mockRecordExternal = jest.fn((..._a: any[]) => Promise.resolve({}));
+jest.mock('react-native-share', () => ({
+  __esModule: true,
+  default: { shareSingle: (...a: any[]) => mockShareSingle(...a), open: (...a: any[]) => mockShareOpen(...a) },
+  Social: { Whatsapp: 'whatsapp', Instagram: 'instagram' },
+}));
+jest.mock('react-native-view-shot', () => {
+  const R = require('react');
+  return R.forwardRef((props: any, ref: any) => {
+    R.useImperativeHandle(ref, () => ({ capture: () => Promise.resolve('file:///card.png') }));
+    return R.createElement('ViewShot', props, props.children);
+  });
+});
 jest.mock('../CommunityRulesSheet', () => ({ CommunityRulesSheet: 'CommunityRulesSheet' }));
 jest.mock('../PostByline', () => ({ PostByline: 'PostByline' }));
 
@@ -155,6 +176,39 @@ describe('CommunityShareProvider sheet', () => {
     expect(text(tree)).toContain('Se publicará en cuanto se confirme tu movimiento.');
     // Closing after a share is not a dismissal (the server already marked it shared).
     expect(mockDismissal).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
+  });
+
+  it('sends a stock as the Ondo card straight to WhatsApp or Instagram', async () => {
+    mockShareable = { unifiedTransactionId: null, pending: true, canShare: true, noteMaxChars: 280, activity: stockBuy };
+    const tree = await mount();
+    await act(async () => { requestActivityShare({ group: 'stock', reference: '0xabc' }); });
+    const shown = text(tree);
+    expect(shown).toContain('Acciones');
+    expect(shown).toContain('En alianza con');
+    expect(shown).toContain('Ondo Finance');
+    expect(shown).not.toContain('Hyperliquid');
+
+    // Android: the direct WhatsApp route (iOS goes through the share sheet, see utils/shareToApp).
+    const { Platform } = require('react-native');
+    const os = Platform.OS;
+    Platform.OS = 'android';
+    const rafSpy = jest.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb: any) => { cb(0); return 0; });
+    await act(async () => { byTestId(tree, 'activity-app-share-whatsapp')[0].props.onPress(); });
+    expect(mockShareSingle).toHaveBeenCalledWith(expect.objectContaining({ social: 'whatsapp', url: 'file:///card.png' }));
+    const message = (mockShareSingle.mock.calls[0] as any)[0].message;
+    expect(message).toContain('Invierto en acciones de EE.UU. desde Confío');
+    // The sharer's own invite link, tagged so the signup it brings is credited to the card.
+    expect(message).toContain('https://confio.lat/invite/ANA?utm_source=whatsapp&utm_medium=share_card&utm_campaign=stock&utm_term=activity');
+    expect(mockRecordExternal).toHaveBeenCalledWith({ variables: expect.objectContaining({
+      surface: 'activity', product: 'stock', target: 'whatsapp', ticker: 'NVDA', reference: 'stock:0xabc' }) });
+
+    // A failed direct route falls back to the phone's share sheet.
+    mockShareSingle.mockRejectedValueOnce(new Error('not installed'));
+    await act(async () => { byTestId(tree, 'activity-app-share-instagram')[0].props.onPress(); });
+    expect(mockShareOpen).toHaveBeenCalledWith(expect.objectContaining({ url: 'file:///card.png' }));
+    rafSpy.mockRestore();
+    Platform.OS = os;
     await act(async () => tree.unmount());
   });
 

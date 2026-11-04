@@ -1,0 +1,29 @@
+{% load humanize %}
+<h2 class="section-title">Share cards &rarr; signups</h2>
+<p class="dash-asof" style="margin:-6px 0 12px;">Investment cards members sent out of Confío, last {{ share_cards.days }} days. Taps are button presses (the
+    other app never says whether it was posted). Clicks and signups come from the sharer's invite link tagged
+    <code>utm_medium=share_card</code>; an image without its text (Instagram, a saved card) carries no link, so those
+    channels undercount.</p>
+<div class="data-table">
+    <table>
+        <thead><tr><th>Sent to</th><th class="num">Sharers</th><th class="num">Taps</th><th class="num">Link clicks</th>
+            <th class="num">Signups</th><th class="num">Verified</th><th class="num">Funded</th><th class="num">Invested</th></tr></thead>
+        <tbody>
+            {% for row in share_cards.rows %}
+            <tr{% if row.total %} style="font-weight:700"{% endif %}><td>{{ row.label }}</td>
+                <td class="num">{{ row.sharers|intcomma }}</td><td class="num">{{ row.taps|intcomma }}</td>
+                <td class="num">{{ row.clicks|intcomma }}</td><td class="num">{{ row.signups|intcomma }}</td>
+                <td class="num">{{ row.verified|intcomma }}</td><td class="num">{{ row.funded|intcomma }}</td>
+                <td class="num">{{ row.invested|intcomma }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div class="metrics-grid">
+    {% for p in share_cards.by_product %}
+    <div class="metric-card"><div class="metric-label">{{ p.label }}</div><div class="metric-value">{{ p.n|intcomma }}</div><div class="metric-change">taps</div></div>
+    {% endfor %}
+    {% for p in share_cards.by_surface %}
+    <div class="metric-card"><div class="metric-label">{{ p.label }}</div><div class="metric-value">{{ p.n|intcomma }}</div><div class="metric-change">taps</div></div>
+    {% endfor %}
+</div>

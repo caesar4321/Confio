@@ -31,6 +31,7 @@ jest.mock('@apollo/client', () => ({
 }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView' }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
+jest.mock('../../components/share/HoldingShareSheet', () => ({ HoldingShareSheet: 'HoldingShareSheet' }));
 jest.mock('../../navigation/Header', () => ({ Header: 'Header' }));
 jest.mock('../../components/CryptoAssetMark', () => ({ CryptoAssetMark: 'CryptoAssetMark' }));
 jest.mock('../../components/common/StockTradeLoadingOverlay', () => ({ StockTradeLoadingOverlay: () => null }));

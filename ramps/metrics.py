@@ -247,34 +247,38 @@ def _direct_flows(periods) -> dict:
     }
 
 
-def deposit_events() -> list:
+def deposit_events(user_ids=None) -> list:
     """(user id, when) for every proven deposit on any rail: perimeter entries
     and provider deliveries that never converted. "Funded" must not depend on
-    a conversion existing, or the arrivals Movido misses read as unfunded."""
+    a conversion existing, or the arrivals Movido misses read as unfunded.
+    `user_ids` limits every source to those members (None = everyone)."""
     from payment_accounts.models import CobreJourney, InfiniaJourney
     from ramps.models import RampTransaction
     from usdc_transactions.models import USDCDeposit
 
+    def only(rows, field='actor_user_id'):
+        return rows if user_ids is None else rows.filter(**{f'{field}__in': user_ids})
+
     entries, _exits = _perimeter_conversions()
-    events = [(user, at) for user, at in entries.order_by().exclude(actor_user_id=None).values_list(
+    events = [(user, at) for user, at in only(entries).order_by().exclude(actor_user_id=None).values_list(
         'actor_user_id', 'created_at')]
     legacy, amount, _provider = _deposit_sources(providers=None)[0]
-    events += [(user, done or made) for user, done, made in legacy.order_by().annotate(
+    events += [(user, done or made) for user, done, made in only(legacy).order_by().annotate(
         flow_usd=amount).filter(flow_usd__gt=0).exclude(actor_user_id=None).values_list(
             'actor_user_id', 'completed_at', 'created_at')]
     # Guardarian holds a received deposit in PROCESSING until its conversion
     # finishes; the money has still arrived.
-    events += [(user, made) for user, made in RampTransaction.objects.filter(
+    events += [(user, made) for user, made in only(RampTransaction.objects.filter(
         direction='on_ramp', status='PROCESSING', usdc_deposit__status='COMPLETED', usdc_deposit__is_deleted=False,
-        usdc_deposit__amount__gt=0).exclude(actor_user_id=None).order_by().values_list('actor_user_id', 'created_at')]
+        usdc_deposit__amount__gt=0)).exclude(actor_user_id=None).order_by().values_list('actor_user_id', 'created_at')]
     # A direct receipt counts on arrival, converted or not.
-    events += [(user, done or made) for user, done, made in USDCDeposit.objects.filter(
-        status='COMPLETED', is_deleted=False, amount__gt=0).exclude(actor_user_id=None).order_by().values_list(
+    events += [(user, done or made) for user, done, made in only(USDCDeposit.objects.filter(
+        status='COMPLETED', is_deleted=False, amount__gt=0)).exclude(actor_user_id=None).order_by().values_list(
             'actor_user_id', 'completed_at', 'created_at')]
     for journey, statuses in ((InfiniaJourney, {'wallet_conversion__status': 'COMPLETED'}),
                               (CobreJourney, {'bridge__status': 'delivered'})):
-        events += [(user, done or made) for user, done, made in journey.objects.filter(
-            direction='to_wallet', stage='completed', **statuses).order_by().exclude(
+        events += [(user, done or made) for user, done, made in only(journey.objects.filter(
+            direction='to_wallet', stage='completed', **statuses), 'confio_account__user_id').order_by().exclude(
                 confio_account__user_id=None).values_list(
                     'confio_account__user_id', 'money_flow__completed_at', 'created_at')]
     return events

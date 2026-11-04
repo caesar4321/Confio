@@ -1195,3 +1195,37 @@ class ActivityShareImpression(models.Model):
 
     def __str__(self):
         return f'{self.user_id} {self.group}:{self.reference} {self.outcome or "open"}'
+
+
+class ExternalShareTap(models.Model):
+    """The member tapped a button that sends one of their investments out of
+    Confío as an image card: straight to WhatsApp or Instagram, the phone's
+    share sheet, or "Guardar imagen". One row per tap, append-only.
+
+    Measures the tap, not the post: the OS never says whether the person
+    actually sent it in the other app. `surface` is where the button was:
+    the sheet right after a trade ('activity', keyed like
+    ActivityShareImpression by group + reference) or later, from a holding
+    or a Futuros position ('holding', 'futures')."""
+    SURFACES = ('activity', 'holding', 'futures')
+    PRODUCTS = ('stock', 'crypto', 'perps')
+    TARGETS = ('whatsapp', 'instagram', 'system', 'save')
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='external_share_taps')
+    surface = models.CharField(max_length=16)
+    product = models.CharField(max_length=16)
+    target = models.CharField(max_length=16)
+    ticker = models.CharField(max_length=20, blank=True, default='')
+    # activity: the sheet's (group, reference); futures: the position id.
+    reference = models.CharField(max_length=128, blank=True, default='')
+    show_amount = models.BooleanField(default=False)
+    platform = models.CharField(max_length=16, blank=True, default='')
+    app_version = models.CharField(max_length=20, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'created_at'], name='inbox_ext_share_user_idx')]
+
+    def __str__(self):
+        return f'{self.user_id} {self.surface}/{self.product} {self.ticker} -> {self.target}'

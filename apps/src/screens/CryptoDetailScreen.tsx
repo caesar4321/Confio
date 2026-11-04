@@ -10,6 +10,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -25,6 +26,7 @@ import { Text } from '../components/common/AppText';
 import { Header } from '../navigation/Header';
 import { VenueAttribution } from '../components/VenueAttribution';
 import { CryptoAssetMark } from '../components/CryptoAssetMark';
+import { HoldingShareSheet } from '../components/share/HoldingShareSheet';
 import { colors } from '../config/theme';
 import { CRYPTO_TRADING_UI_ENABLED } from '../config/features';
 import { useCryptoCapabilities, useCryptoHoldings, useCryptoMarket, useCryptoOhlc } from '../hooks/useCrypto';
@@ -79,6 +81,7 @@ export const CryptoDetailScreen = () => {
   })();
 
   const [range, setRange] = useState<GmRange>('1D');
+  const [sharingHolding, setSharingHolding] = useState(false);
   const { closes, loading: chartLoading, failed: chartFailed } = useCryptoOhlc(
     route.params.symbol, range, Boolean(asset));
   const series = useMemo(() => {
@@ -216,7 +219,16 @@ export const CryptoDetailScreen = () => {
                 {formatUnits(position.units, position.decimals)} {asset.ticker}
               </Text>
             </View>
+            <Pressable style={styles.holdingShare} onPress={() => setSharingHolding(true)}
+              accessibilityRole="button" testID="crypto-share-holding">
+              <Icon name="share-2" size={15} color={colors.primaryDark} />
+              <Text style={styles.holdingShareText}>Compartir mi inversión</Text>
+            </Pressable>
           </View>
+        )}
+        {holds && position && (
+          <HoldingShareSheet visible={sharingHolding} onClose={() => setSharingHolding(false)} kind="crypto"
+            ticker={asset.ticker} name={asset.name} category={asset.category} valueUsd={position.valueUsd} />
         )}
 
         {capabilities?.blockedMessage ? (
@@ -328,6 +340,8 @@ const styles = StyleSheet.create({
   marketDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#10B981' },
   marketText: { fontSize: 12, color: colors.text.secondary },
   sectionLabel: { fontSize: 13, fontWeight: '700', color: colors.text.secondary, marginBottom: 10 },
+  holdingShare: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 12, marginTop: 12, borderTopWidth: 1, borderTopColor: colors.borderLight },
+  holdingShareText: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },
   positionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   positionValue: { fontSize: 22, fontWeight: 'bold', color: colors.text.primary },
   positionUnits: { fontSize: 14, fontWeight: '600', color: colors.text.secondary },

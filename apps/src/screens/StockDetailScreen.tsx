@@ -10,6 +10,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   View,
   StyleSheet,
   TouchableOpacity,
@@ -39,6 +40,7 @@ import {
   GmRange,
 } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
+import { HoldingShareSheet } from '../components/share/HoldingShareSheet';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { STOCKS_TRADING_UI_ENABLED } from '../config/features';
@@ -62,6 +64,7 @@ export const StockDetailScreen = () => {
   const position = stockHoldings.positions.find((p) => p.ticker === route.params.ticker);
 
   const [range, setRange] = useState<GmRange>('1D');
+  const [sharingHolding, setSharingHolding] = useState(false);
   const { closes, loading: chartLoading, failed: chartFailed } = useGmOhlc(
     stock?.symbol,
     range,
@@ -247,7 +250,16 @@ export const StockDetailScreen = () => {
                 {formatNumber(position.dayChangePct, { maximumFractionDigits: 2 })}% hoy
               </Text>
             </View>
+            <Pressable style={styles.holdingShare} onPress={() => setSharingHolding(true)}
+              accessibilityRole="button" testID="stock-share-holding">
+              <Icon name="share-2" size={15} color={colors.primaryDark} />
+              <Text style={styles.holdingShareText}>Compartir mi inversión</Text>
+            </Pressable>
           </View>
+        )}
+        {position && (
+          <HoldingShareSheet visible={sharingHolding} onClose={() => setSharingHolding(false)} kind="stock"
+            ticker={position.ticker} name={position.name} valueUsd={position.valueUsd} />
         )}
 
         {/* CTAs + funding line (sweep model made visible). Trading entry
@@ -378,6 +390,8 @@ const styles = StyleSheet.create({
   marketText: { fontSize: 12, color: colors.text.secondary },
 
   sectionLabel: { fontSize: 13, fontWeight: '700', color: colors.text.secondary, marginBottom: 10 },
+  holdingShare: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 12, marginTop: 12, borderTopWidth: 1, borderTopColor: colors.borderLight },
+  holdingShareText: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },
   positionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   positionValue: { fontSize: 22, fontWeight: 'bold', color: colors.text.primary },
 

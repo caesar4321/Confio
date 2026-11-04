@@ -1929,6 +1929,29 @@ class RecordActivityShareDismissal(graphene.Mutation):
         return RecordActivityShareDismissal(success=True)
 
 
+class RecordExternalShare(graphene.Mutation):
+    """The member tapped WhatsApp, Instagram, Compartir or Guardar imagen on
+    an investment card. Bookkeeping only; always succeeds for the caller."""
+    class Arguments:
+        surface = graphene.String(required=True)
+        product = graphene.String(required=True)
+        target = graphene.String(required=True)
+        ticker = graphene.String()
+        reference = graphene.String()
+        show_amount = graphene.Boolean()
+
+    success = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, surface, product, target, ticker=None, reference=None, show_amount=False):
+        from . import share_impressions
+        share_impressions.record_external(
+            info.context.user, getattr(info.context, 'META', None), surface=surface, product=product,
+            target=target, ticker=ticker or '', reference=reference or '', show_amount=bool(show_amount))
+        return RecordExternalShare(success=True)
+
+
 class FollowCommunityMember(graphene.Mutation):
     class Arguments:
         user_id = graphene.ID(required=True)
@@ -3274,6 +3297,7 @@ class Mutation(DirectMessagesMutation, graphene.ObjectType):
     share_activity = ShareActivity.Field()
     share_activity_intent = ShareActivityIntent.Field()
     record_activity_share_dismissal = RecordActivityShareDismissal.Field()
+    record_external_share = RecordExternalShare.Field()
     follow_community_member = FollowCommunityMember.Field()
     unfollow_community_member = UnfollowCommunityMember.Field()
     set_community_follow_notify = SetCommunityFollowNotify.Field()

@@ -6,16 +6,22 @@ export const buildInviteLink = ({
   username,
   source,
   invitationId,
+  utm,
 }: {
   username?: string | null;
   source?: string;
   invitationId?: string | null;
+  /** utm_* tags the link worker records with the click and carries to signup. */
+  utm?: Record<string, string>;
 }): string => {
   const cleanUsername = normalizeInviteUsername(username);
   const params = new URLSearchParams();
 
   if (source) {
     params.set('source', source);
+  }
+  for (const [key, value] of Object.entries(utm || {})) {
+    if (value) params.set(key, value);
   }
   if (invitationId) {
     params.set('invitation_id', String(invitationId));

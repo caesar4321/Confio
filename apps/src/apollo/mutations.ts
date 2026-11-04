@@ -1654,6 +1654,18 @@ export const REMOVE_COVER_PICTURE = gql`
 
 // The share sheet closed without sharing. Own operation: an older server
 // without it rejects only this call, which the sheet ignores.
+// Its own document: an older server rejects the unknown field, and that
+// failure must never touch another request (the app ignores it).
+export const RECORD_EXTERNAL_SHARE = gql`
+  mutation RecordExternalShare($surface: String!, $product: String!, $target: String!, $ticker: String,
+    $reference: String, $showAmount: Boolean) {
+    recordExternalShare(surface: $surface, product: $product, target: $target, ticker: $ticker,
+      reference: $reference, showAmount: $showAmount) {
+      success
+    }
+  }
+`;
+
 export const RECORD_ACTIVITY_SHARE_DISMISSAL = gql`
   mutation RecordActivityShareDismissal($group: String!, $reference: String!) {
     recordActivityShareDismissal(group: $group, reference: $reference) {
