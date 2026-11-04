@@ -1172,6 +1172,8 @@ class MarketToolTests(TestCase):
         with patch('assistant.engine.Toolbelt._walks', return_value=['top_up']):
             specs = {s['name']: s for s in Toolbelt(viewer, TurnResult(reply=''), analyses_left=0).specs()}
         self.assertIn('el botón es un extra, no la respuesta', specs['show_steps']['description'])
+        # 2026-11-04: "¿cómo actualizo la app?" got a Recargar walk.
+        self.assertIn('si ninguna opción coincide con lo que pregunta, no lo uses', specs['show_steps']['description'])
 
     @patch('cusd_plus.gm_api.all_market', return_value=MARKET)
     def test_market_tools_only_when_news_is_metered(self, _market):
@@ -2338,6 +2340,65 @@ class HandoffGuardAndTopupStatusTests(TestCase):
                                        fiat_amount=Decimal('500'), fiat_currency='BOB', final_amount=Decimal('40'))
         moves = {m['tipo']: m for m in topup_status_data(viewer)['movimientos']}
         self.assertNotIn('llego_usd', moves['retiro'])  # final_amount there is what left, not what arrived
+        employee = Viewer(user=ana, account=None, account_type='business', business_id=1,
+                          is_business_owner=False, tz=ZoneInfo('UTC'))
+        self.assertFalse(topup_status_data(employee)['disponible'])
+
+    def test_unpaid_pago_movil_topup_says_what_it_waits_for(self):
+        # 2026-11-03: "¿cómo se confirma el pago?" two minutes after a
+        # Pago Móvil order was answered about another flow.
+        import json
+        from decimal import Decimal
+
+        from ramps.models import RampTransaction
+
+        from .engine import topup_status_data
+        david = User.objects.create_user(username='david-vex', firebase_uid='uid-david-vex')
+        payer = {'cedula': 'V12345678', 'phone': '584121234567', 'bank_code': 102}
+        receiving = {'bank_name': 'Banco X', 'phone': '584149999999', 'identification': 'J-999'}
+
+        def order(**section):
+            meta = {'payer': payer, 'receiving_account': receiving, 'reference': '998877', **section}
+            return RampTransaction.objects.create(provider='vexpay', direction='on_ramp', status='PENDING',
+                                                  actor_user=david, fiat_currency='VES',
+                                                  metadata={'vexpay': meta})
+        viewer = Viewer(user=david, account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('America/Caracas'))
+        latest = lambda: topup_status_data(viewer)['movimientos'][0]  # noqa: E731
+        ramp = order(phase='created', method='pago_movil', expected_ves='507269')
+        move = latest()
+        self.assertEqual((move['estado'], move['monto']), ('esperando que confirme su pago', '507269 VES'))
+        self.assertIn('no debe pagar de nuevo', move['falta'])
+        self.assertIn('Ya pagué, confirmar', move['falta'])
+        self.assertNotIn('ultimo_intento', move)
+        dumped = json.dumps(topup_status_data(viewer))
+        for secret in ('V12345678', '584121234567', '584149999999', 'J-999', 'Banco X', '998877'):
+            self.assertNotIn(secret, dumped)
+        ramp.status_detail = 'verify_movement_not_found'  # a reference came back unmatched, reopened
+        ramp.save(update_fields=['status_detail'])
+        self.assertIn('pásalo al equipo', latest()['ultimo_intento'])
+        for phase in ('preparing', 'submitting', 'submitted'):  # their part is done or not ready
+            ramp.metadata = {'vexpay': {'phase': phase, 'method': 'pago_movil'}}
+            ramp.save(update_fields=['metadata'])
+            self.assertNotIn('falta', latest(), phase)
+        ramp.metadata = {'vexpay': {'phase': 'created', 'method': 'pago_movil'}}
+        for status in ('COMPLETED', 'FAILED', 'PROCESSING'):
+            ramp.status = status
+            ramp.save(update_fields=['status', 'metadata'])
+            self.assertNotIn('falta', latest(), status)
+        ramp.delete()
+        ramp = order(phase='created', method='c2p', otp_requested=True)
+        self.assertIn('SMS', latest()['falta'])
+        ramp.metadata = {'vexpay': {'phase': 'created', 'method': 'c2p'}}
+        ramp.save(update_fields=['metadata'])
+        self.assertIn('genera', latest()['falta'].replace('generar', 'genera'))
+        RampTransaction.objects.create(provider='koywe', direction='on_ramp', status='PENDING', actor_user=david,
+                                       fiat_amount=Decimal('100'), fiat_currency='PEN')
+        self.assertNotIn('falta', latest())  # only Pago Móvil has these steps
+
+    def test_topup_status_employee_sees_nothing(self):
+        from .engine import topup_status_data
+        ana = User.objects.create_user(username='ana-ramp2', firebase_uid='uid-ana-ramp2')
         employee = Viewer(user=ana, account=None, account_type='business', business_id=1,
                           is_business_owner=False, tz=ZoneInfo('UTC'))
         self.assertFalse(topup_status_data(employee)['disponible'])

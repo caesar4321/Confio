@@ -68,7 +68,7 @@ class Chip:
 # Nobody is carried anywhere: from wherever they are, the pencil points at the
 # real buttons and they tap the way themselves, so they know it next time.
 _OFF_PATH = (TrailStop('*tab', 'Toca Inicio para seguir.', 'tab_home'),
-             TrailStop('*back', 'Toca la flecha para volver.', 'nav_back'))
+             TrailStop('*back', 'Toca la flecha para volver; desde ahí te sigo mostrando el camino.', 'nav_back'))
 
 
 def _walk(*stops):

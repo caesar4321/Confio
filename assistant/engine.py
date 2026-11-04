@@ -487,6 +487,38 @@ RAMP_STATUS_ES = {'PENDING': 'pendiente', 'PROCESSING': 'en proceso', 'COMPLETED
                   'FAILED': 'fallida', 'AML_REVIEW': 'en revisión'}
 
 
+def _unpaid_pago_movil_step(row):
+    """What a Venezuela Pago Móvil top-up still needs from the person, or {}.
+
+    Open for confirmation does not mean unpaid: they may have paid and not yet
+    sent the reference, or a reference may have come back unmatched. Never
+    tell them to pay again."""
+    if row.provider != 'vexpay' or row.direction != 'on_ramp':
+        return {}
+    from ramps import vexpay
+
+    if not vexpay.can_confirm(row):
+        return {}  # their part is done (or the order is closed)
+    section = vexpay._section(row)
+    out = {'estado': 'esperando que confirme su pago'}
+    if section.get('expected_ves') and not row.fiat_amount:
+        out['monto'] = f"{section['expected_ves']} VES"
+    if section.get('method') == 'c2p':
+        where = ('el banco le envió una clave por SMS' if section.get('otp_requested')
+                 else 'debe generar la clave de pago (C2P) en la app de su banco')
+        out['falta'] = (f'Escribir la clave de pago en esa recarga (Recibir → Pago Móvil) y tocar «Pagar»: {where}. '
+                         'Con clave de pago no se hace ninguna transferencia aparte.')
+    else:
+        out['falta'] = ('Si ya hizo el Pago Móvil, no debe pagar de nuevo: en Recibir → Pago Móvil escribe la '
+                        'referencia del Pago Móvil y la fecha y toca «Ya pagué, confirmar». Si todavía no pagó, '
+                        'paga desde su banco con los datos de esa recarga y luego confirma igual. Si no va a pagar, '
+                        '«Cancelar recarga (no pagué)».')
+    if (row.status_detail or '').startswith('verify_'):
+        out['ultimo_intento'] = ('Ya envió una referencia y no se encontró ese pago o el monto no coincide. Que '
+                                 'revise la referencia, la fecha y el monto; si dice que pagó, pásalo al equipo.')
+    return out
+
+
 def topup_status_data(viewer: Viewer, days=30):
     """This account's own top-ups and withdrawals (never another account's)."""
     if viewer.is_employee:
@@ -512,6 +544,12 @@ def topup_status_data(viewer: Viewer, days=30):
             'hace_minutos': int((timezone.now() - row.created_at).total_seconds() // 60),
             'monto': f'{row.fiat_amount.normalize():f} {row.fiat_currency}' if row.fiat_amount else 'desconocido',
         }
+        unpaid = _unpaid_pago_movil_step(row)
+        if unpaid:
+            # Asked "¿cómo se confirma el pago?" two minutes after creating
+            # one, the model guessed another flow (2026-11-03): an order
+            # still waiting for the person says what it is waiting for.
+            item.update(unpaid)
         if row.status == 'COMPLETED' and row.final_amount is not None and row.direction == 'on_ramp':
             # On withdrawals final_amount is what left Confío, not what reached the bank.
             item['llego_usd'] = f'{row.final_amount.quantize(Decimal("0.01"))}'
@@ -827,7 +865,9 @@ class Toolbelt:
                 'name': 'show_steps',
                 'description': 'Agrega un botón "Muéstrame": al tocarlo, un lápiz señala en la app, paso a paso, los '
                                'botones reales. Úsalo cuando pregunte cómo hacer algo de esta lista o pida que se lo '
-                               'muestres, y dile que puede tocar el botón. Responde igual la pregunta en una o dos '
+                               'muestres, y dile que puede tocar el botón. Solo si la pregunta es justo esa tarea: '
+                               'si ninguna opción coincide con lo que pregunta, no lo uses ni ofrezcas otra en su '
+                               'lugar. Responde igual la pregunta en una o dos '
                                'frases (los pasos en palabras): el botón es un extra, no la respuesta. '
                                'No abras además esa pantalla con `navigate`: '
                                'la idea es que aprenda el camino. Opciones: ' + '; '.join(
