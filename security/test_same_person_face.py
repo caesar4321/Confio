@@ -678,14 +678,17 @@ class FaceBlocklistAutoBanTests(TestCase):
         DiditFaceBlocklistEntry.objects.create(user=self.banned, session_id='blk-A', list_uuid='l', entry_uuid='e')
         self.newcomer = User.objects.create_user(username='new-face', firebase_uid='new-face')
 
+    BLK_A = {'provider': 'didit', 'didit': {'session_id': 'blk-A'}}
+
     def _ban(self, user, **kwargs):
         with mock.patch('security.tasks.sync_face_blocklist.delay'), self.captureOnCommitCallbacks(execute=True):
             return UserBan.objects.create(user=user, reason='fraud', **{'ban_type': 'permanent', **kwargs})
 
-    def _decision(self, risk='FACE_IN_BLOCKLIST', blocklisted='blk-A'):
-        return _document(self.newcomer, 'N-1', status='rejected', risk_factors={'provider': 'didit', 'didit': {
-            'session_id': 'session-N-1', 'session': {'liveness_checks': [{'status': 'Declined', 'warnings': [
-                {'risk': risk, 'additional_data': {'blocklisted_session_id': blocklisted}}]}]}}})
+    def _decision(self, risk='FACE_IN_BLOCKLIST', blocklisted='blk-A', number='N-1', **identity):
+        return _document(self.newcomer, number, status='rejected', **identity, risk_factors={
+            'provider': 'didit', 'didit': {
+                'session_id': 'session-N-1', 'session': {'liveness_checks': [{'status': 'Declined', 'warnings': [
+                    {'risk': risk, 'additional_data': {'blocklisted_session_id': blocklisted}}]}]}}})
 
     def _auto_ban(self, verification):
         from security.didit_blocklist import ban_if_face_blocklisted
@@ -702,9 +705,60 @@ class FaceBlocklistAutoBanTests(TestCase):
         self.assertEqual(self.newcomer.auth_token_version, version + 1)  # logged out everywhere
         self.assertIsNone(self._auto_ban(self._decision()))  # once
 
-    def test_a_possible_match_never_bans(self):
+    def test_a_possible_match_alone_never_bans(self):
+        _document(self.banned, 'B-1', verified_first_name='Luis', verified_last_name='Gomez',
+                  verified_date_of_birth=date(1985, 5, 5), risk_factors=self.BLK_A)
         self.assertIsNone(self._auto_ban(self._decision(risk='POSSIBLE_FACE_IN_BLOCKLIST')))
         self.assertFalse(UserBan.all_objects.filter(user=self.newcomer).exists())
+
+    def test_a_possible_match_with_the_banned_document_number_bans(self):
+        _document(self.banned, 'B-1', verified_first_name='Luis', verified_last_name='Gomez',
+                  verified_date_of_birth=date(1985, 5, 5), risk_factors=self.BLK_A)
+        ban = self._auto_ban(self._decision(risk='POSSIBLE_FACE_IN_BLOCKLIST', number='B-1'))
+        self.assertEqual((ban.user_id, ban.ban_type), (self.newcomer.pk, 'permanent'))
+        self.assertIn('el documento con su identidad', ban.reason_details)
+
+    def test_a_possible_match_with_the_banned_name_and_birth_date_bans(self):
+        _document(self.banned, 'B-1', verified_first_name='Lucas Martins', verified_last_name='De Souza',
+                  verified_date_of_birth=date(1996, 6, 27), risk_factors=self.BLK_A)
+        ban = self._auto_ban(self._decision(
+            risk='POSSIBLE_FACE_IN_BLOCKLIST', verified_first_name='Lucas', verified_last_name='Martins De Souza',
+            verified_date_of_birth=date(1996, 6, 27)))
+        self.assertEqual(ban.user_id, self.newcomer.pk)
+
+    def test_a_possible_match_never_bans_on_placeholder_identity(self):
+        from security.didit import PLACEHOLDER_BIRTH_DATE
+        _document(self.banned, 'DIDITAAA', verified_first_name='Pending', verified_last_name='Verification',
+                  verified_date_of_birth=PLACEHOLDER_BIRTH_DATE, risk_factors=self.BLK_A)
+        self.assertIsNone(self._auto_ban(self._decision(
+            risk='POSSIBLE_FACE_IN_BLOCKLIST', number='DIDITBBB', verified_first_name='Pending',
+            verified_last_name='Verification', verified_date_of_birth=PLACEHOLDER_BIRTH_DATE)))
+
+    def test_a_possible_match_never_bans_on_placeholder_names(self):
+        _document(self.banned, 'B-1', verified_first_name='Pending', verified_last_name='Verification',
+                  risk_factors=self.BLK_A)
+        self.assertIsNone(self._auto_ban(self._decision(
+            risk='POSSIBLE_FACE_IN_BLOCKLIST', verified_first_name='Pending', verified_last_name='Verification')))
+
+    def test_a_possible_match_never_trusts_an_unknown_issuing_country(self):
+        _document(self.banned, 'B-1', verified_first_name='Luis', verified_last_name='Gomez',
+                  verified_date_of_birth=date(1985, 5, 5), document_issuing_country='UNK', risk_factors=self.BLK_A)
+        self.assertIsNone(self._auto_ban(self._decision(
+            risk='POSSIBLE_FACE_IN_BLOCKLIST', number='B-1', document_issuing_country='UNK')))
+
+    def test_a_possible_match_ignores_the_banned_users_rejected_documents(self):
+        # A fraudster's rejected session may carry a victim's stolen document.
+        _document(self.banned, 'B-1', status='rejected', verified_at=None, risk_factors=self.BLK_A)
+        self.assertIsNone(self._auto_ban(self._decision(risk='POSSIBLE_FACE_IN_BLOCKLIST', number='B-1')))
+
+    def test_a_possible_match_ignores_documents_from_unmatched_sessions(self):
+        _document(self.banned, 'B-1')  # session-B-1, not the matched blk-A
+        self.assertIsNone(self._auto_ban(self._decision(risk='POSSIBLE_FACE_IN_BLOCKLIST', number='B-1')))
+
+    def test_a_possible_match_to_a_lifted_ban_never_bans(self):
+        _document(self.banned, 'B-1', risk_factors=self.BLK_A)
+        UserBan.all_objects.filter(pk=self.source_ban.pk).update(deleted_at=timezone.now())
+        self.assertIsNone(self._auto_ban(self._decision(risk='POSSIBLE_FACE_IN_BLOCKLIST', number='B-1')))
 
     def test_a_match_outside_our_entries_never_bans(self):
         self.assertIsNone(self._auto_ban(self._decision(blocklisted='someone-elses-entry')))

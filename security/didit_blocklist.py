@@ -202,39 +202,76 @@ def sync_face_blocklist(user_id) -> None:
 
 
 FACE_IN_BLOCKLIST = 'FACE_IN_BLOCKLIST'
+POSSIBLE_FACE_IN_BLOCKLIST = 'POSSIBLE_FACE_IN_BLOCKLIST'
 AUTO_BAN_LOOKBACK_DAYS = 7
 
 
-def blocklisted_sessions_matched(decision) -> set[str]:
-    """Blocklisted sessions a Didit decision confirmed the face against.
-    Only Didit's confirmed match (FACE_IN_BLOCKLIST), never a POSSIBLE_*."""
+def blocklisted_sessions_matched(decision, risk=FACE_IN_BLOCKLIST) -> set[str]:
+    """Blocklisted sessions a Didit decision matched the face against with
+    `risk`: Didit's confirmed match by default, or its POSSIBLE_* grey zone."""
     matched = set()
     for key in ('liveness_checks', 'face_matches'):
         items = (decision or {}).get(key)
         for item in items if isinstance(items, list) else []:
             for warning in (item or {}).get('warnings') or []:
-                if isinstance(warning, dict) and warning.get('risk') == FACE_IN_BLOCKLIST:
+                if isinstance(warning, dict) and warning.get('risk') == risk:
                     session_id = (warning.get('additional_data') or {}).get('blocklisted_session_id')
                     if session_id:
                         matched.add(str(session_id))
     return matched
 
 
+def _same_identity_as(verification, user_id, sessions) -> bool:
+    """The new document names the person whose face Didit matched: same
+    document number from the same known country, or same date of birth and
+    names, as that user's VERIFIED document from a matched session (a
+    rejected one may be someone else's stolen document). Placeholders (an
+    unread document) never match."""
+    from .didit import PLACEHOLDER_BIRTH_DATE, _same_person
+    theirs = IdentityVerification.all_objects.filter(
+        user_id=user_id, deleted_at__isnull=True, status__in=('verified', 'expired'), verified_at__isnull=False,
+        risk_factors__didit__session_id__in=sessions)
+    number = verification.document_number_normalized
+    country = (verification.document_issuing_country or '').upper()
+    if number and not number.upper().startswith('DIDIT') and country not in ('', 'UNK') and theirs.filter(
+            document_number_normalized=number, document_issuing_country__iexact=country).exists():
+        return True
+    if (verification.verified_date_of_birth in (None, PLACEHOLDER_BIRTH_DATE)
+            or verification.verified_first_name in ('', 'Pending')
+            or verification.verified_last_name in ('', 'Verification')):
+        return False
+    extracted = {'verified_date_of_birth': verification.verified_date_of_birth,
+                 'verified_first_name': verification.verified_first_name,
+                 'verified_last_name': verification.verified_last_name}
+    return any(_same_person(other, extracted) for other in theirs.filter(
+        verified_date_of_birth=verification.verified_date_of_birth).exclude(
+        verified_first_name='Pending').exclude(verified_last_name='Verification'))
+
+
+def _banned_sources(matched, user_id) -> set[int]:
+    return {uid for uid in DiditFaceBlocklistEntry.objects.filter(session_id__in=matched, removed_at__isnull=True)
+            .exclude(user_id=user_id).values_list('user_id', flat=True) if blocks_face(uid)}
+
+
 def ban_if_face_blocklisted(verification):
     """A new account showing the face of a permanently banned person is that
     person back: ban it too, the way staff did by hand (Lucas Martins De
     Souza, 2026-10-06/09). Only when the match is one of OUR entries whose
-    user is still banned, so a lifted ban or an unknown entry never bans."""
+    user is still banned, so a lifted ban or an unknown entry never bans.
+
+    Didit's POSSIBLE match alone may be a look-alike stranger, so it bans
+    only when the document also names the banned person (Lucas again,
+    2026-11-04: possible match first, confirmed three minutes later)."""
     from django.contrib.auth import get_user_model
     from django.db.models import F
     didit = (verification.risk_factors or {}).get('didit') or {}
-    matched = blocklisted_sessions_matched(didit.get('session'))
-    if not matched:
-        return None
+    session = didit.get('session')
     user_id = verification.user_id
-    sources = set(DiditFaceBlocklistEntry.objects.filter(session_id__in=matched, removed_at__isnull=True)
-                  .exclude(user_id=user_id).values_list('user_id', flat=True))
-    banned_sources = sorted(uid for uid in sources if blocks_face(uid))
+    confirmed = _banned_sources(blocklisted_sessions_matched(session), user_id)
+    possible_sessions = blocklisted_sessions_matched(session, POSSIBLE_FACE_IN_BLOCKLIST)
+    possible = {uid for uid in _banned_sources(possible_sessions, user_id) - confirmed
+                if _same_identity_as(verification, uid, possible_sessions)}
+    banned_sources = sorted(confirmed | possible)
     if not banned_sources:
         return None
     User = get_user_model()
@@ -248,7 +285,8 @@ def ban_if_face_blocklisted(verification):
             reason_details=(
                 f'Restricción automática {timezone.now():%Y-%m-%d}. Observado en nuestros registros: la '
                 f"verificación de identidad (sesión Didit {didit.get('session_id') or '-'}) coincidió con el "
-                f"rostro de la(s) cuenta(s) restringida(s) de forma permanente {', '.join(map(str, banned_sources))}."))
+                f"rostro de la(s) cuenta(s) restringida(s) de forma permanente {', '.join(map(str, banned_sources))}"
+                + (', y el documento con su identidad' if possible else '') + '.'))
         User.all_objects.filter(pk=user_id).update(is_active=False, auth_token_version=F('auth_token_version') + 1)
     logger.warning('Auto-banned: user=%s face matches permanently banned %s (session=%s)',
                    user_id, banned_sources, didit.get('session_id'))
