@@ -65,6 +65,7 @@ class Command(BaseCommand):
             self.stdout.write(f'  date_joined          = {u.date_joined}')
             self.stdout.write(f'  last_login           = {u.last_login}')
             self.stdout.write(f'  platform_os          = {u.platform_os}  (set on signup only)')
+            self.stdout.write(f'  last app build       = {u.last_app_version or "(unknown)"} {u.last_app_platform}')
             self.stdout.write(f'  backup_provider      = {u.backup_provider}')
             self.stdout.write(f'  backup_verified_at   = {u.backup_verified_at}')
             self.stdout.write(f'  backup_device_name   = {u.backup_device_name}')

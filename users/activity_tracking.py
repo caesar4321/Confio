@@ -82,7 +82,45 @@ def _mark_activity_day(cache_key):
         logger.error(f"Failed to cache activity day {cache_key}: {e}")
 
 
-def touch_last_activity(user, ts=None, force=False):
+_PLATFORMS = ('ios', 'android')
+
+
+def _client_fields(meta):
+    """The app build and platform from the request headers, or nothing."""
+    from users.paid_offers import app_version
+
+    version = app_version(meta)
+    if not version:
+        return {}
+    platform = str((meta or {}).get('HTTP_X_CONFIO_PLATFORM', '') or '')
+    return {'last_app_version': version, 'last_app_platform': platform if platform in _PLATFORMS else ''}
+
+
+def record_app_build(user_id, meta):
+    """Store the visit's build when it differs from the stored one. Outside
+    the activity cooldown: a caller without headers (login) must not hide the
+    build the next requests send. No cache in front: the database row is the
+    only thing that knows what is stored, and an unchanged build writes
+    nothing. Never raises."""
+    from django.db.models import Q
+    from users.models import User
+
+    fields = _client_fields(meta)
+    if not user_id or not fields:
+        return
+    try:
+        # Own savepoint, like record_activity_day: a failure here must not
+        # abort a caller's transaction.
+        with transaction.atomic():
+            User.objects.filter(id=user_id).filter(
+                ~Q(last_app_version=fields['last_app_version'])
+                | ~Q(last_app_platform=fields['last_app_platform'])
+            ).update(**fields)
+    except Exception as e:
+        logger.error(f"Failed to record app build for user {user_id}: {e}")
+
+
+def touch_last_activity(user, ts=None, force=False, meta=None):
     """
     Update user's last_activity_at timestamp to mark them as active.
 
@@ -93,6 +131,7 @@ def touch_last_activity(user, ts=None, force=False):
         user: User instance or user_id (int)
         ts: Timestamp to use (defaults to now)
         force: Skip cooldown check and force update
+        meta: Request META; records the app build that made the visit
 
     Returns:
         bool: True if updated, False if skipped due to cooldown
@@ -121,6 +160,7 @@ def touch_last_activity(user, ts=None, force=False):
     # The day row has its own once-a-day marker, so it runs outside the
     # cooldown: a visit at 23:59 must not hide one at 00:01.
     record_activity_day(user_id, ts)
+    record_app_build(user_id, meta)
 
     # Cooldown check to prevent excessive updates. cache.add is an atomic
     # claim, so concurrent requests from one member write at most once.

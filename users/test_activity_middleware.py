@@ -50,6 +50,34 @@ class ActivityTrackingMiddlewareTestCase(TestCase):
         self.assertGreater(self.user.last_activity_at, self.joined + timedelta(days=1))
         self.assertTrue(UserActivityDay.objects.filter(user=self.user, day=activity_day(timezone.now())).exists())
 
+    def test_the_visit_records_the_app_build(self):
+        info = _info('query { ping }', self.user)
+        info.context.META = {'HTTP_X_CONFIO_VERSION': '5.3.4', 'HTTP_X_CONFIO_PLATFORM': 'ios'}
+        ActivityTrackingMiddleware().resolve(lambda root, info, **kw: 'ok', None, info)
+        self.user.refresh_from_db()
+        self.assertEqual((self.user.last_app_version, self.user.last_app_platform), ('5.3.4', 'ios'))
+
+    def test_a_request_without_a_build_keeps_the_last_one(self):
+        User.objects.filter(id=self.user.id).update(last_app_version='5.2.1', last_app_platform='android')
+        for meta in ({}, {'HTTP_X_CONFIO_VERSION': '5.3; drop', 'HTTP_X_CONFIO_PLATFORM': 'ios'}):
+            cache.clear()
+            info = _info('query { ping }', self.user)
+            info.context.META = meta
+            ActivityTrackingMiddleware().resolve(lambda root, info, **kw: 'ok', None, info)
+            self.user.refresh_from_db()
+            self.assertEqual((self.user.last_app_version, self.user.last_app_platform), ('5.2.1', 'android'))
+
+    def test_a_login_touch_without_headers_does_not_hide_the_build(self):
+        touch_last_activity(self.user)
+        touch_last_activity(self.user, meta={'HTTP_X_CONFIO_VERSION': '5.3.4', 'HTTP_X_CONFIO_PLATFORM': 'ios'})
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.last_app_version, '5.3.4')
+
+    def test_an_unknown_platform_is_not_stored(self):
+        touch_last_activity(self.user, meta={'HTTP_X_CONFIO_VERSION': '5.3.4', 'HTTP_X_CONFIO_PLATFORM': 'web'})
+        self.user.refresh_from_db()
+        self.assertEqual((self.user.last_app_version, self.user.last_app_platform), ('5.3.4', ''))
+
     def test_subscription_does_not_touch(self):
         with mock.patch('users.graphql_middleware.touch_last_activity') as touch:
             self._run('subscription { ping }')

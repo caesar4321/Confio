@@ -49,7 +49,8 @@ class ActivityTrackingMiddleware:
         if user and user.is_authenticated:
             try:
                 context._activity_tracked = True
-                touch_last_activity(user)
+                meta = getattr(context, 'META', None)
+                touch_last_activity(user, meta=meta if isinstance(meta, dict) else None)
             except Exception as e:
                 # Log error but don't fail the request
                 logger.error(f"Failed to track activity for user {user.id}: {e}")

@@ -106,6 +106,10 @@ class User(AbstractUser, SoftDeleteModel):
     wallet_recovery_drive_ids = models.JSONField(default=list, blank=True)
     # Unified activity timestamp for MAU/WAU/DAU (updated on any user activity)
     last_activity_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # The build and platform of the latest tracked visit, so a missing report
+    # can be read as an old build rather than a silent failure.
+    last_app_version = models.CharField(max_length=20, blank=True, default='')
+    last_app_platform = models.CharField(max_length=10, blank=True, default='')
     # Finished signup: the phone OTP on builds that asked for one, first
     # arrival at Home on phone-less builds (markOnboarded). The "real users"
     # every metric counts (users/analytics.get_real_users_queryset).
