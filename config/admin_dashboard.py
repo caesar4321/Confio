@@ -724,12 +724,14 @@ ConfioAdminSite.DASH_PAGES = [
         _w(sections.users_core),
         _w(sections.os_stats),
         _w(sections.funnels),
+        _w(growth.share_cards),
         _w(sections.referral_program),
     ], [
         'admin/dash/_activation.html',
         'admin/dash/_retention.html',
         'admin/dash/_users.html',
         'admin/dash/_referral_funnel.html',
+        'admin/dash/_share_cards.html',
         'admin/dash/_referral_program.html',
     ], {'intro': 'Signups becoming funded, returning members. Cohorts are rolling 7-day windows; referral funnels use '
                  'Argentina calendar days.',
@@ -782,12 +784,10 @@ ConfioAdminSite.DASH_PAGES = [
     ('community', 'Community', [
         _w(growth.demand),
         _w(growth.community),
-        _w(growth.share_cards),
         _w(sections.content),
     ], [
         'admin/dash/_demand.html',
         'admin/dash/_community.html',
-        'admin/dash/_share_cards.html',
         'admin/dash/_content.html',
     ], {'tools': (
         ('Rail waitlist', 'users_localrailwaitlistentry_changelist', ''),

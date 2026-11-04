@@ -80,3 +80,14 @@ class CohortMilestoneTests(TestCase):
         self.assertNotIn(dropped.id, {u for u, _ in filtered})
         self.assertEqual(deposit_events(user_ids=[]), [])
 
+
+
+class ShareCardPlacementTests(TestCase):
+    def test_the_funnel_sits_on_activation_next_to_the_referral_funnel(self):
+        from config.admin_dashboard import ConfioAdminSite
+        pages = {key: templates for key, _label, _builders, templates, *_ in ConfioAdminSite.DASH_PAGES}
+        activation = pages['activation']
+        self.assertIn('admin/dash/_share_cards.html', activation)
+        self.assertEqual(activation.index('admin/dash/_share_cards.html'),
+                         activation.index('admin/dash/_referral_funnel.html') + 1)
+        self.assertNotIn('admin/dash/_share_cards.html', pages['community'])
