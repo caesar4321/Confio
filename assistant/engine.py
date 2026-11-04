@@ -17,7 +17,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 import requests
 from django.conf import settings
@@ -289,6 +289,31 @@ def _known_usd(value):
     return _usd(value) if value is not None else 'desconocido'
 
 
+def _legacy_cusd(account):
+    """Old Confío Dollar (cUSD on Algorand) as Home last stored it, or None
+    when there is none (most accounts). Stored rows only: an inline node
+    refresh can hold the turn past its timeout, and deposits are paused, so
+    the stored value rarely moves. An old read says when it was read."""
+    if account is None or not getattr(account, 'algorand_address', ''):
+        return None
+    from blockchain.balance_service import BalanceService
+
+    try:
+        row = BalanceService._get_cached_balance(account, 'CUSD')
+    except Exception:  # noqa: BLE001 - the rest of the portfolio stands without it
+        logger.warning('Confio Assistant: old cUSD balance unavailable', exc_info=True)
+        return {'antiguo_confio_dollar_usd': 'desconocido'}
+    if row is None or not row.amount or row.amount <= 0:
+        return None
+    # Floored like Home (US$18,52 for 18.529585), never rounded up past it.
+    out = {'antiguo_confio_dollar_usd': format(Decimal(row.amount).quantize(Decimal('0.01'), rounding=ROUND_DOWN), 'f')}
+    if (row.last_synced is None or getattr(row, 'is_stale', False)
+            or timezone.now() - row.last_synced > timedelta(days=1)):
+        out['antiguo_confio_dollar_leido_el'] = (
+            f'{row.last_synced:%Y-%m-%d}' if row.last_synced else 'desconocido')
+    return out
+
+
 def portfolio_data(viewer: Viewer):
     """What the user holds and spends, from the same cached sources the app
     shows. A value we couldn't read is "desconocido", never a confident 0."""
@@ -311,6 +336,9 @@ def portfolio_data(viewer: Viewer):
         # Holdings regardless of eligibility: someone whose country changed
         # still owns their stocks (eligibility only gates buying).
         result['acciones'] = _holdings(address)
+    # Old cUSD lives on Algorand: told "tus saldos aparecen en US$0" while
+    # Home showed US$18,53 of it (2026-11-04). Same cached read as Home.
+    result.update(_legacy_cusd(viewer.account) or {})
     # Only full months the account existed: a month before it opened is not
     # a month of $0 spending.
     opened = getattr(viewer.account, 'created_at', None)
@@ -990,7 +1018,8 @@ class Toolbelt:
                 'type': 'function',
                 'name': 'get_portfolio',
                 'description': (
-                    'Lo que el usuario tiene y gasta: saldo en Confío Dollar y Confío Dollar+, sus acciones, '
+                    'Lo que el usuario tiene y gasta: saldo en Confío Dollar y Confío Dollar+, el Antiguo '
+                    'Confío Dollar (cUSD) si tiene, sus acciones, '
                     'gasto mensual promedio de los últimos meses, el rendimiento anual de hoy de Confío Dollar+ '
                     'y si acciones/Confío Dollar+ están disponibles en su país. Úsala antes de orientar sobre '
                     'inversiones o ahorro, y cuando pregunten cuánto rinde Confío Dollar+.'

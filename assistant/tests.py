@@ -1602,6 +1602,52 @@ class PortfolioAndNeedsTests(TestCase):
                           is_business_owner=False, tz=ZoneInfo('UTC'))
         self.assertFalse(portfolio_data(employee)['disponible'])
 
+    def test_portfolio_shows_old_cusd_only_when_there_is_some(self):
+        # 2026-11-04: "tus saldos aparecen en US$0" to someone with US$18,53 of old cUSD.
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from .engine import _legacy_cusd, portfolio_data
+        account = SimpleNamespace(algorand_address='ALGOADDR')
+        stored = lambda amount, ago, stale=False: SimpleNamespace(  # noqa: E731
+            amount=amount, last_synced=timezone.now() - ago, is_stale=stale)
+        read = 'blockchain.balance_service.BalanceService._get_cached_balance'
+        with patch(read, return_value=stored(Decimal('18.529585'), timedelta(minutes=3))):
+            self.assertEqual(_legacy_cusd(account), {'antiguo_confio_dollar_usd': '18.52'})  # floored like Home
+        with patch(read, return_value=stored(Decimal('18.52'), timedelta(minutes=3), stale=True)):
+            self.assertIn('antiguo_confio_dollar_leido_el', _legacy_cusd(account))  # marked stale after a move
+        with patch(read, return_value=stored(Decimal('18.53'), timedelta(days=9))):
+            old = _legacy_cusd(account)
+        self.assertEqual(old['antiguo_confio_dollar_usd'], '18.53')
+        self.assertEqual(old['antiguo_confio_dollar_leido_el'],
+                         f'{timezone.now() - timedelta(days=9):%Y-%m-%d}')  # an old read says when
+        with patch(read, return_value=stored(Decimal('0'), timedelta(minutes=3))):
+            self.assertIsNone(_legacy_cusd(account))
+        with patch(read, return_value=None):
+            self.assertIsNone(_legacy_cusd(account))
+        with patch(read, side_effect=RuntimeError('redis')):
+            self.assertEqual(_legacy_cusd(account), {'antiguo_confio_dollar_usd': 'desconocido'})
+        with patch(read) as never, \
+                patch('blockchain.balance_service.BalanceService._fetch_from_blockchain') as node:
+            self.assertIsNone(_legacy_cusd(SimpleNamespace(algorand_address='')))
+            self.assertIsNone(_legacy_cusd(None))
+            never.assert_not_called()
+            node.assert_not_called()
+        # Wired into the tool, which never reads for an employee.
+        month = {'disponible': True, 'actual': {'salio_usd': '0.00'}}
+        with patch('blockchain.bsc_balance_service.BscBalanceService.balances_raw', return_value={}), \
+                patch('assistant.engine._holdings', return_value=[]), \
+                patch('assistant.engine.month_summary_data', return_value=month), \
+                patch('assistant.engine._legacy_cusd', return_value={'antiguo_confio_dollar_usd': '18.53'}) as legacy:
+            self.assertEqual(portfolio_data(self.viewer)['antiguo_confio_dollar_usd'], '18.53')
+            legacy.assert_called_once_with(self.viewer.account)
+            employee = Viewer(user=self.user, account=self.account, account_type='business', business_id=1,
+                              is_business_owner=False, tz=ZoneInfo('UTC'))
+            portfolio_data(employee)
+            legacy.assert_called_once()  # not again for the employee
+
     def test_portfolio_says_a_block_comes_from_the_connection_not_the_phone(self):
         from .engine import portfolio_data
         viewer = Viewer(user=self.user, account=SimpleNamespace(id=1, bsc_address='', created_at=None),
