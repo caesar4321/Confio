@@ -14,6 +14,12 @@
   {% for section in sections %}
   <section>
     <h2>{{ section.title }}</h2>
+    {% if section.paragraph %}<p>{{ section.paragraph }}</p>{% endif %}
+    {% if section.definitions %}
+    <ul>
+      {% for item in section.definitions %}<li><strong>{{ item.term }}</strong>: {{ item.definition }}</li>{% endfor %}
+    </ul>
+    {% endif %}
     {% if section.items %}
     <ul>
       {% for item in section.items %}<li>{{ item }}</li>{% endfor %}
