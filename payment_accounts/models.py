@@ -939,3 +939,45 @@ class AgendaEntry(models.Model):
 
     def __str__(self):
         return f'{self.rail}:{self.label}'
+
+
+class PolygonReturn(models.Model):
+    """Dollars stranded as USDC on the person's own Polygon address, returned
+    to their BSC balance by one signature the person makes (EIP-3009
+    ReceiveWithAuthorization) that only Relay's receiver contract can use.
+    Relay submits it and pays the Polygon gas from the USDC: no sponsor."""
+    STATUSES = [
+        ('quoted', 'Awaiting signature'), ('submitted', 'Signed, sent to Relay'),
+        ('delivered', 'Delivered on BSC'), ('refunded', 'Refunded on Polygon'),
+        ('failed', 'Failed'), ('expired', 'Expired unused'), ('needs_review', 'Needs review'),
+    ]
+
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    confio_account = models.ForeignKey('users.Account', on_delete=models.PROTECT, related_name='polygon_returns')
+    address = models.CharField(max_length=42, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default='quoted', db_index=True)
+    amount_units = models.CharField(max_length=78)          # USDC, 6 decimals
+    amount_out = models.CharField(max_length=78)            # USDT expected, 18 decimals
+    amount_out_min = models.CharField(max_length=78)
+    request_id = models.CharField(max_length=66, unique=True)
+    receiver = models.CharField(max_length=42)              # Relay contract allowed to use the signature
+    nonce = models.CharField(max_length=66)
+    valid_before = models.BigIntegerField()
+    post_body = models.JSONField(default=dict)
+    signature = models.CharField(max_length=132, blank=True, default='')
+    post_attempted = models.BooleanField(default=False)
+    post_accepted = models.BooleanField(default=False)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    source_tx_hash = models.CharField(max_length=66, blank=True, default='')
+    destination_tx_hash = models.CharField(max_length=66, blank=True, default='')
+    actual_out_units = models.CharField(max_length=78, blank=True, default='')
+    failure_code = models.CharField(max_length=60, blank=True, default='')
+    alerted = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['confio_account', 'status'])]
+
+    def __str__(self):
+        return f'PolygonReturn {self.internal_id} {self.status}'

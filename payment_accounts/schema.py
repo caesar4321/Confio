@@ -759,7 +759,107 @@ from payment_accounts.local_money_schema import LocalMoneyMutation, LocalMoneyQu
 from .agenda_schema import AgendaMutation, AgendaQuery  # noqa: E402
 
 
-class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, AgendaQuery, graphene.ObjectType):
+
+# ------------------------------------------------------------ Polygon return
+# Dollars stranded on the person's own Polygon address (Relay refunds,
+# mistaken deposits) back to their balance with one signature. Isolated
+# fields: the app queries them alone so an older server only hides the card.
+
+def _polygon_return_error(exc):
+    from .polygon_return import PolygonReturnError, UNAVAILABLE
+    if isinstance(exc, PolygonReturnError):
+        return str(exc)
+    logger.exception('Polygon return request failed')
+    return UNAVAILABLE
+
+
+class PolygonReturnStateType(graphene.ObjectType):
+    state = graphene.String(required=True)        # none | available | in_progress
+    amount = graphene.String(required=True)       # dollars, 2 decimals
+    return_id = graphene.UUID()
+
+
+class PolygonReturnPermitType(graphene.ObjectType):
+    """The exact ReceiveWithAuthorization the app signs. The app rebuilds the
+    digest itself and checks from/value/to before signing."""
+    return_id = graphene.UUID(required=True)
+    amount = graphene.String(required=True)       # dollars leaving, 2 decimals
+    amount_out = graphene.String(required=True)   # dollars arriving, 2 decimals
+    from_address = graphene.String(required=True)
+    to_address = graphene.String(required=True)
+    value = graphene.String(required=True)        # USDC base units
+    valid_before = graphene.String(required=True)
+    nonce = graphene.String(required=True)
+
+
+def _permit_type(ret):
+    from .polygon_return import usd, usd_out
+    return PolygonReturnPermitType(
+        return_id=ret.internal_id, amount=str(usd(ret.amount_units)), amount_out=str(usd_out(ret.amount_out)),
+        from_address=ret.address, to_address=ret.receiver, value=ret.amount_units,
+        valid_before=str(ret.valid_before), nonce=ret.nonce)
+
+
+class PreparePolygonReturn(graphene.Mutation):
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    permit = graphene.Field(PolygonReturnPermitType)
+
+    @classmethod
+    def mutate(cls, root, info):
+        from .polygon_return import prepare
+        try:
+            owner = _active_account(info, permission='send_funds', owner_only=True)
+            return cls(success=True, permit=_permit_type(prepare(owner)))
+        except Exception as exc:
+            return cls(success=False, error=_polygon_return_error(exc))
+
+
+class SubmitPolygonReturn(graphene.Mutation):
+    class Arguments:
+        return_id = graphene.UUID(required=True)
+        signature = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+    state = graphene.Field(PolygonReturnStateType)
+
+    @classmethod
+    def mutate(cls, root, info, return_id, signature):
+        from .polygon_return import submit, usd, UNAVAILABLE
+        try:
+            owner = _active_account(info, permission='send_funds', owner_only=True)
+            ret = submit(owner, return_id, signature)
+            if ret.status != 'submitted':
+                # Refused at hand-off: the app backs off instead of re-signing.
+                return cls(success=False, error=UNAVAILABLE)
+            return cls(success=True, state=PolygonReturnStateType(
+                state='in_progress', amount=str(usd(ret.amount_units)), return_id=ret.internal_id))
+        except Exception as exc:
+            return cls(success=False, error=_polygon_return_error(exc))
+
+
+class PolygonReturnQuery(graphene.ObjectType):
+    polygon_return = graphene.Field(PolygonReturnStateType, required=True)
+
+    def resolve_polygon_return(self, info):
+        from .polygon_return import state, usd
+        empty = PolygonReturnStateType(state='none', amount='0.00', return_id=None)
+        try:
+            owner = _active_account(info, permission='send_funds', owner_only=True)
+        except Exception:
+            return empty  # employees and viewers never see it
+        current = state(owner)
+        return PolygonReturnStateType(state=current['state'], amount=str(usd(current['amount_units'])),
+                                      return_id=current['return_id'])
+
+
+class PolygonReturnMutation(graphene.ObjectType):
+    prepare_polygon_return = PreparePolygonReturn.Field()
+    submit_polygon_return = SubmitPolygonReturn.Field()
+
+
+class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, AgendaQuery, PolygonReturnQuery, graphene.ObjectType):
     payment_bridge = graphene.Field(PaymentBridgeTransferType, internal_id=graphene.UUID(required=True))
 
     def resolve_payment_bridge(self, info, internal_id):
@@ -878,7 +978,7 @@ class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, AgendaQuery, graph
 from .breb_location_schema import BrebLocationMutation
 
 
-class Mutation(JourneyMutation, CobreJourneyMutation, LocalMoneyMutation, BrebLocationMutation, AgendaMutation,
+class Mutation(JourneyMutation, CobreJourneyMutation, LocalMoneyMutation, BrebLocationMutation, AgendaMutation, PolygonReturnMutation,
                graphene.ObjectType):
     prepare_payment_bridge = PreparePaymentBridge.Field()
     submit_payment_bridge = SubmitPaymentBridge.Field()

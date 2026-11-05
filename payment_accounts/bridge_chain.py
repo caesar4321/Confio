@@ -11,14 +11,14 @@ TRANSFER_TOPIC = '0x' + keccak(text='Transfer(address,address,uint256)').hex()
 USDC = TOKENS['POL:USDC'][0]
 
 
-def rpc(chain, method, params):
+def rpc(chain, method, params, *, timeout=(5, 15)):
     if chain not in {'BSC', 'POL'}:
         raise NextError('Unsupported bridge chain')
     url = getattr(settings, 'BSC_RPC_URL' if chain == 'BSC' else 'PAYMENT_BRIDGE_POLYGON_RPC_URL', '')
     if not url.startswith('https://'):
         raise NextError('Bridge RPC is not configured')
     try:
-        response = requests.post(url, json={'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}, timeout=(5, 15))
+        response = requests.post(url, json={'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}, timeout=timeout)
         response.raise_for_status()
         body = response.json()
         if body.get('error') or 'result' not in body:
@@ -33,10 +33,10 @@ def require_chain(chain):
         raise NextError('Bridge RPC chain mismatch')
 
 
-def token_balance(token_id, holder):
+def token_balance(token_id, holder, *, timeout=(5, 15)):
     chain = token_id.split(':')[0]
     return int(rpc(chain, 'eth_call', [{'to': TOKENS[token_id][0],
-        'data': '0x70a08231' + address(holder)[2:].rjust(64, '0')}, 'latest']), 16)
+        'data': '0x70a08231' + address(holder)[2:].rjust(64, '0')}, 'latest'], timeout=timeout), 16)
 
 
 def final_receipt(chain, tx_hash):

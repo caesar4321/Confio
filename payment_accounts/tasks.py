@@ -28,6 +28,24 @@ def accrue_infinia_maintenance():
     return count
 
 
+@shared_task(name='payment_accounts.reconcile_polygon_returns')
+def reconcile_polygon_returns():
+    """Signed Polygon returns until Relay delivers on BSC, refunds or the
+    signature lapses unused."""
+    from django.core.cache import cache
+    from .polygon_return import open_returns, reconcile
+    if not cache.add('polygon_return:reconcile_running', 1, 300):
+        return 'Polygon return reconcile already running'
+    try:
+        done = 0
+        for ret in open_returns()[:100]:
+            if reconcile(ret).status != 'submitted':
+                done += 1
+        return f'Resolved {done} Polygon returns'
+    finally:
+        cache.delete('polygon_return:reconcile_running')
+
+
 @shared_task(name='payment_accounts.reconcile_bridges')
 def reconcile_bridges():
     from .models import PaymentBridgeTransfer

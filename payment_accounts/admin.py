@@ -364,3 +364,18 @@ class AgendaEntryAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+
+class PolygonReturnAdmin(admin.ModelAdmin):
+    """Read-only: money returned from a person's Polygon address to BSC."""
+    list_display = ('internal_id', 'confio_account', 'status', 'amount_units', 'actual_out_units', 'failure_code', 'created_at')
+    list_filter = ('status',)
+    search_fields = ('internal_id', 'address', 'request_id', 'confio_account__user__username', 'confio_account__user__email')
+    ordering = ('-created_at',)
+
+    def get_readonly_fields(self, request, obj=None):
+        from .models import PolygonReturn
+        return tuple(f.name for f in PolygonReturn._meta.fields)
+
+    def has_add_permission(self, request):
+        return False

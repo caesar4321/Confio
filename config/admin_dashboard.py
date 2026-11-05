@@ -1383,6 +1383,10 @@ from payment_accounts.models import AutomaticPayin
 from payment_accounts.admin import AutomaticPayinAdmin
 confio_admin_site.register(AutomaticPayin, AutomaticPayinAdmin)
 
+from payment_accounts.models import PolygonReturn
+from payment_accounts.admin import PolygonReturnAdmin
+confio_admin_site.register(PolygonReturn, PolygonReturnAdmin)
+
 from payment_accounts.models import CobreJourney
 from payment_accounts.admin import CobreJourneyAdmin
 confio_admin_site.register(CobreJourney, CobreJourneyAdmin)

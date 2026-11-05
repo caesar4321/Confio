@@ -119,7 +119,7 @@ class RelayClient:
         return result
 
     def quote(self, source, destination, amount, *, source_address,
-              destination_address, deposit_address=False):
+              destination_address, deposit_address=False, permit=False):
         if {source, destination} != set(TOKENS):
             raise RelayError('Only BSC USDT and Polygon USDC are supported')
         uint(amount, positive=True)
@@ -131,6 +131,10 @@ class RelayClient:
             'amount': amount, 'tradeType': 'EXACT_INPUT',
             'includeProtocolData': True,
         }
+        if permit:
+            # USDC's EIP-3009: the owner signs, Relay submits and pays origin
+            # gas from the input. Execution validates the signature step.
+            body['usePermit'] = True
         if deposit_address:
             # /quote/v2 ignores strict; EXACT_INPUT deposit addresses can be
             # requoted on deposit. Never claim strict guarantees from this flag.
@@ -194,6 +198,12 @@ class RelayClient:
                 raise RelayError('Relay origin refund is missing')
         except (KeyError, TypeError, AttributeError, IndexError) as exc:
             raise RelayError('Relay quote is missing required binding data') from exc
+
+    def execute_permit(self, body, signature):
+        """Hand Relay a signed permit; Relay submits it on the origin chain."""
+        if not isinstance(signature, str) or not re.fullmatch(r'0x[0-9a-fA-F]{130}', signature):
+            raise RelayError('Invalid permit signature')
+        return self._request('POST', '/execute/permits', body=body, params={'signature': signature})
 
     def status(self, request_id):
         if not isinstance(request_id, str) or not re.fullmatch(r'0x[0-9a-fA-F]{64}', request_id):

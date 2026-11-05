@@ -74,6 +74,7 @@ import {
 } from '../utils/deferredReferralRegistration';
 import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 import { PendingIncomingCard, usePendingIncoming } from '../components/PendingIncomingCard';
+import { usePolygonReturn } from '../hooks/usePolygonReturn';
 import { HeroMonthSlot } from '../components/HeroMonthLine';
 import { useMonthHeroLine } from '../hooks/useMonthHeroLine';
 import { AnalyticsService } from '../services/analyticsService';
@@ -240,6 +241,10 @@ export const HomeScreen = () => {
   // BSC mirror of the auto-swap: sweep mis-deposited BNB → USDT (silent,
   // server-gated; no-op until CUSD_PLUS_BNB_AUTOCONVERT_ENABLED flips on).
   useBnbAutoConvert(isAuthenticated);
+
+  // Same contract for dollars a refund left on the person's address on
+  // another network: returned to the balance silently, on mount + foreground.
+  usePolygonReturn(isAuthenticated, activeAccount?.id);
 
   // Finish any cUSD+ mint whose USDT already arrived. Home carries it for the
   // same reason it carries the USDC→cUSD auto-swap: this is where users land,
