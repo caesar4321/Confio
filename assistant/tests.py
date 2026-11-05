@@ -1602,6 +1602,57 @@ class PortfolioAndNeedsTests(TestCase):
                           is_business_owner=False, tz=ZoneInfo('UTC'))
         self.assertFalse(portfolio_data(employee)['disponible'])
 
+    def test_portfolio_totals_stocks_so_the_model_never_adds(self):
+        from .engine import _stock_totals, portfolio_data
+        rows = [{'ticker': 'ASML', 'valor_usd': '110.50', 'invertido_usd': '120.00', 'ganancia_usd': '-9.50'},
+                {'ticker': 'MSFT', 'valor_usd': '70.25', 'invertido_usd': '69.99', 'ganancia_usd': '0.26'},
+                {'ticker': 'NEW', 'valor_usd': '5.00'}]
+        many = [{'ticker': f'T{i}', 'valor_usd': '1.00', 'invertido_usd': '2.00', 'ganancia_usd': '-1.00'}
+                for i in range(17)]
+        month = {'disponible': True, 'actual': {'salio_usd': '0.00'}}
+
+        def run(held, unpriced=()):
+            def fake(address, limit=15, unpriced=None):
+                self.assertIsNone(limit)  # totals see every holding, not just the 15 listed
+                unpriced.extend(unpriced_syms)
+                return held
+            unpriced_syms = list(unpriced)
+            with patch('blockchain.bsc_balance_service.BscBalanceService.balances_raw', return_value={}), \
+                    patch('cusd_plus.eligibility.is_ondo_eligible', return_value=True), \
+                    patch('assistant.engine.month_summary_data', return_value=month), \
+                    patch('assistant.engine._holdings', side_effect=fake):
+                return portfolio_data(self.viewer)
+        result = run(rows)
+        self.assertEqual(result['acciones_total_valor_usd'], '185.75')
+        self.assertEqual(result['acciones_total_invertido_usd'], '189.99')
+        # Gain only over known-cost stocks (-9.24), never value minus invested (-4.24).
+        self.assertEqual(result['acciones_total_ganancia_usd'], '-9.24')
+        self.assertEqual(result['acciones_valor_con_invertido_conocido_usd'], '180.75')
+        self.assertEqual(result['acciones_sin_invertido_conocido'], 1)
+        self.assertIn('nunca restes', result['nota'])
+        result = run(many)
+        self.assertEqual(len(result['acciones']), 15)
+        self.assertEqual((result['acciones_total_valor_usd'], result['acciones_total_invertido_usd'],
+                          result['acciones_total_ganancia_usd'], result['acciones_no_listadas']),
+                         ('17.00', '34.00', '-17.00', 2))
+        self.assertNotIn('acciones_sin_invertido_conocido', result)
+        self.assertNotIn('acciones_valor_con_invertido_conocido_usd', result)
+        # A held stock with no price is not silently missing from the total.
+        result = run(rows[:1], unpriced=['XYZon'])
+        self.assertEqual((result['acciones_total_valor_usd'], result['acciones_sin_precio']), ('110.50', 1))
+        result = run([], unpriced=['XYZon'])
+        self.assertEqual(result['acciones_sin_precio'], 1)
+        self.assertNotIn('acciones_total_valor_usd', result)
+        result = run([{'ticker': 'X', 'valor_usd': '3.00'}])
+        self.assertEqual(result['acciones_total_valor_usd'], '3.00')
+        self.assertNotIn('acciones_total_invertido_usd', result)
+        self.assertNotIn('acciones_total_ganancia_usd', result)
+        for held in ([], 'desconocido'):
+            result = run(held)
+            self.assertFalse(any(k.startswith('acciones_total') for k in result))
+            self.assertNotIn('nunca restes', result['nota'])
+        self.assertEqual(_stock_totals([], 0), {})
+
     def test_portfolio_shows_old_cusd_only_when_there_is_some(self):
         # 2026-11-04: "tus saldos aparecen en US$0" to someone with US$18,53 of old cUSD.
         from datetime import timedelta

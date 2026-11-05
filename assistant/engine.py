@@ -335,7 +335,11 @@ def portfolio_data(viewer: Viewer):
         result['confio_dollar_plus_usd'] = _plus_usd(raw.get('CUSD_PLUS'))
         # Holdings regardless of eligibility: someone whose country changed
         # still owns their stocks (eligibility only gates buying).
-        result['acciones'] = _holdings(address)
+        unpriced = []
+        rows = _holdings(address, limit=None, unpriced=unpriced)
+        result['acciones'] = rows[:15] if isinstance(rows, list) else rows
+        if isinstance(rows, list) and (rows or unpriced):
+            result.update(_stock_totals(rows, len(unpriced)))
     # Old cUSD lives on Algorand: told "tus saldos aparecen en US$0" while
     # Home showed US$18,53 of it (2026-11-04). Same cached read as Home.
     result.update(_legacy_cusd(viewer.account) or {})
@@ -360,12 +364,41 @@ def portfolio_data(viewer: Viewer):
         result['nota'] += (' En acciones, invertido_usd es lo que pagó por las que tiene y ganancia_usd/ganancia_pct '
                            'es la ganancia o pérdida si vendiera hoy (no realizada). Si una acción no trae ganancia, '
                            'no la calcules.')
+    if any(k.startswith('acciones_total') or k == 'acciones_sin_precio' for k in result):
+        # "Suma total": it added the list itself and said US$673,65, then
+        # US$703,65 (2026-11-04). Totals come from here, never its own sums.
+        result['nota'] += (' Para totales de acciones usa los campos acciones_total_* tal cual: no sumes ni restes '
+                           'tú, y nunca restes el invertido del valor (la ganancia total ya viene en '
+                           'acciones_total_ganancia_usd). Si vienen acciones_sin_invertido_conocido, '
+                           'acciones_sin_precio o acciones_no_listadas, di que ese total no incluye esas acciones. '
+                           'Si listas sus acciones, lista todas las que vienen.')
     if not spent:
         # New accounts: saying "no tengo datos de tus gastos" on every answer
         # was the most repeated filler in real replies (2026-10-08 review).
         result['nota'] += (' Todavía no tiene un mes completo de gastos: no menciones sus gastos ni cuánto '
                            'dejar disponible; explica sus opciones.')
     return result
+
+
+def _stock_totals(rows, unpriced=0):
+    """Sums over every holding (not just the 15 listed). Invested and gain
+    only cover stocks whose cost is known, so the two are never compared
+    against a value that includes the others; every gap is counted."""
+    def total(items, key):
+        return _usd(sum(Decimal(r[key].replace(',', '')) for r in items))
+    out = {'acciones_total_valor_usd': total(rows, 'valor_usd')} if rows else {}
+    if unpriced:
+        out['acciones_sin_precio'] = unpriced  # held but not in the value total
+    known = [r for r in rows if 'invertido_usd' in r]
+    if known:
+        out['acciones_total_invertido_usd'] = total(known, 'invertido_usd')
+        out['acciones_total_ganancia_usd'] = total(known, 'ganancia_usd')
+        if len(known) < len(rows):
+            out['acciones_sin_invertido_conocido'] = len(rows) - len(known)
+            out['acciones_valor_con_invertido_conocido_usd'] = total(known, 'valor_usd')
+    if len(rows) > 15:
+        out['acciones_no_listadas'] = len(rows) - 15
+    return out
 
 
 def _plus_net_apy():
@@ -733,7 +766,7 @@ def _trade_books(address):
         return None
 
 
-def _holdings(address, limit=15):
+def _holdings(address, limit=15, unpriced=None):
     from cusd_plus import gm_api
     from inbox.member_portfolio import UNITS_TOLERANCE
     from cusd_plus.gm_holdings import known_holdings_units
@@ -756,6 +789,8 @@ def _holdings(address, limit=15):
     for symbol, amount in units.items():
         pm = (market.get(symbol) or {}).get('primaryMarket') or {}
         if pm.get('price') is None:
+            if unpriced is not None:
+                unpriced.append(symbol)
             continue
         listing = _gm_listing(market.get(symbol) or {}) or (symbol, symbol.removesuffix('on'), '')
         ticker, name = listing[1], third_party_text(listing[2], 40)
