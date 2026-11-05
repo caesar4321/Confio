@@ -579,3 +579,71 @@ class PagoAsapWebhookTests(TestCase):
         response, delay = self._post({'event': 'x'}, sign=False)
         self.assertEqual(response.status_code, 403)
         delay.assert_not_called()
+
+
+class PagoAsapSignatureTests(TestCase):
+    """RFC 9421 Ed25519 request signatures (Pago ASAP's published profile)."""
+
+    VECTOR_X = 'AC4hWOCfYnwX0V2R4iX1o9rncyGNT3QSa2Ulguwozp8'
+    VECTOR_KEYID = 'z9K4FNcAU18TOFoIdPKBLG4I2r-cwaGrOgxrbtdC8ys'
+    VECTOR_SIGNATURE = 'DLBBlp1UgMU+l7VSMAtPA1roEA7Oje8/qIV3yRWkTh7eAeIzwMl6Q3N79fQ9mpmumC/K8LPazC/qhyYo/vcqDw=='
+
+    def test_reproduces_the_published_test_vector(self):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from ramps.pagoasap_client import key_id, signature_base
+        self.assertEqual(key_id(self.VECTOR_X), self.VECTOR_KEYID)
+        base, params, digest = signature_base(
+            'POST', 'https://api.example.com/v2/payments?currency=USD', 'Bearer <token>', b'{"amount":"10.00"}',
+            created=1700000000, keyid=self.VECTOR_KEYID, nonce='d3-vector-nonce-0001')
+        self.assertEqual(digest, 'sha-256=:6etJWsy84qDpW74Hm5+eQsyuIDccFRbj7TA20qeHz1M=:')
+        self.assertEqual(params, '("@method" "@authority" "@path" "@query" "authorization" "content-digest")'
+                                 ';created=1700000000;keyid="z9K4FNcAU18TOFoIdPKBLG4I2r-cwaGrOgxrbtdC8ys"'
+                                 ';nonce="d3-vector-nonce-0001";alg="ed25519"')
+        raw = base64.urlsafe_b64decode(self.VECTOR_X + '=')
+        # Raises if our signature base differs from theirs by a single byte.
+        Ed25519PublicKey.from_public_bytes(raw).verify(base64.b64decode(self.VECTOR_SIGNATURE), base.encode())
+
+    def _client(self, pem):
+        from ramps.pagoasap_client import PagoAsapClient
+        session = mock.Mock()
+        session.prepare_request.side_effect = lambda req: req.prepare()
+        session.merge_environment_settings.return_value = {'verify': True, 'proxies': {}, 'stream': None, 'cert': None}
+        session.send.return_value = mock.Mock(status_code=200, ok=True, json=lambda: {'payload': {'intentId': 'i-1'}})
+        with override_settings(PAGOASAP_SIGNING_PRIVATE_KEY=pem, PAGOASAP_CLIENT_ID='c', PAGOASAP_CLIENT_SECRET='s',
+                               PAGOASAP_AUTH_URL='https://auth.example', PAGOASAP_AUDIENCE='a',
+                               PAGOASAP_API_URL='https://gateway.example.com/partners'):
+            client = PagoAsapClient(session=session)
+        client._token = lambda refresh=False: 'tok'
+        return client, session
+
+    def test_signed_requests_verify_and_never_reuse_a_nonce(self):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
+        from ramps.pagoasap_client import signature_base
+        key = Ed25519PrivateKey.generate()
+        pem = key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()).decode()
+        client, session = self._client(pem)
+        client._request('POST', '/payments/pago-movil', json_body={'amountVES': 10.5}, idempotency_key='k')
+        client._request('GET', '/rate', params={'from': 'USD', 'to': 'VES'})
+        post, get = (call.args[0] for call in session.send.call_args_list)
+        self.assertEqual(post.body, b'{"amountVES":10.5}')
+        for sent in (post, get):
+            inner = sent.headers['Signature-Input'][len('sig1='):]
+            fields = dict(part.split('=', 1) for part in inner.split(';')[1:])
+            base, params, _ = signature_base(sent.method, sent.url, 'Bearer tok', sent.body,
+                                             created=int(fields['created']), keyid=fields['keyid'].strip('"'),
+                                             nonce=fields['nonce'].strip('"'))
+            self.assertEqual(params, inner)
+            key.public_key().verify(base64.b64decode(sent.headers['Signature'][len('sig1=:'):-1]), base.encode())
+        self.assertIn('"content-digest"', post.headers['Signature-Input'])
+        self.assertNotIn('content-digest', get.headers['Signature-Input'])
+        self.assertIn('"@query"', get.headers['Signature-Input'])
+        self.assertNotEqual(post.headers['Signature-Input'].split('nonce=')[1], get.headers['Signature-Input'].split('nonce=')[1])
+
+    def test_without_a_key_requests_stay_unsigned(self):
+        client, session = self._client('')
+        client._request('POST', '/payments/pago-movil', json_body={'a': 1}, idempotency_key='k')
+        sent = session.send.call_args.args[0]
+        self.assertNotIn('Signature', sent.headers)
+        self.assertFalse(session.send.call_args.kwargs['allow_redirects'])
+        self.assertEqual(sent.headers['content-type'], 'application/json')

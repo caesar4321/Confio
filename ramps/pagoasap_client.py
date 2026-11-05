@@ -3,14 +3,22 @@
 Auth is an Auth0 client-credentials token (24 h), cached. Every POST needs an
 `Idempotency-Key` UUID: the same key replays the first answer, even for a
 different body, so a retry with new details must use a new key.
+
+With a signing key configured, every v2 request also carries an RFC 9421
+Ed25519 signature (Content-Digest, Signature-Input, Signature) over the exact
+bytes sent. Each attempt is signed afresh: new `created`, new `nonce`.
 """
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import logging
+import secrets
 import time
 import uuid
 from decimal import Decimal
+from urllib.parse import urlsplit
 
 import requests
 from django.conf import settings
@@ -40,6 +48,45 @@ def idempotency_key(seed: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f'confio:pagoasap:{seed}'))
 
 
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
+
+
+def key_id(public_x: str) -> str:
+    """RFC 7638 thumbprint of the Ed25519 public key (base64url `x`)."""
+    canonical = json.dumps({'crv': 'Ed25519', 'kty': 'OKP', 'x': public_x}, separators=(',', ':'), sort_keys=True)
+    return base64.urlsafe_b64encode(hashlib.sha256(canonical.encode()).digest()).decode().rstrip('=')
+
+
+def public_x(private_key) -> str:
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    raw = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    return base64.urlsafe_b64encode(raw).decode().rstrip('=')
+
+
+def signature_base(method: str, url: str, authorization: str, body: bytes | None, *,
+                   created: int, keyid: str, nonce: str) -> tuple[str, str, str]:
+    """(signature base, Signature-Input value, Content-Digest or '') for
+    Pago ASAP's profile: @method @authority @path [@query] authorization
+    [content-digest]; params created, keyid, nonce, alg."""
+    parts = urlsplit(url)
+    authority = (parts.hostname or '').lower()
+    if parts.port and parts.port != 443:
+        authority = f'{authority}:{parts.port}'
+    lines = [('@method', method.upper()), ('@authority', authority), ('@path', parts.path or '/')]
+    if '?' in url:
+        lines.append(('@query', f'?{parts.query}'))
+    lines.append(('authorization', authorization))
+    digest = ''
+    if body:
+        digest = f'sha-256=:{_b64(hashlib.sha256(body).digest())}:'
+        lines.append(('content-digest', digest))
+    params = (f'({" ".join(chr(34) + name + chr(34) for name, _ in lines)})'
+              f';created={created};keyid="{keyid}";nonce="{nonce}";alg="ed25519"')
+    base = '\n'.join([f'"{name}": {value}' for name, value in lines] + [f'"@signature-params": {params}'])
+    return base, params, digest
+
+
 class PagoAsapClient:
     def __init__(self, *, session: requests.Session | None = None, timeout: int = DEFAULT_TIMEOUT_S):
         self.client_id = getattr(settings, 'PAGOASAP_CLIENT_ID', '') or ''
@@ -49,6 +96,24 @@ class PagoAsapClient:
         self.base_url = (getattr(settings, 'PAGOASAP_API_URL', '') or '').rstrip('/')
         self.session = session or requests.Session()
         self.timeout = timeout
+        self.signing_key = None
+        pem = getattr(settings, 'PAGOASAP_SIGNING_PRIVATE_KEY', '') or ''
+        if pem:
+            from cryptography.hazmat.primitives.serialization import load_pem_private_key
+            # A configured key that does not load must stop the client, never
+            # fall back to unsigned requests.
+            self.signing_key = load_pem_private_key(pem.encode(), password=None)
+            self.signing_key_id = key_id(public_x(self.signing_key))
+
+    def _sign(self, prepared: requests.PreparedRequest) -> None:
+        body = prepared.body.encode() if isinstance(prepared.body, str) else prepared.body
+        base, params, digest = signature_base(
+            prepared.method, prepared.url, prepared.headers['Authorization'], body,
+            created=int(time.time()), keyid=self.signing_key_id, nonce=secrets.token_urlsafe(18))
+        if digest:
+            prepared.headers['Content-Digest'] = digest
+        prepared.headers['Signature-Input'] = f'sig1={params}'
+        prepared.headers['Signature'] = f'sig1=:{_b64(self.signing_key.sign(base.encode()))}:'
 
     @property
     def is_configured(self) -> bool:
@@ -81,9 +146,19 @@ class PagoAsapClient:
         headers = {'Authorization': f'Bearer {self._token()}', 'accept': 'application/json'}
         if idempotency_key:
             headers['idempotency-key'] = idempotency_key
+        if json_body is not None:
+            headers['content-type'] = 'application/json'
         try:
-            response = self.session.request(method, f'{self.base_url}/v2{path}', json=json_body, params=params,
-                                            headers=headers, timeout=self.timeout)
+            # Exact bytes, prepared before signing: the signature covers them.
+            prepared = self.session.prepare_request(requests.Request(
+                method, f'{self.base_url}/v2{path}', params=params, headers=headers,
+                data=None if json_body is None else json.dumps(json_body, separators=(',', ':')).encode()))
+            if self.signing_key is not None:
+                self._sign(prepared)
+            # Same proxy/CA environment as session.request. Never follow a
+            # redirect: it would carry a signature over the original URL.
+            options = self.session.merge_environment_settings(prepared.url, {}, None, None, None)
+            response = self.session.send(prepared, timeout=self.timeout, allow_redirects=False, **options)
         except requests.RequestException as exc:
             # Never include the exception text: it can carry the URL.
             message = f'Pago ASAP request failed ({type(exc).__name__})'
