@@ -771,7 +771,7 @@ class KoyweClient:
             .first()
         )
 
-    def create_ramp_order(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_code: str, email: str | None, wallet_address: str | None, country_code: str, bank_info: Any = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> KoyweOrderResult:
+    def create_ramp_order(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_code: str, email: str | None, wallet_address: str | None, country_code: str, bank_info: Any = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None, on_ramp_destination: Any = None) -> KoyweOrderResult:
         normalized_direction = direction.upper()
         if str(payment_method_code or '').upper() == 'BREB':
             if normalized_direction != 'OFF_RAMP' or country_code.upper() not in {'CO', 'COL'} or fiat_symbol.upper() != 'COP':
@@ -815,6 +815,10 @@ class KoyweClient:
             raise KoyweError('Koywe quote response did not include quoteId')
 
         destination_address = wallet_address if normalized_direction == 'ON_RAMP' else None
+        if normalized_direction == 'ON_RAMP' and on_ramp_destination is not None:
+            # A destination that depends on the exact amount this quote
+            # delivers (a Relay deposit address for the Polygon route).
+            destination_address = on_ramp_destination(quote)
         if normalized_direction == 'OFF_RAMP':
             if not bank_info:
                 raise KoyweError('A saved payout method is required for off-ramp orders')

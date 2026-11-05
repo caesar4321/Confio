@@ -81,6 +81,18 @@ def reconcile_refund(*, ramp_id, client):
         return
     if status != 'INVALID_WITHDRAWALS_DETAILS' or refund.state in {'requested', 'started', 'in_progress', 'rejected'}:
         return
+    from ramps import koywe_polygon
+    if koywe_polygon.polygon(ramp):
+        # Koywe would refund USDC on Polygon, outside the person's BSC
+        # balance. Ops returns it; never auto-request.
+        try:
+            from config.ops_alerts import send_ops_alert
+            send_ops_alert(f'⚠️ Koywe por Polygon (retiro) {ramp.internal_id}: datos de retiro inválidos; '
+                           f'reembolso manual a BSC.', dedupe_key=f'koywe_polygon_refund:{ramp.pk}',
+                           dedupe_seconds=86400)
+        except Exception:  # noqa: BLE001
+            logger.exception('Koywe Polygon refund alert failed for %s', ramp.pk)
+        return
     # Require the persisted source rail to agree with provider data when given.
     if payload.get('symbolIn') and str(payload['symbolIn']).strip().lower() != str(ramp.crypto_currency).strip().lower():
         return

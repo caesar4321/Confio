@@ -660,6 +660,14 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
         if c['to'] == USDT_BSC and c['data'][2:10].lower() == SEL_TRANSFER
     ]
     allowed_exit_transfer = False
+    for transfer in usdt_transfers:
+        # A Koywe off-ramp routed through Polygon pays a Relay deposit
+        # address whose quote expires: never sponsor a payment into it
+        # afterwards (the app may hold the address from before).
+        from ramps.koywe_polygon import expired_deposit_address
+        recipient = '0x' + _word(transfer['data'][2:].lower(), 0)[-40:]
+        if expired_deposit_address(recipient):
+            raise PolicyError('bridge_route_expired')
     if usdt_transfers and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
         normalized_cusd_exit = economic_selectors == [
             SEL_UNWRAP_TO_CUSD, SEL_CUSD_REDEEM]

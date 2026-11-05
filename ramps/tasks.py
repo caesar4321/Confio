@@ -136,6 +136,9 @@ def poll_koywe_ramp_transactions():
                 order_payload=result.raw_response,
                 next_action_url=result.next_action_url,
             )
+            from ramps import koywe_polygon
+            if koywe_polygon.needs_settlement(ramp_tx):
+                koywe_polygon.settle(ramp_tx)
             if ramp_tx.direction == 'off_ramp' and (
                 ramp_tx.status_detail.startswith(('invalid_withdrawals_details', 'refund_'))
                 or hasattr(ramp_tx, 'koywe_refund')
@@ -151,6 +154,26 @@ def poll_koywe_ramp_transactions():
             logger.exception('Unexpected Koywe poll failure for %s', ramp_tx.provider_order_id)
 
     return f'Polled {checked_count} Koywe ramps, updated {updated_count}'
+
+
+@shared_task(name='ramps.tasks.settle_koywe_polygon_bridges')
+def settle_koywe_polygon_bridges():
+    """Koywe on-ramps whose USDC is on its way through Relay to BSC."""
+    from ramps import koywe_polygon
+    ramps = RampTransaction.objects.filter(
+        provider='koywe', direction='on_ramp', status='PROCESSING',
+        metadata__koywe_polygon__phase__in=['provider_delivered', 'delivering', 'review'],
+    ).exclude(
+        metadata__koywe_polygon__phase='review', metadata__koywe_polygon__alerted__isnull=False,
+    )
+    settled = 0
+    for ramp_tx in ramps.iterator():
+        if koywe_polygon.settle(ramp_tx).status == 'COMPLETED':
+            settled += 1
+    if timezone.now().minute % 5 == 0:  # Relay status reads, not every minute
+        for ramp_tx in koywe_polygon.open_off_ramps():
+            koywe_polygon.check_off_ramp(ramp_tx)
+    return f'Settled {settled} Koywe Polygon bridges'
 
 
 @shared_task(name='ramps.tasks.poll_ve_pagomovil')

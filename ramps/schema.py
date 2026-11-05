@@ -1252,7 +1252,25 @@ class CreateRampOrder(graphene.Mutation):
             if not bank_info:
                 return RampOrderType(success=False, error='Saved payout method not found for the active account')
 
-        client = KoyweClient(crypto_symbol='USDT BSC') if savings_rail else KoyweClient()
+        from ramps import koywe_polygon
+        polygon_route = savings_rail and koywe_polygon.enabled()
+        client = (KoyweClient(crypto_symbol=koywe_polygon.crypto_symbol()) if savings_rail
+                  else KoyweClient())
+        on_ramp_route = {}
+
+        def _on_ramp_destination(provider_quote):
+            # Koywe pays this quote's exact USDC to a Relay address that
+            # bridges it to the person's BSC wallet.
+            try:
+                on_ramp_route.update(koywe_polygon.on_ramp_route(
+                    current_account.bsc_address, Decimal(str(provider_quote.get('amountOut')))))
+            except (koywe_polygon.KoywePolygonError, InvalidOperation, TypeError) as exc:
+                raise KoyweError(str(exc) if isinstance(exc, koywe_polygon.KoywePolygonError)
+                                 else koywe_polygon.ROUTE_UNAVAILABLE) from exc
+            # Saved before the order is submitted: an order Koywe accepted
+            # whose answer never reached us still settles through its route.
+            koywe_polygon.save_route(address_reservation, on_ramp_route)
+            return on_ramp_route['deposit_address']
         if not client.is_configured:
             if getattr(settings, 'KOYWE_USE_MOCK_RAMP', False):
                 return CreateMockRampOrder().mutate(
@@ -1477,6 +1495,9 @@ class CreateRampOrder(graphene.Mutation):
                             'wallet_address_reserved': True,
                             'wallet_address_reservation_state': 'creating_order',
                             'reconcile_key': external_id,
+                            # Marked before Koywe sees the order: whatever
+                            # happens next, it is never treated as direct BSC.
+                            **({koywe_polygon.SECTION: {'phase': 'created'}} if polygon_route else {}),
                         },
                     )
             if normalized_direction == 'ON_RAMP':
@@ -1498,6 +1519,8 @@ class CreateRampOrder(graphene.Mutation):
                 country_code=resolved_country_code,
                 bank_info=bank_info,
                 external_id=external_id,
+                on_ramp_destination=(_on_ramp_destination
+                                     if polygon_route and normalized_direction == 'ON_RAMP' else None),
                 contact_profile=contact_profile,
                 previous_emails=_get_koywe_profile_previous_emails(
                     user=user,
@@ -1561,7 +1584,7 @@ class CreateRampOrder(graphene.Mutation):
         if fee_rollout and normalized_direction == 'ON_RAMP':
             try:
                 from cusd_plus.cusd_vault import WAD, preview_mint_wei
-                delivered_wei = int(
+                delivered_wei = int(on_ramp_route['amount_out']) if on_ramp_route else int(
                     (Decimal(str(result.amount_out)) * WAD).to_integral_value(rounding=ROUND_DOWN)
                 )
                 order_fee_preview = preview_mint_wei(delivered_wei)
@@ -1605,6 +1628,44 @@ class CreateRampOrder(graphene.Mutation):
             auth_email=koywe_email,
             order_payload=order_payload,
         )
+        payment_details = annotate_koywe_deposit_address(
+            order_payload, savings_rail=savings_rail,
+            allow_funding=_provider_amount_matches(
+                result.amount_in, provider_order_amount,
+                enforce=(normalized_direction == 'OFF_RAMP'),
+            ),
+            deposit_amount_wei=(
+                int(provider_order_amount * Decimal(10 ** 18))
+                if normalized_direction == 'OFF_RAMP'
+                and fee_capable_client and order_fee_preview is not None
+                else order_fee_preview.net_wei
+                if fee_capable_client and order_fee_preview is not None
+                else None
+            ),
+            gross_debit_amount_wei=(
+                order_fee_preview.gross_wei
+                if fee_capable_client and order_fee_preview is not None
+                else None
+            ),
+        )
+        if polygon_route and normalized_direction == 'OFF_RAMP':
+            # The person pays USDT on BSC to a Relay address that bridges it to
+            # Koywe's Polygon deposit address for this order.
+            if not payment_details.get(CONFIO_DEPOSIT_ADDRESS_KEY):
+                # Nothing verified to bridge to; Koywe's raw Polygon fields
+                # must never be paid from BSC.
+                return RampOrderType(success=False, error=koywe_polygon.ROUTE_UNAVAILABLE)
+            usdt_wei = int(payment_details.get(CONFIO_DEPOSIT_AMOUNT_WEI_KEY)
+                           or int(provider_order_amount * Decimal(10 ** 18)))
+            try:
+                route = koywe_polygon.off_ramp_route(
+                    current_account.bsc_address, payment_details[CONFIO_DEPOSIT_ADDRESS_KEY], usdt_wei)
+            except koywe_polygon.KoywePolygonError as exc:
+                # The unfunded Koywe order expires on its own.
+                return RampOrderType(success=False, error=str(exc))
+            koywe_polygon.save_route(ramp_tx, route)
+            payment_details = koywe_polygon.vouch_off_ramp_deposit(
+                payment_details, ramp_tx, CONFIO_DEPOSIT_ADDRESS_KEY)
         return RampOrderType(
             success=True,
             error=None,
@@ -1618,32 +1679,15 @@ class CreateRampOrder(graphene.Mutation):
             amount_out=(
                 format(order_fee_preview.net, 'f')
                 if normalized_direction == 'ON_RAMP' and order_fee_preview is not None
+                else format(Decimal(int(on_ramp_route['amount_out'])) / Decimal(10 ** 18), 'f')
+                if on_ramp_route
                 else result.amount_out
             ),
             total_change_display=result.total_change_display,
             rate_display=result.rate_display,
             next_step=result.next_step,
             next_action_url=result.next_action_url,
-            payment_details=annotate_koywe_deposit_address(
-                order_payload, savings_rail=savings_rail,
-                allow_funding=_provider_amount_matches(
-                    result.amount_in, provider_order_amount,
-                    enforce=(normalized_direction == 'OFF_RAMP'),
-                ),
-                deposit_amount_wei=(
-                    int(provider_order_amount * Decimal(10 ** 18))
-                    if normalized_direction == 'OFF_RAMP'
-                    and fee_capable_client and order_fee_preview is not None
-                    else order_fee_preview.net_wei
-                    if fee_capable_client and order_fee_preview is not None
-                    else None
-                ),
-                gross_debit_amount_wei=(
-                    order_fee_preview.gross_wei
-                    if fee_capable_client and order_fee_preview is not None
-                    else None
-                ),
-            ),
+            payment_details=payment_details,
             instruction_snapshot=build_koywe_instruction_snapshot(
                 order_payload=order_payload,
                 next_action_url=result.next_action_url,
@@ -2047,7 +2091,10 @@ class Query(graphene.ObjectType):
                 logger.warning('cUSD fee preview failed for off-ramp quote', exc_info=True)
                 raise ValidationError('No pudimos calcular la comisión de Confío.') from exc
 
-        client = KoyweClient(crypto_symbol='USDT BSC') if is_bsc_dollar else KoyweClient()
+        from ramps import koywe_polygon
+        polygon_route = is_bsc_dollar and koywe_polygon.enabled()
+        client = (KoyweClient(crypto_symbol=koywe_polygon.crypto_symbol()) if is_bsc_dollar
+                  else KoyweClient())
         if not client.is_configured:
             raise ValidationError("Koywe credentials are not configured on the server")
 
@@ -2111,6 +2158,12 @@ class Query(graphene.ObjectType):
             _note_ramp_quote(user, normalized_direction, resolved_country_code, 'provider_error',
                              amount=decimal_amount, fiat=resolved_fiat_symbol, error_kind=_koywe_error_kind(exc))
             raise ValidationError(_format_koywe_error(exc, normalized_direction))
+
+        if polygon_route:
+            try:
+                quote = koywe_polygon.adjust_quote(quote, normalized_direction)
+            except koywe_polygon.KoywePolygonError as exc:
+                raise ValidationError(str(exc)) from exc
 
         if fee_enabled and normalized_direction == 'ON_RAMP':
             try:
@@ -2224,14 +2277,26 @@ class Query(graphene.ObjectType):
         ))
         fee_voucher_valid = not is_off_ramp or not has_fee_metadata or (
             gross_wei is not None and deposit_wei is not None)
+        from ramps import koywe_polygon
+        polygon_off_ramp = is_off_ramp and ramp_tx is not None and koywe_polygon.polygon(ramp_tx)
+        public_status, public_details = result.status, result.status_details
+        if (ramp_tx is not None and not is_off_ramp and koywe_polygon.polygon(ramp_tx)
+                and ramp_tx.status != 'COMPLETED' and str(public_status or '').upper() in (
+                    'DELIVERED', 'CRYPTO_DELIVERED')):
+            # Koywe delivered USDC to the bridge; the person's dollars are
+            # still crossing to BSC.
+            public_status, public_details = 'CRYPTO_TX_SENT', 'Enviando tus dólares a tu cuenta'
         return RampOrderStatusType(
             success=True,
             error=None,
             order_id=result.order_id,
-            status=result.status,
-            status_details=result.status_details,
+            status=public_status,
+            status_details=public_details,
             next_action_url=result.next_action_url,
-            payment_details=annotate_koywe_deposit_address(
+            # A Polygon-routed off-ramp is funded through its Relay address
+            # on BSC, never Koywe's Polygon address.
+            payment_details=(koywe_polygon.vouch_off_ramp_deposit if polygon_off_ramp
+                             else _unchanged_payment_details)(annotate_koywe_deposit_address(
                 payment_payload,
                 savings_rail=(getattr(ramp_tx, 'destination', None) == 'cusd_plus'),
                 # Re-verify on EVERY read, against the amount this order was
@@ -2251,7 +2316,7 @@ class Query(graphene.ObjectType):
                 ),
                 deposit_amount_wei=deposit_wei,
                 gross_debit_amount_wei=gross_wei,
-            ),
+            ), ramp_tx, CONFIO_DEPOSIT_ADDRESS_KEY),
             instruction_snapshot=build_koywe_instruction_snapshot(
                 order_payload=result.raw_response,
                 next_action_url=result.next_action_url,
@@ -2597,6 +2662,10 @@ def _provider_amount_matches(provider_amount_in, requested, *,
         )
         return False
     return True
+
+
+def _unchanged_payment_details(details, *_):
+    return details
 
 
 def annotate_koywe_deposit_address(raw_response, *, savings_rail: bool,

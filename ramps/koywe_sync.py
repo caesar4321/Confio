@@ -646,7 +646,25 @@ def _sync_koywe_ramp_transaction_from_order(
             conversion.conversion_type,
             fallback=destination_asset,
         )
-    if direction == 'on_ramp':
+    from ramps import koywe_polygon
+    polygon_routed = direction == 'on_ramp' and koywe_polygon.polygon(ramp_tx)
+    provider_delivered = False
+    if polygon_routed and ramp_status == 'COMPLETED' and koywe_polygon.hold_completion(ramp_tx):
+        # Koywe delivered USDC to the Relay address on Polygon; the person has
+        # dollars only once koywe_polygon.settle proves the BSC arrival.
+        provider_delivered = True
+        ramp_status, normalized_detail = 'PROCESSING', 'bridging'
+    if direction == 'on_ramp' and polygon_routed:
+        # Koywe's figures are USDC on Polygon. The bridge records what reached
+        # BSC (koywe_polygon._complete); never overwrite it with them.
+        ramp_tx.fiat_amount = amount_in or ramp_tx.fiat_amount
+        ramp_tx.crypto_amount_estimated = amount_out or ramp_tx.crypto_amount_estimated
+        ramp_tx.final_currency = destination_asset
+        if conversion is not None and conversion.status == 'COMPLETED':
+            ramp_tx.final_amount = conversion.to_amount or ramp_tx.final_amount
+        elif ramp_tx.final_amount is None:
+            ramp_tx.final_amount = amount_out
+    elif direction == 'on_ramp':
         ramp_tx.fiat_amount = amount_in or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_out or ramp_tx.crypto_amount_estimated
         if ramp_status == 'COMPLETED' and amount_out is not None:
@@ -709,7 +727,11 @@ def _sync_koywe_ramp_transaction_from_order(
         ]
     )
 
-    if not ramp_tx.usdc_deposit_id and ramp_tx.direction == 'on_ramp':
+    if provider_delivered:
+        koywe_polygon.mark_provider_delivered(ramp_tx)
+        ramp_tx.refresh_from_db(fields=['metadata'])
+
+    if not ramp_tx.usdc_deposit_id and ramp_tx.direction == 'on_ramp' and not polygon_routed:
         from ramps.deposit_linking import link_koywe_ramp_to_deposit
         link_koywe_ramp_to_deposit(ramp_tx)
 

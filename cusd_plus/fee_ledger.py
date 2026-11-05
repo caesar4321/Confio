@@ -146,6 +146,10 @@ def _provider_deposit_addresses() -> set:
 
     out = set()
     for metadata in RampTransaction.objects.filter(direction='off_ramp').values_list('metadata', flat=True):
+        # Koywe through Polygon: the person paid this order's Relay address.
+        relay_deposit = str(((metadata or {}).get('koywe_polygon') or {}).get('deposit_address') or '').lower()
+        if len(relay_deposit) == 42 and relay_deposit.startswith('0x'):
+            out.add(relay_deposit)
         details = (metadata or {}).get('payment_details') or {}
         if not isinstance(details, dict):
             continue

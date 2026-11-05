@@ -306,7 +306,15 @@ def find_provider_tx_hash(value) -> str | None:
     """The delivery transaction hash a provider reported anywhere in a ramp's
     stored payloads (Koywe: provider_payload_latest.txHash), lowercased.
     The latest payload is searched before older snapshots, so a hash the
-    provider corrected wins over the one first recorded."""
+    provider corrected wins over the one first recorded.
+
+    A Koywe order routed through Polygon (ramps.koywe_polygon) has Koywe's
+    Polygon hash in its payloads; only Relay's BSC delivery hash counts."""
+    if isinstance(value, dict) and value.get('koywe_polygon'):
+        item = value.get('bsc_provider_transfer_tx_hash')
+        if isinstance(item, str) and re.fullmatch(r'0x[0-9a-fA-F]{64}', item):
+            return item.lower()
+        return None
     if isinstance(value, dict):
         for key, item in value.items():
             if key in PROVIDER_TX_HASH_KEYS and isinstance(item, str) \
