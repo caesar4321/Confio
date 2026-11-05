@@ -72,6 +72,16 @@ def routed(ramp) -> bool:
     return bool(section(ramp).get('deposit_address'))
 
 
+def expected_usdt(ramp) -> Decimal | None:
+    """The USDT a routed on-ramp should land on BSC (Relay's quote), the
+    figure to show until the bridge proves the real one."""
+    route = section(ramp).get('route') or {}
+    try:
+        return (Decimal(int(route['amount_out'])) / USDT_UNITS).quantize(MICRO, rounding=ROUND_DOWN)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 # ------------------------------------------------------------------ quotes
 
 def bridge_ratio(direction: str, amount: Decimal) -> Decimal:

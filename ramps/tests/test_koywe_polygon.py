@@ -109,6 +109,9 @@ class OnRampSettlementTests(TestCase):
         self.assertEqual(self.ramp.status, 'PROCESSING')
         self.assertTrue(self.ramp.status_detail.startswith('bridging'))
         self.assertIsNone(self.ramp.crypto_amount_actual)
+        # Shown amounts are Relay's expected USDT, not Koywe's USDC.
+        self.assertEqual(self.ramp.crypto_amount_estimated, Decimal('27.75'))
+        self.assertEqual(self.ramp.final_amount, Decimal('27.75'))
         self.assertEqual(koywe_polygon.section(self.ramp)['phase'], 'provider_delivered')
         self.assertTrue(koywe_polygon.needs_settlement(self.ramp))
 

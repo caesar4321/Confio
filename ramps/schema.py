@@ -1623,7 +1623,10 @@ class CreateRampOrder(graphene.Mutation):
             order_id=result.order_id,
             external_id=external_id,
             amount_in=result.amount_in,
-            amount_out=result.amount_out,
+            # A Polygon-routed top-up lands Relay's USDT, not Koywe's USDC:
+            # the pending row and its notification show that figure.
+            amount_out=(format(Decimal(int(on_ramp_route['amount_out'])) / Decimal(10 ** 18), 'f')
+                        if on_ramp_route else result.amount_out),
             next_action_url=result.next_action_url,
             auth_email=koywe_email,
             order_payload=order_payload,

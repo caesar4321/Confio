@@ -657,13 +657,14 @@ def _sync_koywe_ramp_transaction_from_order(
     if direction == 'on_ramp' and polygon_routed:
         # Koywe's figures are USDC on Polygon. The bridge records what reached
         # BSC (koywe_polygon._complete); never overwrite it with them.
+        bridged = koywe_polygon.expected_usdt(ramp_tx)
         ramp_tx.fiat_amount = amount_in or ramp_tx.fiat_amount
-        ramp_tx.crypto_amount_estimated = amount_out or ramp_tx.crypto_amount_estimated
+        ramp_tx.crypto_amount_estimated = bridged or amount_out or ramp_tx.crypto_amount_estimated
         ramp_tx.final_currency = destination_asset
         if conversion is not None and conversion.status == 'COMPLETED':
             ramp_tx.final_amount = conversion.to_amount or ramp_tx.final_amount
-        elif ramp_tx.final_amount is None:
-            ramp_tx.final_amount = amount_out
+        elif ramp_tx.crypto_amount_actual is None:
+            ramp_tx.final_amount = bridged or amount_out or ramp_tx.final_amount
     elif direction == 'on_ramp':
         ramp_tx.fiat_amount = amount_in or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_out or ramp_tx.crypto_amount_estimated
