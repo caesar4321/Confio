@@ -120,8 +120,11 @@ class PagoAsapClient:
         return all((self.client_id, self.client_secret, self.auth_url, self.audience, self.base_url))
 
     def _token(self, *, refresh: bool = False) -> str:
+        # One cached token per tenant and client: a sandbox token must never
+        # be sent to production, or the other way round.
+        cache_key = f"{TOKEN_CACHE_KEY}:{hashlib.sha256(f'{self.auth_url}|{self.client_id}'.encode()).hexdigest()[:16]}"
         if not refresh:
-            cached = cache.get(TOKEN_CACHE_KEY)
+            cached = cache.get(cache_key)
             if cached:
                 return cached
         try:
@@ -136,7 +139,7 @@ class PagoAsapClient:
         if not response.ok or not token:
             raise PagoAsapError('Pago ASAP auth refused', status=response.status_code)
         expires = int(payload.get('expires_in') or 3600)
-        cache.set(TOKEN_CACHE_KEY, token, max(expires - 300, 60))
+        cache.set(cache_key, token, max(expires - 300, 60))
         return token
 
     def _request(self, method: str, path: str, *, json_body=None, params=None, idempotency_key: str = '',
