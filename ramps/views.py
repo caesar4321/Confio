@@ -242,7 +242,13 @@ def pagoasap_webhook(request):
     keys = (getattr(settings, 'PAGOASAP_PAYMENT_WEBHOOK_PUBLIC_KEY', ''),
             getattr(settings, 'PAGOASAP_DEPOSIT_WEBHOOK_PUBLIC_KEY', ''))
     if not any(verify_webhook_signature(raw, signature, key) for key in keys if key):
-        logger.warning('Pago ASAP webhook rejected: invalid signature')
+        logger.warning('Pago ASAP webhook rejected: invalid signature (signature %s chars, body %s bytes)',
+                       len(signature), len(raw))
+        # Kept one hour so ops can see why (key, header or encoding); never trusted.
+        from django.core.cache import cache
+        cache.set('pagoasap:webhook:last_rejected', {
+            'body': raw[:20000].decode('utf-8', 'replace'), 'signature': signature[:512],
+            'headers': sorted(name for name in request.headers.keys())}, 3600)
         return JsonResponse({'ok': False, 'error': 'Invalid signature'}, status=403)
     try:
         payload = json.loads(raw.decode('utf-8'))
