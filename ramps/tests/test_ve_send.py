@@ -402,6 +402,14 @@ class SendCoreTests(TestCase):
                          idempotency_key(f'{ramp.external_id}:payout:1'))
         self.assertEqual(client.create_payout.call_args.kwargs['phone'], '04241234567')
 
+    def test_graphql_payload_builds_for_every_phase(self):
+        from ramps.ve_pagomovil_schema import _send_payload
+        ramp = self._funded()
+        for with_funding in (False, True):
+            payload = _send_payload(ramp, with_funding=with_funding)
+            self.assertTrue(payload.success)
+            self.assertEqual(payload.estimated_ves, ve_send._section(ramp)['estimated_ves'])
+
     def test_limit_and_allowlist_refusals_are_definite(self):
         for error in pagoasap_send.REFUSALS_403:
             ramp = self._pay(self._funded(), pagoasap_client(create=PagoAsapError(error, status=403, code=error)))

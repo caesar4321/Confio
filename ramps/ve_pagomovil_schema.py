@@ -136,6 +136,10 @@ def _send_payload(ramp, *, with_funding: bool = False) -> VePagoMovilSendOrderTy
     view = ve_send.view(ramp, with_funding=with_funding)
     beneficiary = view.pop('beneficiary', None)
     funding = view.pop('funding', None)
+    # The shared send view also carries country-neutral keys (estimated_fiat,
+    # fiat_amount) for QR Bolivia; this type keeps its VES names.
+    declared = VePagoMovilSendOrderType._meta.fields
+    view = {key: value for key, value in view.items() if key in declared}
     return VePagoMovilSendOrderType(
         success=True, order_id=str(ramp.internal_id), status=ramp.status, status_detail=ramp.status_detail,
         beneficiary=VePagoMovilBeneficiaryType(**beneficiary) if beneficiary else None,
