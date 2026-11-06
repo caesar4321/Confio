@@ -350,7 +350,8 @@ def _usable_text(text, fallback):
 
 
 def _generate(viewer, step, *, conversation, first_name, account_label, country):
-    from .engine import _identity_status, _openai_post, _output_text, TurnResult, _ve_topup, allowed_destinations
+    from .engine import (_identity_status, _openai_post, _output_text, TurnResult, _ve_send, _ve_topup,
+                         allowed_destinations)
     from .models import AssistantTurn
     from .prompts import GUIDE_OPENING_NOTE, build_system_prompt, dex_offered
 
@@ -359,6 +360,7 @@ def _generate(viewer, step, *, conversation, first_name, account_label, country)
         first_name=first_name, account_label=account_label, country=country, screen=viewer.screen,
         local_now=f'{local_now:%Y-%m-%d %H:%M} ({viewer.tz})', destinations=allowed_destinations(viewer),
         identity=_identity_status(viewer), ve_topup=_ve_topup(viewer, country),
+        ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
     ) + GUIDE_OPENING_NOTE
     model = conf.get('CONFIO_ASSISTANT_MODEL')

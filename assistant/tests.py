@@ -999,8 +999,15 @@ class IdentityInPromptTests(TestCase):
         self.assertIn('ya se puede recargar con Pago Móvil', ve_live)
         self.assertIn('y que después recargue', ve_live)  # verification gates it there too
         self.assertIn('actualice Confío', build_system_prompt(ve_topup='update', **{**common, 'country': 'VE'}))
+        ve_both = build_system_prompt(ve_topup='live', ve_send='live', **{**common, 'country': 'VE'})
+        self.assertIn('Enviar, toca Pago Móvil', ve_both)
+        self.assertNotIn('Retirar o enviar bolívares hoy no está disponible', ve_both)
+        self.assertIn('Enviar → Pago Móvil', build_system_prompt(ve_topup='live', ve_send='update',
+                                                                **{**common, 'country': 'VE'}))
+        send_only = build_system_prompt(identity='unverified', ve_send='live', **{**common, 'country': 'VE'})
+        self.assertNotIn('y que después recargue', send_only)  # top-up off: no "verify, then top up"
         ve_off = build_system_prompt(identity='unverified', **{**common, 'country': 'VE'})
-        self.assertIn('llegará muy pronto', ve_off)
+        self.assertIn('Retirar o enviar bolívares hoy no está disponible', ve_off)
         self.assertNotIn('y que después recargue', ve_off)
         ecuador = build_system_prompt(identity='unverified', **{**common, 'country': 'EC'})
         self.assertIn('no hay Recargar ni Retirar', ecuador)

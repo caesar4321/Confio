@@ -22,7 +22,8 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from . import billing, conf
-from .engine import AssistantUnavailable, Toolbelt, TurnResult, _identity_status, allowed_destinations
+from .engine import (AssistantUnavailable, Toolbelt, TurnResult, _identity_status, _ve_send, _ve_topup,
+                     allowed_destinations)
 from .models import TurnModality, VoiceSession
 from .prompts import build_system_prompt, dex_offered, transcribe_hint
 
@@ -105,7 +106,8 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         first_name=first_name, account_label=account_label, country=country,
         screen=viewer.screen, local_now=f'{local_now:%Y-%m-%d %H:%M} ({viewer.tz})',
         destinations=allowed_destinations(viewer, paid_offers_allowed=False),
-        identity=_identity_status(viewer),
+        identity=_identity_status(viewer), ve_topup=_ve_topup(viewer, country),
+        ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
     ) + VOICE_NOTE
     model = conf.get('CONFIO_ASSISTANT_REALTIME_MODEL')

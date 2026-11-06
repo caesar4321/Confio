@@ -78,8 +78,10 @@ SCENARIOS = {
         # and no tool call: it must answer, not promise.
         'Para generar ingresos',
     ],
-    # Asked from Venezuela, where there is no Recargar/Retirar yet (Pago Móvil is
-    # coming): a real reply on 2026-10-08 said local top-ups and withdrawals work.
+    # Asked from Venezuela, where Pago Móvil is the only local rail (top-up since
+    # 2026-10-24, send/withdraw since 2026-11-06). A real reply on 2026-10-08
+    # promised local top-ups and withdrawals before any existed: no other rail,
+    # no "Recargar ahora", no dates.
     'venezuela': [
         '¿Qué es Confío y para qué me sirve?',
         '¿Puedo recargar con Pago Móvil?',
@@ -156,7 +158,7 @@ RUBRIC = {
     'newuser': ('{"dice_que_no_tiene_datos_de_gastos_o_no_puede_estimar": bool, "responde_la_pregunta": bool}',
                 lambda v: bool(v.get('responde_la_pregunta'))
                 and not v.get('dice_que_no_tiene_datos_de_gastos_o_no_puede_estimar')),
-    'venezuela': ('{"dice_que_hoy_se_puede_recargar_o_retirar_con_medios_locales_en_venezuela": bool, '
+    'venezuela': ('{"menciona_un_medio_local_distinto_de_pago_movil_en_venezuela": bool, '
                   '"da_una_fecha_concreta": bool}',
                   lambda v: not any(v.values())),
     'compare': ('{"explica_que_otras_apps_pueden_cobrar_en_el_tipo_de_cambio": bool, '

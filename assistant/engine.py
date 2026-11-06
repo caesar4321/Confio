@@ -1436,19 +1436,30 @@ _NOT_NOW = re.compile(r'\?|\b(si|cuando|cuanto|una vez que|despu[eé]s|luego|ma�
 _ANY_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _SCREEN_WORDS))
 
 
-def _ve_topup(viewer, country):
-    """'live' (Pago Móvil top-up on this build), 'update' (on, but this build
-    predates it), or None (off, or not Venezuela)."""
-    if (country or '').upper() != 'VE':
+def _ve_rail(viewer, country, direction):
+    """'live' (Venezuelan Pago Móvil in this direction on this build),
+    'update' (on, but this build predates it), or None (off, or not
+    Venezuela)."""
+    # Both rows are the owner's personal account only (local_money_schema).
+    if (country or '').upper() != 'VE' or viewer.account_type != 'personal':
         return None
     try:
         from ramps import ve_pagomovil
-        if not ve_pagomovil.enabled(ve_pagomovil.TOPUP):
+        direction = ve_pagomovil.TOPUP if direction == 'topup' else ve_pagomovil.SEND
+        if not ve_pagomovil.enabled(direction):
             return None
-        return 'live' if ve_pagomovil.client_supports(ve_pagomovil.TOPUP, viewer.request_meta) else 'update'
-    except Exception:  # noqa: BLE001 - unknown: the cautious "not yet" note
+        return 'live' if ve_pagomovil.client_supports(direction, viewer.request_meta) else 'update'
+    except Exception:  # noqa: BLE001 - unknown: the cautious "not available" note
         logger.warning('Confio Assistant: VE Pago Móvil state unavailable', exc_info=True)
         return None
+
+
+def _ve_topup(viewer, country):
+    return _ve_rail(viewer, country, 'topup')
+
+
+def _ve_send(viewer, country):
+    return _ve_rail(viewer, country, 'send')
 
 
 def _identity_status(viewer):
@@ -1562,6 +1573,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
         identity=_identity_status(viewer),
         ve_topup=_ve_topup(viewer, country),
+        ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
     )
     if belt.waiting_for_team:
