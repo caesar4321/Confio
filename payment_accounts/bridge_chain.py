@@ -86,28 +86,3 @@ def authorization_domain():
         keccak(text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'),
         keccak(text='USD Coin'), keccak(text='2'), 137, USDC,
     ]))
-
-
-def authorization_digest(transfer):
-    q = transfer.quote
-    message = keccak(encode(
-        ['bytes32', 'address', 'address', 'uint256', 'uint256', 'uint256', 'bytes32'],
-        [keccak(text='TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)'),
-         q.source_address, transfer.deposit_address, int(q.amount_units), 0,
-         transfer.deadline, authorization_nonce(transfer)],
-    ))
-    return keccak(b'\x19\x01' + authorization_domain() + message)
-
-
-def authorization_calldata(transfer, signature):
-    from cusd_plus.sponsor_7702 import recover_intent_signer
-    if recover_intent_signer(authorization_digest(transfer), signature) != transfer.quote.source_address:
-        raise NextError('Invalid Polygon authorization signature')
-    raw = bytes.fromhex(signature.removeprefix('0x'))
-    if len(raw) != 65:
-        raise NextError('Invalid authorization length')
-    v = raw[64] + 27 if raw[64] < 27 else raw[64]
-    types = ['address', 'address', 'uint256', 'uint256', 'uint256', 'bytes32', 'uint8', 'bytes32', 'bytes32']
-    values = [transfer.quote.source_address, transfer.deposit_address, int(transfer.quote.amount_units),
-              0, transfer.deadline, authorization_nonce(transfer), v, raw[:32], raw[32:64]]
-    return '0x' + keccak(text='transferWithAuthorization(' + ','.join(types) + ')')[:4].hex() + encode(types, values).hex()

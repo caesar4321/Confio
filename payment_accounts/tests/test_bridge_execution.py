@@ -63,8 +63,12 @@ class BridgeExecutionTests(TestCase):
         self.client.build.return_value = build(q)
         intents = mock.Mock()
         intents.status.return_value, intents.tokens.return_value = binding(q), tokens()
+        from .test_polygon_return import permit_quote
+        self.permit_client = mock.Mock()
+        self.permit_client.quote.return_value = permit_quote(amount=int(q.amount_units), sender=q.source_address)
         with mock.patch.object(chain, 'require_chain'), mock.patch('payment_accounts.bridge_execution.funding_calls', return_value=([], {})) as funding, \
-             mock.patch.object(chain, 'token_balance', return_value=10**25), mock.patch.object(chain, 'rpc', return_value='0x'+chain.authorization_domain().hex()):
+             mock.patch.object(chain, 'token_balance', return_value=10**25), \
+             mock.patch('payment_accounts.bridge_execution._permit_client', return_value=self.permit_client):
             t = prepare_bridge(self.owner, q.internal_id, client=self.client, intents=intents)
             if direction == 'to_provider':
                 self.assertEqual(funding.call_args.kwargs['max_spend'], int(q.money_flow.metadata['gross_spend_units']))
@@ -205,18 +209,6 @@ class BindingTests(SimpleTestCase):
         with mock.patch.object(chain, 'rpc', side_effect=['0x89', r, {'number': '0x11'}, {'hash': DEST_HASH}]):
             self.assertIsNone(chain.final_receipt('POL', SOURCE_HASH))
 
-    def test_authorization_is_bound_to_amount_nonce_chain_and_recipient(self):
-        private = '0x' + '01'*32
-        self.q.source_address = EthAccount.from_key(private).address.lower()
-        t = SimpleNamespace(quote=self.q, internal_id=uuid.UUID(int=1), deposit_address=DEPOSIT, deadline=2000000000)
-        digest = chain.authorization_digest(t)
-        signature = EthAccount._sign_hash(digest, private).signature.hex()
-        data = chain.authorization_calldata(t, signature)
-        self.assertTrue(data.startswith('0xe3ee160e'))
-        self.q.amount_units = '1'
-        with self.assertRaises(NextError):
-            chain.authorization_calldata(t, signature)
-
     @mock.patch('cusd_plus.vault.reserved_usdt_wei', return_value=10**18)
     @mock.patch.object(chain, 'token_balance', return_value=3*10**18)
     def test_wallet_funding_respects_existing_reservations(self, balance, reserved):
@@ -303,30 +295,260 @@ class BridgeRecoveryTests(BridgeExecutionTests):
                 self.assertIsNotNone(second)
                 PaymentBridgeTransfer.objects.filter(pk=second.pk).delete()
 
-    def test_polygon_signed_bytes_survive_failed_broadcast_and_retry(self):
-        from payment_accounts.bridge_execution import _submit_polygon
+    def test_polygon_return_is_a_relay_permit_with_no_sponsor(self):
+        from payment_accounts.models import PolygonReturn
+        from payment_accounts import polygon_return as pr
         t, _ = self.prepared('to_wallet')
-        raw = '0x12345678'; txhash = '0x' + keccak(bytes.fromhex(raw[2:])).hex()
-        signer = mock.Mock(address=SOURCE)
-        signer.sign_typed_transaction.return_value = (raw, txhash)
-        def rpc(_, method, args):
-            if method == 'eth_getTransactionCount': return '0x0'
-            if method == 'eth_gasPrice': return hex(30*10**9)
-            if method == 'eth_sendRawTransaction':
-                stored = PaymentBridgeTransfer.objects.get(pk=t.pk)
-                self.assertEqual(stored.signed_raw_tx, raw)
-                self.assertEqual(stored.source_tx_hash, txhash)
-                raise RuntimeError('connection lost after broadcast')
-            return '0x'
-        with mock.patch.object(chain, 'authorization_calldata', return_value='0x1234'), \
-             mock.patch.object(chain, 'require_chain'), mock.patch.object(chain, 'rpc', side_effect=rpc), \
-             mock.patch('blockchain.evm_kms_signer.get_bsc_sponsor_signer_from_settings', return_value=signer):
-            _submit_polygon(t, 'signature')
-            _submit_polygon(t, 'signature')
-        signer.sign_typed_transaction.assert_called_once()
+        self.assertEqual(t.binding['provider'], 'relay_permit')
+        self.assertEqual(self.permit_client.quote.call_args.kwargs['permit'], True)
+        ret = PolygonReturn.objects.get(internal_id=t.binding['polygon_return'])
+        self.assertEqual((ret.purpose, ret.amount_units, t.deadline), ('bridge', t.quote.amount_units, ret.valid_before))
+        with mock.patch.object(pr, 'submit', return_value=SimpleNamespace(status='submitted', failure_code='', post_accepted=True)) as sub, \
+             mock.patch('blockchain.evm_kms_signer.get_bsc_sponsor_signer_from_settings') as sponsor:
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)
+        sub.assert_called_once()
+        sponsor.assert_not_called()
         t.refresh_from_db()
         self.assertEqual(t.status, 'submitted')
-        self.assertEqual(t.sponsor_nonce, 0)
+
+    def test_refused_permit_rebinds_a_fresh_one_and_stays_prepared(self):
+        from payment_accounts.models import PolygonReturn
+        from payment_accounts import polygon_return as pr
+        from .test_polygon_return import permit_quote
+        t, _ = self.prepared('to_wallet')
+        old = t.binding['polygon_return']
+        PolygonReturn.objects.filter(internal_id=old).update(status='failed')
+        quote = permit_quote(amount=int(t.quote.amount_units), sender=t.quote.source_address)
+        quote['requestId'] = quote['steps'][0]['requestId'] = '0x' + 'ee' * 32
+        quote['steps'][0]['items'][0]['data']['post']['body']['requestId'] = '0x' + 'ee' * 32
+        self.permit_client.quote.return_value = quote
+        with mock.patch.object(pr, 'submit', return_value=SimpleNamespace(status='failed', failure_code='relay_rejected_400')), \
+             mock.patch('payment_accounts.bridge_execution._permit_client', return_value=self.permit_client), \
+             self.assertRaises(NextError):
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)
+        t.refresh_from_db(); t.quote.money_flow.refresh_from_db()
+        self.assertEqual(t.status, 'prepared')
+        self.assertNotEqual(t.binding['polygon_return'], old)
+        self.assertEqual(t.deadline, PolygonReturn.objects.get(internal_id=t.binding['polygon_return']).valid_before)
+        self.assertNotEqual(t.quote.money_flow.status, 'processing')
+
+    def test_worker_never_fails_a_bridge_waiting_on_its_rebind(self):
+        from payment_accounts.models import PolygonReturn
+        t, intents = self.prepared('to_wallet')
+        PolygonReturn.objects.filter(internal_id=t.binding['polygon_return']).update(
+            status='failed', failure_code='relay_rejected_400')
+        reconcile_bridge(t, intents=intents)
+        t.refresh_from_db()
+        self.assertEqual(t.status, 'prepared')
+        PaymentBridgeTransfer.objects.filter(pk=t.pk).update(deadline=int(time.time()) - 1)
+        t.refresh_from_db()
+        reconcile_bridge(t, intents=intents)
+        t.refresh_from_db(); t.quote.money_flow.refresh_from_db()
+        self.assertEqual((t.status, t.quote.money_flow.status), ('expired', 'failed'))
+
+    def test_worker_mirrors_only_the_currently_bound_permit(self):
+        from payment_accounts.models import PolygonReturn
+        t, intents = self.prepared('to_wallet')
+        stale = PaymentBridgeTransfer.objects.get(pk=t.pk)   # the worker's old snapshot
+        old = PolygonReturn.objects.get(internal_id=t.binding['polygon_return'])
+        fresh = PolygonReturn.objects.create(
+            confio_account=old.confio_account, address=old.address, purpose='bridge', status='submitted',
+            amount_units=old.amount_units, amount_out=old.amount_out, amount_out_min=old.amount_out_min,
+            request_id='0x' + 'ee' * 32, receiver=old.receiver, nonce=old.nonce, valid_before=old.valid_before)
+        # A refunded old permit is terminal: mirrored from the stale snapshot it
+        # would overwrite the row as 'refunded' with the old binding.
+        PolygonReturn.objects.filter(pk=old.pk).update(status='refunded')
+        PaymentBridgeTransfer.objects.filter(pk=t.pk).update(
+            binding=dict(t.binding, polygon_return=str(fresh.internal_id)), status='submitted')
+        reconcile_bridge(stale, intents=intents)
+        t.refresh_from_db()
+        self.assertEqual((t.status, t.binding['polygon_return']), ('submitted', str(fresh.internal_id)))
+
+    def test_worker_waits_for_relay_before_promoting(self):
+        from payment_accounts.models import PolygonReturn
+        t, intents = self.prepared('to_wallet')
+        PolygonReturn.objects.filter(internal_id=t.binding['polygon_return']).update(status='submitted')
+        reconcile_bridge(t, intents=intents)
+        t.refresh_from_db()
+        self.assertEqual(t.status, 'prepared')
+        PolygonReturn.objects.filter(internal_id=t.binding['polygon_return']).update(post_accepted=True)
+        reconcile_bridge(t, intents=intents)
+        t.refresh_from_db()
+        self.assertEqual(t.status, 'submitted')
+
+    def test_refusal_after_early_promotion_still_rebinds(self):
+        from payment_accounts.models import PolygonReturn
+        from payment_accounts import polygon_return as pr
+        from .test_polygon_return import permit_quote
+        t, _ = self.prepared('to_wallet')
+        old = t.binding['polygon_return']
+        def submit(owner, return_id, signature):
+            # Defensive: the bridge is 'submitted' when the refusal lands (e.g. a
+            # promotion from another path); the rebind must still recover it.
+            PaymentBridgeTransfer.objects.filter(pk=t.pk).update(status='submitted')
+            PolygonReturn.objects.filter(internal_id=old).update(status='failed', failure_code='relay_rejected_409')
+            return SimpleNamespace(status='failed', failure_code='relay_rejected_409')
+        quote = permit_quote(amount=int(t.quote.amount_units), sender=t.quote.source_address)
+        quote['requestId'] = quote['steps'][0]['requestId'] = '0x' + 'ef' * 32
+        quote['steps'][0]['items'][0]['data']['post']['body']['requestId'] = '0x' + 'ef' * 32
+        self.permit_client.quote.return_value = quote
+        with mock.patch.object(pr, 'submit', side_effect=submit), \
+             mock.patch('payment_accounts.bridge_execution._permit_client', return_value=self.permit_client), \
+             self.assertRaises(NextError):
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)
+        t.refresh_from_db()
+        self.assertEqual(t.status, 'prepared')
+        self.assertNotEqual(t.binding['polygon_return'], old)
+
+    def test_retry_after_a_failed_requote_rebinds_without_resubmitting(self):
+        from payment_accounts.models import PolygonReturn
+        from payment_accounts.relay import RelayError
+        from .test_polygon_return import permit_quote
+        t, _ = self.prepared('to_wallet')
+        old = t.binding['polygon_return']
+        PolygonReturn.objects.filter(internal_id=old).update(status='failed', failure_code='relay_rejected_400')
+        self.permit_client.quote.side_effect = RelayError('Relay is temporarily unavailable')
+        with mock.patch('payment_accounts.bridge_execution._permit_client', return_value=self.permit_client), \
+             self.assertRaises(NextError):
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)   # real polygon_return path, re-quote fails
+        t.refresh_from_db()
+        self.assertEqual((t.status, t.binding['polygon_return']), ('prepared', old))
+        quote = permit_quote(amount=int(t.quote.amount_units), sender=t.quote.source_address)
+        quote['requestId'] = quote['steps'][0]['requestId'] = '0x' + 'ed' * 32
+        quote['steps'][0]['items'][0]['data']['post']['body']['requestId'] = '0x' + 'ed' * 32
+        self.permit_client.quote.side_effect = None
+        self.permit_client.quote.return_value = quote
+        with mock.patch('payment_accounts.bridge_execution._permit_client', return_value=self.permit_client), \
+             self.assertRaises(NextError):
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)   # retry: straight to a fresh permit
+        t.refresh_from_db()
+        self.assertEqual(t.status, 'prepared')
+        self.assertEqual(PolygonReturn.objects.get(internal_id=t.binding['polygon_return']).request_id, '0x' + 'ed' * 32)
+
+    def test_late_submitted_tap_does_not_promote_a_rebound_bridge(self):
+        from payment_accounts.models import PolygonReturn
+        from payment_accounts import polygon_return as pr
+        t, _ = self.prepared('to_wallet')
+        def submit(owner, return_id, signature):
+            # A concurrent refused tap rebound the bridge meanwhile.
+            PaymentBridgeTransfer.objects.filter(pk=t.pk).update(
+                binding=dict(t.binding, polygon_return=str(uuid.uuid4())))
+            return SimpleNamespace(status='submitted', failure_code='', post_accepted=True)
+        with mock.patch.object(pr, 'submit', side_effect=submit):
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)
+        t.refresh_from_db()
+        self.assertEqual(t.status, 'prepared')
+
+    def test_rebind_never_binds_a_superseded_permit(self):
+        from payment_accounts.models import PolygonReturn
+        from payment_accounts import polygon_return as pr
+        from .test_polygon_return import permit_quote
+        t, _ = self.prepared('to_wallet')
+        old = t.binding['polygon_return']
+        PolygonReturn.objects.filter(internal_id=old).update(status='failed', failure_code='relay_rejected_400')
+        quote = permit_quote(amount=int(t.quote.amount_units), sender=t.quote.source_address)
+        quote['requestId'] = quote['steps'][0]['requestId'] = '0x' + 'ec' * 32
+        quote['steps'][0]['items'][0]['data']['post']['body']['requestId'] = '0x' + 'ec' * 32
+        self.permit_client.quote.return_value = quote
+        real = pr.create_for_bridge
+        def create(*args, **kwargs):
+            fresh = real(*args, **kwargs)
+            PolygonReturn.objects.filter(pk=fresh.pk).update(status='expired')  # a racing rebind superseded it
+            return fresh
+        with mock.patch.object(pr, 'create_for_bridge', side_effect=create), \
+             mock.patch('payment_accounts.bridge_execution._permit_client', return_value=self.permit_client), \
+             self.assertRaises(NextError):
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)
+        t.refresh_from_db()
+        self.assertEqual(t.binding['polygon_return'], old)
+
+    def test_failed_permit_relay_accepted_goes_to_review(self):
+        from payment_accounts.models import PolygonReturn
+        t, intents = self.prepared('to_wallet')
+        PaymentBridgeTransfer.objects.filter(pk=t.pk).update(status='submitted')
+        PolygonReturn.objects.filter(internal_id=t.binding['polygon_return']).update(
+            status='failed', failure_code='relay_rejected_409', post_accepted=True)
+        t.refresh_from_db()
+        reconcile_bridge(t, intents=intents)
+        t.refresh_from_db()
+        self.assertEqual((t.status, t.failure_code), ('needs_review', 'permit_refused_after_acceptance'))
+
+    def test_early_promoted_bridge_with_a_refused_permit_goes_back_to_prepared(self):
+        from payment_accounts.models import PolygonReturn
+        t, intents = self.prepared('to_wallet')
+        PaymentBridgeTransfer.objects.filter(pk=t.pk).update(status='submitted')
+        PolygonReturn.objects.filter(internal_id=t.binding['polygon_return']).update(
+            status='failed', failure_code='relay_rejected_422')
+        t.refresh_from_db()
+        reconcile_bridge(t, intents=intents)
+        t.refresh_from_db(); t.quote.money_flow.refresh_from_db()
+        self.assertEqual(t.status, 'prepared')
+        self.assertNotEqual(t.quote.money_flow.status, 'failed')
+
+    def test_unaccepted_submit_does_not_promote(self):
+        from payment_accounts import polygon_return as pr
+        t, _ = self.prepared('to_wallet')
+        with mock.patch.object(pr, 'submit', return_value=SimpleNamespace(status='submitted', failure_code='', post_accepted=False)):
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)
+        t.refresh_from_db()
+        self.assertEqual(t.status, 'prepared')
+
+    def test_rebind_never_kills_another_bridge_permit(self):
+        from payment_accounts.models import PolygonReturn
+        from payment_accounts import polygon_return as pr
+        t, _ = self.prepared('to_wallet')
+        bound = PolygonReturn.objects.get(internal_id=t.binding['polygon_return'])
+        self.assertEqual((bound.purpose, bound.status), ('bridge', 'quoted'))
+        from .test_polygon_return import permit_quote
+        quote = permit_quote(amount=int(t.quote.amount_units), sender=t.quote.source_address)
+        quote['requestId'] = quote['steps'][0]['requestId'] = '0x' + 'eb' * 32
+        quote['steps'][0]['items'][0]['data']['post']['body']['requestId'] = '0x' + 'eb' * 32
+        self.permit_client.quote.return_value = quote
+        pr.create_for_bridge(self.owner, t.quote.source_address, int(t.quote.amount_units),
+                             accepted_min=1, client=self.permit_client)
+        bound.refresh_from_db()
+        self.assertEqual(bound.status, 'quoted')
+
+    def test_no_rebind_when_relay_accepted_the_refused_permit(self):
+        from payment_accounts.models import PolygonReturn
+        t, _ = self.prepared('to_wallet')
+        old = t.binding['polygon_return']
+        PolygonReturn.objects.filter(internal_id=old).update(
+            status='failed', failure_code='relay_rejected_409', post_accepted=True)
+        with mock.patch('payment_accounts.polygon_return.submit',
+                        return_value=SimpleNamespace(status='failed', failure_code='relay_rejected_409', post_accepted=True)), \
+             mock.patch('payment_accounts.bridge_execution._permit_client', return_value=self.permit_client), \
+             self.assertRaises(NextError):
+            submit_bridge(self.owner, t.internal_id, '0x' + '00' * 65)
+        t.refresh_from_db()
+        self.assertEqual(t.binding['polygon_return'], old)
+
+    def test_older_apps_cannot_sign_the_placeholder(self):
+        from payment_accounts.schema import PaymentBridgeTransferType
+        t, _ = self.prepared('to_wallet')
+        self.assertEqual(PaymentBridgeTransferType.resolve_authorization_nonce(t, None), 'relay-permit')
+
+    def test_bridge_mirrors_the_permit_delivery(self):
+        from payment_accounts.models import PolygonReturn
+        t, intents = self.prepared('to_wallet')
+        PaymentBridgeTransfer.objects.filter(pk=t.pk).update(status='submitted')
+        PolygonReturn.objects.filter(internal_id=t.binding['polygon_return']).update(
+            status='delivered', actual_out_units='9850000', destination_tx_hash=DEST_HASH, source_tx_hash=SOURCE_HASH)
+        t.refresh_from_db()
+        reconcile_bridge(t, intents=intents)
+        t.refresh_from_db(); t.quote.money_flow.refresh_from_db()
+        self.assertEqual((t.status, t.actual_out_units, t.source_tx_hash), ('delivered', '9850000', SOURCE_HASH))
+        self.assertEqual(t.quote.money_flow.status, 'succeeded')
+
+    def test_unsigned_permit_expires_the_bridge(self):
+        from payment_accounts.models import PolygonReturn
+        t, intents = self.prepared('to_wallet')
+        PolygonReturn.objects.filter(internal_id=t.binding['polygon_return']).update(valid_before=int(time.time()) - 1)
+        t.refresh_from_db()
+        reconcile_bridge(t, intents=intents)
+        t.refresh_from_db(); t.quote.money_flow.refresh_from_db()
+        self.assertEqual((t.status, t.quote.money_flow.status), ('expired', 'failed'))
+        self.assertEqual(PolygonReturn.objects.get(internal_id=t.binding['polygon_return']).status, 'expired')
 
     def test_bsc_domain_callback_failure_never_broadcasts(self):
         from cusd_plus import sponsor_7702 as sponsor
@@ -370,14 +592,6 @@ class BridgeRecoveryTests(BridgeExecutionTests):
         self.assertEqual(t.provider_credit_id, entry.pk)
         self.assertEqual(t.quote.money_flow.status, 'succeeded')
         self.assertEqual(t.quote.money_flow.metadata['provider_credit_asset'], 'USD_STABLE')
-
-    def test_expired_polygon_raw_can_clear_its_sponsor_nonce_without_resigning(self):
-        t, intents = self.prepared('to_wallet')
-        t.source_tx_hash, t.signed_raw_tx, t.status = SOURCE_HASH, '0x1234', 'submitted'
-        t.deadline = int(time.time()) - 1; t.save()
-        with mock.patch.object(chain, 'final_receipt', return_value=None), mock.patch.object(chain, 'rpc') as rpc:
-            reconcile_bridge(t, intents=intents)
-        rpc.assert_called_once_with('POL', 'eth_sendRawTransaction', ['0x1234'])
 
     @override_settings(CUSD_PLUS_7702_ENABLED=False)
     def test_sponsor_kill_switch_blocks_new_bridge_preparation(self):

@@ -1,9 +1,12 @@
 import { bytesToHex } from '@noble/hashes/utils';
-import { BridgeTransfer, bridgeRequestId, journeyReturnBridgeRequestId, polygonAuthorizationDigest, authorizePaymentBridge, preparePaymentBridge } from '../paymentBridge';
+import { BridgeTransfer, bridgeRequestId, journeyReturnBridgeRequestId, authorizePaymentBridge, preparePaymentBridge } from '../paymentBridge';
+import { receiveAuthorizationDigest } from '../polygonReturn';
+import { signIntentDigest } from '../evmWallet';
 
 const mockMutate = jest.fn();
 const mockWallet = jest.fn();
-jest.mock('../../apollo/client', () => ({ apolloClient: { mutate: (...args: any[]) => mockMutate(...args) } }));
+const mockQuery = jest.fn();
+jest.mock('../../apollo/client', () => ({ apolloClient: { mutate: (...args: any[]) => mockMutate(...args), query: (...args: any[]) => mockQuery(...args) } }));
 jest.mock('../secureDeterministicWallet', () => ({ getActiveEvmWallet: () => mockWallet() }));
 
 const transfer = (): BridgeTransfer => ({
@@ -30,14 +33,41 @@ it('does not allow replacing a request after an uncertain preparation result', a
   await expect(preparePaymentBridge('instruction', '50', 'to_provider', 'request')).rejects.toBe(timeout);
   expect(timeout).not.toHaveProperty('quoteRefreshRequired');
 });
-it('matches the independently encoded Python EIP-3009 digest', () => {
-  expect(bytesToHex(polygonAuthorizationDigest(transfer()))).toBe('0d887782902b68ed55499706dbd35f1ea0e3918577673aa978f9c8def745eb00');
+const RELAY = '0xccc88a9d1b4ed6b0eaba998850414b24f1c315be';
+const NONCE = '0x' + 'cd'.repeat(32);
+it('signs the Relay permit for a Polygon return, bound to amount, deadline and nonce', async () => {
+  const priv = '01'.repeat(32);
+  const address = '0x7e5f4552091a69125d5dfcb7b8c2659029395bdf';
+  const t = { ...transfer(), sourceAddress: address, destinationAddress: address };
+  mockWallet.mockResolvedValue({ address, privKeyHex: priv });
+  // The screen holds a stale copy: the live transfer was rebound to a fresh
+  // permit with a later deadline, and that is what must be signed.
+  const liveDeadline = String(Math.floor(Date.now() / 1000) + 600);
+  mockQuery.mockResolvedValue({ data: { paymentBridge: { status: 'prepared', deadline: liveDeadline,
+    amountUnits: t.amountUnits, sourceAddress: address, permitReceiver: RELAY, permitNonce: NONCE } } });
+  mockMutate.mockResolvedValue({ data: { submitPaymentBridge: { success: true, transfer: { ...t, status: 'submitted' } } } });
+  await authorizePaymentBridge(t);
+  const signature: string = mockMutate.mock.calls[0][0].variables.signature;
+  const digest = receiveAuthorizationDigest({ returnId: t.internalId, amount: '0', amountOut: t.amountOut,
+    fromAddress: address, toAddress: RELAY, value: t.amountUnits, validBefore: liveDeadline, nonce: NONCE });
+  // RFC 6979 signing is deterministic: the exact expected permit signature.
+  expect(signature).toBe(signIntentDigest(digest, priv));
 });
-it('binds the signature to the exact deposit, amount, nonce and deadline', () => {
-  const t = transfer(), digest = bytesToHex(polygonAuthorizationDigest(t));
-  for (const changed of [{ amountUnits: '10000001' }, { deadline: '2000000001' }, { depositAddress: '0x' + '44'.repeat(20) }, { authorizationNonce: '0x' + '55'.repeat(32) }]) {
-    expect(bytesToHex(polygonAuthorizationDigest({ ...t, ...changed }))).not.toBe(digest);
-  }
+it('refuses when the live transfer is no longer awaiting a signature', async () => {
+  const t = transfer();
+  mockWallet.mockResolvedValue({ address: t.sourceAddress, privKeyHex: '01'.repeat(32) });
+  mockQuery.mockResolvedValue({ data: { paymentBridge: { status: 'expired', deadline: '2000000000',
+    amountUnits: t.amountUnits, sourceAddress: t.sourceAddress, permitReceiver: RELAY, permitNonce: NONCE } } });
+  await expect(authorizePaymentBridge(t)).rejects.toThrow('Revisa el estado');
+  expect(mockMutate).not.toHaveBeenCalled();
+});
+it('refuses a Polygon permit naming any receiver but Relay', async () => {
+  const t = transfer();
+  mockWallet.mockResolvedValue({ address: t.sourceAddress, privKeyHex: '01'.repeat(32) });
+  mockQuery.mockResolvedValue({ data: { paymentBridge: { status: 'prepared', deadline: '2000000000',
+    amountUnits: t.amountUnits, sourceAddress: t.sourceAddress, permitReceiver: '0x' + '99'.repeat(20), permitNonce: NONCE } } });
+  await expect(authorizePaymentBridge(t)).rejects.toThrow('Ruta no disponible');
+  expect(mockMutate).not.toHaveBeenCalled();
 });
 it('does not derive a key or resubmit a pending transfer', async () => {
   await expect(authorizePaymentBridge({ ...transfer(), status: 'submitted' })).rejects.toThrow();

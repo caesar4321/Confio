@@ -181,6 +181,27 @@ class PolygonReturnTests(TestCase):
         self.assertTrue(ret.post_accepted)
         self.assertEqual(pr.submit(self.owner, ret.internal_id, signature, client=self.client_mock).pk, ret.pk)
 
+    def test_double_tap_never_reposts_while_the_first_post_is_in_flight(self):
+        ret = self.prepare()
+        signature = sign(ret)
+        PolygonReturn.objects.filter(pk=ret.pk).update(status='submitted', signature=signature,
+                                                       submitted_at=timezone.now(), post_attempted=True)
+        pr.submit(self.owner, ret.internal_id, signature, client=self.client_mock)
+        self.client_mock.execute_permit.assert_not_called()
+
+    def test_refusal_never_overwrites_an_accepted_post(self):
+        from payment_accounts.relay import RelayError
+        ret = self.prepare()
+        signature = sign(ret)
+        def post(body, sig):
+            # A concurrent retry's post was accepted first; ours gets the duplicate 409.
+            PolygonReturn.objects.filter(pk=ret.pk).update(post_accepted=True)
+            raise RelayError('duplicate', status_code=409)
+        self.client_mock.execute_permit.side_effect = post
+        with mock.patch.object(pr, 'authorization_used', return_value=False):
+            ret = pr.submit(self.owner, ret.internal_id, signature, client=self.client_mock)
+        self.assertEqual((ret.status, ret.post_accepted), ('submitted', True))
+
     def test_new_prepare_waits_for_the_open_return(self):
         ret = self.prepare()
         pr.submit(self.owner, ret.internal_id, sign(ret), client=self.client_mock)

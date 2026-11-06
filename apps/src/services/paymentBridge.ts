@@ -1,9 +1,10 @@
 import { gql } from '@apollo/client';
 import { keccak_256 } from '@noble/hashes/sha3';
-import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
 import { secureRandomBytes } from '../setup/entropyGuard';
 import { BatchCall, bscGetNonce, hashBatchIntent, signIntentDigest, signSetCodeAuthorization } from './evmWallet';
 import { delegateNonce, fetchSponsored7702Params, isDelegatedTo } from './sponsored7702';
+import { receiveAuthorizationDigest, RELAY_RECEIVERS } from './polygonReturn';
 
 export const BRIDGE_AVAILABILITY = gql`query PaymentBridgeAvailability {
   paymentBridgeAvailability { toProvider toWallet hasHistory }
@@ -65,24 +66,30 @@ export function journeyReturnBridgeRequestId(provider: 'infinia' | 'cobre', jour
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-const hash = (text: string) => bytesToHex(keccak_256(utf8ToBytes(text)));
-const word = (value: string) => BigInt(value).toString(16).padStart(64, '0');
-const addr = (value: string) => {
-  if (!/^0x[0-9a-fA-F]{40}$/.test(value)) throw new Error('Dirección inválida');
-  return value.slice(2).toLowerCase().padStart(64, '0');
-};
+const PERMIT = gql`query PaymentBridgePermit($id: UUID!) {
+  paymentBridge(internalId: $id) { status deadline amountUnits sourceAddress permitReceiver permitNonce }
+}`;
 
-export function polygonAuthorizationDigest(t: BridgeTransfer): Uint8Array {
-  const domain = bytesToHex(keccak_256(hexToBytes(
-    hash('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)') +
-    hash('USD Coin') + hash('2') + word('137') + addr('0x3c499c542cef5e3811e1192ce70d8cc03d5c3359'),
-  )));
-  const message = bytesToHex(keccak_256(hexToBytes(
-    hash('TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)') +
-    addr(t.sourceAddress) + addr(t.depositAddress) + word(t.amountUnits) + word('0') + word(t.deadline) +
-    t.authorizationNonce.replace(/^0x/, ''),
-  )));
-  return keccak_256(hexToBytes('1901' + domain + message));
+/** Polygon -> wallet: the USDC ReceiveWithAuthorization Relay executes (and
+ * pays gas for). Read live, never from the screen's copy of the transfer:
+ * a refused hand-off rebinds a fresh permit with a new deadline. Queried
+ * alone so an older server only makes this refuse. */
+async function polygonPermitDigest(t: BridgeTransfer, wallet: string): Promise<Uint8Array> {
+  const { apolloClient } = await import('../apollo/client');
+  const { data } = await apolloClient.query({ query: PERMIT, variables: { id: t.internalId }, fetchPolicy: 'network-only' });
+  const live = data?.paymentBridge;
+  const receiver = live?.permitReceiver, nonce = live?.permitNonce;
+  if (!receiver || !nonce || !RELAY_RECEIVERS.has(String(receiver).toLowerCase())) throw new Error('Ruta no disponible');
+  if (live.status !== 'prepared' || BigInt(live.deadline) <= BigInt(Math.floor(Date.now() / 1000) + 30)) {
+    throw new Error('Revisa el estado del envío o solicita una nueva cotización');
+  }
+  if (String(live.sourceAddress).toLowerCase() !== wallet.toLowerCase() || live.amountUnits !== t.amountUnits) {
+    throw new Error('Revisa el estado del envío o solicita una nueva cotización');
+  }
+  return receiveAuthorizationDigest({
+    returnId: t.internalId, amount: '0', amountOut: t.amountOut,
+    fromAddress: wallet, toAddress: receiver, value: live.amountUnits, validBefore: live.deadline, nonce,
+  });
 }
 
 function preparationError(message: string): Error {
@@ -121,7 +128,9 @@ export async function preparePaymentBridge(instruction: string, amount: string, 
 export async function authorizePaymentBridge(t: BridgeTransfer): Promise<BridgeTransfer> {
   const { apolloClient } = await import('../apollo/client');
   const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
-  if (t.status !== 'prepared' || BigInt(t.deadline) <= BigInt(Math.floor(Date.now() / 1000) + 30)) {
+  // Polygon returns re-read their live status and deadline before signing.
+  const polygon = t.sourceTokenId === 'POL:USDC';
+  if (t.status !== 'prepared' || (!polygon && BigInt(t.deadline) <= BigInt(Math.floor(Date.now() / 1000) + 30))) {
     throw new Error('Revisa el estado del envío o solicita una nueva cotización');
   }
   const wallet = await getActiveEvmWallet();
@@ -129,7 +138,7 @@ export async function authorizePaymentBridge(t: BridgeTransfer): Promise<BridgeT
   let signature: string, nonce = '0', authorization;
   if (t.sourceTokenId === 'POL:USDC') {
     if (t.destinationAddress.toLowerCase() !== wallet.address.toLowerCase()) throw new Error('Destino inválido');
-    signature = signIntentDigest(polygonAuthorizationDigest(t), wallet.privKeyHex);
+    signature = signIntentDigest(await polygonPermitDigest(t, wallet.address), wallet.privKeyHex);
   } else if (t.sourceTokenId === 'BSC:USDT') {
     const params = await fetchSponsored7702Params();
     if (!params.enabled || !params.delegateAddress) throw new Error('El envío no está disponible');

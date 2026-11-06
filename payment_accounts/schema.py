@@ -353,6 +353,11 @@ class PaymentBridgeTransferType(DjangoObjectType):
     provider_credited = graphene.Boolean(required=True)
     # Scalars use strings for uint256 / Unix deadlines; never GraphQL Int.
     deadline = graphene.String(required=True)
+    # Polygon -> wallet returns are one USDC ReceiveWithAuthorization to
+    # Relay's receiver (polygon_return). Null for every other transfer. The
+    # app queries these alone, so older servers only make the return refuse.
+    permit_receiver = graphene.String()
+    permit_nonce = graphene.String()
 
     class Meta:
         model = PaymentBridgeTransfer
@@ -372,6 +377,10 @@ class PaymentBridgeTransferType(DjangoObjectType):
 
     def resolve_authorization_nonce(self, info):
         from .bridge_chain import authorization_nonce
+        if (self.binding or {}).get('provider') == 'relay_permit':
+            # Not hex on purpose: an older app must fail before signing a
+            # transfer to the never-funded placeholder deposit address.
+            return 'relay-permit'
         return '0x' + authorization_nonce(self).hex()
 
     def resolve_source_address(self, info):
@@ -397,6 +406,21 @@ class PaymentBridgeTransferType(DjangoObjectType):
 
     def resolve_deadline(self, info):
         return str(self.deadline)
+
+    def _permit(self):
+        from .models import PolygonReturn
+        if (self.binding or {}).get('provider') != 'relay_permit':
+            return None
+        return PolygonReturn.objects.filter(internal_id=self.binding.get('polygon_return'),
+                                            confio_account_id=self.quote.confio_account_id).first()
+
+    def resolve_permit_receiver(self, info):
+        ret = PaymentBridgeTransferType._permit(self)
+        return ret.receiver if ret else None
+
+    def resolve_permit_nonce(self, info):
+        ret = PaymentBridgeTransferType._permit(self)
+        return ret.nonce if ret else None
 
 
 class PaymentBridgeQuoteType(DjangoObjectType):

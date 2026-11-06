@@ -4,8 +4,8 @@ import time
 from decimal import Decimal, localcontext
 
 from django.conf import settings
-from django.db import transaction, connection
-from django.db.models import Max, Q
+from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .allbridge_next import NextClient, NextError, TOKENS, address, uint
@@ -156,6 +156,11 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
         route = q.routes[route_index]
         if route['messenger'] not in {'near-intents', 'relay'}:
             raise NextError('This bridge messenger is not enabled for execution')
+        if q.source_token_id == 'POL:USDC' and infinia_journey is None:
+            # The person's own Polygon USDC: one USDC permit Relay executes and
+            # pays gas for. No sponsor (it holds no POL) and no deposit route.
+            chain.require_chain('POL')
+            return _prepare_polygon_permit(owner, q, route)
         from .relay import RelayClient
         client = client or (RelayClient() if route['messenger'] == 'relay' else NextClient())
         source_chain = q.source_token_id.split(':')[0]
@@ -196,16 +201,8 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
             else:
                 prefix, funding = funding_calls(owner, int(q.amount_units),
                                                 max_spend=int(budget) if budget is not None else None)
-        elif infinia_journey is None:
-            prefix = []
-            if chain.token_balance(q.source_token_id, q.source_address) < int(q.amount_units):
-                raise NextError('Polygon USDC has not arrived in the wallet yet')
-            domain = chain.rpc('POL', 'eth_call', [{'to': chain.USDC,
-                 'data': '0x' + __import__('eth_utils').keccak(text='DOMAIN_SEPARATOR()')[:4].hex()}, 'latest'])
-            if domain.lower() != '0x' + chain.authorization_domain().hex():
-                raise NextError('Unsupported USDC authorization domain')
         else:
-            prefix = []
+            prefix = []  # Infinia pays the deposit itself; wallet Polygon returns use permits
         if q.expires_at <= timezone.now():
             raise NextError('Quote expired during preparation; request a fresh quote')
         return PaymentBridgeTransfer.objects.create(
@@ -253,7 +250,9 @@ def submit_bridge(owner, transfer_id, signature, *, nonce='0', authorization=Non
     if int(time.time()) >= t.deadline - 30:
         raise NextError('Bridge authorization expired')
     if t.quote.source_token_id == 'POL:USDC':
-        _submit_polygon(t, signature)
+        if t.binding.get('provider') != 'relay_permit':
+            raise NextError('Quote expired; request a fresh quote')
+        _submit_polygon_permit(owner, t, signature)
         t.refresh_from_db()
     else:
         chain.require_chain('BSC')
@@ -297,6 +296,8 @@ def reconcile_bridge(t, *, intents=None):
     if t.status == 'delivered':
         reconcile_provider_credit(t)
         return t
+    if t.binding.get('provider') == 'relay_permit':
+        return _reconcile_polygon_permit(t)
     if t.funding_mode == 'infinia' and not t.source_tx_hash:
         from .infinia_bridge import bind_payout_hash
         t = bind_payout_hash(t)
@@ -410,44 +411,155 @@ def _record_bridge_result(t):
     return t
 
 
-def _submit_polygon(t, signature):
-    from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
-    from eth_utils import to_checksum_address, keccak
-    calldata = chain.authorization_calldata(t, signature)
-    chain.require_chain('POL')
-    signer = get_bsc_sponsor_signer_from_settings()
-    sponsor = address(signer.address)
+def _permit_client():
+    from .relay import RelayClient
+    return RelayClient()
+
+
+def _prepare_polygon_permit(owner, q, route):
+    from . import polygon_return
+    from .bridge import bridge_route_minimum
+    if chain.token_balance(q.source_token_id, q.source_address) < int(q.amount_units):
+        raise NextError('Polygon USDC has not arrived in the wallet yet')
+    accepted_min = bridge_route_minimum(route)
+    ret = polygon_return.create_for_bridge(owner, q.source_address, int(q.amount_units),
+                                           accepted_min=accepted_min, client=_permit_client())
+    # deposit_address is unique and only means something for deposit routes;
+    # a permit has none. This placeholder is derived from Relay's request id
+    # and is never funded: the server accepts only the permit signature, so
+    # an older app that signs a transfer to it is refused.
+    return PaymentBridgeTransfer.objects.create(
+        quote=q, funding_mode='wallet', deposit_address='0x' + ret.request_id[-40:].lower(),
+        amount_out_min=ret.amount_out_min, amount_out=ret.amount_out, deadline=ret.valid_before, calls=[],
+        binding={'provider': 'relay_permit', 'polygon_return': str(ret.internal_id),
+                 'accepted_min': str(accepted_min),
+                 'funding': {'wallet_usdt_units': '0', 'fee_units': '0', 'gross_redeem_units': '0'}},
+    )
+
+
+def _submit_polygon_permit(owner, t, signature):
+    """Verify and hand the person's permit to Relay (polygon_return owns it).
+
+    A refused first hand-off moved no money (polygon_return proved the USDC
+    nonce unused), so the bridge stays 'prepared' on a fresh permit and the
+    app signs again: one transient Relay refusal must not park a journey."""
+    from . import polygon_return
+    from .models import PolygonReturn
+    bound = t.binding['polygon_return']
+    current = PolygonReturn.objects.filter(internal_id=bound, confio_account=owner).first()
+    if (current is not None and current.status == 'failed' and not current.post_accepted
+            and current.failure_code.startswith('relay_rejected_')):
+        # Refused earlier and the re-quote did not land (e.g. Relay was down):
+        # that permit is proven unused, so go straight to a fresh one.
+        ret = current
+    else:
+        ret = polygon_return.submit(owner, bound, signature)
+    if ret.status == 'submitted':
+        # Promote only once Relay has taken it (else the worker does, later),
+        # and only while still bound to THIS permit: a concurrent refused tap
+        # may already have rebound the bridge to a fresh, unsigned one.
+        if ret.post_accepted:
+            PaymentBridgeTransfer.objects.filter(pk=t.pk, status='prepared', binding__polygon_return=bound).update(
+                status='submitted', updated_at=timezone.now())
+        return
+    if getattr(ret, 'post_accepted', False):
+        # Refused as a duplicate, yet Relay took the permit: it may deliver.
+        # The worker sends the bridge to review; never chase it with another.
+        raise NextError('Ya tienes un envío en curso; revisa su estado primero.')
+    fresh = polygon_return.create_for_bridge(
+        owner, t.quote.source_address, int(t.quote.amount_units),
+        accepted_min=int(t.binding.get('accepted_min') or t.amount_out_min), client=_permit_client())
     with transaction.atomic():
-        t = PaymentBridgeTransfer.objects.select_for_update().get(pk=t.pk)
-        if t.source_tx_hash:
-            return
-        if t.status != 'prepared' or int(time.time()) >= t.deadline - 30:
-            raise NextError('Bridge authorization expired or state changed')
-        # All Polygon sponsor use in this integration serializes nonce allocation.
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT pg_advisory_xact_lock(137, 77023009)')
-        pending = int(chain.rpc('POL', 'eth_getTransactionCount', [sponsor, 'pending']), 16)
-        maximum = PaymentBridgeTransfer.objects.filter(sponsor_address=sponsor).aggregate(n=Max('sponsor_nonce'))['n']
-        sponsor_nonce = max(pending, maximum + 1 if maximum is not None else 0)
-        gas = 180000
-        price = int(chain.rpc('POL', 'eth_gasPrice', []), 16) * 12 // 10
-        if price <= 0 or price > int(getattr(settings, 'PAYMENT_BRIDGE_POLYGON_MAX_GAS_PRICE_WEI', 500000000000)):
-            raise NextError('Polygon gas price exceeds sponsor cap')
-        tx = {'type': 2, 'chainId': 137, 'nonce': sponsor_nonce,
-              'maxPriorityFeePerGas': price, 'maxFeePerGas': price, 'gas': gas,
-              'to': to_checksum_address(chain.USDC), 'value': 0, 'data': calldata, 'accessList': []}
-        chain.rpc('POL', 'eth_call', [{'from': sponsor, 'to': chain.USDC, 'data': calldata, 'gas': hex(gas)}, 'latest'])
-        raw, tx_hash = signer.sign_typed_transaction(tx)
-        if '0x' + keccak(bytes.fromhex(raw.removeprefix('0x'))).hex() != tx_hash.lower():
-            raise NextError('Signed transaction hash mismatch')
-        t.signed_raw_tx, t.source_tx_hash = raw, tx_hash
-        t.sponsor_address, t.sponsor_nonce, t.status = sponsor, sponsor_nonce, 'submitted'
-        t.save(update_fields=['signed_raw_tx', 'source_tx_hash', 'sponsor_address', 'sponsor_nonce', 'status', 'updated_at'])
-    # Committed above. A failed or ambiguous broadcast is recovered by the worker.
-    try:
-        chain.rpc('POL', 'eth_sendRawTransaction', [raw])
-    except Exception:
-        pass
+        locked = PaymentBridgeTransfer.objects.select_for_update().get(pk=t.pk)
+        # 'submitted' too: a bridge promoted before this refusal moved no money.
+        fresh.refresh_from_db(fields=['status'])
+        old = PolygonReturn.objects.filter(internal_id=bound).first()
+        if old is not None and old.post_accepted:
+            # Relay took the old permit after all: it may deliver. The worker
+            # sends this bridge to review; never chase it with a second permit.
+            raise NextError('Ya tienes un envío en curso; revisa su estado primero.')
+        # A concurrent rebind may have superseded our fresh permit: never bind a dead one.
+        if (locked.status in ('prepared', 'submitted') and locked.binding.get('polygon_return') == bound
+                and fresh.status == 'quoted'):
+            locked.status = 'prepared'
+            locked.binding = dict(locked.binding, polygon_return=str(fresh.internal_id))
+            locked.amount_out, locked.amount_out_min = fresh.amount_out, fresh.amount_out_min
+            locked.deadline = fresh.valid_before
+            locked.save(update_fields=['status', 'binding', 'amount_out', 'amount_out_min', 'deadline', 'updated_at'])
+    raise NextError('Bridge price changed; request a fresh quote')
+
+
+def _expire_permit_bridge(t):
+    if t.status in ('prepared', 'submitted'):
+        t.status = 'expired'
+        t.save(update_fields=['status', 'updated_at'])
+        t.quote.money_flow.status = 'failed'
+        t.quote.money_flow.save(update_fields=['status', 'updated_at'])
+    return t
+
+
+_PERMIT_TERMINAL = {'delivered': 'delivered', 'refunded': 'refunded', 'failed': 'failed', 'needs_review': 'needs_review'}
+
+
+def _reconcile_polygon_permit(t):
+    """Mirror the permit's own state machine (polygon_return.reconcile, run
+    every minute) onto the bridge, so journeys see the usual statuses."""
+    with transaction.atomic():
+        # Under the transfer lock and from the CURRENT binding: a refused
+        # hand-off rebinds a fresh permit, and the stale one must not decide.
+        t = PaymentBridgeTransfer.objects.select_for_update().select_related(
+            'quote__money_flow').get(pk=t.pk)
+        if t.status in ('delivered', 'refunded', 'failed', 'expired'):
+            return t
+        return _mirror_polygon_permit(t)
+
+
+def _mirror_polygon_permit(t):
+    from .models import PolygonReturn
+    ret = PolygonReturn.objects.filter(internal_id=t.binding.get('polygon_return'),
+                                       confio_account_id=t.quote.confio_account_id).first()
+    if ret is None:
+        t.status, t.failure_code = 'needs_review', 'permit_missing'
+        return _record_bridge_result(t)
+    if ret.status in ('quoted', 'expired'):
+        if ret.status == 'quoted' and ret.valid_before >= int(time.time()):
+            return t
+        PolygonReturn.objects.filter(pk=ret.pk, status='quoted').update(
+            status='expired', failure_code='unsigned', updated_at=timezone.now())
+        ret.refresh_from_db(fields=['status'])
+        if ret.status != 'expired':
+            return t  # signed in between: the submitted mirror picks it up next tick
+        return _expire_permit_bridge(t)
+    if (ret.status == 'failed' and not ret.post_accepted and ret.failure_code.startswith('relay_rejected_')
+            and t.status in ('prepared', 'submitted')):
+        # A refused hand-off moved no money: the app retries and submit
+        # rebinds a fresh permit. Only past the bridge's own deadline does it
+        # expire. A bridge promoted early goes back to 'prepared' so it can.
+        if t.deadline < int(time.time()):
+            return _expire_permit_bridge(t)
+        if t.status == 'submitted':
+            t.status = 'prepared'
+            t.save(update_fields=['status', 'updated_at'])
+        return t
+    if ret.status == 'submitted':
+        # Promote only once Relay has taken the permit: until then a refused
+        # first hand-off must find the bridge still 'prepared' to rebind it.
+        if t.status == 'prepared' and ret.post_accepted:
+            PaymentBridgeTransfer.objects.filter(pk=t.pk, status='prepared').update(
+                status='submitted', updated_at=timezone.now())
+            t.refresh_from_db()
+        return t
+    t.status = _PERMIT_TERMINAL[ret.status]
+    t.failure_code = (ret.failure_code or '')[:100]
+    if ret.status == 'failed' and ret.post_accepted:
+        # Relay took the permit even though a duplicate hand-off was refused:
+        # the money may well arrive. Ops decides; never a silent failure.
+        t.status, t.failure_code = 'needs_review', 'permit_refused_after_acceptance'
+    if t.status == 'delivered':
+        t.actual_out_units, t.destination_tx_hash = ret.actual_out_units, ret.destination_tx_hash
+    if ret.source_tx_hash and not t.source_tx_hash:
+        PaymentBridgeTransfer.objects.filter(pk=t.pk, source_tx_hash='').update(source_tx_hash=ret.source_tx_hash)
+    return _record_bridge_result(t)
 
 
 def reconcile_provider_credit(t):

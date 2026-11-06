@@ -955,6 +955,9 @@ class PolygonReturn(models.Model):
     internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     confio_account = models.ForeignKey('users.Account', on_delete=models.PROTECT, related_name='polygon_returns')
     address = models.CharField(max_length=42, db_index=True)
+    # sweep: the silent Home return of stranded USDC. bridge: the signature
+    # leg of a PaymentBridgeTransfer (provider journeys, Polygon -> wallet).
+    purpose = models.CharField(max_length=10, default='sweep', choices=[('sweep', 'Home sweep'), ('bridge', 'Bridge')])
     status = models.CharField(max_length=20, choices=STATUSES, default='quoted', db_index=True)
     amount_units = models.CharField(max_length=78)          # USDC, 6 decimals
     amount_out = models.CharField(max_length=78)            # USDT expected, 18 decimals

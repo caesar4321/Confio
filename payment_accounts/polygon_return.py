@@ -42,6 +42,7 @@ BALANCE_CACHE_SECONDS = 600
 # refused: the signature would let that contract pull the person's USDC.
 DEFAULT_RECEIVERS = ('0xccc88a9d1b4ed6b0eaba998850414b24f1c315be',)
 MAX_SIGNATURE_WINDOW = 3600
+BRIDGE_SIGNATURE_WINDOW = 900
 MIN_SIGNATURE_LEFT = 60
 # A signed permit Relay never executed is dead once it is past validBefore;
 # allow Relay's own lag before calling it expired.
@@ -160,12 +161,12 @@ def struck_out(owner) -> bool:
     """Repeated refunds/rejections cost the person Relay's gas each time:
     stop retrying silently and tell ops."""
     reviewing = PolygonReturn.objects.filter(
-        confio_account=owner, status='needs_review',
+        confio_account=owner, status='needs_review', purpose='sweep',
         updated_at__gte=timezone.now() - REVIEW_HOLD).order_by('-updated_at').first()
     if reviewing is not None:
         return True  # ops is looking at this money: never move it silently meanwhile
     since = timezone.now() - STRIKES_WINDOW
-    strikes = PolygonReturn.objects.filter(confio_account=owner, status__in=['failed', 'refunded'],
+    strikes = PolygonReturn.objects.filter(confio_account=owner, status__in=['failed', 'refunded'], purpose='sweep',
                                           updated_at__gte=since).order_by('-updated_at')
     if strikes.count() < MAX_STRIKES:
         return False
@@ -263,7 +264,7 @@ def _lock_account(owner):
 
 def _reusable(owner, addr, units):
     return PolygonReturn.objects.filter(
-        confio_account=owner, address=addr, status='quoted', amount_units=str(units),
+        confio_account=owner, address=addr, status='quoted', amount_units=str(units), purpose='sweep',
         valid_before__gt=int(time.time()) + 5 * 60).order_by('-created_at').first()
 
 
@@ -315,14 +316,47 @@ def prepare(owner, *, client=None) -> PolygonReturn:
             amount_out=amount_out, amount_out_min=amount_out_min, **terms)
 
 
+def create_for_bridge(owner, addr: str, units: int, *, accepted_min: int, client=None) -> PolygonReturn:
+    """The signature leg of a Polygon -> wallet PaymentBridgeTransfer: an
+    exact amount the bridge already priced. Relay pays the gas; no sponsor."""
+    from .relay import RelayClient
+    addr = address(addr)
+    if _owner_address(owner) != addr:
+        raise NextError('Inbound bridge must return to the active wallet')
+    client = client or RelayClient()
+    result = client.quote(SOURCE, DESTINATION, str(units), source_address=addr,
+                          destination_address=addr, permit=True)
+    now = int(time.time())
+    terms = _permit_step(result, addr, units, now)
+    if terms['valid_before'] > now + BRIDGE_SIGNATURE_WINDOW:
+        # The bridge deadline holds the whole wallet; keep it short.
+        raise NextError('Bridge price changed; request a fresh quote')
+    details = result['details']['currencyOut']
+    amount_out = uint(details['amount'], positive=True)
+    amount_out_min = uint(details['minimumAmount'], positive=True)
+    if amount_out_min < accepted_min:
+        raise NextError('Bridge price changed; request a fresh quote')
+    with transaction.atomic():
+        _lock_account(owner)
+        if _open(owner) is not None:
+            raise NextError('Ya tienes un envío en curso; revisa su estado primero.')
+        # A sweep quote for the same USDC must never also be signed. Never
+        # touch bridge permits: a concurrent rebind's may be the bound one.
+        PolygonReturn.objects.filter(confio_account=owner, status='quoted', purpose='sweep').update(
+            status='expired', failure_code='superseded', updated_at=timezone.now())
+        return PolygonReturn.objects.create(
+            confio_account=owner, address=addr, purpose='bridge', amount_units=str(units),
+            amount_out=str(amount_out), amount_out_min=str(amount_out_min), **terms)
+
+
 # ------------------------------------------------------------------ submit
 
 def submit(owner, return_id, signature: str, *, client=None) -> PolygonReturn:
     """Verify the person's signature over our stored terms, persist it, then
     hand it to Relay. A failed hand-off is retried by reconcile()."""
     from cusd_plus.sponsor_7702 import recover_intent_signer
-    if not enabled():
-        raise PolygonReturnError(UNAVAILABLE)
+    # No switch check here: prepare() gates sweeps, and bridge returns
+    # (provider journeys) must not depend on the sweep switch.
     addr = _owner_address(owner)
     with transaction.atomic():
         _lock_account(owner)
@@ -331,7 +365,12 @@ def submit(owner, return_id, signature: str, *, client=None) -> PolygonReturn:
         if ret is None:
             raise PolygonReturnError(NOTHING)
         if ret.status == 'submitted' and ret.signature == signature:
-            pass  # idempotent retry of the same signature
+            # Idempotent retry of the same (deterministic) signature. While the
+            # first hand-off may still be in flight, never post a duplicate:
+            # Relay could refuse the first as a duplicate of the second.
+            if (not ret.post_accepted and ret.submitted_at
+                    and (timezone.now() - ret.submitted_at).total_seconds() < FIRST_POST_GRACE_SECONDS):
+                return ret
         elif ret.status != 'quoted':
             raise PolygonReturnError(BUSY if ret.status == 'submitted' else UNAVAILABLE)
         else:
@@ -386,7 +425,12 @@ def _post(ret: PolygonReturn, *, client=None) -> PolygonReturn:
             # Relay refused it outright and the USDC never moved: the person
             # can try again right away (the card shows the money again).
             logger.warning('Relay refused permit for return %s: %s', ret.internal_id, exc)
-            return _finish(ret, 'failed', failure_code=f'relay_rejected_{status_code}')
+            # Never over a post Relay accepted meanwhile (a concurrent retry).
+            PolygonReturn.objects.filter(pk=ret.pk, status='submitted', post_accepted=False).update(
+                status='failed', failure_code=f'relay_rejected_{status_code}', updated_at=timezone.now())
+            ret.refresh_from_db()
+            forget_balance(ret.address)
+            return ret
         # Ambiguous: Relay may have taken it. reconcile() re-reads and re-posts
         # while the signature is still valid.
         logger.warning('Relay permit post failed for return %s: %s', ret.internal_id, exc)

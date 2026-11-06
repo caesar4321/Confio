@@ -25,7 +25,7 @@ export interface PolygonReturnStatus {
   returnId: string | null;
 }
 
-interface Permit {
+export interface Permit {
   returnId: string; amount: string; amountOut: string;
   fromAddress: string; toAddress: string; value: string; validBefore: string; nonce: string;
 }
@@ -40,7 +40,7 @@ const SUBMIT = gql`mutation SubmitPolygonReturn($returnId: UUID!, $signature: St
 
 const USDC_POLYGON = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
 /** Relay's EIP-3009 receiver. A permit naming anyone else is never signed. */
-const RELAY_RECEIVERS = new Set(['0xccc88a9d1b4ed6b0eaba998850414b24f1c315be']);
+export const RELAY_RECEIVERS = new Set(['0xccc88a9d1b4ed6b0eaba998850414b24f1c315be']);
 const GENERIC = 'No pudimos devolver tu dinero. Intenta de nuevo en unos minutos.';
 
 /** `null` = could not load (keep what was shown); older server = 'none'. */
