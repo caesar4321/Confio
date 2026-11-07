@@ -64,7 +64,8 @@ export const useRampFlows = ({ legacyCusdBalance }: { legacyCusdBalance: number 
       ? 'Completa el mínimo para poder retirarlo · cUSD'
       : 'Enviar, pagar y comprar CONFIO · cUSD',
     onPress: () => {
-      navigateToRampOrEfectivo('TopUp');
+      // Explicit: the ramp screens default to BSC; this door is Algorand cUSD.
+      navigateToRampOrEfectivo('TopUp', { destination: 'cusd' });
     },
   };
   // The cUSD door follows the SAME rule as Home's legacy wallet row
@@ -73,7 +74,10 @@ export const useRampFlows = ({ legacyCusdBalance }: { legacyCusdBalance: number 
   // minimum can never be withdrawn at all.
   const showLegacyCusdDoor =
     !savingsPortfolio.savings.cusdDepositsPaused || legacyCusdBalance > 0;
-  const rechargeOptions: RouteOption[] = showLegacyCusdDoor
+  // The cUSD TOP-UP door needs an Algorand account to deliver to; accounts
+  // created after Algorand's retirement have none, and the deposit guard
+  // refuses them ("Depósito no disponible"). Only holders see it.
+  const rechargeOptions: RouteOption[] = legacyCusdBalance > 0
     ? [savingsRechargeOption, cusdRechargeOption]
     : [savingsRechargeOption];
 
@@ -95,7 +99,8 @@ export const useRampFlows = ({ legacyCusdBalance }: { legacyCusdBalance: number 
         subtitle: `$${formatFixedFloor(legacyCusdBalance, 2)} disponibles`,
         disabled: legacyCusdBalance <= 0,
         onPress: () => {
-          navigateToRampOrEfectivo('Sell');
+          // Explicit: the ramp screens default to BSC; this drains Algorand cUSD.
+          navigateToRampOrEfectivo('Sell', { destination: 'cusd' });
         },
       } as RouteOption]
       : []),

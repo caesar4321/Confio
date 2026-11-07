@@ -163,7 +163,10 @@ const TopUpScreen = () => {
   // param; the savings document carries the extra argument so the legacy
   // flow stays compatible with pre-cUSD+ servers.
   const route = useRoute<any>();
-  const isSavingsRail = route.params?.destination === 'cusd_plus';
+  // Algorand is retired: only an explicit 'cusd' (an Algorand invoice) takes
+  // the old rail. A bare navigate('TopUp') must not land BSC-only accounts
+  // on a path that needs an Algorand address.
+  const isSavingsRail = route.params?.destination !== 'cusd';
   const { data: dollarDestinationData } = useQuery(TOP_UP_DOLLAR_DESTINATION, {
     fetchPolicy: 'cache-and-network',
     skip: !isSavingsRail,

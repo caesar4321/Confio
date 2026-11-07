@@ -118,8 +118,9 @@ export const SellScreen = ({
 
     // cUSD+ savings mode: sell USDT-BSC straight from the savings vault
     // (redeemToUsdt pays Guardarian's deposit address — no intermediate hop).
-    // Default mode sells USDC-Algorand from the day-to-day balance.
-    const isSavings = route.params?.destination === 'cusd_plus';
+    // Algorand is retired: only an explicit 'cusd' sells USDC-Algorand; a
+    // bare navigate('Sell') must not need an Algorand address.
+    const isSavings = route.params?.destination !== 'cusd';
     const { savings, cusdBalanceUsd, conversionFeeBps } = useSavingsPortfolio();
     const savingsBalanceUsd = savings?.balanceUsd ?? 0;
     // One atomic funding batch can redeem cUSD first and cUSD+ for the

@@ -132,7 +132,11 @@ const TopUpScreen = () => {
   // bsc_address (client-supplied payout is refused on this rail) — the same
   // contract as the Koywe savings rail.
   const route = useRoute();
-  const isSavingsRail = (route.params as any)?.destination === 'cusd_plus';
+  // Algorand is retired: only an explicit 'cusd' (an Algorand invoice) takes
+  // the old rail. TopUpScreen renders this screen inline, and bare
+  // navigate('TopUp') callers (Tu mes, logros) used to fall through to
+  // Algorand and hit "Depósito no disponible" on BSC-only accounts.
+  const isSavingsRail = (route.params as any)?.destination !== 'cusd';
   const { data: dollarDestinationData } = useQuery(GUARDARIAN_DOLLAR_DESTINATION, {
     skip: !isSavingsRail,
     fetchPolicy: 'cache-and-network',

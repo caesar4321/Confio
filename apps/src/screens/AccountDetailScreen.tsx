@@ -2320,7 +2320,7 @@ export const AccountDetailScreen = () => {
                   <View style={styles.usdcActions}>
                     <TouchableOpacity
                       style={[styles.usdcActionButton, { backgroundColor: colors.warningLight, borderWidth: 1, borderColor: colors.offRampIcon }]}
-                      onPress={() => navigation.navigate('Sell')}
+                      onPress={() => navigation.navigate('Sell', { destination: 'cusd' })}
                     >
                       <MCIcon name="bank" size={14} color={colors.warning.text} style={{ marginRight: 8 }} />
                       <View style={styles.actionTextContainer}>

@@ -151,7 +151,9 @@ export const SellScreen = () => {
   // Which ASSET this sell spends — not which provider. Koywe and Guardarian
   // both settle it on their own rail (Koywe pays out USDT-BSC in local
   // currency; Guardarian redeems to its deposit address).
-  const isSavingsSell = (route.params as any)?.destination === 'cusd_plus';
+  // Algorand is retired: only an explicit 'cusd' takes the old rail; a bare
+  // navigate('Sell') sells on BSC.
+  const isSavingsSell = (route.params as any)?.destination !== 'cusd';
 
   const { data: meData } = useQuery(GET_ME);
   const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
