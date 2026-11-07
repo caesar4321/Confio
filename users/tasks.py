@@ -596,3 +596,11 @@ def backfill_phone_onboarded():
     User = get_user_model()
     return User.objects.filter(onboarded_at__isnull=True, phone_number__isnull=False).exclude(
         phone_number='').update(onboarded_at=timezone.now())
+
+
+@shared_task(name='users.sync_referral_conversions')
+@ensure_db_connection_closed
+def sync_referral_conversions_task():
+    """Referral status follows funding (achievements/referral_conversion.py)."""
+    from achievements.referral_conversion import sync_referral_conversions
+    return sync_referral_conversions()

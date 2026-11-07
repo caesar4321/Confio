@@ -660,9 +660,11 @@ def referral_program(w):
     total_referrals = referral_records.count()
     converted_referrals = referral_records.filter(status='converted').count()
     new_referrals_week = referral_records.filter(created_at__gte=last_7_start).count()
+    # Converted = funded (achievements/referral_conversion.py), dated by the
+    # first deposit, not by a reward claim.
     converted_week = referral_records.filter(
         status='converted',
-        reward_claimed_at__gte=last_7_start
+        first_transaction_at__gte=last_7_start
     ).count()
     engaged_referrals = referral_records.filter(total_transaction_volume__gt=0).count()
     total_awarded = referral_records.aggregate(

@@ -98,6 +98,12 @@ app.conf.beat_schedule.setdefault('security-retry-pending-same-face', {
     'schedule': crontab(minute=41),
 })
 
+# Referral status follows the referred member's first deposit on any rail.
+app.conf.beat_schedule.setdefault('users-sync-referral-conversions', {
+    'task': 'users.sync_referral_conversions',
+    'schedule': crontab(minute=27),
+})
+
 app.conf.beat_schedule.setdefault('users-rollup-funnel-events', {
     'task': 'users.rollup_funnel_events',
     'schedule': crontab(hour=3, minute=30),
