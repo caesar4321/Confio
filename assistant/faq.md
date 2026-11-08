@@ -49,7 +49,7 @@
 ## Países, recargas y retiros
 - Creas tu cuenta con Google o Apple desde casi cualquier país, sin número de teléfono. Recargar y Retirar dependen del país que eliges en esas pantallas. Para usarlos te pedimos tu dirección y un número de contacto, sin códigos por SMS; los cambias en Perfil → Dirección y teléfono.
 - En Argentina, Bolivia, Brasil, Chile, Colombia, México y Perú recargas con medios locales, y retiras en todos salvo Bolivia:
-  - Argentina: transferencia (recargar y retirar); Khipu y QR interoperable (solo recargar).
+  - Argentina: transferencia (recargar y retirar); Khipu y QR interoperable (solo recargar). Las recargas y los retiros en Argentina son en pesos argentinos: una transferencia en dólares desde un banco no sirve para recargar. Quien tiene dólares en su banco debe pasarlos a pesos antes de recargar, o recibir USDT desde un exchange por BNB Smart Chain (BEP20).
   - Bolivia: QR interoperable, solo para recargar: en Recargar eliges el monto y la app genera un QR para esa orden, que pagas desde la app de tu banco o billetera. Por ahora no se puede retirar a bolivianos ni pagar QR locales; retirar y pagar con QR en Bolivia llegará muy pronto (sin fecha).
   - Brasil: Pix.
   - Chile: transferencia (recargar y retirar); Khipu (solo recargar).

@@ -1723,8 +1723,9 @@ class PortfolioAndNeedsTests(TestCase):
         self.assertIs(by_ip['acciones_y_confio_dollar_plus_disponibles'], False)
         self.assertIn('desde Brasil', by_ip['motivo_no_disponible'])
         self.assertIn('VPN', by_ip['motivo_no_disponible'])
-        self.assertIn('no es por el país de su teléfono', by_ip['motivo_no_disponible'])
-        self.assertIn('país de su teléfono', by_phone['motivo_no_disponible'])
+        self.assertIn('no es por el país de su cuenta', by_ip['motivo_no_disponible'])
+        self.assertIn('país de su cuenta', by_phone['motivo_no_disponible'])
+        self.assertNotIn('teléfono', by_ip['motivo_no_disponible'].replace('no por su teléfono', ''))
         self.assertNotIn('Se está conectando', by_phone['motivo_no_disponible'])
         self.assertNotIn('motivo_no_disponible', allowed)
         # An unresolvable connection country still refuses (the policy already did), without naming one.

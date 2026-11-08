@@ -717,12 +717,14 @@ def _ondo_decision(viewer):
         except Exception:  # noqa: BLE001
             where = None
         return False, (f'Se está conectando desde {COUNTRY_NAMES_ES.get(where, "otro país")}, donde el emisor (Ondo) '
-                       'no permite estas inversiones; no es por el país de su teléfono. No le sugieras conectarse desde '
+                       'no permite estas inversiones; no es por el país de su cuenta. No le sugieras conectarse desde '
                        'otro lugar ni usar una VPN.')
     from security.geo import country_of
     if not country_of(viewer.user):
-        return False, 'Su cuenta no tiene un país de teléfono verificado.'
-    return False, 'El emisor (Ondo) no permite estas inversiones en el país de su teléfono.'
+        return False, 'Su cuenta todavía no tiene un país.'
+    return False, ('El emisor (Ondo) no permite estas inversiones en el país de su cuenta. Ese país lo calcula Confío '
+                   'según desde dónde se conecta (no por su documento) y se actualiza solo cuando usa la app '
+                   'habitualmente desde otro país; no se cambia a mano.')
 
 
 def _ondo_allowed(viewer):
