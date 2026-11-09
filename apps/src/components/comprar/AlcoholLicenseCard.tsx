@@ -65,7 +65,8 @@ export const AlcoholLicenseCard = ({ license, onSubmitted }: {
     expired: 'Tu licencia venció. Sube la renovada para seguir vendiendo bebidas alcohólicas.',
     none: 'Por ley, para vender bebidas alcohólicas necesitas la licencia de funcionamiento de tu municipio que autorice su venta, a tu nombre como figura en tu documento verificado.',
   }[status];
-  const canUpload = status !== 'pending';
+  // While pending too: a stuck or wrong photo can always be replaced.
+  const canUpload = true;
 
   return (
     <View style={styles.card} testID="alcohol-license-card">

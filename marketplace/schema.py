@@ -1044,13 +1044,13 @@ class SubmitAlcoholLicense(graphene.Mutation):
                 # one is reviewed (submitted_at > reviewed_at = to review).
                 Store.objects.filter(pk=store.pk).update(
                     alcohol_license_key=photo_key, alcohol_license_submitted_at=now,
-                    alcohol_license_queued_at=now)
+                    alcohol_license_queued_at=now, alcohol_license_attempts=0)
             else:
                 Store.objects.filter(pk=store.pk).update(
                     alcohol_license_status='pending', alcohol_license_key=photo_key,
                     alcohol_license_number=(license_number or '').strip()[:60], alcohol_license_note='',
                     alcohol_license_expires_on=None, alcohol_license_submitted_at=now,
-                    alcohol_license_reviewed_at=None, alcohol_license_queued_at=now)
+                    alcohol_license_reviewed_at=None, alcohol_license_queued_at=now, alcohol_license_attempts=0)
             # Reviewed automatically (marketplace/license_review.py), in minutes.
             queue_license_review(store.pk, photo_key)
         return SubmitAlcoholLicense(success=True)

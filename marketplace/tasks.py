@@ -150,10 +150,14 @@ def review_product(self, product_id: int, claim: str):
 def review_alcohol_license(self, store_id: int, key: str):
     from .license_review import ReviewUnavailable, review_license
 
+    from .models import Store
+
     try:
         review_license(store_id, key)
     except ReviewUnavailable as exc:
         logger.warning('[COMPRAR] licence review for store %s unavailable: %s', store_id, exc)
+        # Still in flight: the stuck-review sweep must not start a second chain.
+        Store.objects.filter(pk=store_id, alcohol_license_key=key).update(alcohol_license_queued_at=timezone.now())
         raise self.retry(countdown=60 * (2 ** self.request.retries))
 
 
@@ -175,6 +179,8 @@ def review_rating(self, rating_id: int):
 # task's whole retry chain (~31 min), and each hand-back expires at the next
 # one, so a backlog cannot stack copies of the same review.
 STUCK_REVIEW_AFTER_MIN = 60
+LICENSE_SWEEP_ATTEMPTS = 3
+LICENSE_GAVE_UP_NOTE = 'No pudimos revisar tu licencia. Sube la foto de nuevo.'
 
 
 def enqueue_rating_review(rating_id: int) -> None:
@@ -227,6 +233,18 @@ def requeue_stuck_reviews(now=None) -> dict:
         stale, deleted_at__isnull=True,
     ).exclude(alcohol_license_key='').values_list('pk', 'alcohol_license_key')[:50])
     for pk, key in licences:
-        if Store.objects.filter(stale, pk=pk, alcohol_license_key=key).update(alcohol_license_queued_at=now):
+        # Give up after a few hand-backs (a photo the reviewer can never read):
+        # the seller is told to upload it again, never left pending for good.
+        if Store.objects.filter(stale, pk=pk, alcohol_license_key=key,
+                                alcohol_license_attempts__gte=LICENSE_SWEEP_ATTEMPTS).exists():
+            give_up = {'alcohol_license_queued_at': None, 'alcohol_license_reviewed_at': now,
+                       'alcohol_license_note': LICENSE_GAVE_UP_NOTE}
+            Store.objects.filter(pk=pk, alcohol_license_key=key, alcohol_license_status='pending') \
+                .update(alcohol_license_status='rejected', **give_up)
+            # A renewal: the current licence keeps counting; only the new photo is dropped.
+            Store.objects.filter(pk=pk, alcohol_license_key=key, alcohol_license_status='approved').update(**give_up)
+            continue
+        if Store.objects.filter(stale, pk=pk, alcohol_license_key=key).update(
+                alcohol_license_queued_at=now, alcohol_license_attempts=F('alcohol_license_attempts') + 1):
             review_alcohol_license.apply_async((pk, key), expires=STUCK_REVIEW_AFTER_MIN * 60)
     return {'products': len(products), 'ratings': len(ratings), 'licences': len(licences)}

@@ -254,8 +254,10 @@ def _load_photo(key: str):
     except ValueError:
         return None
     except ClientError as exc:
-        # Only "not there" is a bad photo; a permission error is ours: retry.
-        if exc.response.get('Error', {}).get('Code') in ('NoSuchKey', '404'):
+        # Not there. The role cannot list the bucket, so a missing object
+        # answers 403 too (as object_exists reads it): a bad photo, not an
+        # outage to retry forever.
+        if exc.response.get('Error', {}).get('Code') in ('NoSuchKey', '404', '403', 'AccessDenied'):
             return None
         raise ReviewUnavailable(f'licence photo unavailable: {exc}') from exc
 
@@ -270,6 +272,8 @@ def review_license(store_id: int, key: str) -> str:
     store = Store.objects.select_related('owner').filter(pk=store_id, deleted_at__isnull=True).first()
     if store is None or not key or store.alcohol_license_key != key:
         return 'stale'
+    # A decision taken meanwhile (an admin, another review) is never overwritten.
+    started = (store.alcohol_license_status, store.alcohol_license_reviewed_at)
     image = _load_photo(key)
     reading = _read_license(image, _context(store)) if image is not None else None
     photo_hash = hashlib.sha256(image.body).hexdigest() if image is not None else ''
@@ -281,20 +285,22 @@ def review_license(store_id: int, key: str) -> str:
 
     with transaction.atomic():
         row = Store.objects.select_for_update().get(pk=store.pk)
-        if row.alcohol_license_key != key:
-            return 'stale'  # a newer photo arrived meanwhile
+        if row.alcohol_license_key != key or (row.alcohol_license_status, row.alcohol_license_reviewed_at) != started:
+            return 'stale'  # a newer photo, or another decision, arrived meanwhile
         if approved and not assert_unique(row, reading['license_number'], photo_hash):
             approved, expires, reason = False, None, DUPLICATE_REASON
         now = timezone.now()
         common = {'alcohol_license_verdict': {**(reading or {}), 'approved': approved, 'reason': reason,
                                               'expires_on': expires.isoformat() if expires else ''},
-                  'alcohol_license_reviewed_at': now, 'alcohol_license_queued_at': None}
+                  'alcohol_license_reviewed_at': now, 'alcohol_license_queued_at': None,
+                  'alcohol_license_attempts': 0}
         renewal = row.alcohol_license_valid(today)
         if approved:
             # The document's own number is the one that counts (duplicates),
             # never what the seller typed.
             fields = {**common, 'alcohol_license_status': 'approved', 'alcohol_license_expires_on': expires,
                       'alcohol_license_note': '', 'alcohol_license_hash': photo_hash,
+                      'alcohol_license_approved_key': key,
                       'alcohol_license_number': reading['license_number'][:60]}
         elif renewal:
             # A failed renewal never takes away the licence that still counts.

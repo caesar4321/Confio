@@ -1917,6 +1917,45 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             results = [SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key=self.KEY) for _ in range(5)]
         self.assertEqual(results[-1].error, 'too_many_uploads')
 
+    def test_a_missing_photo_reads_as_403_and_is_rejected(self):
+        from botocore.exceptions import ClientError
+        from .license_review import review_license
+        with mock.patch('inbox.community.load_pending_image',
+                        side_effect=ClientError({'Error': {'Code': 'AccessDenied'}}, 'GetObject')):
+            self.assertEqual(review_license(self.store.pk, self.KEY), 'rejected')
+
+    def test_a_decision_taken_meanwhile_is_never_overwritten(self):
+        from .license_review import review_license
+        image = SimpleNamespace(body=b'img', mime_type='image/jpeg')
+
+        def admin_rejects_meanwhile(*_a, **_k):
+            Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected',
+                                                          alcohol_license_reviewed_at=timezone.now())
+            return self.reading()
+        with mock.patch('inbox.community.load_pending_image', return_value=image), \
+                mock.patch('marketplace.license_review._read_license', side_effect=admin_rejects_meanwhile):
+            self.assertEqual(review_license(self.store.pk, self.KEY), 'stale')
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+
+    def test_a_renewal_keeps_the_approved_photo_on_record(self):
+        self.run_review(self.reading())
+        self.assertEqual(self.store.alcohol_license_approved_key, self.KEY)
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_key='marketplace/pending/x/renewal.jpg')
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_approved_key, self.KEY)
+
+    def test_the_sweep_gives_up_after_a_few_attempts(self):
+        from .tasks import LICENSE_SWEEP_ATTEMPTS, requeue_stuck_reviews
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_queued_at=None,
+                                                      alcohol_license_attempts=LICENSE_SWEEP_ATTEMPTS)
+        with mock.patch('marketplace.tasks.review_alcohol_license.apply_async') as send:
+            requeue_stuck_reviews()
+        send.assert_not_called()
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+        self.assertTrue(self.store.alcohol_license_note)
+
     def test_the_sweep_requeues_a_stuck_licence_once(self):
         from .tasks import requeue_stuck_reviews
         # Never queued (pending before automatic review existed) is stuck too.

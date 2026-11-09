@@ -213,6 +213,11 @@ class Store(SoftDeleteModel):
     alcohol_license_verdict = models.JSONField(null=True, blank=True)
     alcohol_license_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
     alcohol_license_queued_at = models.DateTimeField(null=True, blank=True)
+    # The photo of the licence that was approved (a renewal's new photo moves
+    # alcohol_license_key; the approved one stays on record), and how many
+    # times the stuck-review sweep re-queued the current photo.
+    alcohol_license_approved_key = models.CharField(max_length=300, blank=True, default='')
+    alcohol_license_attempts = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         constraints = [

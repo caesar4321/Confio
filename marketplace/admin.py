@@ -146,14 +146,26 @@ class StoreAdmin(admin.ModelAdmin):
     # Derived from the price on every save, so older clients that still read
     # it never disagree with what checkout does.
     readonly_fields = ('ships_outside_city', 'alcohol_license_photo', 'alcohol_license_verdict', 'alcohol_license_hash',
-                       'alcohol_license_queued_at', 'alcohol_license_key',
+                       'alcohol_license_queued_at', 'alcohol_license_key', 'alcohol_license_approved_key',
+                       'alcohol_license_attempts',
                        'alcohol_license_submitted_at', 'alcohol_license_reviewed_at')
 
     def save_model(self, request, obj, form, change):
         obj.ships_outside_city = obj.outside_delivery_price_usd is not None
-        if change and {'alcohol_license_status', 'alcohol_license_expires_on'} & set(form.changed_data):
-            obj.alcohol_license_reviewed_at = timezone.now()
-        super().save_model(request, obj, form, change)
+        if not change:
+            super().save_model(request, obj, form, change)
+        else:
+            # Only what this form changed: a page opened before a review or a
+            # new upload must not write its stale licence fields back.
+            fields = set(form.changed_data) | {'ships_outside_city'}
+            if {'alcohol_license_status', 'alcohol_license_expires_on'} & set(form.changed_data):
+                obj.alcohol_license_reviewed_at = timezone.now()
+                fields.add('alcohol_license_reviewed_at')
+                if obj.alcohol_license_status == 'approved':
+                    # The photo an admin approved is the one on record.
+                    obj.alcohol_license_approved_key = obj.alcohol_license_key
+                    fields.add('alcohol_license_approved_key')
+            obj.save(update_fields=sorted(fields))
         if obj.alcohol_license_status == 'approved' and obj.alcohol_license_expires_on is None:
             self.message_user(request, 'Approved without an expiry date: the licence does not count until '
                               'you set "Alcohol license expires on".', level=messages.WARNING)
@@ -165,7 +177,7 @@ class StoreAdmin(admin.ModelAdmin):
         from .license_review import queue_license_review
         n = 0
         for store in queryset.exclude(alcohol_license_key=''):
-            Store.objects.filter(pk=store.pk).update(alcohol_license_queued_at=timezone.now())
+            Store.objects.filter(pk=store.pk).update(alcohol_license_queued_at=timezone.now(), alcohol_license_attempts=0)
             queue_license_review(store.pk, store.alcohol_license_key)
             n += 1
         self.message_user(request, f'Queued {n} licence review(s).')
@@ -181,13 +193,19 @@ class StoreAdmin(admin.ModelAdmin):
         try:
             url = generate_presigned_get(key=obj.alcohol_license_key, expires_in_seconds=300,
                                          bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
+            approved_url = (generate_presigned_get(key=obj.alcohol_license_approved_key, expires_in_seconds=300,
+                                                   bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
+                            if obj.alcohol_license_approved_key
+                            and obj.alcohol_license_approved_key != obj.alcohol_license_key else '')
         except Exception:  # noqa: BLE001 — the page must still render
             return 'unavailable'
         renewal = (obj.alcohol_license_status == 'approved' and obj.alcohol_license_submitted_at
                    and (obj.alcohol_license_reviewed_at is None
                         or obj.alcohol_license_submitted_at > obj.alcohol_license_reviewed_at))
-        return format_html('<a href="{}" target="_blank" rel="noopener">Open licence</a>{}', url,
-                           ' (renewal being reviewed automatically)' if renewal else '')
+        approved = format_html(' · <a href="{}" target="_blank" rel="noopener">Approved licence</a>', approved_url) \
+            if approved_url else ''
+        return format_html('<a href="{}" target="_blank" rel="noopener">Open licence</a>{}{}', url,
+                           ' (renewal being reviewed automatically)' if renewal else '', approved)
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_products=Count('products'))
