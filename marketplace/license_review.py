@@ -321,10 +321,12 @@ def license_conflict(store, number: str, photo_hash: str) -> str:
 # name these words are part of it, and so is "y Cía." (the partners' name of
 # a sociedad colectiva).
 LEGAL_SUFFIXES = sorted([
-    (('srl',), 'srl'), (('ltda',), 'srl'), (('sociedad', 'de', 'responsabilidad', 'limitada'), 'srl'),
-    (('sa',), 'sa'), (('sociedad', 'anonima'), 'sa'),
-    (('sas',), 'sas'),
-    (('eirl',), 'eirl'), (('empresa', 'individual', 'de', 'responsabilidad', 'limitada'), 'eirl'),
+    (('srl',), 'srl'), (('s', 'r', 'l'), 'srl'), (('ltda',), 'srl'),
+    (('sociedad', 'de', 'responsabilidad', 'limitada'), 'srl'),
+    (('sa',), 'sa'), (('s', 'a'), 'sa'), (('sociedad', 'anonima'), 'sa'),
+    (('sas',), 'sas'), (('s', 'a', 's'), 'sas'),
+    (('eirl',), 'eirl'), (('e', 'i', 'r', 'l'), 'eirl'),
+    (('empresa', 'individual', 'de', 'responsabilidad', 'limitada'), 'eirl'),
     (('empresa', 'unipersonal'), 'unipersonal'),
     (('sca',), 'sca'), (('scs',), 'scs'),
 ], key=lambda item: len(item[0]), reverse=True)
@@ -353,7 +355,9 @@ def company_matches(holder: str, company: str) -> bool:
     held, held_form = _company_core(holder)
     if not wanted or not held_form:
         return False
-    if wanted_form and held_form != wanted_form:
+    # Same form; a registry name with none is a sole proprietorship, so only
+    # an "Empresa Unipersonal" holder can be it (never an SRL of that name).
+    if held_form != (wanted_form or 'unipersonal'):
         return False
     return held == wanted
 

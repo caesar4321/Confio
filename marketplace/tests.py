@@ -1988,6 +1988,9 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertFalse(company_matches('Juan Perez S.A.', 'Juan Pérez y Cía. S.R.L.'))
         self.assertFalse(company_matches('Andina Distribuidora SA', 'Distribuidora Andina S.R.L.'))
         self.assertFalse(company_matches('Distribuidora Andina S.A.', 'Distribuidora Andina S.R.L.'))
+        self.assertTrue(company_matches('Comercial Perez S. R. L.', 'Comercial Perez SRL'))      # spaced form
+        self.assertFalse(company_matches('Comercial Pérez S.R.L.', 'Comercial Perez'))           # no form: only
+        self.assertTrue(company_matches('Comercial Perez Empresa Unipersonal', 'Comercial Pérez'))  # unipersonal
 
     def test_personal_stores_and_unverified_names_never_match_a_company(self):
         # Personal account: a company-held licence is rejected.
