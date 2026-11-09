@@ -874,3 +874,33 @@ class TestPairExemptionTests(TestCase):
                 self.assertFalse(fee_referral.test_pair_exempt(4, 5), until)
         with override_settings(FEE_REFERRAL_TEST_PAIRS='', FEE_REFERRAL_TEST_UNTIL=soon):
             self.assertFalse(fee_referral.test_pair_exempt(4, 5))
+
+
+class DashboardCommissionTests(FeeReferralFixture):
+    def test_fee_table_and_activation_cards(self):
+        from datetime import datetime, timezone as dt_timezone
+        from types import SimpleNamespace
+
+        from django.template.loader import render_to_string
+
+        from config.admin_dashboard_sections import _fee_commission_stats
+        from cusd_plus.fee_ledger import referral_shares
+
+        with mock.patch('notifications.utils.create_notification'):
+            fee_referral.record_referral_payouts('0x41', [_paid_log(index=1)], {100: timezone.now()})
+        shared = referral_shares()
+        self.assertEqual(shared['count'], 1)
+        self.assertGreater(shared['fee_usd'], 0)
+        self.assertEqual(shared['fee_usd_24h'], shared['fee_usd'])
+        stats = _fee_commission_stats(SimpleNamespace(now=timezone.now()))
+        self.assertEqual((stats['payouts'], stats['referrers_30d'], stats['referees_30d']), (1, 1, 1))
+        self.assertEqual(stats['paid_usd'], shared['fee_usd'])
+        html = render_to_string('admin/dash/_referral_program.html', {'fee_commission_stats': stats})
+        self.assertIn('Fee-sharing commissions', html)
+        self.assertIn('commission=earning', html)
+        zero = {k: Decimal('0') for k in ('fee_usd', 'fee_usd_30d', 'fee_usd_7d', 'fee_usd_24h')}
+        ledger = {'rows': [], 'total': dict(zero, count=1, volume_usd=Decimal('100')), 'undated_events': 0,
+                  'shared': dict(shared), 'net': {k: zero[k] - shared[k] for k in zero}}
+        html = render_to_string('admin/dash/_fee_revenue.html', {'fee_ledger': ledger})
+        self.assertIn('Shared with referrers', html)
+        self.assertIn('Net fee revenue (kept)', html)
