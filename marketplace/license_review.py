@@ -236,6 +236,15 @@ def decide(reading: dict, store, today: date, owner_names: tuple) -> tuple:
 REVOKED_REASON = 'Esta licencia fue revocada y no se puede usar en Comprar.'
 
 
+def is_revoked(store, number: str, photo_hash: str) -> bool:
+    """This photo, or the number read from it in the store's city, was revoked."""
+    from .models import RevokedAlcoholLicense
+    normalized = _normalize_number(number)
+    return (bool(normalized) and RevokedAlcoholLicense.objects.filter(
+        city_key=city_key(store.city), number=normalized).exists()) or (
+        bool(photo_hash) and RevokedAlcoholLicense.objects.filter(photo_hash=photo_hash).exists())
+
+
 def city_key(city: str) -> str:
     return ' '.join(sorted(_words(city)))
 
@@ -366,7 +375,7 @@ def revoke_licence(store_id: int) -> tuple:
                     records.add((city_key(row.city), read, ''))
             try:
                 on_screen = current_photo_hash(row.alcohol_license_key)
-            except ReviewUnavailable:
+            except Exception:  # noqa: BLE001 — S3 down/timeout: sales still stop (unrecorded warning)
                 on_screen = ''
             hashes = {h for _, _, h in records if h}
             if on_screen and on_screen not in hashes:
@@ -436,8 +445,12 @@ def review_license(store_id: int, key: str) -> str:
         # Only a licence the automatic review itself approved survives a
         # failed renewal; one approved by hand before the history must pass.
         renewal = row.alcohol_license_valid(today) and AlcoholLicenseApproval.objects.filter(store=row).exists()
-        if conflict == REVOKED_REASON:
-            renewal = False  # presenting a revoked licence ends the current one too
+        # Presenting a revoked licence ends the current one too, whatever else
+        # the review decided about this photo.
+        if conflict == REVOKED_REASON or (reading is not None and is_revoked(row, reading['license_number'], photo_hash)):
+            renewal = False
+            if not approved:
+                reason = REVOKED_REASON
         if approved:
             # The document's own number is the one that counts (duplicates),
             # never what the seller typed.

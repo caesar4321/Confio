@@ -2099,6 +2099,41 @@ class AlcoholLicenseReviewTests(MarketTestBase):
                              alcohol_license_expires_on=self.today + timedelta(days=300))
         self.assertEqual(self.run_review(self.reading()), 'approved')
 
+    def test_the_sweep_rejects_a_hand_approved_licence_it_could_not_review(self):
+        from .tasks import LICENSE_SWEEP_ATTEMPTS, requeue_stuck_reviews
+        Store.objects.filter(pk=self.store.pk).update(
+            alcohol_license_status='approved', alcohol_license_expires_on=self.today + timedelta(days=100),
+            alcohol_license_reviewed_at=None, alcohol_license_queued_at=None,
+            alcohol_license_attempts=LICENSE_SWEEP_ATTEMPTS, alcohol_license_submitted_at=timezone.now() - timedelta(days=2))
+        with mock.patch('marketplace.tasks.review_alcohol_license.apply_async'):
+            requeue_stuck_reviews()
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+
+    def test_a_revoked_photo_ends_the_current_licence_even_when_it_fails_other_rules(self):
+        from .models import RevokedAlcoholLicense
+        import hashlib
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        RevokedAlcoholLicense.objects.create(store=self.store, city_key='la paz', number='',
+                                             photo_hash=hashlib.sha256(b'forged').hexdigest())
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_key='marketplace/pending/x/renewal.jpg',
+                                                      alcohol_license_submitted_at=timezone.now())
+        self.KEY = 'marketplace/pending/x/renewal.jpg'
+        self.assertEqual(self.run_review(self.reading(covers_alcohol=False), body=b'forged'), 'rejected')
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+        self.assertIn('revocada', self.store.alcohol_license_note)
+
+    def test_a_revoke_survives_an_s3_network_error(self):
+        from django.contrib.admin.sites import AdminSite
+        from .admin import StoreAdmin
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        admin = StoreAdmin(Store, AdminSite())
+        with mock.patch.object(admin, 'message_user'), \
+                mock.patch('marketplace.license_review.current_photo_hash', side_effect=ConnectionError('timeout')):
+            admin.revoke_alcohol_license(mock.Mock(), Store.objects.filter(pk=self.store.pk))
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+
     def test_the_sweep_gives_up_after_a_few_attempts(self):
         from .tasks import LICENSE_SWEEP_ATTEMPTS, requeue_stuck_reviews
         Store.objects.filter(pk=self.store.pk).update(alcohol_license_queued_at=None,

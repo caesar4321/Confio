@@ -255,8 +255,15 @@ def requeue_stuck_reviews(now=None) -> dict:
                                          alcohol_license_attempts__gte=LICENSE_SWEEP_ATTEMPTS,
                                          alcohol_license_submitted_at__lt=now - LICENSE_GIVE_UP_AFTER)
             still.filter(alcohol_license_status='pending').update(alcohol_license_status='rejected', **give_up)
-            # A renewal: the current licence keeps counting; only the new photo is dropped.
-            still.filter(alcohol_license_status='approved').update(**give_up)
+            # A renewal: only a licence the automatic review approved keeps
+            # counting; one approved by hand before the history is rejected.
+            from .models import AlcoholLicenseApproval
+            reviewed = AlcoholLicenseApproval.objects.filter(store_id=pk).exists()
+            approved = still.filter(alcohol_license_status='approved')
+            if reviewed:
+                approved.update(**give_up)
+            else:
+                approved.update(alcohol_license_status='rejected', **give_up)
             continue
         # Cap reached but not a day old yet: wait for the give-up, no more
         # paid review chains for a photo that keeps failing.

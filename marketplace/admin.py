@@ -215,6 +215,9 @@ class StoreAdmin(admin.ModelAdmin):
             except OperationalError as exc:  # a lock conflict (e.g. two revokes at once): nothing written
                 failed.append(f'store {store.pk}: busy ({exc.__class__.__name__})')
                 continue
+            except Exception as exc:  # noqa: BLE001 — report per store, never a 500 halfway through
+                failed.append(f'store {store.pk}: {exc.__class__.__name__}: {exc}'[:300])
+                continue
             revoked.update(ids)
             unrecorded.extend(nothing)
         also = revoked - set(queryset.values_list('pk', flat=True))

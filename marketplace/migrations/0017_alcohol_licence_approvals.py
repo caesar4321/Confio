@@ -7,8 +7,9 @@ from django.db import migrations, models
 def review_hand_approved(apps, schema_editor):
     """Licences approved before the approval history existed have no record,
     so they would not count in one-licence-one-store. Queue them for the
-    automatic review as a renewal: a pass records them; a failure keeps the
-    licence (and tells the seller), exactly like any renewal."""
+    automatic review: a pass records them; a failure (or a photo that cannot
+    be reviewed within a day) rejects them, since only a licence the
+    automatic review approved survives a failed renewal."""
     from django.utils import timezone
     Store = apps.get_model('marketplace', 'Store')
     Store.objects.filter(alcohol_license_status='approved').exclude(alcohol_license_key='').update(
