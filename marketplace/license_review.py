@@ -315,46 +315,51 @@ def license_conflict(store, number: str, photo_hash: str) -> str:
 
 
 # Legal-form SUFFIXES of Bolivian/LATAM company names, as word sequences
-# (dots dropped: "S.R.L." is "srl"). Only stripped at the END of a name:
-# inside a name these words are part of it ("Spa Relax", "Compañía Cervecera").
+# (dots dropped: "S.R.L." is "srl"), each with its legal-form CLASS: SRL,
+# "Ltda." and "Sociedad de Responsabilidad Limitada" are one form; S.A. and
+# "Sociedad Anónima" another. Only stripped at the END of a name; inside a
+# name these words are part of it, and so is "y Cía." (the partners' name of
+# a sociedad colectiva).
 LEGAL_SUFFIXES = sorted([
-    ('srl',), ('sa',), ('sas',), ('ltda',), ('eirl',), ('sca',), ('scs',),
-    ('sociedad', 'de', 'responsabilidad', 'limitada'), ('sociedad', 'anonima'),
-    ('empresa', 'unipersonal'), ('empresa', 'individual', 'de', 'responsabilidad', 'limitada'),
-    ('y', 'cia'), ('y', 'compania'), ('cia',),
-], key=len, reverse=True)
-# What business verification stores when the registry gave no company name.
-KYB_PLACEHOLDER = 'Verified Business'
+    (('srl',), 'srl'), (('ltda',), 'srl'), (('sociedad', 'de', 'responsabilidad', 'limitada'), 'srl'),
+    (('sa',), 'sa'), (('sociedad', 'anonima'), 'sa'),
+    (('sas',), 'sas'),
+    (('eirl',), 'eirl'), (('empresa', 'individual', 'de', 'responsabilidad', 'limitada'), 'eirl'),
+    (('empresa', 'unipersonal'), 'unipersonal'),
+    (('sca',), 'sca'), (('scs',), 'scs'),
+], key=lambda item: len(item[0]), reverse=True)
 
 
 def _company_core(value: str) -> tuple:
-    """(core words, had a legal-form suffix): accents, case and dots ignored;
-    trailing legal-form suffixes stripped ("Juan Pérez y Cía. S.R.L." →
-    [juan, perez]); every other word kept, in order."""
+    """(core words in order, legal-form class or ''): accents, case and dots
+    ignored; ONE trailing legal-form suffix stripped ("Pérez y Cía. S.R.L." →
+    ([perez, y, cia], 'srl'))."""
     import re
     import unicodedata
     folded = unicodedata.normalize('NFKD', value or '').encode('ascii', 'ignore').decode().casefold()
     words = re.findall(r'[a-z0-9]+', folded.replace('.', ''))
-    stripped = False
-    changed = True
-    while changed and words:
-        changed = False
-        for suffix in LEGAL_SUFFIXES:
-            if len(words) > len(suffix) and tuple(words[-len(suffix):]) == suffix:
-                words, stripped, changed = words[:-len(suffix)], True, True
-                break
-    return words, stripped
+    for suffix, form in LEGAL_SUFFIXES:
+        if len(words) > len(suffix) and tuple(words[-len(suffix):]) == suffix:
+            return words[:-len(suffix)], form
+    return words, ''
 
 
 def company_matches(holder: str, company: str) -> bool:
     """The licence holder is exactly this verified company: the same core
-    name (counted words, legal form aside), AND the holder itself carries a
-    legal form, so a person who shares the company's core name ("JUAN PEREZ"
-    for "Juan Pérez y Cía. S.R.L.") never passes as the company."""
-    from collections import Counter
-    wanted, _ = _company_core(company)
-    held, held_is_company = _company_core(holder)
-    return bool(wanted) and held_is_company and Counter(held) == Counter(wanted)
+    name, word for word and in order, and the same legal form. The holder
+    must carry a legal form itself, so a person who shares the company's
+    core name never passes as the company."""
+    wanted, wanted_form = _company_core(company)
+    held, held_form = _company_core(holder)
+    if not wanted or not held_form:
+        return False
+    if wanted_form and held_form != wanted_form:
+        return False
+    return held == wanted
+
+
+# What business verification stores when the registry gave no company name.
+KYB_PLACEHOLDER = 'Verified Business'
 
 
 def _verified_company(store) -> str:

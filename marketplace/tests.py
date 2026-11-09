@@ -1972,7 +1972,9 @@ class AlcoholLicenseReviewTests(MarketTestBase):
     def test_a_company_name_must_match_exactly(self):
         from .license_review import company_matches
         self.assertTrue(company_matches('Distribuidora Andina S.R.L.', 'DISTRIBUIDORA ANDINA SRL'))
-        self.assertTrue(company_matches('Distribuidora Andina Ltda.', 'Distribuidora Andina S.R.L.'))
+        self.assertTrue(company_matches('Distribuidora Andina Ltda.', 'Distribuidora Andina S.R.L.'))  # one form
+        self.assertTrue(company_matches('DISTRIBUIDORA ANDINA SOCIEDAD DE RESPONSABILIDAD LIMITADA',
+                                        'Distribuidora Andina S.R.L.'))
         self.assertFalse(company_matches('Distribuidora Andina Norte S.R.L.', 'Distribuidora Andina S.R.L.'))
         self.assertFalse(company_matches('S.R.L.', 'S.A.'))   # legal forms alone are no name
         # A person sharing the company's core name is not the company.
@@ -1981,6 +1983,11 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         # Words inside a name are part of it.
         self.assertFalse(company_matches('Relax S.A.', 'Spa Relax S.R.L.'))
         self.assertFalse(company_matches('Cervecera Boliviana S.A.', 'Compañía Cervecera Boliviana Ltda.'))
+        # 'y Cía.' is part of the name; the legal form must agree; word order counts.
+        self.assertFalse(company_matches('Perez S.R.L.', 'Pérez y Cía. S.R.L.'))
+        self.assertFalse(company_matches('Juan Perez S.A.', 'Juan Pérez y Cía. S.R.L.'))
+        self.assertFalse(company_matches('Andina Distribuidora SA', 'Distribuidora Andina S.R.L.'))
+        self.assertFalse(company_matches('Distribuidora Andina S.A.', 'Distribuidora Andina S.R.L.'))
 
     def test_personal_stores_and_unverified_names_never_match_a_company(self):
         # Personal account: a company-held licence is rejected.
