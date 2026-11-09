@@ -594,7 +594,12 @@ FRIEND_EARNING = 'earning'
 FRIEND_NEEDS_FRIEND_VERIFICATION = 'needs_friend_verification'
 FRIEND_NEEDS_YOUR_VERIFICATION = 'needs_your_verification'
 FRIEND_ENDED = 'ended'
+# A suspension on either side, or an unconfirmed (face-only) same-person
+# match: kept vague on purpose.
 FRIEND_UNAVAILABLE = 'unavailable'
+# The invitee is the referrer themselves (another account of the same verified
+# person). Safe to say plainly: the referrer IS that person.
+FRIEND_SAME_PERSON = 'same_person'
 
 
 def _live_banned_ids(user_ids) -> set:
@@ -606,8 +611,12 @@ def _live_banned_ids(user_ids) -> set:
                .values_list('user_id', flat=True))
 
 
-def _same_person_ids(referrer, friend_ids) -> set:
-    """same_person(referrer, friend) for many friends in three queries."""
+def _same_person_ids(referrer, friend_ids) -> tuple:
+    """same_person(referrer, friend) for many friends in three queries, as
+    (by_document, by_face): a shared KYC'd document is near-certain; a
+    duplicated-face flag can be a false positive that support already
+    dismissed (the flag is sticky), so it blocks commission but is never
+    named to the member."""
     from django.db.models import Q
 
     from security.models import IdentityVerification
@@ -619,11 +628,12 @@ def _same_person_ids(referrer, friend_ids) -> set:
             .exclude(document_issuing_country__in=['', 'UNK']))
     key = ('document_issuing_country', 'document_type', 'document_number_normalized')
     mine = set(docs.filter(user_id=referrer.pk).values_list(*key))
-    out = set()
+    by_document = set()
     if mine:
         for uid, *k in docs.filter(user_id__in=friend_ids).values_list('user_id', *key):
             if tuple(k) in mine:
-                out.add(uid)
+                by_document.add(uid)
+    out = set()
     friend_set = set(friend_ids)
     flagged = IdentityVerification.all_objects.filter(
         user_id__in=[referrer.pk, *friend_ids], risk_factors__has_key='duplicated_face',
@@ -635,7 +645,7 @@ def _same_person_ids(referrer, friend_ids) -> set:
             out |= ids & friend_set
         elif referrer.pk in ids:
             out.add(owner)
-    return out
+    return by_document, out - by_document
 
 
 def friend_statuses(referrer, referrals=None) -> list:
@@ -657,16 +667,26 @@ def friend_statuses(referrer, referrals=None) -> list:
         return []
     verified = set(verified_user_ids(friend_ids))
     banned = _live_banned_ids(friend_ids)
-    same = _same_person_ids(referrer, friend_ids)
+    same_document, same_face = _same_person_ids(referrer, friend_ids)
     referrer_verified = is_identity_verified(referrer)
     referrer_blocked = _is_banned(referrer)
     out = []
     for referral in referrals:
         friend = referral.referred_user
+        # `reason` is for staff (admin) only; members see `status`.
+        reason = ''
         if not referral_window_open(referral):
-            status = FRIEND_ENDED
-        elif referrer_blocked or friend.pk in banned or friend.pk in same:
-            status = FRIEND_UNAVAILABLE
+            not_started = timezone.now() < window_start(referral)
+            status, reason = FRIEND_ENDED, ('window_not_started' if not_started else 'window_ended')
+        elif referrer_blocked or friend.pk in banned:
+            status = FRIEND_UNAVAILABLE  # never reveal that someone else was suspended
+            reason = 'referrer_suspended' if referrer_blocked else 'friend_suspended'
+        elif friend.pk in same_document:
+            status, reason = FRIEND_SAME_PERSON, 'same_document'
+        elif friend.pk in same_face:
+            # Blocks commission but stays vague: the face flag can be a
+            # dismissed false positive, never assert identity on it.
+            status, reason = FRIEND_UNAVAILABLE, 'same_face'
         elif not referrer_verified:
             status = FRIEND_NEEDS_YOUR_VERIFICATION
         elif friend.pk not in verified:
@@ -679,9 +699,81 @@ def friend_statuses(referrer, referrals=None) -> list:
             'display_name': f'@{friend.username}',
             'status': status,
             'ends_at': window_ends_at(referral),
+            'reason': reason,
             'can_remind': status == FRIEND_NEEDS_FRIEND_VERIFICATION and reminder_allowed(referral),
         })
     return out
+
+
+# ── staff view (admin): the real reason behind every referral's status ──
+
+ADMIN_STATUS_LABELS = {
+    ('earning', ''): 'Earning',
+    ('needs_friend_verification', ''): 'Waiting: friend must verify',
+    ('needs_your_verification', ''): 'Waiting: referrer must verify',
+    ('same_person', 'same_document'): 'Same person (shared ID document)',
+    ('unavailable', 'same_face'): 'Same person? (face match only)',
+    ('unavailable', 'friend_suspended'): 'Suspended: friend',
+    ('unavailable', 'referrer_suspended'): 'Suspended: referrer',
+    ('ended', 'window_ended'): 'Ended (1-year window)',
+    ('ended', 'window_not_started'): 'Not started (before launch)',
+    ('inactive', 'friend_inactive'): 'Friend account inactive',
+}
+ADMIN_FILTER_KEYS = {
+    'earning': ('earning', ''),
+    'friend_verify': ('needs_friend_verification', ''),
+    'referrer_verify': ('needs_your_verification', ''),
+    'same_document': ('same_person', 'same_document'),
+    'same_face': ('unavailable', 'same_face'),
+    'friend_suspended': ('unavailable', 'friend_suspended'),
+    'referrer_suspended': ('unavailable', 'referrer_suspended'),
+    'ended': ('ended', 'window_ended'),
+    'not_started': ('ended', 'window_not_started'),
+}
+
+
+def admin_statuses(referrals) -> dict:
+    """{referral_pk: status dict (with reason)} for admin rows, batched per
+    referrer. Referrals without a referrer user get no entry; a referral
+    whose invitee account is gone or deactivated gets 'friend_inactive'."""
+    by_referrer = {}
+    for referral in referrals:
+        if referral.referrer_user_id and referral.deleted_at is None:
+            by_referrer.setdefault(referral.referrer_user_id, (referral.referrer_user, []))[1].append(referral)
+    out = {}
+    for referrer, rows in by_referrer.values():
+        for status in friend_statuses(referrer, rows):
+            out[status['referral_id']] = status
+        for referral in rows:
+            if referral.pk not in out:
+                out[referral.pk] = {'referral_id': referral.pk, 'status': 'inactive',
+                                    'reason': 'friend_inactive', 'ends_at': window_ends_at(referral)}
+    return out
+
+
+def admin_status_label(status: dict | None) -> str:
+    if not status:
+        return 'No referrer account'
+    return ADMIN_STATUS_LABELS.get((status['status'], status.get('reason', '')), status['status'])
+
+
+def referral_ids_with_admin_status(key: str) -> list:
+    """Every live referral whose (status, reason) matches an admin filter key
+    (one bulk friend_statuses per referrer, through the short cache)."""
+    from achievements.models import UserReferral
+    from users.models import User
+
+    wanted = ADMIN_FILTER_KEYS.get(key)
+    if wanted is None:
+        return []
+    referrer_ids = (UserReferral.objects.filter(deleted_at__isnull=True, referrer_user__isnull=False)
+                    .values_list('referrer_user_id', flat=True).distinct())
+    ids = []
+    for referrer in User.objects.filter(pk__in=list(referrer_ids)):
+        for status in cached_friend_statuses(referrer):
+            if (status['status'], status.get('reason', '')) == wanted:
+                ids.append(status['referral_id'])
+    return ids
 
 
 # ── "Recordarle": a referrer nudges an unverified friend ────────────────
@@ -753,7 +845,7 @@ FRIEND_GROUPS = {
     'earning': {FRIEND_EARNING},
     'waiting': {FRIEND_NEEDS_FRIEND_VERIFICATION},
     'you': {FRIEND_NEEDS_YOUR_VERIFICATION},
-    'none': {FRIEND_ENDED, FRIEND_UNAVAILABLE},
+    'none': {FRIEND_ENDED, FRIEND_UNAVAILABLE, FRIEND_SAME_PERSON},
 }
 
 

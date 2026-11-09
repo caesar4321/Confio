@@ -400,11 +400,17 @@ class FriendStatusTests(FeeReferralFixture):
         self.assertNotIn('earned', friend)
         self.assertEqual(friend['display_name'], f'@{self.referee.username}')
 
-    def test_same_person_and_banned_friends_are_unavailable(self):
+    def test_same_person_is_named_and_suspensions_stay_vague(self):
         from security.models import IdentityVerification
 
+        # A shared verified document: named to the member.
+        doc = IdentityVerification.all_objects.filter(user=self.referrer).first()
         IdentityVerification.all_objects.filter(user=self.referee).update(
-            risk_factors={'duplicated_face': {'matched_user_ids': [self.referrer.pk]}})
+            document_number=doc.document_number, document_number_normalized=doc.document_number_normalized)
+        self.assertEqual(self.status(), 'same_person')
+        self.assertEqual(fee_referral.group_counts(fee_referral.friend_statuses(self.referrer))['none'], 1)
+        # A suspension wins over same-person: never reveal it, never relabel it.
+        self.banned.return_value = True
         self.assertEqual(self.status(), 'unavailable')
 
     def test_bounded_queries_for_many_friends(self):
@@ -783,3 +789,41 @@ class MonthFilterTests(FeeReferralFixture):
         self.assertEqual(fee_referral.payouts_page(self.referrer, 30, 0, month='9999-12'), [])
         # Local date/time in the referrer's zone, matching the month bucket.
         self.assertEqual((october[0]['local_date'], october[0]['local_time']), ('2026-10-31', '21:00'))
+
+
+class FaceOnlyMatchTests(FeeReferralFixture):
+    def test_face_only_match_blocks_but_is_never_named(self):
+        from security.models import IdentityVerification
+
+        IdentityVerification.all_objects.filter(user=self.referee).update(
+            risk_factors={'duplicated_face': {'matched_user_ids': [self.referrer.pk]}})
+        status = fee_referral.friend_statuses(self.referrer)[0]
+        self.assertEqual((status['status'], status['reason']), ('unavailable', 'same_face'))
+        self.assertIsNone(fee_referral.eligible_arm(self.referee, REFEREE_ADDR))
+        self.assertEqual(fee_referral.admin_status_label(status), 'Same person? (face match only)')
+
+
+class AdminStatusTests(FeeReferralFixture):
+    def test_admin_labels_and_filter(self):
+        statuses = fee_referral.admin_statuses([self.referral])
+        self.assertEqual(fee_referral.admin_status_label(statuses[self.referral.pk]), 'Earning')
+        self.assertEqual(fee_referral.referral_ids_with_admin_status('earning'), [self.referral.pk])
+        self.assertEqual(fee_referral.referral_ids_with_admin_status('ended'), [])
+        self.assertEqual(fee_referral.referral_ids_with_admin_status('bogus'), [])
+
+    def test_admin_column_link_and_filter(self):
+        from django.test import RequestFactory
+
+        from achievements.admin import FeeCommissionStatusFilter, UserReferralAdmin
+        from achievements.models import UserReferral
+        from config.admin_dashboard import confio_admin_site
+
+        model_admin = UserReferralAdmin(UserReferral, confio_admin_site)
+        self.assertIn('Earning', str(model_admin.commission_status_display(self.referral)))
+        link = str(model_admin.commission_payouts_link(self.referral))
+        self.assertIn(f'referrer_user__id__exact={self.referrer.pk}', link)
+        self.assertIn('0 payouts', link)
+        request = RequestFactory().get('/', {'commission': 'earning'})
+        flt = FeeCommissionStatusFilter(request, {'commission': ['earning']}, UserReferral, model_admin)
+        self.assertEqual(list(flt.queryset(request, UserReferral.objects.all()).values_list('pk', flat=True)),
+                         [self.referral.pk])

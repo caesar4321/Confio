@@ -26,6 +26,7 @@ export type FeeReferralFriendStatus =
   | 'needs_friend_verification'
   | 'needs_your_verification'
   | 'ended'
+  | 'same_person'
   | 'unavailable';
 
 export interface FeeReferralFriend {

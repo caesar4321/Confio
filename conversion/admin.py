@@ -119,6 +119,12 @@ class FeeReferralPayoutAdmin(admin.ModelAdmin):
     raw_id_fields = ('referrer_user', 'referee_user')
     date_hierarchy = 'created_at'
 
+    def lookup_allowed(self, lookup, value, request=None):
+        # The User Referral admin links here filtered to one referral.
+        if lookup in ('referrer_user__id__exact', 'referee_user__id__exact'):
+            return True
+        return super().lookup_allowed(lookup, value, request)
+
     def has_add_permission(self, request):
         return False
 
