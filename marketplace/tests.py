@@ -1969,6 +1969,35 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertTrue(RevokedAlcoholLicense.objects.filter(number='LP20260042').exists())
         self.assertFalse(RevokedAlcoholLicense.objects.filter(number='999').exists())
 
+    def test_revoking_reaches_every_store_approved_with_that_licence(self):
+        from .models import AlcoholLicenseApproval
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        other_owner = make_user()
+        other = Store.objects.create(owner=other_owner, owner_account=other_owner.accounts.get(), name='Otra',
+                                     country_code='BO', city='La Paz', alcohol_license_status='pending',
+                                     alcohol_license_expires_on=self.today + timedelta(days=300))
+        # Approved with the same licence while the first store's had lapsed.
+        AlcoholLicenseApproval.objects.create(store=other, city_key='la paz', number='LP20260042', photo_hash='zz',
+                                              photo_key='k', expires_on=self.today + timedelta(days=300))
+        Store.objects.filter(pk=other.pk).update(alcohol_license_status='approved')
+        self._revoke()
+        other.refresh_from_db()
+        self.assertEqual(other.alcohol_license_status, 'rejected')
+        self.assertFalse(other.alcohol_license_valid(self.today))
+
+    def test_a_revoke_that_cannot_record_anything_is_refused(self):
+        from django.contrib.admin.sites import AdminSite
+        from .admin import StoreAdmin
+        from .license_review import ReviewUnavailable
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='approved')
+        admin = StoreAdmin(Store, AdminSite())
+        with mock.patch.object(admin, 'message_user') as said, \
+                mock.patch('marketplace.license_review.current_photo_hash', side_effect=ReviewUnavailable('s3')):
+            admin.revoke_alcohol_license(mock.Mock(), Store.objects.filter(pk=self.store.pk))
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'approved')   # untouched
+        self.assertTrue(any('Not revoked' in str(c) for c in said.call_args_list))
+
     def test_revocations_cannot_be_deleted_in_admin(self):
         from django.contrib.admin.sites import AdminSite
         from .admin import RevokedAlcoholLicenseAdmin

@@ -179,13 +179,15 @@ class StoreAdmin(admin.ModelAdmin):
                     'alcohol_license_status', 'alcohol_license_expires_on', 'product_count', 'created_at')
     list_filter = ('country_code', 'status', 'ships_outside_city', 'alcohol_license_status')
     search_fields = ('name', 'city', 'owner__username', 'owner__phone_number')
-    raw_id_fields = ('owner', 'owner_account')
     # Derived from the price on every save, so older clients that still read
     # it never disagree with what checkout does.
     # The licence is decided by the automatic review only (no registry to
     # check against, so a person adds nothing); admin can re-run or revoke it
     # through the actions, never edit it, so a stale page cannot undo a review.
-    readonly_fields = ('ships_outside_city', 'city', 'alcohol_license_photo', 'alcohol_license_status',
+    # Owner, account, country and city are what an approved licence was
+    # checked against: never moved from here either.
+    readonly_fields = ('ships_outside_city', 'owner', 'owner_account', 'country_code', 'city',
+                       'alcohol_license_photo', 'alcohol_license_status',
                        'alcohol_license_expires_on', 'alcohol_license_number', 'alcohol_license_note',
                        'alcohol_license_verdict', 'alcohol_license_hash',
                        'alcohol_license_queued_at', 'alcohol_license_key', 'alcohol_license_approved_key',
@@ -204,43 +206,19 @@ class StoreAdmin(admin.ModelAdmin):
 
     @admin.action(description='Alcohol licence: revoke (this licence never passes review again, for any store)')
     def revoke_alcohol_license(self, request, queryset):
-        from django.db import transaction
-        from .license_review import city_key, current_photo_hash
-        from .models import AlcoholLicenseApproval, RevokedAlcoholLicense
-        n = 0
+        from .license_review import RevokeIncomplete, revoke_licence
+        revoked, failed = set(), []
         for store in queryset.exclude(alcohol_license_status='none'):
-            with transaction.atomic():
-                row = Store.objects.select_for_update().get(pk=store.pk)
-                # Only what this store was APPROVED with (a number typed by
-                # the seller, or read from a rejected photo, may be someone
-                # else's licence: never blacklist it). Plus the fingerprint of
-                # the photo the admin is looking at now, so that exact photo
-                # never passes again.
-                # Every licence this store was ever approved with (append-only
-                # history, so an earlier licence never escapes), under the
-                # review's lock: a review of the same licence elsewhere waits
-                # for this revoke and then sees its record.
-                from django.db import connection
-                approvals = list(AlcoholLicenseApproval.objects.filter(store=row))
-                with connection.cursor() as cursor:
-                    for approval in approvals:
-                        cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',
-                                       [f'comprar-licence:{approval.city_key}:{approval.number}'])
-                for approval in approvals:
-                    RevokedAlcoholLicense.objects.create(store=row, city_key=approval.city_key,
-                                                         number=approval.number, photo_hash=approval.photo_hash)
-                recorded = {a.photo_hash for a in approvals}
-                on_screen = current_photo_hash(row.alcohol_license_key)
-                if on_screen and on_screen not in recorded:
-                    RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city), number='',
-                                                         photo_hash=on_screen)
-                # Clearing the current photo makes any review still in flight stale.
-                Store.objects.filter(pk=row.pk).update(
-                    alcohol_license_status='rejected', alcohol_license_reviewed_at=timezone.now(),
-                    alcohol_license_queued_at=None, alcohol_license_key='',
-                    alcohol_license_note='Revisamos tu licencia y ya no es válida. Sube una licencia vigente.')
-            n += 1
-        self.message_user(request, f'Revoked {n} licence(s).')
+            try:
+                revoked.update(revoke_licence(store.pk))
+            except RevokeIncomplete as exc:
+                failed.append(str(exc))
+        also = revoked - set(queryset.values_list('pk', flat=True))
+        self.message_user(request, f'Revoked {len(revoked)} licence(s)'
+                          + (f', including {len(also)} other store(s) approved with the same licence' if also else '')
+                          + '.')
+        for message in failed:
+            self.message_user(request, f'Not revoked, try again: {message}', level=messages.ERROR)
 
     @admin.action(description='Alcohol licence: run the automatic review again')
     def rereview_alcohol_license(self, request, queryset):

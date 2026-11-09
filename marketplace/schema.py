@@ -1029,9 +1029,10 @@ class SubmitAlcoholLicense(graphene.Mutation):
                 return SubmitAlcoholLicense(success=False, error='bad_photo')
         except Exception:  # noqa: BLE001 — S3 down: ask to retry, never queue blind
             return SubmitAlcoholLicense(success=False, error='upload_unavailable')
-        # Each submission is a paid review: a few a day is plenty for a real licence.
+        # Each submission is a paid review: a few a day per person is plenty for a real licence.
         from django.core.cache import cache
-        quota_key = f'comprar:licence-reviews:{store.pk}:{timezone.now().date().isoformat()}'
+        # Per person, not per store: several accounts' stores share one budget.
+        quota_key = f'comprar:licence-reviews:user:{user.pk}:{timezone.now().date().isoformat()}'
         cache.add(quota_key, 0, 60 * 60 * 24)
         if cache.incr(quota_key) > LICENSE_REVIEWS_PER_DAY:
             return SubmitAlcoholLicense(success=False, error='too_many_uploads')
