@@ -247,10 +247,14 @@ def requeue_stuck_reviews(now=None) -> dict:
                                 alcohol_license_submitted_at__lt=now - LICENSE_GIVE_UP_AFTER).exists():
             give_up = {'alcohol_license_queued_at': None, 'alcohol_license_reviewed_at': now,
                        'alcohol_license_note': LICENSE_GAVE_UP_NOTE}
-            Store.objects.filter(pk=pk, alcohol_license_key=key, alcohol_license_status='pending') \
-                .update(alcohol_license_status='rejected', **give_up)
+            # The same conditions again in each write: a review that decided
+            # meanwhile (attempts reset to 0) is never overwritten.
+            still = Store.objects.filter(stale, pk=pk, alcohol_license_key=key,
+                                         alcohol_license_attempts__gte=LICENSE_SWEEP_ATTEMPTS,
+                                         alcohol_license_submitted_at__lt=now - LICENSE_GIVE_UP_AFTER)
+            still.filter(alcohol_license_status='pending').update(alcohol_license_status='rejected', **give_up)
             # A renewal: the current licence keeps counting; only the new photo is dropped.
-            Store.objects.filter(pk=pk, alcohol_license_key=key, alcohol_license_status='approved').update(**give_up)
+            still.filter(alcohol_license_status='approved').update(**give_up)
             continue
         # Cap reached but not a day old yet: wait for the give-up, no more
         # paid review chains for a photo that keeps failing.

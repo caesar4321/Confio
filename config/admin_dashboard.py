@@ -1309,13 +1309,14 @@ from marketplace.models import (MarketplaceCategory, MarketplaceCity, Store as M
                                 Order as MarketOrder, OrderRating as MarketOrderRating,
                                 MarketplacePartnerAgreement, MarketplaceFeeLedger,
                                 MarketplaceLocationCheck, MarketplaceInterest, DeliveryAddress as MarketDeliveryAddress,
-                                RevokedAlcoholLicense)
+                                RevokedAlcoholLicense, AlcoholLicenseApproval)
 from marketplace.admin import (MarketplaceCategoryAdmin, MarketplaceCityAdmin, StoreAdmin as MarketStoreAdmin,
                                ProductAdmin as MarketProductAdmin, OrderAdmin as MarketOrderAdmin,
                                OrderRatingAdmin as MarketOrderRatingAdmin,
                                MarketplacePartnerAgreementAdmin, MarketplaceFeeLedgerAdmin,
                                MarketplaceLocationCheckAdmin, MarketplaceInterestAdmin,
-                               DeliveryAddressAdmin as MarketDeliveryAddressAdmin, RevokedAlcoholLicenseAdmin)
+                               DeliveryAddressAdmin as MarketDeliveryAddressAdmin, RevokedAlcoholLicenseAdmin,
+                               AlcoholLicenseApprovalAdmin)
 confio_admin_site.register(MarketplaceCategory, MarketplaceCategoryAdmin)
 confio_admin_site.register(MarketplaceCity, MarketplaceCityAdmin)
 confio_admin_site.register(MarketStore, MarketStoreAdmin)
@@ -1328,6 +1329,7 @@ confio_admin_site.register(MarketplaceLocationCheck, MarketplaceLocationCheckAdm
 confio_admin_site.register(MarketplaceInterest, MarketplaceInterestAdmin)
 confio_admin_site.register(MarketDeliveryAddress, MarketDeliveryAddressAdmin)
 confio_admin_site.register(RevokedAlcoholLicense, RevokedAlcoholLicenseAdmin)
+confio_admin_site.register(AlcoholLicenseApproval, AlcoholLicenseApprovalAdmin)
 
 # EVM sponsorship ledger + cross-rail auto-swap queue. PendingAutoSwap was
 # never registered, which left the BSC 'BNB' rows — the authoritative

@@ -217,10 +217,6 @@ class Store(SoftDeleteModel):
     # alcohol_license_key; the approved one stays on record), and how many
     # times the stuck-review sweep re-queued the current photo.
     alcohol_license_approved_key = models.CharField(max_length=300, blank=True, default='')
-    # The approved licence's identity, written ONLY by an approval: a revoke
-    # records these whatever happened since (a renewal, a new upload).
-    alcohol_license_approved_number = models.CharField(max_length=60, blank=True, default='')
-    alcohol_license_approved_hash = models.CharField(max_length=64, blank=True, default='')
     alcohol_license_attempts = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
@@ -459,6 +455,26 @@ class MarketplacePartnerAgreement(models.Model):
 
     def __str__(self):
         return f'{self.partner_name} — {self.country_code} {self.share_bps / 100:.0f}%'
+
+
+class AlcoholLicenseApproval(models.Model):
+    """Every licence the automatic review approved, append-only: a revoke
+    records all of a store's approvals (an earlier licence never escapes),
+    and one-licence-one-store compares against what reviews actually read
+    (never a number a seller typed)."""
+    store = models.ForeignKey('Store', on_delete=models.PROTECT, related_name='licence_approvals')
+    city_key = models.CharField(max_length=100, db_index=True, help_text='Normalized store city')
+    number = models.CharField(max_length=60, db_index=True, help_text='Canonical number read from the photo')
+    photo_hash = models.CharField(max_length=64, db_index=True)
+    photo_key = models.CharField(max_length=300)
+    expires_on = models.DateField()
+    approved_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-approved_at']
+
+    def __str__(self):
+        return f'{self.store_id} {self.city_key} {self.number}'
 
 
 class RevokedAlcoholLicense(models.Model):

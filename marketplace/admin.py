@@ -15,7 +15,7 @@ from django.db.models.functions import TruncMonth
 from django.http import HttpResponse
 from django.utils import timezone
 
-from .models import (RevokedAlcoholLicense, DeliveryAddress, MarketplaceCategory, MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
+from .models import (AlcoholLicenseApproval, RevokedAlcoholLicense, DeliveryAddress, MarketplaceCategory, MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
                      MarketplaceLocationCheck, MarketplacePartnerAgreement, Order, OrderRating,
                      Product, Store)
 
@@ -137,6 +137,24 @@ class ProductInline(admin.TabularInline):
     can_delete = False
 
 
+class AlcoholLicenseApprovalAdmin(admin.ModelAdmin):
+    """Every licence the automatic review approved (append-only history)."""
+    list_display = ('store', 'city_key', 'number', 'expires_on', 'approved_at')
+    search_fields = ('number', 'city_key', 'store__name')
+    readonly_fields = ('store', 'city_key', 'number', 'photo_hash', 'photo_key', 'expires_on', 'approved_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
+
 class RevokedAlcoholLicenseAdmin(admin.ModelAdmin):
     """Licences revoked from the store admin: never approved again, for any store."""
     list_display = ('city_key', 'number', 'store', 'revoked_at')
@@ -167,7 +185,7 @@ class StoreAdmin(admin.ModelAdmin):
     # The licence is decided by the automatic review only (no registry to
     # check against, so a person adds nothing); admin can re-run or revoke it
     # through the actions, never edit it, so a stale page cannot undo a review.
-    readonly_fields = ('ships_outside_city', 'alcohol_license_photo', 'alcohol_license_status',
+    readonly_fields = ('ships_outside_city', 'city', 'alcohol_license_photo', 'alcohol_license_status',
                        'alcohol_license_expires_on', 'alcohol_license_number', 'alcohol_license_note',
                        'alcohol_license_verdict', 'alcohol_license_hash',
                        'alcohol_license_queued_at', 'alcohol_license_key', 'alcohol_license_approved_key',
@@ -187,8 +205,8 @@ class StoreAdmin(admin.ModelAdmin):
     @admin.action(description='Alcohol licence: revoke (this licence never passes review again, for any store)')
     def revoke_alcohol_license(self, request, queryset):
         from django.db import transaction
-        from .license_review import _normalize_number, city_key, current_photo_hash
-        from .models import RevokedAlcoholLicense
+        from .license_review import city_key, current_photo_hash
+        from .models import AlcoholLicenseApproval, RevokedAlcoholLicense
         n = 0
         for store in queryset.exclude(alcohol_license_status='none'):
             with transaction.atomic():
@@ -198,24 +216,24 @@ class StoreAdmin(admin.ModelAdmin):
                 # else's licence: never blacklist it). Plus the fingerprint of
                 # the photo the admin is looking at now, so that exact photo
                 # never passes again.
-                # The approved identity is kept apart from what later uploads
-                # change (a renewal, a new photo after expiry).
-                approved_number = row.alcohol_license_approved_number
-                if approved_number:
-                    # The review's lock: a review of the same licence elsewhere
-                    # waits for this revoke and then sees its record.
-                    from django.db import connection
-                    with connection.cursor() as cursor:
+                # Every licence this store was ever approved with (append-only
+                # history, so an earlier licence never escapes), under the
+                # review's lock: a review of the same licence elsewhere waits
+                # for this revoke and then sees its record.
+                from django.db import connection
+                approvals = list(AlcoholLicenseApproval.objects.filter(store=row))
+                with connection.cursor() as cursor:
+                    for approval in approvals:
                         cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',
-                                       [f'comprar-licence:{city_key(row.city)}:{approved_number}'])
-                approved_hash = row.alcohol_license_approved_hash
-                hashes = {h for h in (approved_hash, current_photo_hash(row.alcohol_license_key)) if h}
-                if approved_number:
-                    RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city),
-                                                         number=approved_number, photo_hash=approved_hash)
-                for photo_hash in hashes - ({approved_hash} if approved_number else set()):
+                                       [f'comprar-licence:{approval.city_key}:{approval.number}'])
+                for approval in approvals:
+                    RevokedAlcoholLicense.objects.create(store=row, city_key=approval.city_key,
+                                                         number=approval.number, photo_hash=approval.photo_hash)
+                recorded = {a.photo_hash for a in approvals}
+                on_screen = current_photo_hash(row.alcohol_license_key)
+                if on_screen and on_screen not in recorded:
                     RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city), number='',
-                                                         photo_hash=photo_hash)
+                                                         photo_hash=on_screen)
                 # Clearing the current photo makes any review still in flight stale.
                 Store.objects.filter(pk=row.pk).update(
                     alcohol_license_status='rejected', alcohol_license_reviewed_at=timezone.now(),

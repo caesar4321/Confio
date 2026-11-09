@@ -1693,8 +1693,11 @@ class AlcoholRulesTests(AdultsOnlyTests):
 
     def test_ley_seca_matches_any_spelling_and_unknown_destinations(self):
         from .checkout import ley_seca_error
+        # Own setup: the seed puts La Paz and El Alto in one delivery area,
+        # which is tested separately below.
         MarketplaceCity.objects.update_or_create(country_code='BO', city='El Alto', defaults={
-            'currency_code': 'BOB', 'alcohol_sales_paused': True})
+            'currency_code': 'BOB', 'alcohol_sales_paused': True, 'delivery_area': ''})
+        MarketplaceCity.objects.filter(country_code='BO', city='La Paz').update(delivery_area='')
         self.assertEqual(ley_seca_error('BO', ['La Paz', 'el  ALTO']), 'alcohol_paused')
         self.assertEqual(ley_seca_error('BO', ['La Paz', 'Pueblo Desconocido']), 'alcohol_paused')
         self.assertIsNone(ley_seca_error('BO', ['La Paz']))
@@ -1783,7 +1786,7 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.today = timezone.now().date()
 
     def reading(self, **kw):
-        base = dict(is_license=True, covers_alcohol=True, holder_name='QUISPE, ANA MARIA',
+        base = dict(is_license=True, covers_alcohol=True, holder_name='QUISPE, ANA',
                     municipality='Gobierno Autónomo Municipal de La Paz', license_number='LP-2026-0042', activity='Venta de bebidas alcohólicas',
                     issued_on=(self.today - timedelta(days=30)).isoformat(),
                     expires_on=(self.today + timedelta(days=700)).isoformat(),
@@ -1833,12 +1836,20 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             self.assertTrue(self.store.alcohol_license_note, case)
 
     def test_one_licence_one_store(self):
+        from .models import AlcoholLicenseApproval
         other_owner = make_user()
-        Store.objects.create(owner=other_owner, owner_account=other_owner.accounts.get(), name='Otra', country_code='BO',
-                             city='La Paz', alcohol_license_status='approved', alcohol_license_number='lp 2026-0042',
-                             alcohol_license_expires_on=self.today + timedelta(days=300))
+        other = Store.objects.create(owner=other_owner, owner_account=other_owner.accounts.get(), name='Otra',
+                                     country_code='BO', city='La Paz', alcohol_license_status='approved',
+                                     alcohol_license_expires_on=self.today + timedelta(days=300))
+        AlcoholLicenseApproval.objects.create(store=other, city_key='la paz', number='LP20260042', photo_hash='x',
+                                              photo_key='k', expires_on=self.today + timedelta(days=300))
         self.assertEqual(self.run_review(self.reading()), 'rejected')
         self.assertIn('otra tienda', self.store.alcohol_license_note)
+        # A number a seller merely typed (no approval behind it) never squats.
+        AlcoholLicenseApproval.objects.filter(store=other).delete()
+        Store.objects.filter(pk=other.pk).update(alcohol_license_number='LP-2026-0042')
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='pending')
+        self.assertEqual(self.run_review(self.reading()), 'approved')
 
     def test_municipality_must_be_the_stores_known_city(self):
         from .license_review import municipality_matches
@@ -1932,14 +1943,21 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertTrue(holder_matches('QUISPE MAMANI MARIA DE LOS ANGELES', 'María de los Ángeles', 'Quispe Mamani'))
         # A sister sharing a given name and both surnames: not her.
         self.assertFalse(holder_matches('María Elena Quispe Mamani', 'Ana María', 'Quispe Mamani'))
+        # A brother with an extra given name: not him either.
+        self.assertFalse(holder_matches('Juan Carlos Quispe Mamani', 'Juan', 'Quispe Mamani'))
+        self.assertTrue(holder_matches('Sr. Juan Quispe Mamani', 'Juan', 'Quispe Mamani'))
 
-    def test_revoking_a_hand_approved_licence_records_its_number(self):
+    def test_revoking_records_every_licence_ever_approved(self):
         from .models import RevokedAlcoholLicense
-        Store.objects.filter(pk=self.store.pk).update(
-            alcohol_license_status='approved', alcohol_license_approved_number='LP20260042', alcohol_license_hash='',
-            alcohol_license_verdict=None, alcohol_license_expires_on=self.today + timedelta(days=100))
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        # A renewal with another licence is approved too.
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_key='marketplace/pending/x/renewal.jpg',
+                                                      alcohol_license_submitted_at=timezone.now())
+        self.KEY = 'marketplace/pending/x/renewal.jpg'
+        self.assertEqual(self.run_review(self.reading(license_number='LP-2026-0777'), body=b'img2'), 'approved')
         self._revoke()
-        self.assertTrue(RevokedAlcoholLicense.objects.filter(number='LP20260042').exists())
+        self.assertEqual(set(RevokedAlcoholLicense.objects.values_list('number', flat=True)),
+                         {'LP20260042', 'LP20260777'})
 
     def test_revoke_records_the_approved_licence_after_a_new_upload(self):
         from .models import RevokedAlcoholLicense

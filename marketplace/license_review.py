@@ -160,20 +160,22 @@ def _words(value: str) -> set:
     return {w for w in ''.join(ch if ch.isalnum() else ' ' for ch in folded).split() if len(w) > 1}
 
 
-# Particles of Spanish names ("María de los Ángeles", "Juan de Dios"): never a name on their own.
-NAME_PARTICLES = {'de', 'del', 'la', 'las', 'los', 'y', 'e', 'da', 'do', 'di', 'van', 'von'}
+# Particles of Spanish names ("María de los Ángeles", "Juan de Dios") and
+# courtesy titles: never a name on their own.
+NAME_PARTICLES = {'de', 'del', 'la', 'las', 'los', 'y', 'e', 'da', 'do', 'di', 'van', 'von',
+                  'sr', 'sra', 'srta', 'don', 'dona', 'senor', 'senora', 'senorita', 'lic', 'ing'}
 
 
 def holder_matches(holder: str, first_names: str, last_names: str) -> bool:
-    """The licence holder is this person: EVERY surname and EVERY given name on
-    their verified ID (particles like "de" aside) appear in it, in any order.
-    Fewer would let a namesake's or a sibling's licence through."""
+    """The licence holder is exactly this person: the holder's name words are
+    the given names and surnames on their verified ID, no more and no fewer
+    (particles like "de" and titles aside), in any order. Anything looser lets
+    a sibling's or a namesake's licence through ("Ana María" vs "María Elena",
+    "Juan" vs "Juan Carlos" Quispe Mamani)."""
     words = _words(holder) - NAME_PARTICLES
     surnames = _words(last_names) - NAME_PARTICLES
     given = _words(first_names) - NAME_PARTICLES
-    # Every given name too: siblings share both surnames and often a given
-    # name ("Ana María" vs "María Elena" Quispe Mamani).
-    return bool(surnames) and bool(given) and (surnames | given) <= words
+    return bool(surnames) and bool(given) and words == (surnames | given)
 
 
 # Words that dress up a municipality's name without naming it.
@@ -245,18 +247,18 @@ def license_conflict(store, number: str, photo_hash: str) -> str:
     serializes two stores approved at the same moment."""
     from django.db import connection
 
-    from .models import RevokedAlcoholLicense, Store
+    from .models import AlcoholLicenseApproval, RevokedAlcoholLicense
 
     normalized = _normalize_number(number)
     city = city_key(store.city)
     with connection.cursor() as cursor:
         cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [f'comprar-licence:{city}:{normalized}'])
-    others = Store.objects.exclude(pk=store.pk).filter(deleted_at__isnull=True, alcohol_license_status='approved')
-    if photo_hash and others.filter(alcohol_license_hash=photo_hash).exists():
-        return DUPLICATE_REASON
-    same = any(_normalize_number(n) == normalized and city_key(c) == city for n, c in
-               others.exclude(alcohol_license_number='').values_list('alcohol_license_number', 'city'))
-    if same:
+    # Against what reviews actually approved for other stores that still
+    # sell (never a number typed by a seller).
+    held = AlcoholLicenseApproval.objects.exclude(store=store).filter(
+        store__deleted_at__isnull=True, store__alcohol_license_status='approved')
+    if held.filter(city_key=city, number=normalized).exists() or (
+            photo_hash and held.filter(photo_hash=photo_hash).exists()):
         return DUPLICATE_REASON
     # Last, so a revoke committing while this ran (it takes the same lock and
     # writes its record before un-approving the store) is always seen.
@@ -317,7 +319,7 @@ def review_license(store_id: int, key: str) -> str:
     photo is still the store's current one (a newer upload wins). Returns
     'approved' | 'rejected' | 'stale'. Raises ReviewUnavailable (retry)."""
     from .checkout import local_today
-    from .models import Store
+    from .models import AlcoholLicenseApproval, Store
 
     store = Store.objects.select_related('owner').filter(pk=store_id, deleted_at__isnull=True).first()
     if store is None or not key or store.alcohol_license_key != key:
@@ -352,9 +354,10 @@ def review_license(store_id: int, key: str) -> str:
             fields = {**common, 'alcohol_license_status': 'approved', 'alcohol_license_expires_on': expires,
                       'alcohol_license_note': '', 'alcohol_license_hash': photo_hash,
                       'alcohol_license_approved_key': key,
-                      'alcohol_license_number': _normalize_number(reading['license_number']),
-                      'alcohol_license_approved_number': _normalize_number(reading['license_number']),
-                      'alcohol_license_approved_hash': photo_hash}
+                      'alcohol_license_number': _normalize_number(reading['license_number'])}
+            AlcoholLicenseApproval.objects.create(
+                store=row, city_key=city_key(row.city), number=_normalize_number(reading['license_number']),
+                photo_hash=photo_hash, photo_key=key, expires_on=expires)
         elif renewal:
             # A failed renewal never takes away the licence that still counts.
             fields = {**common, 'alcohol_license_note': reason[:300]}
