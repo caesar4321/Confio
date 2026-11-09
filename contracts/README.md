@@ -12,7 +12,8 @@ cUSD+ savings and supporting BSC contracts (Solidity/Foundry)
 
 ### 📈 [`ondo_stocks/`](./ondo_stocks)
 Ondo Global Markets stock router on BSC, including its dedicated tests and
-deployment scripts. The fixed 0.30% USDT trade fee accumulates in the router.
+deployment scripts. The router charges no fee of its own: stock trades pay
+cUSD's single 0.9% fee on the cUSD+ exit/entry (v3 deleted the old 0.30% path).
 
 ### 📦 [`confio/`](./confio)
 CONFIO utility/governance token (1B fixed supply)
