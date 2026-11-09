@@ -47,6 +47,8 @@ class ConfioCloudBackup: NSObject {
       case .available: resolve("available")
       case .noAccount: resolve("noAccount")
       case .restricted: resolve("restricted")
+      case .couldNotDetermine: resolve("couldNotDetermine")
+      case .temporarilyUnavailable: resolve("temporarilyUnavailable")
       default: resolve("unknown")
       }
     }

@@ -6141,16 +6141,27 @@ class ReportCloudKitBackup(graphene.Mutation):
         wallet_hashes = graphene.List(graphene.NonNull(graphene.String))
         error_code = graphene.String(required=False)
 
+    CLIENT_STATES = ('proven', 'no_icloud_account', 'icloud_restricted', 'icloud_full',
+                     'failed', 'unavailable', 'skipped')
+    # Momentary or device-local: they only fill an empty or equally vague
+    # state, never one that says something (proven, full, signed out, ...).
+    PASSING_STATES = ('unavailable', 'skipped')
+
     def mutate(self, info, state, wallet_hashes=None, error_code=None):
         user = info.context.user
         if not user.is_authenticated:
             return ReportCloudKitBackup(success=False, error="Authentication required")
-        if state not in ('proven', 'no_icloud_account', 'icloud_restricted', 'icloud_full', 'failed'):
+        if state not in ReportCloudKitBackup.CLIENT_STATES:
             return ReportCloudKitBackup(success=False, error="Invalid state")
-        if state in ('icloud_full', 'failed'):
+        passing = state in ReportCloudKitBackup.PASSING_STATES
+        if state != 'proven':
             # Logged, not stored: device text, so only a plain code gets through.
+            # A skip repeats at every open (V1 wallets have nothing to copy), so INFO.
             code = error_code if re.fullmatch(r'[A-Za-z0-9_-]{1,40}', error_code or '') else 'unknown'
-            logger.warning('CloudKit backup not stored for user %s: state=%s code=%s', user.id, state, code)
+            logger.log(logging.INFO if passing else logging.WARNING,
+                       'CloudKit backup not stored for user %s: state=%s code=%s', user.id, state, code)
+        if passing and user.cloudkit_backup_state not in ('',) + ReportCloudKitBackup.PASSING_STATES:
+            return ReportCloudKitBackup(success=True)
 
         update_fields = ['cloudkit_backup_state']
         if state == 'proven':
@@ -6166,6 +6177,14 @@ class ReportCloudKitBackup(graphene.Mutation):
             # Every registered address: restore checks them all, so a copy that
             # only matches one of them would be refused when it is needed.
             if not registered or any(h not in (wallet_hashes or []) for h in registered):
+                # Stored and read back, but not the registered wallet: the
+                # device holds another key. Recorded, never proof, and never
+                # over a proof another device already made of the real one.
+                if registered and user.cloudkit_backup_state != 'proven':
+                    logger.warning('CloudKit backup of another wallet for user %s', user.id)
+                    if user.cloudkit_backup_state != 'wallet_mismatch':
+                        user.cloudkit_backup_state = 'wallet_mismatch'
+                        user.save(update_fields=['cloudkit_backup_state'])
                 return ReportCloudKitBackup(success=False, error="Wallet mismatch")
             user.cloudkit_backup_wallet_hash = registered[0]
             user.cloudkit_backup_verified_at = timezone.now()

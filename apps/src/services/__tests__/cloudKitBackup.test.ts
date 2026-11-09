@@ -187,16 +187,34 @@ it('sends proof again when iCloud comes back', async () => {
   expect(reports()).toEqual(['proven', 'no_icloud_account', 'proven']);
 });
 
-it('claims nothing while iCloud cannot say', async () => {
-  mockNative.accountStatus.mockResolvedValue('unknown');
+const lastReport = () => mockMutate.mock.calls[mockMutate.mock.calls.length - 1][0].variables;
+
+it('claims nothing while iCloud cannot say, and says why', async () => {
+  mockNative.accountStatus.mockResolvedValue('temporarilyUnavailable');
   await ensureCloudKitBackup();
-  expect(mockMutate).not.toHaveBeenCalled();
+  expect(reports()).toEqual(['unavailable']);
+  expect(lastReport()).toMatchObject({ errorCode: 'temporarilyUnavailable' });
+  expect(mockNative.insert).not.toHaveBeenCalled();
 });
 
-it('uploads nothing without a local secret', async () => {
+it('uploads nothing without a local secret, and says so', async () => {
   mockMaterial.mockResolvedValue(null);
   await ensureCloudKitBackup();
   expect(mockNative.insert).not.toHaveBeenCalled();
+  expect(lastReport()).toMatchObject({ state: 'skipped', errorCode: 'NO_LOCAL_WALLET' });
+});
+
+it('reports a check that broke before the upload as a skip with its code', async () => {
+  mockNative.userHash.mockRejectedValue(Object.assign(new Error('CloudKit error 9'), { code: 'CK_9' }));
+  await ensureCloudKitBackup();
+  expect(mockNative.insert).not.toHaveBeenCalled();
+  expect(lastReport()).toMatchObject({ state: 'skipped', errorCode: 'CK_9' });
+});
+
+it('sends nothing more than the proof once a report is lost', async () => {
+  mockMutate.mockRejectedValue(new Error('network'));
+  await ensureCloudKitBackup();
+  expect(reports()).toEqual(['proven']);
 });
 
 describe('findCloudKitBackups', () => {

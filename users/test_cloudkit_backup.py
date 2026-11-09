@@ -32,10 +32,10 @@ class ReportCloudKitBackupTests(TestCase):
         self.assertEqual(self.user.cloudkit_backup_wallet_hash, wallet_hash('0xabc'))
         self.assertIsNotNone(self.user.cloudkit_backup_verified_at)
 
-    def test_proof_for_another_wallet_is_refused(self):
+    def test_proof_for_another_wallet_is_refused_and_recorded(self):
         result = self.report('proven', [wallet_hash('0xdef')])
         self.assertFalse(result.success)
-        self.assertEqual(self.user.cloudkit_backup_state, '')
+        self.assertEqual(self.user.cloudkit_backup_state, 'wallet_mismatch')
         self.assertIsNone(self.user.cloudkit_backup_verified_at)
 
     def test_proof_goes_stale_when_the_wallet_changes(self):
@@ -87,6 +87,40 @@ class ReportCloudKitBackupTests(TestCase):
             ReportCloudKitBackup().mutate(self.info, 'failed', error_code='CK\n12 forged')
         self.assertIn('code=CK_12', logs.output[0])
         self.assertIn('code=unknown', logs.output[1])
+
+    def test_a_skip_never_replaces_a_proven_copy(self):
+        self.report('proven', [wallet_hash('0xabc')])
+        for state in ('skipped', 'unavailable'):
+            self.assertTrue(self.report(state).success)
+            self.assertEqual(self.user.cloudkit_backup_state, 'proven')
+        self.report('failed')
+        self.assertEqual(self.user.cloudkit_backup_state, 'failed')
+
+    def test_a_skip_is_recorded_when_nothing_was_proven(self):
+        with self.assertLogs('users.schema', level='INFO') as logs:
+            ReportCloudKitBackup().mutate(self.info, 'skipped', error_code='NO_LOCAL_WALLET')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.cloudkit_backup_state, 'skipped')
+        self.assertIn('code=NO_LOCAL_WALLET', logs.output[0])
+
+    def test_another_wallet_never_replaces_a_proven_copy(self):
+        self.report('proven', [wallet_hash('0xabc')])
+        self.assertFalse(self.report('proven', [wallet_hash('0xdef')]).success)
+        self.assertEqual(self.user.cloudkit_backup_state, 'proven')
+
+    def test_no_registered_wallet_is_not_a_mismatch(self):
+        self.account.bsc_address = None
+        self.account.save(update_fields=['bsc_address'])
+        self.assertFalse(self.report('proven', [wallet_hash('0xabc')]).success)
+        self.assertEqual(self.user.cloudkit_backup_state, '')
+
+    def test_a_skip_never_hides_a_full_icloud(self):
+        self.report('icloud_full')
+        self.report('skipped')
+        self.assertEqual(self.user.cloudkit_backup_state, 'icloud_full')
+
+    def test_a_client_cannot_claim_a_mismatch(self):
+        self.assertFalse(self.report('wallet_mismatch').success)
 
     def test_unknown_states_are_refused(self):
         self.assertFalse(self.report('verified').success)

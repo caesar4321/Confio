@@ -145,8 +145,12 @@ New on `User`:
   replaced wallet does not inherit proof, and "proven" only counts while this
   hash equals the current one. Reports use the pinned session token.
 - `cloudkit_backup_state`: `proven`, `no_icloud_account`, `icloud_restricted`,
-  `icloud_full`, `failed`. Null means no report reached the server, for any
-  reason. The CloudKit error code of a failed upload goes to the server log.
+  `icloud_full`, `failed`, `unavailable` (iCloud could not say), `skipped`
+  (nothing to copy, or a check broke before the upload), and server-set
+  `wallet_mismatch` (the device read back a different wallet). Since 11-09
+  builds every way out of the backup reports, so null means no session or an
+  older build (`last_app_version` tells which). `unavailable` and `skipped`
+  never replace `proven`. Each report's code goes to the server log.
 
 New mutation `reportCloudKitBackup`, separate from `ReportBackupStatus`, in its
 own try/catch so an older server cannot fail a shared request.

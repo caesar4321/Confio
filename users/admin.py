@@ -108,6 +108,9 @@ class UserAdmin(admin.ModelAdmin):
         'failed': ('red', 'Failed'),
         'no_icloud_account': ('gray', 'No iCloud'),
         'icloud_restricted': ('gray', 'Restricted'),
+        'unavailable': ('gray', 'iCloud unavailable'),
+        'skipped': ('gray', 'Skipped'),
+        'wallet_mismatch': ('red', 'Other wallet'),
     }
 
     def cloudkit_display(self, obj):

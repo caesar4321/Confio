@@ -13,7 +13,13 @@ const CLOUD_TIMEOUT_MS = 15_000;
 // CKError.quotaExceeded: the record counts against the person's own iCloud plan.
 const ICLOUD_FULL_CODE = 'CK_25';
 
-type CloudKitState = 'proven' | 'no_icloud_account' | 'icloud_restricted' | 'icloud_full' | 'failed';
+type CloudKitState =
+  | 'proven' | 'no_icloud_account' | 'icloud_restricted' | 'icloud_full' | 'failed' | 'unavailable' | 'skipped';
+
+/** A short code for the server log: a CloudKit code, an error name, or our own label. */
+const errorCode = (error: any) => String(
+  error?.code || (error?.name && error.name !== 'Error' ? error.name : error?.message) || 'unknown',
+);
 
 const nativeBackup = () => (Platform.OS === 'ios' ? NativeModules.ConfioCloudBackup : undefined);
 
@@ -93,16 +99,38 @@ let storageFull = false;
 async function runCloudKitBackup(): Promise<boolean> {
   const backup = nativeBackup();
   if (!backup) return false;
-  const { oauthStorage } = await import('./oauthStorageService');
   const { AuthService } = await import('./authService');
-  const { getCloudKitBackupMaterial } = await import('./secureDeterministicWallet');
-  const oauth = await oauthStorage.getOAuthSubject();
   const token = await AuthService.getInstance().getToken();
-  if (!oauth?.subject || !token) return storageFull;
+  if (!token) return storageFull;
   const userId = jwtDecode<{ user_id?: string | number }>(token)?.user_id;
   if (!userId) return storageFull;
+  // From here every way out tells the server why, so "no report" only ever
+  // means no session or an unreachable server.
+  const tell = async (state: CloudKitState, code: string) => {
+    await reportState(state, token, undefined, code).catch(() => false);
+    return storageFull;
+  };
+  try {
+    return await backUp(backup, token, userId, tell);
+  } catch (error) {
+    console.warn('[CloudKitBackup] Skipped, will retry:', error);
+    // Before or after the upload, never the upload itself (that reports its
+    // own failure), so it says nothing against a copy already proven.
+    return tell('skipped', errorCode(error));
+  }
+}
+
+async function backUp(
+  backup: any, token: string, userId: string | number,
+  tell: (state: CloudKitState, code: string) => Promise<boolean>,
+): Promise<boolean> {
+  const { oauthStorage } = await import('./oauthStorageService');
+  const { getCloudKitBackupMaterial } = await import('./secureDeterministicWallet');
+  const oauth = await oauthStorage.getOAuthSubject();
+  if (!oauth?.subject) return tell('skipped', 'NO_OAUTH_SUBJECT');
   const material = await getCloudKitBackupMaterial(oauth.subject);
-  if (!material) return storageFull;
+  // V1 wallets derive from the sign-in itself and have no V2 secret to copy.
+  if (!material) return tell('skipped', 'NO_LOCAL_WALLET');
 
   const walletHashes = [material.bscAddress, material.algorandAddress].map(cloudKitAddressHash);
   // Keyed by user too: after deleting an account and signing up again, the same
@@ -117,10 +145,10 @@ async function runCloudKitBackup(): Promise<boolean> {
     if (marker?.acknowledged) {
       await Keychain.setGenericPassword('cloudkit', JSON.stringify({ ...marker, acknowledged: false }), { service });
     }
-    await reportState(status === 'noAccount' ? 'no_icloud_account' : 'icloud_restricted', token);
+    await reportState(status === 'noAccount' ? 'no_icloud_account' : 'icloud_restricted', token).catch(() => false);
     return false;
   }
-  if (status !== 'available') return storageFull;
+  if (status !== 'available') return tell('unavailable', status);
 
   const iCloudUser = await withTimeout<string>(backup.userHash());
   if (marker?.iCloudUser === iCloudUser && marker.acknowledged) return false;
@@ -130,7 +158,7 @@ async function runCloudKitBackup(): Promise<boolean> {
       await uploadAndVerify(backup, material);
     } catch (error: any) {
       console.warn('[CloudKitBackup] Backup not proven:', error);
-      const code = String(error?.code || error?.message || '');
+      const code = errorCode(error);
       const full = code === ICLOUD_FULL_CODE;
       // The person must hear about a full iCloud even if this report is lost.
       await reportState(full ? 'icloud_full' : 'failed', token, undefined, code).catch(() => false);
@@ -141,7 +169,8 @@ async function runCloudKitBackup(): Promise<boolean> {
   }
   // Storing and acknowledging are separate steps: a lost report must retry
   // without hiding behind a marker that says the work is done.
-  if (await reportState('proven', token, walletHashes)) {
+  // A refusal (the device holds another wallet) is recorded by the server.
+  if (await reportState('proven', token, walletHashes).catch(() => false)) {
     await Keychain.setGenericPassword('cloudkit', JSON.stringify({ iCloudUser, acknowledged: true }), { service });
   }
   return false;

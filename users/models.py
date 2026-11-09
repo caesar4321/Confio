@@ -203,6 +203,9 @@ class User(AbstractUser, SoftDeleteModel):
             ('icloud_restricted', 'iCloud restricted'),
             ('icloud_full', 'iCloud storage full'),
             ('failed', 'Failed'),
+            ('unavailable', 'iCloud unavailable'),
+            ('skipped', 'Skipped on device'),
+            ('wallet_mismatch', 'Device holds another wallet'),
         ],
         help_text="Empty means no report reached the server, for any reason"
     )
