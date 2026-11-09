@@ -4,7 +4,8 @@ pragma solidity ^0.8.24;
 /**
  * ConfioStockRouter — the sweep-model trade path: GM tokenized stocks are
  * bought FROM and sold INTO the user's savings (cUSD+). Since v2 (2026-10)
- * the router charges NO fee of its own: Confío's single 0.9% conversion fee
+ * the router charges NO fee of its own, and since v3 (2026-11) it has no
+ * fee path at all (the transitional 0.30% legacy path is deleted): Confío's single 0.9% conversion fee
  * is taken by cUSD when the dollars leave (buy) or re-enter (sell) savings,
  * through the same public cUSD+ exit/entry every withdrawal and deposit
  * uses. There is no per-product rate and no hidden price markup.
@@ -23,10 +24,10 @@ pragma solidity ^0.8.24;
  *                    so no conversion fee)
  *
  * Philosophy (same as CusdPlusVault):
- * - The router holds nothing at rest except 0.30% fees accrued by v1 and by
- *   the transitional legacy path (LEGACY_STOCK_FEE_BPS), withdrawable only
- *   via withdrawFees. Trade principal transits inside a
- *   single transaction.
+ * - The router holds nothing at rest. Trade principal transits inside a
+ *   single transaction. (v1 and the v2 legacy path accrued a 0.30% fee
+ *   here; it was withdrawn to the Safe before v3, and initializeV3 refuses
+ *   to run unless that accrual is zero.)
  * - No discretionary anything: amounts in must equal fee + amounts settled,
  *   enforced by balance accounting per call.
  * - UUPS upgradeability mirrors CusdPlusVault so Ondo settlement migrations
@@ -88,10 +89,6 @@ interface ICusdPlusVaultMinimal {
     function subscribeAndMint(uint256 usdtIn, uint256 minUsdyOut, address recipient) external returns (uint256);
     function isSponsor(address account) external view returns (bool);
     function CUSD() external view returns (address);
-    /// v1 router-only fee-free surfaces. Used ONLY by the legacy 30 bps
-    /// path below, which exists so pre-v2 app builds keep working.
-    function redeemForStock(uint256 shares, uint256 minUsdtOut, address to) external returns (uint256);
-    function subscribeForStock(uint256 usdtIn, uint256 minUsdyOut, address recipient) external returns (uint256);
 }
 
 /// cUSD owns the single Confío conversion fee (feeBps, Safe-set, bounded).
@@ -142,7 +139,6 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
     IERC20 public immutable USDON;
     ICusdPlusVaultMinimal public immutable VAULT;
     IGMTokenManager public immutable GM;
-    uint256 private constant BPS = 10_000;
     uint256 private constant WAD = 1e18;
     /// The router's OWN fee. Zero since v2 (2026-10): stock trades pay the
     /// same cUSD perimeter fee as every other exit/entry of Confío dollars
@@ -151,25 +147,8 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
     /// bytecode so neither the owner nor a compromised key can raise it.
     uint256 public constant stockFeeBps = 0;
 
-    /// TRANSITIONAL. Pre-v2 app builds sign exactly maxFeeBps = 30 and size
-    /// their cUSD+ redemption and floors for the v1 0.30% router fee; a 0.9%
-    /// charge would make every such trade revert. A call signed at exactly
-    /// this cap therefore settles the v1 way (fee-free vault surfaces + 30
-    /// bps accrued here), so old users pay precisely what their screen
-    /// showed. Both entry points are sponsor-originated, so Confío's relay
-    /// decides how long legacy intents are honored; the next router upgrade
-    /// deletes this path.
-    uint256 public constant LEGACY_STOCK_FEE_BPS = 30;
-
-    /// The legacy path redeems through fee-free vault surfaces, so any USDT
-    /// refunded above the trade debit would leave savings without the 0.9%
-    /// perimeter fee (Codex audit 2026-10-19 [P1]: a $10 legacy buy funded
-    /// with $10,000 of shares was a near-free withdrawal). Honest clients
-    /// size shares to the debit from the vault's STORED pPlus, so legitimate
-    /// excess is rounding plus accrual since the last accrue() (~1 bp per
-    /// idle day). 50 bps covers ~7 idle weeks and caps any fee-free leak at
-    /// 0.5% of a real trade instead of an unbounded withdrawal.
-    uint256 public constant LEGACY_MAX_EXCESS_BPS = 50;
+    /// Implementation generation, for on-chain verification of an upgrade.
+    uint256 public constant VERSION = 3;
 
     /// GM converts the full USDT deposit to USDon, consumes quote cost, and
     /// refunds the remainder. A live BSC trade differed from quantity*price
@@ -180,11 +159,12 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
     uint8 private constant BUY = 0;
     uint8 private constant SELL = 1;
 
-    /// USDT earned by the router and not yet withdrawn. This separates fees
-    /// from accidental USDT transfers, which remain independently sweepable.
+    /// Storage slot 0, kept for the proxy's layout and for existing readers.
+    /// It held the 0.30% fee accrued by v1 and the v2 legacy path; since v3
+    /// nothing writes it, and initializeV3 requires it to be zero, so it
+    /// reads 0 forever.
     uint256 public accruedUsdtFees;
 
-    event FeesWithdrawn(address indexed to, uint256 amount);
     event StockBought(
         address indexed user,
         address indexed stockToken,
@@ -240,6 +220,14 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         __Pausable_init();
     }
 
+    /// v2 -> v3 upgrade hook (Safe: upgradeToAndCall(v3, initializeV3())).
+    /// Refuses to install v3 while any legacy router fee is still accrued:
+    /// v3 has no way to withdraw it apart from sweep, so it must be
+    /// collected with v2's withdrawFees first.
+    function initializeV3() external reinitializer(3) {
+        require(accruedUsdtFees == 0, "withdraw legacy fees first");
+    }
+
     function _authorizeUpgrade(address) internal view override onlyOwner {}
 
     /// Confío's relay must ORIGINATE any trade that mints or spends cUSD+.
@@ -281,7 +269,7 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         require(quote.price > 0, "zero price");
         require(quote.side == BUY, "wrong quote side");
         require(quote.chainId == block.chainid, "wrong chain");
-        bool legacy = _isLegacyFee(maxFeeBps);
+        _requireFeeCap(maxFeeBps);
 
         uint256 userStockBefore = IERC20(quote.asset).balanceOf(msg.sender);
         uint256 usdonBefore = USDON.balanceOf(address(this));
@@ -290,7 +278,7 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         // exit, which pays cUSD's conversion fee like any other exit. Trade
         // principal is spent in this tx; nothing stays behind.
         CUSD_PLUS.safeTransferFrom(msg.sender, address(this), sharesIn);
-        uint256 usdt = _redeemSavings(sharesIn, minUsdtOut, legacy);
+        uint256 usdt = _redeemSavings(sharesIn, minUsdtOut);
 
         require(usdtSpend > 0, "nothing to spend");
 
@@ -305,20 +293,20 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
             require(usdtSpend - quoteCost <= MAX_QUOTE_REMAINDER, "overspend vs quote");
         }
 
-        // v2: the conversion fee was already taken by the exit above and the
-        // router charges nothing (event fee = 0). Legacy: 30 bps accrued here.
-        uint256 fee = _settleBuyDebit(usdt, usdtSpend, msg.sender, legacy);
+        // The conversion fee was already taken by the exit above; the router
+        // charges nothing (the event's fee field stays for ABI readers: 0).
+        _returnRedemptionExcess(usdt, usdtSpend, msg.sender);
         stockOut = _deliverBoughtStock(quote, signature, usdtSpend, msg.sender, userStockBefore);
 
         _forwardUsdonRefund(usdonBefore, msg.sender);
 
-        emit StockBought(msg.sender, quote.asset, quote.attestationId, sharesIn, usdtSpend, fee, stockOut);
+        emit StockBought(msg.sender, quote.asset, quote.attestationId, sharesIn, usdtSpend, 0, stockOut);
     }
 
     // ═════════════════════════ Sell ═════════════════════════════════════
 
-    /// Sell `quote.quantity` of `quote.asset`; proceeds (minus fee) re-enter
-    /// the caller's savings and keep earning.
+    /// Sell `quote.quantity` of `quote.asset`; the proceeds re-enter the
+    /// caller's savings (paying cUSD's entry fee) and keep earning.
     ///
     /// `minUsdtOut` floors the GM redemption (enforced inside GM too).
     /// `minSharesOut` floors the cUSD+ the USER ends up holding. It is
@@ -336,7 +324,7 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         require(quote.price > 0, "zero price");
         require(quote.side == SELL, "wrong quote side");
         require(quote.chainId == block.chainid, "wrong chain");
-        bool legacy = _isLegacyFee(maxFeeBps);
+        _requireFeeCap(maxFeeBps);
 
         uint256 userSharesBefore = CUSD_PLUS.balanceOf(msg.sender);
 
@@ -344,28 +332,21 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         uint256 usdt = _gmRedeem(quote, signature, minUsdtOut);
         require(usdt >= minUsdtOut, "gm: insufficient payment out");
 
-        // v2: no router fee; the proceeds re-enter savings through cUSD+'s
+        // No router fee: the proceeds re-enter savings through cUSD+'s
         // ordinary sponsored entry, which pays cUSD's conversion fee like any
         // other USDT -> cUSD+ entry. The router is a registered relay, so
         // the vault accepts it minting to the user.
-        uint256 fee = legacy ? (usdt * LEGACY_STOCK_FEE_BPS) / BPS : 0;
-        accruedUsdtFees += fee;
-        uint256 reinvest = usdt - fee;
-        require(reinvest > 0, "nothing to reinvest");
+        require(usdt > 0, "nothing to reinvest");
 
-        USDT.forceApprove(address(VAULT), reinvest);
-        if (legacy) {
-            VAULT.subscribeForStock(reinvest, 0, msg.sender);
-        } else {
-            VAULT.subscribeAndMint(reinvest, 0, msg.sender);
-        }
+        USDT.forceApprove(address(VAULT), usdt);
+        VAULT.subscribeAndMint(usdt, 0, msg.sender);
         require(USDT.allowance(address(this), address(VAULT)) == 0, "vault: partial fill");
 
         // Floor what the USER actually holds afterwards.
         sharesOut = CUSD_PLUS.balanceOf(msg.sender) - userSharesBefore;
         require(sharesOut >= minSharesOut, "insufficient shares out");
 
-        emit StockSold(msg.sender, quote.asset, quote.attestationId, quote.quantity, usdt, fee, sharesOut);
+        emit StockSold(msg.sender, quote.asset, quote.attestationId, quote.quantity, usdt, 0, sharesOut);
     }
 
     /// Sell stock directly to raw USDT. This is the permissionless exit: it
@@ -407,13 +388,9 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
     /// delta rather than trusting the vault's return value (audit [P2]) —
     /// consistent with _gmMint/_gmRedeem, and it stops stray USDT sitting in
     /// the router from being swept into a user's trade.
-    function _redeemSavings(uint256 sharesIn, uint256 minUsdtOut, bool legacy) private returns (uint256 usdt) {
+    function _redeemSavings(uint256 sharesIn, uint256 minUsdtOut) private returns (uint256 usdt) {
         uint256 before = USDT.balanceOf(address(this));
-        if (legacy) {
-            VAULT.redeemForStock(sharesIn, minUsdtOut, address(this));
-        } else {
-            VAULT.redeemToUsdt(sharesIn, minUsdtOut, address(this));
-        }
+        VAULT.redeemToUsdt(sharesIn, minUsdtOut, address(this));
         usdt = USDT.balanceOf(address(this)) - before;
         require(usdt >= minUsdtOut, "vault: insufficient usdt out");
     }
@@ -432,27 +409,15 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         minted = IERC20(quote.asset).balanceOf(address(this)) - before;
     }
 
-    function _settleBuyDebit(uint256 redeemedUsdt, uint256 usdtSpend, address user, bool legacy)
-        private
-        returns (uint256 fee)
-    {
-        // Legacy: 30 bps of the complete trade debit, rounded up so tiny
-        // valid trades cannot pay zero: fee / (spend + fee) ~= 30 / 10,000.
-        fee = legacy
-            ? Math.mulDiv(usdtSpend, LEGACY_STOCK_FEE_BPS, BPS - LEGACY_STOCK_FEE_BPS, Math.Rounding.Ceil)
-            : 0;
-        uint256 requiredUsdt = usdtSpend + fee;
-        require(redeemedUsdt >= requiredUsdt, "insufficient redeemed usdt");
-        accruedUsdtFees += fee;
+    function _returnRedemptionExcess(uint256 redeemedUsdt, uint256 usdtSpend, address user) private {
+        require(redeemedUsdt >= usdtSpend, "insufficient redeemed usdt");
 
         // cUSD+ accrues before redeeming, so the same shares can return more
         // USDT than the client predicted when it requested the attestation.
         // Spend only the binding notional and return every excess wei rather
-        // than capturing it as an accidental second fee.
-        uint256 excess = redeemedUsdt - requiredUsdt;
-        if (legacy) {
-            require(excess <= (requiredUsdt * LEGACY_MAX_EXCESS_BPS) / BPS, "legacy excess too large");
-        }
+        // than capturing it as an accidental second fee. The excess already
+        // paid cUSD's exit fee, so returning it is an ordinary withdrawal.
+        uint256 excess = redeemedUsdt - usdtSpend;
         if (excess > 0) {
             USDT.safeTransfer(user, excess);
             emit UsdtRedemptionExcessReturned(user, excess);
@@ -510,13 +475,10 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
 
     /// The user's signed cap binds the fee that will actually be charged, so
     /// a Safe fee change cannot apply to an intent signed at a lower fee.
-    /// A cap of exactly LEGACY_STOCK_FEE_BPS below the live fee is a pre-v2
-    /// client and settles the v1 way (see LEGACY_STOCK_FEE_BPS).
-    function _isLegacyFee(uint256 maxFeeBps) private view returns (bool) {
-        uint256 live = conversionFeeBps();
-        if (live <= maxFeeBps) return false;
-        require(maxFeeBps == LEGACY_STOCK_FEE_BPS, "fee above trade cap");
-        return true;
+    /// Since v3 there is no other settlement: a cap below the live fee
+    /// (including a pre-v2 build's 30) reverts.
+    function _requireFeeCap(uint256 maxFeeBps) private view {
+        require(conversionFeeBps() <= maxFeeBps, "fee above trade cap");
     }
 
     // ═════════════════════════ Ops ══════════════════════════════════════
@@ -529,24 +491,10 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         _unpause();
     }
 
-    /// Withdraw only fees actually accrued by completed trades. Accounting is
-    /// reduced before the external token call and the whole tx reverts if the
-    /// transfer fails.
-    function withdrawFees(address to, uint256 amount) external onlyOwner nonReentrant {
-        require(to != address(0), "zero recipient");
-        require(amount <= accruedUsdtFees, "amount exceeds fees");
-        accruedUsdtFees -= amount;
-        USDT.safeTransfer(to, amount);
-        emit FeesWithdrawn(to, amount);
-    }
-
-    /// Rescue accidental tokens. Accrued USDT is reserved for withdrawFees()
-    /// and cannot be removed through this generic path.
+    /// Rescue tokens sent here by accident. The router keeps nothing at rest
+    /// and has no fee balance, so every token held is stray.
     function sweep(address token, address to, uint256 amount) external onlyOwner nonReentrant {
         require(to != address(0), "zero recipient");
-        if (token == address(USDT)) {
-            require(amount <= USDT.balanceOf(address(this)) - accruedUsdtFees, "amount includes fees");
-        }
         IERC20(token).safeTransfer(to, amount);
     }
 }

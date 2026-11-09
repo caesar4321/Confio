@@ -42,12 +42,13 @@ contract ConfioStockRouterForkTest is Test {
         assertEq(address(router.USDT()), USDT);
         assertEq(address(router.USDON()), USDON);
         assertEq(address(router.GM()), GM);
-        assertEq(router.stockFeeBps(), 30);
+        assertEq(router.stockFeeBps(), 0);
+        assertEq(router.VERSION(), 3);
     }
 
     function test_fork_bscSupportsTransientReentrancyGuard() public {
         if (!_forked()) return;
-        router.withdrawFees(address(this), 0);
+        router.sweep(USDT, address(this), 0); // nonReentrant (transient storage)
         assertEq(router.accruedUsdtFees(), 0);
     }
 }

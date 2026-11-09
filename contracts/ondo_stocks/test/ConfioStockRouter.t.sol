@@ -243,10 +243,31 @@ contract ConfioStockRouterTest is Test {
         assertEq(address(router.CUSD_PLUS()), address(vault), "immutable wiring preserved");
     }
 
+    /// v3's upgrade hook installs only when no legacy fee is left behind
+    /// (v3 has no withdrawFees), and runs once.
+    function test_initializeV3_requiresZeroLegacyFees_andRunsOnce() public {
+        ConfioStockRouter nextImpl = new ConfioStockRouter(address(vault), address(usdt), address(usdon), address(gm));
+        bytes memory init = abi.encodeCall(ConfioStockRouter.initializeV3, ());
+
+        _seedLegacyFees(1);
+        vm.prank(treasury);
+        vm.expectRevert(bytes("withdraw legacy fees first"));
+        router.upgradeToAndCall(address(nextImpl), init);
+
+        stdstore.target(address(router)).sig("accruedUsdtFees()").checked_write(uint256(0));
+        vm.prank(treasury);
+        router.upgradeToAndCall(address(nextImpl), init);
+        assertEq(router.VERSION(), 3);
+        assertEq(router.accruedUsdtFees(), 0);
+
+        vm.expectRevert();
+        router.initializeV3();
+    }
+
     // ── core behavior ───────────────────────────────────────────────────
 
-    /// Legacy v1 fees (0.30%) may still sit in the router at upgrade time.
-    /// v2 never accrues more, but they must stay withdrawable and protected.
+    /// Simulates a legacy 0.30% accrual left in slot 0 by v1/v2 (v3 never
+    /// writes it): only initializeV3's guard reads it.
     function _seedLegacyFees(uint256 amount) internal {
         stdstore.target(address(router)).sig("accruedUsdtFees()").checked_write(amount);
         usdt.mint(address(router), amount);
@@ -360,21 +381,19 @@ contract ConfioStockRouterTest is Test {
         assertEq(usdt.balanceOf(address(cusd)), _perimeterFee(sharesIn) + _perimeterFee(proceeds));
     }
 
-    function testFuzz_withdrawAndSweep_cannotInsolventLegacyFees(uint96 rawWithdraw, uint96 rawStray) public {
-        _seedLegacyFees(1.8e18);
-
-        uint256 accrued = router.accruedUsdtFees();
-        uint256 withdraw = bound(uint256(rawWithdraw), 0, accrued);
-        uint256 stray = bound(uint256(rawStray), 0, 1_000_000e18);
+    function testFuzz_sweep_rescuesAnyStrayToken(uint96 rawStray) public {
+        uint256 stray = bound(uint256(rawStray), 1, 1_000_000e18);
         usdt.mint(address(router), stray);
+        tsla.mint(address(router), stray);
 
         vm.startPrank(treasury);
-        router.withdrawFees(treasury, withdraw);
         router.sweep(address(usdt), treasury, stray);
+        router.sweep(address(tsla), treasury, stray);
         vm.stopPrank();
 
-        assertEq(router.accruedUsdtFees(), accrued - withdraw);
-        assertEq(usdt.balanceOf(address(router)), accrued - withdraw);
+        assertEq(usdt.balanceOf(address(router)), 0);
+        assertEq(tsla.balanceOf(address(router)), 0);
+        assertEq(usdt.balanceOf(treasury), stray);
     }
 
     /// Regression: minSharesOut used to be forwarded as the vault's
@@ -422,40 +441,18 @@ contract ConfioStockRouterTest is Test {
         assertEq(router.conversionFeeBps(), FEE);
     }
 
-    function test_ownerCanWithdrawOnlyAccruedLegacyFees() public {
-        _seedLegacyFees(1.8e18);
-
-        uint256 accrued = router.accruedUsdtFees();
-        vm.prank(treasury);
-        router.withdrawFees(treasury, accrued - 1);
-
-        assertEq(usdt.balanceOf(treasury), accrued - 1);
-        assertEq(router.accruedUsdtFees(), 1);
-        assertEq(usdt.balanceOf(address(router)), 1);
-
-        vm.prank(treasury);
-        vm.expectRevert(bytes("amount exceeds fees"));
-        router.withdrawFees(treasury, 2);
-    }
-
-    function test_nonOwnerCannotWithdrawFees() public {
+    function test_nonOwnerCannotSweep() public {
+        usdt.mint(address(router), 1e18);
         vm.prank(user);
         vm.expectRevert();
-        router.withdrawFees(user, 0);
+        router.sweep(address(usdt), user, 1e18);
     }
 
-    function test_sweepCannotTakeAccruedFees_butCanRescueStrayUsdt() public {
-        _seedLegacyFees(0.9e18);
-        uint256 accrued = router.accruedUsdtFees();
-        usdt.mint(address(router), 7e18);
-
+    /// v3 has no fee-withdrawal entry point at all.
+    function test_noWithdrawFeesSelector() public {
         vm.prank(treasury);
-        router.sweep(address(usdt), treasury, 7e18);
-        assertEq(usdt.balanceOf(address(router)), accrued);
-
-        vm.prank(treasury);
-        vm.expectRevert(bytes("amount includes fees"));
-        router.sweep(address(usdt), treasury, 1);
+        (bool ok,) = address(router).call(abi.encodeWithSignature("withdrawFees(address,uint256)", treasury, 0));
+        assertFalse(ok, "withdrawFees must not exist in v3");
     }
 
     function test_pause_blocks_trades() public {
@@ -491,7 +488,7 @@ contract ConfioStockRouterTest is Test {
     }
 
     /// The user's authorization must explicitly tolerate the live
-    /// conversion fee; any cap other than the legacy 30 below it fails.
+    /// conversion fee; any cap below it fails (v3: the old 30 included).
     function test_maxFeeBps_bindsLiveConversionFee() public {
         GmQuote memory q = _buyQuote(address(tsla), 300e18);
         vm.prank(user);
@@ -509,72 +506,39 @@ contract ConfioStockRouterTest is Test {
         router.sellToSavings(sq, "", 0, 0, 31);
     }
 
-    // ── Transitional legacy path: pre-v2 app builds (maxFeeBps == 30) ───
+    // ── v3: the 0.30% legacy path is gone ───────────────────────────────
 
-    /// Old client math: spend = shares * 0.997, fee = ceil(spend*30/9970).
+    /// Old client math: spend = shares * 0.997.
     function _legacySpend(uint256 sharesIn) internal pure returns (uint256) {
         return Math.mulDiv(sharesIn, 9970, 10_000);
     }
 
-    function test_legacyBuy_settlesAtThirtyBps_withoutPerimeter() public {
+    /// A pre-v2 build's buy (cap 30) no longer settles: it reverts before
+    /// touching the user's savings, and nothing accrues anywhere.
+    function test_legacyCapBuy_reverts() public {
         uint256 sharesIn = 600e18;
         uint256 spend = _legacySpend(sharesIn);
         GmQuote memory q = _quote(address(tsla), (spend * 1e18) / PRICE, 0);
+        uint256 sharesBefore = vault.balanceOf(user);
 
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(q, "", sharesIn, spend, 0, 30);
+        vm.expectRevert(bytes("fee above trade cap"));
+        router.buyWithSavings(q, "", sharesIn, spend, 0, 30);
 
-        uint256 fee = Math.mulDiv(spend, 30, 9970, Math.Rounding.Ceil);
-        assertEq(stockOut, q.quantity);
-        assertEq(router.accruedUsdtFees(), fee, "legacy 30 bps accrued in router");
-        assertEq(usdt.balanceOf(address(cusd)), 0, "perimeter not charged");
-        assertEq(usdt.balanceOf(address(router)), fee);
+        assertEq(vault.balanceOf(user), sharesBefore, "savings untouched");
+        assertEq(router.accruedUsdtFees(), 0);
     }
 
-    function test_legacySell_settlesAtThirtyBps_withoutPerimeter() public {
+    function test_legacyCapSell_reverts() public {
         tsla.mint(user, 2e18);
         GmQuote memory sq = _sellQuote(address(tsla), 2e18);
-        uint256 proceeds = 600e18;
-        uint256 fee = (proceeds * 30) / 10_000;
-
         vm.prank(user);
-        uint256 sharesOut = router.sellToSavings(sq, "", 0, proceeds - fee, 30);
-
-        assertEq(sharesOut, proceeds - fee, "old client's floor met exactly");
-        assertEq(router.accruedUsdtFees(), fee);
-        assertEq(usdt.balanceOf(address(cusd)), 0, "perimeter not charged");
+        vm.expectRevert(bytes("fee above trade cap"));
+        router.sellToSavings(sq, "", 0, 0, 30);
+        assertEq(tsla.balanceOf(user), 2e18, "stock untouched");
     }
 
-    /// Codex audit [P1]: oversized shares on the fee-free legacy path would
-    /// be a withdrawal that skips the 0.9% perimeter. Only rounding/accrual
-    /// excess is tolerated there.
-    function test_legacyBuy_rejectsOversizedShares() public {
-        uint256 spend = _legacySpend(10e18);
-        GmQuote memory q = _quote(address(tsla), (spend * 1e18) / PRICE, 0);
-        vm.prank(user);
-        vm.expectRevert(bytes("legacy excess too large"));
-        router.buyWithSavings(q, "", 2_000e18, spend, 0, 30);
-    }
-
-    function test_legacyBuy_toleratesAccrualExcess() public {
-        uint256 sharesIn = 600e18;
-        uint256 spend = _legacySpend(sharesIn);
-        GmQuote memory q = _quote(address(tsla), (spend * 1e18) / PRICE, 0);
-        // ~0.25% accrual since the last accrue(): inside the 50 bps bound.
-        oracle.setPrice(1.003e18);
-        vm.prank(user);
-        router.buyWithSavings(q, "", sharesIn, spend, 0, 30);
-        assertGt(usdt.balanceOf(user), 0, "accrual excess refunded");
-
-        // A 1.9% jump is far beyond honest staleness and is refused.
-        GmQuote memory q2 = _quote(address(tsla), (spend * 1e18) / PRICE, 0);
-        oracle.setPrice(1.022e18);
-        vm.prank(user);
-        vm.expectRevert(bytes("legacy excess too large"));
-        router.buyWithSavings(q2, "", sharesIn, spend, 0, 30);
-    }
-
-    /// On the v2 path an oversized buy simply pays the exit fee on the excess,
+    /// An oversized buy simply pays the exit fee on the excess,
     /// exactly like a withdrawal: nothing escapes the perimeter.
     function test_v2Buy_oversizedSharesPayPerimeterOnExcess() public {
         uint256 spend = _buySpend(10e18);
@@ -585,9 +549,9 @@ contract ConfioStockRouterTest is Test {
         assertEq(usdt.balanceOf(user), 2_000e18 - _perimeterFee(2_000e18) - spend);
     }
 
-    /// A pre-v2 build's exact buy (shares sized for 0.30%) cannot be pushed
-    /// through the 0.9% path: the legacy branch is what keeps it working.
-    function test_v2Path_wouldRejectLegacySizedBuy() public {
+    /// Even at the live cap, a buy sized for the old 0.30% (too few shares
+    /// for the 0.9% exit) cannot settle.
+    function test_legacySizedBuy_rejectedAtLiveCap() public {
         uint256 sharesIn = 600e18;
         uint256 spend = _legacySpend(sharesIn);
         GmQuote memory q = _quote(address(tsla), (spend * 1e18) / PRICE, 0);

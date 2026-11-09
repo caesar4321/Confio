@@ -80,17 +80,14 @@
     </div>
 
     <div class="metric-card">
-        <div class="metric-label">Legacy Router Fees (0.30%)</div>
-        <div class="metric-value">
-            {% if stock_router_metrics.accrued_usdt_fees is not None %}
-            ${{ stock_router_metrics.accrued_usdt_fees|floatformat:6|intcomma }}
+        <div class="metric-label">Router USDT balance (should be 0)</div>
+        <div class="metric-value {% if stock_router_metrics.router_usdt_balance %}negative{% endif %}">
+            {% if stock_router_metrics.router_usdt_balance is not None %}
+            ${{ stock_router_metrics.router_usdt_balance|floatformat:2|intcomma }}
             {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
         </div>
         <div class="metric-change">
-            {% if stock_router_metrics.router_usdt_balance is not None %}
-            Pre-v2 app builds only &middot; v2 trades pay cUSD's fee (see Confío fee revenue)
-            &middot; raw balance ${{ stock_router_metrics.router_usdt_balance|floatformat:2|intcomma }}
-            {% else %}Router balance unreadable{% endif %}
+            The router has no fee since v3: stock trades pay cUSD's 0.9% (see Confío fee revenue)
         </div>
     </div>
 
@@ -109,7 +106,7 @@
 <p style="color:#6b7280; font-size:13px; margin:0 0 12px;">
     Current market value is marked to market from BSC balances and Ondo display prices;
     it is not historical purchase cost. Volumes use exact event-backed settlements.
-    Router USDT can include accidental transfers; only accrued fees are withdrawable as revenue.
+    The router holds nothing at rest; any USDT it shows was sent by accident and the Safe can recover it with sweep.
     {% if stock_portfolio.updated_at_dt %}
     Snapshot: {{ stock_portfolio.updated_at_dt|date:"Y-m-d H:i:s T" }}, BSC block
     {{ stock_portfolio.as_of_block|default:"—" }}.

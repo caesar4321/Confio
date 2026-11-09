@@ -21,10 +21,13 @@ superseded addresses are recorded in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 - Minting requires a configured sponsor. Fee-free savings conversion also
   requires the sponsor. Fee-bearing holder redemption to USDT is
   permissionless for both cUSD and cUSD+, preserving sponsor-independent exit.
-- The Stock Router is the one narrow exception: its registered fee-free vault
-  settlement avoids a second 90-bps conversion charge and applies only the
-  router's fixed 30-bps trade fee. Permissionless stock→USDT redemption also
-  charges only 30 bps and is not used by Confío's normal app flow.
+- The Stock Router has no exception: since router v3 (2026-11) buys leave
+  cUSD+ through the public `redeemToUsdt` and sells re-enter through
+  `subscribeAndMint`, each paying cUSD's 0.9%. The vault's router-only
+  fee-free surfaces (`redeemForStock`/`subscribeForStock`) remain in this
+  vault's code but the router no longer calls them. Permissionless
+  stock→USDT redemption (`sellToUsdt`) never touches cUSD and charges nothing;
+  it is not used by Confío's normal app flow.
 - `ConfioPayContract`, `ConfioPayrollVault`, and `ConfioInviteEscrow` support
   cUSD and cUSD+. The production backend does not authorize legacy raw-USDT
   Pay. The replacement presale charges cUSD.
@@ -152,8 +155,9 @@ Two footnotes:
 
 The GM trade router is maintained as the standalone
 [`contracts/ondo_stocks`](../ondo_stocks/README.md) Foundry package. It uses
-only this vault's minimal external interface. Its fixed 0.30% USDT fee is
-accounted and accumulated in the router until the owner Safe withdraws it.
+only this vault's minimal external interface. It charges no fee of its own;
+the former 0.30% router fee was withdrawn to the Safe and its code deleted in
+router v3 (2026-11).
 
 ## ConfioPresaleVault — $CONFIO presale on the "A" curve
 

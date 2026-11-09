@@ -3,8 +3,8 @@
 <p style="color:#6b7280; margin:-8px 0 12px;">
     Every 0.9% fee is charged by the cUSD vault (one ledger row per on-chain fee event, recorded by the
     finalized-log scanner). Source rows are gross; the referrers' share (minted to them in the same
-    transaction) is subtracted below the total. The legacy 0.30% stock-router fee paid by pre-v2 app builds is separate and
-    listed last; nothing is counted twice.
+    transaction) is subtracted below the total. Stock trades pay this same fee (the stock router has had
+    no fee of its own since v3); nothing is counted twice.
 </p>
 {% if fee_ledger.pending %}
 <div class="alert" style="background:#f3f4f6; color:#374151; padding:16px; border-radius:8px; margin-bottom:20px;">
@@ -64,19 +64,6 @@
             <td style="padding:8px; text-align:right;">—</td>
         </tr>
         {% endif %}
-        <tr style="color:#6b7280;">
-            <td style="padding:8px;">Legacy stock router (0.30%, pre-v2 builds)</td>
-            <td style="padding:8px; text-align:right;">—</td>
-            <td style="padding:8px; text-align:right;">—</td>
-            <td style="padding:8px; text-align:right;">—</td>
-            <td style="padding:8px; text-align:right;">
-                {% if stock_router_metrics.accrued_usdt_fees is not None %}
-                ${{ stock_router_metrics.accrued_usdt_fees|floatformat:2|intcomma }} uncollected
-                {% else %}unavailable{% endif %}
-            </td>
-            <td style="padding:8px; text-align:right;">—</td>
-            <td style="padding:8px; text-align:right;">—</td>
-        </tr>
     </tbody>
 </table>
 {% if cusd_bsc_metrics.accrued_fees_usd is not None and fee_ledger.total.count %}

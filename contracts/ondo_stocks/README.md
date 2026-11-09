@@ -4,9 +4,10 @@ Standalone Foundry package for Confío's Ondo Global Markets stock router.
 It connects the existing cUSD+ vault to Ondo's BSC `GMTokenManager` without
 depending on the cUSD+ implementation source.
 
-## Fees (v2, 2026-10)
+## Fees (v3, 2026-11)
 
-The router charges **no fee of its own** (`stockFeeBps() == 0`). Stock trades
+The router charges **no fee of its own** (`stockFeeBps() == 0`) and, since v3,
+has no fee path or fee balance at all. Stock trades
 pay Confío's single 0.9% conversion fee exactly where every other exit from or
 entry into Confío Dollar pays it:
 
@@ -23,18 +24,17 @@ Every trade signs `maxFeeBps`, which is checked against cUSD's live `feeBps`
 (`conversionFeeBps()`), so a Safe fee change can never apply to an intent
 signed at a lower fee.
 
-**Transitional legacy path.** Pre-v2 app builds always sign `maxFeeBps = 30`
-and size their redemption and floors for the v1 0.30% router fee. A call
-signed at exactly `LEGACY_STOCK_FEE_BPS` (30) settles the v1 way: the
-router-only fee-free vault surfaces (`redeemForStock`/`subscribeForStock`)
-plus 30 bps accrued in `accruedUsdtFees`. Both entry points are
-sponsor-originated, so the relay's `CUSD_PLUS_STOCK_LEGACY_FEE_ENABLED`
-decides how long legacy intents are honored. Once the new build is on both
-stores: switch that off, force-update, and upgrade to a single-mode router that
-deletes this path.
-
-Accrued legacy fees remain withdrawable only through `withdrawFees`; `sweep`
-cannot touch them.
+**The 0.30% legacy path is gone (v3).** v2 kept a transitional path for
+pre-v2 app builds, which sign `maxFeeBps = 30`: it settled through the vault's
+router-only fee-free surfaces and accrued 0.30% in the router. On 2026-11-09
+the relay stopped sponsoring cap 30 (`CUSD_PLUS_STOCK_LEGACY_FEE_ENABLED=False`;
+every recent legacy trader had already updated), the accrued 9.9177 USDT was
+withdrawn to the Safe (Safe nonce 28), and v3 deleted the path:
+`LEGACY_STOCK_FEE_BPS`, the fee-free vault calls, all accrual and
+`withdrawFees`. A cap below cUSD's live fee now reverts ("fee above trade
+cap"). Storage slot 0 (`accruedUsdtFees`) stays for the proxy layout and reads
+0 forever; `initializeV3()` refused to install v3 unless it was 0. `sweep`
+rescues any token sent here by accident.
 
 ## End-to-end wiring
 
@@ -45,8 +45,8 @@ The production flow is deliberately split by custody boundary:
 2. The app reads the user's live cUSD+/stock balances and builds an optional
    approval plus the exact router calldata.
 3. Daphne validates the quote request, sponsored-rail configuration, issuer
-   eligibility, canonical calldata, and the signed fee cap (90 bps v2, or
-   30 bps legacy while the transition switch is on).
+   eligibility, canonical calldata, and the signed fee cap (cUSD's live fee,
+   90 bps).
 4. The app signs an EIP-712 intent and the KMS relay broadcasts the sponsored
    EIP-7702 batch.
 5. The router settles atomically and Daphne invalidates the vault and GM
