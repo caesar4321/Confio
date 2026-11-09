@@ -165,14 +165,15 @@ NAME_PARTICLES = {'de', 'del', 'la', 'las', 'los', 'y', 'e', 'da', 'do', 'di', '
 
 
 def holder_matches(holder: str, first_names: str, last_names: str) -> bool:
-    """The licence holder is this person: EVERY surname on their verified ID
-    and at least one real given name (not a particle like "de") appear in it,
-    in any order. One given name and one surname would let a namesake's or a
-    sibling's licence through."""
+    """The licence holder is this person: EVERY surname and EVERY given name on
+    their verified ID (particles like "de" aside) appear in it, in any order.
+    Fewer would let a namesake's or a sibling's licence through."""
     words = _words(holder) - NAME_PARTICLES
     surnames = _words(last_names) - NAME_PARTICLES
     given = _words(first_names) - NAME_PARTICLES
-    return bool(surnames) and bool(given) and surnames <= words and bool(given & words)
+    # Every given name too: siblings share both surnames and often a given
+    # name ("Ana María" vs "María Elena" Quispe Mamani).
+    return bool(surnames) and bool(given) and (surnames | given) <= words
 
 
 # Words that dress up a municipality's name without naming it.
@@ -351,7 +352,9 @@ def review_license(store_id: int, key: str) -> str:
             fields = {**common, 'alcohol_license_status': 'approved', 'alcohol_license_expires_on': expires,
                       'alcohol_license_note': '', 'alcohol_license_hash': photo_hash,
                       'alcohol_license_approved_key': key,
-                      'alcohol_license_number': _normalize_number(reading['license_number'])}
+                      'alcohol_license_number': _normalize_number(reading['license_number']),
+                      'alcohol_license_approved_number': _normalize_number(reading['license_number']),
+                      'alcohol_license_approved_hash': photo_hash}
         elif renewal:
             # A failed renewal never takes away the licence that still counts.
             fields = {**common, 'alcohol_license_note': reason[:300]}

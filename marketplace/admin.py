@@ -146,6 +146,15 @@ class RevokedAlcoholLicenseAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         return False
 
+    # A deleted row would let that licence pass review again.
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop('delete_selected', None)
+        return actions
+
 
 class StoreAdmin(admin.ModelAdmin):
     list_display = ('name', 'city', 'country_code', 'owner', 'status', 'ships_outside_city',
@@ -189,11 +198,9 @@ class StoreAdmin(admin.ModelAdmin):
                 # else's licence: never blacklist it). Plus the fingerprint of
                 # the photo the admin is looking at now, so that exact photo
                 # never passes again.
-                # (Approved with a hash = by the review; approved without a
-                # verdict = by hand before automatic review: its number too.)
-                approved = row.alcohol_license_status == 'approved' and (
-                    row.alcohol_license_hash or not row.alcohol_license_verdict)
-                approved_number = _normalize_number(row.alcohol_license_number) if approved else ''
+                # The approved identity is kept apart from what later uploads
+                # change (a renewal, a new photo after expiry).
+                approved_number = row.alcohol_license_approved_number
                 if approved_number:
                     # The review's lock: a review of the same licence elsewhere
                     # waits for this revoke and then sees its record.
@@ -201,12 +208,12 @@ class StoreAdmin(admin.ModelAdmin):
                     with connection.cursor() as cursor:
                         cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',
                                        [f'comprar-licence:{city_key(row.city)}:{approved_number}'])
-                hashes = {h for h in (row.alcohol_license_hash if approved_number else '',
-                                      current_photo_hash(row.alcohol_license_key)) if h}
+                approved_hash = row.alcohol_license_approved_hash
+                hashes = {h for h in (approved_hash, current_photo_hash(row.alcohol_license_key)) if h}
                 if approved_number:
                     RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city),
-                                                         number=approved_number, photo_hash=row.alcohol_license_hash)
-                for photo_hash in hashes - {row.alcohol_license_hash if approved_number else ''}:
+                                                         number=approved_number, photo_hash=approved_hash)
+                for photo_hash in hashes - ({approved_hash} if approved_number else set()):
                     RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city), number='',
                                                          photo_hash=photo_hash)
                 # Clearing the current photo makes any review still in flight stale.

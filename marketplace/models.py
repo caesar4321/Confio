@@ -217,6 +217,10 @@ class Store(SoftDeleteModel):
     # alcohol_license_key; the approved one stays on record), and how many
     # times the stuck-review sweep re-queued the current photo.
     alcohol_license_approved_key = models.CharField(max_length=300, blank=True, default='')
+    # The approved licence's identity, written ONLY by an approval: a revoke
+    # records these whatever happened since (a renewal, a new upload).
+    alcohol_license_approved_number = models.CharField(max_length=60, blank=True, default='')
+    alcohol_license_approved_hash = models.CharField(max_length=64, blank=True, default='')
     alcohol_license_attempts = models.PositiveSmallIntegerField(default=0)
 
     class Meta:

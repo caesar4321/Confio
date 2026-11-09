@@ -1930,14 +1930,33 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         # Siblings share both surnames; "de" must not stand in for her name.
         self.assertFalse(holder_matches('Juan de Dios Quispe Mamani', 'María de los Ángeles', 'Quispe Mamani'))
         self.assertTrue(holder_matches('QUISPE MAMANI MARIA DE LOS ANGELES', 'María de los Ángeles', 'Quispe Mamani'))
+        # A sister sharing a given name and both surnames: not her.
+        self.assertFalse(holder_matches('María Elena Quispe Mamani', 'Ana María', 'Quispe Mamani'))
 
     def test_revoking_a_hand_approved_licence_records_its_number(self):
         from .models import RevokedAlcoholLicense
         Store.objects.filter(pk=self.store.pk).update(
-            alcohol_license_status='approved', alcohol_license_number='LP-2026-0042', alcohol_license_hash='',
+            alcohol_license_status='approved', alcohol_license_approved_number='LP20260042', alcohol_license_hash='',
             alcohol_license_verdict=None, alcohol_license_expires_on=self.today + timedelta(days=100))
         self._revoke()
         self.assertTrue(RevokedAlcoholLicense.objects.filter(number='LP20260042').exists())
+
+    def test_revoke_records_the_approved_licence_after_a_new_upload(self):
+        from .models import RevokedAlcoholLicense
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        # Expired, the seller uploads something else (number typed anew).
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='pending', alcohol_license_number='999',
+                                                      alcohol_license_key='marketplace/pending/x/other.jpg')
+        self._revoke()
+        self.assertTrue(RevokedAlcoholLicense.objects.filter(number='LP20260042').exists())
+        self.assertFalse(RevokedAlcoholLicense.objects.filter(number='999').exists())
+
+    def test_revocations_cannot_be_deleted_in_admin(self):
+        from django.contrib.admin.sites import AdminSite
+        from .admin import RevokedAlcoholLicenseAdmin
+        from .models import RevokedAlcoholLicense
+        admin = RevokedAlcoholLicenseAdmin(RevokedAlcoholLicense, AdminSite())
+        self.assertFalse(admin.has_delete_permission(mock.Mock()))
 
     def test_licence_numbers_compare_however_they_are_written(self):
         from .license_review import _normalize_number
