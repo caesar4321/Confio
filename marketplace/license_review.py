@@ -160,13 +160,19 @@ def _words(value: str) -> set:
     return {w for w in ''.join(ch if ch.isalnum() else ' ' for ch in folded).split() if len(w) > 1}
 
 
+# Particles of Spanish names ("María de los Ángeles", "Juan de Dios"): never a name on their own.
+NAME_PARTICLES = {'de', 'del', 'la', 'las', 'los', 'y', 'e', 'da', 'do', 'di', 'van', 'von'}
+
+
 def holder_matches(holder: str, first_names: str, last_names: str) -> bool:
     """The licence holder is this person: EVERY surname on their verified ID
-    and at least one given name appear in it, in any order (one given name and
-    one surname would let a namesake's licence through)."""
-    words = _words(holder)
-    surnames = _words(last_names)
-    return bool(surnames) and surnames <= words and bool(_words(first_names) & words)
+    and at least one real given name (not a particle like "de") appear in it,
+    in any order. One given name and one surname would let a namesake's or a
+    sibling's licence through."""
+    words = _words(holder) - NAME_PARTICLES
+    surnames = _words(last_names) - NAME_PARTICLES
+    given = _words(first_names) - NAME_PARTICLES
+    return bool(surnames) and bool(given) and surnames <= words and bool(given & words)
 
 
 # Words that dress up a municipality's name without naming it.
@@ -200,7 +206,9 @@ def decide(reading: dict, store, today: date, owner_names: tuple) -> tuple:
     from .checkout import city_for
     if city_for(store.country_code, store.city) is None or not municipality_matches(reading['municipality'], store.city):
         return False, None, f'La licencia debe ser del municipio de {store.city}, donde está tu tienda.'
-    if len(_normalize_number(reading['license_number'])) < MIN_NUMBER_LENGTH:
+    number = _normalize_number(reading['license_number'])
+    # "Ilegible", "Sin número", "Pendiente": text, not a number.
+    if len(number) < MIN_NUMBER_LENGTH or not any(ch.isdigit() for ch in number):
         return False, None, 'No pudimos leer el número de la licencia. Sube una foto donde se vea completo.'
     expires = _date(reading['expires_on'])
     issued = _date(reading['issued_on'])
@@ -242,16 +250,18 @@ def license_conflict(store, number: str, photo_hash: str) -> str:
     city = city_key(store.city)
     with connection.cursor() as cursor:
         cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [f'comprar-licence:{city}:{normalized}'])
-    revoked = RevokedAlcoholLicense.objects.filter(city_key=city, number=normalized).exists() or (
-        photo_hash and RevokedAlcoholLicense.objects.filter(photo_hash=photo_hash).exists())
-    if revoked:
-        return REVOKED_REASON
     others = Store.objects.exclude(pk=store.pk).filter(deleted_at__isnull=True, alcohol_license_status='approved')
     if photo_hash and others.filter(alcohol_license_hash=photo_hash).exists():
         return DUPLICATE_REASON
     same = any(_normalize_number(n) == normalized and city_key(c) == city for n, c in
                others.exclude(alcohol_license_number='').values_list('alcohol_license_number', 'city'))
-    return DUPLICATE_REASON if same else ''
+    if same:
+        return DUPLICATE_REASON
+    # Last, so a revoke committing while this ran (it takes the same lock and
+    # writes its record before un-approving the store) is always seen.
+    revoked = RevokedAlcoholLicense.objects.filter(city_key=city, number=normalized).exists() or (
+        photo_hash and RevokedAlcoholLicense.objects.filter(photo_hash=photo_hash).exists())
+    return REVOKED_REASON if revoked else ''
 
 
 def _owner_names(store) -> tuple:
@@ -341,7 +351,7 @@ def review_license(store_id: int, key: str) -> str:
             fields = {**common, 'alcohol_license_status': 'approved', 'alcohol_license_expires_on': expires,
                       'alcohol_license_note': '', 'alcohol_license_hash': photo_hash,
                       'alcohol_license_approved_key': key,
-                      'alcohol_license_number': reading['license_number'][:60]}
+                      'alcohol_license_number': _normalize_number(reading['license_number'])}
         elif renewal:
             # A failed renewal never takes away the licence that still counts.
             fields = {**common, 'alcohol_license_note': reason[:300]}

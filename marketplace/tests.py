@@ -1804,7 +1804,7 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertEqual(self.run_review(self.reading()), 'approved')
         self.assertEqual(self.store.alcohol_license_status, 'approved')
         self.assertEqual(self.store.alcohol_license_expires_on, self.today + timedelta(days=700))
-        self.assertEqual(self.store.alcohol_license_number, 'LP-2026-0042')
+        self.assertEqual(self.store.alcohol_license_number, 'LP20260042')  # canonical form
         self.assertTrue(self.store.alcohol_license_valid(self.today))
 
     def test_expiry_from_issue_date_when_none_is_printed(self):
@@ -1819,7 +1819,7 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             dict(holder_name='Pedro Mamani'),
             dict(municipality='GAM de Cochabamba'),
             dict(holder_name='ANA PEREZ'),                # a namesake: not every surname on the ID
-            dict(license_number=''), dict(license_number='7'),
+            dict(license_number=''), dict(license_number='7'), dict(license_number='Ilegible'),
             dict(issued_on=(self.today + timedelta(days=30)).isoformat(), expires_on=''),
             dict(looks_altered=True), dict(confidence=0.5),
             dict(expires_on=(self.today - timedelta(days=1)).isoformat()),
@@ -1868,7 +1868,7 @@ class AlcoholLicenseReviewTests(MarketTestBase):
     def test_the_documents_number_replaces_what_the_seller_typed(self):
         Store.objects.filter(pk=self.store.pk).update(alcohol_license_number='someone-elses')
         self.run_review(self.reading())
-        self.assertEqual(self.store.alcohol_license_number, 'LP-2026-0042')
+        self.assertEqual(self.store.alcohol_license_number, 'LP20260042')  # canonical form
 
     def test_a_newer_upload_wins_over_an_older_review(self):
         Store.objects.filter(pk=self.store.pk).update(alcohol_license_key='marketplace/pending/x/newer.jpg')
@@ -1924,6 +1924,20 @@ class AlcoholLicenseReviewTests(MarketTestBase):
                         side_effect=ClientError({'Error': {'Code': 'AccessDenied'}}, 'GetObject')):
             with self.assertRaises(ReviewUnavailable):
                 review_license(self.store.pk, self.KEY)
+
+    def test_name_particles_never_count_as_a_given_name(self):
+        from .license_review import holder_matches
+        # Siblings share both surnames; "de" must not stand in for her name.
+        self.assertFalse(holder_matches('Juan de Dios Quispe Mamani', 'María de los Ángeles', 'Quispe Mamani'))
+        self.assertTrue(holder_matches('QUISPE MAMANI MARIA DE LOS ANGELES', 'María de los Ángeles', 'Quispe Mamani'))
+
+    def test_revoking_a_hand_approved_licence_records_its_number(self):
+        from .models import RevokedAlcoholLicense
+        Store.objects.filter(pk=self.store.pk).update(
+            alcohol_license_status='approved', alcohol_license_number='LP-2026-0042', alcohol_license_hash='',
+            alcohol_license_verdict=None, alcohol_license_expires_on=self.today + timedelta(days=100))
+        self._revoke()
+        self.assertTrue(RevokedAlcoholLicense.objects.filter(number='LP20260042').exists())
 
     def test_licence_numbers_compare_however_they_are_written(self):
         from .license_review import _normalize_number

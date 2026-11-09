@@ -189,8 +189,18 @@ class StoreAdmin(admin.ModelAdmin):
                 # else's licence: never blacklist it). Plus the fingerprint of
                 # the photo the admin is looking at now, so that exact photo
                 # never passes again.
-                approved_number = (_normalize_number(row.alcohol_license_number)
-                                   if row.alcohol_license_status == 'approved' and row.alcohol_license_hash else '')
+                # (Approved with a hash = by the review; approved without a
+                # verdict = by hand before automatic review: its number too.)
+                approved = row.alcohol_license_status == 'approved' and (
+                    row.alcohol_license_hash or not row.alcohol_license_verdict)
+                approved_number = _normalize_number(row.alcohol_license_number) if approved else ''
+                if approved_number:
+                    # The review's lock: a review of the same licence elsewhere
+                    # waits for this revoke and then sees its record.
+                    from django.db import connection
+                    with connection.cursor() as cursor:
+                        cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',
+                                       [f'comprar-licence:{city_key(row.city)}:{approved_number}'])
                 hashes = {h for h in (row.alcohol_license_hash if approved_number else '',
                                       current_photo_hash(row.alcohol_license_key)) if h}
                 if approved_number:
