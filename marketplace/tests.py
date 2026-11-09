@@ -2186,6 +2186,12 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         with mock.patch.object(escrow, 'actor_allowed', return_value=True):
             result = escrow.submit_action(self.buyer, order, 'confirm', 0, int(timezone.now().timestamp()) + 600, '0x', None)
         self.assertEqual(result, {'success': False, 'error': 'store_license_required'})
+        # Nor through a dispute opened before shipping.
+        Order.objects.filter(pk=order.pk).update(status='disputed', release_at=None)
+        order = Order.objects.select_related('store', 'product').get(pk=order.pk)
+        with mock.patch.object(escrow, 'actor_allowed', return_value=True):
+            result = escrow.submit_action(self.buyer, order, 'confirm', 0, int(timezone.now().timestamp()) + 600, '0x', None)
+        self.assertEqual(result, {'success': False, 'error': 'store_license_required'})
 
     def test_flagging_a_category_marks_its_open_orders_adults_only(self):
         from django.contrib.admin.sites import AdminSite

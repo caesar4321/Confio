@@ -122,6 +122,16 @@ def alcohol_sale_error(user, store, delivery_city: str = '') -> str | None:
     return alcohol_window_error(store.country_code, [store.city, delivery_city])
 
 
+def handover_action(order, action: str) -> bool:
+    """Is this action a hand-over of the goods? Shipping, or confirming
+    receipt of an order that never shipped (still funded, or disputed before
+    shipping: release_at is only set when it ships)."""
+    if action == 'ship':
+        return True
+    return action == 'confirm' and (order.status == 'funded'
+                                    or (order.status == 'disputed' and order.release_at is None))
+
+
 def ship_alcohol_error(order) -> str | None:
     """Why an adults-only order may not ship now: the store's licence is no
     longer valid (revoked, expired: the buyer's refund path applies), or a ley
