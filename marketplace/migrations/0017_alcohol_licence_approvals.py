@@ -15,6 +15,11 @@ def review_hand_approved(apps, schema_editor):
     Store.objects.filter(alcohol_license_status='approved').exclude(alcohol_license_key='').update(
         alcohol_license_submitted_at=timezone.now(), alcohol_license_reviewed_at=None,
         alcohol_license_queued_at=None, alcohol_license_attempts=0)
+    # Approved by hand with no photo at all: nothing to review, so it stops
+    # counting and the seller is asked for the licence.
+    Store.objects.filter(alcohol_license_status='approved', alcohol_license_key='').update(
+        alcohol_license_status='rejected', alcohol_license_reviewed_at=timezone.now(),
+        alcohol_license_note='Sube la foto de tu licencia de funcionamiento para seguir vendiendo bebidas alcohólicas.')
 
 
 class Migration(migrations.Migration):

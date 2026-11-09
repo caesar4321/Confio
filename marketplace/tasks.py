@@ -257,8 +257,18 @@ def requeue_stuck_reviews(now=None) -> dict:
             still.filter(alcohol_license_status='pending').update(alcohol_license_status='rejected', **give_up)
             # A renewal: only a licence the automatic review approved keeps
             # counting; one approved by hand before the history is rejected.
+            from .license_review import current_photo_hash, is_revoked
             from .models import AlcoholLicenseApproval
             reviewed = AlcoholLicenseApproval.objects.filter(store_id=pk).exists()
+            if reviewed:
+                # A renewal photo that is a revoked licence ends the current one too.
+                try:
+                    photo_hash = current_photo_hash(key)
+                except Exception:  # noqa: BLE001 — S3 down: decide on the next sweep, never keep blindly
+                    continue
+                store_row = Store.objects.filter(pk=pk).first()
+                if store_row is not None and photo_hash and is_revoked(store_row, '', photo_hash):
+                    reviewed = False
             approved = still.filter(alcohol_license_status='approved')
             if reviewed:
                 approved.update(**give_up)

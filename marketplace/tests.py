@@ -2130,6 +2130,23 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertEqual(self.store.alcohol_license_status, 'rejected')
         self.assertIn('revocada', self.store.alcohol_license_note)
 
+    def test_a_revoked_photo_ends_the_licence_even_when_unreadable(self):
+        import hashlib
+        from .license_review import LicenseUnreadable, review_license
+        from .models import RevokedAlcoholLicense
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        RevokedAlcoholLicense.objects.create(store=self.store, city_key='la paz', number='',
+                                             photo_hash=hashlib.sha256(b'forged').hexdigest())
+        renewal = 'marketplace/pending/x/renewal.jpg'
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_key=renewal,
+                                                      alcohol_license_submitted_at=timezone.now())
+        image = SimpleNamespace(body=b'forged', mime_type='image/jpeg')
+        with mock.patch('inbox.community.load_pending_image', return_value=image), \
+                mock.patch('marketplace.license_review._read_license', side_effect=LicenseUnreadable('cut')):
+            self.assertEqual(review_license(self.store.pk, renewal), 'rejected')
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+
     def test_a_revoke_survives_an_s3_network_error(self):
         from django.contrib.admin.sites import AdminSite
         from .admin import StoreAdmin

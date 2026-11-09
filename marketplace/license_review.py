@@ -462,7 +462,8 @@ def review_license(store_id: int, key: str) -> str:
         renewal = row.alcohol_license_valid(today) and AlcoholLicenseApproval.objects.filter(store=row).exists()
         # Presenting a revoked licence ends the current one too, whatever else
         # the review decided about this photo.
-        if conflict == REVOKED_REASON or (reading is not None and is_revoked(row, reading['license_number'], photo_hash)):
+        # (The photo's fingerprint is known even when the model could not read it.)
+        if conflict == REVOKED_REASON or is_revoked(row, reading['license_number'] if reading else '', photo_hash):
             renewal = False
             if not approved:
                 reason = REVOKED_REASON
