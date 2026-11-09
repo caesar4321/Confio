@@ -95,6 +95,13 @@ def run_escrow_keeper():
     for order in Order.objects.select_related('store').filter(
             escrow._pending_free_q(), status='shipped', release_at__lte=now,
     ).order_by('release_at')[:50]:
+        # An adults-only order "shipped" by a store whose licence no longer
+        # counts (marked on-chain around the server's ship check): Confío never
+        # pays it out on its own; it stays for the arbiter (refund to the buyer).
+        if order.age_restricted and not order.store.alcohol_license_valid():
+            logger.error('[COMPRAR] order %s shipped without a valid alcohol licence: release held for the arbiter',
+                         order.pk)
+            continue
         try:
             escrow.keeper_release(order)
             released += 1

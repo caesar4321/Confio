@@ -2157,6 +2157,17 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.store.refresh_from_db()
         self.assertEqual(ship_alcohol_error(order), 'store_license_required')
 
+    def test_the_keeper_never_pays_out_alcohol_shipped_without_a_licence(self):
+        from .tasks import run_escrow_keeper
+        order, _, _ = self.prepare()
+        Order.objects.filter(pk=order.pk).update(status='shipped', age_restricted=True,
+                                                 release_at=timezone.now() - timedelta(hours=1))
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
+        with mock.patch.object(escrow, 'keeper_release') as release, \
+                mock.patch.object(escrow, 'sync_order'), mock.patch.object(escrow, 'enabled', return_value=True):
+            run_escrow_keeper()
+        release.assert_not_called()
+
     def test_a_revoke_survives_an_s3_network_error(self):
         from django.contrib.admin.sites import AdminSite
         from .admin import StoreAdmin
