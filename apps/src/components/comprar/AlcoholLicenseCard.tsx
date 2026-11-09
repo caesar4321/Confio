@@ -57,11 +57,13 @@ export const AlcoholLicenseCard = ({ license, onSubmitted }: {
   };
 
   const line = {
-    approved: `Licencia aprobada${license?.expiresOn ? `, vigente hasta el ${formatDate(license.expiresOn)}` : ''}.`,
-    pending: 'Recibimos tu licencia. Confío la revisa en 1 a 2 días hábiles.',
+    approved: `Licencia aprobada${license?.expiresOn ? `, vigente hasta el ${formatDate(license.expiresOn)}` : ''}.`
+      // A renewal that did not pass: the current licence still counts.
+      + (license?.note ? ` La renovación no se aprobó: ${license.note}` : ''),
+    pending: 'Recibimos tu licencia. La estamos revisando; suele tardar unos minutos.',
     rejected: license?.note || 'No pudimos aprobar tu licencia. Sube una foto clara y vigente.',
     expired: 'Tu licencia venció. Sube la renovada para seguir vendiendo bebidas alcohólicas.',
-    none: 'Por ley, para vender bebidas alcohólicas necesitas la licencia de funcionamiento de tu municipio que autorice su venta.',
+    none: 'Por ley, para vender bebidas alcohólicas necesitas la licencia de funcionamiento de tu municipio que autorice su venta, a tu nombre como figura en tu documento verificado.',
   }[status];
   const canUpload = status !== 'pending';
 

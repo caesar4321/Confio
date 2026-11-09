@@ -145,7 +145,8 @@ class StoreAdmin(admin.ModelAdmin):
     raw_id_fields = ('owner', 'owner_account')
     # Derived from the price on every save, so older clients that still read
     # it never disagree with what checkout does.
-    readonly_fields = ('ships_outside_city', 'alcohol_license_photo', 'alcohol_license_key',
+    readonly_fields = ('ships_outside_city', 'alcohol_license_photo', 'alcohol_license_verdict', 'alcohol_license_hash',
+                       'alcohol_license_queued_at', 'alcohol_license_key',
                        'alcohol_license_submitted_at', 'alcohol_license_reviewed_at')
 
     def save_model(self, request, obj, form, change):
@@ -157,7 +158,17 @@ class StoreAdmin(admin.ModelAdmin):
             self.message_user(request, 'Approved without an expiry date: the licence does not count until '
                               'you set "Alcohol license expires on".', level=messages.WARNING)
     inlines = [ProductInline]
-    actions = ['suspend', 'reinstate']
+    actions = ['suspend', 'reinstate', 'rereview_alcohol_license']
+
+    @admin.action(description='Alcohol licence: run the automatic review again')
+    def rereview_alcohol_license(self, request, queryset):
+        from .license_review import queue_license_review
+        n = 0
+        for store in queryset.exclude(alcohol_license_key=''):
+            Store.objects.filter(pk=store.pk).update(alcohol_license_queued_at=timezone.now())
+            queue_license_review(store.pk, store.alcohol_license_key)
+            n += 1
+        self.message_user(request, f'Queued {n} licence review(s).')
 
     @admin.display(description='Alcohol licence photo')
     def alcohol_license_photo(self, obj):
@@ -176,7 +187,7 @@ class StoreAdmin(admin.ModelAdmin):
                    and (obj.alcohol_license_reviewed_at is None
                         or obj.alcohol_license_submitted_at > obj.alcohol_license_reviewed_at))
         return format_html('<a href="{}" target="_blank" rel="noopener">Open licence</a>{}', url,
-                           ' (renewal to review: set the new expiry)' if renewal else '')
+                           ' (renewal being reviewed automatically)' if renewal else '')
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_products=Count('products'))

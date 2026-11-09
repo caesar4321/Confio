@@ -994,6 +994,9 @@ class RequestMarketPhotoUpload(graphene.Mutation):
             fields=presigned.get('fields'), expires_in=presigned['expires_in']))
 
 
+LICENSE_REVIEWS_PER_DAY = 5
+
+
 class SubmitAlcoholLicense(graphene.Mutation):
     """The store's municipal alcohol licence (a photo, already uploaded via
     requestMarketPhotoUpload): pending until Confío reviews it in the admin."""
@@ -1015,18 +1018,41 @@ class SubmitAlcoholLicense(graphene.Mutation):
             return SubmitAlcoholLicense(success=False, error='no_store')
         if not (photo_key or '').startswith(pending_prefix(user)):
             return SubmitAlcoholLicense(success=False, error='bad_photo')
-        if store.alcohol_license_valid():
-            # A renewal: the current licence keeps selling until Confío
-            # reviews the new one (submitted_at > reviewed_at = to review).
-            Store.objects.filter(pk=store.pk).update(
-                alcohol_license_key=photo_key, alcohol_license_number=(license_number or '').strip()[:60],
-                alcohol_license_submitted_at=timezone.now())
-            return SubmitAlcoholLicense(success=True)
-        Store.objects.filter(pk=store.pk).update(
-            alcohol_license_status='pending', alcohol_license_key=photo_key,
-            alcohol_license_number=(license_number or '').strip()[:60], alcohol_license_note='',
-            alcohol_license_expires_on=None, alcohol_license_submitted_at=timezone.now(),
-            alcohol_license_reviewed_at=None)
+        # A licence is municipal: only a store in a city Comprar knows can match one.
+        from .checkout import city_for
+        if city_for(store.country_code, store.city) is None:
+            return SubmitAlcoholLicense(success=False, error='store_city_unknown')
+        from django.conf import settings as dj_settings
+        from security.s3_utils import object_exists
+        try:
+            if not object_exists(key=photo_key, bucket=dj_settings.AWS_COMMUNITY_UPLOAD_BUCKET):
+                return SubmitAlcoholLicense(success=False, error='bad_photo')
+        except Exception:  # noqa: BLE001 — S3 down: ask to retry, never queue blind
+            return SubmitAlcoholLicense(success=False, error='upload_unavailable')
+        # Each submission is a paid review: a few a day is plenty for a real licence.
+        from django.core.cache import cache
+        quota_key = f'comprar:licence-reviews:{store.pk}:{timezone.now().date().isoformat()}'
+        cache.add(quota_key, 0, 60 * 60 * 24)
+        if cache.incr(quota_key) > LICENSE_REVIEWS_PER_DAY:
+            return SubmitAlcoholLicense(success=False, error='too_many_uploads')
+        from django.db import transaction
+        from .license_review import queue_license_review
+        now = timezone.now()
+        with transaction.atomic():
+            if store.alcohol_license_valid():
+                # A renewal: the current licence keeps selling until the new
+                # one is reviewed (submitted_at > reviewed_at = to review).
+                Store.objects.filter(pk=store.pk).update(
+                    alcohol_license_key=photo_key, alcohol_license_submitted_at=now,
+                    alcohol_license_queued_at=now)
+            else:
+                Store.objects.filter(pk=store.pk).update(
+                    alcohol_license_status='pending', alcohol_license_key=photo_key,
+                    alcohol_license_number=(license_number or '').strip()[:60], alcohol_license_note='',
+                    alcohol_license_expires_on=None, alcohol_license_submitted_at=now,
+                    alcohol_license_reviewed_at=None, alcohol_license_queued_at=now)
+            # Reviewed automatically (marketplace/license_review.py), in minutes.
+            queue_license_review(store.pk, photo_key)
         return SubmitAlcoholLicense(success=True)
 
 

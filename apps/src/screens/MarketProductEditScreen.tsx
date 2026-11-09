@@ -108,9 +108,12 @@ export const MarketProductEditScreen = () => {
   const priceValue = parseAmount(price);
   // Alcohol: the store's licence must be approved and current (server rule).
   const alcohol = Boolean(category && ageRules?.categoryKeys.includes(category));
+  const [licensePoll, setLicensePoll] = useState(0);
   const { data: licenseData, refetch: refetchLicense } = useQuery<{ myAlcoholLicense: AlcoholLicense | null }>(
-    GET_MY_ALCOHOL_LICENSE, { skip: !alcohol, fetchPolicy: 'cache-and-network' });
+    GET_MY_ALCOHOL_LICENSE, { skip: !alcohol, fetchPolicy: 'cache-and-network', pollInterval: licensePoll });
   const license = licenseData?.myAlcoholLicense ?? null;
+  // Reviewed automatically in minutes: follow it while it is pending.
+  useEffect(() => { setLicensePoll(license?.status === 'pending' ? 15_000 : 0); }, [license?.status]);
   const licensed = license?.status === 'approved';
   const valid = title.trim().length >= 3 && category && priceValue >= 0.5 && Number.isInteger(Number(stock))
     && (productId ? true : newKeys.length > 0) && (!alcohol || licensed);

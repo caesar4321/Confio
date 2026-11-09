@@ -357,6 +357,7 @@ export const COMPRAR_ERRORS: Record<string, string> = {
   alcohol_hours: 'Por ley, las bebidas alcohólicas no se venden entre las 03:00 y las 09:00.',
   alcohol_paused: 'Hoy rige la ley seca: no se venden bebidas alcohólicas en esta ciudad.',
   store_license_required: 'Esta tienda no tiene su licencia para vender bebidas alcohólicas al día.',
+  store_city_unknown: 'Tu tienda está en una ciudad donde aún no podemos revisar licencias para vender bebidas alcohólicas.',
   alcohol_license_required: 'Para vender bebidas alcohólicas, primero sube la licencia de funcionamiento de tu tienda.',
   product_unavailable: 'Este producto ya no está disponible.',
   own_store: 'No puedes comprar en tu propia tienda.',

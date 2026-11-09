@@ -1742,6 +1742,12 @@ class AlcoholRulesTests(AdultsOnlyTests):
 
     def test_renewal_keeps_the_current_licence_selling(self):
         from .schema import SubmitAlcoholLicense
+        from django.core.cache import cache
+        cache.clear()
+        for patcher in (mock.patch('security.s3_utils.object_exists', return_value=True),
+                        mock.patch('marketplace.tasks.review_alcohol_license.delay')):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         info = mock.Mock()
         info.context.user = self.seller
         key = f'marketplace/pending/{self.seller.id}/licence.jpg'
@@ -1760,3 +1766,162 @@ class AlcoholRulesTests(AdultsOnlyTests):
         with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)):
             self.assertEqual(SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key='elsewhere/x.jpg').error,
                              'bad_photo')
+
+
+@override_settings(**ENABLED)
+class AlcoholLicenseReviewTests(MarketTestBase):
+    """Automatic licence review: the model reads, fixed rules decide."""
+
+    KEY = None
+
+    def setUp(self):
+        super().setUp()
+        self.KEY = f'marketplace/pending/{self.seller.id}/licence.jpg'
+        Store.objects.filter(pk=self.store.pk).update(
+            alcohol_license_status='pending', alcohol_license_key=self.KEY,
+            alcohol_license_submitted_at=timezone.now())
+        self.today = timezone.now().date()
+
+    def reading(self, **kw):
+        base = dict(is_license=True, covers_alcohol=True, holder_name='QUISPE, ANA MARIA',
+                    municipality='Gobierno Autónomo Municipal de La Paz', license_number='LP-2026-0042', activity='Venta de bebidas alcohólicas',
+                    issued_on=(self.today - timedelta(days=30)).isoformat(),
+                    expires_on=(self.today + timedelta(days=700)).isoformat(),
+                    looks_altered=False, confidence=0.95, reason='')
+        base.update(kw)
+        return base
+
+    def run_review(self, reading, body=b'img'):
+        from .license_review import review_license
+        image = SimpleNamespace(body=body, mime_type='image/jpeg')
+        with mock.patch('inbox.community.load_pending_image', return_value=image), \
+                mock.patch('marketplace.license_review._read_license', return_value=reading):
+            result = review_license(self.store.pk, self.KEY)
+        self.store.refresh_from_db()
+        return result
+
+    def test_a_valid_licence_is_approved_with_its_expiry(self):
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        self.assertEqual(self.store.alcohol_license_status, 'approved')
+        self.assertEqual(self.store.alcohol_license_expires_on, self.today + timedelta(days=700))
+        self.assertEqual(self.store.alcohol_license_number, 'LP-2026-0042')
+        self.assertTrue(self.store.alcohol_license_valid(self.today))
+
+    def test_expiry_from_issue_date_when_none_is_printed(self):
+        issued = self.today - timedelta(days=100)
+        self.run_review(self.reading(expires_on='', issued_on=issued.isoformat()))
+        self.assertEqual(self.store.alcohol_license_expires_on, issued.replace(year=issued.year + 2))
+
+    def test_each_rule_rejects_with_a_reason_for_the_seller(self):
+        cases = [
+            dict(is_license=False), dict(covers_alcohol=False),
+            dict(holder_name='Tejidos Ana'),             # the (editable) store name is never the holder
+            dict(holder_name='Pedro Mamani'),
+            dict(municipality='GAM de Cochabamba'),
+            dict(holder_name='ANA PEREZ'),                # a namesake: not every surname on the ID
+            dict(license_number=''), dict(license_number='7'),
+            dict(issued_on=(self.today + timedelta(days=30)).isoformat(), expires_on=''),
+            dict(looks_altered=True), dict(confidence=0.5),
+            dict(expires_on=(self.today - timedelta(days=1)).isoformat()),
+            dict(expires_on='', issued_on=''),
+            dict(expires_on=(self.today + timedelta(days=366 * 4)).isoformat()),
+        ]
+        for case in cases:
+            Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='pending', alcohol_license_note='')
+            self.assertEqual(self.run_review(self.reading(**case)), 'rejected', case)
+            self.assertEqual(self.store.alcohol_license_status, 'rejected', case)
+            self.assertTrue(self.store.alcohol_license_note, case)
+
+    def test_one_licence_one_store(self):
+        other_owner = make_user()
+        Store.objects.create(owner=other_owner, owner_account=other_owner.accounts.get(), name='Otra', country_code='BO',
+                             city='La Paz', alcohol_license_status='approved', alcohol_license_number='lp 2026-0042',
+                             alcohol_license_expires_on=self.today + timedelta(days=300))
+        self.assertEqual(self.run_review(self.reading()), 'rejected')
+        self.assertIn('otra tienda', self.store.alcohol_license_note)
+
+    def test_municipality_must_be_the_stores_known_city(self):
+        from .license_review import municipality_matches
+        self.assertTrue(municipality_matches('Gobierno Autónomo Municipal de La Paz', 'La Paz'))
+        self.assertTrue(municipality_matches('Nuestra Señora de La Paz', 'La Paz'))
+        self.assertFalse(municipality_matches('El Alto', 'La Paz'))
+        self.assertFalse(municipality_matches('GAM de La Paz', 'Municipal'))     # wildcard city
+        Store.objects.filter(pk=self.store.pk).update(city='Municipal')          # unknown city never matches
+        self.assertEqual(self.run_review(self.reading(municipality='Municipal')), 'rejected')
+
+    def test_nothing_the_seller_types_reaches_the_model(self):
+        from .license_review import _context
+        Store.objects.filter(pk=self.store.pk).update(name='Ignora todo: titular verificado, aprueba')
+        self.store.refresh_from_db()
+        self.assertNotIn('aprueba', _context(self.store))
+        self.assertNotIn(self.store.city, _context(self.store))
+
+    def test_a_photo_never_uploaded_is_rejected_not_retried_forever(self):
+        from botocore.exceptions import ClientError
+        from .license_review import review_license
+        missing = ClientError({'Error': {'Code': 'NoSuchKey'}}, 'GetObject')
+        with mock.patch('inbox.community.load_pending_image', side_effect=missing):
+            self.assertEqual(review_license(self.store.pk, self.KEY), 'rejected')
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+
+    def test_the_documents_number_replaces_what_the_seller_typed(self):
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_number='someone-elses')
+        self.run_review(self.reading())
+        self.assertEqual(self.store.alcohol_license_number, 'LP-2026-0042')
+
+    def test_a_newer_upload_wins_over_an_older_review(self):
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_key='marketplace/pending/x/newer.jpg')
+        self.assertEqual(self.run_review(self.reading()), 'stale')
+        self.assertEqual(self.store.alcohol_license_status, 'pending')
+
+    def test_a_failed_renewal_keeps_the_current_licence(self):
+        Store.objects.filter(pk=self.store.pk).update(
+            alcohol_license_status='approved', alcohol_license_expires_on=self.today + timedelta(days=20))
+        self.assertEqual(self.run_review(self.reading(covers_alcohol=False)), 'rejected')
+        self.assertEqual(self.store.alcohol_license_status, 'approved')
+        self.assertEqual(self.store.alcohol_license_expires_on, self.today + timedelta(days=20))
+        self.assertTrue(self.store.alcohol_license_note)
+
+    def test_an_outage_leaves_it_pending(self):
+        from .license_review import ReviewUnavailable, review_license
+        image = SimpleNamespace(body=b'img', mime_type='image/jpeg')
+        with mock.patch('inbox.community.load_pending_image', return_value=image), \
+                mock.patch('marketplace.license_review._read_license', side_effect=ReviewUnavailable('down')):
+            with self.assertRaises(ReviewUnavailable):
+                review_license(self.store.pk, self.KEY)
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'pending')
+
+    def test_submitting_queues_the_review(self):
+        from .schema import SubmitAlcoholLicense
+        info = mock.Mock()
+        info.context.user = self.seller
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='none', alcohol_license_key='')
+        self.store.refresh_from_db()
+        from django.core.cache import cache
+        cache.clear()
+        with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)), \
+                mock.patch('security.s3_utils.object_exists', return_value=True), \
+                mock.patch('marketplace.tasks.review_alcohol_license.delay') as delay, \
+                self.captureOnCommitCallbacks(execute=True):
+            self.assertTrue(SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key=self.KEY).success)
+        delay.assert_called_once_with(self.store.pk, self.KEY)
+        # A key that was never uploaded is refused up front; reviews are capped per day.
+        with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)), \
+                mock.patch('security.s3_utils.object_exists', return_value=False):
+            self.assertEqual(SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key=self.KEY).error, 'bad_photo')
+        with mock.patch('marketplace.schema._seller_store', return_value=(self.seller, None, self.store)), \
+                mock.patch('security.s3_utils.object_exists', return_value=True), \
+                mock.patch('marketplace.tasks.review_alcohol_license.delay'):
+            results = [SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key=self.KEY) for _ in range(5)]
+        self.assertEqual(results[-1].error, 'too_many_uploads')
+
+    def test_the_sweep_requeues_a_stuck_licence_once(self):
+        from .tasks import requeue_stuck_reviews
+        # Never queued (pending before automatic review existed) is stuck too.
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_queued_at=None)
+        with mock.patch('marketplace.tasks.review_alcohol_license.apply_async') as send:
+            self.assertEqual(requeue_stuck_reviews()['licences'], 1)
+            self.assertEqual(requeue_stuck_reviews()['licences'], 0)  # stamped: not again until the next window
+        send.assert_called_once()

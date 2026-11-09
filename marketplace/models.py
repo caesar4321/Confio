@@ -207,6 +207,12 @@ class Store(SoftDeleteModel):
         max_length=300, blank=True, default='', help_text='Shown to the seller when rejected')
     alcohol_license_submitted_at = models.DateTimeField(null=True, blank=True)
     alcohol_license_reviewed_at = models.DateTimeField(null=True, blank=True)
+    # Automatic review (marketplace/license_review.py): what the AI read and
+    # decided, the photo's fingerprint (one licence, one store), and when the
+    # review was last queued (the stuck-review sweep re-queues it).
+    alcohol_license_verdict = models.JSONField(null=True, blank=True)
+    alcohol_license_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    alcohol_license_queued_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [

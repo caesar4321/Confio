@@ -146,6 +146,17 @@ def review_product(self, product_id: int, claim: str):
         raise self.retry(countdown=60 * (2 ** self.request.retries))
 
 
+@shared_task(name='marketplace.review_alcohol_license', bind=True, max_retries=5)
+def review_alcohol_license(self, store_id: int, key: str):
+    from .license_review import ReviewUnavailable, review_license
+
+    try:
+        review_license(store_id, key)
+    except ReviewUnavailable as exc:
+        logger.warning('[COMPRAR] licence review for store %s unavailable: %s', store_id, exc)
+        raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+
 @shared_task(name='marketplace.review_rating', bind=True, max_retries=5)
 def review_rating(self, rating_id: int):
     from .moderation import ReviewUnavailable, run_rating_review
@@ -202,4 +213,20 @@ def requeue_stuck_reviews(now=None) -> dict:
         if OrderRating.objects.filter(pk=pk, comment_status='pending', comment_queued_at__lt=cutoff) \
                 .update(comment_queued_at=now):
             enqueue_rating_review(pk)
-    return {'products': len(products), 'ratings': len(ratings)}
+    # Alcohol licences waiting for review: a new one (pending) or a renewal
+    # (approved, submitted after the last review).
+    from django.db.models import F, Q
+    from .models import Store
+    # Never queued (submitted before automatic review) counts as stuck too.
+    stale = Q(alcohol_license_queued_at__lt=cutoff) | Q(alcohol_license_queued_at__isnull=True)
+    licences = list(Store.objects.filter(
+        Q(alcohol_license_status='pending')
+        | Q(alcohol_license_status='approved', alcohol_license_submitted_at__isnull=False)
+        & (Q(alcohol_license_reviewed_at__isnull=True)
+           | Q(alcohol_license_submitted_at__gt=F('alcohol_license_reviewed_at'))),
+        stale, deleted_at__isnull=True,
+    ).exclude(alcohol_license_key='').values_list('pk', 'alcohol_license_key')[:50])
+    for pk, key in licences:
+        if Store.objects.filter(stale, pk=pk, alcohol_license_key=key).update(alcohol_license_queued_at=now):
+            review_alcohol_license.apply_async((pk, key), expires=STUCK_REVIEW_AFTER_MIN * 60)
+    return {'products': len(products), 'ratings': len(ratings), 'licences': len(licences)}
