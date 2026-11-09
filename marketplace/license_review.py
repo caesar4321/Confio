@@ -367,8 +367,13 @@ def _verified_company(store) -> str:
         return ''
     from security.identity_status import business_kyb
     kyb = business_kyb(account.business_id)
-    name = (getattr(kyb, 'verified_first_name', '') or '').strip()
-    if not name or name == KYB_PLACEHOLDER or len(name) >= 100:
+    raw = getattr(kyb, 'verified_first_name', '') or ''
+    # Length on the stored value: a cut name may end in a space that strip()
+    # would hide.
+    if len(raw) >= 100:
+        return ''
+    name = raw.strip()
+    if not name or name == KYB_PLACEHOLDER:
         return ''
     return name
 

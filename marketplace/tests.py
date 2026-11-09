@@ -1990,6 +1990,12 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self._business_store(company='Verified Business')
         self.assertEqual(self.run_review(self.reading(holder_name='Verified Business')), 'rejected')
 
+    def test_a_company_name_cut_at_the_stored_length_never_matches(self):
+        from .license_review import _verified_company
+        self._business_store(company=('Distribuidora ' * 8)[:99] + ' ')
+        self.store.refresh_from_db()
+        self.assertEqual(_verified_company(self.store), '')
+
     def test_name_particles_never_count_as_a_given_name(self):
         from .license_review import holder_matches
         # Siblings share both surnames; "de" must not stand in for her name.
