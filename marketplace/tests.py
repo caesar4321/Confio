@@ -2152,10 +2152,23 @@ class AlcoholLicenseReviewTests(MarketTestBase):
 
     def test_a_revoked_store_cannot_ship_a_paid_alcohol_order(self):
         from .checkout import ship_alcohol_error
-        order = SimpleNamespace(age_restricted=True, store=self.store, delivery_city='La Paz')
+        order = SimpleNamespace(age_restricted=True, store=self.store, delivery_city='La Paz',
+                                product=SimpleNamespace(category='bebidas_alcoholicas'), pk=0)
         Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
         self.store.refresh_from_db()
         self.assertEqual(ship_alcohol_error(order), 'store_license_required')
+
+    def test_a_category_flagged_after_payment_still_needs_a_licence_to_ship(self):
+        from .checkout import ship_alcohol_error
+        Product.objects.filter(pk=self.product.pk).update(category='alimentos')
+        order, _, _ = self.prepare()
+        self.assertFalse(order.age_restricted)
+        Product.objects.filter(pk=self.product.pk).update(category='bebidas_alcoholicas')
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
+        order = Order.objects.select_related('store', 'product').get(pk=order.pk)
+        self.assertEqual(ship_alcohol_error(order), 'store_license_required')
+        order.refresh_from_db()
+        self.assertTrue(order.age_restricted)
 
     def test_a_revoke_survives_an_s3_network_error(self):
         from django.contrib.admin.sites import AdminSite

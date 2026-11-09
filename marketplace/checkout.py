@@ -126,8 +126,13 @@ def ship_alcohol_error(order) -> str | None:
     """Why an adults-only order may not ship now: the store's licence is no
     longer valid (revoked, expired: the buyer's refund path applies), or a ley
     seca at either end; else None."""
-    if not order.age_restricted:
+    needs = order.age_restricted or category_is_age_restricted(order.product.category)
+    if not needs:
         return None
+    if not order.age_restricted:
+        # Flagged after payment: the order is adults-only from now on (as at deposit).
+        Order.objects.filter(pk=order.pk).update(age_restricted=True)
+        order.age_restricted = True
     if not order.store.alcohol_license_valid():
         return 'store_license_required'
     return ley_seca_error(order.store.country_code, [order.store.city, order.delivery_city])
