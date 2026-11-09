@@ -145,7 +145,12 @@ class StoreAdmin(admin.ModelAdmin):
     raw_id_fields = ('owner', 'owner_account')
     # Derived from the price on every save, so older clients that still read
     # it never disagree with what checkout does.
-    readonly_fields = ('ships_outside_city', 'alcohol_license_photo', 'alcohol_license_verdict', 'alcohol_license_hash',
+    # The licence is decided by the automatic review only (no registry to
+    # check against, so a person adds nothing); admin can re-run or revoke it
+    # through the actions, never edit it, so a stale page cannot undo a review.
+    readonly_fields = ('ships_outside_city', 'alcohol_license_photo', 'alcohol_license_status',
+                       'alcohol_license_expires_on', 'alcohol_license_number', 'alcohol_license_note',
+                       'alcohol_license_verdict', 'alcohol_license_hash',
                        'alcohol_license_queued_at', 'alcohol_license_key', 'alcohol_license_approved_key',
                        'alcohol_license_attempts',
                        'alcohol_license_submitted_at', 'alcohol_license_reviewed_at')
@@ -155,22 +160,18 @@ class StoreAdmin(admin.ModelAdmin):
         if not change:
             super().save_model(request, obj, form, change)
         else:
-            # Only what this form changed: a page opened before a review or a
-            # new upload must not write its stale licence fields back.
-            fields = set(form.changed_data) | {'ships_outside_city'}
-            if {'alcohol_license_status', 'alcohol_license_expires_on'} & set(form.changed_data):
-                obj.alcohol_license_reviewed_at = timezone.now()
-                fields.add('alcohol_license_reviewed_at')
-                if obj.alcohol_license_status == 'approved':
-                    # The photo an admin approved is the one on record.
-                    obj.alcohol_license_approved_key = obj.alcohol_license_key
-                    fields.add('alcohol_license_approved_key')
-            obj.save(update_fields=sorted(fields))
-        if obj.alcohol_license_status == 'approved' and obj.alcohol_license_expires_on is None:
-            self.message_user(request, 'Approved without an expiry date: the licence does not count until '
-                              'you set "Alcohol license expires on".', level=messages.WARNING)
+            # Only what this form changed (licence fields are read-only here).
+            obj.save(update_fields=sorted(set(form.changed_data) | {'ships_outside_city', 'updated_at'}))
     inlines = [ProductInline]
-    actions = ['suspend', 'reinstate', 'rereview_alcohol_license']
+    actions = ['suspend', 'reinstate', 'rereview_alcohol_license', 'revoke_alcohol_license']
+
+    @admin.action(description='Alcohol licence: revoke (stops alcohol sales until a new licence passes review)')
+    def revoke_alcohol_license(self, request, queryset):
+        n = queryset.exclude(alcohol_license_status='none').update(
+            alcohol_license_status='rejected', alcohol_license_reviewed_at=timezone.now(),
+            alcohol_license_queued_at=None,
+            alcohol_license_note='Revisamos tu licencia y ya no es válida. Sube una licencia vigente.')
+        self.message_user(request, f'Revoked {n} licence(s).')
 
     @admin.action(description='Alcohol licence: run the automatic review again')
     def rereview_alcohol_license(self, request, queryset):

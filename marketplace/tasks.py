@@ -180,6 +180,7 @@ def review_rating(self, rating_id: int):
 # one, so a backlog cannot stack copies of the same review.
 STUCK_REVIEW_AFTER_MIN = 60
 LICENSE_SWEEP_ATTEMPTS = 3
+LICENSE_GIVE_UP_AFTER = timedelta(hours=24)
 LICENSE_GAVE_UP_NOTE = 'No pudimos revisar tu licencia. Sube la foto de nuevo.'
 
 
@@ -235,8 +236,11 @@ def requeue_stuck_reviews(now=None) -> dict:
     for pk, key in licences:
         # Give up after a few hand-backs (a photo the reviewer can never read):
         # the seller is told to upload it again, never left pending for good.
+        # Both: several hand-backs AND a day since the upload, so a reviewer
+        # outage of a few hours never rejects anyone's licence.
         if Store.objects.filter(stale, pk=pk, alcohol_license_key=key,
-                                alcohol_license_attempts__gte=LICENSE_SWEEP_ATTEMPTS).exists():
+                                alcohol_license_attempts__gte=LICENSE_SWEEP_ATTEMPTS,
+                                alcohol_license_submitted_at__lt=now - LICENSE_GIVE_UP_AFTER).exists():
             give_up = {'alcohol_license_queued_at': None, 'alcohol_license_reviewed_at': now,
                        'alcohol_license_note': LICENSE_GAVE_UP_NOTE}
             Store.objects.filter(pk=pk, alcohol_license_key=key, alcohol_license_status='pending') \

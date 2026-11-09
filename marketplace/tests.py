@@ -1949,6 +1949,15 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         from .tasks import LICENSE_SWEEP_ATTEMPTS, requeue_stuck_reviews
         Store.objects.filter(pk=self.store.pk).update(alcohol_license_queued_at=None,
                                                       alcohol_license_attempts=LICENSE_SWEEP_ATTEMPTS)
+        # A few hours of reviewer outage: still retried, never rejected.
+        with mock.patch('marketplace.tasks.review_alcohol_license.apply_async') as send:
+            requeue_stuck_reviews()
+        send.assert_called_once()
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.alcohol_license_status, 'pending')
+        # A day later, still unreviewable: the seller is asked for a new photo.
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_queued_at=None,
+                                                      alcohol_license_submitted_at=timezone.now() - timedelta(days=2))
         with mock.patch('marketplace.tasks.review_alcohol_license.apply_async') as send:
             requeue_stuck_reviews()
         send.assert_not_called()
