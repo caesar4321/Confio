@@ -207,21 +207,26 @@ class StoreAdmin(admin.ModelAdmin):
     @admin.action(description='Alcohol licence: revoke (this licence never passes review again, for any store)')
     def revoke_alcohol_license(self, request, queryset):
         from django.db import OperationalError
-        from .license_review import RevokeIncomplete, revoke_licence
-        revoked, failed = set(), []
+        from .license_review import revoke_licence
+        revoked, failed, unrecorded = set(), [], []
         for store in queryset.exclude(alcohol_license_status='none'):
             try:
-                revoked.update(revoke_licence(store.pk))
-            except RevokeIncomplete as exc:
-                failed.append(str(exc))
+                ids, nothing = revoke_licence(store.pk)
             except OperationalError as exc:  # a lock conflict (e.g. two revokes at once): nothing written
                 failed.append(f'store {store.pk}: busy ({exc.__class__.__name__})')
+                continue
+            revoked.update(ids)
+            unrecorded.extend(nothing)
         also = revoked - set(queryset.values_list('pk', flat=True))
         self.message_user(request, f'Revoked {len(revoked)} licence(s)'
                           + (f', including {len(also)} other store(s) approved with the same licence' if also else '')
                           + '.')
         for message in failed:
             self.message_user(request, f'Not revoked, try again: {message}', level=messages.ERROR)
+        if unrecorded:
+            self.message_user(request, f'Sales stopped, but no licence number or photo could be recorded for '
+                              f'store(s) {sorted(unrecorded)}: the same licence could pass review again.',
+                              level=messages.WARNING)
 
     @admin.action(description='Alcohol licence: run the automatic review again')
     def rereview_alcohol_license(self, request, queryset):

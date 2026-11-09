@@ -1887,9 +1887,12 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertEqual(self.store.alcohol_license_status, 'pending')
 
     def test_a_failed_renewal_keeps_the_current_licence(self):
-        Store.objects.filter(pk=self.store.pk).update(
-            alcohol_license_status='approved', alcohol_license_expires_on=self.today + timedelta(days=20))
-        self.assertEqual(self.run_review(self.reading(covers_alcohol=False)), 'rejected')
+        expires = (self.today + timedelta(days=20)).isoformat()
+        self.assertEqual(self.run_review(self.reading(expires_on=expires)), 'approved')
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_key='marketplace/pending/x/renewal.jpg',
+                                                      alcohol_license_submitted_at=timezone.now())
+        self.KEY = 'marketplace/pending/x/renewal.jpg'
+        self.assertEqual(self.run_review(self.reading(covers_alcohol=False), body=b'renewal'), 'rejected')
         self.assertEqual(self.store.alcohol_license_status, 'approved')
         self.assertEqual(self.store.alcohol_license_expires_on, self.today + timedelta(days=20))
         self.assertTrue(self.store.alcohol_license_note)
@@ -1986,18 +1989,37 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertEqual(other.alcohol_license_status, 'rejected')
         self.assertFalse(other.alcohol_license_valid(self.today))
 
-    def test_a_revoke_that_cannot_record_anything_is_refused(self):
+    def test_a_revoke_that_cannot_record_anything_still_stops_sales_and_warns(self):
         from django.contrib.admin.sites import AdminSite
         from .admin import StoreAdmin
         from .license_review import ReviewUnavailable
-        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='approved')
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='approved', alcohol_license_verdict=None)
         admin = StoreAdmin(Store, AdminSite())
         with mock.patch.object(admin, 'message_user') as said, \
                 mock.patch('marketplace.license_review.current_photo_hash', side_effect=ReviewUnavailable('s3')):
             admin.revoke_alcohol_license(mock.Mock(), Store.objects.filter(pk=self.store.pk))
         self.store.refresh_from_db()
-        self.assertEqual(self.store.alcohol_license_status, 'approved')   # untouched
-        self.assertTrue(any('Not revoked' in str(c) for c in said.call_args_list))
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+        self.assertTrue(any('no licence number or photo could be recorded' in str(c) for c in said.call_args_list))
+
+    def test_a_hand_approved_licence_that_fails_its_re_review_stops_selling(self):
+        Store.objects.filter(pk=self.store.pk).update(
+            alcohol_license_status='approved', alcohol_license_expires_on=self.today + timedelta(days=100))
+        self.assertEqual(self.run_review(self.reading(covers_alcohol=False)), 'rejected')
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
+
+    def test_a_renewal_with_a_revoked_licence_ends_the_current_one(self):
+        from .models import RevokedAlcoholLicense
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        other_owner = make_user()
+        other = Store.objects.create(owner=other_owner, owner_account=other_owner.accounts.get(), name='Otra',
+                                     country_code='BO', city='La Paz')
+        RevokedAlcoholLicense.objects.create(store=other, city_key='la paz', number='LP20260999', photo_hash='')
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_key='marketplace/pending/x/renewal.jpg',
+                                                      alcohol_license_submitted_at=timezone.now())
+        self.KEY = 'marketplace/pending/x/renewal.jpg'
+        self.assertEqual(self.run_review(self.reading(license_number='LP-2026-0999'), body=b'other'), 'rejected')
+        self.assertEqual(self.store.alcohol_license_status, 'rejected')
 
     def test_revocations_cannot_be_deleted_in_admin(self):
         from django.contrib.admin.sites import AdminSite

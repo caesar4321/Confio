@@ -318,64 +318,79 @@ def current_photo_hash(key: str) -> str:
 REVOKED_NOTE = 'Revisamos tu licencia y ya no es válida. Sube una licencia vigente.'
 
 
-class RevokeIncomplete(Exception):
-    """The revoke could not record what it must (nothing written)."""
-
-
-def revoke_licence(store_id: int) -> list:
-    """Revoke a store's alcohol licence: every licence it was ever approved
-    with, plus the photo on screen, goes to RevokedAlcoholLicense (never
-    approved again, for any store), and every OTHER live store approved with
-    one of those licences is revoked the same way, in the same transaction.
-    Returns the revoked store ids. Raises RevokeIncomplete (nothing written)
-    when the photo on screen cannot be fingerprinted and nothing else would
-    be recorded."""
+def _lock_licences(keys) -> None:
+    """The review's advisory locks, in a fixed order."""
     from django.db import connection
+    with connection.cursor() as cursor:
+        for city, number in sorted(keys):
+            cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [f'comprar-licence:{city}:{number}'])
+
+
+def revoke_licence(store_id: int) -> tuple:
+    """Revoke a store's alcohol licence. Sales stop at once. Every licence it
+    was ever approved with (or, for a licence approved by hand before the
+    approval history, the number its last review read) and the photo on
+    screen go to RevokedAlcoholLicense, never approved again for any store;
+    every OTHER live store approved with one of those licences is revoked the
+    same way, in the same transaction.
+
+    Locks follow the review's order: licence locks first, then store rows.
+    Returns (revoked store ids, ids for which nothing could be recorded)."""
     from django.db.models import Q
 
     from .models import AlcoholLicenseApproval, RevokedAlcoholLicense, Store
 
-    revoked, queue = [], [store_id]
+    revoked, unrecorded, queue, locked = [], [], [store_id], set()
     with transaction.atomic():
         while queue:
             pk = queue.pop()
             if pk in revoked:
                 continue
+            # Licence locks before the row (re-read under the lock until stable).
+            while True:
+                keys = set(AlcoholLicenseApproval.objects.filter(store_id=pk).values_list('city_key', 'number'))
+                if keys <= locked:
+                    break
+                _lock_licences(keys - locked)
+                locked |= keys
             row = Store.objects.select_for_update().get(pk=pk)
             approvals = list(AlcoholLicenseApproval.objects.filter(store=row))
+            records = {(a.city_key, a.number, a.photo_hash) for a in approvals}
+            verdict = row.alcohol_license_verdict or {}
+            if not approvals and verdict.get('approved') is True:
+                # Approved before the history existed: the number an approving
+                # review READ (never one a seller typed, nor a rejected reading,
+                # which may be someone else's licence).
+                read = _normalize_number(verdict.get('license_number', ''))
+                if read:
+                    records.add((city_key(row.city), read, ''))
             try:
                 on_screen = current_photo_hash(row.alcohol_license_key)
-            except ReviewUnavailable as exc:
-                if not approvals:
-                    raise RevokeIncomplete(f'store {pk}: the licence photo cannot be read now ({exc})') from exc
+            except ReviewUnavailable:
                 on_screen = ''
-            # The review's lock on each licence: a review of the same licence
-            # elsewhere waits for this revoke and then sees its record.
-            with connection.cursor() as cursor:
-                for approval in approvals:
-                    cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',
-                                   [f'comprar-licence:{approval.city_key}:{approval.number}'])
-            for approval in approvals:
-                RevokedAlcoholLicense.objects.create(store=row, city_key=approval.city_key,
-                                                     number=approval.number, photo_hash=approval.photo_hash)
-            hashes = {a.photo_hash for a in approvals if a.photo_hash}
+            hashes = {h for _, _, h in records if h}
             if on_screen and on_screen not in hashes:
-                RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city), number='',
-                                                     photo_hash=on_screen)
+                records.add((city_key(row.city), '', on_screen))
                 hashes.add(on_screen)
-            # Clearing the current photo makes any review still in flight stale.
+            for city, number, photo_hash in records:
+                RevokedAlcoholLicense.objects.create(store=row, city_key=city, number=number, photo_hash=photo_hash)
+            if not records:
+                unrecorded.append(pk)
+            # Sales stop whatever could be recorded; clearing the current
+            # photo makes any review still in flight stale.
             Store.objects.filter(pk=row.pk).update(
                 alcohol_license_status='rejected', alcohol_license_reviewed_at=timezone.now(),
                 alcohol_license_queued_at=None, alcohol_license_key='', alcohol_license_note=REVOKED_NOTE)
             revoked.append(pk)
             # Any other live store approved with one of these licences loses it too.
             match = Q(photo_hash__in=hashes) if hashes else Q(pk__in=[])
-            for approval in approvals:
-                match |= Q(city_key=approval.city_key, number=approval.number)
+            for city, number, _ in records:
+                if number:
+                    match |= Q(city_key=city, number=number)
             queue.extend(AlcoholLicenseApproval.objects.filter(match).exclude(store_id__in=revoked).filter(
                 store__deleted_at__isnull=True).exclude(store__alcohol_license_status__in=('none', 'rejected'))
                 .values_list('store_id', flat=True).distinct())
-    return revoked
+    return revoked, unrecorded
 
 
 def review_license(store_id: int, key: str) -> str:
@@ -418,7 +433,11 @@ def review_license(store_id: int, key: str) -> str:
                                               'expires_on': expires.isoformat() if expires else ''},
                   'alcohol_license_reviewed_at': now, 'alcohol_license_queued_at': None,
                   'alcohol_license_attempts': 0}
-        renewal = row.alcohol_license_valid(today)
+        # Only a licence the automatic review itself approved survives a
+        # failed renewal; one approved by hand before the history must pass.
+        renewal = row.alcohol_license_valid(today) and AlcoholLicenseApproval.objects.filter(store=row).exists()
+        if conflict == REVOKED_REASON:
+            renewal = False  # presenting a revoked licence ends the current one too
         if approved:
             # The document's own number is the one that counts (duplicates),
             # never what the seller typed.
