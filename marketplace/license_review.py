@@ -328,7 +328,8 @@ LEGAL_SUFFIXES = sorted([
     (('eirl',), 'eirl'), (('e', 'i', 'r', 'l'), 'eirl'),
     (('empresa', 'individual', 'de', 'responsabilidad', 'limitada'), 'eirl'),
     (('empresa', 'unipersonal'), 'unipersonal'),
-    (('sca',), 'sca'), (('scs',), 'scs'),
+    (('sca',), 'sca'), (('s', 'c', 'a'), 'sca'), (('sociedad', 'en', 'comandita', 'por', 'acciones'), 'sca'),
+    (('scs',), 'scs'), (('s', 'c', 's'), 'scs'), (('sociedad', 'en', 'comandita', 'simple'), 'scs'),
 ], key=lambda item: len(item[0]), reverse=True)
 
 

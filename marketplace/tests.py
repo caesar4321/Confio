@@ -1989,6 +1989,8 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertFalse(company_matches('Andina Distribuidora SA', 'Distribuidora Andina S.R.L.'))
         self.assertFalse(company_matches('Distribuidora Andina S.A.', 'Distribuidora Andina S.R.L.'))
         self.assertTrue(company_matches('Comercial Perez S. R. L.', 'Comercial Perez SRL'))      # spaced form
+        self.assertTrue(company_matches('PEREZ Y CIA S. C. A.', 'Pérez y Cía. S.C.A.'))
+        self.assertTrue(company_matches('Perez y Cia Sociedad en Comandita Simple', 'Pérez y Cía. S.C.S.'))
         self.assertFalse(company_matches('Comercial Pérez S.R.L.', 'Comercial Perez'))           # no form: only
         self.assertTrue(company_matches('Comercial Perez Empresa Unipersonal', 'Comercial Pérez'))  # unipersonal
 
