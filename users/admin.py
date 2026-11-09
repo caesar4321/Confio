@@ -1,6 +1,8 @@
+import hashlib
 import json
 
 from django.contrib import admin
+from django.db.models import OuterRef, Subquery
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
@@ -17,7 +19,7 @@ from .admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'accounts_count', 'icp_summary', 'rating_summary', 'is_staff', 'onboarded_at', 'created_at')
+    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'cloudkit_display', 'accounts_count', 'icp_summary', 'rating_summary', 'is_staff', 'onboarded_at', 'created_at')
     list_filter = ('onboarded_at', 'backup_provider', 'cloudkit_backup_state', 'is_staff', 'is_superuser', 'country', 'phone_country', 'confio_rating_star_count', 'confio_rating_action', 'created_at')
     search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name', 'phone_number', 'phone_key', 'confio_icp_other_text', 'confio_rating_feedback_text')
     readonly_fields = (
@@ -26,6 +28,9 @@ class UserAdmin(admin.ModelAdmin):
         'confio_icp_tags', 'confio_icp_other_text', 'confio_icp_captured_at',
         'confio_rating_prompted_at', 'confio_rating_star_count',
         'confio_rating_action', 'confio_rating_feedback_text',
+        'backup_provider', 'backup_verified_at', 'cloudkit_backup_state',
+        'cloudkit_backup_verified_at', 'cloudkit_backup_wallet_hash',
+        'last_app_version', 'last_app_platform',
     )
     actions = ('soft_delete_selected', 'block_direct_receive', 'unblock_direct_receive', 'exempt_direct_receive')
 
@@ -53,6 +58,13 @@ class UserAdmin(admin.ModelAdmin):
         ('Direct receiving (users/direct_receive.py)', {
             'fields': ('direct_receive_nudged_at', 'direct_receive_blocked_at',
                        'direct_receive_block_reason', 'direct_receive_exempt'),
+        }),
+        ('Wallet backup', {
+            'fields': ('backup_provider', 'backup_verified_at', 'cloudkit_backup_state',
+                       'cloudkit_backup_verified_at', 'cloudkit_backup_wallet_hash',
+                       'last_app_version', 'last_app_platform'),
+            'description': "Backup provider 'iCloud' is reported by every iPhone and proves nothing. "
+                           "Only a CloudKit state of Proven means the app read its copy back from Apple.",
         }),
         ('Contact Information', {
             'fields': ('phone_country', 'phone_number', 'phone_key', 'country', 'country_source', 'country_updated_at', 'preferred_rail_country')
@@ -89,6 +101,34 @@ class UserAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+    CLOUDKIT_LABELS = {
+        'proven': ('green', 'Proven'),
+        'icloud_full': ('orange', 'iCloud full'),
+        'failed': ('red', 'Failed'),
+        'no_icloud_account': ('gray', 'No iCloud'),
+        'icloud_restricted': ('gray', 'Restricted'),
+    }
+
+    def cloudkit_display(self, obj):
+        """The proven iOS copy, beside backup_provider's implicit 'iCloud'.
+        With no report, the last build says whether this app could have sent one."""
+        build = ' '.join(filter(None, [obj.last_app_platform, obj.last_app_version]))
+        state = obj.cloudkit_backup_state
+        if not state:
+            return format_html('<span style="color: gray;" title="No report">— <small>{}</small></span>', build)
+        color, label = self.CLOUDKIT_LABELS.get(state, ('black', state))
+        # A proof covers the wallet registered at proof time (ReportCloudKitBackup).
+        registered = getattr(obj, 'personal_bsc_address', None) or getattr(obj, 'personal_algorand_address', None)
+        if state == 'proven' and registered and obj.cloudkit_backup_wallet_hash != hashlib.sha256(
+                registered.lower().encode()).hexdigest():
+            color, label = 'orange', 'Stale (wallet changed)'
+        when = timezone.localtime(obj.cloudkit_backup_verified_at).strftime('%Y-%m-%d %H:%M') \
+            if obj.cloudkit_backup_verified_at else 'never proven'
+        return format_html('<span style="color: {};" title="Last proof: {}">{}</span> <small>{}</small>',
+                           color, when, label, build)
+    cloudkit_display.short_description = 'CloudKit copy'
+    cloudkit_display.admin_order_field = 'cloudkit_backup_state'
 
     def icp_summary(self, obj):
         if not obj.confio_icp_captured_at:
@@ -156,7 +196,12 @@ class UserAdmin(admin.ModelAdmin):
     soft_delete_status.admin_order_field = 'deleted_at'
 
     def get_queryset(self, request):
-        qs = self.model.all_objects.get_queryset()
+        personal = Account.objects.filter(user=OuterRef('pk'), account_type='personal', account_index=0)
+        # One subquery each, so the CloudKit column can spot a stale proof without a query per row.
+        qs = self.model.all_objects.get_queryset().annotate(
+            personal_bsc_address=Subquery(personal.values('bsc_address')[:1]),
+            personal_algorand_address=Subquery(personal.values('algorand_address')[:1]),
+        )
         ordering = self.get_ordering(request)
         if ordering:
             qs = qs.order_by(*ordering)
