@@ -1953,6 +1953,37 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             with self.assertRaises(ReviewUnavailable):
                 review_license(self.store.pk, self.KEY)
 
+    def _business_store(self, company='Distribuidora Andina S.R.L.'):
+        """The store moved to a business account whose KYB recorded `company`."""
+        business, account = make_business(self.seller)
+        Store.objects.filter(pk=self.store.pk).update(owner_account=account)
+        IdentityVerification.objects.create(
+            user=self.seller, verified_first_name=company, verified_last_name='Business',
+            verified_date_of_birth=date(2001, 1, 1), verified_nationality='BOL', verified_address='Calle 2',
+            verified_city='La Paz', verified_state='LP', verified_country='BOL', document_type='national_id',
+            document_number=f'NIT-{business.pk}', document_issuing_country='BOL', status='verified',
+            risk_factors={'account_type': 'business', 'business_id': str(business.pk)})
+        return business
+
+    def test_a_business_store_may_hold_the_licence_in_its_verified_company_name(self):
+        self._business_store()
+        self.assertEqual(self.run_review(self.reading(holder_name='DISTRIBUIDORA ANDINA SRL')), 'approved')
+
+    def test_a_company_name_must_match_exactly(self):
+        from .license_review import company_matches
+        self.assertTrue(company_matches('Distribuidora Andina S.R.L.', 'DISTRIBUIDORA ANDINA SRL'))
+        self.assertTrue(company_matches('Distribuidora Andina Ltda.', 'Distribuidora Andina S.R.L.'))
+        self.assertFalse(company_matches('Distribuidora Andina Norte S.R.L.', 'Distribuidora Andina S.R.L.'))
+        self.assertFalse(company_matches('S.R.L.', 'S.A.'))   # legal forms alone are no name
+
+    def test_personal_stores_and_unverified_names_never_match_a_company(self):
+        # Personal account: a company-held licence is rejected.
+        self.assertEqual(self.run_review(self.reading(holder_name='DISTRIBUIDORA ANDINA SRL')), 'rejected')
+        # The KYB placeholder never matches anything.
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='pending')
+        self._business_store(company='Verified Business')
+        self.assertEqual(self.run_review(self.reading(holder_name='Verified Business')), 'rejected')
+
     def test_name_particles_never_count_as_a_given_name(self):
         from .license_review import holder_matches
         # Siblings share both surnames; "de" must not stand in for her name.

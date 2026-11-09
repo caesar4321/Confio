@@ -216,7 +216,7 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.13.0',
+    'version': '1.13.1',
     'last_updated': '2026-11-09',
     'is_legally_binding': True,
     'sections': [
@@ -332,7 +332,7 @@ PRIVACY = {
                 'Al mostrar los mapas integrados de Comprar, Apple Maps en iOS o Google Maps en Android reciben las coordenadas necesarias para representar la zona y el punto de entrega, aunque no pulse «Abrir en mapas». El selector también puede mostrar la ubicación del dispositivo si ha concedido permiso',
                 'En Comprar, los miembros que consultan una tienda pueden ver su nombre, descripción, país, ciudad, productos, precios de envío, estado, calificación, número de calificaciones y pedidos completados, así como el nombre de pila del titular o, si no consta, su nombre de usuario',
                 'Las calificaciones de los pedidos, el producto comprado y la fecha de la calificación son visibles para otros miembros; el texto de la opinión se muestra después de aprobarse su revisión automática. La autoría se muestra con el nombre de usuario de Comunidad o un seudónimo de la persona que creó el pedido, incluso si otra persona autorizada de la cuenta compradora envió la opinión. No usamos el campo de nombre real para esa autoría, aunque un nombre de usuario elegido por la persona puede identificarla',
-                'Con OpenAI (Estados Unidos), que revisa automáticamente el texto y las fotos que usted publica en Comunidad, sus comentarios y su foto de perfil, junto con la publicación o el comentario al que responde, antes de mostrarlos a otros miembros y de nuevo si otros miembros los reportan; que recibe el título, la categoría, el precio, la descripción y las fotos de los productos enviados a revisión en Comprar, y el texto de las opiniones junto con su número de estrellas, el nombre de la tienda y el título del producto comprado, para revisar los productos y los textos de las opiniones antes de publicarlos; que recibe la foto de la licencia municipal de venta de bebidas alcohólicas que sube una tienda, junto con la fecha y el país, para leerla; el titular y el municipio que lee se comparan en nuestros servidores con el nombre de su documento verificado y la ciudad de la tienda; y que procesa los mensajes, audios y fotos que usted envía a Confio Assistant para responderle'
+                'Con OpenAI (Estados Unidos), que revisa automáticamente el texto y las fotos que usted publica en Comunidad, sus comentarios y su foto de perfil, junto con la publicación o el comentario al que responde, antes de mostrarlos a otros miembros y de nuevo si otros miembros los reportan; que recibe el título, la categoría, el precio, la descripción y las fotos de los productos enviados a revisión en Comprar, y el texto de las opiniones junto con su número de estrellas, el nombre de la tienda y el título del producto comprado, para revisar los productos y los textos de las opiniones antes de publicarlos; que recibe la foto de la licencia municipal de venta de bebidas alcohólicas que sube una tienda, junto con la fecha y el país, para leerla; el titular y el municipio que lee se comparan en nuestros servidores con el nombre de su documento verificado (o, en una cuenta de negocio, con el nombre verificado del negocio) y la ciudad de la tienda; y que procesa los mensajes, audios y fotos que usted envía a Confio Assistant para responderle'
             ]
         },
         {

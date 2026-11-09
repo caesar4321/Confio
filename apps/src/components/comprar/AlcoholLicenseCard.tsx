@@ -63,7 +63,7 @@ export const AlcoholLicenseCard = ({ license, onSubmitted }: {
     pending: 'Recibimos tu licencia. La estamos revisando; suele tardar unos minutos.',
     rejected: license?.note || 'No pudimos aprobar tu licencia. Sube una foto clara y vigente.',
     expired: 'Tu licencia venció. Sube la renovada para seguir vendiendo bebidas alcohólicas.',
-    none: 'Por ley, para vender bebidas alcohólicas necesitas la licencia de funcionamiento de tu municipio que autorice su venta, a tu nombre como figura en tu documento verificado.',
+    none: 'Por ley, para vender bebidas alcohólicas necesitas la licencia de funcionamiento de tu municipio que autorice su venta, a tu nombre como figura en tu documento verificado (o al nombre verificado de tu negocio).',
   }[status];
   // While pending too: a stuck or wrong photo can always be replaced.
   const canUpload = true;

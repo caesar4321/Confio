@@ -229,7 +229,7 @@ def municipality_matches(municipality: str, city: str) -> bool:
     return bool(wanted) and wanted <= named and named - wanted <= OFFICIAL_NAME_EXTRAS
 
 
-def decide(reading: dict, store, today: date, owner_names: tuple) -> tuple:
+def decide(reading: dict, store, today: date, owner_names: tuple, company: str = '') -> tuple:
     """(approved, expiry, reason for the seller). Fixed rules over the reading.
     The one-licence-one-store check runs later, under a lock (license_conflict)."""
     if not reading['is_license']:
@@ -238,8 +238,12 @@ def decide(reading: dict, store, today: date, owner_names: tuple) -> tuple:
         return False, None, 'No pudimos validar la foto de la licencia. Sube una foto clara del documento original.'
     if not reading['covers_alcohol']:
         return False, None, reading['reason'] or 'La licencia no menciona la venta de bebidas alcohólicas.'
-    if not holder_matches(reading['holder_name'], *owner_names):
-        return False, None, 'La licencia debe estar a tu nombre, como figura en tu documento verificado.'
+    # The owner's verified ID name, or (business accounts) the company name
+    # business verification read from the registry.
+    if not (holder_matches(reading['holder_name'], *owner_names)
+            or (company and company_matches(reading['holder_name'], company))):
+        return False, None, ('La licencia debe estar a tu nombre, como figura en tu documento verificado'
+                             + (', o al nombre verificado de tu negocio.' if company else '.'))
     from .checkout import city_for
     if city_for(store.country_code, store.city) is None or not municipality_matches(reading['municipality'], store.city):
         return False, None, f'La licencia debe ser del municipio de {store.city}, donde está tu tienda.'
@@ -308,6 +312,47 @@ def license_conflict(store, number: str, photo_hash: str) -> str:
     revoked = RevokedAlcoholLicense.objects.filter(city_key=city, number=normalized).exists() or (
         photo_hash and RevokedAlcoholLicense.objects.filter(photo_hash=photo_hash).exists())
     return REVOKED_REASON if revoked else ''
+
+
+# Legal-form words of Bolivian/LATAM company names ("S.R.L.", "S.A.", "Ltda.").
+LEGAL_FORMS = {'srl', 'sa', 'sas', 'ltda', 'eirl', 'sca', 'scs', 'spa', 'cia', 'sociedad', 'responsabilidad',
+               'limitada', 'anonima', 'empresa', 'unipersonal', 'individual', 'compania', 'de', 'del', 'y', 'e'}
+# What business verification stores when the registry gave no company name.
+KYB_PLACEHOLDER = 'Verified Business'
+
+
+def _company_tokens(value: str) -> list:
+    """Company name words: accents, case and dots ignored ("S.R.L." is "srl"),
+    legal forms dropped; every other word (single letters, digits) kept."""
+    import re
+    import unicodedata
+    folded = unicodedata.normalize('NFKD', value or '').encode('ascii', 'ignore').decode().casefold()
+    folded = folded.replace('.', '')
+    return [w for w in re.findall(r'[a-z0-9]+', folded) if w not in LEGAL_FORMS]
+
+
+def company_matches(holder: str, company: str) -> bool:
+    """The licence holder is exactly this verified company (legal form aside),
+    as counted words: no more and no fewer."""
+    from collections import Counter
+    wanted = _company_tokens(company)
+    return bool(wanted) and Counter(_company_tokens(holder)) == Counter(wanted)
+
+
+def _verified_company(store) -> str:
+    """The registry name business verification (KYB) recorded for the store's
+    business account; '' for a personal account, an unverified business, the
+    placeholder, or a name cut at the stored length (never compare a partial
+    name)."""
+    account = store.owner_account
+    if account.account_type != 'business' or not account.business_id:
+        return ''
+    from security.identity_status import business_kyb
+    kyb = business_kyb(account.business_id)
+    name = (getattr(kyb, 'verified_first_name', '') or '').strip()
+    if not name or name == KYB_PLACEHOLDER or len(name) >= 100:
+        return ''
+    return name
 
 
 def _owner_names(store) -> tuple:
@@ -461,7 +506,7 @@ def review_license(store_id: int, key: str) -> str:
     from .checkout import local_today
     from .models import AlcoholLicenseApproval, Store
 
-    store = Store.objects.select_related('owner').filter(pk=store_id, deleted_at__isnull=True).first()
+    store = Store.objects.select_related('owner', 'owner_account').filter(pk=store_id, deleted_at__isnull=True).first()
     if store is None or not key or store.alcohol_license_key != key:
         return 'stale'
     # A decision taken meanwhile (an admin, another review) is never overwritten.
@@ -477,7 +522,7 @@ def review_license(store_id: int, key: str) -> str:
     if reading is None:
         approved, expires, reason = False, None, 'No pudimos leer la foto. Sube una foto JPG, PNG o WEBP.'
     else:
-        approved, expires, reason = decide(reading, store, today, _owner_names(store))
+        approved, expires, reason = decide(reading, store, today, _owner_names(store), _verified_company(store))
     archived_key = _archive_photo(store, image, photo_hash) if approved else ''
 
     with transaction.atomic():
