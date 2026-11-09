@@ -248,6 +248,11 @@ def requeue_stuck_reviews(now=None) -> dict:
             # A renewal: the current licence keeps counting; only the new photo is dropped.
             Store.objects.filter(pk=pk, alcohol_license_key=key, alcohol_license_status='approved').update(**give_up)
             continue
+        # Cap reached but not a day old yet: wait for the give-up, no more
+        # paid review chains for a photo that keeps failing.
+        if Store.objects.filter(pk=pk, alcohol_license_key=key,
+                                alcohol_license_attempts__gte=LICENSE_SWEEP_ATTEMPTS).exists():
+            continue
         if Store.objects.filter(stale, pk=pk, alcohol_license_key=key).update(
                 alcohol_license_queued_at=now, alcohol_license_attempts=F('alcohol_license_attempts') + 1):
             review_alcohol_license.apply_async((pk, key), expires=STUCK_REVIEW_AFTER_MIN * 60)

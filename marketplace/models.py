@@ -457,6 +457,19 @@ class MarketplacePartnerAgreement(models.Model):
         return f'{self.partner_name} — {self.country_code} {self.share_bps / 100:.0f}%'
 
 
+class RevokedAlcoholLicense(models.Model):
+    """A licence Confío revoked (forged, withdrawn by the city): its photo and
+    its number in its city never pass the automatic review again, for any store."""
+    store = models.ForeignKey('Store', on_delete=models.PROTECT, related_name='revoked_licences')
+    city_key = models.CharField(max_length=100, db_index=True, help_text='Normalized store city')
+    number = models.CharField(max_length=60, blank=True, default='', db_index=True, help_text='Normalized number')
+    photo_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    revoked_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.city_key} {self.number or self.photo_hash[:12]}'
+
+
 class MarketplaceFeeLedger(models.Model):
     """One row per released order: the fee and the partner's share of it.
 

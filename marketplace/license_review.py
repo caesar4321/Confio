@@ -178,7 +178,7 @@ def municipality_matches(municipality: str, city: str) -> bool:
 
 def decide(reading: dict, store, today: date, owner_names: tuple) -> tuple:
     """(approved, expiry, reason for the seller). Fixed rules over the reading.
-    The one-licence-one-store check runs later, under a lock (assert_unique)."""
+    The one-licence-one-store check runs later, under a lock (license_conflict)."""
     if not reading['is_license']:
         return False, None, reading['reason'] or 'La foto no es una licencia de funcionamiento municipal.'
     if reading['looks_altered']:
@@ -209,23 +209,39 @@ def decide(reading: dict, store, today: date, owner_names: tuple) -> tuple:
     return True, expires, ''
 
 
-def assert_unique(store, number: str, photo_hash: str) -> bool:
-    """One licence, one store: no other APPROVED store holds this number or
-    photo (a rejected attempt never squats someone's licence). Call inside
-    the approving transaction: an advisory lock on the number serializes two
-    stores approved at the same moment."""
+REVOKED_REASON = 'Esta licencia fue revocada y no se puede usar en Comprar.'
+
+
+def city_key(city: str) -> str:
+    return ' '.join(sorted(_words(city)))
+
+
+def license_conflict(store, number: str, photo_hash: str) -> str:
+    """'' when this licence may be approved for this store, else the seller's
+    reason. Numbers are unique per city (two cities may issue "1234").
+    - revoked (by Confío, any store, this one included): never again
+    - another APPROVED store in the same city holds it: one licence, one store
+      (a rejected attempt never squats someone's licence)
+    Call inside the approving transaction: an advisory lock on (city, number)
+    serializes two stores approved at the same moment."""
     from django.db import connection
 
-    from .models import Store
+    from .models import RevokedAlcoholLicense, Store
 
     normalized = _normalize_number(number)
+    city = city_key(store.city)
     with connection.cursor() as cursor:
-        cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [f'comprar-licence:{normalized}'])
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [f'comprar-licence:{city}:{normalized}'])
+    revoked = RevokedAlcoholLicense.objects.filter(city_key=city, number=normalized).exists() or (
+        photo_hash and RevokedAlcoholLicense.objects.filter(photo_hash=photo_hash).exists())
+    if revoked:
+        return REVOKED_REASON
     others = Store.objects.exclude(pk=store.pk).filter(deleted_at__isnull=True, alcohol_license_status='approved')
     if photo_hash and others.filter(alcohol_license_hash=photo_hash).exists():
-        return False
-    return not any(_normalize_number(n) == normalized for n in
-                   others.exclude(alcohol_license_number='').values_list('alcohol_license_number', flat=True))
+        return DUPLICATE_REASON
+    same = any(_normalize_number(n) == normalized and city_key(c) == city for n, c in
+               others.exclude(alcohol_license_number='').values_list('alcohol_license_number', 'city'))
+    return DUPLICATE_REASON if same else ''
 
 
 def _owner_names(store) -> tuple:
@@ -287,8 +303,9 @@ def review_license(store_id: int, key: str) -> str:
         row = Store.objects.select_for_update().get(pk=store.pk)
         if row.alcohol_license_key != key or (row.alcohol_license_status, row.alcohol_license_reviewed_at) != started:
             return 'stale'  # a newer photo, or another decision, arrived meanwhile
-        if approved and not assert_unique(row, reading['license_number'], photo_hash):
-            approved, expires, reason = False, None, DUPLICATE_REASON
+        conflict = license_conflict(row, reading['license_number'], photo_hash) if approved else ''
+        if conflict:
+            approved, expires, reason = False, None, conflict
         now = timezone.now()
         common = {'alcohol_license_verdict': {**(reading or {}), 'approved': approved, 'reason': reason,
                                               'expires_on': expires.isoformat() if expires else ''},

@@ -1044,7 +1044,7 @@ class SubmitAlcoholLicense(graphene.Mutation):
                 # one is reviewed (submitted_at > reviewed_at = to review).
                 Store.objects.filter(pk=store.pk).update(
                     alcohol_license_key=photo_key, alcohol_license_submitted_at=now,
-                    alcohol_license_queued_at=now, alcohol_license_attempts=0)
+                    alcohol_license_queued_at=now, alcohol_license_attempts=0, alcohol_license_note='')
             else:
                 Store.objects.filter(pk=store.pk).update(
                     alcohol_license_status='pending', alcohol_license_key=photo_key,

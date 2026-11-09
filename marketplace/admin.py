@@ -15,7 +15,7 @@ from django.db.models.functions import TruncMonth
 from django.http import HttpResponse
 from django.utils import timezone
 
-from .models import (DeliveryAddress, MarketplaceCategory, MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
+from .models import (RevokedAlcoholLicense, DeliveryAddress, MarketplaceCategory, MarketplaceCity, MarketplaceFeeLedger, MarketplaceInterest,
                      MarketplaceLocationCheck, MarketplacePartnerAgreement, Order, OrderRating,
                      Product, Store)
 
@@ -137,6 +137,16 @@ class ProductInline(admin.TabularInline):
     can_delete = False
 
 
+class RevokedAlcoholLicenseAdmin(admin.ModelAdmin):
+    """Licences revoked from the store admin: never approved again, for any store."""
+    list_display = ('city_key', 'number', 'store', 'revoked_at')
+    search_fields = ('number', 'city_key', 'store__name')
+    readonly_fields = ('store', 'city_key', 'number', 'photo_hash', 'revoked_at')
+
+    def has_add_permission(self, request):
+        return False
+
+
 class StoreAdmin(admin.ModelAdmin):
     list_display = ('name', 'city', 'country_code', 'owner', 'status', 'ships_outside_city',
                     'alcohol_license_status', 'alcohol_license_expires_on', 'product_count', 'created_at')
@@ -165,12 +175,28 @@ class StoreAdmin(admin.ModelAdmin):
     inlines = [ProductInline]
     actions = ['suspend', 'reinstate', 'rereview_alcohol_license', 'revoke_alcohol_license']
 
-    @admin.action(description='Alcohol licence: revoke (stops alcohol sales until a new licence passes review)')
+    @admin.action(description='Alcohol licence: revoke (this licence never passes review again, for any store)')
     def revoke_alcohol_license(self, request, queryset):
-        n = queryset.exclude(alcohol_license_status='none').update(
-            alcohol_license_status='rejected', alcohol_license_reviewed_at=timezone.now(),
-            alcohol_license_queued_at=None,
-            alcohol_license_note='Revisamos tu licencia y ya no es válida. Sube una licencia vigente.')
+        from django.db import transaction
+        from .license_review import _normalize_number, city_key
+        from .models import RevokedAlcoholLicense
+        n = 0
+        for store in queryset.exclude(alcohol_license_status='none'):
+            with transaction.atomic():
+                row = Store.objects.select_for_update().get(pk=store.pk)
+                # Everything this store's licence photos were read as: the
+                # approved one and the current one (a renewal) alike.
+                read = (row.alcohol_license_verdict or {}).get('license_number', '')
+                numbers = {_normalize_number(x) for x in (row.alcohol_license_number, read) if _normalize_number(x)}
+                for number in numbers or ({''} if row.alcohol_license_hash else set()):
+                    RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city), number=number,
+                                                         photo_hash=row.alcohol_license_hash)
+                # Clearing the current photo makes any review still in flight stale.
+                Store.objects.filter(pk=row.pk).update(
+                    alcohol_license_status='rejected', alcohol_license_reviewed_at=timezone.now(),
+                    alcohol_license_queued_at=None, alcohol_license_key='',
+                    alcohol_license_note='Revisamos tu licencia y ya no es válida. Sube una licencia vigente.')
+            n += 1
         self.message_user(request, f'Revoked {n} licence(s).')
 
     @admin.action(description='Alcohol licence: run the automatic review again')

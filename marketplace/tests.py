@@ -1945,14 +1945,50 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.store.refresh_from_db()
         self.assertEqual(self.store.alcohol_license_approved_key, self.KEY)
 
+    def _revoke(self):
+        from django.contrib.admin.sites import AdminSite
+        from .admin import StoreAdmin
+        admin = StoreAdmin(Store, AdminSite())
+        with mock.patch.object(admin, 'message_user'):
+            admin.revoke_alcohol_license(mock.Mock(), Store.objects.filter(pk=self.store.pk))
+
+    def test_a_revoked_licence_never_passes_again(self):
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+        self._revoke()
+        self.store.refresh_from_db()
+        self.assertEqual((self.store.alcohol_license_status, self.store.alcohol_license_key), ('rejected', ''))
+        # The same licence submitted again: refused.
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='pending', alcohol_license_key=self.KEY)
+        self.assertEqual(self.run_review(self.reading()), 'rejected')
+        self.assertIn('revocada', self.store.alcohol_license_note)
+
+    def test_an_in_flight_review_cannot_undo_a_revoke(self):
+        from .license_review import review_license
+        image = SimpleNamespace(body=b'img', mime_type='image/jpeg')
+
+        def revoke_meanwhile(*_a, **_k):
+            self._revoke()
+            return self.reading()
+        with mock.patch('inbox.community.load_pending_image', return_value=image), \
+                mock.patch('marketplace.license_review._read_license', side_effect=revoke_meanwhile):
+            self.assertEqual(review_license(self.store.pk, self.KEY), 'stale')
+
+    def test_the_same_number_in_another_city_is_another_licence(self):
+        other_owner = make_user()
+        Store.objects.create(owner=other_owner, owner_account=other_owner.accounts.get(), name='Otra', country_code='BO',
+                             city='Cochabamba', alcohol_license_status='approved', alcohol_license_number='LP-2026-0042',
+                             alcohol_license_expires_on=self.today + timedelta(days=300))
+        self.assertEqual(self.run_review(self.reading()), 'approved')
+
     def test_the_sweep_gives_up_after_a_few_attempts(self):
         from .tasks import LICENSE_SWEEP_ATTEMPTS, requeue_stuck_reviews
         Store.objects.filter(pk=self.store.pk).update(alcohol_license_queued_at=None,
                                                       alcohol_license_attempts=LICENSE_SWEEP_ATTEMPTS)
-        # A few hours of reviewer outage: still retried, never rejected.
+        # Cap reached within the first day: no more paid chains, and not
+        # rejected either (a reviewer outage must not cost anyone a licence).
         with mock.patch('marketplace.tasks.review_alcohol_license.apply_async') as send:
             requeue_stuck_reviews()
-        send.assert_called_once()
+        send.assert_not_called()
         self.store.refresh_from_db()
         self.assertEqual(self.store.alcohol_license_status, 'pending')
         # A day later, still unreviewable: the seller is asked for a new photo.

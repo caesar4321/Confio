@@ -1308,13 +1308,14 @@ confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 from marketplace.models import (MarketplaceCategory, MarketplaceCity, Store as MarketStore, Product as MarketProduct,
                                 Order as MarketOrder, OrderRating as MarketOrderRating,
                                 MarketplacePartnerAgreement, MarketplaceFeeLedger,
-                                MarketplaceLocationCheck, MarketplaceInterest, DeliveryAddress as MarketDeliveryAddress)
+                                MarketplaceLocationCheck, MarketplaceInterest, DeliveryAddress as MarketDeliveryAddress,
+                                RevokedAlcoholLicense)
 from marketplace.admin import (MarketplaceCategoryAdmin, MarketplaceCityAdmin, StoreAdmin as MarketStoreAdmin,
                                ProductAdmin as MarketProductAdmin, OrderAdmin as MarketOrderAdmin,
                                OrderRatingAdmin as MarketOrderRatingAdmin,
                                MarketplacePartnerAgreementAdmin, MarketplaceFeeLedgerAdmin,
                                MarketplaceLocationCheckAdmin, MarketplaceInterestAdmin,
-                               DeliveryAddressAdmin as MarketDeliveryAddressAdmin)
+                               DeliveryAddressAdmin as MarketDeliveryAddressAdmin, RevokedAlcoholLicenseAdmin)
 confio_admin_site.register(MarketplaceCategory, MarketplaceCategoryAdmin)
 confio_admin_site.register(MarketplaceCity, MarketplaceCityAdmin)
 confio_admin_site.register(MarketStore, MarketStoreAdmin)
@@ -1326,6 +1327,7 @@ confio_admin_site.register(MarketplaceFeeLedger, MarketplaceFeeLedgerAdmin)
 confio_admin_site.register(MarketplaceLocationCheck, MarketplaceLocationCheckAdmin)
 confio_admin_site.register(MarketplaceInterest, MarketplaceInterestAdmin)
 confio_admin_site.register(MarketDeliveryAddress, MarketDeliveryAddressAdmin)
+confio_admin_site.register(RevokedAlcoholLicense, RevokedAlcoholLicenseAdmin)
 
 # EVM sponsorship ledger + cross-rail auto-swap queue. PendingAutoSwap was
 # never registered, which left the BSC 'BNB' rows — the authoritative
