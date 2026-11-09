@@ -183,11 +183,33 @@ def holder_matches(holder: str, first_names: str, last_names: str) -> bool:
     (particles like "de" and titles aside), in any order. Anything looser lets
     a sibling's or a namesake's licence through ("Ana María" vs "María Elena",
     "Juan" vs "Juan Carlos" Quispe Mamani)."""
-    # An initial on the licence ("JUAN C.") is a name word the ID must have.
-    words = _words(holder, keep_initials=True) - NAME_PARTICLES - {'y', 'e'}
-    surnames = _words(last_names) - NAME_PARTICLES
-    given = _words(first_names) - NAME_PARTICLES
-    return bool(surnames) and bool(given) and words == (surnames | given)
+    from collections import Counter
+    holder_words = _name_tokens(holder, initials=True)
+    surnames = _name_tokens(last_names)
+    given = _name_tokens(first_names)
+    # Counted, not a set: "Quispe Quispe" on the ID needs both on the licence.
+    return bool(surnames) and bool(given) and Counter(holder_words) == Counter(surnames + given)
+
+
+def _name_tokens(value: str, initials: bool = False) -> list:
+    """Name words in order, particles and titles dropped. With initials, a
+    single letter is a name word ("JUAN C.", "JUAN E."), except an undotted
+    "y"/"e" joining two names ("Juan y Pedro" style connectors)."""
+    import re
+    import unicodedata
+    folded = unicodedata.normalize('NFKD', value or '').encode('ascii', 'ignore').decode().casefold()
+    tokens = re.findall(r'[a-z0-9]+\.?', folded)
+    out = []
+    for raw in tokens:
+        word, dotted = raw.rstrip('.'), raw.endswith('.')
+        if len(word) == 1:
+            if initials and word.isalpha() and (dotted or word not in ('y', 'e')):
+                out.append(word)
+            continue
+        if word in NAME_PARTICLES:
+            continue
+        out.append(word)
+    return out
 
 
 # Words that dress up a municipality's name without naming it.
@@ -439,13 +461,12 @@ def review_license(store_id: int, key: str) -> str:
         approved, expires, reason = decide(reading, store, today, _owner_names(store))
 
     with transaction.atomic():
-        if approved:
-            # The licence lock BEFORE the store row: the same order a revoke
-            # takes (licence, then other stores' rows), so the two never deadlock.
-            from django.db import connection
-            with connection.cursor() as cursor:
-                cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [
-                    f'comprar-licence:{city_key(store.city)}:{_normalize_number(reading["license_number"])}'])
+        read_number = _normalize_number(reading['license_number']) if reading else ''
+        if read_number:
+            # The licence lock BEFORE the store row (the order a revoke takes),
+            # whatever the decision: a revoke of this number committing now is
+            # always seen by the revoked check below.
+            _lock_licences({(city_key(store.city), read_number)})
         row = Store.objects.select_for_update().get(pk=store.pk)
         if row.alcohol_license_key != key or (row.alcohol_license_status, row.alcohol_license_reviewed_at) != started:
             return 'stale'  # a newer photo, or another decision, arrived meanwhile

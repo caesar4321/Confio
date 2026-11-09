@@ -1957,6 +1957,9 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertFalse(holder_matches('Juan Carlos Quispe Mamani', 'Juan', 'Quispe Mamani'))
         self.assertTrue(holder_matches('Sr. Juan Quispe Mamani', 'Juan', 'Quispe Mamani'))
         self.assertFalse(holder_matches('JUAN C. QUISPE MAMANI', 'Juan', 'Quispe Mamani'))   # an initial is a name
+        self.assertFalse(holder_matches('JUAN E. QUISPE MAMANI', 'Juan', 'Quispe Mamani'))   # 'E.' too
+        self.assertFalse(holder_matches('JUAN QUISPE', 'Juan', 'Quispe Quispe'))              # counted words
+        self.assertTrue(holder_matches('QUISPE QUISPE, JUAN', 'Juan', 'Quispe Quispe'))
 
     def test_revoking_records_every_licence_ever_approved(self):
         from .models import RevokedAlcoholLicense
@@ -2146,6 +2149,13 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             self.assertEqual(review_license(self.store.pk, renewal), 'rejected')
         self.store.refresh_from_db()
         self.assertEqual(self.store.alcohol_license_status, 'rejected')
+
+    def test_a_revoked_store_cannot_ship_a_paid_alcohol_order(self):
+        from .checkout import ship_alcohol_error
+        order = SimpleNamespace(age_restricted=True, store=self.store, delivery_city='La Paz')
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
+        self.store.refresh_from_db()
+        self.assertEqual(ship_alcohol_error(order), 'store_license_required')
 
     def test_a_revoke_survives_an_s3_network_error(self):
         from django.contrib.admin.sites import AdminSite

@@ -123,10 +123,13 @@ def alcohol_sale_error(user, store, delivery_city: str = '') -> str | None:
 
 
 def ship_alcohol_error(order) -> str | None:
-    """'alcohol_paused' when an adults-only order would ship into or out of a
-    city under ley seca; else None."""
+    """Why an adults-only order may not ship now: the store's licence is no
+    longer valid (revoked, expired: the buyer's refund path applies), or a ley
+    seca at either end; else None."""
     if not order.age_restricted:
         return None
+    if not order.store.alcohol_license_valid():
+        return 'store_license_required'
     return ley_seca_error(order.store.country_code, [order.store.city, order.delivery_city])
 
 
