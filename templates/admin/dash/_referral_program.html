@@ -1,4 +1,41 @@
 {% load humanize %}
+{% if fee_commission_stats %}
+{% with c=fee_commission_stats %}
+<h2 class="section-title">Fee-sharing commissions</h2>
+<p style="color:#6b7280; margin:-8px 0 12px;">
+    Referrers get {{ c.share_pct|floatformat:0 }}% of the cUSD border fee their invited friends pay, minted to them
+    in the same transaction. Both must be verified.
+    {% if c.enabled %}Live since {{ c.launched_at|date:"Y-m-d H:i" }} UTC.{% else %}<strong>Currently off.</strong>{% endif %}
+</p>
+<div class="metrics-grid" style="margin-top: 12px;">
+    <div class="metric-card">
+        <div class="metric-label">Paid to referrers (30d)</div>
+        <div class="metric-value">${{ c.paid_30d_usd|floatformat:2|intcomma }}</div>
+        <div class="metric-change">7d: ${{ c.paid_7d_usd|floatformat:2|intcomma }} · all time: ${{ c.paid_usd|floatformat:2|intcomma }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Referrers paid (30d)</div>
+        <div class="metric-value">{{ c.referrers_30d|intcomma }}</div>
+        <div class="metric-change">All time: {{ c.referrers_all|intcomma }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Friends generating (30d)</div>
+        <div class="metric-value">{{ c.referees_30d|intcomma }}</div>
+        <div class="metric-change">Payouts (30d): {{ c.payouts_30d|intcomma }} · all time: {{ c.payouts|intcomma }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Who earns, who doesn't</div>
+        <div class="metric-value" style="font-size:15px; line-height:1.6;">
+            <a href="{% url 'confio_admin:achievements_userreferral_changelist' %}?commission=earning">Earning</a> ·
+            <a href="{% url 'confio_admin:achievements_userreferral_changelist' %}?commission=friend_verify">Friend must verify</a><br>
+            <a href="{% url 'confio_admin:achievements_userreferral_changelist' %}?commission=same_document">Same person</a> ·
+            <a href="{% url 'confio_admin:conversion_feereferralpayout_changelist' %}">All payouts</a>
+        </div>
+        <div class="metric-change">Per-referral status lives in User Referrals</div>
+    </div>
+</div>
+{% endwith %}
+{% endif %}
 {% if referral_stats %}
 <h2 class="section-title">Referral Program</h2>
 <div class="metrics-grid" style="margin-top: 20px;">
@@ -20,7 +57,7 @@
         </div>
     </div>
     <div class="metric-card">
-        <div class="metric-label">Avg Reward / Converted</div>
+        <div class="metric-label">Avg $CONFIO bonus / Converted (ended at launch)</div>
         <div class="metric-value">{{ referral_stats.avg_rewards_per_converted|floatformat:2 }}</div>
         <div class="metric-change">Eligible rewards: {{ referral_stats.eligible_events|default:"0"|intcomma }}
         </div>

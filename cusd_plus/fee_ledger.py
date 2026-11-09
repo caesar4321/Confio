@@ -272,4 +272,32 @@ def summary(now=None) -> dict:
         'fee_usd_24h': sum((r['fee_usd_24h'] for r in rows.values()), Decimal('0')),
         'volume_usd': sum((r['volume_usd'] for r in rows.values()), Decimal('0')),
     }
-    return {'rows': list(rows.values()), 'total': total, 'undated_events': unknown_time}
+    shared = referral_shares(now)
+    net = {key: total[key] - shared[key] for key in ('fee_usd', 'fee_usd_30d', 'fee_usd_7d', 'fee_usd_24h')}
+    return {'rows': list(rows.values()), 'total': total, 'undated_events': unknown_time,
+            'shared': shared, 'net': net}
+
+
+def referral_shares(now=None) -> dict:
+    """The referrers' share of the fees above (FeeReferralPayout: minted to
+    the referrer in the same transaction as the fee), in the same windows.
+    The CusdFeeEvent rows stay GROSS; Confío keeps gross minus this."""
+    from django.db.models import Count, Q, Sum
+    from django.db.models.functions import Coalesce
+
+    from conversion.models import FeeReferralPayout
+
+    now = now or datetime.now(dt_timezone.utc)
+    rows = FeeReferralPayout.objects.annotate(at=Coalesce('block_time', 'created_at'))
+    agg = rows.aggregate(
+        all=Sum('share_wei'), count=Count('id'),
+        d30=Sum('share_wei', filter=Q(at__gte=now - timedelta(days=30))),
+        d7=Sum('share_wei', filter=Q(at__gte=now - timedelta(days=7))),
+        h24=Sum('share_wei', filter=Q(at__gte=now - timedelta(hours=24))),
+    )
+
+    def usd(value):
+        return Decimal(value or 0) / WAD
+
+    return {'count': agg['count'] or 0, 'fee_usd': usd(agg['all']), 'fee_usd_30d': usd(agg['d30']),
+            'fee_usd_7d': usd(agg['d7']), 'fee_usd_24h': usd(agg['h24'])}

@@ -2,7 +2,8 @@
 <h2 class="section-title">Confío fee revenue — by source</h2>
 <p style="color:#6b7280; margin:-8px 0 12px;">
     Every 0.9% fee is charged by the cUSD vault (one ledger row per on-chain fee event, recorded by the
-    finalized-log scanner). The legacy 0.30% stock-router fee paid by pre-v2 app builds is separate and
+    finalized-log scanner). Source rows are gross; the referrers' share (minted to them in the same
+    transaction) is subtracted below the total. The legacy 0.30% stock-router fee paid by pre-v2 app builds is separate and
     listed last; nothing is counted twice.
 </p>
 {% if fee_ledger.pending %}
@@ -43,6 +44,26 @@
             <td style="padding:8px; text-align:right;">{{ fee_ledger.total.count|intcomma }}</td>
             <td style="padding:8px; text-align:right;">${{ fee_ledger.total.volume_usd|floatformat:0|intcomma }}</td>
         </tr>
+        {% if fee_ledger.shared %}
+        <tr style="color:#92400e;">
+            <td style="padding:8px;">Shared with referrers (fee-sharing commissions)</td>
+            <td style="padding:8px; text-align:right;">−${{ fee_ledger.shared.fee_usd_24h|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">−${{ fee_ledger.shared.fee_usd_7d|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">−${{ fee_ledger.shared.fee_usd_30d|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">−${{ fee_ledger.shared.fee_usd|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">{{ fee_ledger.shared.count|intcomma }}</td>
+            <td style="padding:8px; text-align:right;"><a href="{% url 'confio_admin:conversion_feereferralpayout_changelist' %}">Payouts</a></td>
+        </tr>
+        <tr style="font-weight:600;">
+            <td style="padding:8px;">Net fee revenue (kept)</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.net.fee_usd_24h|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.net.fee_usd_7d|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.net.fee_usd_30d|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">${{ fee_ledger.net.fee_usd|floatformat:2|intcomma }}</td>
+            <td style="padding:8px; text-align:right;">—</td>
+            <td style="padding:8px; text-align:right;">—</td>
+        </tr>
+        {% endif %}
         <tr style="color:#6b7280;">
             <td style="padding:8px;">Legacy stock router (0.30%, pre-v2 builds)</td>
             <td style="padding:8px; text-align:right;">—</td>

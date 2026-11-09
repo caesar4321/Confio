@@ -738,7 +738,7 @@ def get_bnb_autoconvert_stats() -> dict:
     return counts
 
 
-FEE_LEDGER_SUMMARY_KEY = 'confio_fee_ledger_summary:v2'
+FEE_LEDGER_SUMMARY_KEY = 'confio_fee_ledger_summary:v3'
 
 
 def refresh_fee_ledger_summary():

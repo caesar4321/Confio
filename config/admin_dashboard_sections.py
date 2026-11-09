@@ -676,6 +676,7 @@ def referral_program(w):
     conversion_rate = (converted_referrals / total_referrals * 100) if total_referrals else 0
     avg_rewards_per_converted = (eligible_events / converted_referrals) if converted_referrals else 0
 
+    context['fee_commission_stats'] = _fee_commission_stats(w)
     context['referral_stats'] = {
         'total': total_referrals,
         'converted': converted_referrals,
@@ -688,6 +689,40 @@ def referral_program(w):
         'eligible_events': eligible_events,
     }
     return context
+
+
+def _fee_commission_stats(w):
+    """Fee-sharing commissions (50% of the cUSD perimeter fee to the
+    referrer): what was paid, to how many referrers, from how many friends."""
+    from django.db.models.functions import Coalesce
+
+    from conversion.models import FeeReferralPayout
+    from cusd_plus import fee_referral
+
+    wad = Decimal(10) ** 18
+    now = w.now
+    rows = FeeReferralPayout.objects.annotate(at=Coalesce('block_time', 'created_at'))
+    last_30 = rows.filter(at__gte=now - timedelta(days=30))
+    agg = rows.aggregate(
+        all=Sum('share_wei'), count=Count('id'),
+        d7=Sum('share_wei', filter=Q(at__gte=now - timedelta(days=7))),
+        d30=Sum('share_wei', filter=Q(at__gte=now - timedelta(days=30))),
+        count_30=Count('id', filter=Q(at__gte=now - timedelta(days=30))),
+    )
+    launched = fee_referral.launch_at()
+    return {
+        'enabled': fee_referral.enabled(),
+        'launched_at': launched,
+        'share_pct': fee_referral.share_bps() / 100,
+        'paid_usd': Decimal(agg['all'] or 0) / wad,
+        'paid_7d_usd': Decimal(agg['d7'] or 0) / wad,
+        'paid_30d_usd': Decimal(agg['d30'] or 0) / wad,
+        'payouts': agg['count'] or 0,
+        'payouts_30d': agg['count_30'] or 0,
+        'referrers_30d': last_30.exclude(referrer_user=None).values('referrer_user').distinct().count(),
+        'referees_30d': last_30.exclude(referee_user=None).values('referee_user').distinct().count(),
+        'referrers_all': rows.exclude(referrer_user=None).values('referrer_user').distinct().count(),
+    }
 
 
 def legacy_conversions(w):
