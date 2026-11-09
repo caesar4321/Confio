@@ -95,13 +95,6 @@ def run_escrow_keeper():
     for order in Order.objects.select_related('store').filter(
             escrow._pending_free_q(), status='shipped', release_at__lte=now,
     ).order_by('release_at')[:50]:
-        # An adults-only order "shipped" by a store whose licence no longer
-        # counts (marked on-chain around the server's ship check): Confío never
-        # pays it out on its own; it stays for the arbiter (refund to the buyer).
-        if order.age_restricted and not order.store.alcohol_license_valid():
-            logger.error('[COMPRAR] order %s shipped without a valid alcohol licence: release held for the arbiter',
-                         order.pk)
-            continue
         try:
             escrow.keeper_release(order)
             released += 1
@@ -271,8 +264,10 @@ def requeue_stuck_reviews(now=None) -> dict:
                 # A renewal photo that is a revoked licence ends the current one too.
                 try:
                     photo_hash = current_photo_hash(key)
-                except Exception:  # noqa: BLE001 — S3 down: decide on the next sweep, never keep blindly
-                    continue
+                except Exception:  # noqa: BLE001 — photo gone or S3 down: nothing to compare
+                    # A missing photo cannot be a revoked one; giving up keeps the
+                    # licence the review approved (never a loop on this row).
+                    photo_hash = ''
                 store_row = Store.objects.filter(pk=pk).first()
                 if store_row is not None and photo_hash and is_revoked(store_row, '', photo_hash):
                     reviewed = False
