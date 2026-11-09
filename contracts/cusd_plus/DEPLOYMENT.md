@@ -1,5 +1,34 @@
 # cUSD+ deployment record — BSC mainnet
 
+## CusdVault — fee referral (LIVE 2026-11-09, Safe nonce 27)
+
+Referrers receive a share of the cUSD perimeter fee their invited friends pay,
+minted as cUSD in the same transaction (`armReferral` + `_payReferral`;
+server side in `cusd_plus/fee_referral.py`).
+
+- Implementation: `0xBE85E4E75a27d1E6Cb1777259Bd909d2953eb249`, commit
+  `96bdebb86`, deployed by the KMS sponsor via `manage.py deploy_cusd_impl`
+  (tx `0x4cfc97c9e28b86fb926f6c88d68daff9f3475ac42af21b8d2f320c10ef87bf0e`).
+  BscScan source verified.
+- Execution, one atomic MultiSendCallOnly DELEGATECALL, tx
+  `0x022c3deb1b0fc5be897a126633428df6bd3f840215ac55cd6d4b0df3b9738fff`, block
+  132614103, signers 1/3/5:
+  1. `upgradeToAndCall(impl, "")`
+  2. `setBatchDelegate(0xC06BD197b34a587026615C6AEd21301F5E99bc00)`
+     (ConfioBatchDelegate: only Confío 7702 accounts may arm)
+  3. `setReferralShareCapBps(5000)`
+  Payload builder: `.kms-local/kms_evm_multisig/build_fee_referral_multisend.py`.
+- Storage: two slots appended after `frozen` (`referralShareCapBps`,
+  `batchDelegate`); no initializer.
+- `test/UpgradeCusdReferral.fork.t.sol` (with `CUSD_IMPL` set) and
+  `test/UpgradeCusdFreeze.fork.t.sol` passed against the live proxy before
+  execution. Verified after: impl slot, Safe owner, feeBps 90, unpaused, fully
+  backed, delegate and cap as above.
+- Nothing pays until the server sets `FEE_REFERRAL_ENABLED` and
+  `FEE_REFERRAL_LAUNCH_AT` (the US$5 $CONFIO referral bonus stops at that
+  instant). The server also refuses to arm unless the vault reports this
+  delegate, a cap covering the share, and not paused.
+
 ## CusdPlusVault v6 — continuous oracle (LIVE 2026-11-01, Safe nonce 26)
 
 Ondo's `ScheduledOracleSwitch` moved USDY pricing from the daily-step
