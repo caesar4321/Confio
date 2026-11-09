@@ -93,6 +93,76 @@ export const fetchBscSendEnabled = async (): Promise<boolean> => {
   }
 };
 
+/** Half of the cUSD border fee goes to whoever invited this member, paid
+ * on-chain in the same transaction (CusdVault.armReferral). The server says
+ * whether this member's batches carry the arm and builds it exactly; a
+ * SEPARATE query so an older server (no field) only means "no arm", never a
+ * failed batch. Any error → null: the fee simply stays whole. */
+export const fetchFeeReferralArm = async (): Promise<BatchCall | null> => {
+  try {
+    const { gql } = await import('@apollo/client');
+    const { apolloClient } = await import('../apollo/client');
+    const { data } = await apolloClient.query({
+      query: gql`
+        query FeeReferralArm {
+          feeReferralArm {
+            to
+            data
+          }
+        }
+      `,
+      fetchPolicy: 'network-only',
+    });
+    const arm = data?.feeReferralArm;
+    if (!arm?.to || !arm?.data) return null;
+    return { to: arm.to, valueWei: 0n, data: arm.data };
+  } catch {
+    return null;
+  }
+};
+
+/** The arm decision per request id: a caller retrying the same economic
+ * action after a lost answer must resend the SAME calls (the server also
+ * matches replays modulo the arm, this keeps the in-session retry exact). */
+const ARM_BY_REQUEST_MAX = 64;
+const armByRequest = new Map<string, BatchCall | null>();
+const rememberArm = (requestId: string | undefined, arm: BatchCall | null) => {
+  if (!requestId) return;
+  armByRequest.delete(requestId);
+  armByRequest.set(requestId, arm);
+  while (armByRequest.size > ARM_BY_REQUEST_MAX) {
+    const oldest = armByRequest.keys().next().value;
+    if (oldest === undefined) break;
+    armByRequest.delete(oldest);
+  }
+};
+
+/** Server codes that refuse only the referral arm (eligibility changed,
+ * first-use delegation, not fee-bearing), and a pre-flight revert of an
+ * armed batch: resend the same batch without it. A commission must never
+ * block the member's money. */
+const isReferralArmRejection = (error?: string | null): boolean =>
+  !!error && (error.startsWith('referral_') || error === 'simulation_reverted');
+
+/** Selectors whose calls charge the cUSD border fee (mirror of the server's
+ *  fee_referral._fee_bearing_selectors). */
+let feeBearingCache: Set<string> | null = null;
+const feeBearingSelectors = (): Set<string> => {
+  if (!feeBearingCache) {
+    feeBearingCache = new Set([
+      'mintWithFee(uint256,uint256,address)',
+      'redeemWithFee(uint256,uint256,address)',
+      'redeemToUsdt(uint256,uint256,address)',
+      'subscribeAndMint(uint256,uint256,address)',
+      'buyWithSavings((uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32),bytes,uint256,uint256,uint256,uint256)',
+      'sellToSavings((uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32),bytes,uint256,uint256,uint256)',
+      'buy(uint8,uint256,uint256,bytes,address,uint256,uint256)',
+      'sell(uint8,address,uint256,bytes,uint256,uint256,uint256)',
+    ].map((sig) => selector(sig).slice(2)));
+  }
+  return feeBearingCache;
+};
+
 export const delegateNonce = async (eoa: string): Promise<bigint> => {
   // nonces() on the EOA itself; a codeless (not yet delegated) EOA returns
   // empty data — that IS nonce 0.
@@ -141,11 +211,26 @@ export const executeSponsoredBatch = async (params: {
   notAfter?: number;
 }): Promise<SponsoredBatchResultReceipt> => {
   const { sponsorBscBatch } = await import('./bscServerRpc');
-  const { wallet, calls, delegateAddress, requestId, notAfter } = params;
+  const { wallet, calls: baseCalls, delegateAddress, requestId, notAfter } = params;
   const from = wallet.address;
+  // Fee referral arm goes FIRST (the server accepts it nowhere else). The
+  // server allows one extra call for it (4 own calls + arm); anything larger
+  // or already carrying an arm is left alone.
+  const armSelector = selector('armReferral(address,uint256)').slice(2);
+  const callSelectors = baseCalls.map((c) => c.data.replace(/^0x/, '').slice(0, 8));
+  const alreadyArmed = callSelectors.includes(armSelector);
+  // Only batches that pay the cUSD border fee earn commission (server rule:
+  // fee_referral._fee_bearing_selectors). Everything else is sent as-is.
+  const feeBearing = callSelectors.some((s) => feeBearingSelectors().has(s));
+  let arm: BatchCall | null;
+  if (alreadyArmed || !feeBearing || baseCalls.length > 4) arm = null;
+  else if (requestId && armByRequest.has(requestId)) arm = armByRequest.get(requestId) ?? null;
+  else arm = await fetchFeeReferralArm();
+  rememberArm(requestId, arm);
 
   let lastError = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
+    const calls = arm ? [arm, ...baseCalls] : baseCalls;
     // A mined no-op legitimately needs a fresh delegate nonce and therefore
     // a fresh idempotency slot. Transport retries of either attempt still
     // reproduce the same suffix and resolve to its original transaction.
@@ -186,6 +271,14 @@ export const executeSponsoredBatch = async (params: {
 
     if (!res.success) {
       lastError = res.error || 'sponsor rejected';
+      if (arm && isReferralArmRejection(res.error)) {
+        // Nothing was broadcast; the same attempt slot is free. Drop the arm
+        // and resend: a commission must never block the member's money.
+        arm = null;
+        rememberArm(requestId, null);
+        attempt--;
+        continue;
+      }
       // Nonce races are retryable with fresh reads; policy errors are not.
       if (res.authorizationRequired || res.error === 'stale_auth_nonce') continue;
       throw new Error(`sponsored batch rejected: ${lastError}`);

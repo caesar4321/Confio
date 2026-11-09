@@ -50,7 +50,8 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
     // Check for specific achievement slugs first
     if (achievement.slug === 'referido_exitoso') {
       // Special message for sharing referral link (before earning the achievement)
-      return `💚 ¡Únete a Confío con mi invitación!\n\n🎁 Ambos ganaremos ${achievement.confioReward} $CONFIO cuando te registres y hagas tu primera recarga de US$20.\n\n📱 Descarga la app aquí:\n${SHARE_LINKS.campaigns.referral}\n\n¡La mejor forma de enviar dólares en Venezuela! 🚀\n\n${SHARE_LINKS.hashtags}`;
+      // The US$5 $CONFIO referral bonus ended with the commission launch.
+      return `💚 ¡Únete a Confío!\n\n📱 Descarga la app aquí:\n${SHARE_LINKS.campaigns.referral}\n\n${SHARE_LINKS.hashtags}`;
     }
 
     const baseMessage = `🎉 ¡Acabo de ganar ${achievement.confioReward} $CONFIO en la app Confío!`;

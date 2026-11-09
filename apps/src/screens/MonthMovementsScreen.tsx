@@ -27,7 +27,7 @@ const SPENDING_KINDS = new Set(['merchant', 'p2p_send', 'payroll_out', 'donation
 const KIND_LABEL: Record<string, string> = {
   top_up: 'Recarga', withdrawal: 'Retiro', savings_in: 'Guardaste', savings_out: 'Retiraste del ahorro',
   investment_in: 'Compra de acciones', investment_out: 'Venta de acciones', payroll_in: 'Sueldo',
-  payroll_out: 'Nómina', sale: 'Venta', bonus: 'Bono',
+  payroll_out: 'Nómina', sale: 'Venta', bonus: 'Bono', commission: 'Comisiones por invitar',
 };
 
 type Group = { key: string; name: string; count: number; total: number; firstId: string };

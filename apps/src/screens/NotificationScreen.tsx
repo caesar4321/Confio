@@ -424,6 +424,11 @@ export const NotificationScreen = () => {
         navigation.navigate('MyCommunityPosts');
         return;
       }
+      if (normalizedUrl.endsWith('achievements')) {
+        // Fee referral commission: the referral program with its card.
+        navigation.navigate('Achievements');
+        return;
+      }
       if (normalizedUrl.includes('referrals/reward-claim')) {
         navigation.navigate('ReferralRewardClaim');
         return;

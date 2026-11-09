@@ -420,11 +420,18 @@ class User(AbstractUser, SoftDeleteModel):
 
     @property
     def referral_count(self) -> int:
-        """Count referrals where the referrer's reward is claimable or claimed."""
+        """Invited friends who are Didit-verified and made a first deposit
+        (status 'converted'), or whose old US$5 bonus became claimable. The bonus statuses stopped
+        moving when the fee-referral commission replaced the bonus; the
+        deposit status keeps badges rising (users/status_badges.py agrees)."""
+        from django.db.models import OuterRef, Q
+
         from achievements.models import UserReferral
+        from security.identity_status import verified_exists
         return UserReferral.objects.filter(
+            Q(referrer_reward_status__in=('eligible', 'claimed'))
+            | (Q(status='converted') & verified_exists(OuterRef('referred_user_id'))),
             referrer_user=self,
-            referrer_reward_status__in=('eligible', 'claimed'),
             deleted_at__isnull=True,
         ).count()
 

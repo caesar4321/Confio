@@ -373,6 +373,50 @@ class CusdFeeEvent(models.Model):
         return f'{self.direction} fee {self.fee_wei} @ {self.tx_hash[:10]}#{self.log_index}'
 
 
+class FeeReferralPayout(models.Model):
+    """One finalized ReferralPaid: the referrer's share of a perimeter fee.
+
+    CusdVault mints the share as cUSD to the referrer inside the same
+    transaction that charged the fee (cusd_plus/fee_referral.py). The
+    CusdFeeEvent beside it keeps the GROSS fee; Confío's revenue from that
+    fee is fee_wei minus the share_wei rows of the same transaction.
+    Recorded by the finalized fee scanner, once per (tx_hash, log_index).
+    """
+
+    tx_hash = models.CharField(max_length=66, db_index=True)
+    log_index = models.PositiveIntegerField()
+    block_number = models.PositiveBigIntegerField(db_index=True)
+    block_time = models.DateTimeField(null=True, blank=True, db_index=True)
+    referee_address = models.CharField(max_length=42, db_index=True)
+    referrer_address = models.CharField(max_length=42, db_index=True)
+    referee_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='fee_referral_payouts_as_referee',
+    )
+    referrer_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='fee_referral_payouts_as_referrer',
+    )
+    fee_wei = models.DecimalField(max_digits=40, decimal_places=0)
+    share_wei = models.DecimalField(max_digits=40, decimal_places=0)
+    share_bps = models.PositiveIntegerField()
+    notified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'cusd_fee_referral_payout'
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['tx_hash', 'log_index'], name='fee_referral_payout_tx_log_uniq'),
+        ]
+        indexes = [
+            models.Index(fields=['referrer_user', 'created_at'], name='fee_ref_payout_referrer_idx'),
+        ]
+
+    def __str__(self):
+        return f'referral {self.share_wei} -> {self.referrer_address[:10]} @ {self.tx_hash[:10]}#{self.log_index}'
+
+
 # Update unified user activity on new conversions
 from django.db.models.signals import post_save
 from django.dispatch import receiver

@@ -3,7 +3,7 @@ import { View, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
-import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { RouteProp, StackActions, useNavigation, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
@@ -80,6 +80,12 @@ const EVENT_COPY = {
 
 export const ReferralEventDetailScreen: React.FC = () => {
   const navigation = useNavigation();
+  // The US$5 $CONFIO bonus ended with the commission launch: old event
+  // notifications land on the referral program (replace: Back never shows
+  // the old bonus copy).
+  React.useEffect(() => {
+    navigation.dispatch(StackActions.replace('Achievements'));
+  }, [navigation]);
   const route = useRoute<ReferralEventDetailRouteProp>();
   const event = route.params?.event as keyof typeof EVENT_COPY;
   const role = (route.params?.role === 'referrer' ? 'referrer' : 'referee') as 'referee' | 'referrer';

@@ -1316,6 +1316,9 @@ class ClaimInviteForPhone(graphene.Mutation):
                                         referee_confio = Decimal('20')
                                         referrer_confio = Decimal('20')
                                         
+                                    from cusd_plus.fee_referral import confio_bonus_ended
+                                    if confio_bonus_ended():
+                                        referee_confio = referrer_confio = Decimal('0')
                                     referral = UserReferral.objects.create(
                                         referred_user=user,
                                         referrer_identifier=inviter.username or str(inviter.id),

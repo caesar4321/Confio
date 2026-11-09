@@ -145,6 +145,7 @@ const NOTIFICATIONS: Record<string, IconVisual> = {
   REFERRAL_EVENT_P2P_TRADE: visual('target', 'social'),
   REFERRAL_REWARD_READY: visual('gift', 'reward'),
   REFERRAL_REWARD_CLAIMED: visual('gift', 'moneyIn', 'done'),
+  REFERRAL_COMMISSION_EARNED: visual('gift', 'moneyIn', 'done'),
 
   // $CONFIO
   PRESALE_PURCHASE_CONFIRMED: visual('lock', 'invest', 'done'),

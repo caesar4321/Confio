@@ -59,7 +59,9 @@ class SetReferrer(graphene.Mutation):
 
             # Auto-detect type if not provided
             # Always remove @ if present and normalize spaces
-            identifier = identifier.lstrip('@').strip()
+            # A code pasted from a formatted chat may carry *bold* / ~strike~
+            # marks (never strip '_': usernames may start or end with it).
+            identifier = identifier.strip('*~ ').lstrip('@').strip('*~ ')
             referral_type = 'friend'
 
             # Determine whether identifier is phone or username
@@ -145,6 +147,11 @@ class SetReferrer(graphene.Mutation):
                 # that would permanently block the referee's bonus — identity
                 # uniqueness picks one winner and answers the other with a
                 # duplicate error.
+                # The US$5 bonus ended with the commission launch: a new
+                # referral records no bonus amount (it earns commission).
+                from cusd_plus.fee_referral import confio_bonus_ended
+                if confio_bonus_ended():
+                    referee_confio = referrer_confio = Decimal('0')
                 referral, _created = UserReferral.objects.get_or_create(
                     referred_user=user,
                     deleted_at__isnull=True,
@@ -198,10 +205,13 @@ class SetReferrer(graphene.Mutation):
                 # Note: Rewards will be synced to on-chain vault when first qualifying event occurs
                 # This is handled by sync_referral_reward_for_event() via signals
                 
+                from cusd_plus.fee_referral import confio_bonus_ended
                 return SetReferrer(
                     success=True,
                     referral_type='friend',
-                    message="¡Referidor registrado! Tienes US$5 en $CONFIO bloqueados. Completa tu primera operación para desbloquearlos."
+                    message=("¡Listo! Verifica tu identidad en la app para usar todo Confío."
+                             if confio_bonus_ended() else
+                             "¡Referidor registrado! Tienes US$5 en $CONFIO bloqueados. Completa tu primera operación para desbloquearlos.")
                 )
                 
         except Exception:

@@ -32,7 +32,7 @@ import { Header } from '../navigation/Header';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
-import { formatUsdDeltaAbs } from '../utils/savingsFormat';
+import { adaptiveDecimals, formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { EmptyState } from '../components/EmptyState';
 import { IconChip } from '../components/icons/IconChip';
 import { transactionVisual } from '../components/icons/vocabulary';
@@ -122,6 +122,9 @@ interface Transaction {
   recipientName?: string;
   p2pTradeId?: string;
   isRewardPayout?: boolean;
+  /** Fee referral: one row per day of commissions (half of invited friends'
+   *  0.9% fee, paid as cUSD). Drawn as a reward card; opens Tus comisiones. */
+  isCommission?: boolean;
   toUsername?: string;
   payrollRunId?: string;
   runId?: string;
@@ -183,14 +186,16 @@ export const AccountDetailScreen = () => {
   }, [formatFixedFloor]);
 
   // Helper function to format transaction amounts to 2 decimal places
-  const formatTransactionAmount = (amount: string): string => {
+  const formatTransactionAmount = (amount: string, adaptive = false): string => {
     // Remove any sign (+/-) temporarily
     const sign = amount.startsWith('-') ? '-' : amount.startsWith('+') ? '+' : '';
     const numericAmount = amount.replace(/^[+-]/, '');
 
-    // Parse and format to 2 decimal places
+    // 2 decimal places; a sub-cent commission keeps 3-4 (never "+0.00").
     const parsedAmount = parseFloat(numericAmount);
-    const formattedAmount = formatDecimal(parsedAmount);
+    const formattedAmount = adaptive
+      ? formatDecimal(parsedAmount, { decimals: adaptiveDecimals(parsedAmount) })
+      : formatDecimal(parsedAmount);
 
     // Return with sign
     return sign + formattedAmount;
@@ -710,7 +715,8 @@ export const AccountDetailScreen = () => {
           type = 'exchange';
         } else if (normalizedTxType === 'ramp') {
           type = 'ramp';
-        } else if (normalizedTxType === 'reward') {
+        } else if (normalizedTxType === 'reward' || normalizedTxType === 'commission') {
+          // A referral commission is money in from Confío, like a reward.
           type = 'reward';
         } else if (normalizedTxType === 'presale') {
           type = 'presale';
@@ -992,6 +998,7 @@ export const AccountDetailScreen = () => {
           description: finalDescription,
           p2pTradeId: type === 'exchange' ? tx.p2pTradeId : undefined,
           isRewardPayout: isReward,
+          isCommission: normalizedTxType === 'commission',
           counterpartyUser: tx.counterpartyUser,
           recipientUser: tx.counterpartyUser,
           senderUser: tx.senderUser,
@@ -1397,6 +1404,12 @@ export const AccountDetailScreen = () => {
       false;
 
     const handlePress = () => {
+      if (transaction.isCommission) {
+        // One wallet row per day of referral commissions; each payout is
+        // listed in Tus comisiones, not as its own receipt.
+        transferNavigation.navigate('FeeReferralCommissions');
+        return;
+      }
       if (transaction.localTransferId) {
         transferNavigation.navigate('LocalTransferStatus', { journeyId: transaction.localTransferId });
         return;
@@ -1560,7 +1573,7 @@ export const AccountDetailScreen = () => {
       }
     };
 
-    const transactionAccessibilityLabel = `${getEnhancedTransactionTitle()}. ${transaction.localTransferPendingAmount ? 'Importe pendiente' : `${formatTransactionAmount(transaction.amount)} ${formatTokenLabel(transaction.currency)}`}. ${formattedDate} ${formattedTime}.`;
+    const transactionAccessibilityLabel = `${getEnhancedTransactionTitle()}. ${transaction.localTransferPendingAmount ? 'Importe pendiente' : `${formatTransactionAmount(transaction.amount, transaction.isCommission)} ${formatTokenLabel(transaction.currency)}`}. ${formattedDate} ${formattedTime}.`;
     const isCounterpartyTheSender =
       transaction.type === 'received' ||
       (transaction.type === 'payment' && transaction.amount.startsWith('+')) ||
@@ -1650,7 +1663,8 @@ export const AccountDetailScreen = () => {
           )}
           {isRewardTransaction && (
             <Text style={styles.rewardNote}>
-              <Icon name="gift" size={12} color={colors.offRampIcon} /> Recompensa por referidos
+              <Icon name="gift" size={12} color={colors.offRampIcon} />{' '}
+              {transaction.isCommission ? 'Mis comisiones por invitar' : 'Recompensa por referidos'}
             </Text>
           )}
           {isPresaleTransaction && (
@@ -1664,7 +1678,7 @@ export const AccountDetailScreen = () => {
             styles.transactionAmountText,
             transaction.amount.startsWith('-') ? styles.negativeAmount : styles.positiveAmount
           ]}>
-            {transaction.localTransferPendingAmount ? 'Pendiente' : `${formatTransactionAmount(transaction.amount)} ${formatTokenLabel(transaction.currency)}`}
+            {transaction.localTransferPendingAmount ? 'Pendiente' : `${formatTransactionAmount(transaction.amount, transaction.isCommission)} ${formatTokenLabel(transaction.currency)}`}
           </Text>
           {/* Status only when it carries information — completed is the
               normal case and stays silent. */}

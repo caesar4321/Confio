@@ -37,26 +37,40 @@ export const buildReferralShareMessage = (username?: string | null): string => {
     username: username || 'tuUsuario',
     source: 'whatsapp',
   });
+  // Referral commission live (the US$5 $CONFIO bonus ended with it): the
+  // friend's reason to join is Confío itself, and because Confío is built on
+  // trust, the inviter says plainly that they earn a share of Confío's own
+  // fee, at no extra cost to the friend.
+  // WhatsApp renders *bold* and _italic_; other apps show the marks as-is,
+  // which reads fine. Never wrap a URL: it must stay tappable.
+  const commissionLines = [
+    '',
+    '🔐 Crea tu cuenta con mi link y *verifica tu identidad* en la app: así queda protegida y puedes usar todo Confío.',
+    '',
+    '🤝 _Para que haya confianza, te lo digo claro:_ Confío me comparte parte de su comisión cuando recargas, retiras o inviertes. *A ti no te cuesta nada extra.*',
+  ];
 
   return [
-    'En Latinoamérica, la confianza entre personas ya existe. Lo que falta es un sistema que la merezca.',
+    '*En Latinoamérica, la confianza entre personas ya existe.* Lo que falta es un sistema que la merezca.',
     '',
-    'Yo ya estoy usando Confío para guardar y mover dólares digitales entre personas, sin depender de bancos ni intermediarios.',
+    'Yo ya estoy usando Confío para *guardar y mover dólares digitales* entre personas, sin depender de bancos ni intermediarios.',
     '',
-    '👇 Únete para recuperar el control de tu dinero:',
+    '👇 *Únete para recuperar el control de tu dinero:*',
     inviteLink,
+    ...commissionLines,
     '',
-    'Conoce a Julian, el fundador, y por qué creó Confío:',
+    '*Conoce a Julian, el fundador, y por qué creó Confío:*',
     '',
-    '▶️ ¡La confianza ya existe!',
+    '▶️ _¡La confianza ya existe!_',
     'https://youtube.com/shorts/Ut01b5Z0NDQ?feature=share',
     '',
-    '▶️ Latinoamérica vive sin barandas',
+    '▶️ _Latinoamérica vive sin barandas_',
     'https://youtu.be/uWTB-SiGyNM',
     '',
-    '▶️ De vividor a fundador',
+    '▶️ _De vividor a fundador_',
     'https://youtu.be/HteVcIVJFbI',
     '',
+    // Plain on purpose: people copy the code into "¿Quién te invitó?".
     `Código: ${cleanUsername}`,
   ].join('\n');
 };
@@ -70,14 +84,17 @@ export const buildSendAndInviteShareMessage = ({
   currency: string;
   inviteLink: string;
 }): string => {
+  // WhatsApp *bold* / _italic_; the link stays on its own line, unformatted.
   return [
-    `¡Hola! Te envié ${amount} ${currency} por Confío.`,
+    `¡Hola! *Te envié ${amount} ${currency} por Confío.*`,
     '',
-    'Confío es una app para guardar, enviar y pagar dólares digitales sin bancos.',
+    'Confío es una app para *guardar, enviar y pagar dólares digitales* sin bancos.',
     '',
-    'Tienes 7 días para reclamarlo. Crea tu cuenta acá:',
+    '⏳ Tienes *7 días* para reclamarlo. Crea tu cuenta acá:',
     inviteLink,
     '',
     'El dinero se acredita en segundos.',
+    '',
+    '🤝 _Para que haya confianza:_ si te unes con este link, Confío me comparte parte de su comisión cuando recargas, retiras o inviertes. A ti no te cuesta nada extra.',
   ].join('\n');
 };

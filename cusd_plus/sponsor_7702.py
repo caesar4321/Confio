@@ -43,6 +43,8 @@ SEL_SUBSCRIBE_AND_MINT = _sel('subscribeAndMint(uint256,uint256,address)')
 SEL_REDEEM_TO_USDT = _sel('redeemToUsdt(uint256,uint256,address)')   # f4794519
 SEL_CUSD_MINT = _sel('mintWithFee(uint256,uint256,address)')
 SEL_CUSD_REDEEM = _sel('redeemWithFee(uint256,uint256,address)')
+# cUSD fee referral (cusd_plus/fee_referral.py): optional first call.
+SEL_ARM_REFERRAL = _sel('armReferral(address,uint256)')
 SEL_WRAP_CUSD = _sel('wrapCusd(uint256,uint256,address)')
 SEL_UNWRAP_TO_CUSD = _sel('unwrapToCusd(uint256,uint256,address)')
 GM_QUOTE_ABI = '(uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32)'
@@ -96,6 +98,9 @@ GAS_PER_SELECTOR = {
     SEL_REDEEM_TO_USDT: 750_000,
     SEL_CUSD_MINT: 180_000,
     SEL_CUSD_REDEEM: 150_000,
+    # armReferral itself is cheap; the budget covers the referrer's cUSD
+    # mint + ReferralPaid that a later fee call in the batch then performs.
+    SEL_ARM_REFERRAL: 80_000,
     SEL_WRAP_CUSD: 750_000,
     SEL_UNWRAP_TO_CUSD: 750_000,
     SEL_STOCK_BUY: 1_700_000,
@@ -529,11 +534,23 @@ def batch_execution_hint(batch) -> Optional[str]:
     }.get(batch.status)
 
 
+def without_leading_arm(calls: list) -> list:
+    """The batch minus an optional leading fee-referral arm. The arm only
+    routes part of Confio's own fee; a retry that gained or lost it (the
+    referral lookup changed, or failed, between attempts) is still the same
+    economic request."""
+    if calls and (calls[0].get('data') or '').lower()[2:10] == SEL_ARM_REFERRAL:
+        return calls[1:]
+    return calls
+
+
 def batch_matches_calls(batch, kind: str, calls: list) -> bool:
-    """True only when a stored batch is byte-for-byte this request."""
+    """True only when a stored batch is byte-for-byte this request, up to
+    the optional leading fee-referral arm."""
     try:
-        return batch.kind == kind and json.loads(batch.calls_json) == calls
-    except (TypeError, ValueError, json.JSONDecodeError):
+        stored = json.loads(batch.calls_json)
+        return batch.kind == kind and without_leading_arm(stored) == without_leading_arm(calls)
+    except (TypeError, ValueError, json.JSONDecodeError, AttributeError):
         return False
 
 

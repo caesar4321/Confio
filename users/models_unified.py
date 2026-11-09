@@ -70,6 +70,7 @@ class UnifiedTransactionTable(models.Model):
         ('ramp', 'Ramp'),
         ('local_transfer', 'Local transfer'),
         ('humanitarian', 'Humanitarian Aid'),
+        ('commission', 'Referral commission'),
     ]
     
     STATUS_CHOICES = [
@@ -472,6 +473,8 @@ class UnifiedTransactionTable(models.Model):
             return self.humanitarian_donation.public_id
         if self.transaction_type == 'humanitarian' and self.humanitarian_release:
             return self.humanitarian_release.public_id
+        if self.transaction_type == 'commission':
+            return self.payment_reference_id or None
         return None
 
     @property

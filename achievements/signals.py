@@ -369,8 +369,16 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
     instance.refresh_from_db()
 
     # Ensure the referred user sees a placeholder pending reward in the app.
+    from cusd_plus.fee_referral import confio_bonus_ended
+    bonus_ended = confio_bonus_ended()
+
     def ensure_pending_event(user, role: str, stage_meta: str, reward_amount: Decimal):
         if not user:
+            return
+        if bonus_ended and not ReferralRewardEvent.objects.filter(
+                user=user, trigger="referral_pending", referral=instance).exists():
+            # No new US$5 placeholders once the commission replaced the bonus
+            # (existing rows keep being maintained, earned ones stay).
             return
         if role == "referee":
             role_status = (instance.referee_reward_status or "pending").lower()

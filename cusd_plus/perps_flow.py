@@ -622,7 +622,8 @@ def recorded_batch(user, calls: list, request_id: str):
     rows = SponsoredBatch.objects.filter(user=user, kind__in=PERPS_BATCH_KINDS, client_request_id=request_id)
     for batch in rows.order_by('-id')[:5]:
         try:
-            if json.loads(batch.calls_json or '[]') == calls:
+            from .sponsor_7702 import without_leading_arm
+            if without_leading_arm(json.loads(batch.calls_json or '[]')) == without_leading_arm(calls):
                 return batch
         except ValueError:
             continue

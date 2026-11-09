@@ -87,9 +87,13 @@ export default function ReceiveScreen() {
           : 'Tus amigos te envían dólares a tu usuario · Compartir',
         onPress: () => {
           const lines = [
-            `Envíame dólares por Confío a mi usuario @${userProfile.username}.`,
+            // The handle stays plain: people copy it into Enviar.
+            `*Envíame dólares por Confío* a mi usuario @${userProfile.username}`,
             '',
-            `¿Aún no tienes Confío? ${buildInviteLink({ username: userProfile.username, source: 'receive' })}`,
+            '¿Aún no tienes Confío? Crea tu cuenta acá:',
+            buildInviteLink({ username: userProfile.username, source: 'receive' }),
+            '',
+            '🤝 Si te unes con este link, Confío me comparte parte de su comisión. A ti no te cuesta nada extra.',
           ];
           Share.share({ message: lines.join('\n') }).catch(() => {});
         },

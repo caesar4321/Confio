@@ -1630,6 +1630,10 @@ export const TransactionDetailScreen = () => {
         return tx.formattedTitle || `Depósito ${tx.currency}`;
       case 'withdrawal':
         return tx.formattedTitle || `Retiro ${tx.currency}`;
+      case 'reward':
+        return tx.description || 'Recompensa por referidos';
+      case 'presale':
+        return tx.description || 'Compra de preventa $CONFIO';
       default:
         return 'Transacción';
     }
@@ -1772,9 +1776,11 @@ export const TransactionDetailScreen = () => {
     } else {
       const amountLabel = currentTx.type === 'unknown' ? 'Monto' : currentTx.type === 'payment'
         ? (isPaymentDebit ? 'Monto pagado' : 'Monto cobrado')
-        : currentTx.type === 'received'
+        : (currentTx.type === 'received' || currentTx.type === 'reward')
           ? 'Monto recibido'
-          : 'Monto enviado';
+          : currentTx.type === 'presale'
+            ? 'Monto comprado'
+            : 'Monto enviado';
       items.push({ label: amountLabel, value: `${formatAmount(currentTx.amount)} ${currency}` });
 
       // External wallet sends are represented by one SendTransaction whose

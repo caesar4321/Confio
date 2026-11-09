@@ -153,10 +153,16 @@ def _referral_reward_totals(user):
 		).aggregate(total=Sum(amount_field))['total']
 		return total or Decimal('0')
 
-	pending = (
-		_sum('referred_user', 'referee_reward_status', 'reward_referee_confio', ['pending'])
-		+ _sum('referrer_user', 'referrer_reward_status', 'reward_referrer_confio', ['pending'])
-	)
+	# Once the fee-referral commission replaced the US$5 bonus, a pending
+	# bonus can never become earned: never show it as pending or locked.
+	from cusd_plus.fee_referral import confio_bonus_ended
+	if confio_bonus_ended():
+		pending = Decimal('0')
+	else:
+		pending = (
+			_sum('referred_user', 'referee_reward_status', 'reward_referee_confio', ['pending'])
+			+ _sum('referrer_user', 'referrer_reward_status', 'reward_referrer_confio', ['pending'])
+		)
 	earned = (
 		_sum('referred_user', 'referee_reward_status', 'reward_referee_confio', ['eligible'])
 		+ _sum('referrer_user', 'referrer_reward_status', 'reward_referrer_confio', ['eligible'])

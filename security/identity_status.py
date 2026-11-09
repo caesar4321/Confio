@@ -136,6 +136,15 @@ def verified_document_of_country(user, country):
     ).first()
 
 
+def verified_exists(user_ref):
+    """Exists() of a current verified personal document for the user that
+    `user_ref` (an OuterRef) points at: an indexed per-row check, for use
+    inside OR filters where an IN subquery would scan every verified row."""
+    from django.db.models import Exists
+
+    return Exists(IdentityVerification.all_documents.filter(PERSONAL, status='verified', user_id=user_ref))
+
+
 def verified_user_ids(user_ids=None):
     """Users with a current verified personal document (distinct ids)."""
     rows = IdentityVerification.all_documents.filter(status='verified').filter(PERSONAL)

@@ -81,6 +81,7 @@ class NotificationType(models.TextChoices):
     REFERRAL_EVENT_P2P_TRADE = 'REFERRAL_EVENT_P2P_TRADE', 'Referral Event - P2P Trade'
     REFERRAL_REWARD_READY = 'REFERRAL_REWARD_READY', 'Referral Reward Ready'
     REFERRAL_REWARD_CLAIMED = 'REFERRAL_REWARD_CLAIMED', 'Referral Reward Claimed'
+    REFERRAL_COMMISSION_EARNED = 'REFERRAL_COMMISSION_EARNED', 'Referral Commission Earned'
     
     # General
     PROMOTION = 'PROMOTION', 'Promotion'

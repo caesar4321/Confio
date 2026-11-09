@@ -151,6 +151,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
   if (showSuccess) {
     return (
       <ReferralSuccessModal
+        message="Listo. Verifica tu identidad en la app para usar todo Confío."
         visible={visible}
         onClose={() => {
           onSuccess?.();
@@ -190,6 +191,12 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
               <Text style={styles.subtitle}>
                 Escribe el @usuario de la persona que te invitó. Lo encuentras en su perfil de Confío. Puedes registrarlo en cualquier momento.
               </Text>
+              {/* Before linking: what the inviter will and won't see. */}
+              <Text style={styles.subtitle}>
+                Quien te invitó recibe parte de la comisión de Confío cuando recargas, retiras o inviertes. A ti no
+                te cuesta nada extra. En la app ve tu @usuario, si verificaste tu identidad y cuánto gana; no le
+                mostramos tus operaciones.
+              </Text>
 
               <View style={styles.usernameInputContainer}>
                 <Text style={styles.atPrefix}>@</Text>
@@ -212,11 +219,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
                 <Text style={styles.errorText}>{error}</Text>
               ) : null}
 
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>
-                  💡 Ambos recibirán el equivalente a US$5 en $CONFIO cuando completes tu primera recarga o ahorro de al menos US$20.
-                </Text>
-              </View>
+
 
               <View style={styles.buttonRow}>
                 <Button

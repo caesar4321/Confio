@@ -9,7 +9,8 @@ interface ReferralSuccessModalProps {
     autoClose?: boolean;
 }
 
-const DEFAULT_MESSAGE = "Tienes US$5 en $CONFIO reservados. Completa tu primera recarga de 20 cUSD para ganarlos.";
+// The US$5 $CONFIO bonus ended with the commission launch.
+const DEFAULT_MESSAGE = "Listo. Verifica tu identidad en la app para usar todo Confío.";
 
 export const ReferralSuccessModal: React.FC<ReferralSuccessModalProps> = ({
     visible,

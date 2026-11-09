@@ -18,6 +18,13 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * registered savings vault may move value between cUSD and cUSD+ without a
  * fee, but only inside a Confio-sponsored transaction. Holder exits to USDT
  * remain permissionless and always fee-bearing.
+ *
+ * Fee referral: a Confio-sponsored transaction may arm a referrer once
+ * (armReferral). Every perimeter fee charged later in that same
+ * transaction, including ones reached through routers or cUSD+, mints the
+ * armed share of the fee to the referrer as cUSD. The fee USDT already in
+ * the vault backs that cUSD, so 1:1 backing is unchanged. The arm lives in
+ * transient storage (EIP-1153) and vanishes when the transaction ends.
  */
 contract CusdVault is
     ERC20Upgradeable,
@@ -32,6 +39,13 @@ contract CusdVault is
 
     uint256 public constant BPS = 10_000;
     uint256 public constant MAX_FEE_BPS = 90;
+    /// Hard ceiling on the referrer's share of a fee: half.
+    uint256 public constant MAX_REFERRAL_SHARE_BPS = 5_000;
+
+    // Transient slots for the per-transaction referral arm.
+    bytes32 private constant _REFERRER_SLOT = keccak256("confio.cusd.referral.referrer");
+    bytes32 private constant _REFEREE_SLOT = keccak256("confio.cusd.referral.referee");
+    bytes32 private constant _SHARE_SLOT = keccak256("confio.cusd.referral.shareBps");
 
     uint256 public feeBps;
     uint256 public accruedEntryFees;
@@ -40,6 +54,14 @@ contract CusdVault is
     address public savingsVault;
     /// Per-address freeze, cUSD+ parity. Appended: layout above must stay.
     mapping(address => bool) public frozen;
+    /// Owner-set ceiling (<= MAX_REFERRAL_SHARE_BPS) for armed shares.
+    /// Zero disables referral payouts. Appended: layout above must stay.
+    uint256 public referralShareCapBps;
+    /// ConfioBatchDelegate: only an EIP-7702 account delegated to it (a
+    /// Confío member's own account) may arm a referral. Without it, any
+    /// contract reached during a sponsored batch (a token hook, a router
+    /// target) could arm itself. Zero disables arming. Appended.
+    address public batchDelegate;
 
     event SponsorSet(address indexed sponsor, bool allowed);
     event SavingsVaultSet(address indexed previousVault, address indexed newVault);
@@ -70,6 +92,11 @@ contract CusdVault is
     event SurplusUsdtRescued(address indexed treasury, uint256 amount);
     event AddressFrozen(address indexed target);
     event AddressUnfrozen(address indexed target);
+    event ReferralShareCapSet(uint256 previousCapBps, uint256 newCapBps);
+    event BatchDelegateSet(address indexed previousDelegate, address indexed newDelegate);
+    event ReferralPaid(
+        address indexed referee, address indexed referrer, uint256 feeUsdt, uint256 shareCusd, uint256 shareBps
+    );
 
     constructor(address usdt) {
         require(usdt != address(0), "zero usdt");
@@ -137,7 +164,7 @@ contract CusdVault is
         require(net >= minCusdOut, "insufficient out");
 
         USDT.safeTransferFrom(msg.sender, address(this), grossUsdt);
-        accruedEntryFees += feeUsdt;
+        accruedEntryFees += _payReferral(feeUsdt);
         _mint(recipient, net);
         _assertFullyBacked();
         emit MintedWithFee(msg.sender, recipient, grossUsdt, feeUsdt, net, feeBps);
@@ -158,7 +185,7 @@ contract CusdVault is
         require(net >= minUsdtOut, "insufficient out");
 
         _burn(msg.sender, grossCusd);
-        accruedExitFees += feeUsdt;
+        accruedExitFees += _payReferral(feeUsdt);
         USDT.safeTransfer(recipient, net);
         _assertFullyBacked();
         emit RedeemedWithFee(msg.sender, recipient, grossCusd, feeUsdt, net, feeBps);
@@ -216,7 +243,7 @@ contract CusdVault is
         require(net > 0, "fee consumes amount");
         require(net >= minUsdtOut, "insufficient out");
         USDT.safeTransferFrom(msg.sender, address(this), grossUsdt);
-        accruedEntryFees += feeUsdt;
+        accruedEntryFees += _payReferral(feeUsdt);
         USDT.safeTransfer(msg.sender, net);
         _assertFullyBacked();
         emit SavingsEntrySettled(grossUsdt, feeUsdt, net, feeBps);
@@ -238,11 +265,93 @@ contract CusdVault is
         require(net > 0, "fee consumes amount");
         require(net >= minUsdtOut, "insufficient out");
         USDT.safeTransferFrom(msg.sender, address(this), grossUsdt);
-        accruedExitFees += feeUsdt;
+        accruedExitFees += _payReferral(feeUsdt);
         USDT.safeTransfer(recipient, net);
         _assertFullyBacked();
         emit SavingsExitSettled(recipient, grossUsdt, feeUsdt, net, feeBps);
         return net;
+    }
+
+    // ═════════════════════════ Fee referral ═══════════════════════════════
+
+    /// @notice Arms the referrer for the rest of this transaction. Only a
+    /// Confio-sponsored transaction may arm, and only once; the sponsor's
+    /// policy decides who the referrer is and the share. A share above the
+    /// owner cap arms nothing (never reverts the batch).
+    /// msg.sender (the user's 7702 account) is recorded as the referee.
+    function armReferral(address referrer, uint256 shareBps) external whenNotPaused {
+        require(isSponsor[tx.origin], "not sponsored");
+        require(_isConfioAccount(msg.sender), "not a Confio account");
+        require(_tload(_REFERRER_SLOT) == 0, "already armed");
+        require(referrer != address(0), "zero referrer");
+        require(referrer != msg.sender, "self referral");
+        require(referrer != address(this) && referrer != savingsVault, "bad referrer");
+        require(!isSponsor[referrer], "bad referrer");
+        require(shareBps > 0 && shareBps <= MAX_REFERRAL_SHARE_BPS, "bad share");
+        // Above the live cap (lowered or zeroed by the Safe while servers or
+        // prepared batches still carry the old share): no arm, whole fee
+        // kept, and the member's conversion still goes through.
+        if (shareBps > referralShareCapBps) return;
+        _tstore(_REFERRER_SLOT, uint256(uint160(referrer)));
+        _tstore(_REFEREE_SLOT, uint256(uint160(msg.sender)));
+        _tstore(_SHARE_SLOT, shareBps);
+    }
+
+    /// @notice The referral armed in the current transaction (zero if none).
+    function armedReferral() external view returns (address referrer, address referee, uint256 shareBps) {
+        referrer = address(uint160(_tload(_REFERRER_SLOT)));
+        referee = address(uint160(_tload(_REFEREE_SLOT)));
+        shareBps = _tload(_SHARE_SLOT);
+    }
+
+    function setBatchDelegate(address newDelegate) external onlyOwner {
+        address previous = batchDelegate;
+        batchDelegate = newDelegate;
+        emit BatchDelegateSet(previous, newDelegate);
+    }
+
+    /// EIP-7702: a delegated EOA's code is the 23-byte designator
+    /// 0xef0100 || delegate.
+    function _isConfioAccount(address account) internal view returns (bool) {
+        address delegate = batchDelegate;
+        if (delegate == address(0)) return false;
+        return keccak256(account.code) == keccak256(abi.encodePacked(hex"ef0100", delegate));
+    }
+
+    function setReferralShareCapBps(uint256 newCapBps) external onlyOwner {
+        require(newCapBps <= MAX_REFERRAL_SHARE_BPS, "cap too high");
+        uint256 previous = referralShareCapBps;
+        referralShareCapBps = newCapBps;
+        emit ReferralShareCapSet(previous, newCapBps);
+    }
+
+    /// @dev Mints the armed share of `feeUsdt` to the referrer as cUSD and
+    /// returns what the vault keeps as fee. Never reverts the user's
+    /// conversion: no arm, no sponsor, a frozen referrer, a lowered cap or
+    /// a share that rounds to zero all simply keep the whole fee.
+    function _payReferral(uint256 feeUsdt) internal returns (uint256 kept) {
+        if (feeUsdt == 0) return 0;
+        address referrer = address(uint160(_tload(_REFERRER_SLOT)));
+        if (referrer == address(0) || !isSponsor[tx.origin] || frozen[referrer]) return feeUsdt;
+        uint256 shareBps = _tload(_SHARE_SLOT);
+        if (shareBps > referralShareCapBps) return feeUsdt;
+        uint256 share = Math.mulDiv(feeUsdt, shareBps, BPS);
+        if (share == 0) return feeUsdt;
+        _mint(referrer, share);
+        emit ReferralPaid(address(uint160(_tload(_REFEREE_SLOT))), referrer, feeUsdt, share, shareBps);
+        return feeUsdt - share;
+    }
+
+    function _tload(bytes32 slot) private view returns (uint256 value) {
+        assembly ("memory-safe") {
+            value := tload(slot)
+        }
+    }
+
+    function _tstore(bytes32 slot, uint256 value) private {
+        assembly ("memory-safe") {
+            tstore(slot, value)
+        }
     }
 
     function setSponsor(address sponsor, bool allowed) external onlyOwner {

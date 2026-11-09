@@ -3,7 +3,7 @@ import { View, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Text } from '../components/common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
-import { useNavigation, NavigationProp, RouteProp, useRoute } from '@react-navigation/native';
+import { useNavigation, NavigationProp, RouteProp, useRoute, StackActions } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
@@ -11,6 +11,13 @@ import { Header } from '../navigation/Header';
 type ReferralFriendJoinedRouteProp = RouteProp<MainStackParamList, 'ReferralFriendJoined'>;
 
 export const ReferralFriendJoinedScreen: React.FC = () => {
+  // The US$5 $CONFIO bonus ended with the commission launch: old notifications
+  // that open this screen land on the referral program instead.
+  const nav = useNavigation<NavigationProp<MainStackParamList>>();
+  React.useEffect(() => {
+    // Replace, not push: Back must never land on the old US$5 copy.
+    nav.dispatch(StackActions.replace('Achievements'));
+  }, [nav]);
   // Typed like every other screen in this stack: a bare useNavigation() gives
   // navigate() a params type of `never`, so every call site here failed to
   // compile.

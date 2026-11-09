@@ -164,7 +164,8 @@ export const parseLinkUrl = (url: string): { publicRef: string; keyHex: string }
 };
 
 export const linkMessage = (amountLabel: string, url: string) =>
-  `Te envié ${amountLabel} por Confío. Ábrelo aquí para recibirlo: ${url}`;
+  // The URL on its own line: tappable, never inside WhatsApp formatting.
+  `*Te envié ${amountLabel} por Confío.* Ábrelo aquí para recibirlo:\n${url}`;
 
 /** Opens the contact's WhatsApp chat with the message typed in. */
 export const openWhatsAppChat = async (phone: string, text: string) => {

@@ -1106,8 +1106,10 @@ confio_admin_site.register(SendTransaction, SendTransactionAdmin)
 confio_admin_site.register(PhoneInvite, PhoneInviteAdmin)
 
 # Conversion models
-from conversion.models import Conversion
+from conversion.models import Conversion, FeeReferralPayout
+from conversion.admin import FeeReferralPayoutAdmin
 confio_admin_site.register(Conversion, ConversionAdmin)
+confio_admin_site.register(FeeReferralPayout, FeeReferralPayoutAdmin)
 
 # Exchange rate models
 from exchange_rates.models import DailyRateSnapshot, ExchangeRate, RateFetchLog

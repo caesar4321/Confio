@@ -139,7 +139,10 @@ def persist_local_fee(batch, raw):
         return
     flow = MoneyFlow.objects.select_for_update().get(pk=journey.money_flow_id)
     if flow.metadata.get('infinia_fee'):
-        mint_policy_calls(json.loads(batch.calls_json), batch.user,
+        # The stored calls may lead with the fee-referral arm (the sponsor
+        # stripped it before every policy): validate without it here too.
+        from cusd_plus.sponsor_7702 import without_leading_arm
+        mint_policy_calls(without_leading_arm(json.loads(batch.calls_json)), batch.user,
                           batch.user_bsc_address, batch.client_request_id)
 
 

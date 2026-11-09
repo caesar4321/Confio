@@ -293,6 +293,10 @@ def notify_referral_joined(referral: UserReferral) -> None:
 
 def _notify_referral_joined(referral: UserReferral) -> None:
     """Create joined notifications only after the referral commits."""
+    from cusd_plus.fee_referral import confio_bonus_ended
+    if confio_bonus_ended():
+        _notify_commission_referral_joined(referral)
+        return
     referred_name = _user_label(referral.referred_user)
     if referral.referrer_user:
         create_notification(
@@ -318,6 +322,38 @@ def _notify_referral_joined(referral: UserReferral) -> None:
                 'referrer_user_id': referral.referrer_user_id,
             },
             action_url=f"confio://referrals/action?step=pending&referral_id={referral.id}",
+        )
+
+
+def _notify_commission_referral_joined(referral: UserReferral) -> None:
+    """Once the fee-referral commission replaced the US$5 bonus: the
+    referrer learns what starts their commission (both verified), and the
+    friend learns, up front, what their inviter can and cannot see."""
+    from cusd_plus.fee_referral import commission_share_percent
+
+    share = commission_share_percent()
+    friend = referral.referred_user
+    handle = f"@{friend.username}" if friend and friend.username else "Tu amigo"
+    if referral.referrer_user:
+        create_notification(
+            user=referral.referrer_user,
+            notification_type=NotificationTypeChoices.REFERRAL_FRIEND_JOINED,
+            title="Tu invitado ya está en Confío",
+            message=(f"{handle} se registró con tu invitación. Cuando ambos verifiquen su identidad, "
+                     f"recibes el {share} de la comisión de sus operaciones, al instante."),
+            data={'referral_id': referral.id, 'referred_user_id': referral.referred_user_id},
+            action_url="confio://achievements",
+        )
+    if friend:
+        create_notification(
+            user=friend,
+            notification_type=NotificationTypeChoices.REFERRAL_ACTION_REMINDER,
+            title="Te uniste por invitación",
+            message=("Quien te invitó recibe parte de la comisión de Confío cuando recargas, retiras o "
+                     "inviertes. A ti no te cuesta nada extra. En la app ve tu @usuario, si verificaste tu "
+                     "identidad y cuánto gana; no le mostramos tus operaciones."),
+            data={'referral_id': referral.id, 'referrer_user_id': referral.referrer_user_id},
+            action_url="confio://achievements",
         )
 
 
@@ -387,6 +423,14 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
 
     Returns the updated referral when eligibility was triggered, otherwise None.
     """
+    # The US$5 $CONFIO bonus ends when the fee-referral commission launches
+    # (cusd_plus/fee_referral.py). Bonuses already earned stay; no new one
+    # is granted, pending ones included. The referral itself is untouched:
+    # it keeps earning commission.
+    from cusd_plus.fee_referral import confio_bonus_ended
+    if confio_bonus_ended():
+        return None
+
     referral, actor_role = _locate_referral_for_user(user)
 
     config = DEFAULT_EVENT_REWARD_CONFIG.get(event_ctx.event)

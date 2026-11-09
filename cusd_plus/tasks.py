@@ -2000,6 +2000,8 @@ def monitor_cusd_fee_events(self):
             'RedeemedWithFee(address,address,uint256,uint256,uint256,uint256)',
             'SavingsEntrySettled(uint256,uint256,uint256,uint256)',
             'SavingsExitSettled(address,uint256,uint256,uint256,uint256)',
+            # Fee referral payouts are emitted in the same transactions.
+            'ReferralPaid(address,address,uint256,uint256,uint256)',
         )
     ]
     ingested = 0
@@ -2027,6 +2029,8 @@ def monitor_cusd_fee_events(self):
                     except (TypeError, ValueError):
                         pass
                 record_fee_events(tx_hash, tx_logs, block_times)
+                from .fee_referral import record_referral_payouts
+                record_referral_payouts(tx_hash, tx_logs, block_times)
                 # Preserve domain identity for sponsored sends. Falling back
                 # to tx.from would see the sponsor, lose kind/source_id, and
                 # recreate the Conversion activity row that send settlement

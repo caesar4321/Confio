@@ -4,7 +4,7 @@ Public by design, like @usuario. They travel WITH the row or person they
 belong to, never through a phone-number lookup (users/schema.py
 check_users_by_phones answers only saved contacts).
 """
-from django.db.models import Count
+from django.db.models import Count, OuterRef, Q
 
 
 def _badge(count: int) -> tuple:
@@ -19,8 +19,13 @@ def badges_for(user_ids) -> dict:
     ids = {uid for uid in user_ids if uid}
     if not ids:
         return {}
+    # Same rule as User.referral_count: a verified friend's first deposit, or
+    # an old claimable bonus (badges earned before the launch are kept).
+    from security.identity_status import verified_exists
     counts = dict(UserReferral.objects.filter(
-        referrer_user_id__in=ids, referrer_reward_status__in=('eligible', 'claimed'), deleted_at__isnull=True,
+        Q(referrer_reward_status__in=('eligible', 'claimed'))
+        | (Q(status='converted') & verified_exists(OuterRef('referred_user_id'))),
+        referrer_user_id__in=ids, deleted_at__isnull=True,
     ).order_by().values_list('referrer_user_id').annotate(total=Count('id')))
     return {uid: _badge(counts.get(uid, 0)) for uid in ids}
 

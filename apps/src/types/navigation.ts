@@ -531,6 +531,7 @@ export type MainStackParamList = {
     };
   } | undefined;
   Achievements: undefined;
+  FeeReferralCommissions: undefined;
   ConfioTokenInfo: undefined;
   LatamCommunity: undefined;
   FundFlow: undefined;

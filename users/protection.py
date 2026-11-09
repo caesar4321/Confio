@@ -48,7 +48,7 @@ MIN_GAIN_USD = Decimal('1')              # hide gains worth less than US$1 today
 RESULT_TTL = 10 * 60
 
 OUTFLOW_KINDS = {'merchant', 'p2p_send', 'payroll_out', 'donation', 'withdrawal', 'investment_in'}
-INFLOW_KINDS = {'income_person', 'sale', 'payroll_in', 'bonus', 'top_up', 'investment_out'}
+INFLOW_KINDS = {'income_person', 'sale', 'payroll_in', 'bonus', 'commission', 'top_up', 'investment_out'}
 
 
 def protection_countries() -> set:

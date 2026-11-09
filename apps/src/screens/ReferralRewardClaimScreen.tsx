@@ -198,11 +198,13 @@ export const ReferralRewardClaimScreen: React.FC = () => {
     | { type: 'pendingHeader' }
     | { type: 'pending'; referral: Referral };
 
+  // The commission replaced the US$5 bonus: pending bonuses can no longer be earned.
   const listData = React.useMemo<ListSection[]>(() => {
     const sections: ListSection[] = [];
     sections.push({ type: 'summary', totalEarned });
+    const visiblePending: typeof pendingReferrals = [];
 
-    if (earned.length === 0 && pendingReferrals.length === 0) {
+    if (earned.length === 0 && visiblePending.length === 0) {
       sections.push({ type: 'empty' });
       return sections;
     }
@@ -214,15 +216,15 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       });
     }
 
-    if (pendingReferrals.length > 0) {
+    if (visiblePending.length > 0) {
       sections.push({ type: 'pendingHeader' });
-      pendingReferrals.forEach((referral) => {
+      visiblePending.forEach((referral) => {
         sections.push({ type: 'pending', referral });
       });
     }
 
     return sections;
-  }, [earned, pendingReferrals, totalEarned]);
+  }, [earned, totalEarned]);
 
 
   const keyExtractor = React.useCallback((item: ListSection, index: number) => {
@@ -244,9 +246,9 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           <EmptyState
             icon="gift"
             title="Aún no tienes bonos"
-            subtitle="Invita a un amigo y, cuando haga su primer depósito, ambos ganan $CONFIO."
-            actionLabel="Invitar amigos"
-            onAction={() => navigation.navigate('ConfioAddress')}
+            subtitle="Los bonos $CONFIO terminaron. Ahora ganas el 50% de la comisión de tus invitados."
+            actionLabel="Ver tus comisiones"
+            onAction={() => navigation.navigate('FeeReferralCommissions')}
           />
         );
       }

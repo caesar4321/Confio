@@ -1,5 +1,5 @@
 from django.contrib import admin, messages
-from .models import Conversion
+from .models import Conversion, FeeReferralPayout
 
 
 @admin.register(Conversion)
@@ -107,3 +107,33 @@ class ConversionAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """Prevent hard deletes from admin"""
         return False
+
+
+class FeeReferralPayoutAdmin(admin.ModelAdmin):
+    """Referrers' share of perimeter fees (ReferralPaid), read-only ledger."""
+
+    list_display = ('created_at', 'referrer_user', 'referee_user', 'share_usd', 'fee_usd', 'share_bps', 'tx_hash')
+    list_filter = ('share_bps',)
+    search_fields = ('tx_hash', 'referrer_address', 'referee_address',
+                     'referrer_user__username', 'referee_user__username')
+    raw_id_fields = ('referrer_user', 'referee_user')
+    date_hierarchy = 'created_at'
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description='Share (US$)')
+    def share_usd(self, obj):
+        from decimal import Decimal
+        return (Decimal(obj.share_wei) / Decimal(10) ** 18).quantize(Decimal('0.0001'))
+
+    @admin.display(description='Fee (US$)')
+    def fee_usd(self, obj):
+        from decimal import Decimal
+        return (Decimal(obj.fee_wei) / Decimal(10) ** 18).quantize(Decimal('0.0001'))

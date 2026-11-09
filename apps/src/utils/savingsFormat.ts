@@ -12,6 +12,22 @@ import { formatDecimal } from './numberLocale';
 // returns null and the caller hides the line. Returns the absolute
 // value — sign and color are the caller's job. Stock day-changes stay
 // 2 dp (market convention); this is for savings yield only.
+/** Decimals for a small money-in amount under the same rule (referral
+ * commissions are often sub-cent: 0.45% of a few dollars). */
+export const adaptiveDecimals = (v: number): number => {
+  const abs = Math.abs(v);
+  if (abs >= 0.005 || abs === 0) return 2;
+  return abs >= 0.0005 ? 3 : 4;
+};
+
+/** A small money-in amount (no currency) under that rule. Below 4-dp
+ *  resolution it says "<0.0001" instead of a misleading all-zeros figure. */
+export const formatSmallAmount = (v: number): string => {
+  const abs = Math.abs(v);
+  if (abs > 0 && abs < 0.00005) return `<${formatDecimal(0.0001, { decimals: 4 })}`;
+  return formatDecimal(abs, { decimals: adaptiveDecimals(abs) });
+};
+
 export const formatUsdDeltaAbs = (v: number): string | null => {
   const abs = Math.abs(v);
   if (abs < 0.00005) return null;

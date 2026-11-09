@@ -24,6 +24,8 @@ import { colors } from '../config/theme';
 import DeviceInfo from 'react-native-device-info';
 import { Button } from '../components/common/Button';
 import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
+import { CommissionsEntryRow } from '../components/CommissionsEntryRow';
+import { DEFAULT_TERMS, commissionPercents, useFeeReferralSummary, windowRule } from '../hooks/useFeeReferralSummary';
 import { formatDecimal } from '../utils/numberLocale';
 
 // Utility function to format phone number with country code
@@ -71,6 +73,11 @@ export const ProfileScreen = () => {
   const [biometricError, setBiometricError] = React.useState<string | null>(null);
   const appState = React.useRef(AppState.currentState);
 
+  // Referral commission: 50% of an invited friend's fee (the referral program).
+  const commission = useFeeReferralSummary(activeAccount?.type?.toLowerCase() === 'business');
+  const commissionTerms = commission ?? DEFAULT_TERMS;
+  const commissionSharePct = commissionPercents(commissionTerms).sharePct;
+
   const referralShareMessage = React.useMemo(() => {
     return buildReferralShareMessage(userProfile?.username);
   }, [userProfile?.username]);
@@ -113,7 +120,7 @@ export const ProfileScreen = () => {
     if (!username) {
       Alert.alert(
         'Configura tu usuario',
-        'Edita tu perfil y crea un @usuario para poder invitar amigos y ganar US$5.'
+        'Edita tu perfil y crea un @usuario para poder invitar amigos y ganar tu comisión.'
       );
       return;
     }
@@ -520,9 +527,12 @@ export const ProfileScreen = () => {
                 <Icon name="gift" size={20} color={colors.white} />
               </View>
               <View style={styles.referralHeaderText}>
-                <Text style={styles.referralTitle}>Invita a tus amigos a la red de confianza</Text>
+                <Text style={styles.referralTitle}>
+                  Tu red de confianza ahora te paga
+                </Text>
                 <Text style={styles.referralSubtitle}>
-                  Comparte tu link con videos de Julian sobre por qué nació Confío. Ayuda a los tuyos a proteger sus ahorros; cuando hagan su primer depósito, ambos reciben US$5 en $CONFIO como bienvenida.
+                  <Text style={styles.referralSubtitleAccent}>Invita a quienes confías.</Text>
+                  {` Cuando mueven su dinero, Confío te comparte el ${commissionSharePct} de su comisión, en dólares y al instante.`}
                 </Text>
               </View>
             </View>
@@ -534,6 +544,37 @@ export const ProfileScreen = () => {
               </TouchableOpacity>
             </View>
 
+            {commission && commission.friendCount > 0 && (
+              // Existing invitations count from launch: tell dormant
+              // referrers their old invites can start paying now.
+              <Text style={[styles.referralCriteriaNote, { marginTop: 10 }]}>
+                {commission.friendCount === 1 ? 'Ya tienes 1 invitado.' : `Ya tienes ${commission.friendCount} invitados.`}
+                {' '}Cuando ambos estén verificados, empiezas a ganar.
+              </Text>
+            )}
+
+            {commission && !commission.viewerVerified && (
+              <TouchableOpacity
+                style={[styles.referralUpdateUsername, { marginTop: 10 }]}
+                onPress={() => navigation.navigate('Verification' as never)}
+              >
+                <Icon name="shield" size={16} color={colors.primaryDark} />
+                <Text style={styles.referralUpdateUsernameText}>Verifica tu identidad para empezar a ganar</Text>
+                <Icon name="chevron-right" size={16} color={colors.primaryDark} />
+              </TouchableOpacity>
+            )}
+
+            {/* The permanent entry: never waits for the summary to load. */}
+            <View style={{ marginTop: 12 }}>
+              <CommissionsEntryRow
+                summary={commission}
+                onPress={() => navigation.navigate('FeeReferralCommissions')}
+              />
+            </View>
+
+            {/* $CONFIO bonuses ended with the commission launch: the row stays
+                only for people holding bonuses they already earned. */}
+            {referralStats.earned > 0 && (
             <TouchableOpacity
               style={[
                 styles.referralClaimButton,
@@ -561,13 +602,12 @@ export const ProfileScreen = () => {
                       account until $CONFIO launches. */}
                   {referralStats.earned > 0
                     ? `${formatDecimal(referralStats.earned)} $CONFIO ganados`
-                    : referralStats.pending > 0
-                      ? `${formatDecimal(referralStats.pending)} $CONFIO pendientes`
-                      : 'Ver mis bonos ($CONFIO)'}
+                    : 'Ver mis bonos ($CONFIO)'}
                 </Text>
               </View>
               <Icon name="chevron-right" size={16} color={colors.primaryDark} />
             </TouchableOpacity>
+            )}
 
             {/* Tier progress indicator */}
             {activeAccount?.type.toLowerCase() === 'personal' && (
@@ -603,60 +643,14 @@ export const ProfileScreen = () => {
               <Text style={styles.referralCriteriaTitle}>¿Cómo funciona?</Text>
               <Text style={styles.referralCriteriaItem}>1. Comparte tu link por WhatsApp con la historia del fundador.</Text>
               <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta y descubre Confío.</Text>
-              <Text style={styles.referralCriteriaItem}>3. Carga al menos US$20 — a su cUSD o directo a su ahorro (cUSD+) — y se activan los US$5 para los dos.</Text>
+              <Text style={styles.referralCriteriaItem}>3. Cuando ambos verifican su identidad, recibes al instante el {commissionSharePct} de la comisión que tu amigo paga al recargar, retirar, invertir o enviar fuera de Confío, en dólares (cUSD). {windowRule(commissionTerms.windowDays)}.</Text>
             </View>
 
-            {/* Status tier explainer — visual preview with user's own name */}
+            {/* Tier ladder in one line; the badge itself still shows next to names. */}
             <View style={styles.referralCriteria}>
-              <Text style={styles.referralCriteriaTitle}>🏅 Niveles y verificado</Text>
               <Text style={styles.referralCriteriaNote}>
-                Desbloquea niveles invitando amigos que completen su primer depósito. La insignia de verificado (✓) la obtienes verificando tu cuenta.
+                🏅 Tu insignia sube con los amigos que invitas: ⭐ 1, 💎 3 y 🏆 10 amigos verificados con depósito.
               </Text>
-              <View style={{ gap: 8, marginTop: 10, backgroundColor: colors.neutral, borderRadius: 10, padding: 12 }}>
-                {(() => {
-                  const name = userProfile?.firstName || 'Tu nombre';
-                  const isVerified = userProfile?.isReferralVerified;
-                  
-                  const VerifiedBadge = () => isVerified ? (
-                    <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name="check" size={10} color={colors.white} />
-                    </View>
-                  ) : null;
-
-                  return (
-                    <>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, color: colors.text.secondary, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
-                        <Text style={{ fontSize: 12, color: colors.text.light }}>← Nivel inicial</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: colors.accent, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color={colors.white} />
-                        </View>
-                        <Text style={{ fontSize: 14 }}>⭐</Text>
-                        <Text style={{ fontSize: 12, color: colors.accent }}>← 1 amigo con depósito</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: colors.offRampIcon, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color={colors.white} />
-                        </View>
-                        <Text style={{ fontSize: 14 }}>💎</Text>
-                        <Text style={{ fontSize: 12, color: colors.offRampIcon }}>← 3 amigos con depósito</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: colors.secondary, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color={colors.white} />
-                        </View>
-                        <Text style={{ fontSize: 14 }}>🏆</Text>
-                        <Text style={{ fontSize: 12, color: colors.secondary }}>← 10 amigos con depósito</Text>
-                      </View>
-                    </>
-                  );
-                })()}
-              </View>
             </View>
 
             <View style={styles.referralCriteria}>
@@ -1246,6 +1240,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: colors.text.primary,
+  },
+  referralSubtitleAccent: {
+    fontWeight: '700',
+    color: colors.accent,
   },
   referralSubtitle: {
     fontSize: 13,

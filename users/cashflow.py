@@ -6,7 +6,7 @@ Reads exactly the rows the history list shows (account_unified_queryset), so
 the month view and the history can never disagree about which movements
 exist. Each row gets a rail-derived `kind`; kinds land in buckets:
 
-  income  (Entró): income_person, sale, payroll_in, bonus
+  income  (Entró): income_person, sale, payroll_in, bonus, commission
   spending (Salió): merchant, p2p_send, payroll_out, donation
   own lines:        top_up, withdrawal              (never in Entró/Salió)
   net lines:        savings_in/out, investment_in/out
@@ -30,7 +30,7 @@ from marketplace.ledger import parse_reference as parse_market_reference
 
 USD_TOKENS = {'CUSD', 'CUSD_BSC', 'CUSD_PLUS', 'USDT', 'USDC'}
 
-INCOME_KINDS = {'income_person', 'sale', 'payroll_in', 'bonus'}
+INCOME_KINDS = {'income_person', 'sale', 'payroll_in', 'bonus', 'commission'}
 SPENDING_KINDS = {'merchant', 'p2p_send', 'payroll_out', 'donation'}
 COUNTERPARTY_KINDS = INCOME_KINDS | SPENDING_KINDS
 
@@ -327,6 +327,9 @@ def classify(row, ctx: ViewerContext, require_confirmed: bool = True) -> Movemen
         kind = 'payroll_in' if direction == 'received' else 'payroll_out'
     elif ttype == 'reward':
         kind = 'bonus' if direction == 'received' else None
+    elif ttype == 'commission':
+        # Fee-referral commissions: their own "Entró" line, not a bonus.
+        kind = 'commission' if direction == 'received' else None
     elif ttype == 'presale':
         kind = 'investment_in' if direction == 'sent' else None
     elif ttype == 'humanitarian':

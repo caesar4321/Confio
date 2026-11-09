@@ -21,6 +21,8 @@ import { AnalyticsService } from '../services/analyticsService';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { DEFAULT_TERMS, commissionPercents, useFeeReferralSummary } from '../hooks/useFeeReferralSummary';
+import { useAccount } from '../contexts/AccountContext';
 
 // Focused share utility: ONE job — put your @usuario in a friend's hands.
 // The program explainer (steps, rewards) lives on AchievementsScreen; this
@@ -41,6 +43,8 @@ export const ConfioAddressScreen: React.FC = () => {
   const [banner, setBanner] = React.useState<{ message: string; variant: 'error' | 'success' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);
 
+  const { activeAccount } = useAccount();
+  const commission = useFeeReferralSummary(activeAccount?.type?.toLowerCase() === 'business');
   const shareMessage = React.useMemo(() => {
     return buildReferralShareMessage(username || 'tuUsuario');
   }, [username]);
@@ -184,7 +188,9 @@ export const ConfioAddressScreen: React.FC = () => {
             </View>
             <View style={styles.rowText}>
               <Text style={styles.rowTitle}>Ver el programa de referidos</Text>
-              <Text style={styles.rowSubtitle}>Cómo ganan US$5 tú y cada amigo</Text>
+              <Text style={styles.rowSubtitle}>
+                {`Tu ${commissionPercents(commission ?? DEFAULT_TERMS).sharePct} de la comisión de tus invitados`}
+              </Text>
             </View>
             <Icon name="chevron-right" size={18} color={colors.text.light} />
           </TouchableOpacity>
@@ -200,30 +206,14 @@ export const ConfioAddressScreen: React.FC = () => {
             </View>
             <View style={styles.rowText}>
               <Text style={styles.rowTitle}>¿Te invitó alguien?</Text>
-              <Text style={styles.rowSubtitle}>Pon su @usuario para que también reciba su regalo</Text>
+              <Text style={styles.rowSubtitle}>
+                Pon su @usuario para que reciba su comisión
+              </Text>
             </View>
             <Icon name="chevron-right" size={18} color={colors.text.light} />
           </TouchableOpacity>
 
-          {/* The one piece of detail unique to this surface: what counts */}
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Operaciones que activan el bono</Text>
-            <View style={styles.criteriaList}>
-              <View style={styles.criteriaRow}>
-                <Icon name="dollar-sign" size={14} color={colors.secondary} />
-                <Text style={styles.criteriaItem}>Primera recarga de dólares digitales (US$20+)</Text>
-              </View>
-              <View style={styles.criteriaRow}>
-                <Icon name="download" size={14} color={colors.secondary} />
-                <Text style={styles.criteriaItem}>Primer depósito convertido a cUSD (≥ US$20)</Text>
-              </View>
-              <View style={styles.criteriaRow}>
-                <Icon name="trending-up" size={14} color={colors.secondary} />
-                <Text style={styles.criteriaItem}>Primer ahorro en Confío Dollar+ (≥ US$20)</Text>
-              </View>
-            </View>
-            <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO al equivalente a US$5.</Text>
-          </View>
+
         </View>
       </ScrollView>
 

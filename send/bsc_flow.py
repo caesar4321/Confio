@@ -832,6 +832,14 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         sender_display, sender_phone_val = author_display_name(user), ''
         recipient_display, recipient_phone_val = author_display_name(recipient_user), ''
 
+    # Fee referral: a personal send that crosses the cUSD perimeter (to an
+    # outside wallet) carries the referrer arm first, so half the fee goes
+    # to whoever invited this member (cusd_plus/fee_referral.py).
+    if sender_business is None and activation_id is None:
+        from cusd_plus.fee_referral import arm_calls_for, has_fee_bearing_call
+        if has_fee_bearing_call(calls):
+            calls = arm_calls_for(user, sender_addr) + calls
+
     with transaction.atomic():
         if recipient_user is not None or recipient_business is not None:
             locked_recipient = _lock_internal_recipient_account(
@@ -1154,7 +1162,9 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
         return {'success': False, 'error': step_up}
 
     try:
-        _validate_send_batch(calls, send_tx, meta)
+        from cusd_plus.fee_referral import strip_stored_arm
+        # Prepare decided the arm; submit only shape-checks it.
+        _validate_send_batch(strip_stored_arm(calls), send_tx, meta)
 
         intent_id = sponsor_7702.intent_id_for(kind, send_tx.id)
         digest = sponsor_7702.intent_digest(

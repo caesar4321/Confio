@@ -25,7 +25,7 @@ export const SHARE_LINKS = {
   // Share messages templates
   messages: {
     beta: '¡Únete a Confío! 💚\nLa billetera digital diseñada para Venezuela.\n\n',
-    referral: '¡Te invito a Confío! 💸\nGana $2 por cada amigo que invites.\n\n',
+    referral: '¡Te invito a Confío! 💚\nLa red de confianza para guardar y mover tus dólares.\n\n',
     achievement: '¡Mira lo que logré en Confío! 🏆\n\n',
     tiktok: '¡Sígueme en mi reto Confío! 🎬\n\n',
     transaction: '¡Te envié dinero por Confío! 💰\n\n',

@@ -22,6 +22,9 @@ import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
+import { CommissionsEntryRow } from '../components/CommissionsEntryRow';
+import { useAccount } from '../contexts/AccountContext';
+import { DEFAULT_TERMS, commissionPercents, useFeeReferralSummary } from '../hooks/useFeeReferralSummary';
 
 type Step = {
   title: string;
@@ -43,6 +46,13 @@ export const AchievementsScreen: React.FC = () => {
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);
 
+  // Referral commission (50% of an invited friend's fee): only once the
+  // server has it live; until then the screen is the US$5 bonus program.
+  const { activeAccount } = useAccount();
+  // Personal program: a business context never sees personal commissions.
+  const commission = useFeeReferralSummary(activeAccount?.type?.toLowerCase() === 'business');
+  const sharePct = commissionPercents(commission ?? DEFAULT_TERMS).sharePct;
+
   const shareMessage = useMemo(() => {
     return buildReferralShareMessage(username || 'tuUsuario');
   }, [username]);
@@ -54,20 +64,24 @@ export const AchievementsScreen: React.FC = () => {
         description: 'Toca "Invitar por WhatsApp" y elige a tus amigos. El mensaje incluye tu link y la historia de Julian.',
       },
       {
-        title: 'Tu amigo descubre Confío',
+        title: 'Tu amigo crea su cuenta',
         description: 'Al crear su cuenta usando tu enlace, queda asociado a tu invitación.',
       },
       {
-        title: 'Tu amigo carga US$20',
-        description:
-          'Con su primera recarga de al menos US$20 — a su cUSD o directo a su ahorro (cUSD+) — se activan los US$5 en $CONFIO para los dos.',
+        title: 'Ambos verifican su identidad',
+        description: 'La comisión empieza cuando tú y tu amigo están verificados en la app; lo que tu amigo mueva antes no cuenta.',
       },
       {
-        title: '¡Ganen sin límites!',
-        description: 'No hay límite de invitaciones. Entre más amigos invites, más ganarás.',
+        title: `Recibes el ${sharePct} de su comisión`,
+        description:
+          'Cuando tu amigo recarga, retira, invierte o envía a una billetera fuera de Confío, te llega al instante tu parte de su comisión en dólares (cUSD).',
+      },
+      {
+        title: 'Sigue tus comisiones',
+        description: 'En "Mis comisiones" ves cuánto ganaste y qué amigos faltan por verificar. Puedes recordarles.',
       },
     ],
-    []
+    [sharePct]
   );
 
   const handleShare = async () => {
@@ -140,11 +154,15 @@ export const AchievementsScreen: React.FC = () => {
             <Circle cx="104%" cy="18%" r="100" stroke={colors.white} strokeWidth="24" strokeOpacity="0.10" fill="none" />
           </Svg>
           <View style={styles.fieldInner}>
-            <Text style={styles.fieldEyebrow}>US$5 PARA TI Y TU AMIGO</Text>
-            <Text style={styles.fieldTitle}>Invita a tus amigos a la red de confianza</Text>
+            <Text style={styles.fieldEyebrow}>
+              {`GANA EL ${sharePct} DE LA COMISIÓN`}
+            </Text>
+            <Text style={styles.fieldTitle}>
+              Tu red de confianza ahora te paga
+            </Text>
             <Text style={styles.fieldSubtitle}>
-              Comparte la historia de Julian y por qué nació Confío. Cuando tu
-              amigo haga su primer depósito, ambos reciben US$5 en $CONFIO.
+              <Text style={styles.fieldSubtitleAccent}>Invita a quienes confías</Text>
+              {` y comparte la historia de Julian. Cuando mueven su dinero, Confío te comparte el ${sharePct} de su comisión, en dólares y al instante.`}
             </Text>
 
             <View style={styles.usernameRow}>
@@ -204,25 +222,13 @@ export const AchievementsScreen: React.FC = () => {
             />
           )}
 
-          {/* Bonus ledger entry — tinted promo card, Home promo grammar. Reads
-              as a record of what's been earned, not a payout: $CONFIO bonuses
-              are held in the account until the token launches. */}
-          <TouchableOpacity
-            style={styles.claimCard}
-            activeOpacity={0.8}
-            onPress={() => navigation.navigate('ReferralRewardClaim')}
-            accessibilityRole="button"
-            accessibilityLabel="Ver tus bonos $CONFIO"
-          >
-            <View style={styles.claimIconWrap}>
-              <Icon name="gift" size={18} color={colors.secondary} />
-            </View>
-            <View style={styles.claimCardText}>
-              <Text style={styles.claimCardTitle}>Tus bonos $CONFIO</Text>
-              <Text style={styles.claimCardSubtitle}>Mira cuánto llevas ganado y qué falta</Text>
-            </View>
-            <Icon name="chevron-right" size={18} color={colors.secondary} />
-          </TouchableOpacity>
+          <CommissionsEntryRow
+            summary={commission}
+            onPress={() => navigation.navigate('FeeReferralCommissions')}
+          />
+
+          {/* $CONFIO bonuses ended at the commission launch: earned ones stay
+              reachable from Profile (shown there only while some exist). */}
 
           {/* Invited-by row */}
           <TouchableOpacity
@@ -236,14 +242,16 @@ export const AchievementsScreen: React.FC = () => {
             </View>
             <View style={styles.claimCardText}>
               <Text style={styles.claimCardTitle}>¿Te invitó alguien?</Text>
-              <Text style={styles.claimCardSubtitle}>Pon su @usuario para que también reciba su regalo</Text>
+              <Text style={styles.claimCardSubtitle}>
+                Pon su @usuario para que reciba su comisión
+              </Text>
             </View>
             <Icon name="chevron-right" size={18} color={colors.text.light} />
           </TouchableOpacity>
 
           {/* How it works */}
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Cómo ganar los US$5</Text>
+            <Text style={styles.sectionTitle}>Cómo funciona</Text>
             {steps.map((step, index) => (
               <View key={step.title} style={[styles.stepRow, index === steps.length - 1 && { marginBottom: 0 }]}>
                 <View style={styles.stepNumberWrap}>
@@ -258,8 +266,7 @@ export const AchievementsScreen: React.FC = () => {
             <View style={styles.criteriaNoteRow}>
               <Icon name="info" size={13} color={colors.text.secondary} />
               <Text style={styles.criteriaNote}>
-                Cuenta cualquier primera recarga, depósito o ahorro (cUSD+) de
-                al menos US$20. El bono se acredita en $CONFIO automáticamente.
+                {'No aplica a envíos entre usuarios de Confío, Confío Pay ni Comprar. En la app no te mostramos qué hizo cada invitado. Confío puede cambiar estas condiciones.'}
               </Text>
             </View>
           </View>
@@ -307,6 +314,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.white,
     lineHeight: 30,
+  },
+  // On the violet field: white and bold (an accent color would fight the brand field).
+  fieldSubtitleAccent: {
+    fontWeight: '700',
+    color: colors.white,
   },
   fieldSubtitle: {
     fontSize: 14,

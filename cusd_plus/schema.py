@@ -287,6 +287,72 @@ class CusdPlusSummaryType(graphene.ObjectType):
 
 
 
+class FeeReferralFriendType(graphene.ObjectType):
+    """One friend this member invited, and whether they earn commission now.
+    status: earning | needs_friend_verification | needs_your_verification |
+    ended | unavailable."""
+    referral_id = graphene.ID(required=True)
+    display_name = graphene.String(required=True)
+    status = graphene.String(required=True)
+    ends_at = graphene.DateTime()
+    can_remind = graphene.Boolean(required=True)
+
+
+class FeeReferralPayoutType(graphene.ObjectType):
+    """One of the member's own commissions: amount and time only."""
+    id = graphene.ID(required=True)
+    amount_usd = graphene.String(required=True)
+    paid_at = graphene.DateTime(required=True)
+
+
+class RemindFeeReferralFriend(graphene.Mutation):
+    """'Recordarle': push an invited friend a verification reminder (once a
+    week per friend). error: not_found | already_verified | not_allowed | too_soon."""
+
+    class Arguments:
+        referral_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, referral_id):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return cls(success=False, error='not_authenticated')
+        from .fee_referral import ReminderError, remind_friend
+        try:
+            remind_friend(user, int(referral_id))
+        except (ValueError, TypeError):
+            return cls(success=False, error='not_found')
+        except ReminderError as exc:
+            return cls(success=False, error=exc.code)
+        return cls(success=True)
+
+
+class FeeReferralSummaryType(graphene.ObjectType):
+    """The invite screens' commission card (cusd_plus/fee_referral.py)."""
+    enabled = graphene.Boolean(required=True)
+    share_bps = graphene.Int(required=True)
+    fee_bps = graphene.Int(required=True)
+    window_days = graphene.Int(required=True)
+    viewer_verified = graphene.Boolean(required=True)
+    month_total_usd = graphene.String(required=True)
+    total_earned_usd = graphene.String(required=True)
+    friends = graphene.List(graphene.NonNull(FeeReferralFriendType), required=True,
+                            description="Newest invitations first, at most FRIENDS_LIST_MAX")
+    friend_count = graphene.Int(required=True, description="All invitations, beyond the list cap")
+    waiting_count = graphene.Int(required=True, description="Invited friends who still need to verify")
+
+
+class FeeReferralArmType(graphene.ObjectType):
+    """The call a fee-bearing sponsored batch puts FIRST so half of the cUSD
+    border fee goes to the member's referrer (cusd_plus/fee_referral.py)."""
+    to = graphene.String(required=True)
+    data = graphene.String(required=True)
+    share_bps = graphene.Int(required=True)
+
+
 class CusdPlusConvertParamsType(graphene.ObjectType):
     """Decision (b), 2026-07-04: the CLIENT prices the bridge leg with the
     ported Allbridge pool math (apps/src/services/allbridgeQuote.ts, validated
@@ -573,6 +639,20 @@ def _sparkline(history: list, points: int = 24) -> list:
 class Query(graphene.ObjectType):
     cusd_plus_summary = graphene.Field(CusdPlusSummaryType)
     cusd_plus_convert_params = graphene.Field(CusdPlusConvertParamsType)
+    fee_referral_payouts = graphene.List(
+        graphene.NonNull(FeeReferralPayoutType),
+        limit=graphene.Int(default_value=30),
+        offset=graphene.Int(default_value=0),
+        description="This member's own referral commissions, newest first",
+    )
+    fee_referral_summary = graphene.Field(
+        FeeReferralSummaryType,
+        description="This member's referral commissions and each invited friend's status",
+    )
+    fee_referral_arm = graphene.Field(
+        FeeReferralArmType,
+        description="Referrer arm for this member's personal sponsored batches, or null (keep the whole fee)",
+    )
     stock_wallet_address = graphene.String(
         description="Active JWT account's BSC address for an explicit self-verification link",
     )
@@ -648,6 +728,66 @@ class Query(graphene.ObjectType):
         params=graphene.String(required=True, description="JSON-encoded params array"),
         description="Read-only BSC RPC proxy (allowlisted methods) — keeps user IPs off public nodes",
     )
+
+    def resolve_fee_referral_payouts(self, info, limit=30, offset=0):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return []
+        from .fee_referral import payouts_page
+        return [FeeReferralPayoutType(id=p['id'], amount_usd=str(p['amount'].quantize(Decimal('0.000001'))),
+                                      paid_at=p['paid_at']) for p in payouts_page(user, limit, offset)]
+
+    def resolve_fee_referral_summary(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        from security.identity_status import is_identity_verified
+
+        from . import fee_referral as fr
+        # Copy only (the screens explain "50% of the 0.9%"): the published
+        # perimeter fee, not a per-load RPC read of CusdVault.feeBps().
+        from django.conf import settings
+        perimeter_bps = int(getattr(settings, 'CUSD_PERIMETER_FEE_BPS', 90))
+        statuses = fr.friend_statuses(user)
+        return FeeReferralSummaryType(
+            enabled=fr.enabled(),
+            share_bps=fr.share_bps(),
+            fee_bps=perimeter_bps,
+            window_days=fr.window_days(),
+            viewer_verified=is_identity_verified(user),
+            month_total_usd=str(fr.month_total(user).quantize(Decimal('0.000001'))),
+            total_earned_usd=str(fr.total_earned(user).quantize(Decimal('0.000001'))),
+            friends=[FeeReferralFriendType(
+                referral_id=f['referral_id'], display_name=f['display_name'], status=f['status'],
+                ends_at=f['ends_at'], can_remind=f['can_remind'],
+            ) for f in statuses[:fr.FRIENDS_LIST_MAX]],
+            friend_count=len(statuses),
+            waiting_count=sum(1 for f in statuses if f['status'] == fr.FRIEND_NEEDS_FRIEND_VERIFICATION),
+        )
+
+    def resolve_fee_referral_arm(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        from users.jwt_context import get_jwt_business_context_with_validation
+        ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+        # Commission follows a person's own activity: personal accounts only.
+        if not ctx or ctx.get('account_type') == 'business':
+            return None
+        address = _active_bsc_address(info)
+        if not address:
+            return None
+        from .fee_referral import arm_call, eligible_arm
+        try:
+            arm = eligible_arm(user, address)
+        except Exception:  # noqa: BLE001 — no arm just keeps the whole fee
+            logger.warning('fee referral arm lookup failed for user %s', user.pk, exc_info=True)
+            return None
+        from .fee_referral import onchain_ready
+        if arm is None or not onchain_ready():
+            return None
+        call = arm_call(arm)
+        return FeeReferralArmType(to=call['to'], data=call['data'], share_bps=arm.share_bps)
 
     def resolve_stock_wallet_address(self, info):
         user = getattr(info.context, 'user', None)
@@ -1939,8 +2079,10 @@ class SponsorBscBatch(graphene.Mutation):
             return SponsorBscBatch(success=False, error='no_bsc_address')
         user_addr = user_addr.lower()
 
-        # Normalize + structural caps.
-        if not calls or len(calls) > 4:
+        # Normalize + structural caps. One extra slot for the optional
+        # leading fee-referral arm (cusd_plus/fee_referral.py); every policy
+        # below still sees at most 4 calls.
+        if not calls or len(calls) > 5:
             return SponsorBscBatch(success=False, error='bad_batch_size')
         try:
             norm_calls = [{
@@ -2011,7 +2153,28 @@ class SponsorBscBatch(graphene.Mutation):
         broadcast_tx_hash = None
         try:
             from payment_accounts.infinia_fee_collection import mint_policy_calls, persist_local_fee
-            policy_calls = mint_policy_calls(norm_calls, user, user_addr, request_id)
+            # The optional fee-referral arm must be first and exactly what the
+            # server would issue now; every policy below sees the batch
+            # without it. Signature, execution and replay use ALL calls.
+            from .fee_referral import strip_arm, strip_stored_arm
+            from blockchain.models import SponsoredBatch as _SponsoredBatch
+            # An exact replay of a batch already signed and recorded keeps
+            # the arm it was broadcast with: today's eligibility must not turn
+            # a lost answer into a rejection (the replay lookup below returns
+            # its transaction). Only new broadcasts are re-decided.
+            recorded_replay = bool(request_id) and any(
+                sponsor_7702.without_leading_arm(json.loads(b or '[]'))
+                == sponsor_7702.without_leading_arm(norm_calls)
+                for b in _SponsoredBatch.objects.filter(
+                    user=user, client_request_id=request_id,
+                    user_bsc_address__iexact=user_addr,
+                ).order_by('-id').values_list('calls_json', flat=True)[:5])
+            base_calls = (strip_stored_arm(norm_calls) if recorded_replay
+                          else strip_arm(norm_calls, user, user_addr,
+                                         delegating=authorization is not None))
+            if len(base_calls) > 4:
+                raise sponsor_7702.PolicyError('bad_batch_size')
+            policy_calls = mint_policy_calls(base_calls, user, user_addr, request_id)
             from . import perps_flow as _perps_flow
             # An exact replay (same request id, same calls) of a Futuros batch
             # already signed and recorded goes straight to the existing-batch
@@ -2029,7 +2192,7 @@ class SponsorBscBatch(graphene.Mutation):
             # the signed intent kind only for a Futuros return, whose entry
             # calls are an ordinary mint (cusd_plus/perps_flow.return_kind).
             stored_kind = (perps_replay.kind if perps_replay is not None
-                           else _perps_flow.return_kind(kind, norm_calls, request_id, user))
+                           else _perps_flow.return_kind(kind, base_calls, request_id, user))
             # A Futuros return is an exit that happens to mint, so it is not
             # capped; that is why this waits for the stored kind.
             if mint_call is not None and mint_refusal_error is None and stored_kind != 'perps_return':
@@ -2207,8 +2370,11 @@ class SponsorBscBatch(graphene.Mutation):
             step_up = claim_external_outflow(
                 user, _ctx, policy_calls, user_addr,
                 namespace='bsc_sponsor', identifier=request_id or digest.hex(),
+                # Keyed WITHOUT the fee-referral arm: a resend without it (the
+                # app drops the arm after a pre-flight revert) is the same
+                # outflow and must not ask for a new face check.
                 payload={'chain': chain_id, 'source': user_addr,
-                         'calls': norm_calls, 'kind': kind})
+                         'calls': sponsor_7702.without_leading_arm(norm_calls), 'kind': kind})
             if step_up:
                 return SponsorBscBatch(success=False, error=step_up)
 
@@ -2562,5 +2728,6 @@ class Mutation(graphene.ObjectType):
     submit_bsc_transaction = SubmitBscTransaction.Field()
     register_bsc_usdt_arrival = RegisterBscUsdtArrival.Field()
     sponsor_bsc_batch = SponsorBscBatch.Field()
+    remind_fee_referral_friend = RemindFeeReferralFriend.Field()
     prepare_gm_trade = PrepareGmTrade.Field()
     acknowledge_gm_complex_products = AcknowledgeGmComplexProducts.Field()

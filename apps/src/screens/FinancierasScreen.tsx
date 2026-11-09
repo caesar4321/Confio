@@ -476,7 +476,10 @@ export const FinancierasScreen = () => {
       : SHARE_LINKS.web.landing;
     Share.share({
       message:
-        `¿Tienes una financiera? Regístrala gratis en el directorio de Confío y recibe clientes de tu zona: ${inviteLink}`,
+        `¿Tienes una financiera? *Regístrala gratis* en el directorio de Confío y recibe clientes de tu zona:\n${inviteLink}`
+        + (userProfile?.username
+          ? '\n\n🤝 Si te unes con este link, Confío me comparte parte de su comisión. A ti no te cuesta nada extra.'
+          : ''),
     }).catch(() => {});
   };
 

@@ -98,6 +98,7 @@ import { PayoutMethodsScreen } from '../screens/PayoutMethodsScreen';
 import AgendaScreen from '../screens/AgendaScreen';
 import { RampAddressScreen } from '../screens/RampAddressScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
+import FeeReferralCommissionsScreen from '../screens/FeeReferralCommissionsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
 import { LatamCommunityScreen } from '../screens/LatamCommunityScreen';
 import { FundFlowScreen } from '../screens/FundFlowScreen';
@@ -780,6 +781,11 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="Achievements"
           component={AchievementsScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="FeeReferralCommissions"
+          component={FeeReferralCommissionsScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen
