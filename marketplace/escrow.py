@@ -408,7 +408,10 @@ def submit_action(user, order, action: str, nonce: int, deadline: int,
     else:
         if order.status not in ALLOWED_FROM[action]:
             return {'success': False, 'error': 'action_not_allowed'}
-        if action == 'ship':
+        # Shipping, or confirming receipt of an order never shipped (a
+        # hand-over in person): the adults-only checks (licence, ley seca)
+        # apply to both; refund and reclaim always stay open.
+        if action == 'ship' or (action == 'confirm' and order.status == 'funded'):
             # Ley seca covers distribution too: an adults-only order paid
             # before it waits to be sent (the ship-by deadline still runs).
             from .checkout import ship_alcohol_error

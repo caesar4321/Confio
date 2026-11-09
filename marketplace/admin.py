@@ -35,6 +35,17 @@ class MarketplaceCategoryAdmin(admin.ModelAdmin):
         # The key is what listings store: fixed once created.
         return ('key',) if obj else ()
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if obj.age_restricted and 'age_restricted' in form.changed_data:
+            # Orders already paid (or being paid) in this category are
+            # adults-only from now on: shipping checks the licence even if
+            # the product is later moved to another category.
+            n = Order.objects.filter(product__category=obj.key, age_restricted=False).exclude(
+                status__in=Order.FINAL_STATUSES).update(age_restricted=True)
+            if n:
+                self.message_user(request, f'{n} open order(s) in this category are now adults-only.')
+
     def get_queryset(self, request):
         from django.db.models import IntegerField, OuterRef, Subquery
         from django.db.models.functions import Coalesce

@@ -244,6 +244,13 @@ class MarketplaceOrderType(graphene.ObjectType):
                     continue
                 if action == 'ship' and order.ship_by and now > order.ship_by:
                     continue
+                # Adults-only: no shipping, and no "received" before shipping,
+                # while the licence or ley seca says no (refund stays open).
+                if (action == 'ship' or (action == 'confirm' and order.status == 'funded')) \
+                        and order.age_restricted:
+                    from .checkout import ship_alcohol_error
+                    if ship_alcohol_error(order):
+                        continue
                 if action == 'dispute' and order.status == 'shipped' and order.release_at \
                         and now >= order.release_at:
                     continue
@@ -1305,7 +1312,7 @@ class MarketOrderActionCalls(graphene.Mutation):
             age_error = deposit_age_error(info.context.user, order)
             if age_error:
                 return MarketOrderActionCalls(success=False, error=age_error)
-        if action == 'ship':
+        if action == 'ship' or (action == 'confirm' and order.status == 'funded'):
             from .checkout import ship_alcohol_error
             ship_error = ship_alcohol_error(order)
             if ship_error:

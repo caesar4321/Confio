@@ -1784,6 +1784,10 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             alcohol_license_status='pending', alcohol_license_key=self.KEY,
             alcohol_license_submitted_at=timezone.now())
         self.today = timezone.now().date()
+        # Approval archives the reviewed photo: never S3 from a test.
+        archive = mock.patch('security.s3_utils.upload_object', return_value='')
+        self.archived = archive.start()
+        self.addCleanup(archive.stop)
 
     def reading(self, **kw):
         base = dict(is_license=True, covers_alcohol=True, holder_name='QUISPE, ANA',
@@ -1805,6 +1809,9 @@ class AlcoholLicenseReviewTests(MarketTestBase):
 
     def test_a_valid_licence_is_approved_with_its_expiry(self):
         self.assertEqual(self.run_review(self.reading()), 'approved')
+        # The record points at the server-only copy of the reviewed bytes.
+        self.assertTrue(self.store.alcohol_license_approved_key.startswith('marketplace/licences/'))
+        self.assertEqual(self.archived.call_args.kwargs['body'], b'img')
         self.assertEqual(self.store.alcohol_license_status, 'approved')
         self.assertEqual(self.store.alcohol_license_expires_on, self.today + timedelta(days=700))
         self.assertEqual(self.store.alcohol_license_number, 'LP20260042')  # canonical form
@@ -2067,10 +2074,11 @@ class AlcoholLicenseReviewTests(MarketTestBase):
 
     def test_a_renewal_keeps_the_approved_photo_on_record(self):
         self.run_review(self.reading())
-        self.assertEqual(self.store.alcohol_license_approved_key, self.KEY)
+        approved_key = self.store.alcohol_license_approved_key
+        self.assertTrue(approved_key.startswith('marketplace/licences/'))
         Store.objects.filter(pk=self.store.pk).update(alcohol_license_key='marketplace/pending/x/renewal.jpg')
         self.store.refresh_from_db()
-        self.assertEqual(self.store.alcohol_license_approved_key, self.KEY)
+        self.assertEqual(self.store.alcohol_license_approved_key, approved_key)
 
     def _revoke(self, photo_hash=''):
         from django.contrib.admin.sites import AdminSite
@@ -2167,6 +2175,30 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
         order = Order.objects.select_related('store', 'product').get(pk=order.pk)
         self.assertEqual(ship_alcohol_error(order), 'store_license_required')
+        order.refresh_from_db()
+        self.assertTrue(order.age_restricted)
+
+    def test_no_received_before_shipping_without_a_licence(self):
+        order, _, _ = self.prepare()
+        Order.objects.filter(pk=order.pk).update(status='funded', age_restricted=True)
+        Store.objects.filter(pk=self.store.pk).update(alcohol_license_status='rejected')
+        order = Order.objects.select_related('store', 'product').get(pk=order.pk)
+        with mock.patch.object(escrow, 'actor_allowed', return_value=True):
+            result = escrow.submit_action(self.buyer, order, 'confirm', 0, int(timezone.now().timestamp()) + 600, '0x', None)
+        self.assertEqual(result, {'success': False, 'error': 'store_license_required'})
+
+    def test_flagging_a_category_marks_its_open_orders_adults_only(self):
+        from django.contrib.admin.sites import AdminSite
+        from .admin import MarketplaceCategoryAdmin
+        from .models import MarketplaceCategory
+        Product.objects.filter(pk=self.product.pk).update(category='alimentos')
+        order, _, _ = self.prepare()
+        Order.objects.filter(pk=order.pk).update(status='funded')
+        category = MarketplaceCategory.objects.get(key='alimentos')
+        category.age_restricted = True
+        admin = MarketplaceCategoryAdmin(MarketplaceCategory, AdminSite())
+        with mock.patch.object(admin, 'message_user'):
+            admin.save_model(mock.Mock(), category, SimpleNamespace(changed_data=['age_restricted']), True)
         order.refresh_from_db()
         self.assertTrue(order.age_restricted)
 

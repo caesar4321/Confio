@@ -435,6 +435,25 @@ def revoke_licence(store_id: int) -> tuple:
     return revoked, unrecorded
 
 
+ARCHIVE_PREFIX = 'marketplace/licences/'
+
+
+def _archive_photo(store, image, photo_hash: str) -> str:
+    """Copy the exact bytes that were reviewed to a key only the server
+    writes (sellers can only upload under their pending prefix, and the
+    upload link they hold could overwrite the original): the compliance
+    record and any later revoke see what was approved. Raises
+    ReviewUnavailable when S3 cannot take it (the review retries)."""
+    from security.s3_utils import upload_object
+    key = f'{ARCHIVE_PREFIX}{store.pk}/{photo_hash}.jpg'
+    try:
+        upload_object(key=key, body=image.body, content_type=image.mime_type or 'image/jpeg',
+                      bucket=settings.AWS_COMMUNITY_UPLOAD_BUCKET)
+    except Exception as exc:  # noqa: BLE001
+        raise ReviewUnavailable(f'could not archive the licence photo: {exc}') from exc
+    return key
+
+
 def review_license(store_id: int, key: str) -> str:
     """Review the licence photo `key` for this store. Applies only while that
     photo is still the store's current one (a newer upload wins). Returns
@@ -459,6 +478,7 @@ def review_license(store_id: int, key: str) -> str:
         approved, expires, reason = False, None, 'No pudimos leer la foto. Sube una foto JPG, PNG o WEBP.'
     else:
         approved, expires, reason = decide(reading, store, today, _owner_names(store))
+    archived_key = _archive_photo(store, image, photo_hash) if approved else ''
 
     with transaction.atomic():
         read_number = _normalize_number(reading['license_number']) if reading else ''
@@ -493,11 +513,11 @@ def review_license(store_id: int, key: str) -> str:
             # never what the seller typed.
             fields = {**common, 'alcohol_license_status': 'approved', 'alcohol_license_expires_on': expires,
                       'alcohol_license_note': '', 'alcohol_license_hash': photo_hash,
-                      'alcohol_license_approved_key': key,
+                      'alcohol_license_approved_key': archived_key,
                       'alcohol_license_number': _normalize_number(reading['license_number'])}
             AlcoholLicenseApproval.objects.create(
                 store=row, city_key=city_key(row.city), number=_normalize_number(reading['license_number']),
-                photo_hash=photo_hash, photo_key=key, expires_on=expires)
+                photo_hash=photo_hash, photo_key=archived_key, expires_on=expires)
         elif renewal:
             # A failed renewal never takes away the licence that still counts.
             fields = {**common, 'alcohol_license_note': reason[:300]}
