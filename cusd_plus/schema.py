@@ -290,7 +290,9 @@ class CusdPlusSummaryType(graphene.ObjectType):
 class FeeReferralFriendType(graphene.ObjectType):
     """One friend this member invited, and whether they earn commission now.
     status: earning | needs_friend_verification | needs_your_verification |
-    ended | unavailable."""
+    ended | same_person (the referrer's own other account) | unavailable (a
+    suspension on either side or an unconfirmed same-person match,
+    deliberately vague)."""
     referral_id = graphene.ID(required=True)
     display_name = graphene.String(required=True)
     status = graphene.String(required=True)

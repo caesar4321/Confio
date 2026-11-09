@@ -28,7 +28,8 @@ if referrer:
     for r in rows:
         if r.pk in ids:
             pos = ids.index(r.pk)
-            print(f'  friend is #{pos + 1} newest, status={statuses[pos]["status"]}, '
+            print(f'  friend is #{pos + 1} newest, status={statuses[pos]["status"]} '
+                  f'reason={statuses[pos].get("reason") or "-"} ({f.admin_status_label(statuses[pos])}), '
                   f'{"VISIBLE" if pos < f.FRIENDS_LIST_MAX else "HIDDEN by the 200 cap"} in the old list')
         else:
             print('  friend is not among this referrer\'s live invitations')

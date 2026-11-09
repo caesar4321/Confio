@@ -140,7 +140,10 @@ const FRIEND_STYLE: Record<string, { label: string; color: string; bg: string }>
   needs_friend_verification: { label: 'Falta que verifique', color: colors.warning.text, bg: '#FEF3C7' },
   needs_your_verification: { label: 'Falta tu verificación', color: colors.warning.text, bg: '#FEF3C7' },
   ended: { label: 'Terminó su año', color: colors.text.secondary, bg: colors.neutralDark },
-  unavailable: { label: 'Sin comisión', color: colors.text.secondary, bg: colors.neutralDark },
+  // Another account of the member themselves: no self-commission.
+  same_person: { label: 'Es tu propia cuenta', color: colors.text.secondary, bg: colors.neutralDark },
+  // A suspension on either side or an unconfirmed same-person match, deliberately vague.
+  unavailable: { label: 'No genera comisión', color: colors.text.secondary, bg: colors.neutralDark },
 };
 
 const REMIND_ERRORS: Record<string, string> = {

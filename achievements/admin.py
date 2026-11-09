@@ -658,6 +658,22 @@ class UserRewardAdmin(admin.ModelAdmin):
     block_device.short_description = "Block all rewards from same device"
 
 
+class FeeCommissionStatusFilter(admin.SimpleListFilter):
+    """Fee-referral commission status with the real reason (staff only)."""
+    title = 'commission status'
+    parameter_name = 'commission'
+
+    def lookups(self, request, model_admin):
+        from cusd_plus.fee_referral import ADMIN_FILTER_KEYS, ADMIN_STATUS_LABELS
+        return [(key, ADMIN_STATUS_LABELS[value]) for key, value in ADMIN_FILTER_KEYS.items()]
+
+    def queryset(self, request, queryset):
+        if not self.value():
+            return queryset
+        from cusd_plus.fee_referral import referral_ids_with_admin_status
+        return queryset.filter(pk__in=referral_ids_with_admin_status(self.value()))
+
+
 @admin.register(UserReferral)
 class UserReferralAdmin(admin.ModelAdmin):
     """Admin for Confío referral records"""
@@ -671,10 +687,12 @@ class UserReferralAdmin(admin.ModelAdmin):
         'referee_reward_display',
         'referee_chain_status_display',
         'referrer_chain_status_display',
+        'commission_status_display',
         'created_at',
     )
     list_display_links = ('referrer_identifier', 'referred_user')
     list_filter = (
+        FeeCommissionStatusFilter,
         'status',
         'reward_status',
         'referee_reward_status',
@@ -691,12 +709,57 @@ class UserReferralAdmin(admin.ModelAdmin):
         'referrer_user__username',
         'referrer_user__email',
     )
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at', 'commission_status_display', 'commission_window_end',
+                       'commission_payouts_link')
     raw_id_fields = ('referred_user', 'referrer_user')
     list_select_related = ('referred_user', 'referrer_user')
     actions = ('mark_as_active', 'mark_as_converted', 'mark_as_inactive', 'mark_rewards_claimed')
+
+    # ── fee-referral commission (staff see the real reason) ────────────
+    def get_changelist_instance(self, request):
+        cl = super().get_changelist_instance(request)
+        # One bulk status computation per referrer on this page, stamped on
+        # the row objects (never on the shared admin instance).
+        from cusd_plus.fee_referral import admin_statuses
+        statuses = admin_statuses(list(cl.result_list))
+        for obj in cl.result_list:
+            obj._fee_commission = statuses.get(obj.pk)
+        return cl
+
+    def _commission(self, obj):
+        if not hasattr(obj, '_fee_commission'):
+            from cusd_plus.fee_referral import admin_statuses
+            obj._fee_commission = admin_statuses([obj]).get(obj.pk)
+        return obj._fee_commission
+
+    @admin.display(description='Commission')
+    def commission_status_display(self, obj):
+        from cusd_plus.fee_referral import admin_status_label
+        status = self._commission(obj)
+        label = admin_status_label(status)
+        color = {'earning': '#047857', 'needs_friend_verification': '#92400E',
+                 'needs_your_verification': '#92400E'}.get((status or {}).get('status'), '#6B7280')
+        return format_html('<span style="color:{};font-weight:600">{}</span>', color, label)
+
+    @admin.display(description='Commission window ends')
+    def commission_window_end(self, obj):
+        status = self._commission(obj)
+        return status['ends_at'] if status else '—'
+
+    @admin.display(description='Commission payouts')
+    def commission_payouts_link(self, obj):
+        if not obj.referred_user_id or not obj.referrer_user_id:
+            return '—'
+        from conversion.models import FeeReferralPayout
+        count = FeeReferralPayout.objects.filter(referrer_user_id=obj.referrer_user_id,
+                                                 referee_user_id=obj.referred_user_id).count()
+        url = (reverse('admin:conversion_feereferralpayout_changelist')
+               + f'?referrer_user__id__exact={obj.referrer_user_id}&referee_user__id__exact={obj.referred_user_id}')
+        return format_html('<a href="{}">{} payout{}</a>', url, count, '' if count == 1 else 's')
     fieldsets = (
         ('Referral', {'fields': ('referred_user', 'referrer_identifier', 'referrer_user', 'status')}),
+        ('Fee-referral commission', {'fields': ('commission_status_display', 'commission_window_end',
+                                               'commission_payouts_link')}),
         ('Performance', {'fields': ('first_transaction_at', 'total_transaction_volume')}),
         ('Rewards', {'fields': ('referrer_confio_awarded', 'referee_confio_awarded', 'reward_claimed_at')}),
         (
