@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.8.2',
-    'last_updated': '2026-10-30',
+    'version': '1.9.0',
+    'last_updated': '2026-11-09',
     'is_legally_binding': True,
     'sections': [
         {
@@ -185,11 +185,27 @@ TERMS = {
             ]
         },
         {
-            'title': '15. Modificaciones',
+            'title': '15. Programa de Referidos',
+            'content': [
+                'Puede invitar a otras personas a Confío con su enlace de invitación o su nombre de usuario. Quien se registra con su enlace, o lo indica como la persona que lo invitó, queda asociado a usted como su invitado. Cada persona solo puede tener a una persona que la invitó, y esa asociación no se puede cambiar.',
+                'Mientras se cumplan las condiciones de esta sección, Confío le comparte una parte de la comisión que su invitado paga en las operaciones que cruzan la frontera del Confío Dollar (cUSD): recargas y retiros de dólares, entradas y salidas del ahorro (cUSD+), compras y ventas de acciones, de oro y de bitcoin, entradas y salidas de Futuros, y envíos a billeteras fuera de Confío. Hoy esa parte es el 50 % de la comisión. No aplica a Confío Pay, a Comprar, a los envíos entre usuarios de Confío ni a ninguna otra comisión.',
+                'Para que una operación genere comisión, usted y su invitado deben tener la identidad verificada en el momento de la operación, ninguno de los dos puede tener la cuenta suspendida o restringida, y no pueden ser la misma persona. Las operaciones hechas antes de cumplir estas condiciones no generan comisión, tampoco de forma retroactiva.',
+                'La comisión se genera durante 1 año desde que su invitado quedó asociado a usted. Para las invitaciones anteriores al lanzamiento del programa (9 de noviembre de 2026), el año se cuenta desde el lanzamiento.',
+                'La comisión se paga en cUSD a su cuenta personal, en la misma operación en la que su invitado paga la comisión, mediante el contrato del Confío Dollar en BNB Chain. Algunas operaciones pueden no generarla aunque cumplan las condiciones, por ejemplo la primera operación de una cuenta nueva o las hechas desde una versión antigua de la app.',
+                'Las operaciones de las cuentas de negocio de su invitado también generan comisión, aunque las haga una persona autorizada por su invitado. Para esas operaciones se toman en cuenta la verificación de identidad y el plazo de su invitado como titular del negocio. La comisión se paga siempre a la cuenta personal de quien invitó.',
+                'La comisión es una recompensa por invitar. No es un salario, no le da participación en los ingresos generales ni en las utilidades de Confío, no es el rendimiento de una inversión, y no depende de comprar ni de tener $CONFIO. Usted es responsable de los impuestos que le correspondan por ella.',
+                'Al quedar asociado a quien lo invitó, esa persona puede ver en la app su nombre de usuario, si usted verificó su identidad, cuánto gana en comisiones por su actividad y la de sus negocios, y el importe y la hora de cada comisión, de los que puede deducirse el monto y el momento de sus operaciones; la app no le muestra el tipo de operación. Como la comisión se paga en BNB Chain, una blockchain pública, cualquier persona puede relacionar en ella la dirección de su billetera con la de quien lo invitó y consultar esas operaciones. Estos registros son permanentes y Confío no puede eliminarlos.',
+                'Está prohibido crear cuentas o identidades falsas, invitarse a sí mismo con otra cuenta, ofrecer pagos o promesas de ganancias para conseguir invitados, y hacer operaciones con el único fin de generar comisiones. Si detectamos estas conductas podemos dejar de pagarle comisiones y suspender o cancelar las cuentas involucradas.',
+                'Podemos cambiar el porcentaje, las operaciones que generan comisión, el plazo o las condiciones, o terminar el programa, en cualquier momento. Los cambios se aplican a las operaciones posteriores; las comisiones ya pagadas no cambian.',
+                'El bono de referidos de US$5 en $CONFIO terminó el 9 de noviembre de 2026. Los bonos ganados hasta esa fecha se mantienen; los que estaban pendientes no se otorgan.'
+            ]
+        },
+        {
+            'title': '16. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '16. Contacto',
+            'title': '17. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'
@@ -200,8 +216,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.11.1',
-    'last_updated': '2026-10-30',
+    'version': '1.11.2',
+    'last_updated': '2026-11-09',
     'is_legally_binding': True,
     'sections': [
         {
@@ -308,6 +324,7 @@ PRIVACY = {
                 'Con autoridades regulatorias, judiciales o administrativas cuando sea necesario',
                 'Con proveedores de pago, bancos o autoridades que lo requieran, los registros de verificación de ubicación de Bre-B como evidencia de cumplimiento',
                 'En Comprar, los datos del pedido y de entrega (país, ciudad, dirección, coordenadas cuando las indica, referencia y teléfono) son accesibles desde la cuenta compradora y desde la cuenta de la tienda; si una cuenta pertenece a un negocio, pueden consultarlos su titular y las personas autorizadas a ver sus transacciones. La tienda también recibe el nombre de pila de la persona que creó el pedido, o «Cliente» si no consta ese nombre, para preparar y coordinar la entrega. La tienda puede abrir el punto de entrega en Yango u otra aplicación de mapas, o compartir mediante la aplicación que elija el producto y la cantidad del pedido, la dirección, la referencia, el teléfono y un enlace de Google Maps con las coordenadas; la persona que consulta el pedido desde la cuenta compradora también puede abrir el punto en una aplicación de mapas. Esas aplicaciones reciben los datos que se les envían mediante estas acciones. Las tiendas no reciben su libreta de direcciones ni la ubicación con la que Comprar busca su ciudad',
+                'Con la persona que lo invitó a Confío, si se registró con su invitación: su nombre de usuario, si verificó su identidad, cuánto gana esa persona en comisiones por su actividad y la de sus negocios, y el importe y la hora de cada comisión, de los que puede deducirse el monto y el momento de sus operaciones (ver la sección Programa de Referidos de los Términos de Servicio). La app no le muestra el tipo de operación. Como esa comisión se paga en BNB Chain, una blockchain pública, cualquier persona puede relacionar en ella la dirección de su billetera con la de quien lo invitó',
                 'Los pagos de Comprar se registran en BNB Chain, una blockchain pública. Cualquier persona puede consultar los identificadores de los pedidos en la cadena, las direcciones de billetera del comprador y de la tienda, los importes y los estados del pago. Estos registros son permanentes y Confío no puede eliminarlos. La dirección de entrega, las coordenadas, el teléfono, la referencia y el texto del reclamo no se incluyen en esas operaciones en la cadena',
                 'Al mostrar los mapas integrados de Comprar, Apple Maps en iOS o Google Maps en Android reciben las coordenadas necesarias para representar la zona y el punto de entrega, aunque no pulse «Abrir en mapas». El selector también puede mostrar la ubicación del dispositivo si ha concedido permiso',
                 'En Comprar, los miembros que consultan una tienda pueden ver su nombre, descripción, país, ciudad, productos, precios de envío, estado, calificación, número de calificaciones y pedidos completados, así como el nombre de pila del titular o, si no consta, su nombre de usuario',

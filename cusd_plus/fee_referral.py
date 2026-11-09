@@ -150,12 +150,17 @@ def _payout_address(user) -> Optional[str]:
     return address
 
 
-def _is_personal_address(user, address: str) -> bool:
+def account_owner(address: str):
+    """The person who owns the Confío account at `address`, personal or
+    business (a business account's `user` is its owner; employees act on it
+    through BusinessEmployee rows and are never its owner), or None."""
     from users.models import Account
 
-    return bool(address) and Account.objects.filter(
-        user=user, account_type='personal', bsc_address__iexact=address, deleted_at__isnull=True,
-    ).exists()
+    if not address:
+        return None
+    account = (Account.objects.filter(bsc_address__iexact=address, deleted_at__isnull=True)
+               .select_related('user').first())
+    return account.user if account else None
 
 
 def same_person(a, b) -> bool:
@@ -215,14 +220,24 @@ def referral_window_open(referral) -> bool:
 
 
 def eligible_arm(user, user_addr: str) -> Optional[ReferralArm]:
-    """The arm this member's fee-bearing batch should carry now, or None.
+    """The arm a fee-bearing batch from `user_addr` should carry now, or None.
 
-    None means "keep the whole fee": no referral, window closed, either side
-    unverified or banned, no payout address, or the feature is off."""
+    The invitee is whoever OWNS the account moving the money: a person's own
+    personal accounts, and the businesses they own (whichever employee acts
+    on it). None means "keep the whole fee": no referral, window closed,
+    either side unverified or banned, no payout address, or the feature is
+    off. `user` is the authenticated actor; it must be the owner or someone
+    acting on the owner's business account (the sponsor already bound the
+    batch to `user_addr` through its signature)."""
     from security.identity_status import is_identity_verified
 
     if not enabled() or not _cusd_address() or share_bps() <= 0 or user is None:
         return None
+    owner = account_owner(user_addr)
+    if owner is None:
+        return None
+    actor = user
+    user = owner  # the invitee is the account's owner
     # (Arms are issued only while CusdVault is ready: callers check
     # onchain_ready(); kept out of here so statuses never need an RPC.)
     referral = live_referral(user)
@@ -239,8 +254,11 @@ def eligible_arm(user, user_addr: str) -> Optional[ReferralArm]:
         return None
     if same_person(user, referrer):
         return None  # one person behind both accounts: no self-commission
-    if not _is_personal_address(user, user_addr):
-        return None  # commission follows a person's own activity, not a business's
+    if actor is not None and (actor.pk == referrer.pk or same_person(actor, referrer)):
+        # The referrer (or another account of the same person) acting as an
+        # employee on their invitee's business: they would be steering the
+        # business's money to earn the fee themselves.
+        return None
     address = _payout_address(referrer)
     if address is None or address == (user_addr or '').lower():
         return None
@@ -632,7 +650,7 @@ def friend_statuses(referrer, referrals=None) -> list:
     if referrals is None:
         referrals = (UserReferral.objects
                      .filter(referrer_user=referrer, deleted_at__isnull=True)
-                     .select_related('referred_user').order_by('-created_at'))
+                     .select_related('referred_user').order_by('-created_at', '-pk'))
     referrals = [r for r in referrals if r.referred_user is not None and r.referred_user.is_active]
     friend_ids = [r.referred_user_id for r in referrals]
     if not friend_ids:
@@ -716,6 +734,7 @@ def remind_friend(referrer, referral_id) -> None:
         data[REMINDER_KEY] = timezone.now().isoformat()
         referral.attribution_data = data
         referral.save(update_fields=['attribution_data'])
+    forget_friend_statuses(referrer)  # can_remind changed
     handle = f'@{referrer.username}' if referrer.username else 'Quien te invitó'
     create_notification(
         user=referral.referred_user,
@@ -727,9 +746,128 @@ def remind_friend(referrer, referral_id) -> None:
     )
 
 
-def payouts_page(user, limit: int, offset: int) -> list:
-    """This member's own commissions, newest first: amount and time only
-    (no friend, no transaction, no hash)."""
+# ── dashboard: the invitee list (searchable, paginated) and monthly totals ─
+
+# Status groups the dashboard filters by.
+FRIEND_GROUPS = {
+    'earning': {FRIEND_EARNING},
+    'waiting': {FRIEND_NEEDS_FRIEND_VERIFICATION},
+    'you': {FRIEND_NEEDS_YOUR_VERIFICATION},
+    'none': {FRIEND_ENDED, FRIEND_UNAVAILABLE},
+}
+
+
+def group_counts(statuses: list) -> dict:
+    counts = {group: 0 for group in FRIEND_GROUPS}
+    for friend in statuses:
+        for group, members in FRIEND_GROUPS.items():
+            if friend['status'] in members:
+                counts[group] += 1
+    return counts
+
+
+STATUSES_CACHE_SECONDS = 45
+
+
+def cached_friend_statuses(referrer) -> list:
+    """friend_statuses for the dashboard, cached briefly per referrer: paging,
+    search keystrokes and the summary would otherwise recompute it for every
+    invitation on each request (thousands for a creator)."""
+    from django.core.cache import cache
+
+    key = f'fee_referral:statuses:{referrer.pk}'
+    cached = cache.get(key)
+    if cached is None:
+        cached = friend_statuses(referrer)
+        cache.set(key, cached, STATUSES_CACHE_SECONDS)
+    return cached
+
+
+def forget_friend_statuses(referrer) -> None:
+    from django.core.cache import cache
+
+    cache.delete(f'fee_referral:statuses:{referrer.pk}')
+
+
+def friends_page(referrer, *, group: str = '', search: str = '', limit: int = 30, offset: int = 0):
+    """(total, page) of this member's invitations, newest first, optionally
+    one status group and an @usuario search. Every invitation is reachable
+    however many there are (statuses are bulk-computed in a fixed number of
+    queries, cached briefly; filtering and paging happen in memory)."""
+    statuses = cached_friend_statuses(referrer)
+    if group in FRIEND_GROUPS:
+        statuses = [f for f in statuses if f['status'] in FRIEND_GROUPS[group]]
+    needle = (search or '').strip().lstrip('@').lower()
+    if needle:
+        statuses = [f for f in statuses if needle in f['display_name'].lstrip('@').lower()]
+    limit = max(1, min(int(limit or 30), 100))
+    offset = max(0, int(offset or 0))
+    return len(statuses), statuses[offset:offset + limit]
+
+
+def monthly_totals(user, months: int = 6) -> list:
+    """[(YYYY-MM, Decimal)] for the last `months` calendar months in the
+    referrer's own time zone, oldest first, zero months included. Summed in
+    the database (one row per month)."""
+    from datetime import datetime, time
+
+    from django.db.models import Sum
+    from django.db.models.functions import Coalesce, TruncMonth
+
+    from conversion.models import FeeReferralPayout
+
+    tz = referrer_timezone(user)
+    now = timezone.localtime(timezone.now(), tz)
+    keys = []
+    year, month = now.year, now.month
+    for _ in range(months):
+        keys.append(f'{year:04d}-{month:02d}')
+        month -= 1
+        if month == 0:
+            year, month = year - 1, 12
+    keys.reverse()
+    first_year, first_month = (int(part) for part in keys[0].split('-'))
+    start = timezone.make_aware(datetime.combine(now.date().replace(year=first_year, month=first_month, day=1),
+                                                 time.min), tz)
+    totals = {key: 0 for key in keys}
+    rows = (FeeReferralPayout.objects.filter(referrer_user=user)
+            .annotate(paid_at=Coalesce('block_time', 'created_at'))
+            .filter(paid_at__gte=start)
+            .annotate(month=TruncMonth('paid_at', tzinfo=tz))
+            .values('month').annotate(total=Sum('share_wei')))
+    for row in rows:
+        key = timezone.localtime(row['month'], tz).strftime('%Y-%m')
+        if key in totals:
+            totals[key] += int(row['total'] or 0)
+    return [(key, Decimal(totals[key]) / WAD) for key in keys]
+
+
+def month_bounds(user, month: str):
+    """(start, end) of a 'YYYY-MM' calendar month in the referrer's own time
+    zone (the same buckets as monthly_totals), or None if malformed."""
+    import re
+    from datetime import datetime, time
+
+    match = re.fullmatch(r'(\d{4})-(\d{2})', (month or '').strip())
+    if not match:
+        return None
+    year, mon = int(match.group(1)), int(match.group(2))
+    if not 1 <= mon <= 12:
+        return None
+    tz = referrer_timezone(user)
+    next_year, next_month = (year + 1, 1) if mon == 12 else (year, mon + 1)
+    try:
+        start = timezone.make_aware(datetime(year, mon, 1), tz)
+        end = timezone.make_aware(datetime.combine(datetime(next_year, next_month, 1).date(), time.min), tz)
+    except (ValueError, OverflowError):  # year 0000, 9999-12 and the like
+        return None
+    return start, end
+
+
+def payouts_page(user, limit: int, offset: int, month: str = '') -> list:
+    """This member's own commissions, newest first, optionally one calendar
+    month ('YYYY-MM', referrer's time zone): amount and time only (no friend,
+    no transaction, no hash). A malformed month returns nothing."""
     from django.db.models.functions import Coalesce
 
     from conversion.models import FeeReferralPayout
@@ -737,9 +875,22 @@ def payouts_page(user, limit: int, offset: int) -> list:
     limit = max(1, min(int(limit or 30), 100))
     offset = max(0, int(offset or 0))
     rows = (FeeReferralPayout.objects.filter(referrer_user=user)
-            .annotate(paid_at=Coalesce('block_time', 'created_at'))
-            .order_by('-paid_at', '-pk')[offset:offset + limit])
-    return [{'id': r.pk, 'amount': Decimal(r.share_wei) / WAD, 'paid_at': r.paid_at} for r in rows]
+            .annotate(paid_at=Coalesce('block_time', 'created_at')))
+    if month:
+        bounds = month_bounds(user, month)
+        if bounds is None:
+            return []
+        rows = rows.filter(paid_at__gte=bounds[0], paid_at__lt=bounds[1])
+    rows = rows.order_by('-paid_at', '-pk')[offset:offset + limit]
+    # Local date/time in the referrer's own time zone (the same zone as the
+    # month buckets), so the app's day headers never disagree with them.
+    tz = referrer_timezone(user)
+    out = []
+    for r in rows:
+        local = timezone.localtime(r.paid_at, tz)
+        out.append({'id': r.pk, 'amount': Decimal(r.share_wei) / WAD, 'paid_at': r.paid_at,
+                    'local_date': local.strftime('%Y-%m-%d'), 'local_time': local.strftime('%H:%M')})
+    return out
 
 
 def month_total(user) -> Decimal:
@@ -776,10 +927,11 @@ def notify_payout(row) -> None:
         notification_type=NotificationType.REFERRAL_COMMISSION_EARNED,
         title='Ganaste una comisión',
         message=f'+{format_usd(share)} por la actividad de un amigo invitado · Este mes: {format_usd(total)}',
+        # No tx hash: it would hand the inviter the friend's transaction (and
+        # with it the operation type), which the app never shows.
         data={
             'share_usd': str(share),
             'month_total_usd': str(total),
-            'tx_hash': row.tx_hash,
         },
         related_object_type='FeeReferralPayout',
         related_object_id=str(row.pk),

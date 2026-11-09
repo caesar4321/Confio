@@ -832,10 +832,11 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         sender_display, sender_phone_val = author_display_name(user), ''
         recipient_display, recipient_phone_val = author_display_name(recipient_user), ''
 
-    # Fee referral: a personal send that crosses the cUSD perimeter (to an
-    # outside wallet) carries the referrer arm first, so half the fee goes
-    # to whoever invited this member (cusd_plus/fee_referral.py).
-    if sender_business is None and activation_id is None:
+    # Fee referral: a send that crosses the cUSD perimeter (to an outside
+    # wallet), from a personal or business account, carries the referrer arm
+    # first, so half the fee goes to whoever invited the account's owner
+    # (cusd_plus/fee_referral.py).
+    if activation_id is None:
         from cusd_plus.fee_referral import arm_calls_for, has_fee_bearing_call
         if has_fee_bearing_call(calls):
             calls = arm_calls_for(user, sender_addr) + calls

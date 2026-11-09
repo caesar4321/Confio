@@ -17,13 +17,6 @@ export const FEE_REFERRAL_SUMMARY = gql`
       totalEarnedUsd
       friendCount
       waitingCount
-      friends {
-        referralId
-        displayName
-        status
-        endsAt
-        canRemind
-      }
     }
   }
 `;
@@ -54,7 +47,8 @@ export interface FeeReferralSummary {
   /** All invitations (the `friends` list is capped, newest first). */
   friendCount: number;
   waitingCount: number;
-  friends: FeeReferralFriend[];
+  /** Not requested by this hook (Mis comisiones pages invitations itself). */
+  friends?: FeeReferralFriend[];
 }
 
 /** This member's commission summary, or null while loading / unavailable.

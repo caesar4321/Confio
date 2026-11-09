@@ -193,9 +193,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
               </Text>
               {/* Before linking: what the inviter will and won't see. */}
               <Text style={styles.subtitle}>
-                Quien te invitó recibe parte de la comisión de Confío cuando recargas, retiras o inviertes. A ti no
-                te cuesta nada extra. En la app ve tu @usuario, si verificaste tu identidad y cuánto gana; no le
-                mostramos tus operaciones.
+                Quien te invitó recibe parte de la comisión de Confío cuando recargas, retiras, inviertes o envías fuera de Confío, también desde tus negocios. A ti no te cuesta nada extra. En la app ve tu @usuario, si verificaste tu identidad y cuánto gana con cada comisión y cuándo, de lo que puede deducir el monto y el momento de tus operaciones; no le mostramos qué operación haces.
               </Text>
 
               <View style={styles.usernameInputContainer}>
