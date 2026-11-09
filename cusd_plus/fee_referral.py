@@ -193,6 +193,40 @@ def same_person(a, b) -> bool:
     return False
 
 
+TEST_PAIR_MAX_DAYS = 30
+
+
+def test_pair_exempt(referrer_id, referee_id) -> bool:
+    """Staff testing: is this (referrer, referee) pair exempt from the
+    same-person block right now? Only while FEE_REFERRAL_TEST_UNTIL is a valid
+    future instant no more than TEST_PAIR_MAX_DAYS ahead; anything malformed
+    exempts nobody. Lifts the self-referral block only: verification, bans,
+    the window and the payout address still apply."""
+    from django.utils.dateparse import parse_datetime
+
+    raw_pairs = str(getattr(settings, 'FEE_REFERRAL_TEST_PAIRS', '') or '').strip()
+    if not raw_pairs or referrer_id is None or referee_id is None:
+        return False
+    try:
+        until = parse_datetime(str(getattr(settings, 'FEE_REFERRAL_TEST_UNTIL', '') or ''))
+    except ValueError:
+        until = None
+    if until is None:
+        return False
+    if timezone.is_naive(until):
+        from datetime import timezone as dt_timezone
+        until = timezone.make_aware(until, dt_timezone.utc)
+    now = timezone.now()
+    if not now < until <= now + timedelta(days=TEST_PAIR_MAX_DAYS):
+        return False
+    for pair in raw_pairs.split(','):
+        left, _, right = pair.strip().partition(':')
+        if left.strip().isdigit() and right.strip().isdigit() \
+                and (int(left), int(right)) == (int(referrer_id), int(referee_id)):
+            return True
+    return False
+
+
 def _is_banned(user) -> bool:
     from security.utils import check_user_banned
 
@@ -252,9 +286,11 @@ def eligible_arm(user, user_addr: str) -> Optional[ReferralArm]:
         return None
     if _is_banned(user) or _is_banned(referrer):
         return None
-    if same_person(user, referrer):
+    test_pair = test_pair_exempt(referrer.pk, user.pk)
+    if same_person(user, referrer) and not test_pair:
         return None  # one person behind both accounts: no self-commission
-    if actor is not None and (actor.pk == referrer.pk or same_person(actor, referrer)):
+    if actor is not None and (actor.pk == referrer.pk or (
+            same_person(actor, referrer) and not (test_pair and actor.pk == user.pk))):
         # The referrer (or another account of the same person) acting as an
         # employee on their invitee's business: they would be steering the
         # business's money to earn the fee themselves.
@@ -681,9 +717,9 @@ def friend_statuses(referrer, referrals=None) -> list:
         elif referrer_blocked or friend.pk in banned:
             status = FRIEND_UNAVAILABLE  # never reveal that someone else was suspended
             reason = 'referrer_suspended' if referrer_blocked else 'friend_suspended'
-        elif friend.pk in same_document:
+        elif friend.pk in same_document and not test_pair_exempt(referrer.pk, friend.pk):
             status, reason = FRIEND_SAME_PERSON, 'same_document'
-        elif friend.pk in same_face:
+        elif friend.pk in same_face and not test_pair_exempt(referrer.pk, friend.pk):
             # Blocks commission but stays vague: the face flag can be a
             # dismissed false positive, never assert identity on it.
             status, reason = FRIEND_UNAVAILABLE, 'same_face'

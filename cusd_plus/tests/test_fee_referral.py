@@ -122,6 +122,26 @@ class EligibilityTests(FeeReferralFixture):
             document_number=doc.document_number, document_number_normalized=doc.document_number_normalized)
         self.assertIsNone(fee_referral.eligible_arm(self.referee, REFEREE_ADDR))
 
+    def test_staff_test_pair_lifts_only_the_same_person_block(self):
+        from security.models import IdentityVerification
+
+        doc = IdentityVerification.all_objects.filter(user=self.referrer).first()
+        IdentityVerification.all_objects.filter(user=self.referee).update(
+            document_number=doc.document_number, document_number_normalized=doc.document_number_normalized)
+        until = (timezone.now() + timedelta(days=3)).isoformat()
+        pair = f'{self.referrer.pk}:{self.referee.pk}'
+        with override_settings(FEE_REFERRAL_TEST_PAIRS=pair, FEE_REFERRAL_TEST_UNTIL=until):
+            self.assertIsNotNone(fee_referral.eligible_arm(self.referee, REFEREE_ADDR))
+            # The referrer acting on the invitee's account still gets nothing.
+            self.assertIsNone(fee_referral.eligible_arm(self.referrer, REFEREE_ADDR))
+            # Every other rule still applies.
+            with mock.patch.object(fee_referral, '_is_banned', return_value=True):
+                self.assertIsNone(fee_referral.eligible_arm(self.referee, REFEREE_ADDR))
+        # Expired: blocked again.
+        past = (timezone.now() - timedelta(minutes=1)).isoformat()
+        with override_settings(FEE_REFERRAL_TEST_PAIRS=pair, FEE_REFERRAL_TEST_UNTIL=past):
+            self.assertIsNone(fee_referral.eligible_arm(self.referee, REFEREE_ADDR))
+
     def test_duplicated_face_either_direction_gets_nothing(self):
         from security.models import IdentityVerification
 
@@ -409,6 +429,11 @@ class FriendStatusTests(FeeReferralFixture):
             document_number=doc.document_number, document_number_normalized=doc.document_number_normalized)
         self.assertEqual(self.status(), 'same_person')
         self.assertEqual(fee_referral.group_counts(fee_referral.friend_statuses(self.referrer))['none'], 1)
+        # A staff test pair shows as an ordinary earning friend.
+        until = (timezone.now() + timedelta(days=3)).isoformat()
+        with override_settings(FEE_REFERRAL_TEST_PAIRS=f'{self.referrer.pk}:{self.referee.pk}',
+                               FEE_REFERRAL_TEST_UNTIL=until):
+            self.assertEqual(self.status(), 'earning')
         # A suspension wins over same-person: never reveal it, never relabel it.
         self.banned.return_value = True
         self.assertEqual(self.status(), 'unavailable')
@@ -827,3 +852,25 @@ class AdminStatusTests(FeeReferralFixture):
         flt = FeeCommissionStatusFilter(request, {'commission': ['earning']}, UserReferral, model_admin)
         self.assertEqual(list(flt.queryset(request, UserReferral.objects.all()).values_list('pk', flat=True)),
                          [self.referral.pk])
+
+
+class TestPairExemptionTests(TestCase):
+    def test_parsing_and_bounds(self):
+        from datetime import timedelta
+
+        from django.test import override_settings
+        from django.utils import timezone
+
+        soon = (timezone.now() + timedelta(days=2)).isoformat()
+        far = (timezone.now() + timedelta(days=45)).isoformat()
+        past = (timezone.now() - timedelta(minutes=1)).isoformat()
+        with override_settings(FEE_REFERRAL_TEST_PAIRS='4:5, 9:10', FEE_REFERRAL_TEST_UNTIL=soon):
+            self.assertTrue(fee_referral.test_pair_exempt(4, 5))
+            self.assertTrue(fee_referral.test_pair_exempt(9, 10))
+            self.assertFalse(fee_referral.test_pair_exempt(5, 4))  # directional
+            self.assertFalse(fee_referral.test_pair_exempt(4, 6))
+        for until in ('', 'garbage', past, far):
+            with override_settings(FEE_REFERRAL_TEST_PAIRS='4:5', FEE_REFERRAL_TEST_UNTIL=until):
+                self.assertFalse(fee_referral.test_pair_exempt(4, 5), until)
+        with override_settings(FEE_REFERRAL_TEST_PAIRS='', FEE_REFERRAL_TEST_UNTIL=soon):
+            self.assertFalse(fee_referral.test_pair_exempt(4, 5))
