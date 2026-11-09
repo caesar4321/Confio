@@ -1897,6 +1897,13 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertEqual(self.store.alcohol_license_expires_on, self.today + timedelta(days=20))
         self.assertTrue(self.store.alcohol_license_note)
 
+    def test_an_unusable_answer_rejects_instead_of_paying_for_retries(self):
+        from .license_review import LicenseUnreadable, review_license
+        image = SimpleNamespace(body=b'img', mime_type='image/jpeg')
+        with mock.patch('inbox.community.load_pending_image', return_value=image), \
+                mock.patch('marketplace.license_review._read_license', side_effect=LicenseUnreadable('cut off')):
+            self.assertEqual(review_license(self.store.pk, self.KEY), 'rejected')
+
     def test_an_outage_leaves_it_pending(self):
         from .license_review import ReviewUnavailable, review_license
         image = SimpleNamespace(body=b'img', mime_type='image/jpeg')
@@ -2000,7 +2007,7 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             admin.revoke_alcohol_license(mock.Mock(), Store.objects.filter(pk=self.store.pk))
         self.store.refresh_from_db()
         self.assertEqual(self.store.alcohol_license_status, 'rejected')
-        self.assertTrue(any('no licence number or photo could be recorded' in str(c) for c in said.call_args_list))
+        self.assertTrue(any('no licence number could be recorded' in str(c) for c in said.call_args_list))
 
     def test_a_hand_approved_licence_that_fails_its_re_review_stops_selling(self):
         Store.objects.filter(pk=self.store.pk).update(

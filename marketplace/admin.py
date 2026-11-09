@@ -227,8 +227,9 @@ class StoreAdmin(admin.ModelAdmin):
         for message in failed:
             self.message_user(request, f'Not revoked, try again: {message}', level=messages.ERROR)
         if unrecorded:
-            self.message_user(request, f'Sales stopped, but no licence number or photo could be recorded for '
-                              f'store(s) {sorted(unrecorded)}: the same licence could pass review again.',
+            self.message_user(request, f'Sales stopped, but no licence number could be recorded for '
+                              f'store(s) {sorted(unrecorded)} (at most the photo): a new photo of the same licence '
+                              f'could pass review again.',
                               level=messages.WARNING)
 
     @admin.action(description='Alcohol licence: run the automatic review again')

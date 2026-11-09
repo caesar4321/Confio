@@ -70,6 +70,10 @@ _FIELDS = {
 SCHEMA = {'type': 'object', 'additionalProperties': False, 'properties': _FIELDS, 'required': list(_FIELDS)}
 
 
+class LicenseUnreadable(Exception):
+    """The reviewer answered, but nothing usable came back for this photo."""
+
+
 def _read_license(image, context: str) -> dict:
     """The model's reading of the photo, validated. Raises ReviewUnavailable."""
     import base64
@@ -91,7 +95,9 @@ def _read_license(image, context: str) -> dict:
             {'type': 'input_text', 'text': 'The licence photo the seller uploaded is attached.'},
             {'type': 'input_image', 'image_url': f'data:{image.mime_type};base64,{encoded}'},
         ]}],
-        'max_output_tokens': 2000,
+        # Reasoning counts toward this: room enough that a dense licence is read,
+        # not cut off.
+        'max_output_tokens': 8000,
         'text': {'format': {'type': 'json_schema', 'name': 'license_review', 'schema': SCHEMA, 'strict': True}},
     }
     effort = settings.COMMUNITY_ESCALATION_REASONING_EFFORT
@@ -105,22 +111,25 @@ def _read_license(image, context: str) -> dict:
         raise ReviewUnavailable(f'{model} request failed: {exc}') from exc
     if response.status_code >= 400:
         raise ReviewUnavailable(f'{model} returned {response.status_code}: {response.text[:300]}')
+    # The service answered: an incomplete or malformed reading is about this
+    # photo, not an outage, so it ends the review (rejected) instead of being
+    # retried as paid calls that can never succeed.
     try:
         reading = json.loads(_openai_output_text(response.json()))
     except Exception as exc:
-        raise ReviewUnavailable(f'{model} returned an unreadable response: {exc}') from exc
+        raise LicenseUnreadable(f'{model} returned an unreadable response: {exc}') from exc
     if not isinstance(reading, dict) or set(reading) != set(_FIELDS):
-        raise ReviewUnavailable(f'{model} returned a reading with the wrong fields')
+        raise LicenseUnreadable(f'{model} returned a reading with the wrong fields')
     for key, spec in _FIELDS.items():
         value = reading[key]
         if spec['type'] == 'boolean' and not isinstance(value, bool):
-            raise ReviewUnavailable(f'{model} returned a non-boolean {key}')
+            raise LicenseUnreadable(f'{model} returned a non-boolean {key}')
         if spec['type'] == 'string' and not isinstance(value, str):
-            raise ReviewUnavailable(f'{model} returned a non-text {key}')
+            raise LicenseUnreadable(f'{model} returned a non-text {key}')
     confidence = reading['confidence']
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) \
             or not math.isfinite(confidence) or not 0 <= confidence <= 1:
-        raise ReviewUnavailable(f'{model} returned a bad confidence')
+        raise LicenseUnreadable(f'{model} returned a bad confidence')
     reading['model'] = model
     return reading
 
@@ -344,7 +353,7 @@ def revoke_licence(store_id: int) -> tuple:
     same way, in the same transaction.
 
     Locks follow the review's order: licence locks first, then store rows.
-    Returns (revoked store ids, ids for which nothing could be recorded)."""
+    Returns (revoked store ids, ids for which no licence NUMBER could be recorded)."""
     from django.db.models import Q
 
     from .models import AlcoholLicenseApproval, RevokedAlcoholLicense, Store
@@ -383,7 +392,9 @@ def revoke_licence(store_id: int) -> tuple:
                 hashes.add(on_screen)
             for city, number, photo_hash in records:
                 RevokedAlcoholLicense.objects.create(store=row, city_key=city, number=number, photo_hash=photo_hash)
-            if not records:
+            # Nothing, or only a photo fingerprint: a new photo of the same
+            # licence could still pass, so the admin is told.
+            if not any(number for _, number, _ in records):
                 unrecorded.append(pk)
             # Sales stop whatever could be recorded; clearing the current
             # photo makes any review still in flight stale.
@@ -415,7 +426,11 @@ def review_license(store_id: int, key: str) -> str:
     # A decision taken meanwhile (an admin, another review) is never overwritten.
     started = (store.alcohol_license_status, store.alcohol_license_reviewed_at)
     image = _load_photo(key)
-    reading = _read_license(image, _context(store)) if image is not None else None
+    try:
+        reading = _read_license(image, _context(store)) if image is not None else None
+    except LicenseUnreadable as exc:
+        logger.warning('[COMPRAR] licence photo for store %s unreadable by the reviewer: %s', store_id, exc)
+        reading = None
     photo_hash = hashlib.sha256(image.body).hexdigest() if image is not None else ''
     today = local_today(store.country_code)
     if reading is None:
