@@ -83,6 +83,22 @@ source imports only minimal interfaces declared in `ConfioStockRouter.sol`.
 
 ## BSC deployment
 
+### Router v3 upgrade — 2026-11-09 (0.30% legacy path deleted)
+
+| Step | Value |
+| --- | --- |
+| Legacy fees withdrawn | 9.917733009645957019 USDT to the Safe via `withdrawFees` (Safe nonce 28, tx `0xb860a3c937017abdefbd2d892c6e1e10527d5b110ca5622f678afaf580f7f356`) |
+| Relay | `CUSD_PLUS_STOCK_LEGACY_FEE_ENABLED=False` (only cap 90 sponsored) |
+| v3 implementation | `0x054EDf7951B9e89734F4155d3465ed0f11DA0532` (KMS sponsor, tx `0x2f7e546a992d9b8d6142544a4b3007a1313460a851dea120b2dc4a8e7bb1d9cb`, BscScan source verified) |
+| Safe upgrade | `upgradeToAndCall(v3, initializeV3())`, Safe nonce 29, tx `0xc77a551e52f7a6c28711393add613a5a8389f8672482dd99db23735d9fd72195`, block 132636766 |
+
+Read back after execution: implementation slot = v3, `VERSION() == 3`,
+`Initialized(3)` emitted, `accruedUsdtFees() == 0`, `stockFeeBps() == 0`,
+`conversionFeeBps() == 90`, owner = Safe, not paused, `withdrawFees`
+absent. Deployed with `manage.py deploy_stock_router_v3 --broadcast
+--yes-mainnet` on the production host; rehearsed first in
+`test/UpgradeRehearsal.fork.t.sol`.
+
 ### Mainnet deployment — 2026-08-10
 
 | Role | Address |

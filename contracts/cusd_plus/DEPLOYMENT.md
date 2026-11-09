@@ -180,7 +180,7 @@ activation.
 | cUSD implementation | `0xf7F2062b4249aD91f061c29Ed059A3073213a93C` | `0x82f28fbd6fed1d353ecd7d49efacaffd61df5495f2cc14eea635148e8eefcfa3` |
 | **cUSD ERC1967 proxy** | **`0x6101cC370635cF2c7f2725EaB010aC407A8d543F`** | `0x052947b6cd8bf6e6c19dd7e3e422d8aa17d91e9f72d6dfb0a1301ec8beb4b3e4` |
 | cUSD+ implementation | `0x1E5D09badBaE8f7b1b81C30B612ef452e7F7eC44` | `0x223cb081c9a984bff1fd92a9a616877f3f69d0c9827984172c29e77c56eb5ba9` |
-| Stock Router implementation | `0xF933976473Ba2291d5BA5934BA8915A058A3C83a` | `0x87b7aae34cac09529697c7cb26ca7bf97e5fa7e0f574aa4a23b0b4d538fb45ba` |
+| Stock Router implementation | `0xF933976473Ba2291d5BA5934BA8915A058A3C83a` (superseded: v2 `0x51B26C9e…` 2026-10-19, v3 `0x054EDf7951B9e89734F4155d3465ed0f11DA0532` 2026-11-09, see below) | `0x87b7aae34cac09529697c7cb26ca7bf97e5fa7e0f574aa4a23b0b4d538fb45ba` |
 | cUSD+/Stock coordinated Safe multisend | existing proxies retained | `0x4120a2c2be2151d264e208b0155578b586c6c58a3fbefe0ee5fa7b1db51c57aa` |
 | ConfioPayContract | `0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA` | `0x960d3d4070f7dbc857545027beadbea4fd97877580f215b7cfd909eb1a04137b` |
 | ConfioPayrollVault | `0x851e1a56De5c0ADBB75e904B2E7325e132692027` | `0x34a17c3656add5b7276b7a6f398c31fe5ba3d4da677384ca851f2160542f6aba` |
@@ -207,6 +207,14 @@ BscScan source verification passed for the cUSD implementation and proxy,
 cUSD+ implementation, Stock Router implementation, Pay, Payroll, Invite, and
 Presale deployments. Existing cUSD+ and Stock proxy addresses remain linked by
 their ERC-1967 implementation slots.
+
+**Stock Router v3 — 2026-11-09.** The transitional 0.30% legacy path was
+retired: relay switch off, accrued 9.917733 USDT withdrawn to the Safe (nonce
+28), then the Safe (nonce 29, tx
+`0xc77a551e52f7a6c28711393add613a5a8389f8672482dd99db23735d9fd72195`)
+upgraded the proxy to v3 `0x054EDf7951B9e89734F4155d3465ed0f11DA0532` with
+`initializeV3()`. The router now has no fee path; stock trades pay only cUSD's
+0.9%. Details: `contracts/ondo_stocks/README.md`.
 
 Production configuration is part of the coordinated cutover:
 
