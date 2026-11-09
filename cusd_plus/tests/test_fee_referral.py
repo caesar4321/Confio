@@ -491,7 +491,8 @@ class LaunchTests(FeeReferralFixture):
         self.assertEqual(push.call_count, 2)
         self.assertIn('50%', texts)
         self.assertNotIn('US$5', texts)
-        self.assertIn('no le mostramos tus operaciones', texts)  # the friend's privacy notice
+        self.assertIn('no le mostramos qué operación haces', texts)
+        self.assertIn('cuándo', texts)  # the friend's privacy notice
 
 
 class ReminderTests(FeeReferralFixture):
@@ -531,7 +532,8 @@ class PayoutsPageTests(FeeReferralFixture):
                 fee_referral.record_referral_payouts(f'0x0{i}', [_paid_log(index=i)], {})
         page = fee_referral.payouts_page(self.referrer, limit=2, offset=0)
         self.assertEqual(len(page), 2)
-        self.assertEqual(set(page[0]), {'id', 'amount', 'paid_at'})
+        # Own money and time only: no friend, no transaction hash.
+        self.assertEqual(set(page[0]), {'id', 'amount', 'paid_at', 'local_date', 'local_time'})
         self.assertEqual(len(fee_referral.payouts_page(self.referrer, limit=2, offset=2)), 1)
         self.assertEqual(fee_referral.payouts_page(self.referee, limit=10, offset=0), [])
 
@@ -649,3 +651,135 @@ class FinalAuditTests(FeeReferralFixture):
             with mock.patch('notifications.utils.create_notification') as push:
                 fee_referral.remind_friend(self.referrer, self.referral.pk)
             push.assert_called_once()
+
+
+class DashboardTests(FeeReferralFixture):
+    def add_friends(self, n, prefix):
+        from achievements.models import UserReferral
+        from users.models import User
+
+        for i in range(n):
+            friend = self.make_user('0x' + format(0xA00 + i + (0x100 if prefix == 'b' else 0), 'x').rjust(40, '0'),
+                                    verified=False)
+            User.objects.filter(pk=friend.pk).update(username=f'{prefix}friend{i}')
+            UserReferral.objects.create(referred_user=friend, referrer_user=self.referrer, referrer_identifier='amigo')
+
+    def test_every_invitation_is_reachable_and_searchable(self):
+        from achievements.models import UserReferral
+
+        # The original referee is the OLDEST invitation (the @julianm case).
+        UserReferral.objects.filter(pk=self.referral.pk).update(created_at=timezone.now() - timedelta(days=60))
+        self.add_friends(5, 'a')
+        total, page = fee_referral.friends_page(self.referrer, limit=2, offset=0)
+        self.assertEqual(total, 6)
+        self.assertEqual(len(page), 2)
+        _, last = fee_referral.friends_page(self.referrer, limit=2, offset=4)
+        self.assertEqual(last[-1]['referral_id'], self.referral.pk)
+        total, found = fee_referral.friends_page(self.referrer, search=f'@{self.referee.username.upper()}')
+        self.assertEqual(total, 1)
+        self.assertEqual(found[0]['referral_id'], self.referral.pk)
+
+    def test_group_filters_and_counts(self):
+        self.add_friends(3, 'b')  # unverified -> waiting
+        statuses = fee_referral.friend_statuses(self.referrer)
+        self.assertEqual(fee_referral.group_counts(statuses),
+                         {'earning': 1, 'waiting': 3, 'you': 0, 'none': 0})
+        total, page = fee_referral.friends_page(self.referrer, group='earning')
+        self.assertEqual(total, 1)
+        self.assertEqual(page[0]['status'], 'earning')
+
+    def test_monthly_totals_cover_six_months_with_zeros(self):
+        with mock.patch('notifications.utils.create_notification'):
+            fee_referral.record_referral_payouts('0x0a', [_paid_log(index=1)], {})
+        months = fee_referral.monthly_totals(self.referrer)
+        self.assertEqual(len(months), 6)
+        self.assertEqual(months[-1][1], Decimal('0.45'))
+        self.assertTrue(all(amount == 0 for _, amount in months[:-1]))
+        self.assertEqual(months, sorted(months, key=lambda m: m[0]))
+
+    def test_dashboard_graphql(self):
+        from types import SimpleNamespace
+
+        from config.schema import schema
+
+        query = ('{ feeReferralSummary { friendCount earningCount waitingCount noCommissionCount '
+                 'monthly { month amountUsd } } feeReferralFriends(group: "earning", limit: 5) '
+                 '{ totalCount friends { displayName status } } }')
+        result = schema.execute(query, context_value=SimpleNamespace(user=self.referrer, META={}))
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data['feeReferralSummary']['earningCount'], 1)
+        self.assertEqual(len(result.data['feeReferralSummary']['monthly']), 6)
+        self.assertEqual(result.data['feeReferralFriends']['totalCount'], 1)
+
+
+BUSINESS_ADDR = '0x' + '66' * 20
+
+
+class BusinessAccountTests(FeeReferralFixture):
+    def setUp(self):
+        super().setUp()
+        from users.models import Account, Business
+
+        business = Business.objects.create(name='Tienda Ana', category='other')
+        Account.objects.create(user=self.referee, account_type='business', account_index=0,
+                               business=business, bsc_address=BUSINESS_ADDR)
+
+    def test_the_owners_business_earns_for_the_owners_referrer(self):
+        arm = fee_referral.eligible_arm(self.referee, BUSINESS_ADDR)
+        self.assertIsNotNone(arm)
+        self.assertEqual(arm.referrer_address, REFERRER_ADDR)
+
+    def test_an_employee_acting_does_not_change_the_invitee(self):
+        employee = self.make_user('0x' + '77' * 19 + '78')
+        arm = fee_referral.eligible_arm(employee, BUSINESS_ADDR)
+        self.assertIsNotNone(arm)
+        self.assertEqual(arm.referrer_user_id, self.referrer.pk)
+
+    def test_owner_conditions_still_apply(self):
+        from security.models import IdentityVerification
+
+        IdentityVerification.all_documents.filter(user=self.referee).update(status='pending')
+        self.assertIsNone(fee_referral.eligible_arm(self.referee, BUSINESS_ADDR))
+
+    def test_a_business_payout_is_credited_to_the_owner(self):
+        log = _paid_log()
+        log['topics'][1] = '0x' + BUSINESS_ADDR[2:].rjust(64, '0')
+        with mock.patch('notifications.utils.create_notification'):
+            rows = fee_referral.record_referral_payouts('0xbiz', [log], {})
+        self.assertEqual(rows[0].referee_user, self.referee)
+        self.assertEqual(rows[0].referrer_user, self.referrer)
+
+    def test_the_referrer_acting_on_the_invitees_business_earns_nothing(self):
+        self.assertIsNone(fee_referral.eligible_arm(self.referrer, BUSINESS_ADDR))
+
+
+class PushPrivacyTests(FeeReferralFixture):
+    def test_push_carries_no_transaction_hash(self):
+        with mock.patch('notifications.utils.create_notification') as push:
+            fee_referral.record_referral_payouts('0xabc', [_paid_log()], {})
+        self.assertNotIn('tx_hash', push.call_args.kwargs['data'])
+
+
+class MonthFilterTests(FeeReferralFixture):
+    def test_payouts_filtered_to_one_local_month(self):
+        from datetime import datetime, timezone as dt_tz
+
+        from users.models import User
+
+        User.objects.filter(pk=self.referrer.pk).update(country='VE')  # UTC-4
+        self.referrer.refresh_from_db()
+        with mock.patch('notifications.utils.create_notification'):
+            # 01:00 UTC Nov 1 = Oct 31 in Caracas.
+            fee_referral.record_referral_payouts('0x31', [_paid_log(index=1)], {100: datetime(2026, 11, 1, 1, tzinfo=dt_tz.utc)})
+            fee_referral.record_referral_payouts('0x32', [_paid_log(index=2)], {100: datetime(2026, 11, 5, 12, tzinfo=dt_tz.utc)})
+        october = fee_referral.payouts_page(self.referrer, 30, 0, month='2026-10')
+        november = fee_referral.payouts_page(self.referrer, 30, 0, month='2026-11')
+        self.assertEqual(len(october), 1)
+        self.assertEqual(len(november), 1)
+        self.assertEqual(len(fee_referral.payouts_page(self.referrer, 30, 0)), 2)
+        self.assertEqual(fee_referral.payouts_page(self.referrer, 30, 0, month='2026-13'), [])
+        self.assertEqual(fee_referral.payouts_page(self.referrer, 30, 0, month='nope'), [])
+        self.assertEqual(fee_referral.payouts_page(self.referrer, 30, 0, month='0000-05'), [])
+        self.assertEqual(fee_referral.payouts_page(self.referrer, 30, 0, month='9999-12'), [])
+        # Local date/time in the referrer's zone, matching the month bucket.
+        self.assertEqual((october[0]['local_date'], october[0]['local_time']), ('2026-10-31', '21:00'))

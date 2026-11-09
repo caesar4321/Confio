@@ -349,9 +349,7 @@ def _notify_commission_referral_joined(referral: UserReferral) -> None:
             user=friend,
             notification_type=NotificationTypeChoices.REFERRAL_ACTION_REMINDER,
             title="Te uniste por invitación",
-            message=("Quien te invitó recibe parte de la comisión de Confío cuando recargas, retiras o "
-                     "inviertes. A ti no te cuesta nada extra. En la app ve tu @usuario, si verificaste tu "
-                     "identidad y cuánto gana; no le mostramos tus operaciones."),
+            message=("Quien te invitó recibe parte de la comisión de Confío cuando recargas, retiras, inviertes o envías fuera de Confío, también desde tus negocios. A ti no te cuesta nada extra. En la app ve tu @usuario, si verificaste tu identidad y cuánto gana con cada comisión y cuándo, de lo que puede deducir el monto y el momento de tus operaciones; no le mostramos qué operación haces."),
             data={'referral_id': referral.id, 'referrer_user_id': referral.referrer_user_id},
             action_url="confio://achievements",
         )

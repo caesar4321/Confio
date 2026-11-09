@@ -303,6 +303,8 @@ class FeeReferralPayoutType(graphene.ObjectType):
     id = graphene.ID(required=True)
     amount_usd = graphene.String(required=True)
     paid_at = graphene.DateTime(required=True)
+    local_date = graphene.String(required=True, description="YYYY-MM-DD in the member's time zone")
+    local_time = graphene.String(required=True, description="HH:MM in the member's time zone")
 
 
 class RemindFeeReferralFriend(graphene.Mutation):
@@ -343,6 +345,22 @@ class FeeReferralSummaryType(graphene.ObjectType):
                             description="Newest invitations first, at most FRIENDS_LIST_MAX")
     friend_count = graphene.Int(required=True, description="All invitations, beyond the list cap")
     waiting_count = graphene.Int(required=True, description="Invited friends who still need to verify")
+    earning_count = graphene.Int(required=True, description="Invitations earning commission now")
+    no_commission_count = graphene.Int(required=True, description="Ended or not eligible")
+    today = graphene.String(required=True, description="Today, YYYY-MM-DD in the member's time zone")
+    monthly = graphene.List(graphene.NonNull(lambda: FeeReferralMonthType), required=True,
+                            description="Last 6 calendar months (referrer's time zone), oldest first")
+
+
+class FeeReferralMonthType(graphene.ObjectType):
+    month = graphene.String(required=True, description="YYYY-MM")
+    amount_usd = graphene.String(required=True)
+
+
+class FeeReferralFriendsPageType(graphene.ObjectType):
+    """One page of the member's invitations (newest first)."""
+    total_count = graphene.Int(required=True)
+    friends = graphene.List(graphene.NonNull(FeeReferralFriendType), required=True)
 
 
 class FeeReferralArmType(graphene.ObjectType):
@@ -639,10 +657,19 @@ def _sparkline(history: list, points: int = 24) -> list:
 class Query(graphene.ObjectType):
     cusd_plus_summary = graphene.Field(CusdPlusSummaryType)
     cusd_plus_convert_params = graphene.Field(CusdPlusConvertParamsType)
+    fee_referral_friends = graphene.Field(
+        FeeReferralFriendsPageType,
+        group=graphene.String(description="earning | waiting | you | none; empty = all"),
+        search=graphene.String(),
+        limit=graphene.Int(default_value=30),
+        offset=graphene.Int(default_value=0),
+        description="This member's invitations, searchable and paginated (every one reachable)",
+    )
     fee_referral_payouts = graphene.List(
         graphene.NonNull(FeeReferralPayoutType),
         limit=graphene.Int(default_value=30),
         offset=graphene.Int(default_value=0),
+        month=graphene.String(description="YYYY-MM in the member's time zone; empty = all"),
         description="This member's own referral commissions, newest first",
     )
     fee_referral_summary = graphene.Field(
@@ -729,13 +756,26 @@ class Query(graphene.ObjectType):
         description="Read-only BSC RPC proxy (allowlisted methods) — keeps user IPs off public nodes",
     )
 
-    def resolve_fee_referral_payouts(self, info, limit=30, offset=0):
+    def resolve_fee_referral_friends(self, info, group='', search='', limit=30, offset=0):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        from .fee_referral import friends_page
+        total, page = friends_page(user, group=group or '', search=search or '', limit=limit, offset=offset)
+        return FeeReferralFriendsPageType(total_count=total, friends=[FeeReferralFriendType(
+            referral_id=f['referral_id'], display_name=f['display_name'], status=f['status'],
+            ends_at=f['ends_at'], can_remind=f['can_remind'],
+        ) for f in page])
+
+    def resolve_fee_referral_payouts(self, info, limit=30, offset=0, month=''):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return []
         from .fee_referral import payouts_page
         return [FeeReferralPayoutType(id=p['id'], amount_usd=str(p['amount'].quantize(Decimal('0.000001'))),
-                                      paid_at=p['paid_at']) for p in payouts_page(user, limit, offset)]
+                                      paid_at=p['paid_at'], local_date=p['local_date'],
+                                      local_time=p['local_time'])
+                for p in payouts_page(user, limit, offset, month=month or '')]
 
     def resolve_fee_referral_summary(self, info):
         user = getattr(info.context, 'user', None)
@@ -748,7 +788,8 @@ class Query(graphene.ObjectType):
         # perimeter fee, not a per-load RPC read of CusdVault.feeBps().
         from django.conf import settings
         perimeter_bps = int(getattr(settings, 'CUSD_PERIMETER_FEE_BPS', 90))
-        statuses = fr.friend_statuses(user)
+        statuses = fr.cached_friend_statuses(user)
+        counts = fr.group_counts(statuses)
         return FeeReferralSummaryType(
             enabled=fr.enabled(),
             share_bps=fr.share_bps(),
@@ -762,7 +803,12 @@ class Query(graphene.ObjectType):
                 ends_at=f['ends_at'], can_remind=f['can_remind'],
             ) for f in statuses[:fr.FRIENDS_LIST_MAX]],
             friend_count=len(statuses),
-            waiting_count=sum(1 for f in statuses if f['status'] == fr.FRIEND_NEEDS_FRIEND_VERIFICATION),
+            waiting_count=counts['waiting'],
+            earning_count=counts['earning'],
+            no_commission_count=counts['none'],
+            today=timezone.localtime(timezone.now(), fr.referrer_timezone(user)).strftime('%Y-%m-%d'),
+            monthly=[FeeReferralMonthType(month=month, amount_usd=str(amount.quantize(Decimal('0.000001'))))
+                     for month, amount in fr.monthly_totals(user)],
         )
 
     def resolve_fee_referral_arm(self, info):
@@ -771,8 +817,9 @@ class Query(graphene.ObjectType):
             return None
         from users.jwt_context import get_jwt_business_context_with_validation
         ctx = get_jwt_business_context_with_validation(info, required_permission=None)
-        # Commission follows a person's own activity: personal accounts only.
-        if not ctx or ctx.get('account_type') == 'business':
+        # Personal and business accounts alike: the invitee is the account's
+        # owner, whichever employee is acting (fee_referral.eligible_arm).
+        if not ctx:
             return None
         address = _active_bsc_address(info)
         if not address:

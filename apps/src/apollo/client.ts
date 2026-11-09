@@ -580,6 +580,11 @@ export const apolloClient = new ApolloClient({
           gmHomeTile: {
             merge: true,
           },
+          // Profile/Achievements (useFeeReferralSummary) and Mis comisiones
+          // read different fields of it: neither may erase the other.
+          feeReferralSummary: {
+            merge: true,
+          },
         },
       },
       MessageInboxType: {
