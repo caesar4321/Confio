@@ -206,6 +206,7 @@ class StoreAdmin(admin.ModelAdmin):
 
     @admin.action(description='Alcohol licence: revoke (this licence never passes review again, for any store)')
     def revoke_alcohol_license(self, request, queryset):
+        from django.db import OperationalError
         from .license_review import RevokeIncomplete, revoke_licence
         revoked, failed = set(), []
         for store in queryset.exclude(alcohol_license_status='none'):
@@ -213,6 +214,8 @@ class StoreAdmin(admin.ModelAdmin):
                 revoked.update(revoke_licence(store.pk))
             except RevokeIncomplete as exc:
                 failed.append(str(exc))
+            except OperationalError as exc:  # a lock conflict (e.g. two revokes at once): nothing written
+                failed.append(f'store {store.pk}: busy ({exc.__class__.__name__})')
         also = revoked - set(queryset.values_list('pk', flat=True))
         self.message_user(request, f'Revoked {len(revoked)} licence(s)'
                           + (f', including {len(also)} other store(s) approved with the same licence' if also else '')

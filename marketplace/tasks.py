@@ -152,9 +152,11 @@ def review_alcohol_license(self, store_id: int, key: str):
 
     from .models import Store
 
+    from django.db import OperationalError
+
     try:
         review_license(store_id, key)
-    except ReviewUnavailable as exc:
+    except (ReviewUnavailable, OperationalError) as exc:  # an outage, or a lock conflict Postgres broke
         logger.warning('[COMPRAR] licence review for store %s unavailable: %s', store_id, exc)
         # Still in flight: the stuck-review sweep must not start a second chain.
         Store.objects.filter(pk=store_id, alcohol_license_key=key).update(alcohol_license_queued_at=timezone.now())

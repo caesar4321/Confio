@@ -153,11 +153,13 @@ def _normalize_number(value: str) -> str:
     return compact[:60]
 
 
-def _words(value: str) -> set:
-    """Accent- and case-free words: "QUISPE MAMANI, Ana María" → {quispe, mamani, ana, maria}."""
+def _words(value: str, keep_initials: bool = False) -> set:
+    """Accent- and case-free words: "QUISPE MAMANI, Ana María" → {quispe, mamani, ana, maria}.
+    Single letters are dropped unless keep_initials (a holder's "Juan C." keeps its "c")."""
     import unicodedata
     folded = unicodedata.normalize('NFKD', value or '').encode('ascii', 'ignore').decode().casefold()
-    return {w for w in ''.join(ch if ch.isalnum() else ' ' for ch in folded).split() if len(w) > 1}
+    return {w for w in ''.join(ch if ch.isalnum() else ' ' for ch in folded).split()
+            if len(w) > 1 or (keep_initials and w.isalpha())}
 
 
 # Particles of Spanish names ("María de los Ángeles", "Juan de Dios") and
@@ -172,7 +174,8 @@ def holder_matches(holder: str, first_names: str, last_names: str) -> bool:
     (particles like "de" and titles aside), in any order. Anything looser lets
     a sibling's or a namesake's licence through ("Ana María" vs "María Elena",
     "Juan" vs "Juan Carlos" Quispe Mamani)."""
-    words = _words(holder) - NAME_PARTICLES
+    # An initial on the licence ("JUAN C.") is a name word the ID must have.
+    words = _words(holder, keep_initials=True) - NAME_PARTICLES - {'y', 'e'}
     surnames = _words(last_names) - NAME_PARTICLES
     given = _words(first_names) - NAME_PARTICLES
     return bool(surnames) and bool(given) and words == (surnames | given)
@@ -397,6 +400,13 @@ def review_license(store_id: int, key: str) -> str:
         approved, expires, reason = decide(reading, store, today, _owner_names(store))
 
     with transaction.atomic():
+        if approved:
+            # The licence lock BEFORE the store row: the same order a revoke
+            # takes (licence, then other stores' rows), so the two never deadlock.
+            from django.db import connection
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [
+                    f'comprar-licence:{city_key(store.city)}:{_normalize_number(reading["license_number"])}'])
         row = Store.objects.select_for_update().get(pk=store.pk)
         if row.alcohol_license_key != key or (row.alcohol_license_status, row.alcohol_license_reviewed_at) != started:
             return 'stale'  # a newer photo, or another decision, arrived meanwhile

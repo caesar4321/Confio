@@ -4,6 +4,18 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def review_hand_approved(apps, schema_editor):
+    """Licences approved before the approval history existed have no record,
+    so they would not count in one-licence-one-store. Queue them for the
+    automatic review as a renewal: a pass records them; a failure keeps the
+    licence (and tells the seller), exactly like any renewal."""
+    from django.utils import timezone
+    Store = apps.get_model('marketplace', 'Store')
+    Store.objects.filter(alcohol_license_status='approved').exclude(alcohol_license_key='').update(
+        alcohol_license_submitted_at=timezone.now(), alcohol_license_reviewed_at=None,
+        alcohol_license_queued_at=None, alcohol_license_attempts=0)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -27,4 +39,5 @@ class Migration(migrations.Migration):
                 'ordering': ['-approved_at'],
             },
         ),
+        migrations.RunPython(review_hand_approved, migrations.RunPython.noop),
     ]

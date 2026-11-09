@@ -1946,6 +1946,7 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         # A brother with an extra given name: not him either.
         self.assertFalse(holder_matches('Juan Carlos Quispe Mamani', 'Juan', 'Quispe Mamani'))
         self.assertTrue(holder_matches('Sr. Juan Quispe Mamani', 'Juan', 'Quispe Mamani'))
+        self.assertFalse(holder_matches('JUAN C. QUISPE MAMANI', 'Juan', 'Quispe Mamani'))   # an initial is a name
 
     def test_revoking_records_every_licence_ever_approved(self):
         from .models import RevokedAlcoholLicense
