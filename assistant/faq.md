@@ -31,6 +31,7 @@
 - Nunca digas que recibir en una cuenta local (Pix, Bre-B, CLABE) es gratis: ese dinero entra a Confío y lleva el 0,9%.
 - Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
 - Acciones: la misma comisión de 0,9% de Confío que un retiro o depósito: al comprar (el dinero sale de tu dólar Confío) y al vender (vuelve a él). Sin comisión aparte por operar.
+- Referidos: la mitad de la comisión de 0,9% que paga un invitado va a quien lo invitó (ver Referidos). Al invitado no le cuesta nada extra: paga la misma comisión.
 - Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti. La tasa que muestra la app ya descuenta esa parte: no la restes otra vez al calcular cuánto gana alguien.
 - El proveedor local de recarga o retiro puede cobrar aparte, y el tipo de cambio varía: el costo final siempre lo ves antes de confirmar.
 - Parte del costo del proveedor puede ser fijo por cada recarga o retiro, sin importar el monto: por eso en montos chicos pesa más y llega proporcionalmente menos. Hacer menos operaciones y de mayor monto suele costar menos. No des cifras de ese costo fijo; el costo final lo muestra la app antes de confirmar.
@@ -45,6 +46,22 @@
 - Estado en BNB Smart Chain (verificado el 5 de octubre de 2026): las bóvedas de vesting del fundador, del co-creador y del Fondo de Invitación Cultural ya tienen sus tokens depositados y sus asignaciones registradas, pero ninguna liberación ha empezado ni se ha retirado nada. Hasta que se active cada una, la tesorería multifirma de Confío todavía puede cancelarla y recuperar esos tokens; una vez activada ya no se puede cancelar, aunque la tesorería sí puede cambiar a quién va dirigida en cualquier momento.
 - $CONFIO no respalda tus dólares, no es una acción de la empresa y no da derecho a ganancias. Su precio futuro no está garantizado y puede bajar.
 - Para más detalle (vesting, riesgos, contratos), el documento de tokenomics y el whitepaper están en GitHub.
+
+## Referidos: invita a quienes confías
+- Cuando alguien que invitaste mueve su dinero, Confío te comparte el 50% de la comisión de 0,9% que paga. Llega en Confío Dollar (cUSD) a tu cuenta personal, al instante, en la misma operación de tu invitado. A tu invitado no le cuesta nada extra.
+- Generan comisión: recargas y retiros, entrar y salir del ahorro (Confío Dollar+), comprar y vender acciones, oro y Bitcoin, el margen que entra y sale de Futuros, y los envíos y depósitos de USDT con billeteras fuera de Confío. No generan: Confío Pay, Comprar, los envíos entre usuarios de Confío (son gratis) ni ninguna otra comisión, como la parte del rendimiento de Confío Dollar+.
+- Condiciones: los dos con la identidad verificada en el momento de la operación, ninguna de las dos cuentas suspendida, y no ser la misma persona. Lo que tu invitado hizo antes de cumplirse esto no paga después, ni de forma retroactiva.
+- Dura 1 año desde que tu invitado quedó asociado a ti. Si te invitó antes del 9 de noviembre de 2026 (el lanzamiento), su año cuenta desde ese día.
+- Las cuentas de negocio de tu invitado también generan comisión, aunque opere un empleado. La comisión va siempre a tu cuenta personal.
+- Algunas operaciones pueden no generarla aunque se cumplan las condiciones, por ejemplo la primera operación de una cuenta nueva o una hecha desde una versión antigua de la app.
+- Cómo invitar: Perfil → "Invitar por WhatsApp" comparte tu enlace. Tu amigo también puede escribir tu @usuario en "¿Quién te invitó?" al crear su cuenta, o después en Perfil → "¿Te invitó alguien? Pon su código". Va el @usuario, no el número de teléfono. Cada persona tiene una sola persona que la invitó y no se puede cambiar.
+- Mis comisiones (en Perfil, en la versión más reciente de la app): lo que ganaste este mes y en cada mes, cada comisión con su importe y su hora, y tus invitados con su estado: "Ganando", "Falta que verifique", "Falta tu verificación", "Terminó su año", "Es tu propia cuenta" o "No genera comisión". Con "Recordarle" le mandas a un invitado sin verificar un recordatorio (una vez por semana).
+- Si preguntan por qué un invitado dice "No genera comisión", no adivines el motivo ni lo pases al equipo solo por eso: di que ese invitado hoy no cumple alguna de las condiciones del programa.
+- Privacidad: quien te invitó ve tu @usuario, si verificaste tu identidad, cuánto le generas y el importe y la hora de cada comisión; la app no le muestra qué operación hiciste. Como se paga en BNB Smart Chain, una blockchain pública, ahí se puede relacionar tu billetera con la suya.
+- Prohibido: invitarte a ti mismo con otra cuenta, crear cuentas falsas, pagar o prometer ganancias para conseguir invitados, y hacer operaciones solo para generar comisiones. Confío puede dejar de pagar comisiones y suspender esas cuentas.
+- La comisión es una recompensa por invitar: no es un sueldo, no es una inversión y no depende de tener $CONFIO. Los impuestos que correspondan son de quien la recibe. Confío puede cambiar el porcentaje o las condiciones, o terminar el programa; lo ya pagado no cambia.
+- El bono de US$5 en $CONFIO por referido terminó el 9 de noviembre de 2026. Los bonos ganados hasta esa fecha se mantienen; los pendientes no se otorgan.
+- Nunca prometas cuánto va a ganar alguien invitando ni lo presentes como un ingreso o una inversión.
 
 ## Países, recargas y retiros
 - Creas tu cuenta con Google o Apple desde casi cualquier país, sin número de teléfono. Recargar y Retirar dependen del país que eliges en esas pantallas. Para usarlos te pedimos tu dirección y un número de contacto, sin códigos por SMS; los cambias en Perfil → Dirección y teléfono.
@@ -178,7 +195,7 @@
 - Pagar: cámara para escanear QR de cobro de Confío y QR locales donde están habilitados; abajo te dice en qué países. En Bolivia hoy sirve para QR de cobro de Confío; pagar QR locales de Bolivia llegará muy pronto: dilo cuando abras Pagar desde Bolivia.
 - Invertir: Acciones de EE.UU. (lista con buscador → la acción → Comprar o Vender) y la preventa de $CONFIO.
 - Información de Confío Dollar+: "Ahorros Protegidos", desde la cifra "Ahorros" de Inicio o el "?" de la pantalla de Confío Dollar+.
-- Perfil: verificación de identidad, tu usuario Confío, dirección para recargas y retiros, Mis cuentas, Mis instituciones, Notificaciones; Seguridad (Biometría / PIN, Respaldo en la nube, Salida de emergencia); grupo de Telegram; términos y cerrar sesión. La versión de la app está al final.
+- Perfil: invitar amigos ("Invitar por WhatsApp") y Mis comisiones, verificación de identidad, tu usuario Confío, dirección para recargas y retiros, Mis cuentas, Mis instituciones, Notificaciones; Seguridad (Biometría / PIN, Respaldo en la nube, Salida de emergencia); grupo de Telegram; términos y cerrar sesión. La versión de la app está al final.
 - Confío Face no es una opción de Perfil: la app te lo pide al confirmar un movimiento o al verificarte.
 - Este chat: la burbuja flotante lo abre en cualquier pantalla. Arriba eliges con quién hablar: Confío IA, Julian o News. "✨ Tu asistente" cambia su mascota, color, nombre o foto. Mensajes no tiene un botón fijo en Inicio: se llega por la burbuja.
 - En Nicaragua, Panamá, Cuba y Ecuador no aparecen "Recargar ahora" ni "A mi propia cuenta". En Venezuela la recarga es la fila Pago Móvil de Recibir, y el retiro es la fila Pago Móvil de Enviar (no hay "A mi propia cuenta").
