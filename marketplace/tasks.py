@@ -226,7 +226,11 @@ def requeue_stuck_reviews(now=None) -> dict:
     from .models import Store
     # Never queued (submitted before automatic review) counts as stuck too.
     stale = Q(alcohol_license_queued_at__lt=cutoff) | Q(alcohol_license_queued_at__isnull=True)
-    licences = list(Store.objects.filter(
+    # Waiting out the cap (under a day old) is skipped in the query, so such
+    # rows never fill the batch ahead of licences the sweep can act on.
+    waiting = Q(alcohol_license_attempts__gte=LICENSE_SWEEP_ATTEMPTS,
+                alcohol_license_submitted_at__gte=now - LICENSE_GIVE_UP_AFTER)
+    licences = list(Store.objects.exclude(waiting).filter(
         Q(alcohol_license_status='pending')
         | Q(alcohol_license_status='approved', alcohol_license_submitted_at__isnull=False)
         & (Q(alcohol_license_reviewed_at__isnull=True)

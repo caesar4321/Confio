@@ -1917,12 +1917,26 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             results = [SubmitAlcoholLicense.mutate.__wrapped__(None, info, photo_key=self.KEY) for _ in range(5)]
         self.assertEqual(results[-1].error, 'too_many_uploads')
 
-    def test_a_missing_photo_reads_as_403_and_is_rejected(self):
+    def test_a_permission_error_is_retried_not_rejected(self):
         from botocore.exceptions import ClientError
-        from .license_review import review_license
+        from .license_review import ReviewUnavailable, review_license
         with mock.patch('inbox.community.load_pending_image',
                         side_effect=ClientError({'Error': {'Code': 'AccessDenied'}}, 'GetObject')):
-            self.assertEqual(review_license(self.store.pk, self.KEY), 'rejected')
+            with self.assertRaises(ReviewUnavailable):
+                review_license(self.store.pk, self.KEY)
+
+    def test_licence_numbers_compare_however_they_are_written(self):
+        from .license_review import _normalize_number
+        self.assertEqual({_normalize_number(x) for x in ('Nº 001234', 'N° 1234', 'Nro. 1234', '1234', 'no-1234')},
+                         {'1234'})
+        self.assertEqual(len(_normalize_number('9' * 200)), 60)
+
+    def test_revoking_a_rejected_attempt_never_blacklists_its_number(self):
+        from .models import RevokedAlcoholLicense
+        self.assertEqual(self.run_review(self.reading(holder_name='Pedro Mamani')), 'rejected')
+        self._revoke(photo_hash='feed')
+        self.assertFalse(RevokedAlcoholLicense.objects.exclude(number='').exists())
+        self.assertTrue(RevokedAlcoholLicense.objects.filter(photo_hash='feed').exists())
 
     def test_a_decision_taken_meanwhile_is_never_overwritten(self):
         from .license_review import review_license
@@ -1945,11 +1959,13 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.store.refresh_from_db()
         self.assertEqual(self.store.alcohol_license_approved_key, self.KEY)
 
-    def _revoke(self):
+    def _revoke(self, photo_hash=''):
         from django.contrib.admin.sites import AdminSite
         from .admin import StoreAdmin
         admin = StoreAdmin(Store, AdminSite())
-        with mock.patch.object(admin, 'message_user'):
+        # Never S3 from a test: the photo on screen hashes to `photo_hash`.
+        with mock.patch.object(admin, 'message_user'), \
+                mock.patch('marketplace.license_review.current_photo_hash', return_value=photo_hash):
             admin.revoke_alcohol_license(mock.Mock(), Store.objects.filter(pk=self.store.pk))
 
     def test_a_revoked_licence_never_passes_again(self):

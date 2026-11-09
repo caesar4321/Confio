@@ -140,7 +140,17 @@ def _add_years(d: date, years: int) -> date:
 
 
 def _normalize_number(value: str) -> str:
-    return ''.join(ch for ch in (value or '').upper() if ch.isalnum())
+    """The canonical licence number, so two readings of one licence compare
+    equal: ASCII, upper case, letters and digits only, without a leading
+    "Nº"/"N°"/"Nro."/"Número" label or leading zeros, capped to the stored length.
+    "Nº 001234", "N° 1234", "Nro. 1234" and "1234" are one number."""
+    import re
+    import unicodedata
+    folded = unicodedata.normalize('NFKD', value or '').encode('ascii', 'ignore').decode().upper()
+    compact = ''.join(ch for ch in folded if ch.isalnum())
+    compact = re.sub(r'^(NUMERO|NRO|NUM|NO|N)(?=\d)', '', compact)
+    compact = re.sub(r'^0+(?=\d)', '', compact)
+    return compact[:60]
 
 
 def _words(value: str) -> set:
@@ -270,12 +280,25 @@ def _load_photo(key: str):
     except ValueError:
         return None
     except ClientError as exc:
-        # Not there. The role cannot list the bucket, so a missing object
-        # answers 403 too (as object_exists reads it): a bad photo, not an
-        # outage to retry forever.
-        if exc.response.get('Error', {}).get('Code') in ('NoSuchKey', '404', '403', 'AccessDenied'):
+        # Only an explicit "no such key" is a bad photo. A 403 here is almost
+        # always ours (IAM/policy): submission already proved the object
+        # exists and marketplace/pending/ never expires. Retried; the sweep's
+        # attempts cap + 24 h give-up bound a photo that truly vanished.
+        if exc.response.get('Error', {}).get('Code') in ('NoSuchKey', '404'):
             return None
         raise ReviewUnavailable(f'licence photo unavailable: {exc}') from exc
+
+
+def current_photo_hash(key: str) -> str:
+    """The fingerprint the review would compute for this photo ('' when it
+    cannot be read now): what a revoke records for the photo on screen."""
+    if not key:
+        return ''
+    try:
+        image = _load_photo(key)
+    except ReviewUnavailable:
+        return ''
+    return hashlib.sha256(image.body).hexdigest() if image is not None else ''
 
 
 def review_license(store_id: int, key: str) -> str:

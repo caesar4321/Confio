@@ -178,19 +178,27 @@ class StoreAdmin(admin.ModelAdmin):
     @admin.action(description='Alcohol licence: revoke (this licence never passes review again, for any store)')
     def revoke_alcohol_license(self, request, queryset):
         from django.db import transaction
-        from .license_review import _normalize_number, city_key
+        from .license_review import _normalize_number, city_key, current_photo_hash
         from .models import RevokedAlcoholLicense
         n = 0
         for store in queryset.exclude(alcohol_license_status='none'):
             with transaction.atomic():
                 row = Store.objects.select_for_update().get(pk=store.pk)
-                # Everything this store's licence photos were read as: the
-                # approved one and the current one (a renewal) alike.
-                read = (row.alcohol_license_verdict or {}).get('license_number', '')
-                numbers = {_normalize_number(x) for x in (row.alcohol_license_number, read) if _normalize_number(x)}
-                for number in numbers or ({''} if row.alcohol_license_hash else set()):
-                    RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city), number=number,
-                                                         photo_hash=row.alcohol_license_hash)
+                # Only what this store was APPROVED with (a number typed by
+                # the seller, or read from a rejected photo, may be someone
+                # else's licence: never blacklist it). Plus the fingerprint of
+                # the photo the admin is looking at now, so that exact photo
+                # never passes again.
+                approved_number = (_normalize_number(row.alcohol_license_number)
+                                   if row.alcohol_license_status == 'approved' and row.alcohol_license_hash else '')
+                hashes = {h for h in (row.alcohol_license_hash if approved_number else '',
+                                      current_photo_hash(row.alcohol_license_key)) if h}
+                if approved_number:
+                    RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city),
+                                                         number=approved_number, photo_hash=row.alcohol_license_hash)
+                for photo_hash in hashes - {row.alcohol_license_hash if approved_number else ''}:
+                    RevokedAlcoholLicense.objects.create(store=row, city_key=city_key(row.city), number='',
+                                                         photo_hash=photo_hash)
                 # Clearing the current photo makes any review still in flight stale.
                 Store.objects.filter(pk=row.pk).update(
                     alcohol_license_status='rejected', alcohol_license_reviewed_at=timezone.now(),
