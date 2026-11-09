@@ -314,29 +314,47 @@ def license_conflict(store, number: str, photo_hash: str) -> str:
     return REVOKED_REASON if revoked else ''
 
 
-# Legal-form words of Bolivian/LATAM company names ("S.R.L.", "S.A.", "Ltda.").
-LEGAL_FORMS = {'srl', 'sa', 'sas', 'ltda', 'eirl', 'sca', 'scs', 'spa', 'cia', 'sociedad', 'responsabilidad',
-               'limitada', 'anonima', 'empresa', 'unipersonal', 'individual', 'compania', 'de', 'del', 'y', 'e'}
+# Legal-form SUFFIXES of Bolivian/LATAM company names, as word sequences
+# (dots dropped: "S.R.L." is "srl"). Only stripped at the END of a name:
+# inside a name these words are part of it ("Spa Relax", "Compañía Cervecera").
+LEGAL_SUFFIXES = sorted([
+    ('srl',), ('sa',), ('sas',), ('ltda',), ('eirl',), ('sca',), ('scs',),
+    ('sociedad', 'de', 'responsabilidad', 'limitada'), ('sociedad', 'anonima'),
+    ('empresa', 'unipersonal'), ('empresa', 'individual', 'de', 'responsabilidad', 'limitada'),
+    ('y', 'cia'), ('y', 'compania'), ('cia',),
+], key=len, reverse=True)
 # What business verification stores when the registry gave no company name.
 KYB_PLACEHOLDER = 'Verified Business'
 
 
-def _company_tokens(value: str) -> list:
-    """Company name words: accents, case and dots ignored ("S.R.L." is "srl"),
-    legal forms dropped; every other word (single letters, digits) kept."""
+def _company_core(value: str) -> tuple:
+    """(core words, had a legal-form suffix): accents, case and dots ignored;
+    trailing legal-form suffixes stripped ("Juan Pérez y Cía. S.R.L." →
+    [juan, perez]); every other word kept, in order."""
     import re
     import unicodedata
     folded = unicodedata.normalize('NFKD', value or '').encode('ascii', 'ignore').decode().casefold()
-    folded = folded.replace('.', '')
-    return [w for w in re.findall(r'[a-z0-9]+', folded) if w not in LEGAL_FORMS]
+    words = re.findall(r'[a-z0-9]+', folded.replace('.', ''))
+    stripped = False
+    changed = True
+    while changed and words:
+        changed = False
+        for suffix in LEGAL_SUFFIXES:
+            if len(words) > len(suffix) and tuple(words[-len(suffix):]) == suffix:
+                words, stripped, changed = words[:-len(suffix)], True, True
+                break
+    return words, stripped
 
 
 def company_matches(holder: str, company: str) -> bool:
-    """The licence holder is exactly this verified company (legal form aside),
-    as counted words: no more and no fewer."""
+    """The licence holder is exactly this verified company: the same core
+    name (counted words, legal form aside), AND the holder itself carries a
+    legal form, so a person who shares the company's core name ("JUAN PEREZ"
+    for "Juan Pérez y Cía. S.R.L.") never passes as the company."""
     from collections import Counter
-    wanted = _company_tokens(company)
-    return bool(wanted) and Counter(_company_tokens(holder)) == Counter(wanted)
+    wanted, _ = _company_core(company)
+    held, held_is_company = _company_core(holder)
+    return bool(wanted) and held_is_company and Counter(held) == Counter(wanted)
 
 
 def _verified_company(store) -> str:

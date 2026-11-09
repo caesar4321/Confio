@@ -120,6 +120,8 @@ class AlcoholLicenseType(graphene.ObjectType):
     status = graphene.String(required=True, description='none | pending | approved | rejected | expired')
     note = graphene.String(description='Why it was rejected (shown to the seller)')
     expires_on = graphene.Date()
+    company_name_accepted = graphene.Boolean(
+        description='A business store whose verification recorded a company name: the licence may be held by it')
 
 
 class MarketplaceStoreType(graphene.ObjectType):
@@ -630,8 +632,10 @@ class Query(graphene.ObjectType):
         status = store.alcohol_license_status
         if status == 'approved' and not store.alcohol_license_valid():
             status = 'expired'
+        from .license_review import _verified_company
         return AlcoholLicenseType(status=status, note=store.alcohol_license_note or None,
-                                  expires_on=store.alcohol_license_expires_on)
+                                  expires_on=store.alcohol_license_expires_on,
+                                  company_name_accepted=bool(_verified_company(store)))
 
     def resolve_market_order_adults_only(self, info, id):
         try:

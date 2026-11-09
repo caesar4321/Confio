@@ -1975,6 +1975,12 @@ class AlcoholLicenseReviewTests(MarketTestBase):
         self.assertTrue(company_matches('Distribuidora Andina Ltda.', 'Distribuidora Andina S.R.L.'))
         self.assertFalse(company_matches('Distribuidora Andina Norte S.R.L.', 'Distribuidora Andina S.R.L.'))
         self.assertFalse(company_matches('S.R.L.', 'S.A.'))   # legal forms alone are no name
+        # A person sharing the company's core name is not the company.
+        self.assertFalse(company_matches('JUAN PEREZ', 'Juan Pérez y Cía. S.R.L.'))
+        self.assertTrue(company_matches('Juan Perez y Cia SRL', 'Juan Pérez y Cía. S.R.L.'))
+        # Words inside a name are part of it.
+        self.assertFalse(company_matches('Relax S.A.', 'Spa Relax S.R.L.'))
+        self.assertFalse(company_matches('Cervecera Boliviana S.A.', 'Compañía Cervecera Boliviana Ltda.'))
 
     def test_personal_stores_and_unverified_names_never_match_a_company(self):
         # Personal account: a company-held licence is rejected.

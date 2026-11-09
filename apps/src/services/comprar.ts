@@ -149,7 +149,7 @@ export const GET_MARKETPLACE_AGE_RULES = gql`
 // The store's municipal alcohol licence (Ley 259): its own query/mutation.
 export const GET_MY_ALCOHOL_LICENSE = gql`
   query MyAlcoholLicense {
-    myAlcoholLicense { status note expiresOn }
+    myAlcoholLicense { status note expiresOn companyNameAccepted }
   }
 `;
 
@@ -163,6 +163,7 @@ export type AlcoholLicense = {
   status: 'none' | 'pending' | 'approved' | 'rejected' | 'expired';
   note: string | null;
   expiresOn: string | null;
+  companyNameAccepted?: boolean | null;
 };
 
 export const GET_MARKET_ORDER_ADULTS_ONLY = gql`
