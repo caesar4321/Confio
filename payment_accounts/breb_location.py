@@ -339,7 +339,7 @@ def verify(owner, meta, challenge_token, location_json, integrity_token):
         while frame.tb_next:
             frame = frame.tb_next
         where = f"{frame.tb_frame.f_code.co_filename.rsplit('/', 1)[-1]}:{frame.tb_lineno}"
-        detail = str(exc)[:80] if where.startswith('apple_attest.py') else ''
+        detail = str(exc)[:150] if where.startswith('apple_attest.py') else ''
         logger.warning('breb_location_verify_failed error=%s at=%s %s', type(exc).__name__, where, detail)
         # A named check keeps its code; anything else, its type and line.
         reason = exc.code if isinstance(exc, _Refused) else f'{type(exc).__name__} at {where} {detail}'.strip()

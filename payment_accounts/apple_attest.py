@@ -68,7 +68,12 @@ def _auth(data, registration):
             raise ValueError('Invalid extensions')
         category = extensions.get('apple_validation_category_01', extensions.get('validationCategory'))
         if type(category) is not int or category not in (2, 4):
-            raise ValueError('Not Store/TestFlight distribution')
+            # Diagnostic only (server log + compliance record, never shown to
+            # the person): what the device reported, so a refusal can be told
+            # apart from a shape this parser does not read. Not secret: key
+            # names, the launch category and the build number.
+            shape = ','.join(f'{str(k)[:32]}={type(v).__name__}:{str(v)[:12]}' for k, v in list(extensions.items())[:6])
+            raise ValueError(f'Not Store/TestFlight distribution [{shape}]')
         version = extensions.get('apple_bundle_version_01', extensions.get('bundleVersion'))
         if not isinstance(version, str) or not version.strip():
             raise ValueError('Missing build version')
