@@ -985,6 +985,7 @@ class IdentityInPromptTests(TestCase):
                       destinations=['home'])
         unverified = build_system_prompt(identity='unverified', **common)
         self.assertIn('Identidad: sin verificar.', unverified)
+        self.assertIn('Nunca repitas una pregunta de aclaración', unverified)  # Takenos loop, 2026-11-09
         self.assertIn('Perfil → Verificación', unverified)
         self.assertIn('Recibir USDT', unverified)  # Avanzado has no identity gate
         self.assertNotIn('Recibir USDT', build_system_prompt(identity='verified', **common))
