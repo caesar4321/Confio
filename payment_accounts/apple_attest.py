@@ -38,6 +38,18 @@ def _cbor(data):
     return result
 
 
+def _launch_category(value):
+    """Apple documents the launch category as a UInt32. Real devices send it
+    as its four raw bytes, little-endian (iPhone on iOS 27, App Store build,
+    2026-11-10: b'\\x04\\x00\\x00\\x00'), not as a CBOR integer. Both are read;
+    anything else is no category at all."""
+    if type(value) is int:
+        return value
+    if type(value) is bytes and len(value) == 4:
+        return int.from_bytes(value, 'little')
+    return None
+
+
 def _auth(data, registration):
     if not isinstance(data, bytes) or len(data) < 37:
         raise ValueError('Invalid authenticator data')
@@ -66,13 +78,20 @@ def _auth(data, registration):
         extensions = _cbor(data[offset:])
         if not isinstance(extensions, dict):
             raise ValueError('Invalid extensions')
-        category = extensions.get('apple_validation_category_01', extensions.get('validationCategory'))
-        if type(category) is not int or category not in (2, 4):
+        category = _launch_category(
+            extensions.get('apple_validation_category_01', extensions.get('validationCategory')))
+        if category not in (2, 4):
             # Diagnostic only (server log + compliance record, never shown to
             # the person): what the device reported, so a refusal can be told
             # apart from a shape this parser does not read. Not secret: key
             # names, the launch category and the build number.
-            shape = ','.join(f'{str(k)[:32]}={type(v).__name__}:{str(v)[:12]}' for k, v in list(extensions.items())[:6])
+            # It is built before the signature is checked, so it is unsigned
+            # input: only [A-Za-z0-9_.-] of each key and value is kept.
+            def plain(value, limit):
+                text = value[:8].hex() if type(value) is bytes else str(value)[:limit]
+                return ''.join(c for c in text if c.isascii() and (c.isalnum() or c in '_.-'))[:limit]
+            shape = ','.join(f'{plain(k, 32)}={type(v).__name__}:{plain(v, 16)}'
+                             for k, v in list(extensions.items())[:6])
             raise ValueError(f'Not Store/TestFlight distribution [{shape}]')
         version = extensions.get('apple_bundle_version_01', extensions.get('bundleVersion'))
         if not isinstance(version, str) or not version.strip():

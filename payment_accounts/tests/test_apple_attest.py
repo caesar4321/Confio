@@ -104,14 +104,31 @@ class AppleAttestTests(SimpleTestCase):
         with self.assertRaises(InvalidSignature):
             apple.validate_assertion(encode(obj), self.pem, 0, self.client_hash)
 
+    def test_refusal_diagnostic_shows_the_value_and_carries_no_injected_text(self):
+        auth = self.rp + b'\x81' + (1).to_bytes(4, 'big') + cbor2.dumps({
+            'apple_validation_category_01': (3).to_bytes(4, 'little'), 'evil\nkey [x]': 'a\nb=1,'})
+        token = encode({'authenticatorData': auth, 'signature': b'x'})
+        with self.assertRaises(ValueError) as refused:
+            apple.validate_assertion(token, self.pem, 0, self.client_hash)
+        message = str(refused.exception)
+        self.assertIn('apple_validation_category_01=bytes:03000000', message)
+        self.assertNotIn('\n', message)
+        self.assertIn('evilkeyx=str:ab1', message)
+
     def test_signed_distribution_extensions(self):
-        for category in (1, 2, 3, 4, True, '2'):
+        # A real iPhone (iOS 27, App Store build) sends the category as the
+        # UInt32's four raw bytes, little-endian; older shapes were integers.
+        le = lambda n: n.to_bytes(4, 'little')
+        accepted = (2, 4, le(2), le(4))
+        refused = (1, 3, True, '2', le(3), le(1), le(0), (4).to_bytes(4, 'big'), b'\x04', le(4) + b'\x00',
+                   b'', None, 2.0, [4])
+        for category in accepted + refused:
             for version in ('42', ''):
                 with self.subTest(category=category, version=version):
                     auth = self.rp + b'\x81' + (1).to_bytes(4, 'big') + cbor2.dumps({
                         'apple_validation_category_01': category, 'apple_bundle_version_01': version})
                     token = encode({'authenticatorData': auth, 'signature': self.key.sign(hashlib.sha256(auth+self.client_hash).digest(), ec.ECDSA(hashes.SHA256()))})
-                    if type(category) is int and category in (2, 4) and version:
+                    if any(type(category) is type(ok) and category == ok for ok in accepted) and version:
                         self.assertEqual(apple.validate_assertion(token, self.pem, 0, self.client_hash), 1)
                     else:
                         with self.assertRaises(ValueError):
