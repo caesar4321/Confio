@@ -45,6 +45,11 @@ logger = logging.getLogger(__name__)
 
 def _public_error(exc):
     from .infinia_fees import FeePricingError
+    if isinstance(exc, EligibilityDenied):
+        # Who the person is, or where: said the same vague way everywhere.
+        from .local_money import IDENTITY_BLOCKED_REASONS, REGION_UNSUPPORTED_MESSAGE
+        if any(reason in str(exc) for reason in IDENTITY_BLOCKED_REASONS):
+            return REGION_UNSUPPORTED_MESSAGE
     if isinstance(exc, (
         PaymentAccountError, ComplianceHandoffError, NextError, FeePricingError,
         EligibilityDenied, EligibilityPolicyNotConfigured,
@@ -640,6 +645,9 @@ class CreateReceivingInstruction(graphene.Mutation):
             if not financial_account:
                 raise PaymentAccountError('Financial account not found')
             _require_breb_location(info, account, financial_account)
+            if financial_account.provider == 'infinia':
+                from .local_money import require_region
+                require_region(account)
             create_funding_instruction(financial_account=financial_account, kind=kind)
             return cls(success=True, account=financial_account, errors=[])
         except Exception as exc:

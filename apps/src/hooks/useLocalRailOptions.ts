@@ -139,7 +139,7 @@ export const useLocalRailOptions = (onOptionSelected?: () => void) => {
     title: method.title,
     subtitle: method.subtitle,
     note: isIdentityBlocked(method)
-      ? 'No disponible por ahora para tu nacionalidad'
+      ? 'No disponible por ahora en tu país'
       : method.status === 'needs_verification'
       ? 'Verifica tu identidad para usarlo'
       : method.status === 'needs_document'

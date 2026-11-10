@@ -123,6 +123,9 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
         destination_id = uuid.UUID(str(destination_id)) if destination_id else None
     source = address(confio_account.bsc_address)
     if direction == 'to_provider':
+        if instruction.financial_account.provider == 'infinia':
+            from .local_money import require_region
+            require_region(confio_account)
         destination = verified_destination(instruction, confio_account)
     else:
         _require_provider_enabled(instruction.financial_account.provider)

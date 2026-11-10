@@ -97,4 +97,18 @@ def infinia_fee_configuration_checks(app_configs, **kwargs):
         if type(tier) is not int or not 0 <= tier <= maximum:
             issues.append(Error(f'{setting} must be an integer from 0 to {maximum}.',
                                 id='payment_accounts.' + code))
+    from decimal import Decimal
+    try:
+        fee = Decimal(str(getattr(settings, 'INFINIA_OPENING_FEE_USD', '1.00')).strip())
+        valid = fee.is_finite() and (fee == 0 or fee >= 1)
+    except Exception:
+        valid = False
+    if not valid:
+        issues.append(Error('INFINIA_OPENING_FEE_USD must be 0 or at least 1.00.',
+                            id='payment_accounts.E015'))
+    for setting, code in [('INFINIA_FREE_OPENING_COUNTRIES', 'E016'), ('INFINIA_UNSUPPORTED_REGIONS', 'E017')]:
+        listed = getattr(settings, setting, '')
+        listed = listed.split(',') if isinstance(listed, str) else listed
+        if any(not (len(c.strip()) == 2 and c.strip().isalpha()) for c in listed if c.strip()):
+            issues.append(Error(f'{setting} must list ISO2 country codes.', id='payment_accounts.' + code))
     return issues

@@ -29,7 +29,20 @@ def accrue(owner):
     accounts = FinancialAccount.objects.filter(provider_profile__confio_account=owner,
         provider_profile__provider='infinia', asset__in=FIAT_ASSETS.values()).exclude(country='XXX').exclude(
         ownership_structure='platform_liquidity').exclude(provider_account_id__isnull=True).exclude(provider_account_id='')
+    # An account opened at the earlier, higher one-time price was sold as a
+    # single payment: it never owes maintenance.
+    from .activation import LEGACY_FEE
+    from .models import AccountActivation
+    prepaid = set(AccountActivation.objects.filter(confio_account=owner, status='active',
+        payment__status='CONFIRMED', payment__amount__gte=LEGACY_FEE).values_list('country', 'asset'))
     for account in accounts:
+        if (account.country, account.asset) in prepaid:
+            # Months invoiced while its one-time payment was still pending are
+            # dropped too; one already inside a signed flow settles with it.
+            InfiniaMaintenanceCharge.objects.filter(account=account, reserved_flow__isnull=True,
+                                                    collected_tx_hash='').delete()
+            InfiniaMaintenanceState.objects.filter(account=account).update(enabled=False)
+            continue
         if not enabled(account.country):
             continue
         active = account.status == 'active'
@@ -86,8 +99,10 @@ def _release_expired(owner):
 @transaction.atomic
 def quoted_charges(owner):
     type(owner).objects.select_for_update().get(pk=owner.pk)
-    accrue(owner)
+    # Release first, so a month an exempt account gets back from a failed flow
+    # is dropped by the same accrual instead of being quoted once more.
     _release_expired(owner)
+    accrue(owner)
     # Previously accrued debt remains due if new accrual is disabled.
     charges = list(InfiniaMaintenanceCharge.objects.filter(account__provider_profile__confio_account=owner,
         reserved_flow__isnull=True, collected_tx_hash='').order_by('period', 'pk'))

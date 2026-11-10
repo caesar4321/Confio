@@ -331,7 +331,7 @@ def document_for(owner, country):
 # Refusals for who the person IS (a seeded eligibility policy's reason code),
 # not for a missing document. Mirrors IDENTITY_BLOCKED_REASONS in
 # apps/src/services/localMoney.ts, which lists these rails as blocked.
-IDENTITY_BLOCKED_REASONS = frozenset({'infinia_nationality_not_supported'})
+IDENTITY_BLOCKED_REASONS = frozenset({'infinia_nationality_not_supported', 'infinia_region_not_supported'})
 
 
 def rail_status(owner, primary, method):
@@ -345,6 +345,8 @@ def rail_status(owner, primary, method):
     document = document_for(owner, method.country) if personal else primary
     anchor = primary or document or (next(iter(_verified_documents(owner)), None) if personal else None)
     status, reason = method_status(anchor, method)
+    if reason not in ('not_enabled', 'policy_not_configured') and region_unsupported(owner):
+        return 'unavailable', REGION_UNSUPPORTED_REASON, None
     if status != 'live':
         return status, reason, None
     if document is None:
@@ -354,8 +356,35 @@ def rail_status(owner, primary, method):
     return status, reason, None
 
 
+REGION_UNSUPPORTED_REASON = 'infinia_region_not_supported'
+REGION_UNSUPPORTED_MESSAGE = 'Por ahora este servicio no está disponible en tu país.'
+
+
+def region_unsupported(owner):
+    """The provider serves nobody whose country (where the person lives:
+    security.geo.country_of, User.country with the legacy phone country as a
+    fallback) is one of these. Location itself is only read for Bre-B, by its
+    own gate (breb_location)."""
+    regions = getattr(settings, 'INFINIA_UNSUPPORTED_REGIONS', '')
+    if isinstance(regions, str):
+        regions = regions.split(',')
+    regions = {value.strip().upper() for value in regions if value.strip()}
+    from security.geo import country_of
+    return country_of(owner.user) in regions
+
+
+def require_region(owner):
+    """Guards every way to open an account or send money out through the
+    provider, including the generic endpoints that never see a rail. Money
+    already on its way in still reaches the person's balance."""
+    if region_unsupported(owner):
+        raise PaymentAccountError(REGION_UNSUPPORTED_MESSAGE)
+
+
 def require_rail(owner, primary, method):
-    status, _, _ = rail_status(owner, primary, method)
+    status, reason, _ = rail_status(owner, primary, method)
+    if reason in IDENTITY_BLOCKED_REASONS:
+        raise PaymentAccountError(REGION_UNSUPPORTED_MESSAGE)
     if status == 'needs_verification':
         raise PaymentAccountError('Verifica tu identidad para usar transferencias locales.')
     if status == 'needs_document':

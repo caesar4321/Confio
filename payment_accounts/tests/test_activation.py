@@ -21,7 +21,8 @@ VAULT='0x'+'5'*40
 
 
 @override_settings(CUSD_PLUS_7702_ENABLED=True, BSC_SEND_ENABLED=True,
-                   CUSD_VAULT_ADDRESS=TOKEN, CUSD_PLUS_VAULT_ADDRESS=VAULT)
+                   CUSD_VAULT_ADDRESS=TOKEN, CUSD_PLUS_VAULT_ADDRESS=VAULT,
+                   INFINIA_OPENING_FEE_USD='10.00', INFINIA_FREE_OPENING_COUNTRIES='')
 class ActivationTests(TestCase):
     def setUp(self):
         self.user=User.objects.create_user(username='activation-user', firebase_uid='activation-user')
@@ -98,17 +99,17 @@ class ActivationTests(TestCase):
                     'cusd_plus.vault.erc20_balance_raw',
                     side_effect=lambda token, holder: (cusd if token == TOKEN else savings) * WAD):
                 if allowed:
-                    activation.require_opening_funds(self.owner)
+                    activation.require_opening_funds(self.owner, Decimal('10'))
                 else:
                     with self.assertRaisesMessage(PaymentAccountError, 'Necesitas US'):
-                        activation.require_opening_funds(self.owner)
+                        activation.require_opening_funds(self.owner, Decimal('10'))
 
     def test_opening_funds_values_savings_at_price_not_share_count(self):
         self.user.phone_country = 'CO'
         with mock.patch('cusd_plus.vault.p_plus_wad', return_value=2 * WAD), \
              mock.patch('cusd_plus.vault.erc20_balance_raw',
                         side_effect=lambda token, holder: 0 if token == TOKEN else 5 * WAD):
-            activation.require_opening_funds(self.owner)
+            activation.require_opening_funds(self.owner, Decimal('10'))
 
     def test_balance_rpc_failure_does_not_create_or_open(self):
         with mock.patch('cusd_plus.vault.erc20_balance_raw', side_effect=TimeoutError), \
@@ -293,6 +294,226 @@ class ActivationTests(TestCase):
                 with self.assertRaises(PaymentAccountError):
                     activation._payment(self.owner, row.pk, self.ctx)
                 pay.assert_not_called()
+
+    # ---- price: US$1 by default, free for a person opening their own listed country
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='CO')
+    def test_price_is_one_dollar_and_free_only_for_own_listed_country(self):
+        self.assertEqual(activation.fee_for(self.owner, 'COL'), Decimal('1.00'))   # country unknown
+        self.user.country = 'CO'
+        self.assertEqual(activation.fee_for(self.owner, 'COL'), Decimal('0.00'))
+        self.assertEqual(activation.fee_for(self.owner, 'CO'), Decimal('0.00'))
+        self.assertEqual(activation.fee_for(self.owner, 'MEX'), Decimal('1.00'))   # another country's account
+        self.user.country = 'PE'
+        self.assertEqual(activation.fee_for(self.owner, 'COL'), Decimal('1.00'))   # another country's person
+        with override_settings(INFINIA_FREE_OPENING_COUNTRIES=''):
+            self.user.country = 'CO'
+            self.assertEqual(activation.fee_for(self.owner, 'COL'), Decimal('1.00'))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='', INFINIA_UNSUPPORTED_REGIONS='VE')
+    def test_opening_waits_without_an_error_while_the_person_is_in_an_unsupported_region(self):
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=WAD), \
+             mock.patch('payment_accounts.local_money.activate', return_value='provisioning'):
+            row, _ = self.prepare('1.00')
+        self.user.country = 'VE'
+        self.user.save(update_fields=['country'])
+        with mock.patch('payment_accounts.local_money.activate', side_effect=AssertionError('no provider call')):
+            row = activation.reconcile(row.pk)
+        self.assertEqual((row.status, row.opening_error, row.opening_failures), ('provisioning', '', 0))
+        self.user.country = 'CO'
+        self.user.save(update_fields=['country'])
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=WAD), \
+             mock.patch('payment_accounts.local_money.activate', side_effect=self.open_accounts):
+            row = activation.reconcile(row.pk)
+        self.assertEqual(row.status, 'awaiting_payment')      # resumes by itself
+
+    def test_mistyped_price_falls_back_instead_of_breaking_or_going_free(self):
+        for bad in ('', 'abc', '-1', 'NaN', 'Infinity', '0.50'):
+            with override_settings(INFINIA_OPENING_FEE_USD=bad):
+                self.assertEqual(activation.standard_fee(), Decimal('1.00'), bad)
+        from payment_accounts.checks import infinia_fee_configuration_checks
+        def ids(**settings_):
+            with override_settings(**settings_):
+                return {issue.id for issue in infinia_fee_configuration_checks(None)}
+        self.assertIn('payment_accounts.E015', ids(INFINIA_OPENING_FEE_USD='abc'))
+        self.assertIn('payment_accounts.E015', ids(INFINIA_OPENING_FEE_USD='-1'))
+        self.assertIn('payment_accounts.E015', ids(INFINIA_OPENING_FEE_USD='0.50'))
+        self.assertNotIn('payment_accounts.E015', ids(INFINIA_OPENING_FEE_USD='0'))
+        self.assertIn('payment_accounts.E016', ids(INFINIA_FREE_OPENING_COUNTRIES='COL'))
+        self.assertIn('payment_accounts.E017', ids(INFINIA_UNSUPPORTED_REGIONS='VEN'))
+        clean = ids(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='CO', INFINIA_UNSUPPORTED_REGIONS='VE')
+        self.assertFalse(clean & {'payment_accounts.E015', 'payment_accounts.E016', 'payment_accounts.E017'})
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='')
+    def test_one_dollar_opening_quotes_checks_and_charges_one_dollar(self):
+        row, payment = self.prepare()
+        self.assertEqual((row.status, row.amount), ('consent_required', Decimal('1.00')))
+        with self.assertRaisesMessage(PaymentAccountError, 'US$1.00'):
+            self.prepare('10')   # the old price is not consent to today's
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=WAD // 2), \
+             mock.patch('payment_accounts.local_money.activate') as opening:
+            with self.assertRaisesMessage(PaymentAccountError, 'Necesitas US$1.00'):
+                self.prepare('1.00')
+            opening.assert_not_called()
+        self.assertFalse(AccountActivation.objects.exists())
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=WAD), \
+             mock.patch('payment_accounts.local_money.activate', side_effect=self.open_accounts), \
+             mock.patch.object(activation, '_prepare_send', side_effect=self.fake_payment):
+            row, payment = self.prepare('1')
+        self.assertEqual((row.status, row.amount, row.payment.amount),
+                         ('payment_pending', Decimal('1.00'), Decimal('1.00')))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='CO')
+    def test_free_opening_needs_no_balance_no_collector_and_never_a_payment(self):
+        self.user.country = 'CO'
+        self.user.save(update_fields=['country'])
+        row, payment = self.prepare()
+        self.assertEqual((row.status, row.amount), ('consent_required', Decimal('0.00')))
+        with self.assertRaisesMessage(PaymentAccountError, 'US$0.00'):
+            self.prepare('1.00')
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=0), \
+             mock.patch.object(activation, 'collector', side_effect=AssertionError('nothing to collect')), \
+             mock.patch.object(activation, '_prepare_send', side_effect=AssertionError('nothing to pay')):
+            # Not open at the provider yet: waits, usable only once it is.
+            with mock.patch('payment_accounts.local_money.activate', return_value='provisioning'):
+                row, payment = self.prepare('0.00')
+            self.assertEqual((row.status, row.amount, payment), ('provisioning', Decimal('0.00'), None))
+            from payment_accounts.local_money import _public_pair_status
+            self.assertEqual(activation.public_status(self.owner, 'COL', 'COP'), 'provisioning')
+            with self.assertRaises(PaymentAccountError):
+                activation.require_paid(self.owner, 'COL', 'COP')
+            with mock.patch('payment_accounts.local_money.activate', side_effect=self.open_accounts):
+                row, payment = self.prepare()
+            self.assertEqual((row.status, payment, row.payment_id), ('active', None, None))
+            activation.require_paid(self.owner, 'COL', 'COP')
+            # Polling again changes nothing.
+            row, payment = self.prepare()
+            self.assertEqual((row.status, payment), ('active', None))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='CO')
+    def test_free_opening_that_fails_at_the_provider_never_becomes_usable(self):
+        self.user.country = 'CO'
+        self.user.save(update_fields=['country'])
+        with mock.patch('payment_accounts.local_money.activate', return_value='failed'):
+            row, payment = self.prepare('0')
+        self.assertEqual((row.status, payment), ('failed', None))
+        with self.assertRaises(PaymentAccountError):
+            activation.require_paid(self.owner, 'COL', 'COP')
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='')
+    def test_unpaid_opening_at_the_old_price_pays_todays_price(self):
+        self.open_accounts()
+        row = self.row('awaiting_payment')          # accepted at US$10, never paid
+        row.refresh_from_db()
+        self.assertEqual(row.amount, Decimal('10.00'))
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=WAD), \
+             mock.patch.object(activation, '_prepare_send', side_effect=self.fake_payment):
+            row, payment = self.prepare()
+        self.assertEqual((row.status, row.amount, row.payment.amount),
+                         ('payment_pending', Decimal('1.00'), Decimal('1.00')))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='CO')
+    def test_unpaid_opening_that_became_free_activates_without_a_payment(self):
+        self.user.country = 'CO'
+        self.user.save(update_fields=['country'])
+        self.open_accounts()
+        self.row('awaiting_payment')
+        with mock.patch.object(activation, '_prepare_send', side_effect=AssertionError('nothing to pay')):
+            row, payment = self.prepare()
+        self.assertEqual((row.status, row.amount, payment), ('active', Decimal('0.00'), None))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='')
+    def test_payment_prepared_at_the_old_price_and_never_signed_is_retired_for_todays(self):
+        self.open_accounts()
+        row = self.row('payment_pending')
+        old = self.fake_payment(self.owner, self.ctx, row)          # PENDING: prepared, never signed
+        row.payment = old
+        row.save(update_fields=['payment'])
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=WAD), \
+             mock.patch.object(activation, '_prepare_send', side_effect=self.fake_payment):
+            row, payment = self.prepare()
+        old.refresh_from_db()
+        self.assertEqual(old.status, 'FAILED')
+        self.assertNotEqual(row.payment_id, old.pk)
+        self.assertEqual((row.status, row.amount, row.payment.amount, row.payment.status),
+                         ('payment_pending', Decimal('1.00'), Decimal('1.00'), 'PENDING'))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='CO')
+    def test_payment_prepared_at_the_old_price_is_retired_when_the_opening_became_free(self):
+        self.user.country = 'CO'
+        self.user.save(update_fields=['country'])
+        self.open_accounts()
+        row = self.row('payment_pending')
+        old = self.fake_payment(self.owner, self.ctx, row)
+        row.payment = old
+        row.save(update_fields=['payment'])
+        with mock.patch.object(activation, '_prepare_send', side_effect=AssertionError('nothing to pay')):
+            row, payment = self.prepare()
+        old.refresh_from_db()
+        self.assertEqual((old.status, row.status, row.amount, payment), ('FAILED', 'active', Decimal('0.00'), None))
+
+    def _batch(self, source_id, kind):
+        from blockchain.models import SponsoredBatch
+        return SponsoredBatch.objects.create(
+            user=self.user, user_bsc_address=self.owner.bsc_address, kind=kind, source_id=source_id,
+            num_calls=1, calls_json='[]', gas_limit=300000, max_fee_wei='1',
+            client_request_id=f'{kind}-{source_id}')
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='')
+    def test_old_price_payment_already_in_a_send_batch_keeps_its_amount(self):
+        from send.kinds import BSC_SEND_KINDS
+        self.open_accounts()
+        row = self.row('payment_pending')
+        old = self.fake_payment(self.owner, self.ctx, row)
+        row.payment = old
+        row.save(update_fields=['payment'])
+        self._batch(old.pk, sorted(BSC_SEND_KINDS)[0])
+        with mock.patch.object(activation, '_prepare_send', side_effect=AssertionError('must not re-prepare')):
+            row, payment = self.prepare()
+        old.refresh_from_db()
+        self.assertEqual((old.status, row.amount, row.payment_id), ('PENDING', Decimal('10.00'), old.pk))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='')
+    def test_another_products_batch_with_the_same_id_does_not_block_the_reprice(self):
+        self.open_accounts()
+        row = self.row('payment_pending')
+        old = self.fake_payment(self.owner, self.ctx, row)
+        row.payment = old
+        row.save(update_fields=['payment'])
+        self._batch(old.pk, 'payment_bridge')       # source ids are shared across products
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=WAD), \
+             mock.patch.object(activation, '_prepare_send', side_effect=self.fake_payment):
+            row, payment = self.prepare()
+        old.refresh_from_db()
+        self.assertEqual((old.status, row.amount, row.payment.amount), ('FAILED', Decimal('1.00'), Decimal('1.00')))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='')
+    def test_hidden_prepared_payment_is_retired_too(self):
+        from django.utils import timezone as djtz
+        self.open_accounts()
+        row = self.row('payment_pending')
+        old = self.fake_payment(self.owner, self.ctx, row)
+        SendTransaction.all_objects.filter(pk=old.pk).update(deleted_at=djtz.now(), transaction_hash=None)
+        row.payment = old
+        row.save(update_fields=['payment'])
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=WAD), \
+             mock.patch.object(activation, '_prepare_send', side_effect=self.fake_payment):
+            row, payment = self.prepare()
+        self.assertEqual(SendTransaction.all_objects.get(pk=old.pk).status, 'FAILED')
+        self.assertEqual(row.amount, Decimal('1.00'))
+
+    @override_settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_FREE_OPENING_COUNTRIES='CO')
+    def test_a_payment_that_may_still_execute_keeps_its_amount(self):
+        self.user.country = 'CO'
+        self.user.save(update_fields=['country'])
+        self.open_accounts()
+        row = self.row('payment_pending')
+        row.payment = self.fake_payment(self.owner, self.ctx, row)
+        row.payment.status = 'SUBMITTED'
+        row.payment.save(update_fields=['status'])
+        row.save(update_fields=['payment'])
+        row, payment = self.prepare()
+        self.assertEqual((row.status, row.amount, payment), ('payment_pending', Decimal('10.00'), None))
 
     def test_opening_and_failure_never_prepare_a_payment(self):
         with mock.patch('payment_accounts.local_money.activate',return_value='provisioning'), mock.patch.object(activation,'_prepare_send') as pay:
@@ -581,7 +802,7 @@ class ActivationTests(TestCase):
         self.row('awaiting_payment')
         with mock.patch('cusd_plus.vault.p_plus_wad', side_effect=AssertionError('unrelated oracle')), \
              mock.patch('cusd_plus.vault.last_oracle_price_wad', side_effect=AssertionError('unrelated oracle')):
-            activation.require_opening_funds(self.owner)
+            activation.require_opening_funds(self.owner, Decimal('10'))
             row, result = self.prepare()
         self.assertEqual(len(result['calls']), 1)
         self.assertEqual(json.loads(row.payment.bsc_calls_json)['kind'], 'send_cusd')
@@ -597,7 +818,8 @@ class ActivationTests(TestCase):
         self.assertEqual(activation.visible_accounts(FinancialAccount.objects.all()).count(),2)
 
 
-@override_settings(CUSD_PLUS_7702_ENABLED=True,CUSD_VAULT_ADDRESS=TOKEN)
+@override_settings(CUSD_PLUS_7702_ENABLED=True,CUSD_VAULT_ADDRESS=TOKEN,
+                   INFINIA_OPENING_FEE_USD='10.00', INFINIA_FREE_OPENING_COUNTRIES='')
 class ConcurrentActivationTests(TransactionTestCase):
     def test_simultaneous_app_and_worker_attempt_only_one_failed_request(self):
         from concurrent.futures import ThreadPoolExecutor

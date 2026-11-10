@@ -35,11 +35,30 @@ def dex_offered(meta) -> bool:
 def faq_text(*, dex=True):
     """The FAQ with values that live in code filled in, so a policy change
     (the local-account opening fee) never needs a second edit here."""
-    from payment_accounts.activation import FEE
+    from django.conf import settings
 
-    amount = f'{FEE:.2f}'.replace('.', ',').removesuffix(',00')
-    fee = (f'Abrir cada cuenta local tiene un costo único de US${amount}; la app te lo muestra antes de confirmar.'
-           if FEE > 0 else 'Abrir una cuenta local no tiene costo.')
+    from payment_accounts.activation import standard_fee
+
+    def usd(value):
+        return f'{value:.2f}'.replace('.', ',').removesuffix(',00')
+
+    price = standard_fee()
+    # The price is the server's per person (some openings are free); the app
+    # always shows the exact amount before anything is confirmed.
+    fee = (f'Abrir una cuenta local tiene un costo único de hasta US${usd(price)}; '
+           'la app te muestra el monto exacto antes de confirmar.'
+           if price > 0 else 'Abrir una cuenta local no tiene costo.')
+    # Maintenance is invoiced only where fees are passed through
+    # (infinia_maintenance.accrue), and collected with the person's next
+    # local-account operation, whichever account it is on.
+    if (getattr(settings, 'INFINIA_MAINTENANCE_FEES_ENABLED', False)
+            and str(getattr(settings, 'INFINIA_PASS_THROUGH_FEE_COUNTRIES', '') or '').strip()):
+        from decimal import Decimal
+        tier = getattr(settings, 'INFINIA_ACCOUNT_FEE_TIER', 0)
+        monthly = Decimal(('0.10', '0.07', '0.05')[tier if tier in (0, 1, 2) else 0])
+        fee += (f' Cada cuenta local tiene además un mantenimiento de US${usd(monthly)} al mes: '
+                'no se cobra aparte, se descuenta en tu siguiente operación con una cuenta local. '
+                'Las cuentas que pagaron la apertura anterior de US$10 no pagan mantenimiento.')
     text = FAQ if dex else _DEX_BLOCK.sub(DEX_NOT_OFFERED_FAQ, FAQ)
     text = text.replace('[[dex]]\n', '').replace('[[/dex]]\n', '')
     return text.replace('{local_account_fee}', fee)

@@ -109,6 +109,11 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         # Held pay-ins (Confío Face) and pay-ins being returned convert by no path.
         from .payin_hold import require_conversion_allowed
         require_conversion_allowed(owner, credit)
+    if direction == 'to_bank':
+        # Refused before it starts; a deposit already received still converts
+        # to the person's balance (to_wallet), so nothing is left behind.
+        from .local_money import require_region
+        require_region(owner)
     validate_accounts(owner, local_account, crypto_account, snapshot['country'])
     source, target = (crypto_account, local_account) if direction == 'to_bank' else (local_account, crypto_account)
     _require_capability(source, 'convert')

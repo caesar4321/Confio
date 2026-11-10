@@ -23,7 +23,8 @@ describe('local transfer menu boundaries', () => {
     const source = readFileSync(resolve(__dirname, '../../hooks/useLocalRailOptions.ts'), 'utf8');
     expect(source).toContain('isIdentityBlocked(method)');
     expect(source).toContain('local_rail_blocked_interest');
-    expect(source).toContain('No disponible por ahora para tu nacionalidad');
+    expect(source).toContain('No disponible por ahora en tu país');
+    expect(source).not.toContain('para tu nacionalidad');
     expect(source).toContain('showIdentityBlockedInterest(`${method.title} · ${countryName(method.country)}`, stage =>');
   });
 

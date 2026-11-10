@@ -330,22 +330,27 @@ Deploy `security` migration `0011` and `payment_accounts` migration `0014`
 (after the direct-bridge migrations `0012`–`0013`).
 
 
-## US$10 local account activation
+## Local account activation (US$1; US$10 until 2026-11-10)
 
 One opening fee applies per Confío owner/country/currency, shared by sending and
 receiving methods. Supporting `XXX / USDC_POL` accounts do not incur another fee.
 
 ### Open first, collect when ready
 
-1. `prepareLocalActivation(methodId)` returns `consent_required` and the US$10
-   price without opening an account or preparing a payment.
-2. After explicit consent, the app repeats the mutation with `acceptedFee: 10`.
+1. `prepareLocalActivation(methodId)` returns `consent_required` and the price
+   (`activation.fee_for`: `INFINIA_OPENING_FEE_USD`, or 0.00 for a person of a
+   country in `INFINIA_FREE_OPENING_COUNTRIES` opening their own country's
+   account) without opening an account or preparing a payment.
+2. After explicit consent, the app repeats the mutation with `acceptedFee` equal
+   to that quote. A free opening prepares no payment and becomes usable once
+   the account is open at the provider. An opening accepted at an earlier,
+   higher price and not yet paid pays today's price.
    KYC and address checks must pass. A durable activation records the consent,
    fixed collector, amount, and country/currency before requesting Infinia accounts.
 3. The provider must confirm both accounts and their owner profile active and provide non-empty, unexpired receiving
    instructions before the activation becomes `awaiting_payment`. A failed opening
    never produces a payment. Unknown outcomes retain their IDs for reconciliation.
-4. Only then can the server prepare a signed payment of exactly 10 cUSD to the
+4. Only then can the server prepare a signed payment of exactly the opening price in cUSD to the
    collector. The user confirms this separate payment. Any savings conversion
    rounding surplus remains in the user's own wallet.
    Savings conversion still obeys Ondo's US$1 minimum: a split balance such as

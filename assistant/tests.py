@@ -2275,7 +2275,7 @@ class FaqTextTests(TestCase):
         from decimal import Decimal
 
         from .prompts import faq_text
-        self.assertIn('costo único de US$10;', faq_text())
+        self.assertIn('costo único de hasta US$1;', faq_text())
         # App Review 3.1.5(iii): where Oro y Bitcoin and Futuros are not offered
         # (the iOS app), the assistant neither describes nor suggests them.
         ios = faq_text(dex=False)
@@ -2291,9 +2291,19 @@ class FaqTextTests(TestCase):
         with self.settings(PERPS_IOS_ENABLED=False, CRYPTO_IOS_ENABLED=False):
             self.assertFalse(dex_offered({'HTTP_X_CONFIO_PLATFORM': 'ios'}))
         self.assertNotIn('{local_account_fee}', faq_text())
-        with patch('payment_accounts.activation.FEE', Decimal('7.50')):
-            self.assertIn('US$7,50', faq_text())
-        with patch('payment_accounts.activation.FEE', Decimal('0')):
+        with self.settings(INFINIA_OPENING_FEE_USD='7.50', INFINIA_MAINTENANCE_FEES_ENABLED=False):
+            self.assertIn('costo único de hasta US$7,50;', faq_text())
+            self.assertNotIn('mantenimiento', faq_text().split('costo único de hasta US$7,50;')[1].split('\n')[0])
+        with self.settings(INFINIA_OPENING_FEE_USD='1.00', INFINIA_MAINTENANCE_FEES_ENABLED=True,
+                           INFINIA_ACCOUNT_FEE_TIER=0, INFINIA_PASS_THROUGH_FEE_COUNTRIES='CO,MX'):
+            self.assertIn('costo único de hasta US$1;', faq_text())
+            self.assertIn('mantenimiento de US$0,10 al mes', faq_text())
+            self.assertIn('US$10 no pagan mantenimiento', faq_text())
+        with self.settings(INFINIA_MAINTENANCE_FEES_ENABLED=True, INFINIA_PASS_THROUGH_FEE_COUNTRIES=''):
+            self.assertNotIn('mantenimiento de US$', faq_text())   # invoiced nowhere: not announced
+        # Refusals never say who or where.
+        self.assertNotRegex(faq_text(), r'(?i)nacionalidad venezolana|documento o nacionalidad|desde Venezuela')
+        with self.settings(INFINIA_OPENING_FEE_USD='0', INFINIA_MAINTENANCE_FEES_ENABLED=False):
             self.assertIn('Abrir una cuenta local no tiene costo.', faq_text())
 
 

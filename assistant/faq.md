@@ -110,8 +110,8 @@
 - Brasil: puedes tener tu propia chave Pix para recibir de cualquier persona, y enviar Pix a la chave de otra persona. También puedes recibir con el QR o los datos bancarios de tu cuenta.
 - En cuentas personales, cuando otra persona te envía dinero a tu cuenta local, llega a tu saldo cuando confirmas con Confío Face que eres tú. Una sola confirmación recibe todo lo pendiente. Si no lo confirmas en 24 horas, se devuelve automáticamente a quien lo envió.
 
-- Necesitas verificar tu identidad. Por ahora no podemos abrirlas con documento o nacionalidad venezolana.
-- Bre-B verifica desde dónde estás (dispositivo y conexión) y no funciona desde Venezuela.
+- Necesitas verificar tu identidad. Por ahora no están disponibles para todos los países: si la app indica que no está disponible en tu país, o no aparece, aún no lo está en el tuyo.
+- Bre-B verifica desde dónde estás (dispositivo y conexión) y no funciona desde todos los países.
 
 ## Verificación de identidad
 - Te verificas dentro de la app con tu documento y una selfie. Hace falta para recargar, retirar y abrir cuentas locales.

@@ -341,6 +341,21 @@ class CancelBoliviaQrSend(graphene.Mutation):
         return _guard(BoliviaQrSendOrderType, run)
 
 
+def koywe_top_up_paused(user) -> bool:
+    """Koywe's top-up is paused for this person's country
+    (KOYWE_ON_RAMP_PAUSED_COUNTRIES): Recibir hides "Recargar ahora" instead of
+    offering a row that can only fail. Their other ways to add money stay."""
+    if not (user and getattr(user, 'is_authenticated', False)):
+        return False
+    from ramps.koywe import on_ramp_paused
+    from ramps.rail_country import rail_countries
+    from ramps.schema import COUNTRY_METHODS
+    # The country the top-up itself would run in (_resolve_ramp_country_code):
+    # the row is hidden exactly when tapping it could only fail.
+    country = next((code for code in rail_countries(user) if code in COUNTRY_METHODS), None)
+    return bool(country) and on_ramp_paused(country)
+
+
 # ------------------------------------------------------------------ queries
 
 class Query(graphene.ObjectType):
@@ -355,8 +370,10 @@ class Query(graphene.ObjectType):
     bolivia_qr_send_order = graphene.Field(BoliviaQrSendOrderType, order_id=graphene.String(required=True))
 
     def resolve_bolivia_qr_koywe_replaced(self, info):
-        replaced = bolivia_qr.koywe_replaced(_user(info), getattr(info.context, 'META', {}))
-        return KoyweReplacedType(top_up=replaced['top_up'], withdraw=replaced['withdraw'])
+        user = _user(info)
+        replaced = bolivia_qr.koywe_replaced(user, getattr(info.context, 'META', {}))
+        return KoyweReplacedType(top_up=replaced['top_up'] or koywe_top_up_paused(user),
+                                 withdraw=replaced['withdraw'])
 
     def resolve_bolivia_qr_availability(self, info):
         meta, user = getattr(info.context, 'META', {}), _user(info)

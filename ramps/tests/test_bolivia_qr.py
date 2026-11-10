@@ -55,6 +55,32 @@ class GateTests(SimpleTestCase):
         self.assertEqual(bolivia_qr.koywe_replaced(bolivian, old), {'top_up': False, 'withdraw': False})
         self.assertEqual(bolivia_qr.koywe_replaced(peruvian, new), {'top_up': False, 'withdraw': False})
 
+    @override_settings(BOLIVIA_QR_RECEIVE_ENABLED=False, BOLIVIA_QR_SEND_ENABLED=False,
+                       KOYWE_ON_RAMP_PAUSED_COUNTRIES=['CO'])
+    def test_paused_koywe_top_up_hides_the_row_for_that_country_only(self):
+        from ramps import bolivia_qr_schema as schema
+        meta = {'HTTP_X_CONFIO_VERSION': '5.3.6'}
+        def rows(user):
+            info = SimpleNamespace(context=SimpleNamespace(user=user, META=meta))
+            row = schema.Query().resolve_bolivia_qr_koywe_replaced(info)
+            return row.top_up, row.withdraw
+        colombian = SimpleNamespace(is_authenticated=True, phone_country='CO')
+        peruvian = SimpleNamespace(is_authenticated=True, phone_country='PE')
+        self.assertEqual(rows(colombian), (True, False))    # the top-up row goes, withdrawals stay
+        self.assertEqual(rows(peruvian), (False, False))
+        self.assertEqual(rows(SimpleNamespace(is_authenticated=False, phone_country='CO')), (False, False))
+        with override_settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=[]):
+            self.assertEqual(rows(colombian), (False, False))  # lifting the pause brings it back
+        # Hidden exactly when the top-up itself would run in the paused country:
+        # the rail the person last picked comes first, as it does for the top-up.
+        picked_peru = SimpleNamespace(is_authenticated=True, phone_country='CO', preferred_rail_country='PE')
+        picked_colombia = SimpleNamespace(is_authenticated=True, phone_country='PE', preferred_rail_country='CO')
+        from ramps.schema import _resolve_ramp_country_code
+        for person, hidden in ((picked_peru, False), (picked_colombia, True)):
+            info = SimpleNamespace(context=SimpleNamespace(user=person, META=meta))
+            self.assertEqual(rows(person)[0], hidden)
+            self.assertEqual(_resolve_ramp_country_code(info) == 'CO', hidden)
+
     @override_settings(BOLIVIA_QR_SEND_ENABLED=False, BOLIVIA_QR_SEND_MIN_APP_VERSION='5.2.9',
                        BOLIVIA_QR_TEST_USER_IDS='7, 9')
     def test_listed_testers_get_it_before_the_switch(self):

@@ -667,6 +667,18 @@ class JourneyTests(TestCase):
         journey = self.inbound()
         self.assertNotIn('face_action_key', journey.money_flow.metadata)
 
+    def test_unsupported_region_refuses_sending_out_but_never_strands_a_deposit(self):
+        t,_=self.prepared(); t.status='delivered';t.destination_tx_hash=DEST_HASH;t.save()
+        self.credit(self.crypto, amount='10.008795', provider_data={'third_party':{'type':'CRYPTO','crypto_network':'POLYGON','transaction_hash':DEST_HASH}})
+        reconcile_provider_credit(t)
+        with mock.patch('payment_accounts.local_money.region_unsupported', return_value=True):
+            with self.assertRaisesMessage(PaymentAccountError, 'no está disponible en tu país'):
+                create_journey(owner=self.owner,local_account=self.local,crypto_account=self.crypto, request_id=uuid.uuid4(),
+                    direction='to_bank',bridge=t,destination=self.dest,minimum_fx_output='30')
+            self.assertFalse(InfiniaJourney.objects.exists())
+            # Money that already arrived still reaches the person's balance.
+            self.assertEqual(self.inbound().direction, 'to_wallet')
+
     def test_outbound_correlates_infinia_credit_to_bridge_then_pays_local_account(self):
         t,_=self.prepared(); t.status='delivered';t.destination_tx_hash=DEST_HASH;t.save()
         entry=self.credit(self.crypto, amount='10.008795', provider_data={'third_party':{'type':'CRYPTO','crypto_network':'POLYGON','transaction_hash':DEST_HASH}})

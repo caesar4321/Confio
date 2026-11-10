@@ -15,7 +15,56 @@ from django.utils import timezone
 from .models import AccountActivation
 from .services import PaymentAccountError
 
-FEE = Decimal('10.00')
+LEGACY_FEE = Decimal('10.00')  # the opening price until 2026-11-10; those accounts owe no maintenance
+
+
+DEFAULT_FEE = Decimal('1.00')
+
+
+def standard_fee():
+    """Never raises and never goes below zero: a mistyped setting (caught at
+    startup by payment_accounts.E015) falls back to the default price rather
+    than break every quote or hand out free accounts."""
+    try:
+        value = Decimal(str(getattr(settings, 'INFINIA_OPENING_FEE_USD', DEFAULT_FEE)).strip())
+    except Exception:
+        return DEFAULT_FEE
+    # Below US$1 a payment funded from savings cannot be built (Ondo's US$1
+    # minimum redemption), so the price is free or at least a dollar.
+    if not value.is_finite() or value < 0 or 0 < value < 1:
+        return DEFAULT_FEE
+    return value.quantize(Decimal('0.01'))
+
+
+def fee_for(owner, country):
+    """The one-time opening price for this person and account country.
+
+    Free while a person of a listed country opens their own country's account
+    (Colombia while Koywe's COP top-up is off: nobody can pay an opening fee
+    with a balance they cannot fund)."""
+    from .infinia_fees import iso_alpha2
+    free = getattr(settings, 'INFINIA_FREE_OPENING_COUNTRIES', '')
+    if isinstance(free, str):
+        free = free.split(',')
+    free = {value.strip().upper() for value in free if value.strip()}
+    try:
+        account_country = iso_alpha2(country)
+    except Exception:
+        account_country = ''
+    from security.geo import country_of
+    person_country = country_of(owner.user)
+    if account_country and account_country in free and person_country == account_country:
+        return Decimal('0.00')
+    return standard_fee()
+
+
+def _due(row):
+    """What an unpaid opening still costs: never more than today's price."""
+    return min(row.amount, fee_for(row.confio_account, row.country))
+
+
+def _usd(amount):
+    return f'US${Decimal(amount).quantize(Decimal("0.01"))}'
 
 
 PAID_STATES = ('active', 'legacy')
@@ -64,11 +113,14 @@ def require_opening_intent(owner, country, asset):
     if not query.exists():
         raise PaymentAccountError('Confirma el costo de apertura antes de solicitar la cuenta.')
     if not query.filter(status__in=PAID_STATES).exists():
-        require_opening_funds(owner)
+        require_opening_funds(owner, max((_due(row) for row in query), default=Decimal('0')))
 
 
-def require_opening_funds(owner):
+def require_opening_funds(owner, amount):
     """Fail closed before provider costs; this is not a reservation of user funds."""
+    amount = Decimal(amount)
+    if amount <= 0:
+        return
     from cusd_plus import vault
     from send.bsc_flow import EVM_ADDR_RE, WAD, activation_unwrap_plan
     if not (getattr(settings, 'CUSD_PLUS_7702_ENABLED', False)
@@ -83,18 +135,18 @@ def require_opening_funds(owner):
         # Spending existing holdings is an exit, not an Ondo mint. Phone/IP
         # eligibility may have changed since acquisition. Use one whole balance.
         cusd_raw = vault.erc20_balance_raw(cusd, address)
-        use_savings = cusd_raw < int(FEE * WAD)
+        use_savings = cusd_raw < int(amount * WAD)
         pps = vault.p_plus_wad(fresh=True) if use_savings else WAD
         oracle = vault.last_oracle_price_wad(fresh=True) if use_savings else WAD
         shares_raw = vault.erc20_balance_raw(savings, address) if use_savings else 0
         if pps <= 0 or oracle <= 0 or cusd_raw < 0 or shares_raw < 0:
             raise ValueError('Invalid activation balance or price')
-        _, _, error = activation_unwrap_plan(int(FEE * WAD), cusd_raw, shares_raw, pps, oracle,
+        _, _, error = activation_unwrap_plan(int(amount * WAD), cusd_raw, shares_raw, pps, oracle,
                                              use_savings=use_savings)
     except Exception as exc:
         raise OpeningFundsError('No pudimos verificar tu saldo para abrir la cuenta. Intenta de nuevo.') from exc
     if error:
-        raise OpeningFundsError('Necesitas US$10.00 en tu saldo Confío. Agrega dólares y vuelve a intentarlo.')
+        raise OpeningFundsError(f'Necesitas {_usd(amount)} en tu saldo Confío. Agrega dólares y vuelve a intentarlo.')
 
 
 def collector():
@@ -134,7 +186,7 @@ def _prepare_send(owner, jwt_ctx, row):
     if not result.get('success'):
         code = result.get('error', '')
         if code == 'insufficient_balance':
-            raise PaymentAccountError('Necesitas US$10.00 en tu saldo Confío. Agrega dólares y vuelve a intentarlo.')
+            raise PaymentAccountError(f'Necesitas {_usd(row.amount)} en tu saldo Confío. Agrega dólares y vuelve a intentarlo.')
         logging.getLogger(__name__).warning('Activation payment preparation rejected: %s', code)
         raise PaymentAccountError('No pudimos preparar el pago. Intenta de nuevo en unos minutos.')
     payment = SendTransaction.objects.get(internal_id=result['send_id'])
@@ -156,6 +208,31 @@ def _definitively_failed(payment):
     return payment.status == 'FAILED' and not SponsoredBatch.objects.filter(
         source_id=payment.pk, kind__in=BSC_SEND_KINDS,
     ).exclude(status__in=['reverted', 'noop_failed']).exists()
+
+
+def _retire_unsigned(payment):
+    """Fail a prepared payment nothing of which has left: no hash and no send
+    batch of its own. Serialized with the broadcast claim on the send row's
+    lock, which this transaction then holds until it commits, so the old and
+    the new payment can never both execute. Batches are matched by send kind:
+    source ids are shared with other products' batches."""
+    from django.db.models import Q
+    from django.utils import timezone
+    from blockchain.models import SponsoredBatch
+    from send.kinds import BSC_SEND_KINDS
+    from send.models import SendTransaction
+    SendTransaction.all_objects.select_for_update().filter(pk=payment.pk).values_list('id', flat=True).first()
+    retired = False
+    if not SponsoredBatch.objects.filter(source_id=payment.pk, kind__in=BSC_SEND_KINDS).exists():
+        retired = bool(SendTransaction.all_objects.filter(
+            Q(transaction_hash='') | Q(transaction_hash__isnull=True), pk=payment.pk, status='PENDING',
+        ).update(status='FAILED', error_message='activation_repriced', updated_at=timezone.now()))
+    # Always re-read: it may have been signed and submitted meanwhile.
+    payment.refresh_from_db()
+    if retired:
+        # A bulk update skips the signals that keep the activity feed in step.
+        payment.save(update_fields=['status', 'error_message', 'updated_at'])
+    return retired
 
 
 def opening_ready(row):
@@ -195,17 +272,24 @@ def _opening(owner, identity, method_id, accepted_fee=None):
     row = AccountActivation.objects.select_for_update(of=('self',)).select_related('payment').filter(
         confio_account=owner, country=method.country, asset=method.asset).first()
     if row is None:
+        fee = fee_for(owner, method.country)
         if accepted_fee is None:
-            return SimpleNamespace(status='consent_required', amount=FEE), None
-        if Decimal(str(accepted_fee)) != FEE:
-            raise PaymentAccountError('Confirma el costo vigente de US$10.00.')
+            return SimpleNamespace(status='consent_required', amount=fee), None
+        try:
+            accepted = Decimal(str(accepted_fee))
+        except Exception as exc:
+            raise PaymentAccountError(f'Confirma el costo vigente de {_usd(fee)}.') from exc
+        if not accepted.is_finite() or accepted != fee:
+            raise PaymentAccountError(f'Confirma el costo vigente de {_usd(fee)}.')
         if AccountActivation.objects.filter(confio_account__user_id=owner.user_id, status__in=OPEN_STATES).exists():
             raise PaymentAccountError('Completa la apertura pendiente antes de solicitar otra cuenta.')
-        require_opening_funds(owner)
-        address = collector()  # Check collection configuration before incurring provider costs.
+        require_opening_funds(owner, fee)
+        # Check collection configuration before incurring provider costs. A
+        # free opening collects nothing.
+        address = collector() if fee > 0 else ''
         row = AccountActivation.objects.create(
             confio_account=owner, country=method.country, asset=method.asset, method_id=method_id,
-            amount=FEE, status='provisioning', accepted_at=timezone.now(),
+            amount=fee, status='provisioning', accepted_at=timezone.now(),
             collector_address=address, settlement_token_address=getattr(settings,'CUSD_VAULT_ADDRESS','').lower(),
             chain_id=int(getattr(settings,'BSC_CHAIN_ID',56)))
     return row
@@ -247,6 +331,11 @@ def _payment(owner, activation_id, jwt_ctx):
     if row.status in ('active', 'legacy', 'failed', 'provisioning'):
         return row, None
     if row.payment_id:
+        if row.payment.status == 'PENDING' and _due(row) < row.amount:
+            # Prepared at an earlier, higher price and never signed: retire it
+            # so the person is asked for today's price. If any of it already
+            # left (a batch exists), it keeps its amount and settles as it is.
+            _retire_unsigned(row.payment)
         if row.payment.status != 'FAILED':
             if row.payment.status == 'PENDING':
                 require_payment_ready(row)
@@ -254,6 +343,18 @@ def _payment(owner, activation_id, jwt_ctx):
         if not _definitively_failed(row.payment):
             return row, None
         row.attempt += 1
+    # No payment can still execute here. The person never pays more than
+    # today's price for an opening they have not paid yet.
+    current = _due(row)
+    if current < row.amount:
+        row.amount = current
+        row.save(update_fields=['amount', 'updated_at'])
+    if row.amount <= 0:
+        if not opening_ready(row):
+            raise PaymentAccountError('La cuenta todavía no está lista. Intenta de nuevo más tarde.')
+        row.status = 'active'
+        row.save(update_fields=['status', 'attempt', 'updated_at'])
+        return row, None
     if not getattr(settings, 'CUSD_PLUS_7702_ENABLED', False):
         raise PaymentAccountError('El pago de apertura no está disponible todavía.')
     require_payment_ready(row)
@@ -261,6 +362,14 @@ def _payment(owner, activation_id, jwt_ctx):
     row.status = 'payment_pending'
     row.save(update_fields=['payment', 'attempt', 'status', 'updated_at'])
     return row, _send_result(row.payment)
+
+
+def _ready_status(row):
+    """The account is open at the provider: a free opening is usable at once,
+    a paid one waits for its payment."""
+    if row.amount <= 0 and not row.payment_id:
+        return 'active'
+    return 'payment_pending' if row.payment_id else 'awaiting_payment'
 
 
 @transaction.atomic
@@ -291,7 +400,7 @@ def reconcile(activation_id):
     if opening_ready(row):
         # A webhook may have finished provisioning during the retry delay.
         if row.status == 'provisioning':
-            row.status = 'payment_pending' if row.payment_id else 'awaiting_payment'
+            row.status = _ready_status(row)
         _clear_opening_error(row)
         row.save(update_fields=['status', 'updated_at', *OPENING_ERROR_FIELDS])
         return row
@@ -301,7 +410,12 @@ def reconcile(activation_id):
         return row
     # Recheck on app polling and worker retries too. Keep affordability failures
     # out of provider retry/error state, so a later top-up can resume safely.
-    require_opening_funds(row.confio_account)
+    from .local_money import region_unsupported
+    if region_unsupported(row.confio_account):
+        # Not a provider failure and not final: the opening simply waits, with
+        # no error recorded, and resumes if the person's country changes back.
+        return row
+    require_opening_funds(row.confio_account, _due(row))
     from .schema import _verified_identity
     try:
         identity = _verified_identity(row.confio_account)
@@ -334,7 +448,7 @@ def reconcile(activation_id):
         return row
     _clear_opening_error(row)
     if status == 'active' and opening_ready(row):
-        row.status = 'payment_pending' if row.payment_id else 'awaiting_payment'
+        row.status = _ready_status(row)
     elif status in terminal and not payment_can_execute:
         row.status = 'failed'
     row.save(update_fields=['status', 'updated_at', *OPENING_ERROR_FIELDS])

@@ -29,6 +29,69 @@ class MaintenanceTests(TestCase):
         self.assertEqual(rows[0].amount_usd,Decimal('0.10'))
         self.assertEqual(str(rows[0].period),'2026-09-01')
 
+    def _opening(self, status, amount, paid=None):
+        """An activation for self.local; `paid` = (amount, status) of its payment."""
+        from payment_accounts.models import AccountActivation
+        from send.models import SendTransaction
+        payment = None
+        if paid:
+            payment = SendTransaction.objects.create(sender_user=self.owner.user, sender_address='0x' + '1' * 40,
+                recipient_address='0x' + '2' * 40, recipient_type='external', amount=paid[0], token_type='CUSD',
+                status=paid[1])
+        AccountActivation.objects.filter(confio_account=self.owner, country=self.local.country,
+                                         asset=self.local.asset).delete()
+        return AccountActivation.objects.create(confio_account=self.owner, country=self.local.country,
+            asset=self.local.asset, method_id='x', status=status, amount=amount, payment=payment)
+
+    def _reset(self):
+        from payment_accounts.models import InfiniaMaintenanceState
+        InfiniaMaintenanceCharge.objects.all().delete()
+        InfiniaMaintenanceState.objects.all().delete()
+
+    def test_account_paid_at_the_old_one_time_price_owes_no_maintenance(self):
+        self._opening('active', Decimal('10.00'), paid=(Decimal('10.00'), 'CONFIRMED'))
+        accrue(self.owner)
+        self.assertEqual(InfiniaMaintenanceCharge.objects.count(), 0)
+        self.assertEqual(quoted_charges(self.owner)[1], Decimal('0'))
+
+    def test_only_a_confirmed_old_price_payment_exempts(self):
+        cases = [
+            ('active', Decimal('1.00'), (Decimal('1.00'), 'CONFIRMED')),     # today's price
+            ('active', Decimal('0.00'), None),                              # free opening
+            ('active', Decimal('10.00'), None),                             # amount alone proves nothing
+            ('active', Decimal('10.00'), (Decimal('10.00'), 'FAILED')),     # never actually paid
+            ('payment_pending', Decimal('10.00'), (Decimal('10.00'), 'SUBMITTED')),
+            ('legacy', Decimal('0.00'), None),
+        ]
+        for status, amount, paid in cases:
+            self._reset()
+            self._opening(status, amount, paid)
+            accrue(self.owner)
+            self.assertEqual(InfiniaMaintenanceCharge.objects.count(), 1, (status, amount, paid))
+
+    def test_months_invoiced_before_the_old_price_was_paid_are_dropped_once_it_is(self):
+        from send.models import SendTransaction
+        row = self._opening('payment_pending', Decimal('10.00'), paid=(Decimal('10.00'), 'SUBMITTED'))
+        self.assertEqual(quoted_charges(self.owner)[1], Decimal('0.10'))      # open, not yet paid
+        SendTransaction.objects.filter(pk=row.payment_id).update(status='CONFIRMED')
+        type(row).objects.filter(pk=row.pk).update(status='active')
+        ids, cost = quoted_charges(self.owner)
+        self.assertEqual((ids, cost), ([], Decimal('0')))
+        self.assertEqual(InfiniaMaintenanceCharge.objects.count(), 0)
+        self.clock.return_value = datetime(2026,12,10,tzinfo=tz.utc)
+        self.assertEqual(quoted_charges(self.owner)[1], Decimal('0'))         # and none later
+
+    def test_exempt_account_keeps_a_month_already_inside_a_signed_flow(self):
+        from send.models import SendTransaction
+        row = self._opening('payment_pending', Decimal('10.00'), paid=(Decimal('10.00'), 'SUBMITTED'))
+        ids, _ = quoted_charges(self.owner)
+        flow = self.flow()
+        reserve({'maintenance_ids': ids}, flow)
+        SendTransaction.objects.filter(pk=row.payment_id).update(status='CONFIRMED')
+        type(row).objects.filter(pk=row.pk).update(status='active')
+        accrue(self.owner)
+        self.assertEqual(InfiniaMaintenanceCharge.objects.filter(reserved_flow=flow).count(), 1)
+
     def test_missing_months_accrue_once_and_closure_stops_next_cycle(self):
         accrue(self.owner)
         self.clock.return_value = datetime(2026,11,10,tzinfo=tz.utc)

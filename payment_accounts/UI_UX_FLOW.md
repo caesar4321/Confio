@@ -417,7 +417,9 @@ Explain only verified properties:
 
 Primary CTA: `Continuar`
 
-Confío charges **US$10.00 once per country/currency account**, after Infinia
+Confío charges the opening price **once per country/currency account** (US$1.00 since
+2026-11-10, `INFINIA_OPENING_FEE_USD`; US$10.00 before; free for a person of a country in
+`INFINIA_FREE_OPENING_COUNTRIES` opening their own country's account), after Infinia
 confirms the account is ready. The user first accepts the opening price. Then
 Confío opens the account and obtains its receiving details. Only then does the app
 ask the user to sign the payment and unlock those details. Failed openings are
@@ -427,7 +429,8 @@ Send and receive methods share the same opening entitlement. Supporting USDC_POL
 accounts are free. Existing provider accounts are grandfathered by migration.
 There is one unfinished opening per verified Confío customer across their accounts.
 Do not expose receiving details or permit money movement before payment confirmation.
-An unpaid ready account has a visible `Pagar apertura · US$10.00` action; a pending
+An unpaid ready account has a visible `Pagar apertura · US$1.00` action (a free opening
+has none and is usable as soon as it is open); a pending
 opening can be resumed without another fee acceptance or duplicate provider request.
 
 ### Screen 2 — Intended use

@@ -413,6 +413,8 @@ function Application({ methodId }: { methodId: string }) {
       }] : []),
   ];
   const ready = requirements.every(row => row.ok);
+  // The server quotes the opening price; a zero quote is a free opening.
+  const freeOpening = Boolean(fee?.amount) && Number(fee?.amount) === 0;
 
   const costRows: Row[] = isCobre
     ? [
@@ -423,7 +425,9 @@ function Application({ methodId }: { methodId: string }) {
       ? [fee?.amount
         ? ['credit-card', `Apertura: US$${formatAmountString(fee.amount)}`, 'Tu cuenta está lista. Paga con tu saldo Confío para ver tus datos y usarla.']
         : ['credit-card', 'Tu cuenta está lista', 'Toca abajo para ver el monto antes de pagar.']]
-      : fee?.amount
+      : freeOpening
+        ? [['gift', 'Sin costo de apertura', 'Abrir esta cuenta es gratis.']]
+        : fee?.amount
         ? [
           ['credit-card', `Apertura: US$${formatAmountString(fee.amount)}`, 'Al confirmar, verificamos tu saldo, abrimos la cuenta y cobramos automáticamente cuando esté lista.'],
           ['check-circle', 'Pagas cuando esté lista', 'Si no se puede abrir, no se cobra nada.'],
@@ -451,10 +455,10 @@ function Application({ methodId }: { methodId: string }) {
       onPress: runOpening, disabled: busy, icon: 'check',
     };
   } else if (status === 'provisioning') {
-    action = { label: fee?.amount ? `Abrir y pagar · US$${formatAmountString(fee.amount)}` : 'Revisar la apertura', onPress: runOpening, disabled: busy };
+    action = { label: freeOpening ? 'Abrir mi cuenta' : fee?.amount ? `Abrir y pagar · US$${formatAmountString(fee.amount)}` : 'Revisar la apertura', onPress: runOpening, disabled: busy };
   } else {
     action = {
-      label: fee?.amount ? `Abrir y pagar · US$${formatAmountString(fee.amount)}` : 'Solicitar cuenta',
+      label: freeOpening ? 'Abrir mi cuenta' : fee?.amount ? `Abrir y pagar · US$${formatAmountString(fee.amount)}` : 'Solicitar cuenta',
       onPress: runOpening,
       disabled: !ready || !fee?.amount || busy,
       icon: 'check',

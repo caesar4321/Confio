@@ -296,6 +296,103 @@ class LocalMoneyTests(TestCase):
 
     # ---- availability
 
+    # ---- unsupported region: the person's country (User.country)
+
+    def _live(self):
+        return mock.patch.object(local_money, 'method_status', return_value=('live', ''))
+
+    @override_settings(INFINIA_UNSUPPORTED_REGIONS='VE')
+    def test_person_of_an_unsupported_country_is_refused_without_naming_it(self):
+        method = local_money.METHODS['co_breb']
+        with self._live():
+            self.user.country = 'CO'
+            self.assertEqual(local_money.rail_status(self.owner, self.identity, method)[0], 'live')
+            self.user.country = 've'
+            self.assertEqual(local_money.rail_status(self.owner, self.identity, method)[:2],
+                             ('unavailable', 'infinia_region_not_supported'))
+            with self.assertRaises(PaymentAccountError) as refused:
+                local_money.require_rail(self.owner, self.identity, method)
+            with self.assertRaises(PaymentAccountError):
+                local_money.require_region(self.owner)
+        message = str(refused.exception)
+        self.assertEqual(message, 'Por ahora este servicio no está disponible en tu país.')
+        self.assertNotIn('enezuel', message)
+
+    @override_settings(INFINIA_UNSUPPORTED_REGIONS='VE')
+    def test_refused_before_identity_is_asked_and_never_masks_a_switched_off_rail(self):
+        method = local_money.METHODS['mx_clabe']
+        self.user.country = 'VE'
+        # Nobody verifies their identity only to be turned away.
+        with mock.patch.object(local_money, 'method_status', return_value=('needs_verification', 'identity_required')):
+            self.assertEqual(local_money.rail_status(self.owner, None, method)[1], 'infinia_region_not_supported')
+        with mock.patch.object(local_money, 'method_status', return_value=('unavailable', 'not_enabled')):
+            self.assertEqual(local_money.rail_status(self.owner, self.identity, method)[1], 'not_enabled')
+
+    @override_settings(INFINIA_UNSUPPORTED_REGIONS='')
+    def test_no_unsupported_region_configured_refuses_nobody(self):
+        self.user.country = 'VE'
+        with self._live():
+            self.assertEqual(local_money.rail_status(self.owner, self.identity, local_money.METHODS['co_breb'])[0], 'live')
+            local_money.require_region(self.owner)
+
+    @override_settings(INFINIA_UNSUPPORTED_REGIONS='VE')
+    def test_legacy_phone_country_counts_when_the_country_is_not_set(self):
+        self.user.country = None
+        self.user.phone_country = 'VE'
+        self.assertTrue(local_money.region_unsupported(self.owner))
+        self.user.country = 'CO'             # where they live wins over the old phone country
+        self.assertFalse(local_money.region_unsupported(self.owner))
+
+    @override_settings(INFINIA_UNSUPPORTED_REGIONS='VE', INFINIA_PAYMENT_ACCOUNTS_ENABLED=True)
+    def test_generic_endpoints_refuse_the_way_out_and_keep_the_way_home(self):
+        from payment_accounts import services
+        self.user.country = 'VE'
+        self.owner.bsc_address = '0x' + 'a' * 40
+        local, crypto = self.pair()
+        refused = 'Por ahora este servicio no está disponible en tu país.'
+        third_party = SimpleNamespace(kind='bank_account', details={'account': '1'}, confio_account_id=self.owner.pk,
+                                      provider='infinia', asset='COP')
+        with self.assertRaisesMessage(PaymentAccountError, refused):
+            services.create_and_submit_payout(confio_account=self.owner, source_account=local,
+                                              destination=third_party, amount=Decimal('1'))
+        other_wallet = SimpleNamespace(kind='crypto_wallet', details={'address': '0x' + 'b' * 40},
+                                       confio_account_id=self.owner.pk, provider='infinia', asset='USDC_POL')
+        with self.assertRaisesMessage(PaymentAccountError, refused):
+            services.create_and_submit_payout(confio_account=self.owner, source_account=crypto,
+                                              destination=other_wallet, amount=Decimal('1'))
+        with self.assertRaisesMessage(PaymentAccountError, refused):
+            services.create_and_submit_transfer(confio_account=self.owner, source_account=crypto,
+                                                destination_account=local, amount=Decimal('1'))
+        with self.assertRaisesMessage(PaymentAccountError, refused):
+            services.provision_payment_account(confio_account=self.owner, provider='infinia', identity=self.identity,
+                country='COL', asset='COP', ownership_structure='provider_named', compliance_consent=True)
+        # Home: the person's own wallet, and local -> dollar transit, get past the region guard.
+        own_wallet = SimpleNamespace(kind='crypto_wallet', details={'address': self.owner.bsc_address.upper().replace('0X', '0x')},
+                                     confio_account_id=self.owner.pk + 1, provider='infinia', asset='USDC_POL')
+        with self.assertRaisesMessage(PaymentAccountError, 'Destination does not belong'):
+            services.create_and_submit_payout(confio_account=self.owner, source_account=crypto,
+                                              destination=own_wallet, amount=Decimal('1'))
+        with mock.patch.object(services, 'enforce_and_record', side_effect=PaymentAccountError('past the guard')):
+            with self.assertRaisesMessage(PaymentAccountError, 'past the guard'):
+                services.create_and_submit_transfer(confio_account=self.owner, source_account=local,
+                                                    destination_account=crypto, amount=Decimal('1'))
+
+    def test_generic_eligibility_refusal_is_reworded_too(self):
+        from payment_accounts.schema import _public_error
+        from payment_accounts.eligibility import EligibilityDenied
+        denied = EligibilityDenied(SimpleNamespace(decision='deny', reason_code='infinia_nationality_not_supported',
+                                                   message='Infinia does not currently support Venezuelan nationals.'))
+        self.assertEqual(_public_error(denied), 'Por ahora este servicio no está disponible en tu país.')
+        other = EligibilityDenied(SimpleNamespace(decision='deny', reason_code='cobre_residence_country_not_supported',
+                                                  message=''))
+        self.assertEqual(_public_error(other), 'deny: cobre_residence_country_not_supported')   # another provider's: untouched
+
+    def test_nationality_refusal_is_worded_without_naming_it(self):
+        with mock.patch.object(local_money, 'method_status',
+                               return_value=('unavailable', 'infinia_nationality_not_supported')):
+            with self.assertRaisesMessage(PaymentAccountError, 'Por ahora este servicio no está disponible en tu país.'):
+                local_money.require_rail(self.owner, self.identity, local_money.METHODS['co_breb'])
+
     def test_rails_are_unavailable_until_both_flags_are_on(self):
         rows = local_money.methods(self.owner, self.identity, 'send')
         self.assertEqual({row['method'].id for row in rows}, {'br_pix', 'br_qr', 'co_breb', 'co_qr', 'mx_clabe', 'ar_cvu', 'ar_qr'})

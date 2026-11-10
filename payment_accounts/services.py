@@ -465,6 +465,11 @@ def provision_payment_account(
     if provider not in PROVIDER_ACCOUNT_SHAPES:
         raise PaymentAccountError('Unsupported provider')
     _require_provider_enabled(provider)
+    if provider == 'infinia':
+        # First of all: before any check whose refusal would say why (the
+        # eligibility policy names its reason) or ask the person for more.
+        from .local_money import require_region
+        require_region(confio_account)
     expected_ownership, supported_pairs = PROVIDER_ACCOUNT_SHAPES[provider]
     if ownership_structure != expected_ownership:
         raise PaymentAccountError('Provider ownership structure mismatch')
@@ -907,6 +912,13 @@ def create_and_submit_payout(
     *, confio_account, source_account, destination, amount, client_request_id=None
 ):
     _require_provider_enabled(source_account.provider)
+    if source_account.provider == 'infinia':
+        # Money coming home to the person's own wallet is never refused.
+        own = str(getattr(confio_account, 'bsc_address', '') or '').strip().lower()
+        target = str((destination.details or {}).get('address') or '').strip().lower()
+        if not (destination.kind == 'crypto_wallet' and own and target == own):
+            from .local_money import require_region
+            require_region(confio_account)
     if destination.confio_account_id != confio_account.id:
         raise PaymentAccountError('Destination does not belong to the active Confío account')
     if destination.provider != source_account.provider:
@@ -992,6 +1004,11 @@ def create_and_submit_transfer(
         raise PaymentAccountError('Source and destination accounts must be different')
     if source_account.provider != destination_account.provider:
         raise PaymentAccountError('Transfers cannot cross provider boundaries')
+    if source_account.provider == 'infinia' and destination_account.country != 'XXX':
+        # Toward a local (fiat) account is the way out; toward the dollar
+        # transit account is money on its way home, which stays open.
+        from .local_money import require_region
+        require_region(confio_account)
     if source_account.status != 'active' or destination_account.status != 'active':
         raise PaymentAccountError('Both financial accounts must be active')
     if (
