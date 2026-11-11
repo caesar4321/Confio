@@ -174,10 +174,16 @@ def quote(amount: Decimal) -> dict:
         raise VePagoMovilError(UNAVAILABLE)
     try:
         rate = client.rate('USD', 'VES')
-        reference = client.reference_rate()
     except PagoAsapError as exc:
         logger.exception('Pago ASAP quote failed')
         raise VePagoMovilError(GENERIC_ERROR) from exc
+    # The market reference only splits the cost into a fee line; the payout is
+    # priced from `rate` alone, so a send never waits on it.
+    try:
+        reference = client.reference_rate()
+    except PagoAsapError:
+        logger.warning('Pago ASAP reference rate unavailable; quoting without the processor fee line', exc_info=True)
+        reference = Decimal('0')
     if rate <= 0:
         raise VePagoMovilError(GENERIC_ERROR)
     # The bridge's own estimate (no deposit address is made for a quote).

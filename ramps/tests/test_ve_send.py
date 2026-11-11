@@ -528,6 +528,34 @@ class NeutralLayerTests(TestCase):
                 ve_pagomovil.send_adapter()
 
 
+class PagoAsapQuoteTests(TestCase):
+    def _quote(self, client):
+        relay = mock.Mock()
+        relay.quote.return_value = {'details': {'currencyOut': {'amount': '4900000'}}}
+        with mock.patch.object(pagoasap_send, '_client', return_value=client), \
+                mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
+                mock.patch('payment_accounts.relay.RelayClient', return_value=relay):
+            return pagoasap_send.quote(Decimal('5'))
+
+    def test_quote_survives_a_missing_market_reference(self):
+        from ramps.pagoasap_client import PagoAsapError
+        with_reference = self._quote(pagoasap_client())
+        client = pagoasap_client()
+        client.reference_rate.side_effect = PagoAsapError('Not found', status=404)
+        without = self._quote(client)
+        # Same bolívares either way: the reference only fills the fee line.
+        self.assertEqual(without['estimated_ves'], with_reference['estimated_ves'])
+        self.assertEqual(without['rate'], with_reference['rate'])
+        self.assertEqual(Decimal(without['processor_fee_usd']), Decimal('0'))
+
+    def test_quote_still_fails_without_a_rate(self):
+        from ramps.pagoasap_client import PagoAsapError
+        client = pagoasap_client()
+        client.rate.side_effect = PagoAsapError('down', status=503)
+        with self.assertRaises(ve_pagomovil.VePagoMovilError):
+            self._quote(client)
+
+
 class NeutralSchemaTests(TestCase):
     def test_quote_refusals_are_answers_not_crashes(self):
         from ramps import ve_pagomovil_schema as schema
