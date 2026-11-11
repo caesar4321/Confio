@@ -978,6 +978,47 @@ class PromisedCheckRetryTests(TestCase):
         self.assertFalse(_promised_unchecked_portfolio(belt, promised))
 
 
+class BoliviaWithdrawPromptTests(TestCase):
+    COMMON = dict(first_name='Ana', account_label='Personal', country='BO', screen='', local_now='now',
+                  destinations=['home'])
+
+    def test_note_follows_the_build(self):
+        off = build_system_prompt(**self.COMMON)
+        self.assertIn('En Bolivia hoy no se puede retirar a bolivianos', off)
+        live = build_system_prompt(bo_withdraw='live', **self.COMMON)
+        self.assertIn('Transferencia bancaria', live)
+        self.assertNotIn('no se puede retirar a bolivianos', live)
+        self.assertIn('Pagar QR locales todavía no se puede', live)
+        business = build_system_prompt(bo_withdraw='business', **self.COMMON)
+        self.assertIn('solo desde una cuenta personal', business)
+        self.assertNotIn('no se puede retirar a bolivianos', business)
+        update = build_system_prompt(bo_withdraw='update', **self.COMMON)
+        self.assertIn('actualice Confío', update)
+        self.assertNotIn('no se puede retirar a bolivianos', update)
+
+    def test_state_per_viewer(self):
+        from security.models import AppVersionPolicy
+        from .engine import _bo_withdraw
+        def viewer(version, account_type='personal', is_employee=False):
+            return SimpleNamespace(account_type=account_type, is_employee=is_employee,
+                                   request_meta={'HTTP_X_CONFIO_VERSION': version, 'HTTP_X_CONFIO_PLATFORM': 'android'})
+        with override_settings(KOYWE_BO_OFF_RAMP_MIN_APP_VERSION='5.3.7'):
+            self.assertEqual(_bo_withdraw(viewer('5.3.7'), 'BO'), 'live')
+            # No store build at the floor yet: never "update", the cautious note.
+            self.assertIsNone(_bo_withdraw(viewer('5.3.6'), 'BO'))
+            self.assertIsNone(_bo_withdraw(viewer('5.3.6', 'business'), 'BO'))
+            AppVersionPolicy.objects.update_or_create(platform='android', defaults={'latest_version': '5.3.6'})
+            self.assertIsNone(_bo_withdraw(viewer('5.3.6'), 'BO'))
+            AppVersionPolicy.objects.update_or_create(platform='android', defaults={'latest_version': '5.3.7'})
+            self.assertEqual(_bo_withdraw(viewer('5.3.6'), 'BO'), 'update')
+            self.assertEqual(_bo_withdraw(viewer('5.3.6', 'business'), 'BO'), 'business')
+            self.assertIsNone(_bo_withdraw(viewer('5.3.7'), 'PE'))
+            self.assertEqual(_bo_withdraw(viewer('5.3.7', 'business'), 'BO'), 'business')
+            self.assertEqual(_bo_withdraw(viewer('5.3.7', 'business', is_employee=True), 'BO'), 'business')
+        with override_settings(KOYWE_BO_OFF_RAMP_MIN_APP_VERSION=''):
+            self.assertIsNone(_bo_withdraw(viewer('9.9.9'), 'BO'))
+
+
 class IdentityInPromptTests(TestCase):
     def test_unverified_people_are_told_to_verify_before_topping_up(self):
         from .prompts import build_system_prompt

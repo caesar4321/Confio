@@ -270,7 +270,7 @@ def _iso2(method_id) -> str:
 
 # ------------------------------------------------------------------ what can be added
 
-def methods(account, identity) -> list[dict]:
+def methods(account, identity, request_meta=None) -> list[dict]:
     """Every account type the person can add, by country, provider-neutral.
     `allows_third_party` comes from the rail, so a rail that starts accepting
     someone else's account changes here, not in the app."""
@@ -290,8 +290,14 @@ def methods(account, identity) -> list[dict]:
             'subtitle': method.subtitle, 'allows_third_party': method.id in THIRD_PARTY_RAILS,
             'status': row['status'], 'reason': row['reason'], 'payment_method_id': None,
         })
+    from ramps.koywe import off_ramp_offered
+
     for method in RampPaymentMethod.objects.filter(is_active=True, supports_off_ramp=True).order_by(
             'country_code', 'display_order', 'display_name'):
+        # A withdrawal-only method this build may not use (Bolivia before its
+        # app floor) would open a form that cannot save it.
+        if not method.supports_on_ramp and not off_ramp_offered(method.country_code, request_meta):
+            continue
         rows.append({
             'id': f'{BANK_INFO}:{method.pk}', 'kind': BANK_INFO, 'country': method.country_code.upper(),
             'title': method.display_name, 'subtitle': 'Para tus retiros',

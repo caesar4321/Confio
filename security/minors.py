@@ -18,7 +18,7 @@ Policy ("Confío Minimum Age and Minors Policy", section 5, 2026-11-03):
   lift up to a day late, never early.
 - Refused at the moment of the action, server-side: fiat ramps (Koywe,
   Transak, Guardarian), Cobre and Infinia local accounts and payments, VEXPay
-  Pago Móvil, Bolivia QR (Mesa de Pagos, Stereum), Confío Dollar+ and stock
+  Pago Móvil, Bolivia QR (Mesa de Pagos), Confío Dollar+ and stock
   purchases, Futuros opens and the $CONFIO presale. Holding, Confío-to-Confío
   sends, QR payments, payroll receipts, USDT BEP-20, Emergency Exit and every
   EXIT (redeeming Dollar+, selling stocks, closing futures) stay open.

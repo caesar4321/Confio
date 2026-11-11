@@ -28,11 +28,9 @@ PUBLIC_NAME = 'QR Bolivia'
 # Provider name -> adapter module. Never shown to users (partners are
 # confidential and can change without the user noticing).
 RECEIVE_ADAPTERS = {
-    'stereum': 'ramps.bolivia_qr_stereum',
     'mesadepagos': 'ramps.bolivia_qr_mesadepagos',
 }
 SEND_ADAPTERS = {
-    'stereum': 'ramps.bolivia_qr_stereum',
     'mesadepagos': 'ramps.bolivia_qr_mesadepagos',
 }
 UNAVAILABLE = {

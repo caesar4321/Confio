@@ -95,7 +95,7 @@ class GateTests(SimpleTestCase):
 
     def test_provider_names_never_reach_users(self):
         from ramps.ve_pagomovil import public_provider_name
-        for provider in ('stereum', 'mesadepagos'):
+        for provider in ('mesadepagos',):
             ramp = RampTransaction(provider=provider, country_code='BO', direction='on_ramp')
             self.assertEqual(public_provider_name(ramp), 'QR Bolivia')
 
@@ -352,26 +352,3 @@ class MesaDePagosTests(SimpleTestCase):
             client.find.return_value = {'status': status, 'transactionId': 't1', 'amountFiat': '100'}
             with mock.patch.object(mdp, '_client', return_value=client):
                 self.assertEqual(mdp.poll(ramp).kind, kind)
-
-
-class StereumTests(SimpleTestCase):
-    def test_transfer_outcomes(self):
-        from ramps import bolivia_qr_stereum as st
-        self.assertEqual(st._transfer_outcome({'status': 'VERIFICADO', 'id': 'x'}).kind, 'paid')
-        self.assertEqual(st._transfer_outcome({'status': 'PENDIENTE', 'id': 'x'}).kind, 'pending')
-        self.assertEqual(st._transfer_outcome({'status': 'ERROR', 'id': 'x'}).kind, 'failed')
-        self.assertEqual(st._transfer_outcome({}).kind, 'unknown')
-
-    @override_settings(STEREUM_ENV='production', STEREUM_API_KEY='k')
-    def test_production_refuses_test_network_resources(self):
-        from ramps.stereum_client import StereumError, StereumLiveClient
-        client = StereumLiveClient()
-        with self.assertRaises(StereumError):
-            client.check({'on_main_net': 'false'})
-        self.assertEqual(client.check({'on_main_net': True}), {'on_main_net': True})
-
-    @override_settings(STEREUM_ENV='production')
-    def test_the_test_console_never_reaches_production(self):
-        from ramps.stereum_client import StereumClient, StereumError
-        with self.assertRaises(StereumError):
-            StereumClient()

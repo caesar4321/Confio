@@ -97,7 +97,7 @@ class AgendaQuery(graphene.ObjectType):
                 identity = _verified_identity(owner)
             except PaymentAccountError:
                 identity = None
-            return [AgendaMethodType(**row) for row in agenda.methods(owner, identity)]
+            return [AgendaMethodType(**row) for row in agenda.methods(owner, identity, getattr(info.context, 'META', None))]
         except (AgendaError, PaymentAccountError) as exc:
             raise GraphQLError(_error(exc))
 

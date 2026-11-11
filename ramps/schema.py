@@ -45,6 +45,8 @@ from ramps.koywe import (
     UNPAID_ORDER_MESSAGE,
     quote_ramp,
     sync_country_payment_methods,
+    off_ramp_offered,
+    BOLIVIA_OFF_RAMP_UNAVAILABLE,
 )
 from security.geo import country_of
 
@@ -1241,8 +1243,8 @@ class CreateRampOrder(graphene.Mutation):
         if wallet_upgrade_blocker:
             return RampOrderType(success=False, error=wallet_upgrade_blocker)
 
-        if normalized_direction == 'OFF_RAMP' and resolved_country_code == 'BO':
-            return RampOrderType(success=False, error='Retiro en BOB no está disponible por ahora. En Bolivia solo está habilitada la recarga.')
+        if normalized_direction == 'OFF_RAMP' and not off_ramp_offered(resolved_country_code, getattr(info.context, 'META', None)):
+            return RampOrderType(success=False, error=BOLIVIA_OFF_RAMP_UNAVAILABLE)
 
         bank_info = None
         if normalized_direction == 'OFF_RAMP':
@@ -1738,8 +1740,8 @@ class CreateMockRampOrder(graphene.Mutation):
         if wallet_upgrade_blocker:
             return RampOrderType(success=False, error=wallet_upgrade_blocker)
 
-        if normalized_direction == "OFF_RAMP" and resolved_country_code == "BO":
-            return RampOrderType(success=False, error='Retiro en BOB no está disponible por ahora. En Bolivia solo está habilitada la recarga.')
+        if normalized_direction == "OFF_RAMP" and not off_ramp_offered(resolved_country_code, getattr(info.context, 'META', None)):
+            return RampOrderType(success=False, error=BOLIVIA_OFF_RAMP_UNAVAILABLE)
 
         config = get_country_ramp_config(resolved_country_code)
         if not config:
@@ -2028,7 +2030,7 @@ class Query(graphene.ObjectType):
             )
             if method["supports_on_ramp"] and not on_ramp_paused(resolved_country_code):
                 on_ramp_methods.append(payload)
-            if method["supports_off_ramp"]:
+            if method["supports_off_ramp"] and off_ramp_offered(resolved_country_code, getattr(info.context, 'META', None)):
                 off_ramp_methods.append(payload)
 
         return RampAvailabilityType(
@@ -2059,6 +2061,8 @@ class Query(graphene.ObjectType):
             queryset = queryset.filter(supports_on_ramp=True)
         elif normalized_direction == 'OFF_RAMP':
             queryset = queryset.filter(supports_off_ramp=True)
+        if not off_ramp_offered(resolved_country_code, getattr(info.context, 'META', None)):
+            queryset = queryset.exclude(supports_off_ramp=True, supports_on_ramp=False)
         return queryset.select_related('country', 'bank', 'legacy_payment_method')
 
     def resolve_ramp_quote(self, info, direction, amount, country_code=None, fiat_currency=None, payment_method_code=None, destination=None):

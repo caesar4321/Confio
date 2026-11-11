@@ -69,8 +69,11 @@ COUNTRY_METHODS = {
         "network_fee_fiat": Decimal("0.13"),
         "on_ramp_min_amount": Decimal("350"),
         "on_ramp_max_amount": Decimal("56000"),
-        "off_ramp_min_amount": Decimal("0"),
-        "off_ramp_max_amount": Decimal("0"),
+        # Refreshed dynamically from Koywe quotes. These static values are
+        # only the fallback when the provider is temporarily unavailable:
+        # dollars for Koywe's 350-56,000 BOB band (2026-11-11 quote, 11.38 BOB/USD).
+        "off_ramp_min_amount": Decimal("30.75"),
+        "off_ramp_max_amount": Decimal("4919.98"),
         "methods": [
             {
                 "code": "QRI-BO",
@@ -83,6 +86,18 @@ COUNTRY_METHODS = {
                 "requires_email": False,
                 "supports_on_ramp": True,
                 "supports_off_ramp": False,
+            },
+            {
+                "code": "WIREBO",
+                "display_name": "Transferencia bancaria",
+                "provider_type": "bank",
+                "icon": "repeat",
+                "description": "Retiro en bolivianos a una cuenta bancaria a tu nombre.",
+                "requires_account_number": True,
+                "requires_phone": False,
+                "requires_email": False,
+                "supports_on_ramp": False,
+                "supports_off_ramp": True,
             },
         ],
     },
@@ -343,6 +358,28 @@ def on_ramp_paused(country_code: str | None) -> bool:
     if paused is None:
         paused = config('KOYWE_ON_RAMP_PAUSED_COUNTRIES', default='CO', cast=Csv())
     return bool(country_code) and country_code.upper() in {str(c).strip().upper() for c in paused}
+
+
+BOLIVIA_OFF_RAMP_UNAVAILABLE = (
+    'Retiro en BOB no está disponible por ahora. En Bolivia solo está habilitada la recarga.'
+)
+
+
+def off_ramp_offered(country_code: str | None, meta) -> bool:
+    """Whether this build may withdraw in this country.
+
+    Bolivia's bank withdrawal (WIREBO) needs a build that can save a Bolivian
+    payout account; older builds keep their "only Recarga" screen. An unset
+    KOYWE_BO_OFF_RAMP_MIN_APP_VERSION offers it to nobody.
+    """
+    if (country_code or '').upper() != 'BO':
+        return True
+    from django.conf import settings
+    from ramps.ve_pagomovil import _version
+
+    floor = _version(getattr(settings, 'KOYWE_BO_OFF_RAMP_MIN_APP_VERSION', ''))
+    version = _version((meta or {}).get('HTTP_X_CONFIO_VERSION', ''))
+    return floor is not None and version is not None and version >= floor
 
 
 ON_RAMP_REJECTION_LIMIT = 5
@@ -645,6 +682,17 @@ def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
                 "placeholder": "Nombre de la institución",
                 "required": False,
                 "helpText": "Guarda la institución receptora para transferencias SPEI.",
+            },
+        ]
+    elif country_code == "BO" and code == "WIREBO":
+        schema["providerFields"] = [
+            {
+                "key": "bankName",
+                "label": "Banco receptor",
+                "placeholder": "Selecciona el banco",
+                "required": True,
+                "picker": "bank",
+                "helpText": "La cuenta debe pertenecer al mismo titular verificado en Confío.",
             },
         ]
     elif country_code == "PE" and code in {"WIREPE", "RECAUDO-PE"}:

@@ -315,13 +315,6 @@ class RailRefusalTests(MinorFixture):
                 self.assertEqual(str(caught.exception), MINOR_MESSAGE)
                 self.assertIsNone(caught.exception.next_step)
 
-    def test_stereum_refused(self):
-        from ramps.stereum_client import StereumError
-        from ramps.stereum_schema import adult_user
-        with self.assertRaisesMessage(StereumError, MINOR_MESSAGE):
-            adult_user(self.minor)
-        self.assertIs(adult_user(self.adult), self.adult)
-
     def test_koywe_order_refused_before_any_provider_work(self):
         from ramps.schema import CreateRampOrder
         info = self._info(self.minor)  # a saved User is authenticated

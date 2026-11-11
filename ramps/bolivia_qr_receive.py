@@ -22,7 +22,7 @@ completed or in review.
 Adapter contract (module attributes/functions):
   PROVIDER
   ROUTE_AT_CREATION: the Relay deposit address is the QR's destination
-    (Mesa de pagos); else it is made once the payment is confirmed (Stereum)
+    (Mesa de pagos); else it is made once the payment is confirmed
   quote_receive(bob) -> dict (usdc_units, usd_estimate, rate, fee_bob, ...)
   create_receive(ramp, *, bob, usdc_units, deposit_address|None, pay_by) -> dict
     (qr_text and/or qr_image, expires_at ISO, provider_id). `pay_by` is when
@@ -284,7 +284,7 @@ def _check_payment(ramp: RampTransaction) -> RampTransaction:
     if state == 'paid':
         route = section.get('route')
         if not route:
-            # Paid first, routed now (Stereum): the provider sends to a
+            # Paid first, routed now: the provider sends to a
             # Relay address made for this exact amount.
             try:
                 route = _route(ramp.actor_address, int(section['usdc_units']))

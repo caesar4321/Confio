@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from payment_accounts import agenda
 from payment_accounts.agenda import AgendaError
@@ -203,3 +203,19 @@ class AgendaMethodsTests(TestCase):
                 self.assertTrue(rows[rail]['allows_third_party'])
                 self.assertEqual(rows[rail]['kind'], 'local')
         self.assertFalse(any(row['id'].endswith('_qr') for row in rows.values()))
+
+    @override_settings(KOYWE_BO_OFF_RAMP_MIN_APP_VERSION='5.3.7')
+    def test_bolivian_bank_withdrawal_only_for_builds_at_the_floor(self):
+        from ramps.models import RampPaymentMethod
+        user = User.objects.create_user(username='agenda-bo', firebase_uid='agenda-bo')
+        owner = Account.objects.create(user=user, account_type='personal')
+        RampPaymentMethod.objects.create(code='WIREBO', country_code='BO', display_name='Transferencia bancaria',
+                                         supports_off_ramp=True)
+
+        def has_wirebo(meta):
+            return any(row['kind'] == 'bank_info' and row['country'] == 'BO'
+                       for row in agenda.methods(owner, None, meta))
+
+        self.assertTrue(has_wirebo({'HTTP_X_CONFIO_VERSION': '5.3.7'}))
+        self.assertFalse(has_wirebo({'HTTP_X_CONFIO_VERSION': '5.3.6'}))
+        self.assertFalse(has_wirebo(None))

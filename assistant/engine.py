@@ -1456,6 +1456,38 @@ def _ve_rail(viewer, country, direction):
         return None
 
 
+def _bo_withdraw(viewer, country):
+    """'live' (Bolivian bank withdrawal on this build), 'update' (on, but
+    this build predates it), 'business' (on, but Koywe serves personal
+    accounts only: ramps/schema.py CreateRampOrder), or None (off, or not
+    Bolivia)."""
+    if (country or '').upper() != 'BO':
+        return None
+    try:
+        from django.conf import settings
+        from ramps.koywe import off_ramp_offered
+        if not str(getattr(settings, 'KOYWE_BO_OFF_RAMP_MIN_APP_VERSION', '') or '').strip():
+            return None
+        on_this_build = off_ramp_offered('BO', viewer.request_meta)
+        if not on_this_build:
+            # Nothing to promise until this platform's store has a build at the
+            # floor (AppVersionPolicy.latest_version is set when a release goes out).
+            from security.face_client import _version
+            from security.models import AppVersionPolicy
+            platform = str((viewer.request_meta or {}).get('HTTP_X_CONFIO_PLATFORM', '') or '').lower()
+            policy = AppVersionPolicy.objects.filter(platform=platform).first()
+            latest = _version(policy.latest_version) if policy else None
+            floor = _version(settings.KOYWE_BO_OFF_RAMP_MIN_APP_VERSION)
+            if latest is None or floor is None or latest < floor:
+                return None
+        if viewer.account_type != 'personal':
+            return 'business'
+        return 'live' if on_this_build else 'update'
+    except Exception:  # noqa: BLE001 - unknown: the cautious "not available" note
+        logger.warning('Confio Assistant: Bolivia withdrawal state unavailable', exc_info=True)
+        return None
+
+
 def _ve_topup(viewer, country):
     return _ve_rail(viewer, country, 'topup')
 
@@ -1596,6 +1628,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
+        bo_withdraw=_bo_withdraw(viewer, country),
     )
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE

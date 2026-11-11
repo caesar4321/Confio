@@ -135,7 +135,7 @@ def _withdrawal_sources(providers=LEGACY_PROVIDERS):
 # Rails the admin always lists, even before their first operation.
 RAIL_PROVIDERS = {
     'koywe': 'Koywe', 'guardarian': 'Guardarian', 'transak': 'Transak', 'infinia': 'Infinia', 'cobre': 'Cobre',
-    'vexpay': 'VEXPay', 'pagoasap': 'Pago ASAP', 'mesadepagos': 'Mesa de pagos', 'stereum': 'Stereum',
+    'vexpay': 'VEXPay', 'pagoasap': 'Pago ASAP', 'mesadepagos': 'Mesa de pagos',
 }
 # Same person, an amount within the fee and rounding, close in time: how a
 # provider row with no conversion link finds the conversion it became.

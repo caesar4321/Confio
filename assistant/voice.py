@@ -22,7 +22,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from . import billing, conf
-from .engine import (AssistantUnavailable, Toolbelt, TurnResult, _identity_status, _local_account_topup, _ve_send, _ve_topup,
+from .engine import (AssistantUnavailable, Toolbelt, TurnResult, _bo_withdraw, _identity_status, _local_account_topup, _ve_send, _ve_topup,
                      allowed_destinations)
 from .models import TurnModality, VoiceSession
 from .prompts import build_system_prompt, dex_offered, transcribe_hint
@@ -110,6 +110,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
+        bo_withdraw=_bo_withdraw(viewer, country),
     ) + VOICE_NOTE
     model = conf.get('CONFIO_ASSISTANT_REALTIME_MODEL')
     # The secret only has to live until the call connects.

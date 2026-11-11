@@ -29,12 +29,13 @@ import { CountryFlag } from './CountryFlag';
 import { InlineBanner } from './common/InlineBanner';
 
 // Colors matching app design
-const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BR', 'CL', 'CO', 'MX', 'PE'];
+const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE'];
 const FIRST_NAME_ONLY_METHOD_CODES = new Set(['QRI-AR', 'QRI', 'SIP-QR', 'QRI-PE', 'LIGO']);
 // Provider fields that describe the person, not the account, render with the holder.
 const HOLDER_FIELD_KEYS = new Set(['beneficiaryRut', 'firstName', 'lastName', 'documentType', 'documentNumber']);
 const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'WIREAR',
+  'WIREBO',
   'SULPAYMENTS',
   'WIRECL',
   'NEQUI',

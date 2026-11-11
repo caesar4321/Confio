@@ -358,7 +358,7 @@ def _usable_text(text, fallback):
 
 
 def _generate(viewer, step, *, conversation, first_name, account_label, country):
-    from .engine import (_identity_status, _local_account_topup, _openai_post, _output_text, TurnResult, _ve_send, _ve_topup,
+    from .engine import (_bo_withdraw, _identity_status, _local_account_topup, _openai_post, _output_text, TurnResult, _ve_send, _ve_topup,
                          allowed_destinations)
     from .models import AssistantTurn
     from .prompts import GUIDE_OPENING_NOTE, build_system_prompt, dex_offered
@@ -371,6 +371,7 @@ def _generate(viewer, step, *, conversation, first_name, account_label, country)
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
+        bo_withdraw=_bo_withdraw(viewer, country),
     ) + GUIDE_OPENING_NOTE
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     data = _openai_post({
@@ -492,11 +493,12 @@ _PAY_QR = (TrailStop('Home', 'Toca Pagar.', 'tab_pay'), TrailStop('Scan', 'Apunt
 _SHARE = (_TO_RECEIVE, TrailStop('Receive', 'Toca aquí para compartir tu usuario.', 'username_share'))
 
 
-def _can_withdraw(country):
-    from ramps.koywe import get_country_ramp_config
+def _can_withdraw(country, request_meta=None):
+    from ramps.koywe import get_country_ramp_config, off_ramp_offered
 
     config = get_country_ramp_config(country) or {}
-    return any(method.get('supports_off_ramp') for method in config.get('methods', []))
+    return (any(method.get('supports_off_ramp') for method in config.get('methods', []))
+            and off_ramp_offered(country, request_meta))
 
 
 def walks_on_this_build(request_meta):
@@ -543,7 +545,7 @@ def walk_trail(viewer, key, request_meta):
     if key == 'send':
         return STEPS['send'].chips[0].trail
     if key == 'withdraw':
-        return _walk(*_WITHDRAW) if _can_withdraw(country) else None
+        return _walk(*_WITHDRAW) if _can_withdraw(country, request_meta) else None
     if key == 'pay_qr':
         return _walk(*_PAY_QR)
     if key == 'share_number':

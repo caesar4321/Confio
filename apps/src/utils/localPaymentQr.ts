@@ -1,7 +1,7 @@
 /** Routing hint only. Server validation and eligibility remain authoritative. */
 export function localPaymentQrRoute(raw: string): {methodId: string; country: string} | null {
   const value = raw.trim();
-  // Stereum documents encrypted Bolivia bank QR strings as ciphertext|hex.
+  // Bolivian bank QR strings arrive encrypted as ciphertext|hex.
   // This is only a routing hint; the server decoder establishes validity.
   if (value.length <= 32768 && /^[A-Za-z0-9+/_=-]{32,}\|[a-fA-F0-9]{16}$/.test(value)) {
     return {methodId: 'bo_qr', country: 'BO'};
