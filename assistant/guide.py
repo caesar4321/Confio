@@ -22,7 +22,7 @@ from django.utils import timezone
 from security.geo import country_of
 
 from . import conf
-from .rails import topup_entry, topup_route
+from .rails import local_account_topup, topup_entry, topup_route
 from .suggestions import GUIDE_ANSWERS, GUIDE_ANSWERS_SHORT, PROBE_ID, _didit_stage, _state, record_probe_answer
 
 logger = logging.getLogger(__name__)
@@ -216,7 +216,12 @@ def _unfunded_key(viewer, state, answer):
     route = topup_route(state.country)
     if route == 'international_soon' or route == 'international':
         return route
-    if route == 'usdt' or on_ramp_paused(state.country) or on_ramp_rejection_locked(viewer.user):
+    # A paused Koywe top-up is replaced by the person's own local account
+    # where they have one to open (Colombia: Bre-B); Koywe's own lock on
+    # rejected orders does not apply to it.
+    local_account = local_account_topup(state.country, viewer)
+    if route == 'usdt' or (not local_account and (
+            on_ramp_paused(state.country) or on_ramp_rejection_locked(viewer.user))):
         return 'usdt'
     if state.country == 'VE':
         topup = _ve_topup(viewer, state.country)
@@ -226,7 +231,9 @@ def _unfunded_key(viewer, state, answer):
             return 'top_up_update'
     recent = timezone.now() - timedelta(days=OPEN_ORDER_DAYS)
     orders = RampTransaction.objects.filter(actor_user=viewer.user, direction='on_ramp', created_at__gte=recent)
-    if orders.filter(status='PENDING').exists():
+    # A Koywe order made before the pause cannot be paid now, and its row is
+    # hidden on Recibir: with a local account the person is shown that instead.
+    if not local_account and orders.filter(status='PENDING').exists():
         return 'awaiting_payment'
     if state.topup_in_progress:
         return None  # paid, on its way: nothing to teach
@@ -237,8 +244,9 @@ def _unfunded_key(viewer, state, answer):
         # "pending" also covers a session never finished: that one still has a step.
         latest = personal_documents(viewer.user).order_by('-created_at').first()
         return 'verifying' if _didit_stage(latest) == 'in_review' else 'verify'
-    # Venezuela's top-up takes any verified document, not one from Venezuela.
-    if identity == 'other_country' and state.country == 'VE':
+    # Venezuela's top-up takes any verified document, not one from Venezuela;
+    # so does a local account (its own rail already said this person may open it).
+    if identity == 'other_country' and (state.country == 'VE' or local_account):
         return 'top_up'
     return 'top_up' if identity == 'verified' else 'verify'
 
@@ -350,7 +358,7 @@ def _usable_text(text, fallback):
 
 
 def _generate(viewer, step, *, conversation, first_name, account_label, country):
-    from .engine import (_identity_status, _openai_post, _output_text, TurnResult, _ve_send, _ve_topup,
+    from .engine import (_identity_status, _local_account_topup, _openai_post, _output_text, TurnResult, _ve_send, _ve_topup,
                          allowed_destinations)
     from .models import AssistantTurn
     from .prompts import GUIDE_OPENING_NOTE, build_system_prompt, dex_offered
@@ -362,6 +370,7 @@ def _generate(viewer, step, *, conversation, first_name, account_label, country)
         identity=_identity_status(viewer), ve_topup=_ve_topup(viewer, country),
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
+        local_account_topup=_local_account_topup(viewer, country),
     ) + GUIDE_OPENING_NOTE
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     data = _openai_post({
@@ -422,7 +431,10 @@ def current(viewer, request_meta, **context):
     step = STEPS[key]
     presentation = 'bubble'
     if key in COUNTRY_ENTRY_STEPS:
-        step = _for_country(step, topup_entry(context.get('country'), viewer.user, request_meta))
+        # Only the top-up itself moves to the local account; an order still
+        # waiting for payment is a Koywe order and stays where it was made.
+        step = _for_country(step, topup_entry(context.get('country'), viewer.user, request_meta,
+                                              viewer=viewer if key == 'top_up' else None))
     if key == 'opening':
         state = _state(viewer, request_meta)
         hidden = {job for job in ('invest', 'comprar') if not _ladder_usable(viewer, state, job)}
@@ -439,7 +451,7 @@ def current(viewer, request_meta, **context):
                  presentation=presentation)
 
 
-def steering_note(key, country=None):
+def steering_note(key, country=None, viewer=None, request_meta=None):
     """For a question typed in the card: answer it, then back to this step.
     The key comes from the app, so a promise only reaches where it holds."""
     from .prompts import GUIDE_STEERING_NOTE
@@ -447,7 +459,16 @@ def steering_note(key, country=None):
     step = STEPS.get(key)
     if step is None or (key in ('international_soon', 'international') and topup_route(country) != key):
         return ''
-    return GUIDE_STEERING_NOTE.format(step=step.brief.format(entry='Recargar ahora') if step.brief else step.text)
+    # The entry this person's guide step itself names (Bre-B, Pago Móvil, QR
+    # Bolivia), so the note never contradicts the rails note beside it.
+    entry = 'Recargar ahora'
+    if viewer is not None and key in COUNTRY_ENTRY_STEPS:
+        try:
+            entry = topup_entry(country, viewer.user, request_meta or {},
+                                viewer=viewer if key == 'top_up' else None).name
+        except Exception:  # noqa: BLE001 - the default name, never a broken reply
+            logger.warning('Confio Assistant: guide entry unavailable', exc_info=True)
+    return GUIDE_STEERING_NOTE.format(step=step.brief.format(entry=entry) if step.brief else step.text)
 
 
 # Walks on request: anyone, any time, however far along they are. The model only
@@ -500,18 +521,19 @@ def walk_trail(viewer, key, request_meta):
     if key == 'top_up':
         from .engine import _identity_status, _ve_topup
 
-        if (topup_route(country) != 'local' or on_ramp_paused(country)
-                or on_ramp_rejection_locked(viewer.user)
+        local_account = local_account_topup(country, viewer)
+        if (topup_route(country) != 'local'
+                or (not local_account and (on_ramp_paused(country) or on_ramp_rejection_locked(viewer.user)))
                 or (country == 'VE' and _ve_topup(viewer, country) != 'live')):
             return None
         # Recargar needs a verified identity: three unverified people were walked
         # to a top-up screen they could not use (2026-11-03). Verification first,
         # with the same rule as the guide's own ladder (_unfunded_key).
         identity = _identity_status(viewer)
-        can_top_up = identity == 'verified' or (identity == 'other_country' and country == 'VE')
+        can_top_up = identity == 'verified' or (identity == 'other_country' and (country == 'VE' or local_account))
         if identity is not None and not can_top_up:
             return STEPS['verify'].chips[0].trail
-        step = _for_country(STEPS['top_up'], topup_entry(country, viewer.user, request_meta))
+        step = _for_country(STEPS['top_up'], topup_entry(country, viewer.user, request_meta, viewer=viewer))
         return step.chips[0].trail
     if key == 'usdt':
         return STEPS['usdt'].chips[0].trail

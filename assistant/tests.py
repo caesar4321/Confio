@@ -2671,6 +2671,146 @@ class GuideStepTests(TestCase):
                 patch('assistant.engine._ve_topup', return_value='update'):
             self.assertIsNone(guide.walk_trail(self._viewer(), 'top_up', {}))
 
+    # ---- a paused Koywe top-up hands over to the person's own local account (Colombia: Bre-B)
+
+    def _breb(self, status='live', paused=True, cobre=False):
+        """Colombia with Koywe's top-up paused and the Bre-B rail in `status` for this person."""
+        from contextlib import ExitStack
+        stack = ExitStack()
+        stack.enter_context(patch('ramps.koywe.on_ramp_paused', side_effect=lambda c: paused and (c or '').upper() == 'CO'))
+        stack.enter_context(patch('ramps.koywe.on_ramp_rejection_locked', return_value=False))
+        stack.enter_context(patch('payment_accounts.local_money_schema._identity', return_value=None))
+        stack.enter_context(patch('payment_accounts.local_money.rail_status', return_value=(status, '', None)))
+        stack.enter_context(self.settings(COBRE_PAYMENT_ACCOUNTS_ENABLED=cobre))
+        return stack
+
+    def test_local_account_stands_in_only_where_its_row_is_really_there(self):
+        from .engine import Viewer
+        from .rails import local_account_topup
+        viewer = self._viewer()
+        with self._breb():
+            self.assertEqual(local_account_topup('CO', viewer).pointer, 'co_breb_receive')
+            self.assertEqual(local_account_topup('co', viewer).name, 'Llave Bre-B')
+            self.assertIsNone(local_account_topup('PE', viewer))            # not paused, no entry
+            self.assertIsNone(local_account_topup('CO', None))
+            business = Viewer(user=self.user, account=None, account_type='business', business_id=1,
+                              is_business_owner=True, tz=dt_timezone.utc)
+            self.assertIsNone(local_account_topup('CO', business))
+        with self._breb(status='needs_verification'):
+            with patch('security.identity_status.is_identity_verified', return_value=False):
+                self.assertIsNotNone(local_account_topup('CO', viewer))      # the guide verifies first
+            with patch('security.identity_status.is_identity_verified', return_value=True):
+                self.assertIsNone(local_account_topup('CO', viewer))         # never "verify again"
+        for status in ('unavailable', 'needs_document'):                     # refused, or needs another document
+            with self._breb(status=status):
+                self.assertIsNone(local_account_topup('CO', viewer), status)
+        with self._breb(paused=False):                                       # Koywe is back: Recargar ahora again
+            self.assertIsNone(local_account_topup('CO', viewer))
+        with self._breb(cobre=True):                                         # that row has another id then
+            self.assertIsNone(local_account_topup('CO', viewer))
+        with self._breb(), patch('payment_accounts.local_money.rail_status', side_effect=RuntimeError('db')):
+            self.assertIsNone(local_account_topup('CO', viewer))             # unknown is never a guess
+
+    def _co_key(self, identity='verified'):
+        from . import guide
+        state = SimpleNamespace(personal=True, employee=False, funded=False, country='CO', ondo_eligible=False,
+                                topup_in_progress=False)
+        if not ProbeAnswer.objects.filter(user=self.user).exists():
+            self._answer()
+        with patch.object(guide, '_state', return_value=state), \
+                patch('assistant.engine._identity_status', return_value=identity), \
+                patch('assistant.engine._ve_topup', return_value=None):
+            return guide.current_key(self._viewer(), {})
+
+    def test_colombia_is_walked_to_bre_b_while_koywe_is_paused(self):
+        from . import guide
+        self.user.phone_country = 'CO'
+        with self._breb():
+            self.assertEqual(self._co_key(), 'top_up')
+            self.assertEqual(self._co_key(identity='other_country'), 'top_up')   # any verified document opens it
+            self.assertEqual(self._co_key(identity='unverified'), 'verify')
+            state = SimpleNamespace(personal=True, employee=False, funded=False, country='CO',
+                                    ondo_eligible=False, topup_in_progress=False)
+            with patch.object(guide, '_state', return_value=state), \
+                    patch.object(guide, '_generate', side_effect=RuntimeError('no model in tests')), \
+                    patch('assistant.engine._identity_status', return_value='verified'), \
+                    patch('assistant.engine._ve_topup', return_value=None):
+                trail = guide.walk_trail(self._viewer(), 'top_up', {})
+                shown = guide.current(self._viewer(), {}, country='CO', first_name='Ana')
+            self.assertEqual(shown.key, 'top_up')
+            receive = [stop for stop in trail if stop.route == 'Receive']
+            self.assertEqual([(stop.pointer, stop.text) for stop in receive],
+                             [('co_breb_receive', 'Toca aquí para recargar con tu llave Bre-B.')])
+            self.assertEqual(shown.chips[0].label, 'Sí, ir a Bre-B')
+            self.assertNotIn('recharge_now', [stop.pointer for stop in shown.chips[0].trail])
+
+    def test_colombia_without_a_usable_bre_b_rail_keeps_the_usdt_step(self):
+        from . import guide
+        self.user.phone_country = 'CO'
+        with self._breb(status='unavailable'):
+            self.assertEqual(self._co_key(), 'usdt')
+            state = SimpleNamespace(funded=False, country='CO', ondo_eligible=False)
+            with patch.object(guide, '_state', return_value=state), \
+                    patch('assistant.engine._identity_status', return_value='verified'), \
+                    patch('assistant.engine._ve_topup', return_value=None):
+                self.assertIsNone(guide.walk_trail(self._viewer(), 'top_up', {}))
+
+    def test_an_unpayable_koywe_order_does_not_keep_colombia_at_a_hidden_row(self):
+        from ramps.models import RampTransaction
+        from .rails import topup_entry
+        self.user.phone_country = 'CO'
+        with patch.object(RampTransaction.objects, 'filter') as orders:
+            orders.return_value.filter.return_value.exists.return_value = True     # a PENDING order
+            with self._breb():
+                self.assertEqual(self._co_key(), 'top_up')                         # Bre-B, not the hidden row
+            with self._breb(status='unavailable'):
+                self.assertEqual(self._co_key(), 'usdt')
+            with self._breb(paused=False):
+                self.assertEqual(self._co_key(), 'awaiting_payment')               # Koywe back: the order again
+        with self._breb():
+            # The Bre-B entry is only handed out for the top-up itself (with a viewer).
+            self.assertEqual(topup_entry('CO', self.user, {}).pointer, 'recharge_now')
+            self.assertEqual(topup_entry('CO', self.user, {}, viewer=self._viewer()).pointer, 'co_breb_receive')
+
+    def test_the_card_note_names_the_same_entry_as_the_step(self):
+        from . import guide
+        self.user.phone_country = 'CO'
+        with self._breb():
+            self.assertIn('Llave Bre-B', guide.steering_note('top_up', 'CO', viewer=self._viewer()))
+            self.assertNotIn('Recargar ahora', guide.steering_note('top_up', 'CO', viewer=self._viewer()))
+        with self._breb(status='unavailable'):
+            self.assertIn('Recargar ahora', guide.steering_note('top_up', 'CO', viewer=self._viewer()))
+        self.assertIn('Recargar ahora', guide.steering_note('top_up', 'BO'))
+
+    def test_the_prompt_never_names_another_way_than_the_pencil_points_at(self):
+        from .engine import _local_account_topup
+        from .rails import BOLIVIA_QR_ENTRY, topup_entry
+        self.user.phone_country = 'CO'
+        viewer = self._viewer()
+        with self._breb():
+            self.assertEqual(_local_account_topup(viewer, 'CO'), 'Llave Bre-B')
+            # Someone living in Colombia who picked Bolivia, with QR Bolivia on: the pencil goes to QR Bolivia.
+            with patch('ramps.bolivia_qr.koywe_replaced', return_value={'top_up': True, 'withdraw': False}):
+                self.assertIs(topup_entry('CO', self.user, {}, viewer=viewer), BOLIVIA_QR_ENTRY)
+                self.assertEqual(_local_account_topup(viewer, 'CO'), '')
+            with patch('ramps.bolivia_qr.koywe_replaced', side_effect=RuntimeError('down')):
+                self.assertEqual(_local_account_topup(viewer, 'CO'), '')
+        with self._breb(status='unavailable'):
+            self.assertEqual(_local_account_topup(viewer, 'CO'), '')
+
+    def test_the_prompt_names_the_local_account_instead_of_recargar_ahora(self):
+        from .prompts import build_system_prompt
+        base = dict(first_name='Ana', account_label='personal', country='CO', screen='Home',
+                    local_now='2026-11-10 12:00', destinations=[])
+        with_entry = build_system_prompt(**base, identity='other_country', local_account_topup='Llave Bre-B')
+        self.assertIn('Recibir → Llave Bre-B', with_entry)
+        self.assertIn('No le digas que use «Recargar ahora» ni PSE', with_entry)
+        self.assertIn('prevalece sobre lo que diga el FAQ', with_entry)
+        self.assertNotIn('documento de identidad del país desde donde recarga', with_entry)
+        without = build_system_prompt(**base, identity='other_country')
+        self.assertNotIn('Recibir → Llave Bre-B', without)
+        self.assertIn('documento de identidad del país desde donde recarga', without)
+
     def test_a_requested_walk_leaves_the_guides_own_step_alone(self):
         from . import guide
         from .models import AssistantGuideEvent, AssistantGuideStep

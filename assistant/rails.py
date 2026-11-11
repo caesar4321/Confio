@@ -35,13 +35,57 @@ BOLIVIA_QR_ENTRY = TopupEntry(name='QR Bolivia', pointer='bo_qr_receive', chip='
                               pointer_text='Toca aquí para recargar con QR Bolivia.')
 
 
-def topup_entry(country, user, request_meta):
+# While Koywe's top-up is paused for a country (Recibir hides "Recargar ahora"
+# there), the person's own local account is where a top-up starts. The pointer
+# is that rail's row id on Recibir.
+PAUSED_TOPUP_ENTRIES = {
+    'CO': TopupEntry(name='Llave Bre-B', pointer='co_breb_receive', chip='Sí, ir a Bre-B',
+                     pointer_text='Toca aquí para recargar con tu llave Bre-B.'),
+}
+
+
+def local_account_topup(country, viewer):
+    """The local-account entry that stands in for a paused Koywe top-up, for
+    this person, or None. Only where the row really is on their Recibir: the
+    rail is usable by them (or one identity check away, which the guide asks
+    for first). Any doubt is None, and the guide falls back as before."""
+    entry = PAUSED_TOPUP_ENTRIES.get((country or '').upper())
+    if entry is None or viewer is None or getattr(viewer, 'user', None) is None:
+        return None
+    try:
+        from django.conf import settings
+        from payment_accounts import local_money
+        from payment_accounts.local_money_schema import _identity
+        from ramps.koywe import on_ramp_paused
+        if not on_ramp_paused(country) or viewer.account_type != 'personal' or viewer.is_employee:
+            return None
+        # Cobre's key, when on, replaces this row under another id (local_money_schema).
+        if getattr(settings, 'COBRE_PAYMENT_ACCOUNTS_ENABLED', False):
+            return None
+        method = local_money.METHODS[entry.pointer]
+        status = local_money.rail_status(viewer.account, _identity(viewer.account, required=False), method)[0]
+        if status == 'needs_verification':
+            # One identity check away only for someone the guide will send to
+            # verify first. A person it already counts as verified, whose
+            # document this rail does not read, would be walked to a row
+            # that asks them to verify again.
+            from security.identity_status import is_identity_verified
+            return None if is_identity_verified(viewer.user) else entry
+        return entry if status == 'live' else None
+    except Exception:  # noqa: BLE001 - unknown is "no entry", never a guess
+        import logging
+        logging.getLogger(__name__).warning('Confio Assistant: local account top-up state unavailable', exc_info=True)
+        return None
+
+
+def topup_entry(country, user, request_meta, viewer=None):
     # Decided by the person's rail, not where they live: Recibir hides Recargar
     # ahora for anyone QR Bolivia replaces it for.
     from ramps.bolivia_qr import koywe_replaced
     if koywe_replaced(user, request_meta or {})['top_up']:
         return BOLIVIA_QR_ENTRY
-    return TOPUP_ENTRIES.get((country or '').upper(), DEFAULT_TOPUP_ENTRY)
+    return (local_account_topup(country, viewer)
+            or TOPUP_ENTRIES.get((country or '').upper(), DEFAULT_TOPUP_ENTRY))
 
 
 def topup_route(country):

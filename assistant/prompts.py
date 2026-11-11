@@ -229,6 +229,11 @@ GUIDE_OPENING_NOTE = ('\n\nEscribe un solo mensaje corto para abrir la conversac
                       'caracteres, sin cifras, sin listas y sin negritas. Solo di lo que se te pide.')
 GUIDE_STEERING_NOTE = ('\n\nLa persona sigue su guía de primeros pasos. Responde primero lo que pregunta, en dos frases '
                        'como máximo, y termina invitándola a seguir con este paso: {step}\n')
+# Where Koywe's top-up is paused and the person's local account stands in.
+LOCAL_ACCOUNT_TOPUP_NOTE = ('En su país «Recargar ahora» está en pausa y no aparece en la app: para recargar se usa '
+                            '{entry} (Recibir → {entry}), una cuenta local a su nombre. No le digas que use '
+                            '«Recargar ahora» ni PSE: esto prevalece sobre lo que diga el FAQ sobre recargar '
+                            'en su país. La app le muestra el costo antes de confirmar.\n')
 NO_RAMP_NOTE = ('En su país hoy no hay Recargar ni Retirar en la app: no le digas que puede recargar o retirar con '
                 'medios locales.\n')
 
@@ -255,7 +260,8 @@ IDENTITY_NOTES = {
 
 
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
-                        ia_plus_bundled=False, identity=None, ve_topup=None, ve_send=None, dex=True):
+                        ia_plus_bundled=False, identity=None, ve_topup=None, ve_send=None, dex=True,
+                        local_account_topup=''):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
     prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text(dex=dex))
               + _paid_offer_sections(destinations, ia_plus_bundled)
@@ -272,9 +278,13 @@ def build_system_prompt(*, first_name, account_label, country, screen, local_now
         identity_line=f'Identidad: {IDENTITY_ES.get(identity, "desconocida")}.\n' if identity else '',
         # Where there is no Recargar (Venezuela…), "verify, then top up" would
         # contradict the rails note.
-        identity_note=('' if (country or '').upper() in NO_RAMP_COUNTRIES and not ve_topup
+        # A local account takes any verified document: "add one from your
+        # country" would be wrong there.
+        identity_note=('' if ((country or '').upper() in NO_RAMP_COUNTRIES and not ve_topup)
+                       or (local_account_topup and identity == 'other_country')
                        else IDENTITY_NOTES.get(identity, '') and IDENTITY_NOTES[identity] + USDT_NO_KYC_NOTE),
         rails_note=(ve_rails_note(ve_topup, ve_send) if (country or '').upper() == 'VE'
+                    else LOCAL_ACCOUNT_TOPUP_NOTE.format(entry=local_account_topup) if local_account_topup
                     else BO_RAILS_NOTE if (country or '').upper() == 'BO'
                     else INTERNATIONAL_SOON_NOTE if topup_route(country) == 'international_soon'
                     else NO_RAMP_NOTE if (country or '').upper() in NO_RAMP_COUNTRIES else ''),

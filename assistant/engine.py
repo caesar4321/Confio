@@ -1460,6 +1460,24 @@ def _ve_topup(viewer, country):
     return _ve_rail(viewer, country, 'topup')
 
 
+def _local_account_topup(viewer, country):
+    """The name of the local account that stands in for a paused Koywe top-up
+    for this person ('Llave Bre-B'), or ''."""
+    from .rails import local_account_topup, topup_entry
+    entry = local_account_topup(country, viewer)
+    if entry is None:
+        return ''
+    # Named only when it is the entry the guide itself points at: another
+    # rail can take precedence (QR Bolivia for someone who picked Bolivia),
+    # and the prompt must never name a different way than the pencil shows.
+    try:
+        resolved = topup_entry(country, viewer.user, viewer.request_meta, viewer=viewer)
+    except Exception:  # noqa: BLE001 - unknown: no note
+        logger.warning('Confio Assistant: top-up entry unavailable', exc_info=True)
+        return ''
+    return entry.name if resolved is entry else ''
+
+
 def _ve_send(viewer, country):
     return _ve_rail(viewer, country, 'send')
 
@@ -1577,6 +1595,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         ve_topup=_ve_topup(viewer, country),
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
+        local_account_topup=_local_account_topup(viewer, country),
     )
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
