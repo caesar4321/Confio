@@ -329,3 +329,30 @@ class KoyweRefund(models.Model):
     attempts = models.PositiveIntegerField(default=0)
     result_code = models.CharField(max_length=32, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class RampQuoteView(models.Model):
+    """A person looked at a price for a rail on a day (one row per user, rail
+    and day). Product evidence: who saw the price and never started an order.
+    Nothing here is charged or shown to users."""
+
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='ramp_quote_views')
+    rail = models.CharField(max_length=40)
+    # Calendar day in the activity time zone (users.activity_tracking).
+    day = models.DateField(db_index=True)
+    views = models.PositiveIntegerField(default=1)
+    first_usd = models.DecimalField(max_digits=19, decimal_places=2)
+    last_usd = models.DecimalField(max_digits=19, decimal_places=2)
+    max_usd = models.DecimalField(max_digits=19, decimal_places=2)
+    # What the last quote said the person would receive, after every fee.
+    last_net_usd = models.DecimalField(max_digits=19, decimal_places=2, null=True, blank=True)
+    country = models.CharField(max_length=2, blank=True, default='')
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ['-day', '-last_seen_at']
+        constraints = [models.UniqueConstraint(fields=['user', 'rail', 'day'], name='unique_ramp_quote_view_day')]
+
+    def __str__(self):
+        return f'{self.user_id} {self.rail} {self.day}'

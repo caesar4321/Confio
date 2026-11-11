@@ -33,9 +33,11 @@ import {
   CANCEL_VE_TOP_UP,
   CONFIRM_VE_TOP_UP_KEY,
   CREATE_VE_TOP_UP,
+  RECORD_VE_TOP_UP_CANCEL_REASON,
   VE_ACTIVE_TOP_UP,
   VE_BANKS,
   VE_TOP_UP_ORDER,
+  VE_TOP_UP_CANCEL_REASONS,
   VE_TOP_UP_QUOTE,
   VERIFY_VE_TOP_UP,
   VeTopUpMethod,
@@ -84,6 +86,10 @@ export default function VePagoMovilReceiveScreen() {
   const setOrder = useCallback((next: VeTopUpOrder | null) => {
     setOrderState(prev => (next && isOrderRegression(prev, next) ? prev : next));
   }, []);
+
+  // The order this visit cancelled, until the person says why (or leaves).
+  const [askCancelReason, setAskCancelReason] = useState<string | null>(null);
+  const [cancelReasonSent, setCancelReasonSent] = useState(false);
 
   const [amount, setAmount] = useState('');
   const [amountFocused, setAmountFocused] = useState(false);
@@ -289,6 +295,10 @@ export default function VePagoMovilReceiveScreen() {
         return;
       }
       setOrder(result);
+      if (result.status === 'FAILED' && result.statusDetail === 'cancelled_by_user' && result.orderId) {
+        setCancelReasonSent(false);
+        setAskCancelReason(result.orderId);
+      }
     } catch {
       if (alive.current) setError(GENERIC);
     } finally {
@@ -459,6 +469,13 @@ export default function VePagoMovilReceiveScreen() {
     </RampReveal>
   );
 
+  // One tap, never required: the order is already cancelled.
+  const sendCancelReason = (orderId: string, reason: string) => {
+    setCancelReasonSent(true);
+    client.mutate({ mutation: RECORD_VE_TOP_UP_CANCEL_REASON, variables: { orderId, reason }, fetchPolicy: 'no-cache' })
+      .catch(() => {});
+  };
+
   // ─── After paying: one timeline, whatever the provider's legs ───
   const renderProgress = (current: VeTopUpOrder) => {
     const progress = topUpProgressCopy(current);
@@ -473,6 +490,27 @@ export default function VePagoMovilReceiveScreen() {
             </View>
             <Text style={styles.emptyStateTitle}>{progress.title}</Text>
             <Text style={styles.emptyStateText}>{progress.body}</Text>
+            {current.statusDetail === 'cancelled_by_user' && !!current.orderId && askCancelReason === current.orderId && (
+              cancelReasonSent ? (
+                <Text style={[styles.helperText, local.spaced]}>Gracias, nos ayuda a mejorar.</Text>
+              ) : (
+                <View style={local.reasonBlock}>
+                  <Text style={[styles.inputLabel, local.reasonLabel]}>¿Qué te hizo cancelar?</Text>
+                  <View style={[styles.chipRow, local.reasonChips]}>
+                    {VE_TOP_UP_CANCEL_REASONS.map(([id, label]) => (
+                      <TouchableOpacity
+                        key={id}
+                        accessibilityRole="button"
+                        onPress={() => sendCancelReason(current.orderId as string, id)}
+                        style={styles.chip}
+                      >
+                        <Text style={styles.chipText}>{label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )
+            )}
           </View>
         </RampReveal>
       );
@@ -803,6 +841,9 @@ const local = StyleSheet.create({
   statusLink: { marginTop: 4 },
   timeline: { marginTop: 4 },
   failIcon: { backgroundColor: colors.warning.background },
+  reasonBlock: { marginTop: 18, alignSelf: 'stretch' },
+  reasonLabel: { textAlign: 'center' },
+  reasonChips: { justifyContent: 'center', marginTop: 8 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20 },
   bankRow: {
     height: BANK_ROW, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 12,

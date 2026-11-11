@@ -1126,6 +1126,9 @@ confio_admin_site.register(RampPaymentMethod, RampPaymentMethodAdmin)
 confio_admin_site.register(RampTransaction, RampTransactionAdmin)
 confio_admin_site.register(RampUserAddress, RampUserAddressAdmin)
 confio_admin_site.register(RampWebhookEvent, RampWebhookEventAdmin)
+from ramps.models import RampQuoteView
+from ramps.admin import RampQuoteViewAdmin
+confio_admin_site.register(RampQuoteView, RampQuoteViewAdmin)
 
 # Persistent provider accounts and named/omnibus money flows
 from payment_accounts.admin import (

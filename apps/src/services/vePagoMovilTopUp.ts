@@ -41,6 +41,22 @@ export const CANCEL_VE_TOP_UP = gql`mutation CancelVePagoMovilTopUp($orderId: St
   cancelVePagomovilTopUp(orderId: $orderId) { ${ORDER_FIELDS} }
 }`;
 
+// Why the person cancelled, asked once after cancelling. Its own operation:
+// an older server without it fails only this answer, never the cancellation.
+export const RECORD_VE_TOP_UP_CANCEL_REASON = gql`mutation RecordVePagoMovilTopUpCancelReason($orderId: String!, $reason: String!) {
+  recordVePagomovilTopUpCancelReason(orderId: $orderId, reason: $reason) { success }
+}`;
+
+/** One-tap answers; the keys are the server's (ramps/ve_funnel.py). */
+export const VE_TOP_UP_CANCEL_REASONS = [
+  ['fee', 'La comisión es muy alta'],
+  ['account', 'No reconozco la cuenta destino'],
+  ['limit', 'Mi banco no me deja ese monto'],
+  ['later', 'Lo haré más tarde'],
+  ['looking', 'Solo estaba mirando'],
+  ['other', 'Otro motivo'],
+] as const;
+
 export const VERIFY_VE_TOP_UP = gql`mutation VerifyVePagoMovilTopUp($orderId: String!, $reference: String!, $paymentDate: String) {
   verifyVePagomovilTopUp(orderId: $orderId, reference: $reference, paymentDate: $paymentDate) { ${ORDER_FIELDS} }
 }`;

@@ -3,6 +3,7 @@ import json
 from django.contrib import admin
 
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress, RampWebhookEvent
+from ramps.models import RampQuoteView
 
 
 from ramps.models import StereumTestOperation, StereumTestWebhook, StereumCustomer
@@ -318,3 +319,19 @@ class RampWebhookEventAdmin(admin.ModelAdmin):
         'payload',
         'processed_at',
     )
+
+
+class RampQuoteViewAdmin(admin.ModelAdmin):
+    """Read-only: who looked at a price, per rail and day."""
+    list_display = ('day', 'rail', 'user', 'country', 'views', 'last_usd', 'max_usd', 'last_net_usd', 'last_seen_at')
+    list_filter = ('rail', 'country', 'day')
+    search_fields = ('user__username', 'user__email')
+    raw_id_fields = ('user',)
+    list_select_related = ('user',)
+    date_hierarchy = 'day'
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

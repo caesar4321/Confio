@@ -12,7 +12,7 @@ from decimal import ROUND_DOWN, Decimal, InvalidOperation
 import graphene
 from django.conf import settings
 
-from ramps import ve_pagomovil, ve_send
+from ramps import ve_funnel, ve_pagomovil, ve_send
 from ramps.ve_pagomovil import SEND, TOPUP, VePagoMovilError
 
 logger = logging.getLogger(__name__)
@@ -297,6 +297,30 @@ class CancelVePagoMovilTopUp(graphene.Mutation):
         return _topup_order_action(info, order_id, lambda a, r: a.cancel(r))
 
 
+class VePagoMovilCancelReasonType(graphene.ObjectType):
+    success = graphene.Boolean()
+
+
+class RecordVePagoMovilTopUpCancelReason(graphene.Mutation):
+    """Why the person cancelled, asked once after the cancellation. Its own
+    mutation: the cancellation never waits for it or depends on it."""
+
+    class Arguments:
+        order_id = graphene.String(required=True)
+        reason = graphene.String(required=True)
+
+    Output = VePagoMovilCancelReasonType
+
+    def mutate(self, info, order_id, reason):
+        try:
+            ramp = ve_pagomovil.owned_order(_user(info), order_id, TOPUP)
+            saved = bool(ramp) and ve_funnel.record_cancel_reason(ramp, (reason or '').strip().lower())
+        except Exception:  # noqa: BLE001 — an unsaved answer is not the user's problem
+            logger.exception('Could not record a VE top-up cancel reason')
+            saved = False
+        return VePagoMovilCancelReasonType(success=saved)
+
+
 # ------------------------------------------------------------------ send
 
 class CreateVePagoMovilSend(graphene.Mutation):
@@ -429,6 +453,7 @@ class Query(graphene.ObjectType):
             quote = ve_pagomovil.topup_adapter().quote(amount)
             maximum = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_MAX_USD')
             quote.setdefault('max_usd', format(maximum, 'f') if maximum is not None else None)
+            ve_funnel.record_quote_view(_user(info), ve_funnel.TOPUP_RAIL, amount, quote.get('estimated_usdt'))
             return VePagoMovilTopUpQuoteType(success=True, **quote)
         return _guard(VePagoMovilTopUpQuoteType, run)
 
@@ -476,6 +501,7 @@ class Mutation(graphene.ObjectType):
     confirm_ve_pagomovil_top_up_key = ConfirmVePagoMovilTopUpKey.Field()
     verify_ve_pagomovil_top_up = VerifyVePagoMovilTopUp.Field()
     cancel_ve_pagomovil_top_up = CancelVePagoMovilTopUp.Field()
+    record_ve_pagomovil_top_up_cancel_reason = RecordVePagoMovilTopUpCancelReason.Field()
     create_ve_pagomovil_send = CreateVePagoMovilSend.Field()
     start_ve_pagomovil_send_funding = StartVePagoMovilSendFunding.Field()
     report_ve_pagomovil_send_funding = ReportVePagoMovilSendFunding.Field()
