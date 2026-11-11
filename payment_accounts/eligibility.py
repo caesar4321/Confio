@@ -120,6 +120,45 @@ def evaluate_active_policy(*, provider, scope, context, at=None):
     return evaluate_policy(policy, context)
 
 
+_PERSON_SELECTORS = ('nationalities', 'residence_countries', 'document_types', 'document_issuing_countries')
+
+
+def _route_matches(rule, context):
+    for selector_name, context_name in (('account_countries', 'account_country'),
+                                        ('destination_countries', 'destination_country')):
+        selector = getattr(rule, selector_name) or []
+        if not isinstance(selector, list):
+            return False
+        if selector and getattr(context, context_name) not in {_country(value) for value in selector}:
+            return False
+    return True
+
+
+def blocked_for_everyone(*, provider, scope, account_country='', destination_country='', at=None):
+    """The rule that refuses this route whoever the person is, or None.
+
+    Rules are first-match-wins, so a route-only block counts only while no
+    earlier rule could let some person through: an earlier rule that selects
+    on the person, covers this route and does not block ends the search.
+    Earlier person-specific blocks, and rules for other routes, cannot open
+    this one and are skipped. Policy defaults and a
+    missing policy are not a refusal for everyone.
+    """
+    policy = get_active_policy(provider, scope, at=at)
+    if policy is None:
+        return None
+    context = EligibilityContext(
+        account_country=account_country, destination_country=destination_country).normalized()
+    for rule in policy.rules.filter(is_active=True).order_by('priority', 'id'):
+        if any(getattr(rule, name) for name in _PERSON_SELECTORS):
+            if rule.decision == 'block' or not _route_matches(rule, context):
+                continue
+            return None
+        if rule_matches(rule, context):
+            return None if rule.decision == 'allow' else rule
+    return None
+
+
 def context_from_identity(
     identity_verification,
     *,

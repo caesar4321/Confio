@@ -404,6 +404,67 @@ class LocalMoneyTests(TestCase):
         self.assertEqual(status, 'needs_verification')
 
     @override_settings(**FLAGS)
+    def test_rail_switched_off_for_everyone_is_off_before_verification(self):
+        from payment_accounts.models import EligibilityPolicy, EligibilityRule
+        from datetime import timedelta
+        from django.utils import timezone
+        EligibilityPolicy.objects.filter(provider='infinia').update(is_active=False)
+        policy = EligibilityPolicy.objects.create(
+            provider='infinia', scope='payout', version=9001, is_active=True, default_decision='allow',
+            effective_from=timezone.now() - timedelta(days=1))
+        EligibilityRule.objects.create(policy=policy, priority=0, decision='block', reason_code='country_paused',
+                                       account_countries=['ARG', 'AR'])
+        for method_id in ('ar_cvu', 'ar_cvu_receive'):
+            self.assertEqual(local_money.method_status(None, local_money.METHODS[method_id]),
+                             ('unavailable', 'country_paused'))
+        # Other countries, and rules about who the person is, still wait for the document.
+        EligibilityRule.objects.create(policy=policy, priority=1, decision='block', reason_code='nationality',
+                                       nationalities=['VEN'])
+        self.assertEqual(local_money.method_status(None, local_money.METHODS['mx_clabe']),
+                         ('needs_verification', 'identity_required'))
+
+    @override_settings(**FLAGS)
+    def test_only_a_refusal_for_everyone_hides_a_rail_before_verification(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from payment_accounts.models import EligibilityPolicy, EligibilityRule
+        EligibilityPolicy.objects.filter(provider='infinia').update(is_active=False)
+        policies = {scope: EligibilityPolicy.objects.create(
+            provider='infinia', scope=scope, version=9002, is_active=True, default_decision='block',
+            effective_from=timezone.now() - timedelta(days=1)) for scope in ('account_opening', 'conversion', 'payout')}
+        unverified = lambda: local_money.method_status(None, local_money.METHODS['ar_cvu'])
+        # A policy default that refuses is not a rule about the route.
+        self.assertEqual(unverified(), ('needs_verification', 'identity_required'))
+        # "Argentina only for Argentines": someone can still get through.
+        opening = policies['account_opening']
+        EligibilityRule.objects.create(policy=opening, priority=10, decision='allow', reason_code='locals',
+                                       nationalities=['ARG'], account_countries=['ARG'])
+        block = EligibilityRule.objects.create(policy=opening, priority=20, decision='block',
+                                               reason_code='country_paused', account_countries=['ARG'])
+        self.assertEqual(unverified(), ('needs_verification', 'identity_required'))
+        # An earlier block about the person cannot open the route.
+        EligibilityRule.objects.filter(policy=opening, priority=10).update(decision='block')
+        self.assertEqual(unverified(), ('unavailable', 'country_paused'))
+        # Nor can a locals-only rule for another country.
+        EligibilityRule.objects.create(policy=opening, priority=5, decision='allow', reason_code='locals',
+                                       nationalities=['MEX'], account_countries=['MEX'])
+        self.assertEqual(unverified(), ('unavailable', 'country_paused'))
+        # A route held for manual review is not offered either; an allowed one is.
+        block.decision = 'review'
+        block.save()
+        self.assertEqual(unverified(), ('unavailable', 'country_paused'))
+        block.decision = 'allow'
+        block.save()
+        self.assertEqual(unverified(), ('needs_verification', 'identity_required'))
+
+    @override_settings(**FLAGS)
+    def test_unverified_user_without_policies_is_still_sent_to_verification(self):
+        from payment_accounts.models import EligibilityPolicy
+        EligibilityPolicy.objects.filter(provider='infinia').update(is_active=False)
+        self.assertEqual(local_money.method_status(None, local_money.METHODS['mx_clabe']),
+                         ('needs_verification', 'identity_required'))
+
+    @override_settings(**FLAGS)
     def test_missing_policy_fails_closed(self):
         # A fresh test DB carries the seeded Infinia policies; remove them.
         from payment_accounts.models import EligibilityPolicy

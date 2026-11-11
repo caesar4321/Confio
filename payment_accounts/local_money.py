@@ -19,7 +19,9 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from .clients import InfiniaClient, ProviderAPIError
-from .eligibility import EligibilityPolicyNotConfigured, context_from_identity, evaluate_active_policy
+from .eligibility import (
+    EligibilityPolicyNotConfigured, blocked_for_everyone, context_from_identity, evaluate_active_policy,
+)
 from .models import FinancialAccount, InfiniaJourney, PayoutDestination, ProviderProfile
 from .providers.common import iso_alpha2
 from .services import PaymentAccountError, create_payout_destination, provision_payment_account
@@ -251,8 +253,6 @@ def method_status(identity, method):
     """(status, reason) from flags and verified KYC — never from phone country."""
     if not _flags_enabled() or method.id not in _enabled_method_ids():
         return 'unavailable', 'not_enabled'
-    if identity is None:
-        return 'needs_verification', 'identity_required'
     destination = method.country if method.direction == 'send' else 'XXX'
     # The same scopes provisioning and InfiniaJourney.validate_accounts enforce,
     # so a rail shown as live cannot fail on a policy the user never saw.
@@ -260,6 +260,17 @@ def method_status(identity, method):
         ('account_opening', method.country, ''), ('account_opening', 'XXX', ''),
         ('conversion', method.country, destination), ('payout', method.country, destination),
     )
+    if identity is None:
+        # A rail a rule switches off for everyone is off before verification
+        # too: nobody verifies their identity for a rail they will be refused.
+        # Rules about who the person is, and policy defaults, wait for the
+        # verified document (eligibility.blocked_for_everyone).
+        for scope, account_country, destination_country in checks:
+            rule = blocked_for_everyone(provider='infinia', scope=scope, account_country=account_country,
+                                        destination_country=destination_country)
+            if rule is not None:
+                return 'unavailable', rule.reason_code or rule.decision
+        return 'needs_verification', 'identity_required'
     for scope, account_country, destination_country in checks:
         try:
             result = evaluate_active_policy(provider='infinia', scope=scope, context=context_from_identity(
