@@ -11,6 +11,7 @@ import { MARK_MESSAGE_CHANNEL_SEEN, REACT_TO_MESSAGE_CONTENT } from '../../apoll
 let mockAccountId = 'account-1';
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ isAuthenticated: true, isLoading: false, accountContextTick: 0 }) }));
 jest.mock('../../contexts/AccountContext', () => ({ useAccount: () => ({ activeAccount: { id: mockAccountId } }) }));
+jest.mock('../../assistant/AssistantContext', () => ({ useOptionalAssistant: () => null }));
 jest.mock('../MessageInboxList', () => ({ MessageInboxList: () => null }));
 jest.mock('../MessageChannelThread', () => ({ MessageChannelThread: () => null }));
 

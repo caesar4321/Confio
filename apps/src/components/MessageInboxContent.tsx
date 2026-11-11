@@ -297,6 +297,12 @@ export function MessageInboxContent({
     setScreen('inbox');
     setHasMoreThreadMessages(false);
     setUnreadCounts({ julian: 0, confio: 0, soporte: 0 });
+    // Embedded has no inbox list to fall back to: the thread must come back
+    // once the new account's channels arrive, or the box spins forever (a
+    // push opens the box before the account has settled).
+    if (embeddedChannelId) {
+      setPendingInitialChannelId(embeddedChannelId);
+    }
   }, [contextKey]);
 
   useEffect(() => {
@@ -313,6 +319,9 @@ export function MessageInboxContent({
     } else {
       setActiveChannel(null);
       setScreen('inbox');
+      if (embeddedChannelId) {
+        setPendingInitialChannelId(embeddedChannelId);
+      }
     }
   }, [channels, activeChannel]);
 
