@@ -39,6 +39,26 @@ class FeePolicyTests(SimpleTestCase):
             self.assertEqual(fee['units'], str(5 * 10**17))
             self.assertEqual(fee['itf_collection'], 'provider_automatic')
 
+    def test_disclosure_splits_the_fee_the_person_pays(self):
+        from payment_accounts.infinia_fee_policy import disclosure
+        self.assertIsNone(disclosure(None))
+        with mock.patch('payment_accounts.infinia_maintenance.quoted_charges', return_value=([7], Decimal('0.20'))), \
+                mock.patch('payment_accounts.infinia_fee_debt.quoted', return_value=([3], Decimal('0.05'))):
+            fee = disclosure(price(self.local, 'to_bank', destination=SimpleNamespace(details={'type': 'BREB_KEY'})))
+        self.assertEqual({key: Decimal(value) for key, value in fee.items()}, {
+            'processing_usd': Decimal('0.5'), 'network_usd': Decimal('0.75'), 'maintenance_usd': Decimal('0.20'),
+            'debt_usd': Decimal('0.05'), 'total_usd': Decimal('1.50'), 'deferred_usd': Decimal(0)})
+
+    def test_disclosure_reports_what_a_capped_deposit_collected(self):
+        # A deposit smaller than its invoice pays what arrived; the rest is carried.
+        from payment_accounts.infinia_fee_policy import disclosure
+        snapshot = dict(price(self.local, 'to_wallet'), invoice_units=str(125 * 10**16), units=str(9 * 10**17),
+                        maintenance_usd='0.20', debt_usd='0.05')
+        fee = disclosure(snapshot)
+        self.assertEqual((Decimal(fee['total_usd']), Decimal(fee['deferred_usd'])), (Decimal('0.9'), Decimal('0.35')))
+        # Never "includes US$0.20" on a total that did not cover it.
+        self.assertEqual((fee['maintenance_usd'], fee['debt_usd']), ('0', '0'))
+
     @override_settings(INFINIA_PASS_THROUGH_FEE_COUNTRIES='')
     def test_disabled_rollout_does_not_reprice_legacy_routes(self):
         self.local.country = 'XXX'

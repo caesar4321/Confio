@@ -7,11 +7,16 @@ let mockDirection = 'to_bank';
 let mockSender: any = null;
 const mockStop = jest.fn();
 const mockRefetch = jest.fn().mockResolvedValue({});
+let mockFee: any = null;
+let mockFeeError: any;
+const mockFeeRefetch = jest.fn().mockResolvedValue({});
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({goBack: jest.fn(), navigate: jest.fn(), popToTop: jest.fn()}),
   useRoute: () => ({params: {journeyId: 'journey'}}), useFocusEffect: () => {},
 }));
-jest.mock('@apollo/client', () => ({useApolloClient: jest.fn(), useQuery: () => ({
+jest.mock('@apollo/client', () => ({useApolloClient: jest.fn(), useQuery: (document: string) => document === 'fee' ? {
+  data: {localTransferFee: mockFee}, error: mockFeeError, refetch: mockFeeRefetch,
+} : ({
   data: {infiniaJourney: {internalId: 'journey', direction: mockDirection,
     stage: mockStage, localAsset: 'MXN', destinationSummary: 'CLABE', refundAmount: '1.982',
     sender: mockSender, receivedFiatAmount: '32.51'}},
@@ -25,7 +30,7 @@ jest.mock('../../components/ramps/RampReveal', () => ({RampReveal: 'Reveal'}));
 jest.mock('../../components/ramps/RampStepHeader', () => ({RampStepHeader: 'Step'}));
 jest.mock('../../services/communityShare', () => ({requestActivityShare: jest.fn()}));
 jest.mock('../../services/localMoney', () => ({
-  LOCAL_JOURNEY: 'journey', LOCAL_JOURNEY_BRIDGE: 'bridge', LOCAL_JOURNEYS: 'journeys',
+  LOCAL_JOURNEY: 'journey', LOCAL_JOURNEY_BRIDGE: 'bridge', LOCAL_JOURNEYS: 'journeys', LOCAL_TRANSFER_FEE: 'fee',
   journeySteps: () => ['Convirtiendo', 'Completado'], journeyStepIndex: () => 0,
 }));
 import Screen from '../LocalTransferStatusScreen';
@@ -35,7 +40,7 @@ import {requestActivityShare} from '../../services/communityShare';
 const screenText = (tree: renderer.ReactTestRenderer) =>
   JSON.stringify(tree.toJSON(), (key, value) => key === 'refreshControl' ? undefined : value);
 
-beforeEach(() => {mockSender = null; mockStage = 'refunded'; mockDirection = 'to_bank'; mockStop.mockClear(); mockRefetch.mockReset().mockResolvedValue({data: {infiniaJourney: {}}});});
+beforeEach(() => {mockFee = null; mockFeeError = undefined; mockFeeRefetch.mockReset().mockResolvedValue({}); mockSender = null; mockStage = 'refunded'; mockDirection = 'to_bank'; mockStop.mockClear(); mockRefetch.mockReset().mockResolvedValue({data: {infiniaJourney: {}}});});
 
 it('shows reported incoming sender, masked bank details, reference and original currency', async () => {
   mockDirection = 'to_wallet'; mockStage = 'completed';
@@ -45,6 +50,56 @@ it('shows reported incoming sender, masked bank details, reference and original 
   const text = screenText(tree);
   for (const value of ['Ana Pérez', 'Banco de origen', '•••• 7890', 'REF-1', 'MXN']) expect(text).toContain(value);
   expect(tree.root.findByType('Hero' as any).props.subtitle).toBe('De Ana Pérez');
+  await act(async () => tree.unmount());
+});
+
+const FEE = {processingUsd: '0.5', networkUsd: '0.75', maintenanceUsd: '0.20', debtUsd: '0', totalUsd: '1.45', deferredUsd: '0'};
+const FEE_LABEL = 'Comisión del procesador de pagos';
+
+it('lists the processor fee as charged only once its collection is confirmed', async () => {
+  mockStage = 'completed'; mockFee = {...FEE, collected: true};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  let text = screenText(tree);
+  expect(text).toContain(FEE_LABEL);
+  expect(text).toContain('1.45');
+  expect(text).toContain('de mantenimiento de cuenta');
+  expect(text).not.toContain('al convertir');
+  expect(text).not.toContain('al confirmar');
+  await act(async () => tree.unmount());
+  // Still to be taken: says when, for each direction.
+  mockStage = 'awaiting_wallet_conversion'; mockDirection = 'to_wallet'; mockFee = {...FEE, collected: false};
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(screenText(tree)).toContain('al convertir');
+  await act(async () => tree.unmount());
+  mockStage = 'awaiting_credit'; mockDirection = 'to_bank';
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(screenText(tree)).toContain('al confirmar');
+  await act(async () => tree.unmount());
+});
+
+it('shows no fee for a transfer that ended uncollected, or when the server cannot say', async () => {
+  let tree!: renderer.ReactTestRenderer;
+  mockStage = 'failed'; mockFee = {...FEE, collected: false};
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(screenText(tree)).not.toContain(FEE_LABEL);
+  await act(async () => tree.unmount());
+  // An older server rejects the query: the receipt renders without the line.
+  mockStage = 'completed'; mockFee = {...FEE, collected: true}; mockFeeError = new Error('Cannot query field');
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(screenText(tree)).not.toContain(FEE_LABEL);
+  expect(screenText(tree)).toContain('Destino');
+  await act(async () => tree.unmount());
+});
+
+it('re-reads the fee when the transfer changes stage, never on a timer', async () => {
+  mockStage = 'awaiting_wallet_conversion'; mockDirection = 'to_wallet'; mockFee = {...FEE, collected: false};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(mockFeeRefetch).not.toHaveBeenCalled();
+  mockStage = 'completed'; mockFeeRefetch.mockRejectedValueOnce(new Error('offline'));
+  await act(async () => {tree.update(<Screen />);});
+  expect(mockFeeRefetch).toHaveBeenCalledTimes(1);
   await act(async () => tree.unmount());
 });
 

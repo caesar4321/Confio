@@ -82,6 +82,22 @@ class LocalPayoutQuoteType(graphene.ObjectType):
     expires_at = graphene.String(required=True)
 
 
+class LocalTransferFeeType(graphene.ObjectType):
+    """The payment processor's fee for one local transfer, in US dollars.
+
+    A flat amount per transfer, so it weighs most on small ones. Served by its
+    own queries: an app asking an older server for it loses only this line.
+    """
+    processing_usd = graphene.String(required=True)
+    network_usd = graphene.String(required=True)
+    maintenance_usd = graphene.String(required=True)
+    debt_usd = graphene.String(required=True)
+    total_usd = graphene.String(required=True)
+    deferred_usd = graphene.String(required=True)
+    # Receipts only: the fee left the wallet in a confirmed transaction.
+    collected = graphene.Boolean()
+
+
 class LocalDepositQuoteType(graphene.ObjectType):
     minimum_net_wallet_receipt = graphene.String()
     source_amount = graphene.String(required=True)
@@ -162,6 +178,9 @@ class LocalMoneyQuery(graphene.ObjectType):
     local_payout_quote = graphene.Field(LocalPayoutQuoteType, destination_id=graphene.UUID(required=True),
                                         amount=graphene.Decimal(), bridge_id=graphene.UUID())
     local_deposit_quote = graphene.Field(LocalDepositQuoteType, credit_id=graphene.UUID(required=True))
+    local_payout_fee = graphene.Field(LocalTransferFeeType, destination_id=graphene.UUID(required=True),
+                                      bridge_id=graphene.UUID())
+    local_transfer_fee = graphene.Field(LocalTransferFeeType, journey_id=graphene.UUID(required=True))
     limit_increase_request = graphene.Field(LimitIncreaseRequestType)
     limit_increase_requirements = graphene.List(graphene.NonNull(EddRequirementType), required=True,
                                                 income_type=graphene.String(required=True))
@@ -323,6 +342,32 @@ class LocalMoneyQuery(graphene.ObjectType):
         except Exception as exc:
             raise _query_error(exc)
         return LocalPayoutQuoteType(**{key: str(value) for key, value in quote.items()})
+
+    def resolve_local_payout_fee(self, info, destination_id, bridge_id=None):
+        owner = _owner(info, 'send_funds')
+        try:
+            destination = PayoutDestination.objects.get(internal_id=destination_id, confio_account=owner)
+            bridge = (PaymentBridgeTransfer.objects.select_related('quote__money_flow').get(
+                internal_id=bridge_id, quote__confio_account=owner) if bridge_id else None)
+            fee = local_money.payout_fee(owner, destination, bridge=bridge)
+        except (PayoutDestination.DoesNotExist, PaymentBridgeTransfer.DoesNotExist):
+            raise GraphQLError('Destino no encontrado')
+        except Exception as exc:
+            raise _query_error(exc)
+        return LocalTransferFeeType(**fee) if fee else None
+
+    def resolve_local_transfer_fee(self, info, journey_id):
+        from .infinia_fee_collection import collection_evidence
+        from .infinia_fee_policy import disclosure
+        from .models import InfiniaJourney
+        from .schema import _active_account
+        owner = _active_account(info, permission='view_transactions')
+        journey = InfiniaJourney.objects.filter(confio_account=owner, internal_id=journey_id).select_related(
+            'money_flow', 'bridge__batch', 'wallet_conversion', 'confio_account').first()
+        fee = disclosure(journey.money_flow.metadata.get('infinia_fee')) if journey else None
+        if not fee:
+            return None
+        return LocalTransferFeeType(collected=bool(collection_evidence(journey)), **fee)
 
     def resolve_local_deposit_quote(self, info, credit_id):
         owner = _owner(info, 'send_funds', owner_only=True)

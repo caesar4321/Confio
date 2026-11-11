@@ -54,6 +54,26 @@ def price(local, direction, *, destination=None):
                 units=str(int(Decimal(tariff['total_usd']) * 10**18)))
 
 
+def disclosure(snapshot):
+    """A fee snapshot as the person pays it, in US dollars, for the quote and the receipt.
+
+    total_usd is what the transfer collects (an incoming fee is capped at what
+    arrived); deferred_usd is the rest of that invoice, carried to a later one.
+    """
+    if not snapshot:
+        return None
+    wei = Decimal(10**18)
+    collected = Decimal(snapshot['units']) / wei
+    invoice = Decimal(snapshot.get('invoice_units', snapshot['units'])) / wei
+    # A capped collection pays part of the invoice without saying which part:
+    # the account costs are then not attributed, only the amount carried over.
+    capped = collected < invoice
+    return {'processing_usd': snapshot['processing_usd'], 'network_usd': snapshot['blockchain_usd'],
+            'maintenance_usd': '0' if capped else str(snapshot.get('maintenance_usd', '0')),
+            'debt_usd': '0' if capped else str(snapshot.get('debt_usd', '0')),
+            'total_usd': str(collected), 'deferred_usd': str(max(invoice - collected, Decimal(0)))}
+
+
 def freeze(local, direction, *, destination=None):
     snapshot = price(local, direction, destination=destination)
     if snapshot is None:

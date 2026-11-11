@@ -833,6 +833,52 @@ class LocalMoneyTests(TestCase):
             self.assertGreater(result['expected_target'], result['minimum_target'])
             self.assertEqual(result['total_cost_percent'], Decimal('2.00'))
 
+    def test_amount_below_the_processor_fee_is_refused_in_spanish_before_any_quote(self):
+        self.pair()
+        destination = SimpleNamespace(country='COL', asset='COP', details={'type': 'BREB_KEY'})
+        fee = {'units': str(125 * 10**16), 'total_usd': '1.250000'}
+        with mock.patch('payment_accounts.infinia_fee_policy.price', return_value=fee), \
+                mock.patch('payment_accounts.infinia_fee_funding.quote_funding') as funding:
+            for amount in ('1', '1.25'):
+                with self.assertRaisesRegex(PaymentAccountError, r'comisión del procesador de pagos \(US\$1\.25\)'):
+                    local_money.payout_quote(self.owner, destination, amount=amount, client=self.client_api)
+            funding.assert_not_called()
+            # The conversion fee on top can still leave nothing to send.
+            from payment_accounts.infinia_fees import FeePricingError
+            funding.side_effect = FeePricingError('Amount is too small after fees')
+            with self.assertRaisesRegex(PaymentAccountError, 'Ingresa un monto mayor'):
+                local_money.payout_quote(self.owner, destination, amount='1.26', client=self.client_api)
+            # Not having the dollars is a different problem and keeps its own error.
+            funding.side_effect = FeePricingError('Insufficient dollars for transfer and fees')
+            with self.assertRaisesRegex(FeePricingError, 'Insufficient dollars'):
+                local_money.payout_quote(self.owner, destination, amount='5', client=self.client_api)
+        self.client_api.create_transfer_quote.assert_not_called()
+
+    def test_payout_fee_prices_the_destination_or_reads_the_prepared_bridge(self):
+        self.pair()
+        destination = SimpleNamespace(country='COL', asset='COP', internal_id='dest-1', details={'type': 'BREB_KEY'})
+        snapshot = {'processing_usd': '0.5', 'blockchain_usd': '0.75', 'maintenance_usd': '0.10', 'debt_usd': '0',
+                    'total_usd': '1.350000', 'units': str(135 * 10**16)}
+        with mock.patch('payment_accounts.infinia_fee_policy.price', return_value=snapshot) as price:
+            fee = local_money.payout_fee(self.owner, destination)
+            price.assert_called_once()
+            self.assertEqual(price.call_args.args[1], 'to_bank')
+            self.assertEqual((Decimal(fee['total_usd']), fee['maintenance_usd']), (Decimal('1.35'), '0.10'))
+            price.return_value = None
+            self.assertIsNone(local_money.payout_fee(self.owner, destination))
+            price.reset_mock()
+            flow = SimpleNamespace(metadata={'infinia_fee': dict(snapshot, units=str(10**18)),
+                                             'local_destination_id': 'dest-1'})
+            bridge = SimpleNamespace(quote=SimpleNamespace(confio_account_id=self.owner.pk, money_flow=flow))
+            self.assertEqual(Decimal(local_money.payout_fee(self.owner, destination, bridge=bridge)['total_usd']), 1)
+            price.assert_not_called()  # the frozen fee, never a fresh price
+            flow.metadata['local_destination_id'] = 'someone-else'
+            with self.assertRaisesRegex(PaymentAccountError, 'no corresponde al destinatario'):
+                local_money.payout_fee(self.owner, destination, bridge=bridge)
+            bridge.quote.confio_account_id = -1
+            with self.assertRaisesRegex(PaymentAccountError, 'no corresponde a tu cuenta'):
+                local_money.payout_fee(self.owner, destination, bridge=bridge)
+
     def test_subcent_bridge_output_does_not_request_a_zero_quote(self):
         _, crypto = self.pair()
         bridge = SimpleNamespace(amount_out_min='9999', amount_out='10000', quote=SimpleNamespace(
@@ -1013,6 +1059,7 @@ class SchemaTests(SimpleTestCase):
         from django.utils.module_loading import import_string
         schema = str(import_string(settings.GRAPHENE['SCHEMA']))
         for field in ('localMoneyMethods', 'localMoneyLimits', 'localPayoutQuote', 'localDepositQuote',
+                      'localPayoutFee(', 'localTransferFee(', 'deferredUsd',
                       'activateLocalMoney', 'resolveLocalDestination', 'startLimitIncreaseVerification',
                       'syncLimitIncreaseVerification', 'documentTypes', 'infiniaJourney(', 'heldReason'):
             self.assertIn(field, schema)

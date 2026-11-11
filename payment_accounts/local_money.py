@@ -879,6 +879,29 @@ def _positive(value, quantum):
     return amount
 
 
+def fee_exceeds_amount_message(fee):
+    total = Decimal(fee['total_usd']).quantize(FIAT_CENT, rounding=ROUND_UP)
+    return (f'El monto no alcanza para la comisión del procesador de pagos (US${total}). '
+            'Ingresa un monto mayor.')
+
+
+def payout_fee(owner, destination, *, bridge=None):
+    """The processor's fee for a send, split for display. None when none applies.
+
+    With a prepared bridge it is the frozen fee that bridge collects.
+    """
+    from .infinia_fee_policy import disclosure, price as fee_price
+    if bridge is not None:
+        if bridge.quote.confio_account_id != owner.pk:
+            raise PaymentAccountError('Este envío no corresponde a tu cuenta.')
+        frozen_destination = bridge.quote.money_flow.metadata.get('local_destination_id')
+        if frozen_destination and frozen_destination != str(destination.internal_id):
+            raise PaymentAccountError('Este envío no corresponde al destinatario. Solicita una nueva cotización.')
+        return disclosure(bridge.quote.money_flow.metadata.get('infinia_fee'))
+    local, _ = _active_pair(owner, destination.country, destination.asset)
+    return disclosure(fee_price(local, 'to_bank', destination=destination))
+
+
 def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
     """Estimate for a send. With a prepared bridge, price exactly what will land.
 
@@ -913,7 +936,16 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
         fee = fee_price(local, 'to_bank', destination=destination)
         if fee:
             from .infinia_fee_funding import quote_funding
-            units = quote_funding(owner, int(to_units(total, 'BSC:USDT')), int(fee['units']))['bridge_units']
+            from .infinia_fees import FeePricingError
+            budget = int(to_units(total, 'BSC:USDT'))
+            if budget <= int(fee['units']):
+                raise PaymentAccountError(fee_exceeds_amount_message(fee))
+            try:
+                units = quote_funding(owner, budget, int(fee['units']))['bridge_units']
+            except FeePricingError as exc:
+                if 'too small' in str(exc):
+                    raise PaymentAccountError(fee_exceeds_amount_message(fee)) from exc
+                raise
         else:
             units = net_funding_units(owner, int(to_units(total, 'BSC:USDT')))
         instruction = FundingInstruction.objects.filter(financial_account=crypto,

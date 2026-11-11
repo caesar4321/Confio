@@ -1,6 +1,8 @@
 import {Alert} from 'react-native';
 import {gql} from '@apollo/client';
 
+import type {LocalTransferFee} from '../utils/localTransferFee';
+
 // Local money: Enviar a banco o billetera / Recibir por cuenta local.
 //
 // These operations are deliberately their OWN documents, never merged into the
@@ -270,6 +272,24 @@ const LOCAL_PAYOUT_QUOTE = gql`
       asset
       expiresAt
     }
+  }
+`;
+
+// The processor's fee, in its own queries: against a server that predates
+// them the app loses only the fee line, never the quote or the receipt.
+const LOCAL_TRANSFER_FEE_FIELDS = `
+  processingUsd networkUsd maintenanceUsd debtUsd totalUsd deferredUsd
+`;
+
+const LOCAL_PAYOUT_FEE = gql`
+  query LocalPayoutFee($destinationId: UUID!, $bridgeId: UUID) {
+    localPayoutFee(destinationId: $destinationId, bridgeId: $bridgeId) { ${LOCAL_TRANSFER_FEE_FIELDS} }
+  }
+`;
+
+export const LOCAL_TRANSFER_FEE = gql`
+  query LocalTransferFee($journeyId: UUID!) {
+    localTransferFee(journeyId: $journeyId) { ${LOCAL_TRANSFER_FEE_FIELDS} collected }
   }
 `;
 
@@ -682,6 +702,23 @@ export function fetchLocalDestination(id: string): Promise<LocalDestination> {
 export function fetchPayoutQuote(destinationId: string, options: {amount?: string; bridgeId?: string}): Promise<LocalPayoutQuote> {
   return runQuery(LOCAL_PAYOUT_QUOTE, {destinationId, ...options}, 'localPayoutQuote',
     'No pudimos cotizar este envío.');
+}
+
+/**
+ * The processor's fee for a send: null when none applies, undefined when the
+ * server could not say (an older server, a network error). Unknown is never
+ * shown as "no fee"; the quote itself already carries the fee either way.
+ */
+export async function fetchPayoutFee(destinationId: string, options: {bridgeId?: string} = {}): Promise<LocalTransferFee | null | undefined> {
+  try {
+    const response = await (await client()).query({
+      query: LOCAL_PAYOUT_FEE, variables: {destinationId, ...options}, fetchPolicy: 'network-only', errorPolicy: 'all',
+    });
+    if (response.errors?.length || !response.data) return undefined;
+    return response.data.localPayoutFee ?? null;
+  } catch {
+    return undefined;
+  }
 }
 
 export function fetchDepositQuote(creditId: string): Promise<LocalDepositQuote> {

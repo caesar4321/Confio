@@ -46,6 +46,7 @@ import { bridgeAmount } from './LocalAccountFundingScreen';
 import {
   currencyName,
   fetchLocalDestination,
+  fetchPayoutFee,
   fetchPayoutQuote,
   LOCAL_MONEY_ACCOUNTS,
   LOCAL_MONEY_LIMITS,
@@ -59,6 +60,13 @@ import {
   resolveLocalDestination,
 } from '../services/localMoney';
 import { sanitizeAmountInput } from '../utils/numberLocale';
+import {
+  heavyFeeNote,
+  LocalTransferFee,
+  PROCESSOR_FEE_LABEL,
+  processorFeeIncludes,
+  processorFeeView,
+} from '../utils/localTransferFee';
 import { SaveDestinationToAgenda } from '../components/agenda/SaveDestinationToAgenda';
 import { AGENDA_ENTRIES, AgendaEntry, useAgendaAccountKey } from '../services/agenda';
 
@@ -239,6 +247,9 @@ function InfiniaLocalSendScreen() {
   const [quote, setQuote] = useState<LocalPayoutQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState('');
+  // The processor's flat fee for this recipient: null = none, undefined = unknown.
+  const [fee, setFee] = useState<LocalTransferFee | null | undefined>(undefined);
+  const [finalFee, setFinalFee] = useState<LocalTransferFee | null | undefined>(undefined);
   const [step, setStep] = useState<'form' | 'preparing' | 'review'>('form');
   const [bridge, setBridge] = useState<BridgeTransfer | null>(null);
   const [finalQuote, setFinalQuote] = useState<LocalPayoutQuote | null>(null);
@@ -263,6 +274,7 @@ function InfiniaLocalSendScreen() {
     requestId.current = null;
     setBridge(null);
     setFinalQuote(null);
+    setFinalFee(undefined);
     setStep('form');
     setFlowError('');
     setFlowLocationBlocked(false);
@@ -440,6 +452,7 @@ function InfiniaLocalSendScreen() {
   // the prepared bridge at review.
   useEffect(() => {
     setQuote(null);
+    setFee(undefined);
     setQuoteError('');
     setQuoteLoading(false); // a cancelled estimate cannot clear its own spinner
     if (!destination || destination.verification === 'not_found' || !pairReady || !amountNumber || amountError) {
@@ -449,8 +462,13 @@ function InfiniaLocalSendScreen() {
     const timer = setTimeout(async () => {
       setQuoteLoading(true);
       try {
-        const next = await fetchPayoutQuote(destination.id, { amount: normalizedAmount });
-        if (!cancelled) setQuote(next);
+        // The fee is read with every estimate, not once per recipient: account
+        // costs riding on it change as other sends reserve or release them.
+        const [next, nextFee] = await Promise.all([
+          fetchPayoutQuote(destination.id, { amount: normalizedAmount }),
+          fetchPayoutFee(destination.id),
+        ]);
+        if (!cancelled) { setQuote(next); setFee(nextFee); }
       } catch (error: any) {
         if (!cancelled) setQuoteError(error?.message || 'No pudimos cotizar este envío.');
       } finally {
@@ -459,6 +477,10 @@ function InfiniaLocalSendScreen() {
     }, 600);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [destination, pairReady, amountNumber, amountError, normalizedAmount]);
+
+  const feeView = processorFeeView(fee, amountNumber);
+  const finalFeeView = processorFeeView(finalFee, amountNumber);
+  const usd = (value: string) => formatRampMoney(value, USD_UNIT);
 
   const recipientReady = Boolean(destination) && destination!.verification !== 'not_found'
     && destination!.verification !== 'pending'
@@ -499,10 +521,14 @@ function InfiniaLocalSendScreen() {
         requestId.current, snapshot.destinationId);
       bridgePrepared = true;
       if (run !== prepareRun.current) return;
-      const priced = await fetchPayoutQuote(snapshot.destinationId, { bridgeId: prepared.internalId });
+      const [priced, pricedFee] = await Promise.all([
+        fetchPayoutQuote(snapshot.destinationId, { bridgeId: prepared.internalId }),
+        fetchPayoutFee(snapshot.destinationId, { bridgeId: prepared.internalId }),
+      ]);
       if (run !== prepareRun.current) return;
       setBridge(prepared);
       setFinalQuote(priced);
+      setFinalFee(pricedFee);
       setReviewedFor(snapshot);
       setStep('review');
     } catch (error: any) {
@@ -1055,11 +1081,28 @@ function InfiniaLocalSendScreen() {
                         <Text style={styles.quoteLabel}>Tipo de cambio</Text>
                         <Text style={styles.quoteValue}>{`${formatRampRate(quote.rate)} ${quote.asset}/USD`}</Text>
                       </View>
+                      {feeView ? (
+                        <>
+                          <View style={styles.quoteRow}>
+                            <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>
+                            <Text style={styles.quoteValue}>{usd(feeView.total)}</Text>
+                          </View>
+                          {processorFeeIncludes(feeView, usd) ? (
+                            <Text style={styles.helperText}>{processorFeeIncludes(feeView, usd)}</Text>
+                          ) : null}
+                        </>
+                      ) : null}
                       <View style={styles.quoteFinalDivider} />
                       <View style={styles.quoteFinalRow}>
                         <Text style={styles.quoteFinalLabel}>Recibe al menos</Text>
                         <Text style={styles.quoteFinalValue}>{formatRampMoney(quote.minimumTarget, quote.asset)}</Text>
                       </View>
+                      {feeView && heavyFeeNote(feeView) ? (
+                        <View style={styles.disclaimerPill}>
+                          <Icon name="alert-circle" size={12} color={colors.primaryDark} />
+                          <Text style={styles.quoteNote}>{heavyFeeNote(feeView)}</Text>
+                        </View>
+                      ) : null}
                       <View style={styles.disclaimerPill}>
                         <Icon name="info" size={12} color={colors.primaryDark} />
                         <Text style={styles.quoteNote}>Si la conversión diera menos, no enviamos el pago y te avisamos.</Text>
@@ -1106,6 +1149,21 @@ function InfiniaLocalSendScreen() {
                     <Text style={styles.reviewLabel}>Envías</Text>
                     <Text style={styles.reviewValue}>{formatRampMoney(normalizedAmount, USD_UNIT)}</Text>
                   </View>
+                  {finalFeeView ? (
+                    <>
+                      <View style={styles.reviewRow}>
+                        <Icon name="credit-card" size={16} color={colors.textSecondary} />
+                        <Text style={styles.reviewLabel}>{`${PROCESSOR_FEE_LABEL} (incluida)`}</Text>
+                        <Text style={styles.reviewValue}>{usd(finalFeeView.total)}</Text>
+                      </View>
+                      {processorFeeIncludes(finalFeeView, usd) ? (
+                        <Text style={styles.helperText}>{processorFeeIncludes(finalFeeView, usd)}</Text>
+                      ) : null}
+                      {heavyFeeNote(finalFeeView) ? (
+                        <Text style={styles.helperText}>{heavyFeeNote(finalFeeView)}</Text>
+                      ) : null}
+                    </>
+                  ) : null}
                   {BigInt(bridge.feeUnits || '0') > 0n ? (
                     <View style={styles.reviewRow}>
                       <Icon name="repeat" size={16} color={colors.textSecondary} />

@@ -30,8 +30,16 @@ import {
   LOCAL_JOURNEY,
   LOCAL_JOURNEY_BRIDGE,
   LOCAL_JOURNEYS,
+  LOCAL_TRANSFER_FEE,
   LocalJourney,
 } from '../services/localMoney';
+import {
+  PROCESSOR_FEE_LABEL,
+  processorFeeDeferred,
+  processorFeeIncludes,
+  processorFeeView,
+  receiptFeeState,
+} from '../utils/localTransferFee';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'LocalTransferStatus'>;
 type Route = RouteProp<MainStackParamList, 'LocalTransferStatus'>;
@@ -85,6 +93,15 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
   const bridgeQuery = useQuery(LOCAL_JOURNEY_BRIDGE, {
     variables: { id: journeyId }, fetchPolicy: 'network-only', errorPolicy: 'all', pollInterval: 10000,
   });
+  // The processor's fee, in its own query (older servers): without an answer
+  // the receipt simply has no fee line.
+  const feeQuery = useQuery(LOCAL_TRANSFER_FEE, {
+    variables: { journeyId }, fetchPolicy: 'cache-and-network', errorPolicy: 'all',
+  });
+  const fee = feeQuery.error ? null : feeQuery.data?.localTransferFee;
+  const feeState = receiptFeeState(fee, journey?.stage || '');
+  const feeView = feeState === 'hidden' ? null : processorFeeView(fee);
+  const usd = (value: string) => formatRampMoney(value, 'US$');
   // Until the bridge status is known, a bank send waiting for its funds is not
   // presented as fine: unknown is not "no signature needed".
   const awaitingFunding = journey?.direction === 'to_bank' && journey.stage === 'awaiting_credit';
@@ -108,6 +125,15 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
       bridgeQuery.startPolling(10000);
     }
   }, [journey?.stage]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The fee is settled as the transfer advances (an incoming one is capped at
+  // what arrived, then collected): re-read it at each stage. Never polled, so
+  // a server without the query is asked once per stage, not every few seconds.
+  const feeStage = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!journey?.stage) return;
+    if (feeStage.current !== undefined && feeStage.current !== journey.stage) feeQuery.refetch().catch(() => {});
+    feeStage.current = journey.stage;
+  }, [journey?.stage]); // eslint-disable-line react-hooks/exhaustive-deps
   // A transfer that completes WHILE this screen watches it offers the global
   // "share to Comunidad" sheet; reopening a finished one from the list never does.
   const sawIncomplete = useRef(false);
@@ -125,6 +151,8 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
     refreshBusy.current = true;
     setRefreshing(true);
     try {
+      // The fee line is optional (older servers): refreshed, never counted as a failure.
+      feeQuery.refetch().catch(() => {});
       const results = await Promise.allSettled([query.refetch(), bridgeQuery.refetch()]);
       setRefreshFailed(results.some(result => result.status === 'rejected' ||
         Boolean(result.value.error || result.value.errors?.length) ||
@@ -298,6 +326,24 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
                   </View>
                   </>
                 )}
+                {feeView ? (
+                  <>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>{PROCESSOR_FEE_LABEL}</Text>
+                      <Text style={styles.reviewValue}>
+                        {/* Charged only once confirmed: until then it says when it will be. */}
+                        {feeState === 'charged' ? usd(feeView.total)
+                          : `${usd(feeView.total)} · ${journey.direction === 'to_wallet' ? 'al convertir' : 'al confirmar'}`}
+                      </Text>
+                    </View>
+                    {processorFeeIncludes(feeView, usd) ? (
+                      <Text style={styles.helperText}>{processorFeeIncludes(feeView, usd)}</Text>
+                    ) : null}
+                    {processorFeeDeferred(feeView, usd) ? (
+                      <Text style={styles.helperText}>{processorFeeDeferred(feeView, usd)}</Text>
+                    ) : null}
+                  </>
+                ) : null}
                 <Text style={styles.reference} selectable>Referencia {journey.internalId}</Text>
               </View>
               {!TERMINAL.has(journey.stage) && !unsigned && !fundingUnknown ? (
