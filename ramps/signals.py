@@ -790,7 +790,12 @@ def _notify_ramp_status(ramp_tx: RampTransaction, *, created: bool, previous_sta
     elif previous_status != ramp_tx.status and ramp_tx.status == 'COMPLETED':
         notification_type = NotificationTypeChoices.RAMP_COMPLETED
         title = 'Operación completada'
-        message = f'Tu {label} de {amount_words} {token_display} se completó.'.strip()
+        # A withdrawal always leaves a dollar balance: "US$50", never the
+        # provider's token name ("50 USDT BSC").
+        dollars = format_amount(wallet_amount, ramp_tx.actor_user, decimals=2, trim=False) if wallet_amount is not None else ''
+        message = (f'Tu {label} de {amount_words} {token_display} se completó.' if is_on_ramp
+                   else f'Tu {label} de US${dollars} se completó.' if dollars
+                   else f'Tu {label} se completó.')
     elif previous_status != ramp_tx.status and ramp_tx.status in {'FAILED', 'AML_REVIEW'}:
         notification_type = NotificationTypeChoices.RAMP_FAILED
         title = 'Operación con problema'

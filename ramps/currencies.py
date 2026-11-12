@@ -11,6 +11,17 @@ RAW_USDT_BSC = 'USDT BSC'
 CUSD_BSC = 'CUSD_BSC'
 CUSD_PLUS = 'CUSD+'
 
+# What users read for a dollar amount: the app formats it as a prefix
+# ("US$1,71"). Koywe's dollar tokens are never shown by their provider name.
+USD_DISPLAY = 'US$'
+_KOYWE_DOLLAR_TOKENS = {'USDC POLYGON', 'USDT BSC'}
+
+
+def fee_display_unit(unit):
+    """A quote fee's unit as the person reads it: Koywe dollar tokens become
+    US$; local currencies and 'USDC Algorand' (the app shows cUSD) stay."""
+    return USD_DISPLAY if str(unit or '').strip().upper() in _KOYWE_DOLLAR_TOKENS else unit
+
 
 def bsc_final_currency(conversion_type: str, *, fallback: str = RAW_USDT_BSC) -> str:
     """Return the user product created by a completed BSC conversion.

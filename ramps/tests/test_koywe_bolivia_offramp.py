@@ -137,3 +137,12 @@ class KoyweBoliviaBankCatalogTests(SimpleTestCase):
             params={'countrySymbol': 'BO'},
             timeout=15,
         )
+
+
+class RampFeeDisplayUnitTests(SimpleTestCase):
+    def test_koywe_dollar_tokens_read_as_dollars(self):
+        from ramps.currencies import fee_display_unit
+        self.assertEqual(fee_display_unit('USDC Polygon'), 'US$')
+        self.assertEqual(fee_display_unit('USDT BSC'), 'US$')
+        self.assertEqual(fee_display_unit('BOB'), 'BOB')  # top-up fees stay in the local currency
+        self.assertEqual(fee_display_unit('USDC Algorand'), 'USDC Algorand')  # the app shows it as cUSD

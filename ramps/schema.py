@@ -49,6 +49,7 @@ from ramps.koywe import (
     BOLIVIA_OFF_RAMP_UNAVAILABLE,
 )
 from security.geo import country_of
+from ramps.currencies import fee_display_unit
 
 logger = logging.getLogger(__name__)
 
@@ -2203,9 +2204,9 @@ class Query(graphene.ObjectType):
             amount_out=_plain(amount_out),
             exchange_rate=str(quote["exchange_rate"]),
             fee_amount=str(quote["fee_amount"]),
-            fee_currency=quote["fee_currency"],
+            fee_currency=fee_display_unit(quote["fee_currency"]),
             network_fee_amount=str(quote["network_fee_amount"]),
-            network_fee_currency=quote["network_fee_currency"],
+            network_fee_currency=fee_display_unit(quote["network_fee_currency"]),
             rate_display=quote["rate_display"],
             total_change_display=quote["total_change_display"],
             token_symbol=quote["token_symbol"],

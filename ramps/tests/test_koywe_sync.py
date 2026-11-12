@@ -186,6 +186,23 @@ class KoyweNotificationTimingUnitTests(SimpleTestCase):
         self.assertEqual(data['fee_amount'], '0.9')
         self.assertEqual(data['fee_bps'], '90')
 
+    @mock.patch('ramps.signals.create_notification')
+    def test_completed_withdrawal_reads_in_dollars(self, notify_mock):
+        ramp = self._ramp(reservation_state='provider_order_recorded')
+        ramp.direction, ramp.status, ramp.final_currency = 'off_ramp', 'COMPLETED', 'USDT BSC'
+        # A per-sender micro-unit tag must not reach the sentence (US$49,999999).
+        ramp.final_amount, ramp.fiat_currency = Decimal('49.999999'), 'BOB'
+
+        ramps_signals._notify_ramp_status(ramp, created=False, previous_status='PROCESSING')
+
+        message = notify_mock.call_args.kwargs['message']
+        self.assertRegex(message, r'^Tu retiro de US\$50[.,]00 se completó\.$')
+        self.assertNotIn('USDT', message)
+
+        ramp.final_amount = Decimal('12.50')
+        ramps_signals._notify_ramp_status(ramp, created=False, previous_status='PROCESSING')
+        self.assertRegex(notify_mock.call_args.kwargs['message'], r'US\$12[.,]50 ')
+
 
 class KoyweOrderAmbiguityTests(SimpleTestCase):
     def _client_with_response(self, response):
