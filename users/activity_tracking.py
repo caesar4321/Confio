@@ -27,6 +27,7 @@ from django.core.cache import cache
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,40 @@ def record_app_build(user_id, meta):
         logger.error(f"Failed to record app build for user {user_id}: {e}")
 
 
+_KEYCHAIN_DIAG = re.compile(r'first=(\d{1,7});max=(\d{1,7});n=(\d{1,7})(?:;c=([01]))?(?:;st=([A-Za-z0-9_-]{1,40}))?')
+# A read this slow means the phone's keystore is queueing. The app keeps the
+# session in memory so one slow read no longer stalls every request
+# (apps/src/services/sessionStore.ts); this is how such a phone is found.
+KEYCHAIN_SLOW_MS = 500
+
+
+def record_keychain_diagnostic(user_id, meta):
+    """Log how long the member's phone took to read its session from the
+    keystore (X-Confio-KC-Diag). Timings only, once an hour per member, and
+    every ten minutes while they are slow. Never raises."""
+    raw = str((meta or {}).get('HTTP_X_CONFIO_KC_DIAG', '') or '')[:120]
+    if not user_id or not raw:
+        return
+    match = _KEYCHAIN_DIAG.fullmatch(raw)
+    if not match:
+        return
+    try:
+        first_ms, max_ms, reads = (int(match.group(i)) for i in (1, 2, 3))
+        slow = max(first_ms, max_ms) >= KEYCHAIN_SLOW_MS
+        cache_key = f"keychain_diag:{'slow' if slow else 'ok'}:{user_id}"
+        if not cache.add(cache_key, True, timeout=600 if slow else 3600):
+            return
+        logger.log(
+            logging.WARNING if slow else logging.INFO,
+            "keychain_diag user=%s first_ms=%s max_ms=%s reads=%s cached=%s storage=%s build=%s platform=%s",
+            user_id, first_ms, max_ms, reads, match.group(4) or '-', match.group(5) or '-',
+            _client_fields(meta).get('last_app_version', '-'),
+            _client_fields(meta).get('last_app_platform', '-'),
+        )
+    except Exception as e:
+        logger.error(f"Failed to record keychain diagnostic for user {user_id}: {e}")
+
+
 def touch_last_activity(user, ts=None, force=False, meta=None):
     """
     Update user's last_activity_at timestamp to mark them as active.
@@ -161,6 +196,7 @@ def touch_last_activity(user, ts=None, force=False, meta=None):
     # cooldown: a visit at 23:59 must not hide one at 00:01.
     record_activity_day(user_id, ts)
     record_app_build(user_id, meta)
+    record_keychain_diagnostic(user_id, meta)
 
     # Cooldown check to prevent excessive updates. cache.add is an atomic
     # claim, so concurrent requests from one member write at most once.

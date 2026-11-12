@@ -57,6 +57,29 @@ class ActivityTrackingMiddlewareTestCase(TestCase):
         self.user.refresh_from_db()
         self.assertEqual((self.user.last_app_version, self.user.last_app_platform), ('5.3.4', 'ios'))
 
+    def test_a_slow_keystore_is_logged_once_with_timings_only(self):
+        meta = {'HTTP_X_CONFIO_VERSION': '5.3.8', 'HTTP_X_CONFIO_PLATFORM': 'android',
+                'HTTP_X_CONFIO_KC_DIAG': 'first=1840;max=2210;n=3;c=1;st=KeystoreAESGCM_NoAuth'}
+        with self.assertLogs('users.activity_tracking', level='WARNING') as logs:
+            touch_last_activity(self.user, meta=meta)
+            touch_last_activity(self.user, force=True, meta=meta)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn(f'keychain_diag user={self.user.id} first_ms=1840 max_ms=2210 reads=3 cached=1 '
+                      'storage=KeystoreAESGCM_NoAuth build=5.3.8 platform=android', logs.output[0])
+
+    def test_a_fast_keystore_is_logged_quietly(self):
+        meta = {'HTTP_X_CONFIO_KC_DIAG': 'first=12;max=40;n=1'}
+        with self.assertLogs('users.activity_tracking', level='INFO') as logs:
+            touch_last_activity(self.user, meta=meta)
+        self.assertEqual([record.levelname for record in logs.records], ['INFO'])
+        self.assertIn('first_ms=12 max_ms=40 reads=1 cached=- storage=-', logs.output[0])
+
+    def test_a_malformed_keystore_header_is_ignored(self):
+        for raw in ('first=abc;max=1;n=1', 'first=1;max=2;n=3;st=bad value\nforged', 'x' * 400, ''):
+            cache.clear()
+            with self.assertNoLogs('users.activity_tracking', level='INFO'):
+                touch_last_activity(self.user, force=True, meta={'HTTP_X_CONFIO_KC_DIAG': raw})
+
     def test_a_request_without_a_build_keeps_the_last_one(self):
         User.objects.filter(id=self.user.id).update(last_app_version='5.2.1', last_app_platform='android')
         for meta in ({}, {'HTTP_X_CONFIO_VERSION': '5.3; drop', 'HTTP_X_CONFIO_PLATFORM': 'ios'}):
