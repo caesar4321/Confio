@@ -16,7 +16,7 @@ Rules behind it: the home screen holds names a LATAM beginner recognises; the ca
 
 **Memecoin rule, open point:** DOGE is the single memecoin exception, catalog only, never home. The proposed wording "only memecoins in the top 10 by market cap" would exclude DOGE itself (CoinGecko rank 12 on 2026-10-19). Pick a wording that matches the intent, e.g. "only the largest memecoin by market cap" or "top 15". DOGE fork test: buy matched the same-block quote, transfers deliver 100%; RT 52.5 / 57.3 / 102.5 bps at $10 / $100 / $1,000 via USDT-0.01%-WBNB-0.25%-DOGE; Binance-Peg upgradeable proxy.
 
-**Cost shown before buying:** Confío's 0.9% applies on the way in and again on the way out, so a full round trip is about 1.8% plus the DEX cost in this CSV. DOGE at $100: ~1.8% + 0.57% ≈ 2.4%. The pre-trade screen should show that total, not the 0.9% alone.
+**Cost shown before buying:** each order screen already shows "Comisión de Confío 0.9%" (live `cUSD.feeBps()`) and, on its own line, "Costo de mercado ~X%" (pool fees from `_pool_fee_bps` plus quoted price impact). Both work for any catalog route (v3 multi-hop and v2), so new tokens need no fee-display change. The round-trip columns in this CSV are market cost only; they are for comparing tokens, not a figure the app shows.
 
 ## Result (screen, before the final decision)
 
