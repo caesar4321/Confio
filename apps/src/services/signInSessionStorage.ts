@@ -1,5 +1,6 @@
 import * as Keychain from 'react-native-keychain';
 import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
+import { invalidateSessionCache } from './sessionStore';
 
 /** A successful social sign-in must leave a usable, verified cold-start JWT. */
 export async function persistSignInSession(accessToken: string, refreshToken?: string): Promise<void> {
@@ -22,6 +23,9 @@ export async function persistSignInSession(accessToken: string, refreshToken?: s
     // A malformed or stale read is not verification of this sign-in.
   }
   if (!saved || saved.accessToken !== accessToken || saved.refreshToken !== refreshToken) {
+    // The write reported success and the keychain says otherwise: the
+    // in-memory session must not go on holding what was never stored.
+    invalidateSessionCache();
     throw new Error('Failed to verify sign-in session');
   }
 }

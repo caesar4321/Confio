@@ -2,6 +2,7 @@
 import './src/setup/polyfills';   // URL, crypto, slice, Buffer - MUST be first
 import './src/setup/silenceLogs'; // Silence noisy logs early in app boot
 import './src/setup/appLockGuard'; // No Modal or Alert stays above the app lock
+import './src/setup/sessionObserver'; // Session held in memory; keystore writes observed
 
 // Apollo Client setup and error messages (after polyfills)
 import { loadErrorMessages, loadDevMessages } from "@apollo/client/dev";

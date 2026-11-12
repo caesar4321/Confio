@@ -104,7 +104,7 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion 24
         targetSdkVersion 36
-        versionCode 195
+        versionCode 197
         versionName "5.3.7"
         // Google Maps SDK key (Comprar's delivery pin), from the git-crypted
         // apps/android/.env; restricted to this package + signing SHA-1.

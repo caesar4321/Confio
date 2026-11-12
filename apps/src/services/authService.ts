@@ -19,6 +19,7 @@ import { getAuth, GoogleAuthProvider, AppleAuthProvider, signInWithCredential, g
 import { Platform } from 'react-native';
 // Using Web3Auth mutations from mutations.ts
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
+import { invalidateSessionCache } from './sessionStore';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
@@ -2983,6 +2984,9 @@ export class AuthService {
       }
     } catch (error) {
       console.error('Error storing tokens:', error);
+      // Whatever the write reported, the read-back did not confirm it: the
+      // in-memory session must not keep a session the keychain may not hold.
+      invalidateSessionCache();
       throw error;
     }
   }

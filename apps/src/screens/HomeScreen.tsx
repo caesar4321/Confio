@@ -619,9 +619,41 @@ export const HomeScreen = () => {
     }
   }, [activeAccount, myBalancesLoading, myBalancesData]);
 
+  // A first balances load that fails (a timed-out or dropped request) used to
+  // leave the skeleton up for good: nothing asked again. Ask again, backing
+  // off, until the first answer arrives. The skeleton stays meanwhile: a
+  // balance that is not known is never drawn as $0.
+  const balancesRetryRef = useRef(0);
   useEffect(() => {
-    if (myBalancesError) {    }
-  }, [myBalancesError]);
+    if (isInitialized || !isAuthReady || !myBalancesError || myBalancesLoading) return;
+    const attempt = balancesRetryRef.current;
+    const delayMs = Math.min(2000 * 2 ** attempt, 15000);
+    let waitingForActive: { remove: () => void } | null = null;
+    const retry = () => {
+      balancesRetryRef.current = attempt + 1;
+      refetchMyBalances().catch(() => undefined);
+    };
+    const timer = setTimeout(() => {
+      if (AppState.currentState === 'active') {
+        retry();
+        return;
+      }
+      // Not from the background; but do not count on another refresh to
+      // pick this up either (the state can be 'unknown' at launch, or
+      // 'background' in split-screen with Home still on show). Ask as soon
+      // as the app is active again.
+      waitingForActive = AppState.addEventListener('change', (next: AppStateStatus) => {
+        if (next !== 'active') return;
+        waitingForActive?.remove();
+        waitingForActive = null;
+        retry();
+      });
+    }, delayMs);
+    return () => {
+      clearTimeout(timer);
+      waitingForActive?.remove();
+    };
+  }, [isInitialized, isAuthReady, myBalancesError, myBalancesLoading, refetchMyBalances]);
 
   // Auto-Swap logic has been refactored into the useAutoSwap hook
 

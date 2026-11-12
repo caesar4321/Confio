@@ -16,6 +16,24 @@ jest.mock('../../services/authService', () => ({
   ensureBscAddressRegistered: jest.fn(),
 }));
 jest.mock('react-native-keychain', () => ({ getGenericPassword: jest.fn() }));
+// The store's own behaviour is covered in services/__tests__/sessionStore.test.ts.
+// Here it reads straight through to the mocked keychain, and a test ends the
+// session the way the app sees it: a reset of the stored entry.
+const mockResetListeners = new Set<() => void>();
+let mockObserverInstalled = true;
+// The monitor looks a second after a reset (SESSION_RESET_GRACE_MS).
+const mockEmitSessionReset = () => {
+  mockResetListeners.forEach(listener => listener());
+  jest.advanceTimersByTime(1000);
+};
+jest.mock('../../services/sessionStore', () => ({
+  getSessionCredentials: () => require('react-native-keychain').getGenericPassword(),
+  isSessionObserverInstalled: () => mockObserverInstalled,
+  onSessionReset: (listener: () => void) => {
+    mockResetListeners.add(listener);
+    return () => { mockResetListeners.delete(listener); };
+  },
+}));
 jest.mock('../../navigation/RootNavigation', () => ({ navigationRef: { current: null } }));
 jest.mock('../../services/linkSend', () => ({
   setLinkOpener: jest.fn(), takeClipboardLink: jest.fn(), takePendingLink: jest.fn(),
@@ -77,6 +95,7 @@ describe('session loss after biometric unlock', () => {
     mockClient.mutate.mockResolvedValue({ data: {} });
     mockAuthenticate.mockResolvedValue(true);
     mockExpired = false;
+    mockObserverInstalled = true;
   });
 
   afterEach(async () => {
@@ -125,13 +144,13 @@ describe('session loss after biometric unlock', () => {
     await mount();
     expect(authState!.isAuthenticated).toBe(true);
     (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
-    await act(async () => { jest.advanceTimersByTime(1000); });
+    await act(async () => { mockEmitSessionReset(); });
     expect(authState!.isAuthenticated).toBe(false);
     expect(Alert.alert).toHaveBeenCalledTimes(1);
     expect(navigationRef.current.reset).toHaveBeenCalledWith({
       index: 0, routes: [{ name: 'Auth', params: { screen: 'Login' } }],
     });
-    await act(async () => { jest.advanceTimersByTime(2000); });
+    await act(async () => { mockEmitSessionReset(); });
     expect(Alert.alert).toHaveBeenCalledTimes(1);
   });
 
@@ -261,6 +280,93 @@ describe('session loss after biometric unlock', () => {
     expect(authState!.isAuthenticated).toBe(false);
   });
 
+  // protects=a person who signs out is not told their session vanished; fails_when=signOut's own keychain reset reaches the session-ended alert; no_claim=sessions ended by the server
+  it('does not explain a session the person ended themselves', async () => {
+    await mount();
+    let finishSignOut!: () => void;
+    mockAuthSignOut.mockImplementationOnce(() => new Promise<void>(resolve => { finishSignOut = resolve; }));
+    let signingOut!: Promise<void>;
+    await act(async () => { signingOut = authState!.signOut(); });
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
+    await act(async () => { mockEmitSessionReset(); });
+    await act(async () => { finishSignOut(); await signingOut; });
+    await act(async () => { mockEmitSessionReset(); });
+    expect(authState!.isAuthenticated).toBe(false);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('still notices a lost session by asking again when the keychain cannot be observed', async () => {
+    mockObserverInstalled = false;
+    await mount();
+    expect(authState!.isAuthenticated).toBe(true);
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
+    await act(async () => { jest.advanceTimersByTime(15_000); });
+    expect(authState!.isAuthenticated).toBe(false);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
+  // protects=a person whose session the server ended reaches login; fails_when=one unreadable keychain answer ends the watching; no_claim=how long the keychain stays unreadable
+  it('asks again when the keychain cannot be read after a reset', async () => {
+    await mount();
+    (Keychain.getGenericPassword as jest.Mock).mockRejectedValueOnce(new Error('keystore busy'));
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
+    await act(async () => { mockEmitSessionReset(); });
+    expect(authState!.isAuthenticated).toBe(true);
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    expect(authState!.isAuthenticated).toBe(false);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
+  // protects=a flow that clears the session and writes a new one at once; fails_when=a return to the app inside the grace signs the person out; no_claim=flows slower than the grace
+  it('a return to the app right after a reset still waits out the grace', async () => {
+    const handlers = new Set<(state: string) => unknown>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+      handlers.add(handler);
+      return { remove: () => handlers.delete(handler) };
+    }) as any);
+    await mount();
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
+    await act(async () => { mockResetListeners.forEach(listener => listener()); });
+    await act(async () => { [...handlers].forEach(h => { h('active'); }); });
+    expect(authState!.isAuthenticated).toBe(true);
+    // The new session is written within the grace.
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({
+      password: JSON.stringify({ accessToken: 'access2', refreshToken: 'refresh2' }),
+    });
+    await act(async () => { jest.advanceTimersByTime(1500); });
+    expect(authState!.isAuthenticated).toBe(true);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  // protects=a clear-then-write flow on a slow keychain; fails_when=a check already waiting on the keychain acts on what it read inside the grace; no_claim=flows slower than the grace
+  it('a check that was already reading when the reset landed waits out the grace too', async () => {
+    const handlers = new Set<(state: string) => unknown>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+      handlers.add(handler);
+      return { remove: () => handlers.delete(handler) };
+    }) as any);
+    await mount();
+    let answerRead: (value: unknown) => void = () => {};
+    (Keychain.getGenericPassword as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { answerRead = resolve; }));
+    await act(async () => { [...handlers].forEach(h => { h('active'); }); });
+    // The reset lands while that read is still waiting, then the read answers empty.
+    await act(async () => { mockResetListeners.forEach(listener => listener()); answerRead(false); });
+    expect(authState!.isAuthenticated).toBe(true);
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValue({
+      password: JSON.stringify({ accessToken: 'access2', refreshToken: 'refresh2' }),
+    });
+    await act(async () => { jest.advanceTimersByTime(1500); });
+    expect(authState!.isAuthenticated).toBe(true);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('does not poll the keychain when resets are observed', async () => {
+    await mount();
+    const readsAfterMount = (Keychain.getGenericPassword as jest.Mock).mock.calls.length;
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect((Keychain.getGenericPassword as jest.Mock).mock.calls.length).toBe(readsAfterMount);
+  });
+
   it('leaves the lock for login when the session ends while locked', async () => {
     const handlers = new Set<(state: string) => unknown>();
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
@@ -278,7 +384,7 @@ describe('session loss after biometric unlock', () => {
     nowSpy.mockRestore();
     expect(authState!.isLocked).toBe(true);
     (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
-    await act(async () => { jest.advanceTimersByTime(1000); });
+    await act(async () => { mockEmitSessionReset(); });
     expect(authState!.isAuthenticated).toBe(false);
     expect(authState!.isLocked).toBe(false);
   });

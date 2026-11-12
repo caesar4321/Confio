@@ -9,6 +9,7 @@ import { useApolloClient, gql } from '@apollo/client';
 import * as Keychain from 'react-native-keychain';
 import { jwtDecode } from 'jwt-decode';
 import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
+import { getSessionCredentials, isSessionObserverInstalled, onSessionReset } from '../services/sessionStore';
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { biometricAuthService } from '../services/biometricAuthService';
@@ -173,6 +174,12 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// How often the session is re-checked when resets cannot be observed
+// (services/sessionStore.ts could not watch the keychain).
+const SESSION_FALLBACK_POLL_MS = 15_000;
+// How long after a keychain reset the session is looked at again.
+const SESSION_RESET_GRACE_MS = 1_000;
+
 const explainSessionEnded = () => alertAboveLock(
   'Vuelve a iniciar sesión',
   'Tu sesión ya no está disponible. Continúa con la misma cuenta de Google o Apple que usaste para crear tu cuenta de Confío.',
@@ -199,6 +206,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastInactiveAtRef = useRef<number | null>(null);
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
+  // True from signOut() until the next session begins, so its own keychain
+  // reset is not reported as a session that ended unexpectedly.
+  const voluntarySignOutRef = useRef<boolean>(false);
+  // Until this moment a session reset is too fresh to judge (the grace in
+  // the session monitor). A ref: the monitor's effect can run again inside
+  // the grace and must not forget it.
+  const resetGraceUntilRef = useRef<number>(0);
   const resumeAuthenticationRef = useRef(false);
   // Last known "the phone has a lock set up for Confío"; null until read.
   const deviceLockEnrolledRef = useRef<boolean | null>(null);
@@ -292,10 +306,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
     for (let attempt = 0; attempt < retries; attempt += 1) {
       try {
-        const credentials = await Keychain.getGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME,
-        });
+        const credentials = await getSessionCredentials();
 
         if (credentials && 'password' in credentials && credentials.password) {
           return credentials;
@@ -551,10 +562,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
 
                 // Get existing refresh token
-                const credentials = await Keychain.getGenericPassword({
-                  service: AUTH_KEYCHAIN_SERVICE,
-                  username: AUTH_KEYCHAIN_USERNAME
-                });
+                const credentials = await getSessionCredentials();
 
                 if (credentials) {
                   const tokens = JSON.parse(credentials.password);
@@ -608,20 +616,57 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     loadProfileForCurrentAccount();
   }, [isAuthenticated]);
 
-  // Monitor for credential invalidation (e.g., token version mismatch on server)
+  // Monitor for credential invalidation (e.g., token version mismatch on server).
+  // Driven by the reset itself, not a timer: this used to read the keystore
+  // every second, which on a phone with a slow keystore queued ahead of
+  // every request's own read and starved Home (services/sessionStore.ts).
+  // A new session: whatever sign-out came before it is over. Cleared here
+  // rather than when signOut() returns, so a check still in flight from that
+  // sign-out's own reset cannot slip through and raise the alert. Its own
+  // effect: the monitor below also re-runs when navigation becomes ready.
+  useEffect(() => {
+    if (isAuthenticated) voluntarySignOutRef.current = false;
+    else resetGraceUntilRef.current = 0;
+  }, [isAuthenticated]);
+
   useEffect(() => {
     if (!isAuthenticated) return;
     let sessionEndHandled = false;
+    let pendingResetCheck: ReturnType<typeof setTimeout> | null = null;
+    let failedChecks = 0;
+    const scheduleCheck = (delayMs: number) => {
+      if (pendingResetCheck) clearTimeout(pendingResetCheck);
+      pendingResetCheck = setTimeout(() => {
+        pendingResetCheck = null;
+        void checkSession();
+      }, delayMs);
+    };
 
-    const checkInterval = setInterval(async () => {
+    const checkSession = async () => {
+      // Whoever asks (the reset itself, a return to the app, this effect
+      // running again): never inside the grace that follows a reset.
+      const graceLeft = resetGraceUntilRef.current - Date.now();
+      if (graceLeft > 0) {
+        scheduleCheck(graceLeft);
+        return;
+      }
       try {
-        const credentials = await Keychain.getGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME,
-        });
+        const credentials = await getSessionCredentials();
+        failedChecks = 0;
+        // The read can be slow. If this effect was torn down meanwhile it
+        // is no longer this check's call; and if a reset landed while it
+        // was waiting, what it read is from inside that reset's grace.
+        if (sessionEndHandled) return;
+        const graceAfterRead = resetGraceUntilRef.current - Date.now();
+        if (graceAfterRead > 0) {
+          scheduleCheck(graceAfterRead);
+          return;
+        }
 
         // If credentials are gone but we're still marked as authenticated, log out
-        if (!credentials && isAuthenticated && !sessionEndHandled) {
+        // signOut() below ends the session itself and says nothing: only a
+        // session that ended on its own is explained to the person.
+        if (!credentials && isAuthenticated && !sessionEndHandled && !voluntarySignOutRef.current) {
           sessionEndHandled = true;
           resetAuthReady();
           setIsAuthenticated(false);
@@ -649,12 +694,44 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         }
       } catch (error) {
         console.error('[AuthContext] Error checking credentials:', error);
+        // "Could not read" is not an answer. Nothing else will ask again
+        // (no reset is coming, requests carry no token to be rejected), so
+        // ask again here, backing off, until the keychain answers.
+        if (!sessionEndHandled) {
+          failedChecks += 1;
+          scheduleCheck(Math.min(1000 * 2 ** failedChecks, SESSION_FALLBACK_POLL_MS));
+        }
       }
-    }, 1000); // Check every second
+    };
+
+    // A moment after the reset, not at once: a flow that clears the session
+    // and writes a new one straight away has then finished, and is not a
+    // session that ended. The old once-a-second poll gave the same grace.
+    const unsubscribe = onSessionReset(() => {
+      resetGraceUntilRef.current = Date.now() + SESSION_RESET_GRACE_MS;
+      scheduleCheck(SESSION_RESET_GRACE_MS);
+    });
+    // Once on arrival too: a reset that landed between sign-in and this
+    // effect would otherwise go unnoticed.
+    void checkSession();
+    // And on every return to the app. With the session in memory this
+    // answers from memory and costs nothing; when memory holds nothing (a
+    // write that failed) it is one keychain read per foreground.
+    const foreground = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void checkSession();
+    });
+    // If the keychain could not be observed, no reset is ever announced:
+    // fall back to asking, far less often than the old once a second.
+    const fallbackPoll = isSessionObserverInstalled()
+      ? null
+      : setInterval(() => { void checkSession(); }, SESSION_FALLBACK_POLL_MS);
 
     return () => {
       sessionEndHandled = true;
-      clearInterval(checkInterval);
+      unsubscribe();
+      if (pendingResetCheck) clearTimeout(pendingResetCheck);
+      foreground.remove();
+      if (fallbackPoll) clearInterval(fallbackPoll);
     };
   }, [isAuthenticated, isNavigationReady]);
 
@@ -717,10 +794,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           coverApp();
         }
         try {
-          const creds = await Keychain.getGenericPassword({
-            service: AUTH_KEYCHAIN_SERVICE,
-            username: AUTH_KEYCHAIN_USERNAME,
-          });
+          const creds = await getSessionCredentials();
           if (!creds || !creds.password) return;
           const tokens = JSON.parse(creds.password);
           const at = tokens.accessToken;
@@ -1448,6 +1522,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       alertAboveLock('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta.');
       return;
     }
+    voluntarySignOutRef.current = true;
     try {
       resetAuthReady();
       const authService = AuthService.getInstance();

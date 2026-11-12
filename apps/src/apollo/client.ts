@@ -14,9 +14,10 @@ import { shouldSkipStoredJwt, shouldNeverMutateSession } from './authPolicy';
 import { successProvesUnbanned } from '../services/emergencyExit/banSignal';
 import { mobileClientHeaders } from '../services/mobileClientHeaders';
 
-// Extract constants to avoid circular dependency
-export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
-export const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
+import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME, getSessionCredentials } from '../services/sessionStore';
+
+// Re-exported: most of the app imports the session constants from here.
+export { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME };
 
 interface CustomJwtPayload {
   user_id: number;
@@ -76,10 +77,10 @@ export function refreshAccessToken(tokens: SessionTokens): Promise<string> {
 
 async function getStoredTokens(): Promise<SessionTokens | null> {
   try {
-    const credentials = await Keychain.getGenericPassword({
-      service: AUTH_KEYCHAIN_SERVICE,
-      username: AUTH_KEYCHAIN_USERNAME
-    });
+    // The in-memory session (services/sessionStore.ts), not a keystore read:
+    // this runs once more on every request, to catch a sign-out or account
+    // switch that landed while the request was being prepared.
+    const credentials = await getSessionCredentials();
     if (!credentials) return null;
     const parsed = JSON.parse((credentials as any).password || '{}');
     if (typeof parsed.accessToken !== 'string' || typeof parsed.refreshToken !== 'string') return null;
@@ -470,10 +471,7 @@ const authLink = setContext(async (operation, previousContext) => {
   try {
     let credentials;
     try {
-      credentials = await Keychain.getGenericPassword({
-        service: AUTH_KEYCHAIN_SERVICE,
-        username: AUTH_KEYCHAIN_USERNAME
-      });
+      credentials = await getSessionCredentials();
     } catch (keychainError: any) {
       if (keychainError?.message?.includes('No entry found')) {
         credentials = false;
