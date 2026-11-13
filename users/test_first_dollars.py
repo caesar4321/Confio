@@ -133,6 +133,15 @@ class BackfillFirstDollarsTests(TestCase):
         ana.refresh_from_db()
         self.assertEqual(ana.first_cusd_acquired_at, early)
 
+    def test_soft_deleted_conversions_are_ignored(self):
+        bob = make('bob-b')
+        conv = convert(bob)
+        Conversion.objects.filter(pk=conv.pk).update(is_deleted=True)
+        User.objects.filter(pk=bob.pk).update(first_cusd_acquired_at=None)
+        call_command('backfill_first_dollars_received', '--apply', stdout=StringIO())
+        bob.refresh_from_db()
+        self.assertIsNone(bob.first_cusd_acquired_at)
+
     def test_since_filters_old_inflows_and_already_set_is_untouched(self):
         old, done = make('old-b'), make('done-b')
         convert(old, at=timezone.now() - timedelta(days=400))

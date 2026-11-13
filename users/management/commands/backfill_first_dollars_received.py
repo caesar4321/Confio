@@ -38,7 +38,7 @@ def first_inflows():
 
     for uid, at in Conversion.objects.filter(
         status='COMPLETED', conversion_type__in=INCOMING_CONVERSION_TYPES,
-        actor_type='user', actor_user__isnull=False,
+        actor_type='user', actor_user__isnull=False, is_deleted=False,
     ).values_list('actor_user_id', 'completed_at'):
         add(uid, at)
     for uid, sender, at in SendTransaction.objects.filter(
