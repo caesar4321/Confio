@@ -55,8 +55,8 @@ SCENARIOS = {
         '¿Cuánto rinde Confío Dollar+?',
         '¿Cuánto gano al año si guardo en Confío Dollar+?',
     ],
-    # Asked in Bolivia, where Confío has no withdrawals to a bank: "FIO" is
-    # ambiguous, so the assistant should ask, not send them to a bank payout.
+    # Asked in Bolivia: "FIO" is ambiguous (a bank? a person? another app?),
+    # so the assistant should ask before sending them to a bank payout.
     'clarify': [
         'Como puedo pasar dinero ala cuenta de fio',
     ],

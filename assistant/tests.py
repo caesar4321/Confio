@@ -943,7 +943,7 @@ class SeventeenthPassTests(TestCase):
         self.assertFalse(SupportMessage.objects.filter(body='Abre Pagar').exists())
 
 
-from .prompts import FAQ, build_system_prompt, faq_text  # noqa: E402
+from .prompts import BO_RAILS_NOTE, FAQ, build_system_prompt, faq_text  # noqa: E402
 
 
 class PromptTests(TestCase):
@@ -1023,20 +1023,23 @@ class BoliviaWithdrawPromptTests(TestCase):
 
     def test_note_follows_the_build(self):
         off = build_system_prompt(**self.COMMON)
-        self.assertIn('En Bolivia hoy no se puede retirar a bolivianos', off)
+        self.assertIn('el retiro a bolivianos no está disponible en este momento', off)
+        withdraw_part = BO_RAILS_NOTE.split('Pagar QR locales')[0]  # off = paused, not "coming"
+        self.assertIn('sin decir que llegará pronto', withdraw_part)
+        self.assertNotIn('agrega que llegará', withdraw_part)
         live = build_system_prompt(bo_withdraw='live', **self.COMMON)
         self.assertIn('Transferencia bancaria', live)
-        self.assertNotIn('no se puede retirar a bolivianos', live)
+        self.assertNotIn('retiro a bolivianos no está disponible', live)
         self.assertIn('Pagar QR locales todavía no se puede', live)
         business = build_system_prompt(bo_withdraw='business', **self.COMMON)
         self.assertIn('solo desde una cuenta personal', business)
-        self.assertNotIn('no se puede retirar a bolivianos', business)
+        self.assertNotIn('retiro a bolivianos no está disponible', business)
         update = build_system_prompt(bo_withdraw='update', **self.COMMON)
         self.assertIn('actualice Confío', update)
-        self.assertNotIn('no se puede retirar a bolivianos', update)
-        soon = build_system_prompt(bo_withdraw='next_update', **self.COMMON)
-        self.assertIn('en revisión en Google Play', soon)
-        self.assertNotIn('no se puede retirar a bolivianos', soon)
+        self.assertNotIn('retiro a bolivianos no está disponible', update)
+        unknown = build_system_prompt(bo_withdraw='unknown', **self.COMMON)
+        self.assertIn('No digas que no existe', unknown)
+        self.assertNotIn('retiro a bolivianos no está disponible', unknown)
 
     def test_state_per_viewer(self):
         from security.models import AppVersionPolicy
@@ -1046,15 +1049,12 @@ class BoliviaWithdrawPromptTests(TestCase):
                                    request_meta={'HTTP_X_CONFIO_VERSION': version, 'HTTP_X_CONFIO_PLATFORM': 'android'})
         with override_settings(KOYWE_BO_OFF_RAMP_MIN_APP_VERSION='5.3.7'):
             self.assertEqual(_bo_withdraw(viewer('5.3.7'), 'BO'), 'live')
-            # No store build at the floor yet: never "update", the cautious note.
-            self.assertIsNone(_bo_withdraw(viewer('5.3.6'), 'BO'))
-            self.assertIsNone(_bo_withdraw(viewer('5.3.6', 'business'), 'BO'))
-            AppVersionPolicy.objects.update_or_create(platform='android', defaults={'latest_version': '5.3.6'})
-            self.assertIsNone(_bo_withdraw(viewer('5.3.6'), 'BO'))
-            # Out on iOS, Android still in review: "next Android update", never "update now".
-            AppVersionPolicy.objects.update_or_create(platform='ios', defaults={'latest_version': '5.3.7'})
-            self.assertEqual(_bo_withdraw(viewer('5.3.6'), 'BO'), 'next_update')
+            # No store build at the floor that we know of: neither "update now" nor "not available".
+            self.assertEqual(_bo_withdraw(viewer('5.3.6'), 'BO'), 'unknown')
             self.assertEqual(_bo_withdraw(viewer('5.3.6', 'business'), 'BO'), 'business')
+            AppVersionPolicy.objects.update_or_create(platform='android', defaults={'latest_version': '5.3.6'})
+            self.assertEqual(_bo_withdraw(viewer('5.3.6'), 'BO'), 'unknown')
+            AppVersionPolicy.objects.update_or_create(platform='ios', defaults={'latest_version': '5.3.7'})
             ios_old = SimpleNamespace(account_type='personal', is_employee=False,
                                       request_meta={'HTTP_X_CONFIO_VERSION': '5.3.6', 'HTTP_X_CONFIO_PLATFORM': 'ios'})
             self.assertEqual(_bo_withdraw(ios_old, 'BO'), 'update')
@@ -1064,6 +1064,10 @@ class BoliviaWithdrawPromptTests(TestCase):
             self.assertIsNone(_bo_withdraw(viewer('5.3.7'), 'PE'))
             self.assertEqual(_bo_withdraw(viewer('5.3.7', 'business'), 'BO'), 'business')
             self.assertEqual(_bo_withdraw(viewer('5.3.7', 'business', is_employee=True), 'BO'), 'business')
+            # A failure reading the state never becomes "not available".
+            with patch('ramps.koywe.off_ramp_offered', side_effect=RuntimeError('db')):
+                self.assertEqual(_bo_withdraw(viewer('5.3.7'), 'BO'), 'unknown')
+                self.assertEqual(_bo_withdraw(viewer('5.3.7', 'business'), 'BO'), 'business')
         with override_settings(KOYWE_BO_OFF_RAMP_MIN_APP_VERSION=''):
             self.assertIsNone(_bo_withdraw(viewer('9.9.9'), 'BO'))
 

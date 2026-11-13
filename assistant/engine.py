@@ -1458,9 +1458,10 @@ def _ve_rail(viewer, country, direction):
 
 def _bo_withdraw(viewer, country):
     """'live' (Bolivian bank withdrawal on this build), 'update' (on, but
-    this build predates it), 'next_update' (out on the other store, not yet
-    on this one), 'business' (on, but Koywe serves personal accounts only:
-    ramps/schema.py CreateRampOrder), or None (off, or not Bolivia)."""
+    this build predates it), 'business' (on, but Koywe serves personal
+    accounts only: ramps/schema.py CreateRampOrder), 'unknown' (on, but this
+    build's store state can't be read: never claim it's unavailable), or
+    None (switched off, or not Bolivia)."""
     if (country or '').upper() != 'BO':
         return None
     try:
@@ -1479,20 +1480,15 @@ def _bo_withdraw(viewer, country):
             latest = _version(policy.latest_version) if policy else None
             floor = _version(settings.KOYWE_BO_OFF_RAMP_MIN_APP_VERSION)
             if latest is None or floor is None or latest < floor:
-                # Out on iOS but not on Play yet (5.3.7 in review, 2026-11-12):
-                # it comes with the next Android update. The note says so.
-                elsewhere = any(_version(v) is not None and _version(v) >= floor
-                                for v in AppVersionPolicy.objects.exclude(platform=platform)
-                                .values_list('latest_version', flat=True)) if floor else False
-                if elsewhere and platform == 'android':
-                    return 'next_update' if viewer.account_type == 'personal' else 'business'
-                return None
+                # No store build at the floor that we know of (or no platform
+                # header): don't promise an update, don't deny it either.
+                return 'unknown' if viewer.account_type == 'personal' else 'business'
         if viewer.account_type != 'personal':
             return 'business'
         return 'live' if on_this_build else 'update'
-    except Exception:  # noqa: BLE001 - unknown: the cautious "not available" note
+    except Exception:  # noqa: BLE001 - live for everyone since 2026-11-13: "unknown", not "unavailable"
         logger.warning('Confio Assistant: Bolivia withdrawal state unavailable', exc_info=True)
-        return None
+        return 'unknown' if getattr(viewer, 'account_type', 'personal') == 'personal' else 'business'
 
 
 def _ve_topup(viewer, country):

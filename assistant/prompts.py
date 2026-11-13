@@ -190,12 +190,15 @@ def _paid_offer_sections(destinations, ia_plus_bundled=False):
 # Ecuador too (2026-10-26): no local top-up there, and Kleber was sent to Recargar.
 # Honduras and its neighbours too (2026-11-01): Adán was told to withdraw to a bank.
 NO_RAMP_COUNTRIES = {'VE', 'NI', 'PA', 'CU', 'EC', 'HN', 'GT', 'SV', 'CR', 'DO', 'UY', 'PY'}
-BO_RAILS_NOTE = ('En Bolivia hoy no se puede retirar a bolivianos ni pagar QR locales: si abres Pagar o hablas de '
-                 'retirar, dilo en una frase y agrega que llegará muy pronto (sin fecha). Pagar sí sirve para QR de '
+# Only when the withdrawal is switched off (KOYWE_BO_OFF_RAMP_MIN_APP_VERSION
+# unset): since 2026-11-13 it is live on both stores, so off means paused.
+BO_RAILS_NOTE = ('En Bolivia el retiro a bolivianos no está disponible en este momento: si habla de retirar, dilo en '
+                 'una frase, sin fecha y sin decir que llegará pronto. Pagar QR locales todavía no se puede: si abres '
+                 'Pagar, dilo en una frase y agrega que llegará muy pronto (sin fecha). Pagar sí sirve para QR de '
                  'cobro de Confío. Esto prevalece sobre lo que diga el FAQ de Bolivia.\n')
 # Bolivian bank withdrawal (Koywe WIREBO) per build: 'live' (this build has
-# it), 'update' (on, this build predates it), 'next_update' (out on the
-# other store only), 'business' (on, but Koywe
+# it), 'update' (on, this build predates it), 'unknown' (on, store state
+# unreadable), 'business' (on, but Koywe
 # serves personal accounts only) or None (off: BO_RAILS_NOTE).
 BO_WITHDRAW_NOTES = {
     'live': ('En Bolivia ya se puede retirar a bolivianos a una cuenta bancaria a su nombre: en Enviar, toca «A mi '
@@ -207,13 +210,11 @@ BO_WITHDRAW_NOTES = {
                'lo encuentra en Enviar → «A mi propia cuenta» → Transferencia bancaria (con su identidad verificada). Pagar '
                'QR locales todavía no se puede (llegará muy pronto, sin fecha); Pagar sí sirve para QR de cobro de '
                'Confío. Esto prevalece sobre lo que diga el FAQ de Bolivia.\n'),
-    'next_update': ('En Bolivia ya se puede retirar a bolivianos a una cuenta bancaria a su nombre en la versión '
-                    'nueva de Confío, que ya salió en iPhone; en Android llega con la próxima actualización, que está '
-                    'en revisión en Google Play (sin fecha). Si quiere retirar, díselo así: no le pidas actualizar '
-                    'todavía. Cuando actualice, lo encuentra en Enviar → «A mi propia cuenta» → Transferencia '
-                    'bancaria (con su identidad verificada). Pagar QR locales todavía no se puede (llegará muy pronto, '
-                    'sin fecha); Pagar sí sirve para QR de cobro de Confío. Esto prevalece sobre lo que diga el FAQ de '
-                    'Bolivia.\n'),
+    'unknown': ('En Bolivia se puede retirar a bolivianos a una cuenta bancaria a su nombre con la app actualizada: '
+                'si quiere retirar, dile que lo busque en Enviar → «A mi propia cuenta» → Transferencia bancaria (con su '
+                'identidad verificada) y que, si no lo ve, actualice Confío desde la tienda. No digas que no existe ni '
+                'que llegará pronto. Pagar QR locales todavía no se puede (llegará muy pronto, sin fecha); Pagar sí '
+                'sirve para QR de cobro de Confío. Esto prevalece sobre lo que diga el FAQ de Bolivia.\n'),
     'business': ('En Bolivia ya se puede retirar a bolivianos a una cuenta bancaria, pero solo desde una cuenta '
                  'personal: en las cuentas de negocio todavía no hay recargas ni retiros locales. No le digas que el '
                  'retiro no existe ni que llegará pronto. Pagar QR locales todavía no se puede (llegará muy pronto, '
