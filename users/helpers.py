@@ -1,8 +1,9 @@
 """
 Helpers for post-deposit ICP capture + Rating modal triggers.
 
-Both helpers are called from post_save signal handlers on Conversion
-(usdc_transactions/signals.py) and SendTransaction (send/models.py).
+note_dollars_received() is called from post_save signal handlers on incoming
+Conversion (usdc_transactions/signals.py) and received cUSD/Dollar+
+SendTransaction (send/models.py). Every route money comes in ends in one of them.
 They are idempotent: the fast-path early-return avoids the DB hit when the
 target field is already set; the select_for_update inside the transaction
 serializes concurrent writers so the earliest acquisition timestamp wins.
@@ -30,6 +31,30 @@ def mark_first_cusd_acquired_if_null(user, acquired_at):
         if u.first_cusd_acquired_at is None:
             u.first_cusd_acquired_at = acquired_at
             u.save(update_fields=['first_cusd_acquired_at'])
+
+
+def note_dollars_received(user, received_at):
+    """A user just received dollars by any route: arm the ICP poll / rating.
+
+    Routes: an incoming conversion (USDT/USDC -> Dollar+/cUSD) or a received
+    cUSD/Dollar+ send. first_cusd_acquired_at keeps
+    its historical name but now means "first dollars in", whatever the token.
+    Callers swallow exceptions: modal arming must never fail a money write.
+    received_at must be the inflow's own fixed time (completed_at, created_at),
+    never a moving updated_at: providers re-save finished rows, and the rating
+    prompt may only arm for dollars that arrived after the ICP answer, not for
+    a re-save of the inflow that opened the poll.
+    """
+    if user is None or received_at is None:
+        return
+    with transaction.atomic():
+        mark_first_cusd_acquired_if_null(user, received_at)
+        user.refresh_from_db(
+            fields=['first_cusd_acquired_at', 'confio_icp_captured_at',
+                    'rating_prompt_due_at', 'confio_rating_prompted_at']
+        )
+        if user.confio_icp_captured_at and received_at > user.confio_icp_captured_at:
+            arm_rating_prompt_if_eligible(user)
 
 
 def arm_rating_prompt_if_eligible(user):

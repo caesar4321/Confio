@@ -244,30 +244,34 @@ def send_txn_activity(sender, instance: SendTransaction, created, update_fields=
             pass
 
 
+# Tokens that land in the balance without a conversion on the recipient's side.
+BALANCE_TOKEN_TYPES = ('CUSD', 'CUSD_PLUS')
+
+
 @receiver(post_save, sender=SendTransaction)
 def handle_first_cusd_on_send_receive(sender, instance: SendTransaction, **kwargs):
-    """Trigger ICP/Rating modal arming when a user receives their first cUSD via P2P send.
+    """Trigger ICP/Rating modal arming when a user receives cUSD or Dollar+ via a send.
 
-    Fires on any save where the row is now CONFIRMED + cUSD + has a recipient_user.
+    Fires on any save where the row is now CONFIRMED + cUSD/Dollar+ + has a
+    recipient_user. Those land in the balance with no conversion on the
+    recipient's side; USDT arrivals are caught by their USDT -> Dollar+
+    conversion instead (usdc_transactions/signals.py).
     Idempotent: mark_first_cusd_acquired_if_null is a no-op if already set.
-    No confirmed_at column on SendTransaction, so use updated_at as the proxy
-    for confirmation time — when status transitions to CONFIRMED, updated_at
-    is set to that moment by auto_now=True.
+    Payments to a business (recipient_user = its owner) and transfers between
+    one's own accounts don't count. Uses created_at: updated_at moves on every
+    later re-save, which would let a re-save arm the rating prompt.
     """
     try:
         if instance.is_deleted:
             return
-        if instance.status != 'CONFIRMED' or instance.token_type != 'CUSD':
+        if instance.status != 'CONFIRMED' or instance.token_type not in BALANCE_TOKEN_TYPES:
             return
-        if instance.recipient_user_id is None:
+        if instance.recipient_user_id is None or instance.recipient_business_id is not None:
             return
-        from users.helpers import mark_first_cusd_acquired_if_null, arm_rating_prompt_if_eligible
-        recipient = instance.recipient_user
-        mark_first_cusd_acquired_if_null(recipient, instance.updated_at)
-        recipient.refresh_from_db(
-            fields=['confio_icp_captured_at', 'rating_prompt_due_at', 'confio_rating_prompted_at']
-        )
-        arm_rating_prompt_if_eligible(recipient)
+        if instance.sender_user_id == instance.recipient_user_id:
+            return  # moving own money between own accounts is not money in
+        from users.helpers import note_dollars_received
+        note_dollars_received(instance.recipient_user, instance.created_at)
     except Exception:
         # Swallow — never block the send-transaction write path on modal-arming.
         pass

@@ -377,26 +377,28 @@ def handle_conversion_soft_delete_for_usdc(sender, instance, **kwargs):
         UnifiedUSDCTransactionTable.objects.filter(conversion=instance).delete()
 
 
+INCOMING_CONVERSION_TYPES = ('usdc_to_cusd', 'usdt_to_cusd', 'to_savings')
+
+
 @receiver(post_save, sender=Conversion)
 def handle_first_cusd_on_conversion(sender, instance, **kwargs):
-    """Trigger ICP/Rating modal arming on first confirmed cUSD acquisition.
+    """Trigger ICP/Rating modal arming on a user's first dollars in.
 
-    Fires only for completed USDC→cUSD conversions with a personal actor_user.
-    Business-account conversions short-circuit (actor_user is null at that path).
+    Every way money comes in ends in a conversion into the user's balance:
+    on BSC the on-chain leg is always USDT -> Dollar+ (to_savings) or
+    USDT -> cUSD, whatever the origin (ramp, Infinia/Cobre, external deposit).
+    usdc_to_cusd alone missed every BSC user (no poll from 2026-08 to 2026-11).
+    Personal conversions only: business ones have actor_type 'business'.
     """
     if instance.is_deleted:
         return
-    if instance.status != 'COMPLETED' or instance.conversion_type != 'usdc_to_cusd':
+    if instance.status != 'COMPLETED' or instance.conversion_type not in INCOMING_CONVERSION_TYPES:
         return
-    if instance.actor_user_id is None or instance.completed_at is None:
+    if instance.actor_type != 'user' or instance.actor_user_id is None or instance.completed_at is None:
         return
     try:
-        from users.helpers import mark_first_cusd_acquired_if_null, arm_rating_prompt_if_eligible
-        mark_first_cusd_acquired_if_null(instance.actor_user, instance.completed_at)
-        # Refetch to see ICP capture state armed by another path.
-        instance.actor_user.refresh_from_db(
-            fields=['confio_icp_captured_at', 'rating_prompt_due_at', 'confio_rating_prompted_at']
-        )
-        arm_rating_prompt_if_eligible(instance.actor_user)
+        from users.helpers import note_dollars_received
+        note_dollars_received(instance.actor_user, instance.completed_at)
     except Exception as e:
         logger.error(f"handle_first_cusd_on_conversion: {e}")
+
