@@ -119,16 +119,20 @@ class RelayClient:
         return result
 
     def quote(self, source, destination, amount, *, source_address,
-              destination_address, deposit_address=False, permit=False):
+              destination_address, deposit_address=False, permit=False, exact_output=False):
+        """`amount` is the input, or with exact_output the output the
+        recipient must receive exactly (Relay then names the input)."""
         if {source, destination} != set(TOKENS):
             raise RelayError('Only BSC USDT and Polygon USDC are supported')
         uint(amount, positive=True)
+        if exact_output and (not deposit_address or permit):
+            raise RelayError('Exact-output Relay quotes are deposit-address only')
         sender, recipient = address(source_address), address(destination_address)
         body = {
             'user': sender, 'recipient': recipient, 'refundTo': sender,
             'originChainId': CHAINS[source], 'destinationChainId': CHAINS[destination],
             'originCurrency': TOKENS[source][0], 'destinationCurrency': TOKENS[destination][0],
-            'amount': amount, 'tradeType': 'EXACT_INPUT',
+            'amount': amount, 'tradeType': 'EXACT_OUTPUT' if exact_output else 'EXACT_INPUT',
             'includeProtocolData': True,
         }
         if permit:
@@ -139,12 +143,23 @@ class RelayClient:
             # /quote/v2 ignores strict; EXACT_INPUT deposit addresses can be
             # requoted on deposit. Never claim strict guarantees from this flag.
             body['useDepositAddress'] = True
+        if exact_output:
+            # Per Relay's deposit-address docs (nothing in the response
+            # confirms it): EXACT_OUTPUT addresses are single-use, fill the
+            # quoted output, refund any surplus, and refund an underpayment
+            # whole rather than partially filling it. strict is sent as the
+            # docs specify for EXACT_OUTPUT.
+            body['strict'] = True
         result = self._request('POST', '/quote/v2', body=body)
-        self.validate_quote(result, source, destination, amount, sender, recipient)
+        self.validate_quote(result, source, destination, amount, sender, recipient,
+                            exact_output=exact_output)
         return deepcopy(result)
 
     @staticmethod
-    def validate_quote(result, source, destination, amount, sender, recipient):
+    def validate_quote(result, source, destination, amount, sender, recipient, exact_output=False):
+        """With exact_output, `amount` is the output the recipient gets and
+        the input is Relay's, bounded only by the total-cost ceiling (up to
+        ~33% over the output): callers must cap the input they will fund."""
         try:
             details = result['details']
             if address(details['sender']) != sender or address(details['recipient']) != recipient:
@@ -156,13 +171,21 @@ class RelayClient:
                         or address(currency['address']) != TOKENS[token][0]
                         or currency['decimals'] != TOKENS[token][1]):
                     raise RelayError('Relay asset or network mismatch')
-            if details['currencyIn']['amount'] != amount:
-                raise RelayError('Relay input amount mismatch')
             output = uint(details['currencyOut']['amount'], positive=True)
             minimum = uint(details['currencyOut']['minimumAmount'], positive=True)
-            if minimum > output or output - minimum > allowed_deterioration(output, destination):
-                raise RelayError('Relay output exceeds the allowed slippage')
-            if minimum * 10000 < rebase(amount, source, destination) * (10000 - TOTAL_COST_MAX_BPS):
+            if exact_output:
+                paid = details['currencyIn']['amount']
+                if not isinstance(paid, str) or str(uint(paid, positive=True)) != paid:
+                    raise RelayError('Relay input amount is invalid')
+                if output != uint(amount, positive=True) or minimum != output:
+                    raise RelayError('Relay exact output mismatch')
+            else:
+                paid = amount
+                if details['currencyIn']['amount'] != amount:
+                    raise RelayError('Relay input amount mismatch')
+                if minimum > output or output - minimum > allowed_deterioration(output, destination):
+                    raise RelayError('Relay output exceeds the allowed slippage')
+            if minimum * 10000 < rebase(paid, source, destination) * (10000 - TOTAL_COST_MAX_BPS):
                 # NextError text reaches the user verbatim via _public_error.
                 raise RelayError('Este monto es muy pequeño para enviar en este momento.')
             order = result['protocol']['v2']['orderData']
@@ -172,7 +195,7 @@ class RelayClient:
             payment = inputs[0]['payment']
             if (payment['chainId'] != PROTOCOL_CHAINS[source]
                     or address(payment['currency']) != TOKENS[source][0]
-                    or payment['amount'] != amount):
+                    or payment['amount'] != paid):
                 raise RelayError('Relay order input mismatch')
             output_payment = output_order['payments'][0]
             if (output_order['chainId'] != PROTOCOL_CHAINS[destination]
@@ -210,15 +233,21 @@ class RelayClient:
             raise RelayError('Invalid Relay request ID')
         return self._request('GET', '/intents/status/v3', params={'requestId': request_id})
 
-    def routes(self, source, destination, amount, sender, recipient):
+    def routes(self, source, destination, amount, sender, recipient, exact_output=False):
+        """With exact_output, `amount` is the output and the route's
+        'amount' is the input Relay requires (what the deposit transfers)."""
         started = int(time.time())
         response = self.quote(source, destination, amount, source_address=sender,
-                              destination_address=recipient, deposit_address=True)
+                              destination_address=recipient, deposit_address=True,
+                              exact_output=exact_output)
         route = {'sourceTokenId': source, 'destinationTokenId': destination,
-                 'amount': amount, 'messenger': 'relay', 'relayerFees': [],
+                 'amount': response['details']['currencyIn']['amount'] if exact_output else amount,
+                 'messenger': 'relay', 'relayerFees': [],
                  'amountOut': response['details']['currencyOut']['amount'],
                  'amountOutMin': response['details']['currencyOut']['minimumAmount'],
                  'relay': response, 'relayRequestedAt': started}
+        if exact_output:
+            route['exactOutput'] = amount
         # Validate the actual payment step before displaying an actionable quote.
         self.build(route, source_address=sender, destination_address=recipient)
         return [route]
@@ -230,7 +259,14 @@ class RelayClient:
             raise RelayError('Invalid Relay route')
         sender, recipient = address(source_address), address(destination_address)
         response = route['relay']
-        self.validate_quote(response, source, destination, amount, sender, recipient)
+        exact = route.get('exactOutput')
+        if exact is not None:
+            self.validate_quote(response, source, destination, exact, sender, recipient,
+                                exact_output=True)
+            if response['details']['currencyIn']['amount'] != amount:
+                raise RelayError('Relay input amount mismatch')
+        else:
+            self.validate_quote(response, source, destination, amount, sender, recipient)
         try:
             steps = response['steps']
             if len(steps) != 1 or steps[0]['id'] != 'deposit' or steps[0]['kind'] != 'transaction':

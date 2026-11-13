@@ -9,13 +9,16 @@ Relay (payment_accounts.relay, the audited bridge client) crosses to BSC:
             whose recipient is the person's BSC wallet, the QR Bolivia receive
             pattern. Koywe calls that delivered; the order stays PROCESSING
             until finalized BSC receipts prove the USDT arrived.
-  off-ramp  the person pays the order's exact USDT to a Relay deposit address
-            on BSC whose recipient is Koywe's Polygon deposit address, the Pago
-            ASAP send pattern. The app funds `confioDepositAddress` as before;
-            Koywe settles whatever USDC the bridge delivers.
+  off-ramp  Koywe waits for its order's EXACT USDC (2026-11-13: ramp 2030
+            sat WAITING after Relay delivered $1.02 less), so the order is
+            sized to the USDC the person's net USDT buys (off_ramp_usdc) and
+            the bridge is an EXACT_OUTPUT Relay deposit address on BSC whose
+            recipient is Koywe's Polygon deposit address. The app funds
+            `confioDepositAddress` with the input Relay names, which is never
+            more than the net; the cents of headroom stay in the wallet.
 
-Relay's cost (about $0.05 per crossing) comes out of the person's dollars; the
-quote shows it. Orders created while the switch is on keep their route after
+Relay's cost (about 0.5% at $200) comes out of the person's dollars; the quote
+shows it. Orders created while the switch is on keep their route after
 it is turned off (metadata[SECTION]).
 """
 from __future__ import annotations
@@ -35,6 +38,11 @@ CRYPTO_SYMBOL = 'USDC Polygon'
 ON_SOURCE, ON_DESTINATION = 'POL:USDC', 'BSC:USDT'
 OFF_SOURCE, OFF_DESTINATION = 'BSC:USDT', 'POL:USDC'
 MICRO = Decimal('0.000001')
+CENT = Decimal('0.01')
+# Room for Relay's price to move between pricing an off-ramp and building its
+# exact-output route a few seconds later; it stays in the person's wallet.
+OFF_RAMP_HEADROOM_BPS = 10
+_HEADROOM = (10000 - OFF_RAMP_HEADROOM_BPS) / Decimal(10000)
 USDC_UNITS = Decimal(10 ** 6)
 USDT_UNITS = Decimal(10 ** 18)
 LOG_CHUNK = 2000
@@ -122,7 +130,8 @@ def adjust_quote(quote: dict, direction: str) -> dict:
     else:
         usdt = Decimal(str(quote['amount_in']))
         fiat = Decimal(str(quote['amount_out']))
-        ratio = bridge_ratio('OFF_RAMP', usdt)
+        # The order is sized with the same headroom (off_ramp_usdc).
+        ratio = bridge_ratio('OFF_RAMP', usdt) * _HEADROOM
         adjusted['amount_out'] = (fiat * ratio).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
         adjusted['network_fee_amount'] = (network_fee + usdt * (1 - ratio)).quantize(
             MICRO, rounding=ROUND_DOWN)
@@ -144,13 +153,14 @@ def _units(amount: Decimal, token: str) -> int:
 
 # ------------------------------------------------------------------ routes
 
-def _build(source: str, destination: str, units: int, sender: str, recipient: str) -> dict:
+def _build(source: str, destination: str, units: int, sender: str, recipient: str,
+           route: dict | None = None) -> dict:
     from payment_accounts.allbridge_next import NextError
     from payment_accounts.bridge_binding import deposit_call
     from payment_accounts.relay import RelayClient
     client = RelayClient()
     try:
-        route = client.routes(source, destination, str(units), sender, recipient)[0]
+        route = route or client.routes(source, destination, str(units), sender, recipient)[0]
         build = client.build(route, source_address=sender, destination_address=recipient)
         deposit, _ = deposit_call(build, source, str(units))
     except NextError as exc:
@@ -164,6 +174,7 @@ def _build(source: str, destination: str, units: int, sender: str, recipient: st
         'sender': sender.lower(), 'recipient': recipient.lower(),
         'amount_in': str(units), 'amount_out': str(build['amountOut']),
         'amount_out_min': str(build['amountOutMin']),
+        **({'exact_output': True} if route.get('exactOutput') is not None else {}),
     }
 
 
@@ -175,10 +186,63 @@ def on_ramp_route(recipient_bsc: str, usdc: Decimal) -> dict:
     return route
 
 
-def off_ramp_route(sender_bsc: str, koywe_polygon_address: str, usdt_wei: int) -> dict:
-    """A BSC deposit address that bridges the person's exact USDT to Koywe's
-    Polygon deposit address for this order; refunds go back to the person."""
-    return _build(OFF_SOURCE, OFF_DESTINATION, int(usdt_wei), sender_bsc, koywe_polygon_address)
+def off_ramp_usdc(net_usdt: Decimal) -> Decimal:
+    """The USDC a Koywe off-ramp order asks for when the person funds it
+    with `net_usdt`: what Relay delivers for that input, less a small
+    headroom for the price moving before the order's own exact-output route
+    is built, in whole cents (Koywe's settlement precision)."""
+    net = Decimal(str(net_usdt))
+    usdc = (net * bridge_ratio('OFF_RAMP', net) * _HEADROOM).quantize(CENT, rounding=ROUND_DOWN)
+    # Confirmed with the same EXACT_OUTPUT quote the order's route will use,
+    # so a refusal happens before Koywe has an order, never after.
+    for _ in range(2):
+        if usdc <= 0:
+            break
+        needed = _exact_output_input(usdc)
+        budget = net * _HEADROOM  # room for the price to move until the route
+        if needed <= budget:
+            return usdc
+        usdc = (usdc * budget / needed).quantize(CENT, rounding=ROUND_DOWN)
+    raise KoywePolygonError('El monto es muy pequeño o la red no está disponible. Prueba con otro monto.')
+
+
+def _exact_output_input(usdc: Decimal) -> Decimal:
+    """USDT Relay needs on BSC to deliver exactly `usdc` on Polygon, priced
+    with Confío's sponsor address on both ends (the order's real route is
+    built once Koywe names its address)."""
+    from payment_accounts.allbridge_next import NextError
+    from payment_accounts.relay import RelayClient
+    address = str(getattr(settings, 'BSC_SPONSOR_ADDRESS', '') or '')
+    try:
+        quote = RelayClient().quote(OFF_SOURCE, OFF_DESTINATION, str(_units(usdc, OFF_DESTINATION)),
+                                    source_address=address, destination_address=address,
+                                    deposit_address=True, exact_output=True)
+    except NextError as exc:
+        logger.warning('Relay exact-output pricing failed for a Koywe off-ramp: %s', exc)
+        raise KoywePolygonError(ROUTE_UNAVAILABLE) from exc
+    return Decimal(int(quote['details']['currencyIn']['amount'])) / USDT_UNITS
+
+
+def off_ramp_route(sender_bsc: str, koywe_polygon_address: str, usdc: Decimal, max_usdt_wei: int) -> dict:
+    """A BSC deposit address whose bridge delivers exactly the order's `usdc`
+    to Koywe's Polygon deposit address (Relay refunds any surplus, and an
+    underpayment whole, to the person). Refused when Relay's input exceeds
+    the USDT the person funds."""
+    from payment_accounts.allbridge_next import NextError
+    from payment_accounts.relay import RelayClient
+    units = _units(usdc, OFF_DESTINATION)
+    try:
+        route = RelayClient().routes(OFF_SOURCE, OFF_DESTINATION, str(units), sender_bsc,
+                                     koywe_polygon_address, exact_output=True)[0]
+    except NextError as exc:
+        logger.warning('Relay exact-output route failed for a Koywe off-ramp: %s', exc)
+        raise KoywePolygonError(
+            'El monto es muy pequeño o la red no está disponible. Prueba con otro monto.') from exc
+    if int(route['amount']) > int(max_usdt_wei):
+        logger.warning('Relay wants %s USDT wei for a Koywe off-ramp funded with %s', route['amount'], max_usdt_wei)
+        raise KoywePolygonError('El costo de la red cambió. Inténtalo de nuevo.')
+    return _build(OFF_SOURCE, OFF_DESTINATION, int(route['amount']), sender_bsc, koywe_polygon_address,
+                  route=route)
 
 
 def _polygon_block() -> int | None:
@@ -234,6 +298,12 @@ def vouch_off_ramp_deposit(annotated: dict, ramp, deposit_key: str) -> dict:
         return annotated
     annotated[deposit_key] = route['deposit_address']
     annotated['confioBridge'] = 'relay:BSC:USDT->POL:USDC'
+    if route.get('exact_output'):
+        # The wallet pays Relay's input for the order's exact USDC, never the
+        # order's USDC figure (Relay refunds an underpayment whole). It is at
+        # most the net the person funds; the headroom stays in the wallet.
+        from ramps.schema import CONFIO_DEPOSIT_AMOUNT_WEI_KEY
+        annotated[CONFIO_DEPOSIT_AMOUNT_WEI_KEY] = route['amount_in']
     return annotated
 
 

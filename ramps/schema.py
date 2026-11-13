@@ -1257,6 +1257,15 @@ class CreateRampOrder(graphene.Mutation):
 
         from ramps import koywe_polygon
         polygon_route = savings_rail and koywe_polygon.enabled()
+        # The USDT the person's wallet funds an off-ramp with. On the Polygon
+        # route Koywe's order is the USDC that USDT buys through Relay: Koywe
+        # waits for its order's exact amount, never settling a short one.
+        off_ramp_funding_usdt = provider_order_amount
+        if polygon_route and normalized_direction == 'OFF_RAMP':
+            try:
+                provider_order_amount = koywe_polygon.off_ramp_usdc(off_ramp_funding_usdt)
+            except koywe_polygon.KoywePolygonError as exc:
+                return RampOrderType(success=False, error=str(exc))
         client = (KoyweClient(crypto_symbol=koywe_polygon.crypto_symbol()) if savings_rail
                   else KoyweClient())
         on_ramp_route = {}
@@ -1327,7 +1336,7 @@ class CreateRampOrder(graphene.Mutation):
                     # Actual provider funding, after every contract fee. This
                     # is net for fee-capable builds and gross for legacy
                     # fee-on-top compatibility.
-                    required_available_usdt = provider_order_amount
+                    required_available_usdt = off_ramp_funding_usdt
                     if available_usdt < required_available_usdt:
                         if not fee_capable_client and raw_usdt > 0:
                             return RampOrderType(
@@ -1661,11 +1670,10 @@ class CreateRampOrder(graphene.Mutation):
                 # Nothing verified to bridge to; Koywe's raw Polygon fields
                 # must never be paid from BSC.
                 return RampOrderType(success=False, error=koywe_polygon.ROUTE_UNAVAILABLE)
-            usdt_wei = int(payment_details.get(CONFIO_DEPOSIT_AMOUNT_WEI_KEY)
-                           or int(provider_order_amount * Decimal(10 ** 18)))
             try:
                 route = koywe_polygon.off_ramp_route(
-                    current_account.bsc_address, payment_details[CONFIO_DEPOSIT_ADDRESS_KEY], usdt_wei)
+                    current_account.bsc_address, payment_details[CONFIO_DEPOSIT_ADDRESS_KEY],
+                    provider_order_amount, int(off_ramp_funding_usdt * Decimal(10 ** 18)))
             except koywe_polygon.KoywePolygonError as exc:
                 # The unfunded Koywe order expires on its own.
                 return RampOrderType(success=False, error=str(exc))

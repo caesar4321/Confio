@@ -173,6 +173,7 @@ class KoyweFundingPrecisionTests(SimpleTestCase):
                 }.items():
                     stack.enter_context(mock.patch.object(schema, name, return_value=value))
                 stack.enter_context(mock.patch('cusd_plus.cusd_vault.require_operational'))
+                stack.enter_context(mock.patch('security.face_step_up.missing_face_step_up', return_value=None))
                 stack.enter_context(mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', return_value=preview))
                 for name, value in {'usdt_balance_raw': 0, 'cusd_withdrawable_usdt_wei': 100 * 10**18,
                                     'withdrawable_usdt_wei': 100 * 10**18}.items():

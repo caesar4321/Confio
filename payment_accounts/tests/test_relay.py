@@ -439,3 +439,70 @@ class RelayIntegrationTests(TestCase):
              mock.patch('payment_accounts.allbridge_next.NextClient') as old:
             self.assertEqual(quote_routes('BSC:USDT', 'POL:USDC', '1982000000000000000', SENDER, RECIPIENT)[0]['messenger'], 'relay')
             old.assert_not_called()
+
+
+def exact_output_response(output='198200000', paid='199206843004229380792'):
+    """Relay's EXACT_OUTPUT shape (live 2026-11-13): the output is fixed,
+    minimum == expected, and Relay names the input."""
+    payload = response(amount=paid)
+    payload['details']['currencyOut'].update(amount=output, minimumAmount=output)
+    payload['protocol']['v2']['orderData']['output']['payments'][0].update(
+        minimumAmount=output, expectedAmount=output)
+    return payload
+
+
+class RelayExactOutputTests(SimpleTestCase):
+    def setUp(self):
+        self.session = mock.Mock()
+        self.client = RelayClient(self.session)
+
+    def route(self, payload):
+        self.session.request.return_value = mock.Mock(status_code=200, json=lambda: payload)
+        return self.client.routes('BSC:USDT', 'POL:USDC', '198200000', SENDER, RECIPIENT, exact_output=True)[0]
+
+    def test_deposit_is_relays_input_for_the_exact_output(self):
+        route = self.route(exact_output_response())
+        body = self.session.request.call_args.kwargs['json']
+        self.assertEqual(body['tradeType'], 'EXACT_OUTPUT')
+        self.assertEqual(body['amount'], '198200000')
+        self.assertTrue(body['strict'])
+        self.assertTrue(body['useDepositAddress'])
+        self.assertEqual(route['amount'], '199206843004229380792')
+        self.assertEqual(route['exactOutput'], '198200000')
+        build = self.client.build(route, source_address=SENDER, destination_address=RECIPIENT)
+        self.assertEqual(build['amountOutMin'], '198200000')
+
+    def test_exact_input_quotes_stay_exact_input(self):
+        self.session.request.return_value = mock.Mock(status_code=200, json=lambda: response())
+        self.client.routes('BSC:USDT', 'POL:USDC', '1982000000000000000', SENDER, RECIPIENT)
+        body = self.session.request.call_args.kwargs['json']
+        self.assertEqual(body['tradeType'], 'EXACT_INPUT')
+        self.assertNotIn('strict', body)
+
+    def test_rejects_an_output_that_is_not_exact(self):
+        for mutate in [
+            lambda p: p['details']['currencyOut'].update(minimumAmount='198100000'),
+            lambda p: p['details']['currencyOut'].update(amount='198100000', minimumAmount='198100000'),
+            lambda p: p['protocol']['v2']['orderData']['output']['payments'][0].update(minimumAmount='1'),
+            lambda p: p['protocol']['v2']['orderData']['inputs'][0]['payment'].update(amount='1'),
+            lambda p: p['details']['currencyIn'].update(amount='0199206843004229380792'),
+        ]:
+            payload = exact_output_response()
+            mutate(payload)
+            with self.subTest(mutate=mutate), self.assertRaises(RelayError):
+                self.route(payload)
+
+    def test_rejects_an_input_beyond_the_cost_ceiling(self):
+        with self.assertRaises(RelayError):
+            self.route(exact_output_response(paid='270000000000000000000'))
+
+    def test_build_rejects_a_swapped_input(self):
+        route = self.route(exact_output_response())
+        route['amount'] = '198200000000000000000'
+        with self.assertRaises(RelayError):
+            self.client.build(route, source_address=SENDER, destination_address=RECIPIENT)
+
+    def test_exact_output_requires_a_deposit_address(self):
+        with self.assertRaises(RelayError):
+            self.client.quote('BSC:USDT', 'POL:USDC', '198200000', source_address=SENDER,
+                              destination_address=RECIPIENT, exact_output=True)
