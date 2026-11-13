@@ -1458,9 +1458,9 @@ def _ve_rail(viewer, country, direction):
 
 def _bo_withdraw(viewer, country):
     """'live' (Bolivian bank withdrawal on this build), 'update' (on, but
-    this build predates it), 'business' (on, but Koywe serves personal
-    accounts only: ramps/schema.py CreateRampOrder), or None (off, or not
-    Bolivia)."""
+    this build predates it), 'next_update' (out on the other store, not yet
+    on this one), 'business' (on, but Koywe serves personal accounts only:
+    ramps/schema.py CreateRampOrder), or None (off, or not Bolivia)."""
     if (country or '').upper() != 'BO':
         return None
     try:
@@ -1479,6 +1479,13 @@ def _bo_withdraw(viewer, country):
             latest = _version(policy.latest_version) if policy else None
             floor = _version(settings.KOYWE_BO_OFF_RAMP_MIN_APP_VERSION)
             if latest is None or floor is None or latest < floor:
+                # Out on iOS but not on Play yet (5.3.7 in review, 2026-11-12):
+                # it comes with the next Android update. The note says so.
+                elsewhere = any(_version(v) is not None and _version(v) >= floor
+                                for v in AppVersionPolicy.objects.exclude(platform=platform)
+                                .values_list('latest_version', flat=True)) if floor else False
+                if elsewhere and platform == 'android':
+                    return 'next_update' if viewer.account_type == 'personal' else 'business'
                 return None
         if viewer.account_type != 'personal':
             return 'business'
@@ -1539,10 +1546,21 @@ RETRY_NOTE = ('\n# Revisa antes de contestar\nLlama get_portfolio antes de respo
               'contesta con sus datos. Nunca digas que vas a revisar algo: revísalo con la herramienta y contesta.\n')
 
 
+# "En Bolivia no se ofrecen acciones" said without looking (Marizela,
+# 2026-11-11): only get_portfolio knows what this person can use.
+_INVESTMENT = r'(?:\bacciones\b|\betfs?\b|\bconf[ií]o dollar\+(?!\w))'
+_NOT_OFFERED = r'\bno (?:est[aá]n? disponibles?|se ofrecen?|est[aá]n? habilitad[ao]s?|tienes acceso)\b'
+_SAME_SENTENCE = r'(?:(?![.\n?!]).)*?'
+_CLAIMED_UNAVAILABLE = re.compile(_INVESTMENT + _SAME_SENTENCE + _NOT_OFFERED + '|'
+                                  + _NOT_OFFERED + _SAME_SENTENCE + _INVESTMENT, re.I)
+
+
 def _promised_unchecked_portfolio(belt, result):
     called = {str(t.get('name', '')).split(':')[0] for t in result.tools if isinstance(t, dict)}
+    reply = result.reply or ''
     return (not belt.force_tool and 'get_portfolio' not in called
-            and bool(_PROMISED_CHECK.search(result.reply or ''))
+            and bool(_PROMISED_CHECK.search(reply)
+                     or _CLAIMED_UNAVAILABLE.search(re.sub(r'EE\.\s?UU\.', 'EEUU', reply)))
             and any(s.get('name') == 'get_portfolio' for s in belt.specs()))
 
 

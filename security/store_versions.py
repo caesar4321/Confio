@@ -24,11 +24,25 @@ PLAY_SCOPE = 'https://www.googleapis.com/auth/androidpublisher'
 VERSION_IN_NAME = re.compile(r'(?<![0-9.])([0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4})(?![0-9.])')
 
 
+# Apple's lookup is cached per storefront and lagged the 5.3.7 release by
+# hours (2026-11-12): ask a few of our storefronts and take the newest.
+IOS_STOREFRONTS = ('us', 'bo', 've', 'ar', 'co', 'pe')
+
+
 def ios_store_version():
-    response = requests.get(LOOKUP_URL, params={'id': IOS_APP_ID}, timeout=10)
-    response.raise_for_status()
-    results = response.json().get('results') or []
-    return results[0].get('version') if results else None
+    versions = []
+    for country in IOS_STOREFRONTS:
+        try:
+            response = requests.get(LOOKUP_URL, params={'id': IOS_APP_ID, 'country': country}, timeout=10)
+            response.raise_for_status()
+            results = response.json().get('results') or []
+        except (requests.RequestException, ValueError):
+            logger.warning('App Store lookup failed for storefront %s', country, exc_info=True)
+            continue
+        version = results[0].get('version') if results else None
+        if _version(version) is not None:
+            versions.append(version)
+    return max(versions, key=_version) if versions else None
 
 
 def _play_credentials():

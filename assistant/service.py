@@ -14,6 +14,7 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from inbox.models import SupportMessage
@@ -216,7 +217,7 @@ def _route_to_team(message):
 
 
 def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='', tz_name=None,
-        can_navigate=True, request_meta=None, guide_step=''):
+        can_navigate=True, request_meta=None, guide_step='', pending_message=None):
     """Answer `body` (or a voice note: audio=(base64, mime, duration_ms)) in
     the user's support thread.
 
@@ -226,6 +227,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     can_navigate=False for app builds that predate Confio Assistant: they can't
     open screens, so the model must not claim it did.
+    pending_message: answer this already-recorded user message (written while
+    the team had the thread) instead of recording a new one.
     Raises ValueError (bad input) / AssistantUnavailable (transcription down).
     """
     screen = (screen or '')[:64]
@@ -274,10 +277,22 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         lock_user(user)
         state = thread_state(conversation)
         human = is_human_mode(conversation, state) or not conf.get('CONFIO_ASSISTANT_ENABLED')
-        user_message = _append(conversation, sender_type='USER', sender_user=user, body=clean,
-                               metadata={'modality': modality, 'screen': screen})
-        # A proposal lives for exactly one user message, whatever path it takes.
-        proposal = take_pending_categorization(conversation)
+        if pending_message is not None:
+            # Re-checked under the lock: a second tap, or a reply that landed
+            # meanwhile, means there is nothing left to answer.
+            if (human or pending_message.conversation_id != conversation.id
+                    or pending_message.id != getattr(_last_message(conversation), 'id', None)
+                    # Answered, or being answered by an overlapping tap. A voice
+                    # note's metering turn (no reply, not pending) doesn't count.
+                    or AssistantTurn.objects.filter(user_message=pending_message)
+                    .filter(Q(reply_message__isnull=False) | Q(error='pending')).exists()):
+                return None
+            user_message, proposal, wants_human = pending_message, None, False
+        else:
+            user_message = _append(conversation, sender_type='USER', sender_user=user, body=clean,
+                                   metadata={'modality': modality, 'screen': screen})
+            # A proposal lives for exactly one user message, whatever path it takes.
+            proposal = take_pending_categorization(conversation)
         if turn is not None:
             turn.user_message = user_message
             turn.save(update_fields=['user_message'])
@@ -585,11 +600,41 @@ def handoff_from_voice(conversation, reason):
     _route_to_team(note)
 
 
-def return_to_ai(user, account, business):
+def _last_message(conversation):
+    return conversation.messages.exclude(sender_type='SYSTEM').order_by('-created_at', '-id').first()
+
+
+def unanswered_after_handoff(conversation, state):
+    """The user's last message when nobody has answered it since the handoff
+    (they wrote while the team had the thread and then came back), else None."""
+    last = _last_message(conversation)
+    # Human mode starts at a handoff or at the team's own first reply.
+    since = max([t for t in (state.handoff_at, last_staff_reply_at(conversation)) if t], default=None)
+    if last is None or last.sender_type != 'USER' or since is None or last.created_at < since:
+        return None
+    if (last.metadata or {}).get('handoff_note') or not (last.body or '').strip():
+        return None
+    return last
+
+
+def return_to_ai(user, account, business, jwt_context=None, *, request_meta=None, screen='', tz_name=None):
+    """Back to the AI. A question left unanswered while the team had the
+    thread is answered now (Brahayan, 2026-11-11: two questions, no reply)."""
     conversation = get_or_create_support_conversation(user, account, business)
     state = thread_state(conversation)
+    pending = unanswered_after_handoff(conversation, state)
     state.returned_to_ai_at = timezone.now()
     state.save(update_fields=['returned_to_ai_at', 'updated_at'])
+    # Out of turns: no limit notice just for coming back.
+    if (pending is not None and jwt_context is not None and conf.get('CONFIO_ASSISTANT_ENABLED')
+            and remaining_turns(user) > 0):
+        try:
+            outcome = ask(user, account, business, jwt_context, pending.body, screen=screen, tz_name=tz_name,
+                          request_meta=request_meta, pending_message=pending)
+            if outcome is not None and outcome.mode == 'HUMAN':
+                conversation.returned_mode = 'HUMAN'  # the answer handed it back to the team
+        except Exception:  # noqa: BLE001 - coming back must work even if the answer fails
+            logger.exception('Confio Assistant: answering the pending message after return failed')
     return conversation
 
 

@@ -126,6 +126,31 @@ class AskTests(TestCase):
         self.assertEqual(self.ask('¿cómo pago con QR?').mode, 'AI')
 
     @patch('assistant.engine._openai_post')
+    def test_coming_back_answers_what_was_asked_while_waiting(self, post):
+        # Brahayan, 2026-11-11: two questions while handed off, then back to the AI, no reply.
+        with self.captureOnCommitCallbacks(execute=True):
+            self.ask('Quiero hablar con una persona')
+        with self.captureOnCommitCallbacks(execute=True):
+            waiting = self.ask('se me perdió un envío de 20 dólares')
+        self.assertIsNone(waiting.reply_message)
+        post.side_effect = [text_response('Te explico lo del envío.')]
+        conversation = service.return_to_ai(self.user, self.account, None, {}, request_meta={})
+        replies = list(conversation.messages.filter(sender_type='AGENT', metadata__ai=True).order_by('created_at'))
+        self.assertEqual(replies[-1].body, 'Te explico lo del envío.')
+        turn = AssistantTurn.objects.get(reply_message=replies[-1])
+        self.assertEqual(turn.user_message_id, waiting.user_message.id)
+        self.assertEqual(conversation.messages.filter(sender_type='USER').count(), 2)  # nothing re-recorded
+        # A second tap answers nothing more.
+        service.return_to_ai(self.user, self.account, None, {}, request_meta={})
+        self.assertEqual(post.call_count, 1)
+        # An overlapping tap while the first answer is still running answers nothing either.
+        later = SupportMessage.objects.create(conversation=conversation, sender_type='USER', sender_user=self.user,
+                                              body='¿y ahora?')
+        AssistantTurn.objects.create(user=self.user, conversation=conversation, user_message=later, error='pending')
+        self.assertIsNone(service.ask(self.user, self.account, None, {}, later.body, pending_message=later))
+        self.assertEqual(post.call_count, 1)
+
+    @patch('assistant.engine._openai_post')
     def test_general_questions_are_answered_while_the_team_owns_the_thread(self, post):
         with self.captureOnCommitCallbacks(execute=True):
             self.ask('Quiero hablar con una persona')
@@ -971,6 +996,20 @@ class PromisedCheckRetryTests(TestCase):
         self.assertTrue(_promised_unchecked_portfolio(belt, promised))
         checked = TurnResult(reply='Necesito revisar tu portafolio.', tools=[{'name': 'get_portfolio', 'ok': True}])
         self.assertFalse(_promised_unchecked_portfolio(belt, checked))
+        # "No se ofrecen en Bolivia" said without looking (Marizela, 2026-11-11): look first.
+        guessed = TurnResult(reply='Las acciones no están disponibles para todos y, en Bolivia, no se ofrecen '
+                                   'actualmente por requisitos del emisor.')
+        self.assertTrue(_promised_unchecked_portfolio(belt, guessed))
+        self.assertTrue(_promised_unchecked_portfolio(belt, TurnResult(
+            reply='En tu cuenta, las acciones de EE. UU. y Confío Dollar+ no están disponibles.')))
+        self.assertFalse(_promised_unchecked_portfolio(belt, TurnResult(
+            reply='Una acción es una parte de una empresa; puedes comprar acciones desde US$1,01.')))
+        self.assertTrue(_promised_unchecked_portfolio(belt, TurnResult(reply='Confío Dollar+ no está disponible.')))
+        for ordinary in ('Estas acciones no se pueden deshacer.', 'No está claro si las acciones subirán.',
+                         'Puedes comprar acciones desde US$1\n\nSi no tienes acceso a Pix, abre Recibir.'):
+            self.assertFalse(_promised_unchecked_portfolio(belt, TurnResult(reply=ordinary)), ordinary)
+        self.assertFalse(_promised_unchecked_portfolio(belt, TurnResult(
+            reply=guessed.reply, tools=[{'name': 'get_portfolio', 'ok': True}])))
         self.assertFalse(_promised_unchecked_portfolio(belt, TurnResult(reply='Confío Dollar+ rinde 3,18% anual.')))
         future = TurnResult(reply='Para orientarte según lo que ya tienes, revisaré tu cartera.')
         self.assertTrue(_promised_unchecked_portfolio(belt, future))
@@ -995,6 +1034,9 @@ class BoliviaWithdrawPromptTests(TestCase):
         update = build_system_prompt(bo_withdraw='update', **self.COMMON)
         self.assertIn('actualice Confío', update)
         self.assertNotIn('no se puede retirar a bolivianos', update)
+        soon = build_system_prompt(bo_withdraw='next_update', **self.COMMON)
+        self.assertIn('en revisión en Google Play', soon)
+        self.assertNotIn('no se puede retirar a bolivianos', soon)
 
     def test_state_per_viewer(self):
         from security.models import AppVersionPolicy
@@ -1009,6 +1051,13 @@ class BoliviaWithdrawPromptTests(TestCase):
             self.assertIsNone(_bo_withdraw(viewer('5.3.6', 'business'), 'BO'))
             AppVersionPolicy.objects.update_or_create(platform='android', defaults={'latest_version': '5.3.6'})
             self.assertIsNone(_bo_withdraw(viewer('5.3.6'), 'BO'))
+            # Out on iOS, Android still in review: "next Android update", never "update now".
+            AppVersionPolicy.objects.update_or_create(platform='ios', defaults={'latest_version': '5.3.7'})
+            self.assertEqual(_bo_withdraw(viewer('5.3.6'), 'BO'), 'next_update')
+            self.assertEqual(_bo_withdraw(viewer('5.3.6', 'business'), 'BO'), 'business')
+            ios_old = SimpleNamespace(account_type='personal', is_employee=False,
+                                      request_meta={'HTTP_X_CONFIO_VERSION': '5.3.6', 'HTTP_X_CONFIO_PLATFORM': 'ios'})
+            self.assertEqual(_bo_withdraw(ios_old, 'BO'), 'update')
             AppVersionPolicy.objects.update_or_create(platform='android', defaults={'latest_version': '5.3.7'})
             self.assertEqual(_bo_withdraw(viewer('5.3.6'), 'BO'), 'update')
             self.assertEqual(_bo_withdraw(viewer('5.3.6', 'business'), 'BO'), 'business')

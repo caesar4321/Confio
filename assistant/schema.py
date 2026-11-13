@@ -408,9 +408,10 @@ class ReturnToAssistant(graphene.Mutation):
     @classmethod
     @login_required
     def mutate(cls, root, info):
-        user, account, business, _ = get_context_models(info)
-        service.return_to_ai(user, account, business)
-        return ReturnToAssistant(success=True, mode='AI')
+        user, account, business, jwt_context = get_context_models(info)
+        conversation = service.return_to_ai(user, account, business, jwt_context,
+                                            request_meta=getattr(info.context, 'META', None))
+        return ReturnToAssistant(success=True, mode=getattr(conversation, 'returned_mode', 'AI'))
 
 
 class UpdateAssistantProfile(graphene.Mutation):

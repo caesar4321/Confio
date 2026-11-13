@@ -27,7 +27,20 @@ class StoreVersionReadTests(TestCase):
     def test_ios_reads_lookup_version(self, get):
         get.return_value = lookup_response({'resultCount': 1, 'results': [{'version': '5.2.3'}]})
         self.assertEqual(store_versions.ios_store_version(), '5.2.3')
-        self.assertEqual(get.call_args.kwargs['params'], {'id': '6472662314'})
+        self.assertEqual(get.call_args.kwargs['params']['id'], '6472662314')
+
+    @mock.patch('security.store_versions.requests.get')
+    def test_ios_takes_the_newest_storefront(self, get):
+        # One storefront's cache still served 5.3.6 hours after 5.3.7 went out.
+        def lookup(url, params, timeout):
+            if params['country'] == 'bo':
+                raise store_versions.requests.ConnectionError('down')
+            version = '5.3.7' if params['country'] == 've' else '5.3.6'
+            return lookup_response({'resultCount': 1, 'results': [{'version': version}]})
+        get.side_effect = lookup
+        self.assertEqual(store_versions.ios_store_version(), '5.3.7')
+        self.assertEqual({c.kwargs['params']['country'] for c in get.call_args_list},
+                         set(store_versions.IOS_STOREFRONTS))
 
     @mock.patch('security.store_versions.requests.get')
     def test_ios_empty_lookup(self, get):
