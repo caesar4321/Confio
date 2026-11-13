@@ -6,17 +6,21 @@ the Bolivian steps around it:
 
   decode   the provider reads the QR (who, bank, amount); the app never
            supplies the recipient
-  quote    bolivianos -> the USDC the provider asks for -> the USDT the
-           person's BSC wallet must send through Relay so that even its
-           guaranteed minimum covers it -> the Confío-dollar debit
+  quote    bolivianos -> the USDC the provider asks for -> the USDT Relay
+           needs on BSC to deliver exactly that (an EXACT_OUTPUT quote), with
+           a little headroom -> the Confío-dollar debit
   funding  at the claim: the provider's funding address and amount (made at
            creation or at the claim, per adapter, and remade or refused once
-           expired) and a Relay route for the order's exact USDT to it,
-           refused if its minimum no longer covers the amount. Only a
-           production provider is ever funded.
-  surplus  the bridge usually delivers a little more than its minimum; the
-           surplus stays in our balance at the provider (decided 2026-10-26)
-           and is recorded on the order (provider_surplus_units)
+           expired) and an EXACT_OUTPUT Relay route that delivers exactly
+           that amount to it. The wallet pays the input Relay names, refused
+           if it exceeds the USDT this order reserved; the headroom it did
+           not need stays in the wallet. Only a production provider is ever
+           funded.
+  exact    the provider receives its order's exact USDC in one transfer (a
+           provider may not settle an order funded short or in parts: Koywe,
+           2026-11-13). Orders routed before that date bridged an exact input
+           sized on Relay's minimum, and their surplus stayed in our balance
+           at the provider (provider_surplus_units).
   settle   Relay's delivery to the provider, proven from finalized receipts
 
 The person signs only on BSC; Polygon is between Relay and the provider.
@@ -40,9 +44,10 @@ NOT_LIVE = 'Pagar con QR Bolivia está en modo de prueba: no se envió nada.'
 EXPIRED = 'Este pago venció. Vuelve a escanear el QR.'
 # Never sign a funding the provider order would not survive (bridge time).
 PROVIDER_MARGIN_SECONDS = 600
-# Room between what the provider asks and the bridge's guaranteed minimum,
-# so a small move between the quote and the claim does not refuse the send.
-CUSHION = Decimal('1.004')
+# Room above the USDT Relay asks for the provider's exact amount, so a small
+# move between the quote and the claim does not refuse the send. What the
+# claim does not need stays in the person's wallet.
+HEADROOM = Decimal('1.003')
 SIZING_ROUNDS = 4
 
 
@@ -77,34 +82,24 @@ def _bob(preview: dict, amount) -> Decimal:
 
 # ------------------------------------------------------------------ sizing
 
-def _relay_min_out(usdt_wei: int, recipient: str) -> tuple[int, int]:
-    """(expected, guaranteed minimum) USDC units Relay delivers for this
-    exact input (an estimate: no deposit address is made)."""
+def _relay_input(usdc_units: int, recipient: str) -> int:
+    """USDT wei Relay needs on BSC to deliver exactly `usdc_units` (an
+    estimate: the address this quote makes is never funded)."""
     from payment_accounts.allbridge_next import NextError
     from payment_accounts.relay import RelayClient
     try:
-        quote = RelayClient().quote(SOURCE, DESTINATION, str(usdt_wei), source_address=recipient,
-                                    destination_address=recipient)
-        out = quote['details']['currencyOut']
-        return int(out['amount']), int(out['minimumAmount'])
+        quote = RelayClient().quote(SOURCE, DESTINATION, str(usdc_units), source_address=recipient,
+                                    destination_address=recipient, deposit_address=True, exact_output=True)
+        return int(quote['details']['currencyIn']['amount'])
     except (NextError, KeyError, TypeError, ValueError) as exc:
         message = str(exc) if 'muy pequeño' in str(exc) else GENERIC
         raise BoliviaQrError(message) from exc
 
 
 def size_funding(usdc_units: int, recipient: str) -> dict:
-    """The USDT on BSC whose bridged minimum covers `usdc_units` with a small
-    cushion, then the Confío-dollar debit that leaves exactly that USDT."""
-    target = int((Decimal(usdc_units) * CUSHION).to_integral_value(rounding=ROUND_UP))
-    usdt_wei = int(Decimal(target) * USDT_WEI / USDC_UNITS)
-    for _ in range(SIZING_ROUNDS):
-        expected, minimum = _relay_min_out(usdt_wei, recipient)
-        if minimum >= target:
-            break
-        # Relay's cost is roughly fixed per crossing: add the gap and retry.
-        usdt_wei += int(Decimal(target - minimum) * USDT_WEI / USDC_UNITS * Decimal('1.05')) + 10 ** 12
-    else:
-        raise BoliviaQrError('El monto es muy pequeño para pagarlo. Prueba con un monto mayor.')
+    """The USDT on BSC that buys exactly `usdc_units` through Relay, with a
+    little headroom, then the Confío-dollar debit that leaves that USDT."""
+    usdt_wei = int((Decimal(_relay_input(usdc_units, recipient)) * HEADROOM).to_integral_value(rounding=ROUND_UP))
     usdt_wei = (usdt_wei // ve_send.WEI_PER_MICRO + 1) * ve_send.WEI_PER_MICRO
     gross = (Decimal(usdt_wei) / USDT_WEI).quantize(ve_send.CENT, rounding=ROUND_UP)
     for _ in range(SIZING_ROUNDS + 2):
@@ -115,8 +110,7 @@ def size_funding(usdc_units: int, recipient: str) -> dict:
             ve_send.CENT, rounding=ROUND_UP), ve_send.CENT)
     else:
         raise BoliviaQrError(GENERIC)
-    return {'usdc_units': usdc_units, 'usdt_wei': deposit_wei, 'gross_usd': gross, 'gross_wei': gross_wei,
-            'bridge_expected_units': expected, 'bridge_minimum_units': minimum}
+    return {'usdc_units': usdc_units, 'usdt_wei': deposit_wei, 'gross_usd': gross, 'gross_wei': gross_wei}
 
 
 # ------------------------------------------------------------------ quote + create
@@ -189,8 +183,9 @@ def _payment_expired(payment: dict) -> bool:
 
 
 def relay_target(ramp, live: bool) -> dict:
-    """The Relay deposit address on BSC for the order's exact USDT, bridging
-    to the provider's funding address, checked again at the last moment."""
+    """The Relay deposit address on BSC that delivers the provider's exact
+    USDC to its funding address, for no more USDT than this order reserved,
+    priced at the last moment."""
     from payment_accounts.allbridge_next import NextError
     from payment_accounts.bridge_binding import deposit_call
     from payment_accounts.relay import RelayClient
@@ -224,16 +219,21 @@ def relay_target(ramp, live: bool) -> dict:
         raise BoliviaQrError(EXPIRED)
     recipient = payment['deposit_address']
     needed = int(payment['usdc_units'])
-    amount = str(section['deposit_wei'])
+    reserved = int(section['deposit_wei'])
     client = RelayClient()
     try:
-        route = client.routes(SOURCE, DESTINATION, amount, ramp.actor_address, recipient)[0]
+        route = client.routes(SOURCE, DESTINATION, str(needed), ramp.actor_address, recipient,
+                              exact_output=True)[0]
+        amount = route['amount']
+        if int(amount) > reserved:
+            # Relay now asks more than the person approved: they requote.
+            raise BoliviaQrError(PRICE_MOVED)
         build = client.build(route, source_address=ramp.actor_address, destination_address=recipient)
         deposit, _ = deposit_call(build, SOURCE, amount)
     except NextError as exc:
         logger.warning('Relay quote failed for QR Bolivia send %s: %s', ramp.pk, exc)
         raise BoliviaQrError(GENERIC) from exc
-    if int(build['amountOutMin']) < needed:
+    if int(build['amountOutMin']) != needed or int(build['amountOut']) != needed:
         raise BoliviaQrError(PRICE_MOVED)
     # The signing window never outlives the provider's order (with room for
     # the bridge to deliver), nor Relay's deposit address.
@@ -245,11 +245,14 @@ def relay_target(ramp, live: bool) -> dict:
         raise BoliviaQrError(EXPIRED)
     return {
         'deposit_address': deposit,
+        # The wallet pays Relay's input, at most what this order reserved.
+        'deposit_wei': str(int(amount)),
         'binding': {
             'provider': 'relay', 'request_id': build['relay']['request_id'],
             'response': build['relay']['response'], 'deadline': deadline,
             'recipient': recipient.lower(), 'amount_out': build['amountOut'],
             'amount_out_min': build['amountOutMin'], 'needed_units': str(needed),
+            'exact_output': True,
         },
     }
 
@@ -283,8 +286,9 @@ def settle(ramp) -> 've_send.Settlement':
         needed = int(bridge.get('needed_units') or 0)
         if received < needed:
             return ve_send.Settlement('review', reason='provider_underfunded')
-        # What the bridge delivered beyond the payment stays in our balance at
-        # the provider; recorded per order so it is always accountable.
+        # Exact-output routes deliver the payment's amount. Anything an older
+        # exact-input route delivered beyond it stays in our balance at the
+        # provider; recorded per order so it is always accountable.
         ve_send._update(ramp.pk, provider_surplus_units=str(received - needed))
         usd = Decimal(received) / USDC_UNITS
         return ve_send.Settlement('delivered', credited_usd=format(usd, 'f'), evidence=transfer.destination_tx_hash)

@@ -206,16 +206,30 @@ class ReceiveTests(TestCase):
 
 
 class SendSizingTests(SimpleTestCase):
-    def test_debit_covers_the_bridge_minimum_with_cushion(self):
-        quotes = iter([(9_990_000, 9_800_000), (10_100_000, 10_060_000)])
-        with mock.patch('ramps.bolivia_qr_send._relay_min_out', side_effect=lambda w, r: next(quotes)), \
+    def test_debit_covers_relays_input_for_the_exact_amount_with_headroom(self):
+        relay_input = 10_055_000_000_000_000_000  # Relay asks 10.055 USDT for exactly 10 USDC
+        with mock.patch('ramps.bolivia_qr_send._relay_input', return_value=relay_input) as probe, \
                 mock.patch('ramps.ve_send.confio_amounts', side_effect=lambda g: (None, int(g * 10 ** 18))):
             sizing = bolivia_qr_send.size_funding(10_000_000, ADDRESS)
-        self.assertGreaterEqual(sizing['bridge_minimum_units'], 10_040_000)
-        self.assertGreaterEqual(sizing['usdt_wei'], 10 * 10 ** 18)
+        probe.assert_called_once_with(10_000_000, ADDRESS)
+        # 0.3% above Relay's input, and no more than a cent over that.
+        self.assertGreaterEqual(sizing['usdt_wei'], relay_input * 1003 // 1000)
+        self.assertLess(sizing['usdt_wei'], relay_input * 1003 // 1000 + 2 * 10 ** 16)
+
+    def test_sizing_asks_relay_for_an_exact_output_quote(self):
+        client = mock.Mock()
+        client.quote.return_value = {'details': {'currencyIn': {'amount': '10055000000000000000'}}}
+        with mock.patch('payment_accounts.relay.RelayClient', return_value=client):
+            self.assertEqual(bolivia_qr_send._relay_input(10_000_000, ADDRESS), 10_055_000_000_000_000_000)
+        args, kwargs = client.quote.call_args
+        self.assertEqual(args, ('BSC:USDT', 'POL:USDC', '10000000'))
+        self.assertTrue(kwargs['exact_output'] and kwargs['deposit_address'])
 
     def test_too_small_to_cross(self):
-        with mock.patch('ramps.bolivia_qr_send._relay_min_out', return_value=(10, 1)):
+        from payment_accounts.relay import RelayError
+        client = mock.Mock()
+        client.quote.side_effect = RelayError('Este monto es muy pequeño para enviar en este momento.')
+        with mock.patch('payment_accounts.relay.RelayClient', return_value=client):
             with self.assertRaisesRegex(BoliviaQrError, 'muy pequeño'):
                 bolivia_qr_send.size_funding(10_000, ADDRESS)
 
@@ -231,11 +245,11 @@ class SendFundingTests(TestCase):
                                      'expires_at': 2_000_000_000},
                 'beneficiary': {'holder_name': 'Tienda', 'bob': '100.00'}}})
 
-    def build(self, out_min):
-        return {'amountOut': str(out_min + 200_000), 'amountOutMin': str(out_min),
+    def build(self, out):
+        return {'amountOut': str(out), 'amountOutMin': str(out),
                 'relay': {'request_id': 'r', 'response': {}, 'deadline': 2_000_000_000}}
 
-    def target(self, accepts, out_min):
+    def target(self, accepts, out=14_440_000, relay_input=14_520_000_000_000_000_000):
         impl = SimpleNamespace(PAYMENT_AT_CREATION=True, environment=lambda: 'prod|abc')
         section = dict(self.ramp.metadata[ve_send.SECTION])
         section['provider_payment'] = dict(section['provider_payment'], environment='prod|abc',
@@ -243,14 +257,16 @@ class SendFundingTests(TestCase):
         RampTransaction.objects.filter(pk=self.ramp.pk).update(metadata={ve_send.SECTION: section})
         self.ramp.refresh_from_db()
         with mock.patch('ramps.bolivia_qr_send.adapter', return_value=impl), \
-                mock.patch('payment_accounts.relay.RelayClient.routes', return_value=[{}]), \
-                mock.patch('payment_accounts.relay.RelayClient.build', return_value=self.build(out_min)), \
+                mock.patch('payment_accounts.relay.RelayClient.routes',
+                           return_value=[{'amount': str(relay_input)}]) as routes, \
+                mock.patch('payment_accounts.relay.RelayClient.build', return_value=self.build(out)), \
                 mock.patch('payment_accounts.bridge_binding.deposit_call', return_value=(RELAY_DEPOSIT, {})):
+            self.routes = routes
             return bolivia_qr_send.relay_target(self.ramp, accepts)
 
     def test_real_dollars_never_fund_a_sandbox_provider(self):
         with self.assertRaisesRegex(BoliviaQrError, 'modo de prueba'):
-            self.target(False, 14_500_000)
+            self.target(False)
 
     def test_an_expired_provider_payment_is_never_funded(self):
         import time
@@ -259,7 +275,7 @@ class SendFundingTests(TestCase):
         RampTransaction.objects.filter(pk=self.ramp.pk).update(metadata={ve_send.SECTION: section})
         self.ramp.refresh_from_db()
         with self.assertRaisesRegex(BoliviaQrError, 'venció'):
-            self.target(True, 14_500_000)
+            self.target(True)
         self.ramp.refresh_from_db()
         self.assertEqual(self.ramp.status, 'FAILED')
 
@@ -280,9 +296,13 @@ class SendFundingTests(TestCase):
         self.ramp.refresh_from_db()
         self.assertEqual(ve_send._section(self.ramp)['provider_surplus_units'], '160000')
 
-    def test_refused_when_the_minimum_no_longer_covers_the_payment(self):
+    def test_refused_when_relay_asks_more_than_the_order_reserved(self):
         with self.assertRaisesRegex(BoliviaQrError, 'precio cambió'):
-            self.target(True, 14_000_000)
+            self.target(True, relay_input=15 * 10 ** 18 + 1)
+
+    def test_refused_when_the_route_would_not_deliver_the_exact_payment(self):
+        with self.assertRaisesRegex(BoliviaQrError, 'precio cambió'):
+            self.target(True, out=14_439_999)
 
     def test_a_payment_from_another_environment_never_receives_real_dollars(self):
         section = dict(self.ramp.metadata[ve_send.SECTION])
@@ -296,10 +316,64 @@ class SendFundingTests(TestCase):
         self.ramp.refresh_from_db()
         self.assertEqual(self.ramp.status, 'FAILED')
 
-    def test_target_bridges_to_the_provider_address(self):
-        target = self.target(True, 14_500_000)
+    def test_target_delivers_the_providers_exact_amount_for_relays_input(self):
+        target = self.target(True)
         self.assertEqual((target['deposit_address'], target['binding']['recipient']), (RELAY_DEPOSIT, PROVIDER_DEPOSIT))
         self.assertEqual(target['binding']['needed_units'], '14440000')
+        self.assertEqual(target['binding']['amount_out_min'], '14440000')
+        self.assertTrue(target['binding']['exact_output'])
+        # The wallet pays Relay's input (14.52), not the 15 the order reserved.
+        self.assertEqual(target['deposit_wei'], '14520000000000000000')
+        args, kwargs = self.routes.call_args
+        self.assertEqual(args[:3], ('BSC:USDT', 'POL:USDC', '14440000'))
+        self.assertTrue(kwargs['exact_output'])
+
+    def test_the_claim_lowers_the_deposit_to_what_relay_asks(self):
+        impl = SimpleNamespace(TARGET_AT_CLAIM=True, funding_target=lambda ramp: {
+            'deposit_address': RELAY_DEPOSIT, 'deposit_wei': '14520000000000000000', 'binding': {'deadline': 2_000_000_000}})
+        with mock.patch('ramps.ve_send.adapter', return_value=impl):
+            claimed = ve_send.start_funding(self.ramp)
+            section = ve_send._section(claimed)
+            self.assertEqual(section['deposit_wei'], '14520000000000000000')
+            self.assertEqual(section['reserved_deposit_wei'], str(15 * 10 ** 18))
+            self.assertEqual(ve_send.funding_details(claimed)['deposit_amount_wei'], '14520000000000000000')
+            # History shows what leaves the wallet, not what was reserved.
+            self.assertEqual(claimed.crypto_amount_estimated, Decimal('14.52'))
+            self.assertEqual(claimed.final_amount, Decimal('14.52'))
+            self.assertEqual(ve_send.view(claimed)['usdt_amount'], '14.520000')
+
+    def test_settlement_proves_the_lowered_deposit_and_the_exact_delivery(self):
+        section = dict(self.ramp.metadata[ve_send.SECTION])
+        section.update(deposit_wei='14520000000000000000', reserved_deposit_wei=str(15 * 10 ** 18),
+                       funding_tx_hash='0x' + '33' * 32, deposit_address=RELAY_DEPOSIT, bridge={
+                           'request_id': 'r', 'response': {}, 'deadline': 2_000_000_000,
+                           'recipient': PROVIDER_DEPOSIT, 'amount_out_min': '14440000',
+                           'needed_units': '14440000', 'exact_output': True})
+        RampTransaction.objects.filter(pk=self.ramp.pk).update(metadata={ve_send.SECTION: section})
+        self.ramp.refresh_from_db()
+        seen = {}
+
+        def delivered(view):
+            seen.update(amount_units=view.quote.amount_units, amount_out_min=view.amount_out_min)
+            view.status, view.actual_out_units, view.destination_tx_hash = 'delivered', '14440000', '0x' + '44' * 32
+
+        with mock.patch('payment_accounts.relay_settlement.reconcile_relay', side_effect=delivered):
+            result = bolivia_qr_send.settle(self.ramp)
+        self.assertEqual(result.kind, 'delivered')
+        self.assertEqual(seen, {'amount_units': '14520000000000000000', 'amount_out_min': '14440000'})
+        self.ramp.refresh_from_db()
+        self.assertEqual(ve_send._section(self.ramp)['provider_surplus_units'], '0')
+
+    def test_the_claim_never_raises_the_deposit(self):
+        for priced in (str(15 * 10 ** 18 + 1), '0', 'abc'):
+            impl = SimpleNamespace(TARGET_AT_CLAIM=True, funding_target=lambda ramp, p=priced: {
+                'deposit_address': RELAY_DEPOSIT, 'deposit_wei': p, 'binding': {}})
+            with self.subTest(priced=priced), mock.patch('ramps.ve_send.adapter', return_value=impl), \
+                    self.assertRaises(ve_send.VeSendError):
+                ve_send.start_funding(self.ramp)
+            self.ramp.refresh_from_db()
+            self.assertEqual(ve_send._section(self.ramp)['deposit_wei'], str(15 * 10 ** 18))
+            self.assertEqual(ve_send._phase(self.ramp), 'awaiting_funding')
 
     def test_inflight_payouts_are_counted_per_provider(self):
         other = RampTransaction.objects.create(

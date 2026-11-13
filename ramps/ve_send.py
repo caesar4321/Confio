@@ -39,6 +39,8 @@ Adapter contract (module attributes/functions):
   beneficiary_view(beneficiary) -> dict  (optional; Venezuelan fields otherwise)
   TARGET_AT_CLAIM: the deposit target is made when the funding is claimed
     (funding_target(ramp) -> dict), else at creation (deposit_target(ramp))
+    funding_target may return 'deposit_wei' (<= the reserved amount): what
+    the wallet pays this target, e.g. an exact-output bridge's input
   settle(ramp) -> Settlement   (optional: funded -> settled; else immediate)
   payout_terms(ramp, inflight) -> dict | None (amount + body; None = wait;
     {'review': reason} = not payable as priced)
@@ -235,9 +237,10 @@ def _phase(ramp: RampTransaction) -> str:
     return _section(ramp).get('phase') or 'preparing'
 
 
-def _update(ramp_pk: int, *, require=None, status=None, detail=None, **values) -> RampTransaction | None:
+def _update(ramp_pk: int, *, require=None, status=None, detail=None, row=None, **values) -> RampTransaction | None:
     """Merge into metadata.ve_send under the row lock, never from a stale
-    copy. `require(current) -> bool` gates the write; None when it refuses."""
+    copy. `require(current) -> bool` gates the write; None when it refuses.
+    `row` sets model fields in the same write."""
     with transaction.atomic():
         current = RampTransaction.objects.select_for_update().get(pk=ramp_pk)
         if require is not None and not require(current):
@@ -254,6 +257,9 @@ def _update(ramp_pk: int, *, require=None, status=None, detail=None, **values) -
         if detail is not None:
             current.status_detail = detail[:500]
             fields.append('status_detail')
+        for name, value in (row or {}).items():
+            setattr(current, name, value)
+            fields.append(name)
         current.save(update_fields=fields)
         return current
 
@@ -433,7 +439,7 @@ def funding_details(ramp: RampTransaction) -> dict | None:
 def start_funding(ramp: RampTransaction) -> RampTransaction:
     """The single right to fund this order: from here it can never be funded
     again, nor cancelled while a broadcast may still land."""
-    values = {}
+    values, row = {}, None
     if getattr(adapter(ramp), 'TARGET_AT_CLAIM', False):
         if not can_fund(RampTransaction.objects.get(pk=ramp.pk)):
             raise VeSendError('Este envío ya se está procesando.')
@@ -444,7 +450,19 @@ def start_funding(ramp: RampTransaction) -> RampTransaction:
         if not _valid_target(ramp, address):
             raise VeSendError('No pudimos preparar el envío. Intenta de nuevo en unos minutos.')
         values = {'deposit_address': address.lower(), 'bridge': target.get('binding')}
-    updated = _update(ramp.pk, require=can_fund, detail='confirming_funding',
+        if target.get('deposit_wei') is not None:
+            # A target priced at the claim (an exact-output bridge) names what
+            # the wallet pays: never more than this order reserved. The proof
+            # of funding then looks for that amount.
+            priced, reserved = str(target['deposit_wei']), str(_section(ramp).get('deposit_wei') or '')
+            if not priced.isdigit() or not reserved.isdigit() or not 0 < int(priced) <= int(reserved):
+                raise VeSendError('No pudimos preparar el envío. Intenta de nuevo en unos minutos.')
+            values['deposit_wei'] = priced
+            values['reserved_deposit_wei'] = reserved
+            # History and the ledger record what leaves the wallet.
+            usdt = (Decimal(int(priced)) / Decimal(10 ** 18)).quantize(MICRO, rounding=ROUND_DOWN)
+            row = {'crypto_amount_estimated': usdt, 'final_amount': usdt}
+    updated = _update(ramp.pk, require=can_fund, detail='confirming_funding', row=row,
                       phase='funding_reported', funding_started_at=_now_iso(), **values)
     if updated is None:
         raise VeSendError('Este envío ya se está procesando.')
