@@ -237,6 +237,8 @@ export default function AssistantSheet() {
   const [mode, setMode] = useState<'AI' | 'HUMAN'>('AI');
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
+  // True while «Volver a Confio Assistant» waits for the server (see backToAi).
+  const returningRef = useRef(false);
   const [speaking, setSpeaking] = useState(false);
   const [recordingMs, setRecordingMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -333,7 +335,11 @@ export default function AssistantSheet() {
     if (!olderLoaded.current) {
       setHasMore(thread.hasMore);
     }
-    setMode(thread.mode === 'HUMAN' ? 'HUMAN' : 'AI');
+    // While coming back, the server already says AI but may still be
+    // answering; backToAi sets the mode when it is done.
+    if (!returningRef.current) {
+      setMode(thread.mode === 'HUMAN' ? 'HUMAN' : 'AI');
+    }
     setProfile(thread.profile);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
@@ -732,10 +738,34 @@ export default function AssistantSheet() {
     }
   };
 
+  // Coming back may answer a message left while the team had the thread
+  // (server side), so the tap can take a few seconds: show it, and never
+  // leave the banner stuck if the request fails.
+  const [returning, setReturning] = useState(false);
   const backToAi = async () => {
-    await returnToAi();
-    setMode('AI');
-    void refetch();
+    if (returningRef.current || thinking) return; // a message still sending: tap again after it
+    returningRef.current = true;
+    setReturning(true);
+    setThinking(true); // nothing new is sent while a pending message is answered
+    let failed = false;
+    try {
+      const { data } = await returnToAi();
+      setMode(data?.returnToAssistant?.mode === 'HUMAN' ? 'HUMAN' : 'AI');
+    } catch {
+      // The request failed but the server may have switched anyway: take the
+      // mode from a fresh read (an unchanged result doesn't re-run the effect).
+      failed = true;
+    } finally {
+      returningRef.current = false;
+      setReturning(false);
+      setThinking(false);
+      void refetch()
+        .then((result) => {
+          const mode = result?.data?.assistantThread?.mode;
+          if (failed && mode) setMode(mode === 'HUMAN' ? 'HUMAN' : 'AI');
+        })
+        .catch(() => {});
+    }
   };
 
   // The box grows out of the bubble and shrinks back into it.
@@ -1014,8 +1044,11 @@ export default function AssistantSheet() {
             <View style={styles.humanBanner}>
               <Icon name="users" size={14} color={EMERALD_DARK} />
               <Text style={styles.humanBannerText}>El equipo verá tus mensajes y te responderá aquí.</Text>
-              <Pressable onPress={backToAi} accessibilityRole="button">
-                <Text style={styles.humanBannerLink}>Volver a Confio Assistant</Text>
+              <Pressable onPress={backToAi} disabled={returning || thinking} accessibilityRole="button"
+                accessibilityState={{ busy: returning, disabled: returning || thinking }}>
+                {returning
+                  ? <ActivityIndicator size="small" color={EMERALD} />
+                  : <Text style={styles.humanBannerLink}>Volver a Confio Assistant</Text>}
               </Pressable>
             </View>
           ) : null}
