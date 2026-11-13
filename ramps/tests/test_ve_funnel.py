@@ -124,3 +124,49 @@ class ReasonKeysTests(TestCase):
         source = (Path(__file__).resolve().parents[2] / 'apps/src/services/vePagoMovilTopUp.ts').read_text()
         block = source.split('VE_TOP_UP_CANCEL_REASONS = [', 1)[1].split('] as const', 1)[0]
         self.assertEqual(tuple(re.findall(r"\['(\w+)',", block)), ve_funnel.CANCEL_REASONS)
+
+
+class KoyweTopUpQuoteViewTests(TestCase):
+    """Bolivia, 2026-11-13: 55 of 79 verified signups never started a top-up,
+    and the funnel event kept only the first keystroke of the day."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='bo_quote', firebase_uid='bo_quote', country='BO')
+
+    def _quote(self, amount, direction='ON_RAMP', user=None):
+        from ramps import schema
+        info = SimpleNamespace(context=SimpleNamespace(user=user or self.user))
+        client = mock.Mock(is_configured=True)
+        client.get_ramp_quote.return_value = dict(
+            direction=direction, amount_in=str(amount), amount_out=str((Decimal(amount) / Decimal('11.38')).quantize(Decimal('0.01'))),
+            exchange_rate=Decimal('11.38'), fee_amount='6.13', fee_currency='BOB', network_fee_amount='0.13',
+            network_fee_currency='BOB', rate_display='', total_change_display='', token_symbol='USDT',
+            network_symbol='BSC', network_display='BSC', asset_note='')
+        with mock.patch.object(schema, '_resolve_ramp_country_code', return_value='BO'), \
+                mock.patch.object(schema, 'KoyweClient', return_value=client), \
+                mock.patch.object(schema, '_validate_koywe_on_ramp_quote_limits'), \
+                mock.patch.object(schema, '_get_koywe_auth_email', return_value=None), \
+                mock.patch('users.funnel.emit_once'):
+            return schema.Query().resolve_ramp_quote(info, direction=direction, amount=str(amount), country_code='BO',
+                                                     fiat_currency='BOB', payment_method_code='QRI-BO')
+
+    def test_quotes_count_in_dollars_at_the_quotes_rate(self):
+        self._quote('350')
+        self._quote('1138')
+        self._quote('569')
+        row = RampQuoteView.objects.get(user=self.user)
+        self.assertEqual((row.rail, row.views, row.first_usd, row.last_usd, row.max_usd, row.last_net_usd, row.country),
+                         ('koywe_bo_topup', 3, Decimal('30.76'), Decimal('50.00'), Decimal('100.00'), Decimal('50.00'), 'BO'))
+
+    def test_withdrawal_quotes_and_anonymous_quotes_are_not_top_up_views(self):
+        self._quote('100', direction='OFF_RAMP')
+        self._quote('350', user=SimpleNamespace(is_authenticated=False))
+        self.assertFalse(RampQuoteView.objects.exists())
+
+    def test_an_unusable_rate_or_amount_records_nothing_and_never_raises(self):
+        from ramps import schema
+        schema._record_koywe_top_up_view(self.user, 'BO', '1E+999999', Decimal('0.0001'), None)
+        schema._record_koywe_top_up_view(self.user, 'BO', 'abc', Decimal('11.38'), None)
+        schema._record_koywe_top_up_view(self.user, 'BO', Decimal('350'), None, Decimal('30'))
+        schema._record_koywe_top_up_view(self.user, 'BO', Decimal('350'), '0', Decimal('30'))
+        self.assertFalse(RampQuoteView.objects.exists())

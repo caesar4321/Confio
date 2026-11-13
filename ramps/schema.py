@@ -197,6 +197,28 @@ def _note_ramp_quote(user, direction, country_code, outcome, *, amount=None, fia
               dedupe_key=f'{direction}:{outcome}:{country_code or ""}:{day}')
 
 
+def koywe_top_up_rail(country_code) -> str:
+    return f'koywe_{(country_code or "xx").lower()[:2]}_topup'
+
+
+def _record_koywe_top_up_view(user, country_code, fiat_amount, rate, net_usd):
+    """The day's quote views on Koywe's top-up, in dollars at the quote's own
+    rate (1 dollar token = rate fiat), beside the VE top-up's (ramps.ve_funnel).
+    The funnel event above keeps only the first quote of a day, which is the
+    first keystroke; this keeps the last and largest amount too. Never raises."""
+    if not user or not getattr(user, 'is_authenticated', False):
+        return
+    try:
+        rate = Decimal(str(rate))
+        if not rate.is_finite() or rate <= 0:
+            return
+        usd = Decimal(str(fiat_amount)) / rate
+    except (ArithmeticError, TypeError, ValueError):  # InvalidOperation, Overflow, ...
+        return
+    from ramps import ve_funnel
+    ve_funnel.record_quote_view(user, koywe_top_up_rail(country_code), usd, net_usd)
+
+
 def _format_koywe_error(exc: 'KoyweError', direction: str = '') -> str:
     """Koywe's account-level rail switches come back as English sentences;
     users get Spanish. Anything unrecognized passes through unchanged."""
@@ -2228,6 +2250,8 @@ class Query(graphene.ObjectType):
         )
         _note_ramp_quote(user, normalized_direction, resolved_country_code, 'ok',
                          amount=decimal_amount, fiat=result.fiat_currency)
+        if normalized_direction == 'ON_RAMP':
+            _record_koywe_top_up_view(user, resolved_country_code, amount_in, quote.get('exchange_rate'), net_crypto)
         return result
 
     def resolve_ramp_order_status(self, info, order_id, country_code=None):
