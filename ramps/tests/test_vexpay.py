@@ -697,6 +697,37 @@ class VexPayRampTests(TestCase):
             vexpay.check_provider_minimums(Decimal('11'), terms)
         vexpay.check_provider_minimums(Decimal('11.14'), terms)
 
+    def test_contractual_floor_beats_a_lower_api_minimum(self):
+        # Prod terms 11-14: the API reports 1 USDT, VEXPay requires 10 from us.
+        terms = {'payin_fee_percent': '2', 'spread_percent': '1.5', 'payout_fee_usdt': '0.20',
+                 'minimum_conversion_usdt': '1', 'minimum_payout_usdt': '1'}
+        with self.settings(VEXPAY_MIN_CONVERSION_USDT='10'):
+            # 10 * 1.015 / 0.98 = 10.357… → 10.36
+            self.assertEqual(vexpay.provider_minimum_usd(terms), Decimal('10.36'))
+            self.assertGreaterEqual(vexpay._converted_usdt(Decimal('10.36'), terms), Decimal('10'))
+            with self.assertRaises(vexpay.VexPayRampError):
+                vexpay.check_provider_minimums(Decimal('10'), terms)
+        with self.settings(VEXPAY_MIN_CONVERSION_USDT=''):
+            self.assertEqual(vexpay.provider_minimum_usd(terms), Decimal('1.25'))
+
+    def test_verify_below_the_floor_alerts_but_still_verifies(self):
+        terms = {'payin_fee_percent': '2', 'spread_percent': '1.5', 'payout_fee_usdt': '0.20',
+                 'minimum_conversion_usdt': '1', 'minimum_payout_usdt': '1', 'payin_fee_fixed_usd': '0'}
+        ramp = self._ramp()
+        with self.settings(VEXPAY_MIN_CONVERSION_USDT='10'), \
+                mock.patch.object(vexpay, 'fee_terms', return_value=terms), \
+                mock.patch.object(vexpay, '_alert') as alert:
+            vexpay.warn_if_below_provider_minimum(ramp, Decimal('10.30'), mock.Mock())
+            alert.assert_called_once()
+            self.assertEqual(alert.call_args.args[1], 'below_vexpay_minimum')
+            alert.reset_mock()
+            vexpay.warn_if_below_provider_minimum(ramp, Decimal('10.36'), mock.Mock())
+            alert.assert_not_called()
+        with mock.patch.object(vexpay, 'fee_terms', side_effect=RuntimeError('down')), \
+                mock.patch.object(vexpay, '_alert') as alert:
+            vexpay.warn_if_below_provider_minimum(ramp, Decimal('1'), mock.Mock())  # never raises
+            alert.assert_not_called()
+
     def test_execute_ambiguous_never_asks_for_a_second_token(self):
         ramp = self._ramp()
         client = mock.Mock()

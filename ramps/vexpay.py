@@ -166,10 +166,13 @@ def confio_net(usdt: Decimal) -> Decimal:
 
 def provider_minimum_usd(terms: dict) -> Decimal:
     """Smallest top-up that clears VEXPay's conversion AND payout minimums.
-    Below it VEXPay would collect the bolívares and then hold them."""
+    Below it VEXPay would collect the bolívares and then hold them.
+    VEXPay's contractual floor (VEXPAY_MIN_CONVERSION_USDT) applies even when
+    its API reports a lower minimumUsdt."""
     payin = Decimal(terms['payin_fee_percent']) / 100
     spread = Decimal(terms['spread_percent']) / 100
-    needed = max(Decimal(terms['minimum_conversion_usdt']),
+    floor = Decimal(str(getattr(settings, 'VEXPAY_MIN_CONVERSION_USDT', '') or '0'))
+    needed = max(Decimal(terms['minimum_conversion_usdt']), floor,
                  Decimal(terms['minimum_payout_usdt']) + Decimal(terms['payout_fee_usdt']))
     if payin >= 1:
         return Decimal('Infinity')
@@ -779,6 +782,7 @@ def verify_pago_movil(ramp: RampTransaction, reference: str, client: VexPayClien
         _release(ramp)
         raise VexPayRampError('No pudimos consultar la tasa. Intenta de nuevo en unos segundos.')
     _update(ramp.pk, verify_usd_amount=format(usd_amount, 'f'))
+    warn_if_below_provider_minimum(ramp, usd_amount, client)
     if wait is None:
         import time
         wait = time.sleep
@@ -850,6 +854,20 @@ def verify_usd_amount(section: dict, client: VexPayClient) -> Decimal:
     return (Decimal(str(expected_ves)) / rate).quantize(CENT, rounding=ROUND_DOWN)
 
 
+def warn_if_below_provider_minimum(ramp: RampTransaction, usd_amount: Decimal, client: VexPayClient) -> None:
+    """An unpaid Pago Móvil order is payable for days at the bolívares
+    fixed when it was made; if the bolívar slid since, today's dollar amount
+    can fall under VEXPay's minimum and VEXPay may hold the bolívares instead
+    of converting them. Never gate the user on it: verify anyway and tell ops."""
+    try:
+        minimum = provider_minimum_usd(fee_terms(client))
+        if usd_amount < minimum:
+            logger.warning('VEXPay verify for ramp %s is $%s, under the $%s minimum', ramp.pk, usd_amount, minimum)
+            _alert(ramp, 'below_vexpay_minimum')
+    except Exception:  # noqa: BLE001 — a warning never blocks the verification
+        logger.warning('VEXPay minimum check at verify failed for ramp %s', ramp.pk, exc_info=True)
+
+
 VERIFY_RETRY_AFTER = timedelta(minutes=10)
 VERIFY_MAX_RETRIES = 5
 
@@ -886,6 +904,7 @@ def _retry_lost_verification(ramp: RampTransaction, client: VexPayClient) -> Ram
     if _update(ramp.pk, require=still_lost, verify_retries=retries + 1,
                verify_usd_amount=format(usd_amount, 'f')) is None:
         return RampTransaction.objects.get(pk=ramp.pk)
+    warn_if_below_provider_minimum(ramp, usd_amount, client)
     try:
         # A fresh key per replay: the same key would only replay a cached
         # answer. Safe because the by-reference lookup just proved no payment
