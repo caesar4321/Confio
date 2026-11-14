@@ -15,6 +15,7 @@ to receive the deduction; none exists yet, so every return is a full refund.
 """
 import logging
 from datetime import timedelta
+from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
@@ -53,6 +54,94 @@ def needs_face(owner) -> bool:
         user=owner.user, status='passed', purpose='payin_release',
         completed_at__gte=timezone.now() - WITHDRAWAL_WINDOW,
     ).exists()
+
+
+# Since 2026-11-14 (Julian) a pay-in is held only when it looks like a ring.
+# The emergency exit opens only after the on-chain heartbeat stops for 14 days,
+# so while Confío runs, money leaving the account needs Confío Face anyway
+# (ramp orders, sponsored sends). Holding every deposit bounced 5 of the first 9
+# (R$1-10 tests) back to their payers. What the hold still buys is a clean return
+# to the payer, which matters where a recruited identity collects volume: a young
+# account or many different payers, above a daily amount. Flagged people are
+# always held (a banned person cannot release, so it goes back in 24h).
+AUTO_RELEASE_USD_24H = Decimal('100')
+YOUNG_ACCOUNT = timedelta(days=30)
+MANY_PAYERS_24H = 3
+WATCH_WINDOW = timedelta(hours=24)
+FLAGGED_CASE_STATES = ('investigating', 'confirmed')  # 'banned' counts only while the ban is active
+
+
+def _setting(name, default, cast):
+    from django.conf import settings
+    value = getattr(settings, name, None)
+    return default if value in (None, '') else cast(value)
+
+
+def _usd(entry):
+    """The pay-in in dollars, or None when no rate is known."""
+    asset = (entry.asset or '').upper()
+    if asset in ('USD', 'USDC_POL', 'USDT', 'USDC'):
+        return Decimal(entry.amount)
+    from exchange_rates.services import exchange_rate_service
+    rate = (exchange_rate_service.get_current_rate(asset, 'USD', 'official')
+            or exchange_rate_service.get_rate_with_fallback(asset, 'USD'))
+    return Decimal(entry.amount) / Decimal(rate) if rate else None
+
+
+def _payer(entry):
+    party = (entry.provider_data or {}).get('third_party') or {}
+    key = tuple(str(party.get(k) or '').strip().upper() for k in ('document_number', 'account_number', 'full_name'))
+    return key if any(key) else ('?', str(entry.pk))
+
+
+def _flagged(user) -> bool:
+    # The same ban the API middleware enforces (it also blocks every send,
+    # withdrawal and Face release, so a held pay-in goes back in 24h).
+    from security.models import SuspiciousActivity
+    from security.utils import check_user_banned
+    if check_user_banned(user)[0]:
+        return True
+    return SuspiciousActivity.objects.filter(user=user, status__in=FLAGGED_CASE_STATES).exists()
+
+
+def _ring_pattern(owner, entry) -> bool:
+    now = timezone.now()
+    since = (entry.occurred_at or now) - WATCH_WINDOW
+    from .models import LedgerEntry
+    # Per person, not per account: several personal accounts share one limit.
+    entries = {e.pk: e for e in LedgerEntry.objects.filter(
+        automatic_payin__isnull=False, direction='credit',
+        occurred_at__gte=since, occurred_at__lte=entry.occurred_at or now,
+        financial_account__provider_profile__confio_account__user=owner.user)}
+    entries[entry.pk] = entry
+    total = Decimal(0)
+    for item in entries.values():
+        value = _usd(item)
+        if value is None:
+            return True  # no rate: cannot tell it is small, so it waits
+        total += value
+    if total <= _setting('INFINIA_PAYIN_AUTO_RELEASE_USD', AUTO_RELEASE_USD_24H, Decimal):
+        return False
+    joined = getattr(owner.user, 'date_joined', None)
+    young = joined is None or joined > now - timedelta(days=_setting('INFINIA_PAYIN_YOUNG_DAYS', YOUNG_ACCOUNT.days, int))
+    payers = {_payer(item) for item in entries.values()}
+    return young or len(payers) >= _setting('INFINIA_PAYIN_MANY_PAYERS', MANY_PAYERS_24H, int)
+
+
+def hold_required(owner, entry) -> bool:
+    """Should this personal pay-in wait for Confío Face? Only when its person
+    has no open face window and it is flagged or looks like a ring. Any
+    error holds it: an unknown risk is never waved through."""
+    if not needs_face(owner):
+        return False
+    try:
+        # Own savepoint: a failed query must not abort the caller's transaction
+        # (process() then holds the row and starts its 24h clock).
+        with transaction.atomic():
+            return _flagged(owner.user) or _ring_pattern(owner, entry)
+    except Exception:
+        logger.exception('Pay-in %s risk check failed: held', entry.pk)
+        return True
 
 
 def received_at(row):
@@ -163,7 +252,9 @@ def require_conversion_allowed(owner, credit) -> None:
     row = AutomaticPayin.objects.select_for_update().filter(entry=credit).first()
     if row and row.status in ('returning', 'returned', 'return_failed'):
         raise PaymentAccountError('Este depósito se está devolviendo al remitente.')
-    if needs_face(owner) and not (row and row.released_at):
+    if row and row.released_at:
+        return
+    if (row and row.status == ACTIVE_HOLD and needs_face(owner)) or hold_required(owner, credit):
         raise PaymentAccountError(FACE_STEP_UP_MESSAGE)
 
 

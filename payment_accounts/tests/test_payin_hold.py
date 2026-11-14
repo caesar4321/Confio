@@ -80,6 +80,65 @@ class PayinHoldTests(TestCase):
         entry = self.credit(self.local)
         self.assertEqual(process(enqueue(entry).pk).status, 'started')
 
+    # Only flagged or ring-shaped pay-ins wait (2026-11-14)
+
+    def _rate(self, rate='3.4'):
+        from exchange_rates.models import ExchangeRate
+        ExchangeRate.objects.create(source_currency='PEN', target_currency='USD', rate=rate,
+                                    rate_type='official', source='exchangerate_api')
+
+    def _joined(self, days_ago):
+        user = self.owner.user
+        user.date_joined = timezone.now() - timedelta(days=days_ago)
+        user.save(update_fields=['date_joined'])
+
+    def test_a_small_payin_converts_without_a_face(self):
+        self._rate()
+        entry = self.credit(self.local, amount='34')  # US$10
+        row = process(enqueue(entry).pk)
+        self.assertEqual(row.status, 'started')
+        self.assertIsNotNone(row.released_at)  # a retry never re-decides it
+
+    def test_a_young_account_over_the_daily_limit_waits(self):
+        self._rate()
+        self._joined(3)
+        entry = self.credit(self.local, amount='510')  # US$150
+        self.assertEqual(process(enqueue(entry).pk).status, 'awaiting_face')
+
+    def test_an_older_account_with_one_payer_over_the_limit_converts(self):
+        self._rate()
+        self._joined(90)
+        entry = self.credit(self.local, amount='510')
+        self.assertEqual(process(enqueue(entry).pk).status, 'started')
+
+    def test_many_payers_over_the_limit_wait_even_on_an_older_account(self):
+        self._rate()
+        self._joined(90)
+        def paid_by(n):  # US$40 each, from a different payer
+            entry = self.credit(self.local, amount='136', provider_data={'third_party': {
+                'full_name': f'Payer {n}', 'document_number': str(n)}})
+            enqueue(entry)
+            return entry
+        paid_by(0)
+        self.assertFalse(payin_hold.hold_required(self.owner, paid_by(1)))  # US$80: under the limit
+        self.assertTrue(payin_hold.hold_required(self.owner, paid_by(2)))  # US$120 from 3 payers
+
+    def test_a_flagged_person_always_waits(self):
+        from security.models import UserBan
+        self._rate()
+        self._joined(90)
+        UserBan.objects.create(user=self.owner.user, ban_type='permanent', reason='fraud', reason_details='test')
+        entry = self.credit(self.local, amount='3.4')
+        self.assertEqual(process(enqueue(entry).pk).status, 'awaiting_face')
+
+    def test_an_unknown_amount_or_a_failed_check_waits(self):
+        entry = self.credit(self.local, amount='3.4')  # no PEN rate at all
+        self.assertTrue(payin_hold.hold_required(self.owner, entry))
+        self._rate()
+        self.assertFalse(payin_hold.hold_required(self.owner, entry))
+        with mock.patch.object(payin_hold, '_ring_pattern', side_effect=RuntimeError):
+            self.assertTrue(payin_hold.hold_required(self.owner, entry))
+
     # Release
 
     def test_release_needs_a_passed_face(self):

@@ -3,6 +3,19 @@
 Status: decided 2026-09-29 (Julian). Backend: Codex. App UI/UX: Claude Code session.
 This file is the contract between the two; change it here first if either side needs to.
 
+## Amended 2026-11-14 (Julian): hold only flagged or ring-shaped pay-ins
+
+The emergency exit now opens only after the on-chain heartbeat stops for 14 days,
+so while Confío runs, money leaving an account needs Confío Face anyway (ramp
+orders, sponsored sends). Holding every deposit bounced 5 of the first 9 (small Pix
+tests) back to their payers. `payin_hold.hold_required` now holds a personal pay-in
+only when the person has no open face window and either (a) is flagged (an active
+ban, or a SuspiciousActivity case investigating/confirmed) or (b) the person's last
+24 hours of pay-ins (all their accounts) pass a dollar limit and the account is young or the money came
+from several payers. An unknown dollar value or a failed check holds. Everything
+else converts straight away. The freeze for a flagged account is the existing
+`UserBan`: the API middleware blocks every request, so its held pay-ins return in 24h.
+
 ## Why
 
 Recruited-identity rings (Colombia case, Sept 2026) KYC a holder once and run the

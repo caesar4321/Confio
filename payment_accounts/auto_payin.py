@@ -110,11 +110,12 @@ def process(pk):
             row.status, row.reason = 'review', 'not_external_payin'
         else:
             from .services import require_unreserved_source
-            from .payin_hold import hold, needs_face
-            # Personal pay-in awaiting Confío Face: parked (and visible, on its
-            # 24h clock) even while another journey holds the account. The
-            # reservation and debit checks run when the face releases it.
-            held = needs_face(owner) and not row.released_at
+            from .payin_hold import hold, hold_required
+            # Personal pay-in awaiting Confío Face (flagged or ring-shaped only,
+            # payin_hold.hold_required): parked and visible on its 24h clock even
+            # while another journey holds the account. The reservation and debit
+            # checks run when the face releases it.
+            held = not row.released_at and hold_required(owner, entry)
             if not held:
                 # A debit can arrive before its conversion completion event. Wait
                 # for the existing owner of those funds before evaluating proof;
@@ -145,7 +146,9 @@ def process(pk):
                     automatic_payin=True, automatic_payin_policy='quoted-minima-v1')
                 journey.money_flow.save(update_fields=['metadata'])
                 row.status, row.reason = 'started', ''
-        row.save(update_fields=['status', 'reason', 'awaiting_since', 'updated_at'])
+                # Released without a face: kept, so a retry never re-decides it.
+                row.released_at = row.released_at or timezone.now()
+        row.save(update_fields=['status', 'reason', 'awaiting_since', 'released_at', 'updated_at'])
         return row
 
 
