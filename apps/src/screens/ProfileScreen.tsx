@@ -35,6 +35,7 @@ type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>
 
 export const ProfileScreen = () => {
   const verificationAnchor = useGuideAnchor('profile_verification');
+  const inviteAnchor = useGuideAnchor('profile_invite');
   const scrollRef = React.useRef<ScrollView>(null);
   const onGuideScroll = useScrollToGuidePointer(scrollRef);
   const { signOut, userProfile, isUserProfileLoading } = useAuth();
@@ -538,7 +539,14 @@ export const ProfileScreen = () => {
             </View>
 
             <View style={styles.referralActions}>
-              <TouchableOpacity style={styles.referralShareButton} onPress={handleShareReferral}>
+              <TouchableOpacity
+                ref={inviteAnchor}
+                style={styles.referralShareButton}
+                onPress={() => {
+                  reportGuideTap('profile_invite');
+                  handleShareReferral();
+                }}
+              >
                 <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
                 <Text style={styles.referralShareText}>Invitar por WhatsApp</Text>
               </TouchableOpacity>

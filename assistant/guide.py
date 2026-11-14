@@ -482,6 +482,7 @@ WALKS = {
     'withdraw': 'Retirar a su propia cuenta bancaria',
     'pay_qr': 'Pagar con un código QR',
     'share_number': 'Compartir su usuario para que le envíen dinero',
+    'invite': 'Invitar a un amigo a Confío (referidos)',
     'stocks': 'Comprar acciones',
     'crypto': 'Comprar oro o Bitcoin',
     'perps': 'Abrir una posición en futuros',
@@ -491,6 +492,20 @@ _WITHDRAW = (TrailStop('Home', 'Toca Enviar.', 'home_send'),
              TrailStop('Send', 'Toca aquí para retirar a tu cuenta.', 'own_account'))
 _PAY_QR = (TrailStop('Home', 'Toca Pagar.', 'tab_pay'), TrailStop('Scan', 'Apunta la cámara al código QR.'))
 _SHARE = (_TO_RECEIVE, TrailStop('Receive', 'Toca aquí para compartir tu usuario.', 'username_share'))
+_INVITE = (TrailStop('Home', 'Toca Perfil.', 'tab_profile'),
+           TrailStop('Profile', 'Toca aquí para invitar a tus amigos por WhatsApp.', 'profile_invite'))
+
+
+def _invite_on_this_build(request_meta):
+    """Perfil's invite button is a pointer anchor only from this build on (2026-11-13:
+    a referral question was walked to Recibir instead)."""
+    from django.conf import settings
+
+    from users.paid_offers import _version
+
+    floor = _version(getattr(settings, 'ASSISTANT_INVITE_WALK_MIN_APP_VERSION', '5.3.8'))
+    version = _version(str((request_meta or {}).get('HTTP_X_CONFIO_VERSION', '') or ''))
+    return floor is not None and version is not None and version >= floor
 
 
 def _can_withdraw(country, request_meta=None):
@@ -550,6 +565,8 @@ def walk_trail(viewer, key, request_meta):
         return _walk(*_PAY_QR)
     if key == 'share_number':
         return _walk(*_SHARE)
+    if key == 'invite':
+        return _walk(*_INVITE) if _invite_on_this_build(request_meta) else None
     if key == 'comprar':
         return STEPS['comprar'].chips[0].trail if _ladder_usable(viewer, state, 'comprar') else None
     return INVEST_OPTIONS[key].trail if key in _invest_options(viewer, state) else None

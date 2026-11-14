@@ -2752,6 +2752,10 @@ class GuideStepTests(TestCase):
             self.assertIsNone(guide.walk_trail(viewer, 'stocks', {}))
             self.assertIsNotNone(guide.walk_trail(viewer, 'crypto', {}))
             self.assertIsNone(guide.walk_trail(viewer, 'nothing', {}))
+            # Perfil's invite button is an anchor only from 5.3.8 on.
+            self.assertIsNone(guide.walk_trail(viewer, 'invite', {'HTTP_X_CONFIO_VERSION': '5.3.7'}))
+            invite = guide.walk_trail(viewer, 'invite', {'HTTP_X_CONFIO_VERSION': '5.3.8'})
+            self.assertEqual([stop.pointer for stop in invite[:2]], ['tab_profile', 'profile_invite'])
             self.user.phone_country = 'HN'
             self.assertIsNone(guide.walk_trail(viewer, 'top_up', {}))
 
