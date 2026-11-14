@@ -286,6 +286,11 @@ def method_status(identity, method):
 # except Venezuelan documents (product rule 2026-09-14; supersedes the
 # per-country table of Infinia's Required Documents page). Brazil also keeps
 # the CNH. Nationality is still decided by eligibility, not by the document.
+# US and Canadian driver's licences open them too (2026-11-13), whether Didit's
+# label stored them as national_id or drivers_license. Other countries'
+# licences are kept out by Didit (both personal workflows allow licences from
+# USA and CAN only) and by security.didit._unmet_request for 'DL' requests; a
+# "Driver's License" stored as national_id before then is not re-judged here.
 LOCAL_ACCOUNT_COUNTRIES = {'COL', 'MEX', 'BRA', 'ARG'}
 BLOCKED_DOCUMENT_COUNTRIES = {'VEN'}
 
@@ -299,12 +304,18 @@ def accepts_identity(identity, country):
         return False
     if identity.document_type in ('national_id', 'passport'):
         return True
-    return identity.document_type == 'drivers_license' and identity.document_issuing_country == country == 'BRA'
+    if identity.document_type != 'drivers_license':
+        return False
+    # Didit's "Driving License"/"Driver License" labels are stored as such
+    # (its "Driver's License" as national_id): a US/Canadian one still counts.
+    from security.didit import LICENCE_COUNTRIES
+    return identity.document_issuing_country in LICENCE_COUNTRIES or identity.document_issuing_country == country == 'BRA'
 
 
 def document_requirement(country):
-    """What to ask for when none of the person's documents fits (Didit codes)."""
-    return {'id_country': '', 'document_types': ['ID', 'P']}
+    """What to ask for when none of the person's documents fits (Didit codes).
+    'DL' means a US or Canadian licence only: security.didit._unmet_request."""
+    return {'id_country': '', 'document_types': ['DL', 'ID', 'P']}
 
 
 def _verified_documents(owner):

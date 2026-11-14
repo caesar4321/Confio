@@ -34,6 +34,9 @@ function acceptedDocument(idCountry: string, types: string[]): string {
   if (types.length === 1 && types[0] === 'P') {
     return 'Pasaporte vigente de cualquier país';
   }
+  if (types.includes('DL')) {
+    return 'Documento de identidad o pasaporte de cualquier país, o licencia de conducir de EE. UU. o Canadá';
+  }
   return 'Documento de identidad o pasaporte, de cualquier país';
 }
 

@@ -45,6 +45,15 @@ ISO2_TO_ISO3 = {
     'US': 'USA',
 }
 
+# Didit's licence labels, e.g. "Driver's License". Deliberately NOT in
+# DOCUMENT_TYPE_MAP: licence primaries are stored as national_id (a Brazilian
+# CNH reaches Koywe as the CPF it carries, and identity_reuse matches on the
+# stored type). The raw label is kept as extracted['document_is_licence'].
+LICENCE_LABELS = frozenset({"driver's license", "driver's_license", 'drivers license', 'drivers_license',
+                            'driver license', 'driver_license', 'driving license', 'driving_license'})
+# The only licences that count as an additional document (they open local accounts).
+LICENCE_COUNTRIES = frozenset({'USA', 'CAN'})
+
 DOCUMENT_TYPE_MAP = {
     'passport': 'passport',
     'id': 'national_id',
@@ -1208,6 +1217,7 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
             _first_non_empty(id_verification.get('expiration_date'), response_payload.get('expiration_date'))
         ),
         'brazilian_cpf_database_validation_present': database_validation_present,
+        'document_is_licence': str(document_type or '').strip().lower() in LICENCE_LABELS,
         'brazilian_cpf_database_validation_valid': bool(authoritative_cpf),
     }
 
@@ -1707,14 +1717,31 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
     return 'verified', ''
 
 
-def _unmet_request(issuing_country: Any, document_type: Any, request: dict[str, Any] | None) -> str:
-    """Why a document does not meet what the rail asked for ('' when it does)."""
+def _unmet_request(issuing_country: Any, document_type: Any, request: dict[str, Any] | None,
+                   is_licence: bool = False) -> str:
+    """Why a document does not meet what the rail asked for ('' when it does).
+
+    A licence is Didit's raw label (document_is_licence) or the stored
+    drivers_license type. A request for 'DL' (made since 2026-11-13) takes
+    only a US or Canadian one. A US/Canadian licence also meets 'ID', so one
+    verified under an older ['ID', 'P'] request keeps passing on resync.
+    Anything else is judged as before: a "Driver's License" stored as
+    national_id is an 'ID', a stored drivers_license only a 'DL'. The real
+    gate for new sessions is Didit: both personal workflows allow licences
+    from USA and CAN only (security/workflows, 2026-11-13)."""
     request = request or {}
     wanted_country = str(request.get('id_country') or '')
     if wanted_country and issuing_country != wanted_country:
         return 'El documento no es del país que pide este medio.'
+    is_licence = is_licence or document_type == 'drivers_license'
     wanted_types = set(request.get('document_types') or [])
-    if wanted_types and _DOCUMENT_TYPE_CODES.get(document_type) not in wanted_types:
+    if is_licence and 'DL' in wanted_types and issuing_country not in LICENCE_COUNTRIES:
+        return 'Solo aceptamos licencias de conducir de Estados Unidos o Canadá.'
+    if is_licence and issuing_country in LICENCE_COUNTRIES:
+        codes = {'DL', 'ID'}
+    else:
+        codes = {'DL' if is_licence else None, _DOCUMENT_TYPE_CODES.get(document_type)} - {None}
+    if wanted_types and not codes & wanted_types:
         return 'Ese tipo de documento no sirve para este medio.'
     return ''
 
@@ -1731,13 +1758,14 @@ def _review_additional_document(verification: IdentityVerification, extracted: d
     document is what the rail asked for.
     """
     request = (verification.risk_factors or {}).get('document_request') or {}
-    unmet = _unmet_request(extracted.get('document_issuing_country'), extracted.get('document_type'), request)
+    unmet = _unmet_request(extracted.get('document_issuing_country'), extracted.get('document_type'), request,
+                           is_licence=bool(extracted.get('document_is_licence')))
     if unmet:
         return 'rejected', unmet
     return _bind_to_person(verification, extracted, decision, precomputed)
 
 
-_DEFAULT_ADDITIONAL_REQUEST = {'id_country': '', 'document_types': ['ID', 'P']}
+_DEFAULT_ADDITIONAL_REQUEST = {'id_country': '', 'document_types': ['DL', 'ID', 'P']}
 
 
 def didit_session_purpose(payload: dict[str, Any]) -> str:

@@ -455,7 +455,7 @@ const VerificationScreen = () => {
     </TouchableOpacity>
   );
 
-  const openOtherDocument = () => (navigation as any).navigate('AdditionalDocument', { idCountry: '', documentTypes: ['P', 'ID'] });
+  const openOtherDocument = () => (navigation as any).navigate('AdditionalDocument', { idCountry: '', documentTypes: ['P', 'ID', 'DL'] });
 
   const list = documents || [];
   const verifiedCount = list.filter(doc => doc.status === 'verified').length;

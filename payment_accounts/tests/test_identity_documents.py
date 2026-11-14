@@ -47,12 +47,27 @@ class DocumentRequestTests(SimpleTestCase):
             self.assertTrue(local_money.accepts_identity(doc('passport', 'KOR'), account))
             self.assertFalse(local_money.accepts_identity(doc('national_id', 'VEN'), account))
             self.assertFalse(local_money.accepts_identity(doc('passport', 'VEN'), account))
-            self.assertEqual(local_money.document_requirement(account), {'id_country': '', 'document_types': ['ID', 'P']})
-        # The CNH is Brazilian-only; a driver's license is never an ID elsewhere.
+            self.assertEqual(local_money.document_requirement(account),
+                             {'id_country': '', 'document_types': ['DL', 'ID', 'P']})
+            # Didit's other licence labels store drivers_license: US/Canadian ones still count.
+            self.assertTrue(local_money.accepts_identity(doc('drivers_license', 'USA'), account))
+            self.assertTrue(local_money.accepts_identity(doc('drivers_license', 'CAN'), account))
+            self.assertFalse(local_money.accepts_identity(doc('drivers_license', 'MEX'), account))
+            self.assertFalse(local_money.accepts_identity(doc('drivers_license', 'VEN'), account))
+        # The CNH is Brazilian-only; other licences are never an ID.
         self.assertTrue(local_money.accepts_identity(doc('drivers_license', 'BRA'), 'BRA'))
         self.assertFalse(local_money.accepts_identity(doc('drivers_license', 'BRA'), 'COL'))
         self.assertFalse(local_money.accepts_identity(doc('drivers_license', 'PRY'), 'BRA'))
         self.assertFalse(local_money.accepts_identity(None, 'COL'))
+
+    def test_didit_licence_label_is_flagged_but_stored_as_before(self):
+        from security.didit import _extract_verification_payload as extract_verification_fields
+        for label, stored in (("Driver's License", 'national_id'), ('Driving License', 'drivers_license'),
+                              ('Identity Card', 'national_id'), ('Passport', 'passport')):
+            fields = extract_verification_fields({'id_verifications': [{
+                'document_type': label, 'issuing_state': 'USA', 'first_name': 'Ana', 'last_name': 'Perez'}]})
+            self.assertEqual(fields['document_type'], stored, label)
+            self.assertEqual(fields['document_is_licence'], 'licen' in label.lower(), label)
 
 
 class AdditionalDocumentTests(TestCase):
@@ -115,6 +130,43 @@ class AdditionalDocumentTests(TestCase):
         row = self.pending({'id_country': '', 'document_types': ['P']})
         self.assertEqual(_review_additional_document(row, self.extracted(document_type='drivers_license'), {})[0],
                          'rejected')
+
+    def test_extra_licence_only_from_the_us_or_canada(self):
+        document(self.user, 'V-L')
+        # Didit's "Driver's License" is stored as national_id; the raw label is the flag.
+        licence = dict(document_type='national_id', document_is_licence=True)
+        request = {'id_country': '', 'document_types': ['DL', 'ID', 'P']}
+        for country, expected in (('USA', 'verified'), ('CAN', 'verified'), ('MEX', 'rejected'),
+                                  ('BRA', 'rejected')):
+            status, reason = _review_additional_document(
+                self.pending(request), self.extracted(document_issuing_country=country, **licence), {})
+            self.assertEqual(status, expected, country)
+            if expected == 'rejected':
+                self.assertIn('Estados Unidos o Canadá', reason)
+        # A licence verified under an older request (no 'DL') keeps passing on resync,
+        # whatever its country: the US/Canada rule is only for requests that ask for one.
+        for old in ({'id_country': '', 'document_types': ['ID', 'P']}, {}):
+            self.assertEqual(_review_additional_document(
+                self.pending(old), self.extracted(document_issuing_country='MEX', **licence), {})[0], 'verified')
+        # A request from before licences were asked for (['ID', 'P']) still takes a
+        # US one: a resync of a licence verified back then must not reject it.
+        self.assertEqual(_review_additional_document(
+            self.pending({'id_country': '', 'document_types': ['ID', 'P']}),
+            self.extracted(document_issuing_country='USA', **licence), {})[0], 'verified')
+        # A stored drivers_license from elsewhere is still only a 'DL', as before.
+        self.assertEqual(_review_additional_document(
+            self.pending({'id_country': '', 'document_types': ['ID', 'P']}),
+            self.extracted(document_issuing_country='MEX', document_type='drivers_license',
+                           document_is_licence=True), {})[0], 'rejected')
+        # A passport-only request never takes a licence.
+        status, reason = _review_additional_document(
+            self.pending({'id_country': '', 'document_types': ['P']}),
+            self.extracted(document_issuing_country='USA', **licence), {})
+        self.assertEqual((status, reason), ('rejected', 'Ese tipo de documento no sirve para este medio.'))
+        # A national ID is unaffected.
+        self.assertEqual(_review_additional_document(
+            self.pending({'id_country': '', 'document_types': ['DL', 'ID', 'P']}),
+            self.extracted(document_type='national_id', document_issuing_country='MEX'), {})[0], 'verified')
 
     def test_extra_document_must_be_the_same_person(self):
         document(self.user, 'V-3')
@@ -199,7 +251,8 @@ class AdditionalDocumentTests(TestCase):
         primary = document(self.user, 'V-4')
         with mock.patch.object(local_money, 'method_status', return_value=LIVE):
             status, reason, requirement = local_money.rail_status(self.owner, primary, local_money.METHODS['co_breb'])
-            self.assertEqual((status, requirement), ('needs_document', {'id_country': '', 'document_types': ['ID', 'P']}))
+            self.assertEqual((status, requirement),
+                             ('needs_document', {'id_country': '', 'document_types': ['DL', 'ID', 'P']}))
             document(self.user, 'P-4', document_type='passport', document_issuing_country='KOR',
                      is_additional_document=True)
             self.assertEqual(local_money.rail_status(self.owner, primary, local_money.METHODS['co_breb'])[0], 'live')
