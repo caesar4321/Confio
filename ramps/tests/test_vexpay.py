@@ -728,6 +728,21 @@ class VexPayRampTests(TestCase):
             vexpay.warn_if_below_provider_minimum(ramp, Decimal('1'), mock.Mock())  # never raises
             alert.assert_not_called()
 
+    def test_no_bolivar_quote_under_the_minimum(self):
+        from ramps import vexpay_topup
+        terms = {'payin_fee_percent': '2', 'spread_percent': '1.5', 'payout_fee_usdt': '0.20',
+                 'minimum_conversion_usdt': '1', 'minimum_payout_usdt': '1', 'payin_fee_fixed_usd': '0'}
+        client = mock.Mock()
+        client.quote_usd.return_value = {'vesAmount': '11000', 'rate': '1060'}
+        with self.settings(VEXPAY_MIN_CONVERSION_USDT='10'), \
+                mock.patch.object(vexpay_topup, '_client', return_value=client), \
+                mock.patch.object(vexpay, 'fee_terms', return_value=terms), \
+                mock.patch.object(vexpay, 'confio_net', side_effect=lambda gross: gross):
+            with self.assertRaisesRegex(ve_pagomovil.BelowMinimumError, r'mínimo.*\$10\.36'):
+                vexpay_topup.quote(Decimal('5'))
+            client.quote_usd.assert_not_called()
+            self.assertEqual(vexpay_topup.quote(Decimal('10.36'))['min_usd'], '10.36')
+
     def test_execute_ambiguous_never_asks_for_a_second_token(self):
         ramp = self._ramp()
         client = mock.Mock()

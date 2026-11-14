@@ -67,6 +67,10 @@ class VePagoMovilError(Exception):
         self.next_step = next_step
 
 
+class BelowMinimumError(VePagoMovilError):
+    """The amount is under the rail's minimum; no quote is priced."""
+
+
 # ------------------------------------------------------------------ gates
 
 def _version(value) -> tuple | None:

@@ -450,7 +450,12 @@ class Query(graphene.ObjectType):
             amount = _parse_usd(usd_amount)
             if amount is None:
                 raise VePagoMovilError('Monto no válido.')
-            quote = ve_pagomovil.topup_adapter().quote(amount)
+            try:
+                quote = ve_pagomovil.topup_adapter().quote(amount)
+            except ve_pagomovil.BelowMinimumError:
+                # Still a try at topping up: the funnel counts it, with no net.
+                ve_funnel.record_quote_view(_user(info), ve_funnel.TOPUP_RAIL, amount)
+                raise
             maximum = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_MAX_USD')
             quote.setdefault('max_usd', format(maximum, 'f') if maximum is not None else None)
             ve_funnel.record_quote_view(_user(info), ve_funnel.TOPUP_RAIL, amount, quote.get('estimated_usdt'))
