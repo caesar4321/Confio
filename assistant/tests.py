@@ -2144,6 +2144,10 @@ class ConversationReviewFixTests(TestCase):
         self.assertIn('se paga con cUSD o con Confío Dollar+', FAQ)
         self.assertIn('En Bolivia el mínimo para recargar es de 350 Bs', FAQ)
         self.assertIn('Es solo el mínimo de recarga', FAQ)
+        # 2026-11-14: a near-miss Confío Face was handed to the team with no tips while a pay-in waited.
+        self.assertIn('Si Confío Face no reconoce tu rostro', FAQ)
+        self.assertIn('pásalo al equipo solo si dice que ya lo intentó así varias veces', FAQ)
+        self.assertIn('se aplica igual la regla de escalar ese dinero', FAQ)
         # 2026-11-03: verification is 18+; "no tiene edad mínima" was the old answer.
         self.assertIn('Verificar la identidad es solo para mayores de 18 años', FAQ)
         self.assertNotIn('no tiene edad mínima', FAQ)
