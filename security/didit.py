@@ -754,8 +754,13 @@ def build_didit_callback_url(request=None) -> str | None:
     return None
 
 
-ADDITIONAL_DOCUMENT_TYPES = frozenset({'P', 'ID', 'DL'})
-_DOCUMENT_TYPE_CODES = {'passport': 'P', 'national_id': 'ID', 'drivers_license': 'DL'}
+# Didit expected_document_types codes. 'RP' (residence permit, stored as
+# foreign_id) is what a foreign resident tops up with: Koywe takes it as e.g.
+# CED_EXT in Colombia (ramps/koywe_client.py _COUNTRY_DOCUMENT_TYPE_MAP).
+ADDITIONAL_DOCUMENT_TYPES = frozenset({'P', 'ID', 'DL', 'RP'})
+_DOCUMENT_TYPE_CODES = {'passport': 'P', 'national_id': 'ID', 'drivers_license': 'DL', 'foreign_id': 'RP'}
+# Where Koywe takes a residence permit (ramps/koywe_client.py foreign_id).
+RESIDENCE_PERMIT_RAIL_COUNTRIES = frozenset({'ARG', 'CHL', 'COL', 'PER'})
 
 
 def normalize_document_request(id_country: Any = None, document_types: Any = None) -> dict[str, Any]:
@@ -772,6 +777,11 @@ def normalize_document_request(id_country: Any = None, document_types: Any = Non
     types = sorted({str(value).strip().upper() for value in (document_types or []) if str(value).strip()})
     if any(value not in ADDITIONAL_DOCUMENT_TYPES for value in types):
         raise DiditConfigurationError('Tipo de documento no válido.')
+    # Recargar asks for ['ID', 'RP'] in every country; where the rail cannot
+    # use a residence permit, ask for the ID alone instead of verifying a
+    # document that then fails at the provider.
+    if 'RP' in types and len(types) > 1 and country and country not in RESIDENCE_PERMIT_RAIL_COUNTRIES:
+        types.remove('RP')
     return {'id_country': country, 'document_types': types}
 
 
