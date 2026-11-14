@@ -389,11 +389,15 @@ def _individual_identifiers(identity, id_check):
         # Like MX/CL: a passport carries no DNI, so the DNI/CUIL pair is only
         # required for the national ID.
         # CUIL must be supplied separately; it cannot be inferred from DNI.
+        # Didit reads it off the DNI into extra_fields.tax_number (the same key
+        # security/didit.py reads the Brazilian CPF from); the check digit and
+        # the DNI match below still decide whether it is a CUIL at all.
         extra = id_check.get('extra_fields') or {}
         if not isinstance(extra, dict):
             raise ComplianceHandoffError('Invalid Argentine identifier evidence')
         candidates = {re.sub(r'[\s-]', '', str(v)) for v in (
             id_check.get('additional_tax_id'), extra.get('additional_tax_id'), extra.get('cuil'),
+            extra.get('tax_number'),
         ) if v not in (None, '')}
         if len(candidates) != 1:
             raise ComplianceHandoffError('A unique verified Argentine CUIL is required')

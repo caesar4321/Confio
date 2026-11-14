@@ -124,6 +124,17 @@ class InfiniaComplianceHandoffTests(SimpleTestCase):
             with self.subTest(check=check), self.assertRaises(ComplianceHandoffError):
                 _individual_identifiers(self.identity, check)
 
+    def test_argentina_reads_the_cuil_didit_extracts_as_tax_number(self):
+        self.identity.document_issuing_country = 'ARG'
+        self.identity.document_number = '12345678'
+        result = _individual_identifiers(self.identity, {'extra_fields': {'tax_number': '20-12345678-6'}})
+        self.assertEqual(result['additional_tax_id'], '20123456786')
+        # Still a CUIL only if it validates against this DNI, and never one of two.
+        for extra in [{'tax_number': '20123456780'}, {'tax_number': '20876543216'},
+                      {'tax_number': '20123456786', 'cuil': '27123456780'}]:
+            with self.subTest(extra=extra), self.assertRaises(ComplianceHandoffError):
+                _individual_identifiers(self.identity, {'extra_fields': extra})
+
     def test_an_argentine_passport_needs_no_dni_or_cuil(self):
         self.identity.document_issuing_country = 'ARG'
         self.identity.document_type = 'passport'
