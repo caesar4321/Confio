@@ -210,6 +210,20 @@ class InfiniaComplianceHandoffTests(SimpleTestCase):
             'line_1': 'Calle 123 # 4-5, Chapinero', 'city': 'Bogota', 'state': 'Cundinamarca',
             'postal_code': '110111', 'country': 'CO'})
 
+    @mock.patch('payment_accounts.compliance.fetch_didit_evidence', side_effect=evidence)
+    def test_declared_address_goes_as_koywe_receives_it(self, _fetch):
+        # A document import may leave a placeholder province; Koywe gets the
+        # saved address as it is, and so does the payment processor.
+        for field in ('verified_address', 'verified_city', 'verified_state', 'verified_postal_code'):
+            setattr(self.identity, field, '')
+        self.declared.address_state = 'Unknown State'
+        decision = {'session_kind': 'user', 'status': 'Approved', 'contact_details': {},
+                    'id_verifications': [{'status': 'Approved', 'document_type': 'Identity Card',
+                                          'full_front_image': 'https://media.didit.test/front.jpg'}],
+                    'liveness_checks': [{'status': 'Approved', 'reference_image': 'https://media.didit.test/s.jpg'}]}
+        payload, _ = build_infinia_self_declared_payload(profile=self.profile(), client=self.client, decision=decision)
+        self.assertEqual(payload['individual']['address']['state'], 'Unknown State')
+
     def test_incomplete_declared_address_stops_before_uploads(self):
         self.declared.address_zip_code = ''
         decision = {'session_kind': 'user', 'status': 'Approved',

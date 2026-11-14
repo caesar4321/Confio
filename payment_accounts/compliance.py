@@ -119,7 +119,7 @@ def _required(value, label):
     return value
 
 
-def _address(*, line_1, city, state, postal_code, country):
+def _address(*, line_1, city, state, postal_code, country, placeholders_ok=False):
     values = {
         'line_1': line_1,
         'city': city,
@@ -128,7 +128,7 @@ def _address(*, line_1, city, state, postal_code, country):
         'country': iso_alpha2(country),
     }
     missing = [name for name, value in values.items() if not isinstance(value, str) or not value.strip()
-               or value in {'Verified by Didit', 'Unknown City', 'Unknown State'}]
+               or (not placeholders_ok and value in {'Verified by Didit', 'Unknown City', 'Unknown State'})]
     if missing:
         raise ComplianceHandoffError(
             f'Didit verification is missing Infinia address fields: {", ".join(missing)}'
@@ -439,8 +439,12 @@ def _declared_address(user):
 def declared_address_for_provider(declared):
     line_1 = ', '.join(part for part in (
         (declared.address_street or '').strip(), (declared.address_neighborhood or '').strip()) if part)
+    # The same address Koywe receives, as the person saved it: whatever the
+    # app accepts as complete (ramps.schema._is_ramp_address_complete) opens
+    # the account, including the placeholders a document import may leave.
     return _address(line_1=line_1, city=declared.address_city, state=declared.address_state,
-                    postal_code=declared.address_zip_code, country=declared.address_country)
+                    postal_code=declared.address_zip_code, country=declared.address_country,
+                    placeholders_ok=True)
 
 
 def _individual_payload(*, decision, identity, user, client, declared_address=None):
