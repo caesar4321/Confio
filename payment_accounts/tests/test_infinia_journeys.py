@@ -190,6 +190,19 @@ class JourneyTests(TestCase):
         entry.refresh_from_db()
         self.assertEqual(entry.provider_data, original)
 
+    def test_crypto_conversion_ignores_provider_leg_references_beside_the_hash(self):
+        # Journey 25 (11-15): Infinia listed its own leg references next to the
+        # Polygon hash. The hash still binds the one credit; references alone never do.
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        op.provider_data['voucher_ids'] = ['mm_QTReCp9Ku929Rs',
+            'eb8d0925-9d2f-4af3-a6d1-2944a6ed4bcd', DEST_HASH]
+        op.save()
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal('2.5'))
+        op.provider_data['voucher_ids'] = ['mm_QTReCp9Ku929Rs', DEST_HASH, '0x' + 'b' * 64]
+        op.save()
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+
     def test_crypto_voucher_requires_polygon_type_amount_and_unique_credit(self):
         from payment_accounts.infinia_journeys import _credit_for_operation
         op, entry = self.crypto_voucher_conversion()

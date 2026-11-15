@@ -260,6 +260,14 @@ def _credit_for_operation(operation, account, *, voucher_entry=None):
     from .providers.common import same_country
     import re
     polygon = account.asset == 'USDC_POL' and same_country(account.country, 'XX')
+    if polygon:
+        # A COP→USDC conversion can list the Polygon transaction hash next to
+        # the provider's own leg references (e.g. 'mm_…' and a UUID, journey
+        # 25, 11-15). Only the hashes are credits to this account; each must
+        # still match exactly one credit and the total must equal the amount.
+        hashes = [v for v in vouchers if re.fullmatch(r'0x[0-9a-fA-F]{64}', v)]
+        if hashes:
+            vouchers = hashes
     matching = Q(provider_data__third_party__voucher_id__in=vouchers)
     if polygon:
         matching |= Q(provider_data__third_party__transaction_hash__in=vouchers)
