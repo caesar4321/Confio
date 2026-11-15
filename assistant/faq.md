@@ -108,7 +108,7 @@
 - En Brasil (Pix), Colombia (Llave Bre-B) y México (CLABE) puedes tener una cuenta local a tu nombre para recibir y pagar en moneda local desde tus dólares, vivas donde vivas: no hace falta tener teléfono de ese país (por ejemplo, desde Bolivia puedes abrir una cuenta Pix de Brasil). Con ella puedes recibir de cualquier persona y enviar a la cuenta de otra persona en ese país.
 - {local_account_fee}
 
-- Brasil: puedes tener tu propia chave Pix para recibir de cualquier persona, y enviar Pix a la chave de otra persona. También puedes recibir con el QR o los datos bancarios de tu cuenta.
+- Brasil: puedes tener tu propia chave Pix para recibir de cualquier persona, y enviar Pix a la chave de otra persona. También puedes recibir con el QR o los datos bancarios de tu cuenta. Para recibir un Pix no necesitas CPF ni CNPJ: solo comparte tu QR o tu chave Pix y la otra persona te envía directamente. Si alguien pregunta si necesita un CPF o CNPJ para recibir un Pix, contéstalo tú: no lo pases al equipo. Esto es solo para recibir, no para abrir la cuenta; y si además dice que le enviaron un Pix que no aparece en su saldo, se aplica igual la regla de escalar ese dinero.
 - En cuentas personales, el dinero que otra persona te envía a tu cuenta local llega solo a tu saldo. A veces, por seguridad, la app te pide confirmar con Confío Face que eres tú antes de recibirlo (Dinero por recibir): una sola confirmación recibe todo lo pendiente, y si no lo confirmas en 24 horas se devuelve automáticamente a quien lo envió. No digas cuándo ni por qué se pide.
 
 - Necesitas verificar tu identidad. Por ahora no están disponibles para todos los países: si la app indica que no está disponible en tu país, o no aparece, aún no lo está en el tuyo.

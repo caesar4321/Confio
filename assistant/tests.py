@@ -2148,6 +2148,9 @@ class ConversationReviewFixTests(TestCase):
         self.assertIn('Si Confío Face no reconoce tu rostro', FAQ)
         self.assertIn('pásalo al equipo solo si dice que ya lo intentó así varias veces', FAQ)
         self.assertIn('se aplica igual la regla de escalar ese dinero', FAQ)
+        # 2026-11-15: a sender's CPF/CNPJ question about receiving Pix went to the team.
+        self.assertIn('Para recibir un Pix no necesitas CPF ni CNPJ', FAQ)
+        self.assertIn('le enviaron un Pix que no aparece en su saldo, se aplica igual la regla de escalar', FAQ)
         # 2026-11-03: verification is 18+; "no tiene edad mínima" was the old answer.
         self.assertIn('Verificar la identidad es solo para mayores de 18 años', FAQ)
         self.assertNotIn('no tiene edad mínima', FAQ)
