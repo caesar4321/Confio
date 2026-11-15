@@ -1,0 +1,70 @@
+import React, { useEffect, useState } from 'react';
+import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
+import { useApolloClient } from '@apollo/client';
+
+import { Text } from '../common/AppText';
+import { colors } from '../../config/theme';
+import {
+  RECORD_TOP_UP_EXIT_REASON,
+  TOP_UP_EXIT_SKIPPED,
+  TopUpExitReason,
+  shuffledExitReasons,
+  subscribeTopUpExitQuestion,
+} from '../../services/topUpExit';
+
+/**
+ * The one "why did you leave without topping up?" sheet (services/topUpExit),
+ * mounted once above the navigator so it shows over whatever screen comes
+ * after the top-up screen closes. One tap or close; never blocks anything.
+ */
+export function TopUpExitQuestionHost() {
+  const client = useApolloClient();
+  const [reasons, setReasons] = useState<TopUpExitReason[] | null>(null);
+
+  useEffect(() => subscribeTopUpExitQuestion(() => setReasons(shuffledExitReasons())), []);
+
+  const answer = (reason: string) => {
+    setReasons(null);
+    client.mutate({ mutation: RECORD_TOP_UP_EXIT_REASON, variables: { reason }, fetchPolicy: 'no-cache' })
+      .catch(() => {});
+  };
+
+  return (
+    <Modal visible={!!reasons} transparent animationType="slide" onRequestClose={() => answer(TOP_UP_EXIT_SKIPPED)}>
+      <View style={local.backdrop}>
+        <View style={local.sheet}>
+          <View style={local.header}>
+            <Text style={local.title}>¿Qué te hizo salir sin recargar?</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar"
+              onPress={() => answer(TOP_UP_EXIT_SKIPPED)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Icon name="x" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+          <Text style={local.subtitle}>Un toque. Nos ayuda a mejorar Confío.</Text>
+          {(reasons || []).map(([id, label]) => (
+            <TouchableOpacity key={id} accessibilityRole="button" onPress={() => answer(id)} style={local.option}>
+              <Text style={local.optionText}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const local = StyleSheet.create({
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17, 24, 39, 0.4)' },
+  sheet: {
+    backgroundColor: colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 32,
+  },
+  header: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  title: { flex: 1, fontSize: 18, fontWeight: '700', color: colors.dark },
+  subtitle: { marginTop: 4, marginBottom: 14, fontSize: 14, color: colors.textSecondary },
+  option: {
+    borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+    paddingHorizontal: 16, paddingVertical: 13, marginTop: 8,
+  },
+  optionText: { fontSize: 15, fontWeight: '600', color: colors.dark },
+});

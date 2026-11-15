@@ -201,7 +201,7 @@ def koywe_top_up_rail(country_code) -> str:
     return f'koywe_{(country_code or "xx").lower()[:2]}_topup'
 
 
-def _record_koywe_top_up_view(user, country_code, fiat_amount, rate, net_usd):
+def _record_koywe_top_up_view(user, country_code, fiat_amount, rate, net_usd, fiat_currency=''):
     """The day's quote views on Koywe's top-up, in dollars at the quote's own
     rate (1 dollar token = rate fiat), beside the VE top-up's (ramps.ve_funnel).
     The funnel event above keeps only the first quote of a day, which is the
@@ -216,7 +216,18 @@ def _record_koywe_top_up_view(user, country_code, fiat_amount, rate, net_usd):
     except (ArithmeticError, TypeError, ValueError):  # InvalidOperation, Overflow, ...
         return
     from ramps import ve_funnel
-    ve_funnel.record_quote_view(user, koywe_top_up_rail(country_code), usd, net_usd)
+    ve_funnel.record_quote_view(user, koywe_top_up_rail(country_code), usd, net_usd,
+                                fiat_amount=fiat_amount, fiat_currency=fiat_currency or '')
+
+
+def _record_koywe_top_up_limit_view(user, country_code, fiat_amount, fiat_currency):
+    """A top-up amount Koywe refused for its minimum or maximum (Bolivia: 350
+    BOB). No dollar price exists yet, so only the fiat amount. Never raises."""
+    if not user or not getattr(user, 'is_authenticated', False):
+        return
+    from ramps import ve_funnel
+    ve_funnel.record_quote_view(user, koywe_top_up_rail(country_code), None, None, fiat_amount=fiat_amount,
+                                fiat_currency=fiat_currency or '', outside_limits=True)
 
 
 def _format_koywe_error(exc: 'KoyweError', direction: str = '') -> str:
@@ -2175,6 +2186,8 @@ class Query(graphene.ObjectType):
             )
             _note_ramp_quote(user, normalized_direction, resolved_country_code, 'below_minimum',
                              amount=decimal_amount, fiat=getattr(exc, 'currency', None) or resolved_fiat_symbol)
+            if normalized_direction == 'ON_RAMP':
+                _record_koywe_top_up_limit_view(user, resolved_country_code, decimal_amount, resolved_fiat_symbol)
             raise ValidationError(_format_minimum_amount_error(exc, normalized_direction))
         except KoyweMaximumAmountError as exc:
             logger.info(
@@ -2185,6 +2198,8 @@ class Query(graphene.ObjectType):
             )
             _note_ramp_quote(user, normalized_direction, resolved_country_code, 'above_maximum',
                              amount=decimal_amount, fiat=getattr(exc, 'currency', None) or resolved_fiat_symbol)
+            if normalized_direction == 'ON_RAMP':
+                _record_koywe_top_up_limit_view(user, resolved_country_code, decimal_amount, resolved_fiat_symbol)
             raise ValidationError(_format_maximum_amount_error(exc, normalized_direction))
         except KoyweError as exc:
             logger.warning(
@@ -2251,7 +2266,8 @@ class Query(graphene.ObjectType):
         _note_ramp_quote(user, normalized_direction, resolved_country_code, 'ok',
                          amount=decimal_amount, fiat=result.fiat_currency)
         if normalized_direction == 'ON_RAMP':
-            _record_koywe_top_up_view(user, resolved_country_code, amount_in, quote.get('exchange_rate'), net_crypto)
+            _record_koywe_top_up_view(user, resolved_country_code, amount_in, quote.get('exchange_rate'), net_crypto,
+                                      fiat_currency=result.fiat_currency)
         return result
 
     def resolve_ramp_order_status(self, info, order_id, country_code=None):
@@ -3222,7 +3238,35 @@ class SetPreferredRailCountry(graphene.Mutation):
         return cls(success=True)
 
 
+class TopUpExitReasonType(graphene.ObjectType):
+    success = graphene.Boolean()
+
+
+class RecordTopUpExitReason(graphene.Mutation):
+    """Why the person left a top-up price without ordering, any rail and any
+    currency, one tap. Lands on their latest top-up quote view (ramps.ve_funnel);
+    the client never names a rail or an account. Never an error to the user."""
+
+    class Arguments:
+        reason = graphene.String(required=True)
+
+    Output = TopUpExitReasonType
+
+    def mutate(self, info, reason):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return TopUpExitReasonType(success=False)
+        from ramps import ve_funnel
+        try:
+            saved = ve_funnel.record_exit_reason(user, (reason or '').strip().lower())
+        except Exception:  # noqa: BLE001 — an unsaved answer is not the user's problem
+            logger.exception('Could not record a top-up exit reason')
+            saved = False
+        return TopUpExitReasonType(success=saved)
+
+
 class Mutation(graphene.ObjectType):
+    record_top_up_exit_reason = RecordTopUpExitReason.Field()
     create_ramp_order = CreateRampOrder.Field()
     set_preferred_rail_country = SetPreferredRailCountry.Field()
     create_mock_ramp_order = CreateMockRampOrder.Field()

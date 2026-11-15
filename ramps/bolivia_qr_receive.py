@@ -164,13 +164,25 @@ def _polygon_block() -> int | None:
 
 # ------------------------------------------------------------------ create
 
+# The quote-view rail (ramps.ve_funnel): a top-up rail, like Koywe's and VE's.
+QUOTE_VIEW_RAIL = 'bo_qr_topup'
+
+
+class ReceiveLimitError(BoliviaQrError):
+    """The amount is over the per-QR maximum; still a look at the price."""
+
+    def __init__(self, message, *, usd_estimate=None):
+        super().__init__(message)
+        self.usd_estimate = usd_estimate
+
+
 def quote(bob: Decimal) -> dict:
     if bob <= 0:
         raise BoliviaQrError('Monto no válido.')
     maximum = bolivia_qr.optional_limit('BOLIVIA_QR_RECEIVE_MAX_USD')
     terms = adapter(bolivia_qr.provider_name(RECEIVE)).quote_receive(bob)
     if maximum is not None and Decimal(str(terms.get('usd_estimate') or '0')) > maximum:
-        raise BoliviaQrError(f'El monto máximo por QR es ${maximum}.')
+        raise ReceiveLimitError(f'El monto máximo por QR es ${maximum}.', usd_estimate=terms.get('usd_estimate'))
     return terms
 
 

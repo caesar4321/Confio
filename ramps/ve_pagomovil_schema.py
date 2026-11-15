@@ -302,8 +302,8 @@ class VePagoMovilCancelReasonType(graphene.ObjectType):
 
 
 class RecordVePagoMovilTopUpCancelReason(graphene.Mutation):
-    """Why the person cancelled, asked once after the cancellation. Its own
-    mutation: the cancellation never waits for it or depends on it."""
+    """Why the person cancelled. Asked only by app 5.3.7, which still sends it;
+    later builds ask when the person leaves the price (RecordTopUpExitReason)."""
 
     class Arguments:
         order_id = graphene.String(required=True)
@@ -454,7 +454,7 @@ class Query(graphene.ObjectType):
                 quote = ve_pagomovil.topup_adapter().quote(amount)
             except ve_pagomovil.BelowMinimumError:
                 # Still a try at topping up: the funnel counts it, with no net.
-                ve_funnel.record_quote_view(_user(info), ve_funnel.TOPUP_RAIL, amount)
+                ve_funnel.record_quote_view(_user(info), ve_funnel.TOPUP_RAIL, amount, outside_limits=True)
                 raise
             maximum = ve_pagomovil.optional_limit('VE_PAGOMOVIL_TOPUP_MAX_USD')
             quote.setdefault('max_usd', format(maximum, 'f') if maximum is not None else None)

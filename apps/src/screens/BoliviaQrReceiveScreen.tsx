@@ -29,6 +29,7 @@ import {
   qrImageUri,
   receiveCopy,
 } from '../services/boliviaQr';
+import { isLimitRefusal, useAskWhyOnLeave } from '../services/topUpExit';
 
 const POLL_MS = 5_000;
 const GENERIC = 'No pudimos conectar. Intenta de nuevo en unos segundos.';
@@ -125,6 +126,13 @@ export default function BoliviaQrReceiveScreen() {
   }, [order?.phase]);
 
   const amountValue = toNumber(amount);
+  // A price (or a refusal for the maximum) seen and left without a QR: ask
+  // why once the screen closes. An open or past QR here is not that.
+  const markOrdered = useAskWhyOnLeave(
+    quote?.success ? `price:${quote.bobAmount}:${quote.usdEstimate}`
+      : isLimitRefusal(quote?.error) ? `limit:${amount}` : null,
+    !!order, busy);
+
   const quoteMatches = !!quote?.success && Number(quote.bobAmount) === Number(amountValue.toFixed(2));
 
   const create = async () => {
@@ -160,6 +168,8 @@ export default function BoliviaQrReceiveScreen() {
       }
       setOrder(result);
     } catch {
+      // A lost answer may still have made a QR: never ask why they left without one.
+      markOrdered();
       if (alive.current) {
         setError(GENERIC);
         // A lost answer may still have made a QR: show whatever exists.

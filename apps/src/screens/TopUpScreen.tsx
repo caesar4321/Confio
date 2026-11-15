@@ -32,6 +32,7 @@ import { FlagLabel } from '../components/CountryFlag';
 import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
+import { isLimitRefusal, useAskWhyOnLeave } from '../services/topUpExit';
 import { useRampCountry } from '../hooks/useRampCountry';
 import { isRampBlockedCountry } from '../config/env';
 import { hasKoyweTestIdentity } from '../utils/koyweTestIdentity';
@@ -215,6 +216,12 @@ const TopUpScreen = () => {
     maxAmount: selectedMethodMax,
     destination: isSavingsRail ? 'cusd_plus' : 'cusd',
   });
+  // A price, or a refusal for the minimum/maximum (Bolivia's 350 BOB), seen
+  // and left without ordering: ask why once the screen closes.
+  const markTopUpOrdered = useAskWhyOnLeave(
+    quote ? `price:${parsedAmount}:${quote.amountOut}`
+      : topUpAmountError || isLimitRefusal(quoteError?.message) ? `limit:${parsedAmount}` : null,
+    false, orderSubmissionInFlightRef);
   // What the user ends up holding. The savings rail buys dollars, not cUSD.
   const assetUnit = isSavingsRail ? USD_UNIT : 'cUSD';
   const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, assetUnit)}${isYieldDestination ? ' en tu ahorro' : ''}` : '';
@@ -295,6 +302,8 @@ const TopUpScreen = () => {
       }
       const result = response?.data?.createRampOrder;
       if (result?.nextStep === 'resume_order' && result.orderId) {
+        // An order already exists: not a person who left the price.
+        markTopUpOrdered();
         Alert.alert('Ya tienes una recarga pendiente', getFriendlyRampError(result.error), [
           { text: 'Ahora no', style: 'cancel' },
           { text: 'Ver recarga pendiente', onPress: () => navigation.replace('RampInstructions', {
@@ -309,9 +318,13 @@ const TopUpScreen = () => {
         return;
       }
       if (!result?.success || !result?.orderId) {
+        // Some refusals mean Koywe may have created it anyway (unconfirmed,
+        // or an earlier one still open): never ask this visit why they left.
+        markTopUpOrdered();
         Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
         return;
       }
+      markTopUpOrdered();
       void AnalyticsService.logEvent('add_payment_info', {
         payment_type: selectedMethod.code,
         provider: 'koywe',
@@ -333,6 +346,9 @@ const TopUpScreen = () => {
         paymentDetails: result.paymentDetails,
       });
     } catch (error: any) {
+      // A lost response may hide an order the server did create: never ask
+      // this visit why they left without one.
+      markTopUpOrdered();
       Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
     } finally {
       orderSubmissionInFlightRef.current = false;

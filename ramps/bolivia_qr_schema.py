@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 
 import graphene
 
-from ramps import bolivia_qr, bolivia_qr_receive, bolivia_qr_send, ve_send
+from ramps import bolivia_qr, bolivia_qr_receive, bolivia_qr_send, ve_funnel, ve_send
 from ramps.bolivia_qr import RECEIVE, SEND, BoliviaQrError
 from ramps.ve_pagomovil import VePagoMovilError
 
@@ -389,7 +389,15 @@ class Query(graphene.ObjectType):
             bob = _bob(bob_amount)
             if bob is None:
                 raise BoliviaQrError('Escribe el monto en bolivianos.')
-            terms = bolivia_qr_receive.quote(bob)
+            try:
+                terms = bolivia_qr_receive.quote(bob)
+            except bolivia_qr_receive.ReceiveLimitError as exc:
+                # Refused for the maximum: still a look at the price, and askable.
+                ve_funnel.record_quote_view(_user(info), bolivia_qr_receive.QUOTE_VIEW_RAIL, exc.usd_estimate,
+                                            fiat_amount=bob, fiat_currency='BOB', outside_limits=True)
+                raise
+            ve_funnel.record_quote_view(_user(info), bolivia_qr_receive.QUOTE_VIEW_RAIL, terms.get('usd_estimate'),
+                                        terms.get('usd_estimate'), fiat_amount=bob, fiat_currency='BOB')
             return BoliviaQrReceiveQuoteType(success=True, bob_amount=format(bob, '.2f'),
                                              usd_estimate=terms.get('usd_estimate'), rate=terms.get('rate'),
                                              fee_bob=terms.get('fee_bob'))

@@ -248,8 +248,9 @@ class RampWebhookEventAdmin(admin.ModelAdmin):
 
 class RampQuoteViewAdmin(admin.ModelAdmin):
     """Read-only: who looked at a price, per rail and day."""
-    list_display = ('day', 'rail', 'user', 'country', 'views', 'last_usd', 'max_usd', 'last_net_usd', 'last_seen_at')
-    list_filter = ('rail', 'country', 'day')
+    list_display = ('day', 'rail', 'user', 'country', 'views', 'last_outside_limits', 'last_usd', 'max_usd', 'last_net_usd',
+                    'last_fiat_amount', 'fiat_currency', 'exit_reason', 'last_seen_at')
+    list_filter = ('rail', 'country', 'exit_reason', 'day')
     search_fields = ('user__username', 'user__email')
     raw_id_fields = ('user',)
     list_select_related = ('user',)

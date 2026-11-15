@@ -287,11 +287,22 @@ class RampQuoteView(models.Model):
     # Calendar day in the activity time zone (users.activity_tracking).
     day = models.DateField(db_index=True)
     views = models.PositiveIntegerField(default=1)
-    first_usd = models.DecimalField(max_digits=19, decimal_places=2)
-    last_usd = models.DecimalField(max_digits=19, decimal_places=2)
-    max_usd = models.DecimalField(max_digits=19, decimal_places=2)
+    # Null while every quote that day was refused for the minimum or maximum
+    # before any dollar price existed (Koywe: only the fiat amount is known).
+    first_usd = models.DecimalField(max_digits=19, decimal_places=2, null=True, blank=True)
+    last_usd = models.DecimalField(max_digits=19, decimal_places=2, null=True, blank=True)
+    max_usd = models.DecimalField(max_digits=19, decimal_places=2, null=True, blank=True)
     # What the last quote said the person would receive, after every fee.
     last_net_usd = models.DecimalField(max_digits=19, decimal_places=2, null=True, blank=True)
+    # The last amount typed in local money, when the rail is priced in it.
+    last_fiat_amount = models.DecimalField(max_digits=19, decimal_places=2, null=True, blank=True)
+    fiat_currency = models.CharField(max_length=3, blank=True, default='')
+    # Whether the latest quote was refused for the rail's minimum or maximum
+    # (not a count: quotes follow keystrokes, so "5", "50" pass through it).
+    last_outside_limits = models.BooleanField(default=False)
+    # Why the person left without ordering (ramps.ve_funnel.EXIT_REASONS), one tap.
+    exit_reason = models.CharField(max_length=16, blank=True, default='')
+    exit_reason_at = models.DateTimeField(null=True, blank=True)
     country = models.CharField(max_length=2, blank=True, default='')
     first_seen_at = models.DateTimeField()
     last_seen_at = models.DateTimeField()

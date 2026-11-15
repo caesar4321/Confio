@@ -28,6 +28,7 @@ import { OndoStocksInfoScreen } from '../screens/OndoStocksInfoScreen';
 import { StocksListScreen } from '../screens/StocksListScreen';
 import { StockDetailScreen } from '../screens/StockDetailScreen';
 import { BuyStockScreen } from '../screens/BuyStockScreen';
+import { TopUpExitQuestionHost } from '../components/ramps/TopUpExitQuestionHost';
 import { SellStockScreen } from '../screens/SellStockScreen';
 import { CryptoDetailScreen } from '../screens/CryptoDetailScreen';
 import { BuyCryptoScreen } from '../screens/BuyCryptoScreen';
@@ -915,6 +916,8 @@ export const MainNavigator = () => {
       <AssistantOverlay />
       {/* The one "share to Comunidad" sheet, above every screen (services/communityShare). */}
       <CommunityShareProvider />
+      {/* "Why did you leave without topping up?", after any top-up screen closes (services/topUpExit). */}
+      <TopUpExitQuestionHost />
       <MigrationModal />
       <OnboardingModalCoordinator />
     </AssistantProvider>
