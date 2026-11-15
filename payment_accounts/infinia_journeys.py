@@ -221,7 +221,9 @@ def _state(j, stage, *, failure=''):
     flow.save(update_fields=['status', 'metadata', 'completed_at', 'updated_at'])
 
 
-def _credit_for_operation(operation, account, *, voucher_entry=None):
+def _credit_for_operation(operation, account, *, voucher_entry=None, why=None):
+    """The proven proceeds, or 0. A caller passing `why` (a dict) learns when
+    a 0 will never resolve by waiting: why['reason'] is then set."""
     # COMPLETED means sent. Require actual destination movement(s), related by
     # the provider operation ID, not by amount. Refunds/fees are not proceeds.
     if not operation.provider_operation_id:
@@ -260,14 +262,23 @@ def _credit_for_operation(operation, account, *, voucher_entry=None):
     from .providers.common import same_country
     import re
     polygon = account.asset == 'USDC_POL' and same_country(account.country, 'XX')
+    narrowed = False
     if polygon:
         # A COP→USDC conversion can list the Polygon transaction hash next to
         # the provider's own leg references (e.g. 'mm_…' and a UUID, journey
         # 25, 11-15). Only the hashes are credits to this account; each must
         # still match exactly one credit and the total must equal the amount.
         hashes = [v for v in vouchers if re.fullmatch(r'0x[0-9a-fA-F]{64}', v)]
-        if hashes:
-            vouchers = hashes
+        if hashes and len(hashes) != len(vouchers):
+            vouchers, narrowed = hashes, True
+    # Nothing marks a voucher credit as spent, so a voucher another of our
+    # conversions also lists proves neither: count it for none.
+    if voucher_claimed_elsewhere(operation, account, vouchers):
+        # On Polygon, provider references alone (no hash yet) are not credit
+        # vouchers and may be shared across conversions: wait, don't review.
+        if why is not None and not (polygon and not hashes):
+            why['reason'] = 'conversion_voucher_claimed'
+        return Decimal(0)
     matching = Q(provider_data__third_party__voucher_id__in=vouchers)
     if polygon:
         matching |= Q(provider_data__third_party__transaction_hash__in=vouchers)
@@ -292,7 +303,36 @@ def _credit_for_operation(operation, account, *, voucher_entry=None):
                    and e.operation.operation_type not in {'deposit', 'payin'} for e in candidates)):
         return Decimal(0)
     total = sum((e.amount for e in candidates), Decimal(0))
-    return total if total == expected else Decimal(0)
+    if total == expected:
+        return total
+    if narrowed and why is not None and _provider_quiet(data, hours=1):
+        # Every hash arrived and bound cleanly, yet they don't add up, and the
+        # provider has not touched the transfer for an hour (a later leg would
+        # add its hash and update it): the rest came under a reference we set
+        # aside, and waiting will not resolve it.
+        why['reason'] = 'conversion_credit_mismatch'
+    return Decimal(0)
+
+
+def _provider_quiet(data, *, hours):
+    """The provider's own last update is older than `hours` (unknown = not quiet)."""
+    from datetime import timedelta
+    try:
+        stamp = parse_datetime(str(data.get('updated_at') or ''))
+    except ValueError:
+        return False
+    if stamp is None:
+        return False
+    if timezone.is_naive(stamp):
+        stamp = stamp.replace(tzinfo=dt_timezone.utc)
+    return timezone.now() - stamp > timedelta(hours=hours)
+
+
+def voucher_claimed_elsewhere(operation, account, vouchers):
+    """Another of our conversions into this account lists one of these vouchers."""
+    others = MoneyOperation.objects.filter(provider='infinia', destination_account=account,
+        operation_type__in=['conversion', 'internal_transfer']).exclude(pk=operation.pk)
+    return any(others.filter(provider_data__voucher_ids__contains=[v]).exists() for v in vouchers)
 
 
 def has_refund(operation):
@@ -532,8 +572,11 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
         elif j.fx_operation.status in {'failed', 'reversed', 'needs_review'}:
             _state(j, 'needs_review', failure='conversion_' + j.fx_operation.status)
         elif not j.payout_operation_id:
-            proceeds = _credit_for_operation(j.fx_operation, target)
-            if not proceeds:
+            why = {}
+            proceeds = _credit_for_operation(j.fx_operation, target, why=why)
+            if not proceeds and why.get('reason'):
+                _state(j, 'needs_review', failure=why['reason'])
+            elif not proceeds:
                 operation = j.fx_operation if j.fx_operation.status == 'created' else None
             elif proceeds < j.minimum_fx_output or proceeds != positive(j.fx_quote['target_amount']):
                 _state(j, 'needs_review', failure='conversion_credit_mismatch')

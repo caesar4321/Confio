@@ -203,6 +203,127 @@ class JourneyTests(TestCase):
         op.save()
         self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
 
+    def test_short_hash_delivery_beside_other_references_goes_to_review(self):
+        # The hash credit arrived but the rest came under a reference we set
+        # aside: a short total is surfaced, never paid, never left waiting.
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        op.provider_data['voucher_ids'] = ['mm_QTReCp9Ku929Rs', DEST_HASH]
+        op.provider_data['updated_at'] = (timezone.now() - timedelta(hours=2)).isoformat()
+        op.save()
+        entry.amount = Decimal('2.0')
+        entry.save()
+        why = {}
+        self.assertEqual(_credit_for_operation(op, self.crypto, why=why), Decimal(0))
+        self.assertEqual(why, {'reason': 'conversion_credit_mismatch'})
+        j = op.money_flow.infinia_journey
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'conversion_credit_mismatch'))
+        self.assertIsNone(j.payout_operation_id)
+
+    def test_recently_updated_short_hash_delivery_still_waits(self):
+        # A later leg would add its hash and update the transfer: give it time.
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        op.provider_data['voucher_ids'] = ['mm_QTReCp9Ku929Rs', DEST_HASH]
+        op.provider_data['updated_at'] = timezone.now().isoformat()
+        op.save()
+        entry.amount = Decimal('2.0')
+        entry.save()
+        why = {}
+        self.assertEqual(_credit_for_operation(op, self.crypto, why=why), Decimal(0))
+        self.assertEqual(why, {})
+
+    def test_provider_quiet_reads_infinia_naive_timestamps_as_utc(self):
+        from payment_accounts.infinia_journeys import _provider_quiet
+        old = (timezone.now() - timedelta(hours=2)).replace(tzinfo=None).isoformat()
+        fresh = timezone.now().replace(tzinfo=None).isoformat()
+        self.assertTrue(_provider_quiet({'updated_at': old}, hours=1))
+        self.assertFalse(_provider_quiet({'updated_at': fresh}, hours=1))
+        for bad in (None, '', 'soon', '2026-13-40T00:00:00'):
+            self.assertFalse(_provider_quiet({'updated_at': bad}, hours=1))
+
+    def test_shared_references_without_a_hash_wait(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        op.provider_data['voucher_ids'] = ['mm_shared', 'eb8d0925-9d2f-4af3-a6d1-2944a6ed4bcd']
+        op.save()
+        MoneyOperation.objects.create(provider='infinia', operation_type='conversion',
+            source_account=op.source_account, destination_account=self.crypto,
+            idempotency_key='other-conversion', status='settling', source_asset=op.source_asset,
+            source_amount=op.source_amount, target_asset=op.target_asset,
+            provider_data={'voucher_ids': ['mm_shared']})
+        why = {}
+        self.assertEqual(_credit_for_operation(op, self.crypto, why=why), Decimal(0))
+        self.assertEqual(why, {})
+
+    def test_hash_only_list_that_falls_short_still_waits(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        entry.amount = Decimal('2.0')
+        entry.save()
+        why = {}
+        self.assertEqual(_credit_for_operation(op, self.crypto, why=why), Decimal(0))
+        self.assertEqual(why, {})
+
+    def test_shared_provider_reference_does_not_mark_a_waiting_conversion_claimed(self):
+        # Only the hashes we match on count: two conversions may share an
+        # 'mm_' leg reference while one still waits for its own hash credit.
+        op, entry = self.crypto_voucher_conversion()
+        op.provider_data['voucher_ids'] = ['mm_shared', DEST_HASH]
+        op.save()
+        entry.delete()
+        MoneyOperation.objects.create(provider='infinia', operation_type='conversion',
+            source_account=op.source_account, destination_account=self.crypto,
+            idempotency_key='other-conversion', status='settling', source_asset=op.source_asset,
+            source_amount=op.source_amount, target_asset=op.target_asset,
+            provider_data={'voucher_ids': ['mm_shared', '0x' + 'c' * 64]})
+        j = op.money_flow.infinia_journey
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'converting')
+
+    def test_destination_above_quote_never_pays_a_partial_hash_total(self):
+        # A short hash total that happens to equal the quote must not pay.
+        op, entry = self.crypto_voucher_conversion()
+        op.provider_data['voucher_ids'] = ['mm_QTReCp9Ku929Rs', DEST_HASH]
+        op.provider_data['destination_amount'] = '3'
+        op.provider_data['updated_at'] = (timezone.now() - timedelta(hours=2)).isoformat()
+        op.save()
+        j = op.money_flow.infinia_journey
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'conversion_credit_mismatch'))
+        self.assertIsNone(j.payout_operation_id)
+
+    def test_voucher_listed_by_two_conversions_counts_for_neither(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        op.provider_data['voucher_ids'] = ['mm_QTReCp9Ku929Rs', DEST_HASH]
+        op.save()
+        MoneyOperation.objects.create(provider='infinia', operation_type='conversion',
+            source_account=op.source_account, destination_account=self.crypto,
+            idempotency_key='other-conversion', status='settling', source_asset=op.source_asset,
+            source_amount=op.source_amount, target_asset=op.target_asset,
+            provider_data={'voucher_ids': [DEST_HASH], 'status': 'COMPLETED'})
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+        j = op.money_flow.infinia_journey
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'conversion_voucher_claimed'))
+        self.assertIsNone(j.payout_operation_id)
+
+    def test_fiat_voucher_listed_by_two_conversions_counts_for_neither(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.voucher_conversion()
+        MoneyOperation.objects.create(provider='infinia', operation_type='internal_transfer',
+            source_account=op.source_account, destination_account=self.crypto,
+            idempotency_key='other-transfer', status='succeeded', source_asset=op.source_asset,
+            source_amount=op.source_amount, target_asset=op.target_asset,
+            provider_data={'voucher_ids': ['voucher-one']})
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+
     def test_crypto_voucher_requires_polygon_type_amount_and_unique_credit(self):
         from payment_accounts.infinia_journeys import _credit_for_operation
         op, entry = self.crypto_voucher_conversion()
