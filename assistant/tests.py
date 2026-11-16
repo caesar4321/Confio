@@ -2217,6 +2217,13 @@ class ConversationReviewFixTests(TestCase):
         self.assertIn('le enviaron un Pix que no aparece en su saldo, se aplica igual la regla de escalar', FAQ)
         # 2026-11-16: told a person their own QR charge had no fee; Cobrar deducts 0.9% from anyone charging.
         self.assertIn('0,9% que se descuenta a quien cobra, sea un negocio o una persona', FAQ)
+        # 2026-11-16: told to share 'tu chave Pix'; the key inside the QR is the bank's shared one, so a Pix to it went unattributed.
+        self.assertIn('Tu cuenta Pix no tiene una chave Pix propia', FAQ)
+        self.assertNotIn('puedes tener tu propia chave Pix', FAQ)
+        self.assertNotIn('comparte tu QR o tu chave Pix', FAQ)
+        self.assertIn('Esto es solo para Bre-B: no aplica a recargas por PSE', FAQ)
+        # 2026-11-16: Bre-B fixed cost asked twice; the AI had no figure to give.
+        self.assertIn('cada pago que recibes en tu Llave Bre-B y cada envío por Bre-B (a otra persona o a tu propia cuenta) tiene un costo fijo del proveedor de US$1,25', FAQ)
         # 2026-11-03: verification is 18+; "no tiene edad mínima" was the old answer.
         self.assertIn('Verificar la identidad es solo para mayores de 18 años', FAQ)
         self.assertNotIn('no tiene edad mínima', FAQ)
