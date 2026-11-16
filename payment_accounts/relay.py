@@ -74,6 +74,10 @@ class RelayError(NextError):
         self.status_code = status_code
 
 
+class RelayAmountTooSmall(RelayError):
+    """Fixed route costs exceed the allowed share of this amount."""
+
+
 class RelayClient:
     BASE_URL = 'https://api.relay.link'
 
@@ -187,7 +191,7 @@ class RelayClient:
                     raise RelayError('Relay output exceeds the allowed slippage')
             if minimum * 10000 < rebase(paid, source, destination) * (10000 - TOTAL_COST_MAX_BPS):
                 # NextError text reaches the user verbatim via _public_error.
-                raise RelayError('Este monto es muy pequeño para enviar en este momento.')
+                raise RelayAmountTooSmall('Este monto es muy pequeño para enviar en este momento.')
             order = result['protocol']['v2']['orderData']
             inputs, output_order = order['inputs'], order['output']
             if len(inputs) != 1 or len(output_order['payments']) != 1:

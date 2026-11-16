@@ -4,6 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from .models import AutomaticPayin, FinancialAccount, InfiniaJourney, LedgerEntry
 from .receiving_rails import sync_verified_rail
+from .relay import RelayAmountTooSmall
 
 
 def has_unallocated_debit(entry):
@@ -152,12 +153,41 @@ def process(pk):
         return row
 
 
+TOO_SMALL_REASON = 'too_small_to_convert'
+
+
+def _is_dust(pk):
+    """True when the pay-in is worth less than LOCAL_MONEY_DUST_USD (default US$1).
+    Unknown value is not dust: it keeps retrying."""
+    from decimal import Decimal
+    from django.conf import settings
+    from .payin_hold import _usd
+    limit = Decimal(str(getattr(settings, 'LOCAL_MONEY_DUST_USD', '1')))
+    try:
+        usd = _usd(AutomaticPayin.objects.select_related('entry').get(pk=pk).entry)
+    except Exception:
+        return False
+    return usd is not None and usd < limit
+
+
 def reconcile(limit=50):
     import logging
     logger = logging.getLogger(__name__)
     for pk in AutomaticPayin.objects.filter(status='pending').order_by('updated_at', 'pk').values_list('pk', flat=True)[:limit]:
         try:
             process(pk)
+        except RelayAmountTooSmall:
+            # Dust (e.g. a 200-peso test): the route's fixed costs exceed the
+            # allowed share and always will, so stop retrying every cycle. The
+            # money stays in the person's local account. Larger amounts keep
+            # retrying: a cost spike can make them too small for a while.
+            if _is_dust(pk):
+                logger.info('Automatic pay-in too small to convert, parked: %s', pk)
+                AutomaticPayin.objects.filter(pk=pk, status='pending').update(
+                    status='review', reason=TOO_SMALL_REASON)
+            else:
+                logger.warning('Automatic pay-in too small for now, retrying: %s', pk)
+                AutomaticPayin.objects.filter(pk=pk, status='pending').update(reason='waiting_for_safe_quote_or_account')
         except Exception:
             # Includes provider outage, active journey, opening fee not settled,
             # unavailable quote or quote outside existing safety limits.

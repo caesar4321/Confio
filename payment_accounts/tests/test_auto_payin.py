@@ -306,6 +306,32 @@ class AutomaticPayinTests(TestCase):
         self.assertEqual(row.reason, 'waiting_for_safe_quote_or_account')
         self.assertFalse(InfiniaJourney.objects.exists())
 
+    def _too_small(self, usd):
+        from payment_accounts.auto_payin import reconcile
+        from payment_accounts.relay import RelayAmountTooSmall
+        row = enqueue(self.credit(self.local))
+        with mock.patch('payment_accounts.local_money._active_pair', return_value=(self.local, self.crypto)), \
+             mock.patch('payment_accounts.local_money.deposit_quote',
+                        side_effect=RelayAmountTooSmall('Este monto es muy pequeño para enviar en este momento.')), \
+             mock.patch('payment_accounts.payin_hold._usd', return_value=usd):
+            reconcile()
+        row.refresh_from_db()
+        return row
+
+    def test_dust_too_small_to_convert_stops_retrying(self):
+        # 2026-11-16: a 200-peso Bre-B test retried every cycle forever.
+        row = self._too_small(Decimal('0.05'))
+        self.assertEqual((row.status, row.reason), ('review', 'too_small_to_convert'))
+        self.assertFalse(InfiniaJourney.objects.exists())
+
+    def test_too_small_but_not_dust_keeps_retrying(self):
+        row = self._too_small(Decimal('25'))
+        self.assertEqual((row.status, row.reason), ('pending', 'waiting_for_safe_quote_or_account'))
+
+    def test_too_small_with_unknown_value_keeps_retrying(self):
+        row = self._too_small(None)
+        self.assertEqual(row.status, 'pending')
+
     @override_settings(INFINIA_THIRD_PARTY_PAYIN_DEFAULT_ENABLED=True)
     def test_non_brazil_third_party_deposit_starts_without_recipient_grants(self):
         from payment_accounts.models import AccountCapability, ThirdPartyPayinSwitch
