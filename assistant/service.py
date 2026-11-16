@@ -191,6 +191,45 @@ def _append(conversation, **kwargs):
     return message
 
 
+def send_team_notice(conversation, body, tag, *, user_id, hand_back=True):
+    """A team message written outside the support portal (an ops script),
+    pushed to the person after commit, idempotent on ``tag`` per conversation.
+
+    It has no staff user, so it never counts as the team answering: without
+    ``hand_back`` a thread in human mode (after a handoff or a staff reply)
+    stays with the team and the AI goes silent on the person's next questions
+    (Johan, 2026-11-16). By default the thread goes back to the AI; a later
+    handoff or staff reply takes it again. The portal still lists the thread
+    as awaiting the team until a person replies there, as with return_to_ai.
+    Always shown as the team, never as Confio Assistant.
+    Returns (message, created)."""
+    from inbox.push_service import send_support_reply_push
+    if not isinstance(tag, str) or not tag.strip():
+        raise ValueError('tag required')
+    if not (body or '').strip():
+        raise ValueError('body required')
+    if conversation.user_id != user_id:
+        raise ValueError('conversation does not belong to that user')
+    with transaction.atomic():
+        lock_user(conversation.user)
+        existing = conversation.messages.filter(metadata__notice=tag).first()
+        if existing is not None:
+            return existing, False
+        state = thread_state(conversation)
+        message = _append(conversation, sender_type='AGENT', body=body, metadata={'notice': tag})
+        if hand_back and is_human_mode(conversation, state):
+            state.returned_to_ai_at = timezone.now()
+            state.save(update_fields=['returned_to_ai_at', 'updated_at'])
+
+        def push():
+            try:
+                send_support_reply_push(message.id)
+            except Exception:  # noqa: BLE001 - the message is in the thread either way
+                logger.exception('Team notice push failed: %s', message.id)
+        transaction.on_commit(push)
+    return message, True
+
+
 TEAM_PUSH_WINDOW = timedelta(minutes=10)
 TEAM_PUSHES_PER_WINDOW = 5
 

@@ -260,6 +260,70 @@ class AskTests(TestCase):
         SupportMessage.objects.create(conversation=conversation, sender_type='AGENT', sender_user=staff, body='Listo')
         self.assertFalse(service.awaiting_team(conversation, recent()))
 
+    def _escalated(self):
+        conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
+        AssistantThreadState.objects.create(conversation=conversation, handoff_at=timezone.now())
+        SupportMessage.objects.create(conversation=conversation, sender_type='USER', sender_user=self.user,
+                                      body='¿y mi dinero?', metadata={'to_team': True})
+        return conversation
+
+    def notice(self, conversation, body, tag, **kwargs):
+        with self.captureOnCommitCallbacks(execute=True):
+            return service.send_team_notice(conversation, body, tag, user_id=self.user.id, **kwargs)
+
+    @patch('inbox.push_service.send_support_reply_push')
+    def test_team_notice_hands_an_escalated_thread_back_to_the_ai(self, reply_push):
+        # 2026-11-16: an ops-script answer left Johan's thread with the team; the AI went silent.
+        conversation = self._escalated()
+        self.assertTrue(service.is_human_mode(conversation))
+        message, created = self.notice(conversation, 'Tus pesos llegaron.', 'tag-1')
+        self.assertTrue(created)
+        self.assertEqual(message.metadata, {'notice': 'tag-1'})  # shown as the team, not the AI
+        self.assertFalse(service.is_human_mode(conversation))
+        reply_push.assert_called_once_with(message.id)
+        # The portal keeps it until a person answers there, as with return_to_ai.
+        self.assertTrue(service.awaiting_team(conversation, list(conversation.messages.order_by('-created_at'))))
+        again, created = self.notice(conversation, 'otra vez', 'tag-1')
+        self.assertFalse(created)
+        self.assertEqual(again.pk, message.pk)
+        reply_push.assert_called_once()
+        # A later handoff takes the thread again.
+        AssistantThreadState.objects.filter(conversation=conversation).update(
+            handoff_at=timezone.now() + timedelta(seconds=1))
+        self.assertTrue(service.is_human_mode(conversation))
+
+    @patch('inbox.push_service.send_support_reply_push')
+    def test_team_notice_can_keep_the_thread_with_the_team(self, reply_push):
+        conversation = self._escalated()
+        self.notice(conversation, 'Lo estamos revisando.', 'tag-2', hand_back=False)
+        self.assertTrue(service.is_human_mode(conversation))
+        self.assertIsNone(AssistantThreadState.objects.get(conversation=conversation).returned_to_ai_at)
+        reply_push.assert_called_once()
+
+    @patch('inbox.push_service.send_support_reply_push')
+    def test_team_notice_in_ai_mode_leaves_the_state_alone(self, reply_push):
+        conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
+        message, _ = self.notice(conversation, 'Hola', 'tag-ai')
+        self.assertEqual(message.metadata, {'notice': 'tag-ai'})
+        self.assertIsNone(service.thread_state(conversation).returned_to_ai_at)
+
+    @patch('inbox.push_service.send_support_reply_push', side_effect=RuntimeError('fcm down'))
+    def test_team_notice_survives_a_failed_push(self, reply_push):
+        conversation = self._escalated()
+        message, created = self.notice(conversation, 'Hola', 'tag-push')
+        self.assertTrue(created)
+        self.assertTrue(conversation.messages.filter(pk=message.pk).exists())
+
+    @patch('inbox.push_service.send_support_reply_push')
+    def test_team_notice_refuses_bad_input(self, reply_push):
+        conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
+        for body, tag, uid in (('x', '', self.user.id), ('x', None, self.user.id), ('  ', 't', self.user.id),
+                               ('x', 't', self.user.id + 999)):
+            with self.assertRaises(ValueError):
+                service.send_team_notice(conversation, body, tag, user_id=uid)
+        reply_push.assert_not_called()
+        self.assertFalse(conversation.messages.exists())
+
     def test_pre_ia_threads_keep_the_old_rule(self):
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
         SupportMessage.objects.create(conversation=conversation, sender_type='USER', sender_user=self.user, body='hola')
