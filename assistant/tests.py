@@ -2916,6 +2916,21 @@ class GuideStepTests(TestCase):
         self.assertNotIn('Recibir → Llave Bre-B', without)
         self.assertIn('documento de identidad del país desde donde recarga', without)
 
+    def test_a_top_up_refusal_reason_is_kept_and_changes_no_rest(self):
+        from . import guide
+        from .models import AssistantGuideEvent, AssistantGuideStep
+        self._answer()
+        guide.record_event(self._viewer(), 'top_up', 'dismissed')
+        before = AssistantGuideStep.objects.get(user=self.user, step='top_up')
+        guide.record_event(self._viewer(), 'top_up', 'reason', detail='no_money')
+        after = AssistantGuideStep.objects.get(user=self.user, step='top_up')
+        self.assertEqual((after.dismissed_at, after.shown_at, after.accepted_at),
+                         (before.dismissed_at, before.shown_at, before.accepted_at))
+        self.assertEqual(AssistantGuideEvent.objects.get(user=self.user, event='reason').detail, 'no_money')
+        for step, detail in (('top_up', 'free text'), ('top_up', ''), ('send', 'no_money')):
+            with self.assertRaises(ValueError):
+                guide.record_event(self._viewer(), step, 'reason', detail=detail)
+
     def test_a_requested_walk_leaves_the_guides_own_step_alone(self):
         from . import guide
         from .models import AssistantGuideEvent, AssistantGuideStep

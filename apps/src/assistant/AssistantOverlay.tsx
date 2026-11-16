@@ -6,6 +6,7 @@ import AssistantGuideCard from './AssistantGuideCard';
 import AssistantServices from './AssistantServices';
 import AssistantSheet from './AssistantSheet';
 import GuidePencil from './GuidePencil';
+import GuideTopUpDeclineHost from './GuideTopUpDeclineHost';
 
 export default function AssistantOverlay() {
   return (
@@ -14,6 +15,7 @@ export default function AssistantOverlay() {
       <AssistantBubble />
       <GuidePencil />
       <AssistantGuideCard />
+      <GuideTopUpDeclineHost />
       <AssistantSheet />
     </>
   );

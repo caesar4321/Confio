@@ -15,7 +15,7 @@ from assistant.guide import PAID_ORDER_STATUSES, PERP_OPENED_STATES
 from assistant.models import AssistantGuideEvent
 
 EVENT_ORDER = ('shown', 'replied', 'dismissed', 'accepted', 'opened', 'pointer_shown', 'pointer_missing',
-               'pointer_tapped', 'pointer_closed')
+               'pointer_tapped', 'pointer_closed', 'reason')
 
 
 def outcomes(first_shown):

@@ -130,7 +130,22 @@ export function requestTopUpExitQuestion(now: Date = new Date()): Promise<boolea
   });
 }
 
+// When this app run last showed a top-up price; 0 = never. The guide's
+// "why not top up?" question is only for people who never got that far.
+let lastPriceSeenAt = 0;
+
+/** A top-up price (or a min/max refusal) was on screen since the app started. */
+export function sawTopUpPriceThisRun(): boolean {
+  return lastPriceSeenAt > 0;
+}
+
+/** Another account took over: what the last one looked at doesn't count for it. */
+export function forgetTopUpPriceSeen(): void {
+  lastPriceSeenAt = 0;
+}
+
 export function resetTopUpExitQuestionForTests(testStore?: DayStore): void {
+  lastPriceSeenAt = 0;
   askedOn = '';
   storedDay = null;
   storedRead = null;
@@ -157,7 +172,10 @@ export function useAskWhyOnLeave(priceKey: string | null, ordered = false, creat
   inFlight.current = creating;
   if (ordered) placed.current = true;
   useEffect(() => {
-    if (priceKey) sawAt.current = Date.now();
+    if (priceKey) {
+      sawAt.current = Date.now();
+      lastPriceSeenAt = sawAt.current;
+    }
   }, [priceKey]);
   useEffect(() => {
     void preloadTopUpExitDay();

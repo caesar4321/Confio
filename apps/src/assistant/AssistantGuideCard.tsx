@@ -37,6 +37,8 @@ import {
 } from './guidePointer';
 import { BUBBLE_ROUTES, TAB_ROUTES } from './suggestions';
 import GuideOpening from './GuideOpening';
+import { GUIDE_TOP_UP_STEP, requestTopUpDecline } from './guideTopUpDecline';
+import { forgetTopUpPriceSeen, sawTopUpPriceThisRun } from '../services/topUpExit';
 
 const HOME_ROUTE = 'Home';
 const VERIFICATION_ROUTE = 'Verification';
@@ -193,6 +195,7 @@ export default function AssistantGuideCard() {
 
   // A guide belongs to one personal account: never carried across a switch.
   useEffect(() => clear, [contextKey, clear]);
+  useEffect(() => forgetTopUpPriceSeen, [contextKey]);
   useEffect(() => {
     if (!personal) {
       clear();
@@ -343,9 +346,16 @@ export default function AssistantGuideCard() {
   useEffect(() => setGuideShown(shown), [shown, setGuideShown]);
 
   const close = useCallback(() => {
-    const current = opening ?? guide;
+    // While the pet lands the next step's bubble is already live: it comes first, as in press().
+    const current = guide ?? opening;
     if (current) {
       record(current.step, 'dismissed');
+      // Said no to topping up before seeing any price: one tap asks why. Someone who
+      // already looked at a price this run isn't asked here (the top-up screen's own
+      // question may have asked them, at most once a day).
+      if (current === guide && current.step === GUIDE_TOP_UP_STEP && !sawTopUpPriceThisRun()) {
+        requestTopUpDecline();
+      }
     } else if (pointer) {
       record(pointer.step, 'pointer_closed');
     }

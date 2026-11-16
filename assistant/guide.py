@@ -45,7 +45,12 @@ TEXT_CACHE_SECONDS = 24 * 3600
 FALLBACK_CACHE_SECONDS = 300
 MAX_TEXT_CHARS = 240
 EVENTS = {'shown', 'accepted', 'dismissed', 'replied', 'opened', 'pointer_shown', 'pointer_missing',
-          'pointer_tapped', 'pointer_closed'}
+          'pointer_tapped', 'pointer_closed', 'reason'}
+# One tap after closing "Ya puedes recargar": why a verified person isn't topping
+# up yet, asked before any price (ramps' EXIT_REASONS covers leaving a price).
+# The app shows the labels; 'skipped' = asked, and closed without answering.
+TOP_UP_DECLINE_REASONS = ('no_money', 'trust', 'no_use', 'fees', 'pay_method', 'looking', 'loan', 'other',
+                          'skipped')
 LATER = 'Ahora no'
 
 
@@ -597,6 +602,8 @@ def record_event(viewer, key, event, *, answer=None, funded=False, detail=''):
     requested = key.startswith(WALK_PREFIX) and key[len(WALK_PREFIX):] in WALKS
     if (key not in STEPS and not requested) or event not in EVENTS:
         raise ValueError('Evento no válido')
+    if event == 'reason' and (key != 'top_up' or detail not in TOP_UP_DECLINE_REASONS):
+        raise ValueError('Evento no válido')
     now = timezone.now()
     today = AssistantGuideEvent.objects.filter(user=viewer.user, created_at__gte=now - timedelta(days=1)).count()
     if today >= MAX_EVENTS_PER_DAY:
@@ -605,8 +612,9 @@ def record_event(viewer, key, event, *, answer=None, funded=False, detail=''):
                                        event=event,
                                        detail=(detail or '')[:40],
                                        country=(country_of(viewer.user) or '')[:2].upper())
-    if requested:
-        return  # asked for by the person: the guide's own steps don't rest for it
+    if requested or event == 'reason':
+        # Asked for by the person, or a why after a close: the guide's own steps don't rest for it.
+        return
     row, _ = AssistantGuideStep.objects.get_or_create(user=viewer.user, step=key)
     if event == 'shown':
         AssistantGuideStep.objects.filter(pk=row.pk).update(shown_count=F('shown_count') + 1, shown_at=now)
