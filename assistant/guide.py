@@ -173,8 +173,12 @@ LADDERS = {
     'devaluation': ('invest', 'send', 'comprar'),
     'savings': ('invest', 'send', 'comprar'),
     'pay': ('comprar', 'send', 'invest'),
+    'usdt': ('send', 'invest', 'comprar'),
+    'other': ('send', 'invest', 'comprar'),
 }
-DEFAULT_LADDER = ('send', 'invest', 'comprar')
+# No answer → invest first: funders who stay are the ones who invest, and a send
+# step after a first deposit went untouched (Nov 2026: 5 of 7 did nothing).
+DEFAULT_LADDER = ('invest', 'send', 'comprar')
 
 
 # Amounts and promises in words: the digit check can't see these.
@@ -297,9 +301,16 @@ def _ladder_usable(viewer, state, key):
 
 
 def _funded_key(viewer, state, rows, answer, now):
+    chosen = answer in LADDERS
     for key in LADDERS.get(answer, DEFAULT_LADDER):
         if _ladder_usable(viewer, state, key) and not _ladder_done(viewer.user, key):
-            return None if _resting(rows.get(key), now) else key
+            row = rows.get(key)
+            if _resting(row, now):
+                return None
+            # Nobody chose investing here: after one "Ahora no" has rested, move on for good.
+            if not chosen and key == 'invest' and row is not None and row.dismissed_at:
+                continue
+            return key
     return None
 
 

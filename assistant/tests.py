@@ -2959,6 +2959,43 @@ class GuideStepTests(TestCase):
             with patch.object(guide, '_invest_options', return_value=[]):
                 self.assertEqual(self._key(funded=True), 'send')
 
+    def test_no_answer_offers_investing_first(self):
+        from . import guide
+        with patch.object(guide, '_ladder_done', return_value=False), \
+                patch('marketplace.checkout.live_city_names', return_value=[]):
+            with patch.object(guide, '_invest_options', return_value=['stocks']):
+                self.assertEqual(self._key(funded=True), 'invest')
+            with patch.object(guide, '_invest_options', return_value=[]):
+                self.assertEqual(self._key(funded=True), 'send')
+
+    def test_usdt_and_other_answers_keep_sending_first(self):
+        from . import guide
+        for answer in ('usdt', 'other'):
+            ProbeAnswer.objects.filter(user=self.user).delete()
+            self._answer(answer)
+            with patch.object(guide, '_ladder_done', return_value=False), \
+                    patch.object(guide, '_invest_options', return_value=['stocks']), \
+                    patch('marketplace.checkout.live_city_names', return_value=[]):
+                self.assertEqual(self._key(funded=True), 'send', answer)
+
+    def test_unanswered_invest_refusal_moves_on_to_send(self):
+        from . import guide
+        from .models import AssistantGuideStep
+        row = AssistantGuideStep.objects.create(user=self.user, step='invest', shown_count=1,
+                                                shown_at=timezone.now() - timedelta(hours=1),
+                                                dismissed_at=timezone.now() - timedelta(hours=1))
+        with patch.object(guide, '_ladder_done', return_value=False), \
+                patch.object(guide, '_invest_options', return_value=['stocks']), \
+                patch('marketplace.checkout.live_city_names', return_value=[]):
+            # Saying no still rests the guide first.
+            self.assertIsNone(self._key(funded=True))
+            AssistantGuideStep.objects.filter(pk=row.pk).update(
+                shown_at=timezone.now() - timedelta(days=10), dismissed_at=timezone.now() - timedelta(days=10))
+            self.assertEqual(self._key(funded=True), 'send')
+            # Someone who chose investing still gets it back after the rest.
+            self._answer('invest')
+            self.assertEqual(self._key(funded=True), 'invest')
+
     def test_every_pointer_is_a_button_the_app_registers(self):
         from . import guide, rails
         pointers = {t.pointer for s in guide.STEPS.values() for c in s.chips for t in c.trail if t.pointer}

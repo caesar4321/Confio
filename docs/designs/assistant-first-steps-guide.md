@@ -114,10 +114,12 @@ records show it happened, not when it was offered.
 
 Order comes from the first-use answer:
 
-- family: Send, Invest, Comprar
-- devaluation, savings: Invest, Send, Comprar
-- pay: Comprar, Send, Invest
-- no answer: Send, Invest, Comprar
+- family, usdt, other: Send, Invest, Comprar
+- devaluation, savings, invest: Invest, Send, Comprar
+- pay, comprar: Comprar, Send, Invest
+- no answer: Invest, Send, Comprar (since 2026-11-16: depositors who stay are the
+  ones who invest). This person never chose investing, so once an "Ahora no" on
+  Invest has rested, the guide moves on to Send and does not offer Invest again.
 
 Where Dollar+ and stocks are unavailable (Brazil, for example), the Invest step is
 dropped by the same policy the Invest screens use.
