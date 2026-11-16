@@ -99,6 +99,23 @@ class AutomaticPayinTests(TestCase):
         self.assertTrue(journey.money_flow.metadata['automatic_payin'])
         self.submit.assert_not_called()  # Only the existing journey worker moves funds.
 
+    def test_fee_larger_than_the_deposit_parks_it_instead_of_converting(self):
+        # 2026-11-16: a 500-peso test converted, the US$1.35 fee took it all and left a debt.
+        for net, status in ((Decimal('0'), 'review'), (Decimal('0.01'), 'started')):
+            entry = self.credit(self.local)
+            row = enqueue(entry)
+            with mock.patch('payment_accounts.local_money._active_pair', return_value=(self.local, self.crypto)), \
+                 mock.patch('payment_accounts.local_money.deposit_quote', return_value={
+                     'minimum_fx_output': '2', 'minimum_wallet_output': '2.4',
+                     'minimum_net_wallet_receipt': net}):
+                process(row.pk)
+            row.refresh_from_db()
+            self.assertEqual(row.status, status)
+            self.assertEqual(InfiniaJourney.objects.filter(funding_credit=entry).exists(), status == 'started')
+            if status == 'review':
+                self.assertEqual(row.reason, 'fees_exceed_amount')
+                InfiniaJourney.objects.all().delete()
+
     def test_pending_name_only_deposit_rechecks_admission_before_starting(self):
         from payment_accounts.models import AccountCapability, ProviderProfile
         from payment_accounts.payin_admission import assess

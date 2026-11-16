@@ -138,6 +138,15 @@ def process(pk):
                 local, crypto = _active_pair(owner, account.country, account.asset)
                 require_unreserved_source('infinia', local, None)
                 quote = deposit_quote(owner, entry)
+                net = quote.get('minimum_net_wallet_receipt')
+                if net is not None and net <= 0:
+                    # The fixed deposit fee is larger than the pay-in (Johan's
+                    # 500-peso test, 2026-11-16): converting would hand the
+                    # whole amount to fees and leave the rest as a debt on the
+                    # person. Park it in the local account instead.
+                    row.status, row.reason = 'review', FEES_EXCEED_REASON
+                    row.save(update_fields=['status', 'reason', 'updated_at'])
+                    return row
                 journey = create_journey(owner=owner, local_account=local, crypto_account=crypto,
                     direction='to_wallet', credit=entry,
                     request_id=uuid.uuid5(entry.internal_id, 'automatic-infinia-payin'),
@@ -154,6 +163,7 @@ def process(pk):
 
 
 TOO_SMALL_REASON = 'too_small_to_convert'
+FEES_EXCEED_REASON = 'fees_exceed_amount'
 
 
 def _is_dust(pk):
