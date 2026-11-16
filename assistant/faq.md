@@ -24,12 +24,12 @@
 
 
 ## Comisiones de Confío (dilas solo cuando pregunten qué cobra Confío, cuánto cuesta o por qué reciben menos)
-- Regla de Confío: 0,9% al entrar, 0% al moverte dentro, 0,9% al salir.
+- Regla de Confío: 0,9% al entrar, 0% al moverte dentro (salvo los cobros con QR de Confío, ver Pagos a comercios), 0,9% al salir.
 - Entrar (0,9%): todo dinero que llega a Confío desde fuera: una recarga, un depósito de USDT y también el dinero que te envían a tu cuenta local (Pix, Bre-B, CLABE).
 - Salir (0,9%): todo dinero que sale de Confío: un retiro, un envío a una billetera externa y cualquier envío o pago en moneda local, en cualquier país (desde tu cuenta local o pagando un QR local en Pagar). Es el mismo 0,9% en todos los países; esto no significa que cada medio esté disponible en tu país.
-- Gratis dentro de Confío: enviar dinero a otro usuario de Confío o recibir un envío de otro usuario. Confío paga la comisión de la red. (Un negocio que cobra con Confío Pay sí paga su 0,9%: ver Pagos a comercios.)
+- Gratis dentro de Confío: enviar dinero a otro usuario de Confío o recibir un envío de otro usuario. Confío paga la comisión de la red. (Un cobro con QR de Confío —Cobrar— no es un envío: sí lleva 0,9%, ver Pagos a comercios.)
 - Nunca digas que recibir en una cuenta local (Pix, Bre-B, CLABE) es gratis: ese dinero entra a Confío y lleva el 0,9%.
-- Pagos a comercios (Confío Pay): 0,9% que paga el comercio, no quien paga. Nómina: 0,9% que paga el negocio.
+- Pagos a comercios y cobros con QR de Confío (Cobrar): 0,9% que se descuenta a quien cobra, sea un negocio o una persona; quien paga no paga comisión. Ejemplo: de un cobro de US$10, quien cobra recibe US$9,91. Si quieren recibir sin comisión entre personas, que les envíen a su número Confío. Nómina: 0,9% que paga el negocio.
 - Acciones: la misma comisión de 0,9% de Confío que un retiro o depósito: al comprar (el dinero sale de tu dólar Confío) y al vender (vuelve a él). Sin comisión aparte por operar.
 - Referidos: la mitad de la comisión de 0,9% que paga un invitado va a quien lo invitó (ver Referidos). Al invitado no le cuesta nada extra: paga la misma comisión.
 - Confío Dollar+: Confío se queda con el 15% del rendimiento positivo; el 85% es para ti. La tasa que muestra la app ya descuenta esa parte: no la restes otra vez al calcular cuánto gana alguien.
@@ -49,7 +49,7 @@
 
 ## Referidos: invita a quienes confías
 - Cuando alguien que invitaste mueve su dinero, Confío te comparte el 50% de la comisión de 0,9% que paga. Llega en Confío Dollar (cUSD) a tu cuenta personal, al instante, en la misma operación de tu invitado. A tu invitado no le cuesta nada extra.
-- Generan comisión: recargas y retiros, entrar y salir del ahorro (Confío Dollar+), comprar y vender acciones, oro y Bitcoin, el margen que entra y sale de Futuros, y los envíos y depósitos de USDT con billeteras fuera de Confío. No generan: Confío Pay, Comprar, los envíos entre usuarios de Confío (son gratis) ni ninguna otra comisión, como la parte del rendimiento de Confío Dollar+.
+- Generan comisión: recargas y retiros, entrar y salir del ahorro (Confío Dollar+), comprar y vender acciones, oro y Bitcoin, el margen que entra y sale de Futuros, y los envíos y depósitos de USDT con billeteras fuera de Confío. No generan: Confío Pay ni los cobros con QR de Confío (Cobrar), Comprar, los envíos entre usuarios de Confío (son gratis) ni ninguna otra comisión, como la parte del rendimiento de Confío Dollar+.
 - Condiciones: los dos con la identidad verificada en el momento de la operación, ninguna de las dos cuentas suspendida, y no ser la misma persona. Lo que tu invitado hizo antes de cumplirse esto no paga después, ni de forma retroactiva.
 - Dura 1 año desde que tu invitado quedó asociado a ti. Si te invitó antes del 9 de noviembre de 2026 (el lanzamiento), su año cuenta desde ese día.
 - Las cuentas de negocio de tu invitado también generan comisión, aunque opere un empleado. La comisión va siempre a tu cuenta personal.
