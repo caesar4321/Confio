@@ -6,7 +6,7 @@ cuenta-inteligente-fake-door.md):
 - `asked`: the person names the offer → its chip, even inside the cap.
 - `pain_point` (Cuenta inteligente) / `model` (Confío IA+): the model opened
   an offer itself (a need it solves, e.g. paying bills by hand every month) →
-  kept unless that offer's chip was shown in the last 7 days (navigate()
+  kept only if the reply names Cuenta inteligente (pain_point), and unless that offer's chip was shown in the last 7 days (navigate()
   refuses it then, so the reply doesn't pitch it either).
 - `investing`: the turn used get_portfolio or get_stock_quote → Confío IA+,
   same 7-day cap.
@@ -82,6 +82,11 @@ def choose(viewer, user_text, result, allowed):
             # for a reason the regex didn't name.
             key, trigger = ((ia_key, 'model') if action['target'] == 'ia_plus'
                             else (action['target'], 'pain_point'))
+            # A pain-point chip must match a reply that pitches the offer: a
+            # bare chip under an unrelated answer read as a non sequitur (a
+            # Bolivian asking to be told when local QR pay ships, 2026-11-17).
+            if trigger == 'pain_point' and not ASKED[key].search(result.reply or ''):
+                continue
             if key in allowed and not capped(viewer.user, key):
                 chosen = (key, trigger)
                 break

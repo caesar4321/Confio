@@ -2222,6 +2222,9 @@ class ConversationReviewFixTests(TestCase):
         self.assertNotIn('puedes tener tu propia chave Pix', FAQ)
         self.assertNotIn('comparte tu QR o tu chave Pix', FAQ)
         self.assertIn('Esto es solo para Bre-B: no aplica a recargas por PSE', FAQ)
+        # 2026-11-17: a Bolivian asked to be told when local QR pay ships and how to pay his workers.
+        self.assertIn('Si alguien pide que le avisen cuando algo esté disponible', FAQ)
+        self.assertIn('Para pagar a trabajadores o a otras personas en Bolivia', FAQ)
         # 2026-11-16: Bre-B fixed cost asked twice; the AI had no figure to give.
         self.assertIn('cada pago que recibes en tu Llave Bre-B y cada envío por Bre-B (a otra persona o a tu propia cuenta) tiene un costo fijo del proveedor de US$1,25', FAQ)
         # 2026-11-03: verification is 18+; "no tiene edad mínima" was the old answer.
@@ -2313,16 +2316,26 @@ class PaidChipTests(TestCase):
         self._shown('cuenta_inteligente')
         model = {'type': 'navigate', 'destination': 'home', 'target': 'cuenta_inteligente'}
         result = self._result(actions=[model])
+        result.reply = 'Para eso está Cuenta inteligente.'  # named, so only the cap drops it
         self.assertIsNone(paid_chips.choose(self.viewer, 'pago el alquiler a mano', result, self.allowed))
         asked = self._result(actions=[model])
         self.assertEqual(paid_chips.choose(self.viewer, '¿Qué es la Cuenta inteligente?', asked, self.allowed),
                          ('cuenta_inteligente', 'asked'))
         self.assertEqual(len(asked.actions), 1)
 
+    def test_pain_point_chip_needs_a_reply_that_names_the_offer(self):
+        from . import paid_chips
+        # 2026-11-17: "avísame cuando se pueda pagar QR" got a bare Cuenta inteligente chip.
+        bare = self._result(actions=[{'type': 'navigate', 'destination': 'home', 'target': 'cuenta_inteligente'}])
+        bare.reply = 'Por ahora no hay fecha para pagar QR locales en Bolivia.'
+        self.assertIsNone(paid_chips.choose(self.viewer, 'Avísame cuando se pueda', bare, self.allowed))
+        self.assertEqual(bare.actions, [])
+
     def test_one_chip_never_after_escalation_never_when_not_allowed(self):
         from . import paid_chips
         both = self._result(actions=[{'type': 'navigate', 'destination': 'home', 'target': 'cuenta_inteligente'}],
                             tools=[{'name': 'get_portfolio', 'ok': True}])
+        both.reply = 'Para eso estamos preparando Cuenta inteligente.'
         self.assertEqual(paid_chips.choose(self.viewer, 'pago todo a mano', both, self.allowed),
                          ('cuenta_inteligente', 'pain_point'))
         self.assertEqual([a['target'] for a in both.actions], ['cuenta_inteligente'])
