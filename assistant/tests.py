@@ -2219,6 +2219,9 @@ class ConversationReviewFixTests(TestCase):
         self.assertIn('0,9% que se descuenta a quien cobra, sea un negocio o una persona', FAQ)
         # 2026-11-16: told to share 'tu chave Pix'; the key inside the QR is the bank's shared one, so a Pix to it went unattributed.
         self.assertIn('Tu cuenta Pix no tiene una chave Pix propia', FAQ)
+        self.assertIn('ni datos bancarios propios (agencia y número de cuenta)', FAQ)
+        self.assertIn('BRLA Digital, Avenia o Woovi', FAQ)
+        self.assertNotIn('también puedes recibir con los datos bancarios de tu cuenta', FAQ)
         self.assertNotIn('puedes tener tu propia chave Pix', FAQ)
         self.assertNotIn('comparte tu QR o tu chave Pix', FAQ)
         self.assertIn('Esto es solo para Bre-B: no aplica a recargas por PSE', FAQ)
