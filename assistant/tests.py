@@ -2231,6 +2231,14 @@ class ConversationReviewFixTests(TestCase):
         self.assertIn('Verificar la identidad es solo para mayores de 18 años', FAQ)
         self.assertNotIn('no tiene edad mínima', FAQ)
 
+    def test_prompt_explains_a_lower_total_from_trades_before_escalating(self):
+        # 2026-11-18: 'bajó a 45' was a Petrobras loss + SPY dip, and a US$32 withdrawal minimum vs US$26 in dollars; both escalated.
+        from .prompts import SYSTEM_PROMPT
+        self.assertIn('si dice que su saldo o su total bajó', SYSTEM_PROMPT)
+        self.assertIn('se retira el saldo en dólares (Confío Dollar y Confío Dollar+ juntos), no las acciones', SYSTEM_PROMPT)
+        self.assertIn('no sumes ni restes tú', SYSTEM_PROMPT)
+        self.assertIn('El Confío Dollar antiguo (`antiguo_confio_dollar_usd`) se retira aparte', SYSTEM_PROMPT)
+
     def test_hint_echo_on_silence_is_an_empty_note(self):
         from .prompts import TRANSCRIBE_HINTS, prompt_echo
         self.assertTrue(prompt_echo(TRANSCRIBE_HINTS['es']))
