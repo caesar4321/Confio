@@ -14,17 +14,6 @@
       ]
     },
     {
-      "key": "blackrock",
-      "title": "BlackRock",
-      "subtitle": "BlackRock es la administradora de inversiones más grande del mundo: maneja el dinero de millones de personas, fondos de pensiones y gobiernos, y es la dueña de los fondos iShares. Diseñó para Ondo la estrategia de estos portafolios, que emite Ondo; BlackRock no los emite, administra ni supervisa. También puedes tener acciones de la propia empresa.",
-      "items": [
-        {"ticker": "BLKDIG", "tagline": "Portafolio: crecer repartiendo el riesgo"},
-        {"ticker": "BLKGRW", "tagline": "Portafolio: más crecimiento, más altibajos"},
-        {"ticker": "BLKHI", "tagline": "Portafolio: busca generar ingresos"},
-        {"ticker": "BLK", "tagline": "Acciones de la empresa BlackRock"}
-      ]
-    },
-    {
       "key": "crypto",
       "title": "Bitcoin y cripto",
       "subtitle": "Invierte en cripto sin abrir cuenta en un exchange. Puede subir o bajar mucho en poco tiempo.",

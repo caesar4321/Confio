@@ -550,6 +550,54 @@ class StockHoldings(models.Model):
         return f'{self.bsc_address} - {len(self.held)} positions'
 
 
+class GmAssetProfile(models.Model):
+    """Plain-Spanish "what is this" copy and website for one Ondo GM
+    underlying ticker that has no hand-written entry in
+    cusd_plus/gm_descriptions.json (which always wins).
+
+    Ondo publishes neither descriptions nor logos, so a daily task
+    (cusd_plus.describe_gm_assets) writes one for each newly listed asset
+    from a cited web search; `website` feeds the logo mirror when its usual
+    source has no logo. Staff can edit the text (source becomes 'edited',
+    never regenerated) or hide it. A blank description is a failed attempt,
+    retried with backoff up to a cap (cusd_plus.gm_profiles)."""
+    SOURCES = [('generated', 'Generated'), ('edited', 'Edited by staff')]
+
+    ticker = models.CharField(max_length=32, unique=True, help_text='Underlying ticker, e.g. ANT')
+    name = models.CharField(max_length=200, blank=True, help_text="Ondo's name when written")
+    description = models.TextField(blank=True, help_text='Shown on the stock screen; neutral, no forecasts. Blank = not written yet')
+    website = models.CharField(max_length=253, blank=True, help_text='Company/fund domain, e.g. anthropic.com')
+    logo_website = models.CharField(
+        max_length=253, blank=True,
+        help_text='Website whose icon is mirrored as the logo; cleared (and the logo re-fetched) '
+                  'when the profile is hidden or its website changes')
+    source = models.CharField(max_length=16, choices=SOURCES, default='generated')
+    sources = models.JSONField(default=list, blank=True, help_text='Cited URLs behind generated text')
+    model = models.CharField(max_length=64, blank=True)
+    is_hidden = models.BooleanField(default=False, help_text='Hide the description in the app')
+    failed_attempts = models.PositiveSmallIntegerField(
+        default=0, help_text='Generation attempts that produced nothing usable (blank description)')
+    last_error = models.CharField(max_length=120, blank=True)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Stock description'
+        verbose_name_plural = 'Stock descriptions'
+
+    def save(self, *args, **kwargs):
+        from cusd_plus.gm_profiles import clean_website
+
+        self.ticker = (self.ticker or '').strip().upper()
+        # The website goes into the logo mirror's lookup URL: domain only.
+        self.website = clean_website(self.website)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.ticker} ({self.source})'
+
+
 class CryptoHoldings(models.Model):
     """A wallet's crypto & metals balances (cusd_plus/crypto_tokens.json)
     from its last COMPLETE scan (cusd_plus/crypto_holdings.py).

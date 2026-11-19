@@ -21,6 +21,7 @@ from datetime import timedelta
 from decimal import ROUND_DOWN, Decimal
 
 import requests
+from urllib.parse import urlencode
 from celery import current_app, shared_task
 from django.conf import settings
 from django.utils import timezone
@@ -2948,12 +2949,55 @@ def _card_safe_logo(png_bytes: bytes) -> bytes:
     return out.getvalue()
 
 
+LOGO_MIN_SIDE = 64  # below this a site icon is a blurry favicon, not a logo
+
+
+def _png_side(content: bytes) -> int:
+    import io
+
+    from PIL import Image
+    try:
+        with Image.open(io.BytesIO(content)) as im:
+            return min(im.size)
+    except Exception:  # noqa: BLE001 — not an image
+        return 0
+
+
+def _fetch_logo(ticker: str, website: str | None) -> tuple[bytes | None, bool]:
+    """The ticker's logo from financialmodelingprep, else (listings it
+    doesn't know: Innovator and Franklin ETFs, Take-Two...) the icon of the
+    asset's own website, recorded in its GmAssetProfile. Only real images
+    of a usable size count; Google answers an unknown site with a 16px
+    globe and HTTP 404. Returns (image, came_from_website)."""
+    sources = [(f'https://financialmodelingprep.com/image-stock/{ticker}.png', False)]
+    if website:
+        sources.append(('https://www.google.com/s2/favicons?' + urlencode({'domain': website, 'sz': 256}), True))
+    for url, via_website in sources:
+        try:
+            resp = requests.get(url, timeout=10)
+        except requests.RequestException:
+            continue                     # a dead first source must not skip the fallback
+        if (resp.status_code == 200 and resp.content
+                and 'image' in resp.headers.get('Content-Type', '')
+                and _png_side(resp.content) >= LOGO_MIN_SIDE):
+            return resp.content, via_website
+    return None, False
+
+
+@shared_task(name='cusd_plus.describe_gm_assets')
+def describe_gm_assets(limit: int = 40):
+    """Describe newly listed Ondo assets (cusd_plus/gm_profiles.py). Runs
+    before the logo mirror so a new listing's website is known in time."""
+    from .gm_profiles import describe_new_assets
+    return describe_new_assets(limit=limit)
+
+
 @shared_task(name='cusd_plus.mirror_gm_logos')
 def mirror_gm_logos():
     """Mirror stock logos into OUR S3 so the app never hotlinks a third
     party (privacy: user IPs stay off financialmodelingprep.com; and no
     dependency on an SLA-less CDN). Idempotent — only fetches tickers whose
-    key is missing — so the weekly run costs a handful of requests once the
+    key is missing — so the daily run costs a handful of requests once the
     universe is backfilled. TickerLogo's initial-circle fallback makes any
     residual gap cosmetic."""
     import boto3
@@ -2977,30 +3021,52 @@ def mirror_gm_logos():
     except Exception:  # noqa: BLE001 — no ListBucket perm → treat all as missing
         logger.warning('gm logo mirror: list failed, falling back to blind puts')
 
-    mirrored = skipped = failed = 0
+    from blockchain.models import GmAssetProfile
+    from .gm_profiles import websites
+
+    # A logo taken from a profile's website is only as right as that
+    # profile: once staff hide it or change the website, drop the logo so
+    # this run re-fetches it from the corrected source (or shows initials).
+    stale = [row for row in GmAssetProfile.objects.exclude(logo_website='')
+             if row.is_hidden or row.website != row.logo_website]
+    for row in stale:
+        key = f'{prefix}{row.ticker}.png'
+        try:
+            s3.delete_object(Bucket=bucket, Key=key)
+        except Exception:  # noqa: BLE001 — retried next run
+            logger.warning('gm logo mirror: could not drop %s', key, exc_info=True)
+            continue
+        existing.discard(key)
+        GmAssetProfile.objects.filter(pk=row.pk).update(logo_website='')
+
+    sites = websites()
+    mirrored = skipped = 0
+    failed = []
     for ticker in tickers:
         key = f'{prefix}{ticker}.png'
         if key in existing:
             skipped += 1
             continue
         try:
-            resp = requests.get(
-                f'https://financialmodelingprep.com/image-stock/{ticker}.png',
-                timeout=10,
-            )
-            if resp.status_code == 200 and resp.content and \
-                    'image' in resp.headers.get('Content-Type', ''):
+            website = sites.get(ticker.upper())
+            logo, via_website = _fetch_logo(ticker, website)
+            if logo:
                 s3.put_object(
-                    Bucket=bucket, Key=key, Body=_card_safe_logo(resp.content),
+                    Bucket=bucket, Key=key, Body=_card_safe_logo(logo),
                     ContentType='image/png',
-                    CacheControl='public, max-age=604800',
+                    # A website-derived logo can be corrected by staff (see
+                    # the drop above): keep caches short so a fix shows in a day.
+                    CacheControl=f'public, max-age={86400 if via_website else 604800}',
                 )
+                if via_website:
+                    GmAssetProfile.objects.filter(ticker=ticker.upper()).update(logo_website=website)
                 mirrored += 1
             else:
-                failed += 1
+                failed.append(ticker)
         except Exception:  # noqa: BLE001 — one bad logo never stops the sweep
-            failed += 1
-    result = {'tickers': len(tickers), 'mirrored': mirrored, 'skipped': skipped, 'failed': failed}
+            failed.append(ticker)
+    result = {'tickers': len(tickers), 'mirrored': mirrored, 'skipped': skipped, 'dropped': len(stale),
+              'failed': len(failed), 'missing': failed[:50]}
     logger.info('gm logo mirror: %s', result)
     return result
 

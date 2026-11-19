@@ -348,7 +348,10 @@ class GmApiTradingTests(SimpleTestCase):
         query = Query()
         with mock.patch('cusd_plus.schema._stock_surfaces_enabled', return_value=True):
             self.assertIn('500', query.resolve_gm_asset_description(info, 'spy'))
-            self.assertIsNone(query.resolve_gm_asset_description(info, 'NOPE'))
+            # No hand-written copy: falls through to the generated profiles.
+            with mock.patch('blockchain.models.GmAssetProfile.objects') as profiles:
+                profiles.filter.return_value.exclude.return_value.values_list.return_value.first.return_value = None
+                self.assertIsNone(query.resolve_gm_asset_description(info, 'NOPE'))
 
     def test_highlights_serve_shelves_and_warnings(self):
         info = SimpleNamespace(context=SimpleNamespace(
@@ -411,18 +414,16 @@ class GmApiTradingTests(SimpleTestCase):
         self.assertTrue(all(a.name for a in listed))       # never a blank row
         self.assertEqual(tile.asset_count, len(listed))    # Home counts what the list shows
 
-    def test_blackrock_shelf_explains_blackrock_and_its_limited_role(self):
+    def test_blackrock_portfolios_stay_listed_without_a_shelf(self):
         from cusd_plus.schema import _gm_descriptions, _gm_highlights
-        shelf = next(s for s in _gm_highlights()['shelves'] if s['key'] == 'blackrock')
-        self.assertIn('BlackRock es', shelf['subtitle'])
-        self.assertIn('no los emite, administra ni supervisa', shelf['subtitle'])
-        self.assertIn('BLK', [item['ticker'] for item in shelf['items']])  # the company itself
-        self.assertEqual(_gm_highlights()['names']['BLK'], 'BlackRock')
-        for item in (i for i in shelf['items'] if i['ticker'] != 'BLK'):
-            self.assertIn(item['ticker'], _gm_highlights()['names'])
+        # Shelf dropped 2026-11 (nobody bought it); names and copy stay so the
+        # portfolios remain findable and correctly described.
+        self.assertNotIn('blackrock', [s['key'] for s in _gm_highlights()['shelves']])
+        for ticker in ('BLKHI', 'BLKDIG', 'BLKGRW'):
+            self.assertIn(ticker, _gm_highlights()['names'])
             # Never "fondo de BlackRock": it is Ondo's product on a BlackRock strategy.
-            self.assertNotIn('fondo de BlackRock', _gm_descriptions()[item['ticker']])
-            self.assertIn('no lo emite, administra ni supervisa', _gm_descriptions()[item['ticker']])
+            self.assertNotIn('fondo de BlackRock', _gm_descriptions()[ticker])
+            self.assertIn('no lo emite, administra ni supervisa', _gm_descriptions()[ticker])
 
     def test_highlighted_tickers_have_descriptions(self):
         from cusd_plus.schema import _gm_descriptions, _gm_highlights

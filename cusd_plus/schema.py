@@ -1234,7 +1234,8 @@ class Query(graphene.ObjectType):
             return None
         if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
             return None
-        return _gm_descriptions().get((ticker or '').strip().upper())
+        from .gm_profiles import description_for
+        return description_for(ticker)
 
     def resolve_gm_ohlc(self, info, symbol, range='3M'):
         user = getattr(info.context, 'user', None)

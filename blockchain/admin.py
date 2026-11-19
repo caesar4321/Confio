@@ -7,7 +7,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.utils.html import format_html
 from .models import (
     Balance, CryptoSwapTrade, IndexerAssetCursor, OndoStockTrade, PendingAutoSwap, PerpMarginChange,
-    ProcessedIndexerTransaction, SponsoredBatch, StockHoldings, StockRiskAcknowledgement,
+    GmAssetProfile, ProcessedIndexerTransaction, SponsoredBatch, StockHoldings, StockRiskAcknowledgement,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,41 @@ class StockHoldingsAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('account', 'account__user')
+
+
+@admin.register(GmAssetProfile)
+class GmAssetProfileAdmin(admin.ModelAdmin):
+    list_display = ['ticker', 'name', 'source', 'is_hidden', 'website', 'failed_attempts', 'updated_at']
+    list_filter = ['source', 'is_hidden']
+    search_fields = ['ticker', 'name', 'description']
+    readonly_fields = ['sources', 'model', 'failed_attempts', 'last_error', 'last_attempt_at',
+                       'created_at', 'updated_at']
+
+    def get_form(self, request, obj=None, **kwargs):
+        from django import forms
+        from cusd_plus.gm_profiles import clean_website
+
+        form = super().get_form(request, obj, **kwargs)
+
+        def clean_website_field(self):
+            value = self.cleaned_data.get('website', '')
+            if value and not clean_website(value):
+                raise forms.ValidationError('Use a bare domain, e.g. anthropic.com')
+            return clean_website(value)
+
+        def clean_ticker_field(self):
+            # Upper-case BEFORE the form's unique check, or 'ttwo' slips past
+            # it and save() collides with TTWO (IntegrityError -> 500).
+            return (self.cleaned_data.get('ticker') or '').strip().upper()
+
+        form.clean_website = clean_website_field
+        form.clean_ticker = clean_ticker_field
+        return form
+
+    def save_model(self, request, obj, form, change):
+        if change and 'description' in form.changed_data:
+            obj.source = 'edited'        # staff copy is never regenerated
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(ProcessedIndexerTransaction)
