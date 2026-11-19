@@ -43,9 +43,6 @@ class GenerateTests(TestCase):
 
     def test_rejections(self):
         cases = {
-            'no_search': _response(_answer(), searched=False),
-            # URLs the model types into its answer are not sources.
-            'no_sources': _response({**_answer(), 'sources': ['https://made.up/x']}, cited=()),
             'not_identified': _response(_answer(identified=False, description='')),
             'banned:recomend': _response(_answer(description=GOOD + ' Te la recomendamos.')),
             'length': _response(_answer(description='Corta. Ondo.')),
@@ -53,6 +50,29 @@ class GenerateTests(TestCase):
         for reason, data in cases.items():
             with self.subTest(reason), self.assertRaisesMessage(ValueError, reason):
                 self._gen(data)
+
+    def test_a_search_without_results_is_intermittent_not_a_content_failure(self):
+        cases = {
+            'no_search': _response(_answer(), searched=False),
+            # URLs the model types into its answer are not sources.
+            'no_sources': _response({**_answer(), 'sources': ['https://made.up/x']}, cited=()),
+        }
+        for reason, data in cases.items():
+            with self.subTest(reason), self.assertRaisesMessage(gm_profiles.SearchIncomplete, reason):
+                self._gen(data)
+
+    def test_intermittent_search_is_retried_then_counted_as_an_attempt(self):
+        profile = {'description': GOOD, 'website': 'b.com', 'sources': ['https://x.test'], 'model': 'm'}
+        incomplete = gm_profiles.SearchIncomplete('no_sources')
+        market = _market(('AAAA', 'A'), ('BBBB', 'B'))
+        with mock.patch('cusd_plus.gm_api.all_market', return_value=market), \
+                mock.patch('cusd_plus.gm_profiles.generate', side_effect=[incomplete, profile, incomplete, incomplete]), \
+                mock.patch('config.ops_alerts.send_ops_alert') as alert:
+            result = gm_profiles.describe_new_assets()
+        self.assertEqual(result['written'], ['AAAA'])                     # retry succeeded
+        row = GmAssetProfile.objects.get(ticker='BBBB')
+        self.assertEqual((row.failed_attempts, row.description), (1, ''))  # bounded by MAX_ATTEMPTS
+        self.assertNotIn('gm_profiles_outage', str(alert.call_args_list))  # not an outage
 
     def test_search_sources_count_when_the_answer_carries_no_citation(self):
         data = _response(_answer(), cited=())
@@ -62,7 +82,11 @@ class GenerateTests(TestCase):
     def test_banned_words_match_whole_words_only(self):
         neutral = 'Oscar Health es una aseguradora de salud que se compromete a dar seguros simples. Es la versión digital, emitida por Ondo, de su acción.'
         self.assertIsNone(gm_profiles.check_description(neutral))
-        for bad in ('Te lo recomendamos.', 'Es una buena inversión.', 'Promete ganancias.', 'Tu dinero está asegurado.'):
+        honest = GOOD + ' El fondo no garantiza ganancias y tu dinero no está asegurado.'
+        self.assertIsNone(gm_profiles.check_description(honest))
+        for bad in ('Te lo recomendamos.', 'Es una buena inversión.', 'Promete ganancias.', 'Tu dinero está asegurado.',
+                    'Garantiza que no pierdas.', 'No deberías venderla en caídas.', 'No recomendamos venderla.',
+                    'No te conviene esperar.'):
             with self.subTest(bad):
                 self.assertTrue(gm_profiles.check_description(GOOD + ' ' + bad).startswith('banned:'))
 

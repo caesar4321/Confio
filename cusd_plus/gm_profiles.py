@@ -36,11 +36,16 @@ DOMAIN_RE = re.compile(r'^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+
 # that merely contain a stem ("aseguradora", "se compromete", "mercados de
 # predicción") pass. A description informs; it never advises, promises or
 # forecasts.
-BANNED = re.compile(r'\b(' + '|'.join((
-    r'recomend\w*', r'garantiz\w*', r'sin riesgos?', r'deberias', r'te conviene',
-    r'(gran|buena|excelente) (oportunidad|inversion)', r'promete(n|mos)?', r'prometid[oa]s?',
-    r'asegurad[oa]s?', r'pronostica(n|mos)?', r'precio objetivo', r'compra(lo|la)? ahora',
-    r'no te (lo |la )?pierdas',
+# Advice is banned outright, negated or not ("no deberías vender" is still
+# advice). Only the disclosure verbs may appear negated: "no garantiza"
+# (protection funds) and "no está asegurado" are honest, "garantiza" is not.
+ADVICE = re.compile(r'\b(' + '|'.join((
+    r'recomend\w*', r'deberias', r'te conviene', r'sin riesgos?',
+    r'(gran|buena|excelente) (oportunidad|inversion)', r'pronostica(n|mos)?',
+    r'precio objetivo', r'compra(lo|la)? ahora', r'no te (lo |la )?pierdas',
+)) + r')\b')
+PROMISE = re.compile(r'(?<!\bno )(?<!\bno esta )(?<!\bno estan )\b(' + '|'.join((
+    r'garantiz\w*', r'promete(n|mos)?', r'prometid[oa]s?', r'asegurad[oa]s?',
 )) + r')\b')
 MARKUP = re.compile(r'https?://|www\.|\*\*|#')
 
@@ -84,6 +89,12 @@ SCHEMA = {
 }
 
 
+class SearchIncomplete(Exception):
+    """The web search returned nothing usable this time (often
+    intermittent): retried once at once; if it fails again it counts as a
+    normal attempt (backoff, cap), never as a provider outage."""
+
+
 def _fold(text: str) -> str:
     return unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
 
@@ -104,7 +115,7 @@ def check_description(text: str) -> str | None:
     if '\n' in text or MARKUP.search(text):
         return 'not_prose'
     folded = _fold(text)
-    hit = BANNED.search(folded)
+    hit = ADVICE.search(folded) or PROMISE.search(folded)
     if hit:
         return f'banned:{hit.group(0)}'
     if 'ondo' not in folded:
@@ -174,10 +185,10 @@ def generate(ticker: str, name: str) -> dict:
         'text': {'format': {'type': 'json_schema', 'name': 'gm_asset_profile', 'strict': True, 'schema': SCHEMA}},
     }, timeout=90)
     if data.get('status') in {'failed', 'incomplete'}:
-        raise ValueError('search_unfinished')
+        raise SearchIncomplete('search_unfinished')
     output = data.get('output') or []
     if not any(item.get('type') == 'web_search_call' and item.get('status') == 'completed' for item in output):
-        raise ValueError('no_search')
+        raise SearchIncomplete('no_search')
     texts = [part.get('text', '') for item in output if item.get('type') == 'message'
              for part in item.get('content') or [] if part.get('type') == 'output_text']
     try:
@@ -194,7 +205,7 @@ def generate(ticker: str, name: str) -> dict:
         raise ValueError(reason)
     sources = _consulted_urls(output)[:5]
     if not sources:
-        raise ValueError('no_sources')
+        raise SearchIncomplete('no_sources')
     return {'description': description, 'website': clean_website(str(answer.get('website') or '')),
             'sources': sources, 'model': model}
 
@@ -288,8 +299,11 @@ def describe_new_assets(limit: int = 40, dry_run: bool = False) -> dict:
     todo = missing_listed()
     for ticker, name in todo[:limit]:
         try:
-            profile = generate(ticker, name)
-        except ValueError as exc:  # the answer was unusable: counts as an attempt
+            try:
+                profile = generate(ticker, name)
+            except SearchIncomplete:
+                profile = generate(ticker, name)  # intermittent: one immediate retry
+        except (ValueError, SearchIncomplete) as exc:  # unusable answer: counts as an attempt
             streak = 0
             failed[ticker] = str(exc)[:80]
             if not dry_run:
