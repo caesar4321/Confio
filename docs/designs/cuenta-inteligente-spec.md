@@ -1,7 +1,7 @@
 # Cuenta inteligente: final specification
 
 Date: 2026-11-20
-Status: FINAL for the decisions in section 2 (rows 1 to 15 from the decision session, rows 16 to 28 from the founder's answers to the first draft, same day). What is still open is listed in section 9.3.
+Status: FINAL for the decisions in section 2 (rows 1 to 15 from the decision session, rows 16 to 32 from the founder's answers to the drafts, same day). What is still open is listed in section 9.3.
 Supersedes: the section "For Build B (launch only; nothing below is built for the probe)" and every other launch-only note in [`cuenta-inteligente-fake-door.md`](cuenta-inteligente-fake-door.md). That document remains the record of the waitlist probe (2026-10-11 to 2026-11-20). Where the two disagree, this document wins. In particular the probe's merchant subscriptions and debit control, its price (US$9.99), its "cUSD+ is unwrapped to cUSD to pay the charge" rule and its `ConfioPayrollVault`-style shared escrow are all replaced.
 
 The repository is public. This document contains no user identifiers, names, interview material, revenue or user counts, and none may be added.
@@ -48,31 +48,31 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 | 1 | One tier, brand "Cuenta inteligente". No "Bóveda" brand. A second tier only after 50 paying users | One name and one price keep the offer readable; a second tier needs evidence first | FINAL |
 | 2 | US$14.99/month or US$149.99/year, annual preselected. The probe showed US$9.99. (Revised by the founder after the first draft: was US$149 with monthly preselected) | Payment, not a waitlist tap, is now the demand signal; the annual plan is the one to push | FINAL |
 | 3 | The 0.9% entry/exit conversion fee stays. No waiver or discount for subscribers | The conversion fee is existing revenue and must not be discounted by a membership | FINAL |
-| 4 | Included: (a) contract automation: scheduled sends, automatic payments to bank destinations, DCA of stocks, bitcoin, gold (revised by rows 17 and 18: "saving" removed, bank payments added); (b) IA+ as part of the account service; (c) one family beneficiary ("beneficiario" in store and legal copy) | These three are the paid job; IA+ is framed as account service for store review | FINAL |
+| 4 | Included: (a) contract automation: scheduled sends, automatic payments to bank destinations, DCA of stocks, bitcoin, gold (revised by rows 17 and 18: "saving" removed, bank payments added); (b) IA+ as part of the account service; (c) one family beneficiary ("beneficiario" in store and legal copy) | These three are the paid job; IA+ is part of the account service | FINAL |
 | 5 | A separate smart-contract account owned by the user's personal wallet (EOA with the EIP-7702 `ConfioBatchDelegate`, Confío's KMS sponsor as `tx.origin`). Only assets inside it are automated and inheritable. Rejected: ERC-20 approvals from the personal wallet; inheritance logic in the 7702 delegate | A separate contract bounds what automation and inheritance can touch; the delegate stays minimal and immutable | FINAL |
 | 6 | The fee is taken from inside the account: cUSD first, then cUSD+ shares in kind (no conversion to cUSD first). If neither covers it, the contract sells stock/bitcoin/gold: one period's fee only, after several days of notices, proceeds land only inside the contract | Converting cUSD+ to pay would charge 0.9% again; forced sale closes free riding for non-dollar holders | FINAL |
-| 7 | Cancellation is user-signed. At the end of the paid period every asset returns to the owner's personal wallet. A failed payment or failed sale never returns assets: it pauses automation and retries. The expiry return is callable by anyone, destination fixed to the owner's wallet, executable per asset | A dead owner's assets must not bounce back to a wallet nobody can open; one failing token must not block the rest | FINAL |
+| 7 | Cancellation is user-signed. At the end of the paid period every asset returns to the owner's personal wallet. A failed payment or failed sale never returns assets: it pauses automation and retries. The expiry return is callable by anyone, destination fixed to the owner's wallet, executable per asset. Futures/perps are excluded from the account | A dead owner's assets must not bounce back to a wallet nobody can open; one failing token must not block the rest | FINAL |
 | 8 | No free riding: no "beneficiary stays after lapse", no settlement fee at claim | Forced sale (6) makes the subscription the only way to keep coverage | FINAL |
 | 9 | Inheritance is an ownership transfer of the account. Beneficiary initiates, a challenge window runs (default 180 days, user-selectable), beneficiary executes and becomes owner. No heartbeat, no Confío liveness ping. Any owner-signed transaction cancels a pending claim; the relayer's fee deduction does not. Cooldown after a cancel; the owner can remove the beneficiary. The beneficiary can call the functions directly on-chain | Ownership transfer avoids per-token logic; only the owner's own signature proves the owner is alive | FINAL |
 | 10 | After execution the account is a withdraw-only box: no fee, no automation, no beneficiary designation, no relayer authority, no authority for the previous owner's key. The new owner can only move assets out, to their own Cuenta inteligente or personal wallet, with no deadline | Keeps one Cuenta inteligente per user and removes any need for subscription consent on an inherited account | FINAL |
 | 11 | One beneficiary in v1. Must be a Didit-verified Confío user, checked and notified at designation. US-resident beneficiaries are blocked at designation | Ondo's continuing no-US-person representation covers cUSD+ and stock tokens; checks at designation avoid a failed claim years later | FINAL |
-| 12 | Relayer limits are enforced in the contract: at most one fee per period; forced-sale proceeds stay in the contract; assets leave only to the owner's wallet or, by ownership transfer, to the registered beneficiary | A server-only rule does not survive a relayer key compromise | FINAL |
+| 12 | Relayer limits are enforced in the contract: at most one fee per period; forced-sale proceeds stay in the contract; assets leave only to the owner's wallet or, by ownership transfer, to the registered beneficiary (extended by rows 16 and 29: owner-registered send payees and owner-registered payment rules) | A server-only rule does not survive a relayer key compromise | FINAL |
 | 13 | Locked presale CONFIO is out of scope; no presale purchases from the account. `ConfioPresaleVault` is not changed and not made upgradeable. Claimed CONFIO is inheritable once moved in. `uncreditMigrated`/`creditMigrated` is not an inheritance mechanism | The presale vault has no transfer function and must not gain an owner-driven one for this feature | FINAL |
 | 14 | UI: a third account in the existing personal/business switcher, an inherited-account view, a "move everything" action. Headline benefit depends on balance (beneficiary first with a balance, automation first otherwise) | Reuses the account model users already know | FINAL |
 | 15 | Rollout: automation + IA+ first with small amounts; the founder runs the full claim and return flow with his own funds; then the beneficiary feature is switched on. The Codex audit loop applies, with a separate pass for the inheritance path | The inheritance path is the one that cannot be fixed after a user dies | FINAL |
 | 16 | A scheduled send is allowed as an exit from the account when its payee, token, amount and schedule were stored on-chain by an owner-signed call. The relayer can only trigger that exact transfer | Reconciles decisions 4 and 12 (former conflict C1) | FINAL |
 | 17 | No automatic "saving" and no cUSD/cUSD+ conversion in the account. A user holds cUSD or cUSD+ by Ondo eligibility and sees one dollar balance, never both. Automation means payments, transfers and investing | There is nothing to convert between; income cannot be pulled from the personal wallet under decision 5 (former conflict C3) | FINAL |
 | 18 | Automatic payments to a saved bank destination (CLABE, Pix, Bre-B) are included, daily, weekly, every two weeks or monthly. Merchant subscriptions are not | The probe promised automatic payments; that promise is kept. Merchant subscriptions need merchants (former conflict C5) | FINAL |
-| 19 | A user-owned contract with limited relayer sell authority is treated as satisfying Ondo's self-custody requirement, and withdraw-only handling of an ineligible new owner is treated as sufficient | Founder's determination (former open point O1) | FINAL |
+| 19 | Stock tokens and cUSD+ in a Cuenta inteligente are held at the user's own account address, with the relayer limited as in decision 12. A new owner who is not eligible can only withdraw | Closes former open point O1 | FINAL |
 | 20 | The move from US$9.99 to US$14.99 is not announced separately to waitlist members | The launch price is simply the price shown (former O2) | FINAL |
-| 21 | App Review exposure is accepted. The account is a financial account with payments, investing and a beneficiary; IA+ is a minor benefit inside it, not the product | The beneficiary feature strengthens the financial-service reading (former O3) | FINAL |
+| 21 | The product is a financial account: payments, investing and a beneficiary. IA+ is a minor benefit inside it, not the product. No store billing | Closes former open point O3 | FINAL |
 | 22 | No refunds. A cancelled annual plan runs to its expiry | One rule for both plans (former O5) | FINAL |
 | 23 | Account instances are immutable. No upgrade path | An upgrade path would make a compromise of Confío's side a risk to every account (former S1) | FINAL |
-| 24 | A price change applies to an existing subscriber from the next renewal, as store subscriptions do | No subscribers exist yet; no snapshot is needed (former S3) | FINAL |
+| 24 | A price change applies to an existing subscriber from the next renewal, as store subscriptions do | No snapshot is needed (former S3) | FINAL |
 | 25 | While a claim is pending, rules keep executing, the fee keeps being charged and forced sales keep happening | Pausing any of them would open a loophole (former S4, S5) | FINAL |
 | 26 | A beneficiary can be designated only through Confío's sponsor gate; a direct on-chain designation is impossible. The beneficiary must accept, and the server records the time of designation and of acceptance | The KYC and residence checks must not be bypassable; acceptance gives the beneficiary knowledge and consent (former S6, S8) | FINAL |
 | 27 | Waitlist rows and answers are kept. The probe plan's "deleted 90 days after the decision" line is withdrawn | They are funnel data for later comparison | FINAL |
-| 28 | No country-by-country succession review is commissioned for v1, and no rule is imposed on "works even if Confío disappears" copy | Founder's call (former S7, O7). The facts in section 6.7 stay as engineering reference | FINAL |
+| 28 | No rule is imposed on "works even if Confío disappears" copy; the facts in section 6.7 stay as engineering reference. A per-country legal review is not part of v1 scope | Closes former S7, O7 | FINAL |
 | 29 | Bank payment rules are bound on-chain by the rule the owner signed (token, amount, frequency) and nothing else. No address allowlist, no extra monthly cap | The BSC-side recipient is a per-transfer bridge address; the exposure is what each owner chose to automate (former C7) | FINAL |
 | 30 | Presale CONFIO is not a fee source; it cannot be inside the account at all (decision 13), so the question does not arise for it. CONFIO that has been unlocked and moved into the account is an ordinary asset of the account: it passes with an ownership transfer and it is a fee source by forced sale like stocks, bitcoin and gold. CONFIO has no DEX market today, so v1 cannot sell it; the contract must be built so that CONFIO sales can be switched on later without replacing accounts (section 5.5). (Corrected by the founder: an earlier version of this row excluded all CONFIO from fees) | Unlocked CONFIO is the user's liquid asset like any other; only the locked allocation is outside | FINAL |
 | 31 | USDT that reaches the account is converted automatically into the owner's Confío dollar (cUSD+ if Ondo-eligible, cUSD otherwise), as in the personal wallet | A user never holds raw USDT in Confío; the same rule applies inside the account | FINAL |
@@ -102,7 +102,7 @@ One Cuenta inteligente per user means one account per owner address, enforced by
 | Asset | Inside the account | Automated | Used for the fee | Returned on expiry | Notes |
 |---|---|---|---|---|---|
 | cUSD | Yes | Yes | First | Yes | Held by users who are not Ondo-eligible. Transfers revert while cUSD is paused (`CusdVault._update`) |
-| cUSD+ (shares) | Yes | Yes | Second, in kind | Yes | Held by Ondo-eligible users. Transfers blocked only for `frozen` addresses |
+| cUSD+ (shares) | Yes | Yes | Second, in kind | Yes | Held by Ondo-eligible users. Transfers revert while the vault is paused or either address is `frozen` (`CusdPlusVault._update`) |
 | Ondo GM stock tokens | Yes | DCA buys | By forced sale | Yes | |
 | Catalog crypto/metals tokens (BTCB, XAUt at launch) | Yes | DCA buys | By forced sale | Yes | |
 | CONFIO (unlocked, moved in) | Yes | No | By forced sale once a market exists (decision 30, section 5.5); not sellable in v1 | Yes | Inheritable once moved in. Locked presale CONFIO is never inside |
@@ -137,7 +137,7 @@ The account does not keep an on-chain list of tokens. Every asset function takes
 
 Two contracts, in a new package `contracts/smart_account/` (Foundry, same layout as `contracts/crypto_swap/`):
 
-- `ConfioSmartAccountFactory`: deploys one account per owner and holds the global configuration. UUPS-upgradeable, `Ownable2StepUpgradeable`, owned by the Confío Safe, `renounceOwnership` disabled (house style of `CusdVault`, `ConfioStockRouter`, `ConfioHeartbeat`).
+- `ConfioSmartAccountFactory`: deploys one account per owner and holds the global configuration. UUPS-upgradeable, `Ownable2StepUpgradeable`, owned by the Confío Safe, `renounceOwnership` disabled (as in `CusdVault` and `CusdPlusVault`).
 - `ConfioSmartAccount`: the per-user account, deployed by the factory as an EIP-1167 minimal clone at a CREATE2 address derived from the owner. Instances are immutable (decision 23): no owner-of-code, no upgrade function, no delegatecall to a changeable target. A new version is a new implementation and a new factory entry; an owner moves to it by signing. Because the factory itself is upgradeable, every limit an account relies on is hard-coded in the account implementation (maximum fee per plan, minimum notice, minimum rule gap) and the account clamps whatever the factory returns to those limits.
 
 One contract per user is required here, unlike `ConfioMarketEscrow`, which deliberately uses one shared contract (`ConfioMarketEscrow.sol:17-21`): both routers deliver bought assets and sale proceeds to `msg.sender`, ownership must be transferable as a unit, and a per-user address is what Ondo's self-custody requirement rests on (decision 19).
@@ -148,7 +148,7 @@ One contract per user is required here, unlike `ConfioMarketEscrow`, which delib
 |---|---|---|
 | Owner | The user's personal wallet | `msg.sender == owner`. Under 7702 the delegate's `execute` calls the account as the EOA, so `msg.sender` is the EOA whether the transaction was sponsored or self-sent |
 | Beneficiary | The registered beneficiary's personal wallet | `msg.sender == beneficiary` |
-| Relayer | Confío's KMS sponsor | `msg.sender` is a sponsor: `CUSD_PLUS.isSponsor(msg.sender)`. Reusing the vault's sponsor set means the Safe rotates one list |
+| Relayer | Confío's KMS sponsor | `CUSD_PLUS.isSponsor(msg.sender)` **and** `msg.sender == tx.origin`. The second condition matters: the sponsor set also contains contracts (the stock and swap routers are sponsors so they can mint to users), and a contract must never hold the relayer role on an account. Note that `CusdVault` keeps its own separate sponsor set, used by `mintWithFee` and `armReferral`; the relayer key must be in both |
 | Anyone | Any address | No check |
 | Safe | Confío Safe | Owner of the factory. Has no function on an account. It can change factory configuration and pause relayer functions (4.3) |
 
@@ -156,7 +156,7 @@ A call arriving through the owner's 7702 batch has `tx.origin` equal to the spon
 
 ### 4.2 Immutable configuration (account implementation)
 
-`FACTORY`, `CUSD`, `CUSD_PLUS`, `STOCK_ROUTER`, `SWAP_ROUTER`, `FEE_COLLECTOR`, and one price-feed pair per crypto token the account can force-sell: `BTCB` with the Chainlink `BTC / USD` feed and `XAUT` with the Chainlink `XAU / USD` feed. These addresses are constants of the implementation, not entries in a Safe-maintained list: no one can repoint them, and adding a token means a new implementation version.
+`FACTORY`, `CUSD`, `CUSD_PLUS`, `STOCK_ROUTER`, `SWAP_ROUTER`, `FEE_COLLECTOR`, and one price-feed pair per crypto token the account can force-sell: `BTCB` with the Chainlink `BTC / USD` feed and `XAUT` with the Chainlink `XAU / USD` feed. These addresses are constants of the implementation, not entries in a Safe-maintained list: no one can repoint them, and adding a token means a new implementation version. The single exception is CONFIO, whose sale venue and price reference are set once later through the factory (section 5.5, decision 30). `USDT` and `CONFIO` token addresses are immutables too.
 
 `FEE_COLLECTOR` follows `AccountActivationCollector`: no key, no owner, no upgrade path, anyone may sweep, only an immutable treasury receives. It must sweep two tokens (cUSD and cUSD+) rather than one, so it is a new contract of the same shape.
 
@@ -169,6 +169,9 @@ A call arriving through the owner's 7702 batch has `tx.origin` equal to the spon
 | `allowedChallengeWindows` | `mapping(uint64 => bool)` | Selectable windows: 90, 180, 365 days |
 | `claimCooldown` | `uint64` | Wait after a cancelled claim before the same beneficiary may claim again: 30 days |
 | `forcedSaleNotice` | `uint64` | Minimum time between `startPaymentNotice` and `forcedSale`: 7 days, with hard-coded floor |
+| `confioSale` | struct (venue, price reference) | Empty at launch. The Safe can set it once; after that it cannot be changed or cleared. Read only by `forcedSale` when `tokenIn` is CONFIO (section 5.5) |
+| `isAccount` | `mapping(address => bool)` | True for accounts this factory created. Read by `CusdVault.armReferral` (decision 32) |
+| `FEE_CHANGE_DELAY` | constant | 30 days |
 | `inheritanceEnabled` | `bool` | One-way switch, Safe-set. `setBeneficiary` reverts while false (rollout step 3) |
 | `relayerPaused` | `bool` | Safe-set. Blocks relayer functions on every account. Never blocks owner, beneficiary or permissionless functions |
 
@@ -189,7 +192,7 @@ An account snapshots its challenge window at the owner-signed designation; a lat
 | `cancelRequested` | `bool` | Set by owner-signed `cancelSubscription` |
 | `noticeStartedAt` | `uint64` | Non-zero while a payment notice runs for the current unpaid period |
 | `forcedSaleForPeriod` | `uint64` | The `paidUntil` value for which a forced sale already succeeded |
-| `pendingBeneficiary` | `address` | Named by the owner, not yet accepted. Cannot claim |
+| `pendingBeneficiary` | `address` | Named by the owner, not yet accepted. Cannot claim. Lapses 30 days after naming (`pendingBeneficiaryExpiresAt`): `acceptBeneficiary` reverts after that and the owner names again |
 | `beneficiary` | `address` | Accepted beneficiary. Zero when none |
 | `challengeWindow` | `uint64` | Chosen by the owner at designation |
 | `claimStartedAt` | `uint64` | Non-zero while a claim is pending |
@@ -226,7 +229,7 @@ The account has three independent dimensions. The functions check them with inte
 
 | Function | Preconditions | Effect |
 |---|---|---|
-| `subscribe(plan, maxFeeUsd)` | `Unsubscribed` or `Expired`; not `inherited`; `feeUsd()` for `plan` `<= maxFeeUsd` | Sets `plan`, `periodSeconds`; clears `cancelRequested`; takes the first fee (section 5.1) in the same call, reverting if dollars are short; sets `paidUntil` |
+| `subscribe(plan, maxFeeUsd)` | `Unsubscribed` or `Expired`; not `inherited`; `feeUsd()` for `plan` `<= maxFeeUsd` | Sets `plan`, `periodSeconds`; clears `cancelRequested`, `noticeStartedAt` and `forcedSaleForPeriod` (a notice from an earlier subscription must never count for a later one); takes the first fee (section 5.1) in the same call, reverting if dollars are short; sets `paidUntil` |
 | `changePlan(plan)` | `Active`, `Current` | Records the new plan; it applies from the next renewal |
 | `cancelSubscription()` | `Active` | Sets `cancelRequested`. Automation keeps running until `paidUntil` |
 | `undoCancel()` | `CancelPending` | Clears `cancelRequested` |
@@ -234,7 +237,7 @@ The account has three independent dimensions. The functions check them with inte
 | `withdrawAll(tokens[])` | Not `inherited` | Transfers each full balance to `owner` |
 | `trade(venue, data, tokenIn, tokenOut, maxIn, minOut)` | `Active`, `Current`; `venue` is `STOCK_ROUTER` or `SWAP_ROUTER`; `data` selector is one of the allowed buy/sell selectors | Approves `tokenIn` to the venue for `maxIn`, calls it, resets the approval to zero, requires `tokenOut` balance to rise by at least `minOut` and `tokenIn` to fall by at most `maxIn` |
 | `createRule(rule)`, `updateRule(id, rule)`, `cancelRule(id)` | `Active`; not `inherited` | Stores the rule |
-| `setBeneficiary(addr, window)` | `Active`; `factory.inheritanceEnabled`; **`CUSD_PLUS.isSponsor(tx.origin)`** (decision 26: only a transaction Confío's relay originated can designate, so the server-side checks of 6.1 cannot be bypassed by a self-sent transaction); `addr` not zero, not `owner`, not `address(this)`; `factory.allowedChallengeWindows[window]` | Sets `pendingBeneficiary`, `challengeWindow`. The current accepted beneficiary, if any, stays until the new one accepts |
+| `setBeneficiary(addr, window)` | `Active`; `factory.inheritanceEnabled`; **`CUSD_PLUS.isSponsor(tx.origin)`** (decision 26: only a transaction Confío's relay originated can designate, so a self-sent transaction cannot. As the vault's own audit note says of the same pattern, `tx.origin` proves a sponsor started the transaction, not that it approved this call; the guarantee therefore also rests on the relay policy never executing a call to an account that it did not prepare, which 7.4 requires); `addr` not zero, not `owner`, not `address(this)`; `factory.allowedChallengeWindows[window]` | Sets `pendingBeneficiary`, `challengeWindow`. The current accepted beneficiary, if any, stays until the new one accepts |
 | `removeBeneficiary()` | Not `inherited`. No sponsor gate: the owner can always remove | Clears `pendingBeneficiary`, `beneficiary`, `challengeWindow`, `claimCooldownUntil` |
 | `cancelClaim()` | Not `inherited` | Explicit touch. Succeeds (no-op) when no claim is pending so that it can be appended to any batch |
 
@@ -242,7 +245,7 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 
 | Function | Preconditions | Effect |
 |---|---|---|
-| `withdraw(token, amount, to)` | `inherited`; `to == owner` or `to == FACTORY.accountOf(owner)` (non-zero) | Transfers |
+| `withdraw(token, amount, to)` | `inherited`; `to == owner`, or `to == FACTORY.accountOf(owner)` where that account is non-zero, reports `owner() == owner` and is not itself `inherited` (an account the caller once opened may since have passed to someone else) | Transfers |
 | `withdrawAll(tokens[], to)` | Same | Transfers each full balance |
 
 **Beneficiary.**
@@ -259,9 +262,9 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 |---|---|---|
 | `collectFee()` | `PaymentDue` (so `block.timestamp >= paidUntil`); cUSD plus cUSD+ cover `feeUsd()` | Section 5.1. Sets `paidUntil = block.timestamp + periodSeconds`; clears `noticeStartedAt` |
 | `startPaymentNotice()` | `PaymentDue`; dollars do not cover `feeUsd`; `noticeStartedAt == 0` | Sets `noticeStartedAt`; emits `PaymentNoticeStarted` |
-| `forcedSale(venue, data, tokenIn, maxIn, minDollarsOut)` | `SaleAllowed`; `forcedSaleForPeriod != paidUntil`; `tokenIn` is not cUSD or cUSD+; `tokenIn` has a price reference (a listed stock via its Ondo quote, BTCB, XAUt, or CONFIO once switched on); dollars still do not cover `feeUsd` | Section 5.3. Sets `forcedSaleForPeriod = paidUntil` on success |
-| `executeRule(id, data, minOut)` | `Active` (including `CancelPending`), `Current`; rule active; `block.timestamp >= rule.nextRunAt` | Runs the rule (4.7); sets `nextRunAt = block.timestamp + minimum gap of the rule's frequency` (missed runs are not caught up). Runs whether or not a claim is pending (decision 25) |
-| `convertUsdt(dest, minOut)` | Not `inherited`; lifecycle `Active` (any billing state, so a deposit of USDT can cure a missed payment); USDT balance above zero; `dest` is cUSD+ or cUSD | Converts the whole USDT balance through the normal entry: `CUSD_PLUS.subscribeAndMint(usdt, minOut, address(this))` or `CUSD.mintWithFee(usdt, minOut, address(this))`, both paying the 0.9% entry fee as any deposit does. Recipient is fixed to the account; the account requires its dollar balance to rise by at least `minOut` and `minOut` to be no lower than the USDT amount less the live fee and a small tolerance. The relayer picks `dest` from the owner's eligibility, as the server does for the personal wallet |
+| `forcedSale(venue, data, tokenIn, maxIn, minDollarsOut, referrer, shareBps)` | `SaleAllowed`; `forcedSaleForPeriod != paidUntil`; `tokenIn` is not cUSD or cUSD+; `tokenIn` has a price reference (a listed stock via its Ondo quote, BTCB, XAUt, or CONFIO once switched on); dollars still do not cover `feeUsd` | Section 5.3. Sells, then collects the fee in the same transaction; if the dollars still do not cover the fee the whole call reverts, so a sale never happens without the fee being paid by it. Sets `forcedSaleForPeriod` on success |
+| `executeRule(id, data, minOut, referrer, shareBps)` | `Active` (including `CancelPending`), `Current`; rule active; `block.timestamp >= rule.nextRunAt` | Runs the rule (4.7); sets `nextRunAt = block.timestamp + minimum gap of the rule's frequency` (missed runs are not caught up). Runs whether or not a claim is pending (decision 25) |
+| `convertUsdt(dest, minDollarsOut, referrer, shareBps)` | Not `inherited`; lifecycle `Active` (any billing state, so a deposit of USDT can cure a missed payment); USDT balance above zero; `dest` is cUSD+ or cUSD | Converts the whole USDT balance through the normal entry, paying the 0.9% entry fee as any deposit does: `CUSD.mintWithFee(usdt, minDollarsOut, address(this))`, or `CUSD_PLUS.subscribeAndMint(usdt, 0, address(this))`. The vault's own floor argument is in USDY units, so it is passed as zero (as both routers do) and the account enforces the floor itself: the dollar value received (cUSD at par; cUSD+ shares gained times `pPlus`) must be at least `minDollarsOut`, and `minDollarsOut` must be no lower than the USDT amount less the live fee and a small tolerance. Recipient is fixed to the account. The relayer picks `dest` from the owner's eligibility, as the server does for the personal wallet. Emits `UsdtConverted` |
 
 **Anyone.**
 
@@ -276,7 +279,7 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 |---|---|---|
 | `Send` | Transfer `amount` of `tokenIn` (cUSD or cUSD+) to `payee` | `payee`, `tokenIn`, `amount` and `frequency` come from the stored rule; the relayer supplies nothing (decision 16) |
 | `Payout` | Exit up to `amount` of `tokenIn` to USDT (`CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee`, both sponsor-less, both paying the normal 0.9% exit fee) with the USDT sent to the address the relayer names for this run; the bridge and the provider then pay the bank destination behind `payoutRef` (CLABE, Pix, Bre-B) | `tokenIn`, `amount`, `frequency` and `payoutRef` come from the stored rule; `tokenIn` falls by at most `amount`; at most one run per minimum gap; the event carries `payoutRef` and the destination. The destination address itself is **not** bound: it is a bridge deposit address created per transfer (section 9.2, C7). There is no allowlist |
-| `Buy` | Spend up to `amount` of `tokenIn` (cUSD or cUSD+) on `tokenOut` through `STOCK_ROUTER.buyWithSavings` or `SWAP_ROUTER.buy` | Venue and selector fixed; `tokenIn` falls by at most `amount`; `tokenOut` rises by at least the relayer-supplied `minOut` and by more than zero; no other token balance passed in the check list falls. Worst case per run is the rule's `amount` |
+| `Buy` | Spend up to `amount` of `tokenIn` on `tokenOut`: a stock through `STOCK_ROUTER.buyWithSavings`, which takes cUSD+ only, or bitcoin or gold through `SWAP_ROUTER.buy`, which takes cUSD+ or cUSD | Venue and selector fixed; `tokenIn` falls by at most `amount`; `tokenOut` rises by at least the relayer-supplied `minOut` and by more than zero; no other token balance passed in the check list falls. Worst case per run is the rule's `amount` |
 
 There is no saving rule and no conversion function (decision 17).
 
@@ -284,11 +287,11 @@ There is no saving rule and no conversion function (decision 17).
 
 ### 4.8 Events
 
-`Subscribed(plan, feeUsd, paidUntil)`, `PlanChanged`, `SubscriptionCancelled(paidUntil)`, `CancelUndone`, `FeeCollected(cusdAmount, cusdPlusShares, pPlus, paidUntil)`, `PaymentNoticeStarted(saleAllowedAt)`, `ForcedSale(tokenIn, amountIn, dollarsOut, forPeriod)`, `Withdrawn(token, to, amount)`, `AssetReturned(token, amount)`, `Traded(venue, tokenIn, tokenOut, amountIn, amountOut)`, `RuleCreated`, `RuleUpdated`, `RuleCancelled`, `RuleExecuted(id, tokenIn, tokenOut, amountIn, amountOut)`, `PayoutSent(id, payoutRef, destination, tokenIn, amountIn, usdtOut)`, `BeneficiaryNamed(pendingBeneficiary, challengeWindow)`, `BeneficiaryAccepted(beneficiary)`, `BeneficiaryRemoved`, `ClaimInitiated(beneficiary, executableAt)`, `ClaimCancelled(beneficiary, cooldownUntil)`, `ClaimExecuted(previousOwner, newOwner)`.
+`Subscribed(plan, feeUsd, paidUntil)`, `PlanChanged`, `SubscriptionCancelled(paidUntil)`, `CancelUndone`, `FeeCollected(cusdAmount, cusdPlusShares, pPlus, paidUntil)`, `PaymentNoticeStarted(saleAllowedAt)`, `ForcedSale(tokenIn, amountIn, dollarsOut, forPeriod)`, `Withdrawn(token, to, amount)`, `AssetReturned(token, amount)`, `Traded(venue, tokenIn, tokenOut, amountIn, amountOut)`, `RuleCreated`, `RuleUpdated`, `RuleCancelled`, `RuleExecuted(id, tokenIn, tokenOut, amountIn, amountOut)`, `UsdtConverted(dest, usdtIn, dollarsOut)`, `PayoutSent(id, payoutRef, destination, tokenIn, amountIn, usdtOut)`, `BeneficiaryNamed(pendingBeneficiary, challengeWindow)`, `BeneficiaryAccepted(beneficiary)`, `BeneficiaryRemoved`, `ClaimInitiated(beneficiary, executableAt)`, `ClaimCancelled(beneficiary, cooldownUntil)`, `ClaimExecuted(previousOwner, newOwner)`.
 
 Factory: `AccountCreated(owner, account)`, and one event per setter.
 
-Every state change in the tables above emits exactly one of these. The backend reconciles from events and never from its own writes (section 7.6).
+Every state change in the tables above emits at least one of these (an owner call that also cancels a pending claim emits `ClaimCancelled` as well). The backend reconciles from events and never from its own writes (section 7.6).
 
 ### 4.9 State machine
 
@@ -331,7 +334,7 @@ PaymentDue --collectFee (R), dollars cover--> Current
 PaymentDue --startPaymentNotice (R), dollars short--> Notice
 Notice --owner adds dollars, then collectFee (R)--> Current
 Notice --forcedSaleNotice elapsed (T)--> SaleAllowed
-SaleAllowed --forcedSale succeeds (R)--> PaymentDue with dollars, then collectFee (R) --> Current
+SaleAllowed --forcedSale succeeds (R): sells and collects in one transaction--> Current
 SaleAllowed --forcedSale reverts--> SaleAllowed            [retry; nothing returned]
 SaleAllowed --nothing sellable--> SaleAllowed              [stays paused; nothing returned]
 ```
@@ -342,7 +345,7 @@ No transition out of `PaymentDue`, `Notice` or `SaleAllowed` returns assets to t
 
 Each is a testable statement. Section 10.2 maps them to tests.
 
-1. A token balance of the account decreases only through: a transfer to `owner`; a transfer to `FEE_COLLECTOR` inside `collectFee` or `subscribe`; a transfer to a `Send` rule's stored `payee` inside `executeRule`; a burn by `CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee` inside a `Payout` rule, limited to the rule's stored amount and frequency, whose USDT goes to the address the relayer names for that run (the one exit whose destination the contract does not fix; C7); a pull by `STOCK_ROUTER` or `SWAP_ROUTER` inside `trade`, `executeRule` or `forcedSale`; a pull of USDT by `CUSD_PLUS` or `CUSD` inside `convertUsdt`, which mints the owner's dollar back to the account. In `Inherited` state only: a transfer to `owner` or `FACTORY.accountOf(owner)`.
+1. A token balance of the account decreases only through: a transfer to `owner`; a transfer to `FEE_COLLECTOR` inside `collectFee` or `subscribe`; a transfer to a `Send` rule's stored `payee` inside `executeRule`; a burn by `CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee` inside a `Payout` rule, limited to the rule's stored amount and frequency, whose USDT goes to the address the relayer names for that run (the one exit whose destination the contract does not fix; C7); a pull by `STOCK_ROUTER` or `SWAP_ROUTER` inside `trade`, `executeRule` or `forcedSale`; a pull of CONFIO by the `confioSale` venue inside `forcedSale`, once that venue is set; a pull of USDT by `CUSD_PLUS` or `CUSD` inside `convertUsdt`, which mints the owner's dollar back to the account. In `Inherited` state only: a transfer to `owner` or `FACTORY.accountOf(owner)`.
 2. `owner` changes only in `executeClaim`, and only to the `beneficiary` stored at that moment.
 3. `collectFee` succeeds at most once for any value of `paidUntil`, and each success moves `paidUntil` forward by exactly `periodSeconds` from the block time. The total collected by one success never exceeds `feeUsd()` in value (cUSD at par, cUSD+ at `pPlus`, rounding up by at most one share unit), and `feeUsd()` never exceeds the implementation's hard-coded maximum for the plan whatever the factory returns.
 4. The relayer cannot change the fee, `plan`, `periodSeconds`, `owner`, `pendingBeneficiary`, `beneficiary`, `challengeWindow` or any rule. The price changes only through the factory's delayed `scheduleFee`, which is Safe-only.
@@ -350,16 +353,16 @@ Each is a testable statement. Section 10.2 maps them to tests.
 6. After `forcedSale`, the account's cUSD plus cUSD+ value has risen by at least the shortfall and by no more than the cap in section 5.3; the sold token's balance fell by at most `maxIn`; no other checked balance fell; no token left to any address other than the venue.
 7. `returnAsset` reverts unless `cancelRequested` is true and `block.timestamp >= paidUntil`. Its only destination is `owner`.
 8. No relayer function and no permissionless function changes `claimStartedAt`, `claimCooldownUntil` or `beneficiary`.
-9. Every owner function sets `claimStartedAt` to zero. If a claim was pending, it also sets `claimCooldownUntil = block.timestamp + claimCooldown`.
+9. Every owner function sets `claimStartedAt` to zero. If a claim was pending, it also sets `claimCooldownUntil = block.timestamp + claimCooldown`, except `removeBeneficiary`, which ends the designation and clears the cooldown with it. `claimCooldown` is read from the factory and clamped to hard-coded bounds in the account (1 to 90 days), and a failing factory read falls back to 30 days, so no factory value can remove the cooldown or make an owner call revert.
 10. `executeClaim` reverts before `claimStartedAt + challengeWindow`, reverts for any caller other than `beneficiary`, and reverts if `claimStartedAt == 0`.
 11. `initiateClaim` reverts while `block.timestamp < claimCooldownUntil`.
 12. After `executeClaim`: `plan == None`, `beneficiary == 0`, `pendingBeneficiary == 0`, `claimStartedAt == 0`, every rule inactive, and every relayer function, `subscribe`, `setBeneficiary`, `acceptBeneficiary`, `createRule` and `trade` revert forever.
 13. After `executeClaim` the previous owner address has no function it can call successfully other than views.
 14. The account never holds a non-zero allowance to any address at the end of a transaction.
 15. `factory.relayerPaused` blocks only relayer functions. `withdraw`, `withdrawAll`, `cancelSubscription`, `returnAsset`, `cancelClaim`, `removeBeneficiary`, `initiateClaim` and `executeClaim` work while it is set.
-16. The Safe has no function that moves an account's assets, changes its `owner` or changes its `beneficiary`.
+16. The Safe has no function that moves an account's assets, changes its `owner` or changes its `beneficiary`. The one indirect power is setting `confioSale` once: the venue it names can then receive CONFIO in a forced sale, under every cap of 5.3.
 17. `factory.accountOf[owner]` is written once per owner and never overwritten.
-18. `setBeneficiary` and `acceptBeneficiary` revert unless `tx.origin` is a sponsor. A self-sent transaction from the owner or from the named address cannot create or accept a designation.
+18. `setBeneficiary` and `acceptBeneficiary` revert unless `tx.origin` is a sponsor. A self-sent transaction from the owner or from the named address cannot create or accept a designation. (Contract-level statement only; that the relay itself originates no designation it did not check is a backend test, 10.3.)
 19. `initiateClaim` and `executeClaim` revert for `pendingBeneficiary`. Only an accepted beneficiary can claim.
 20. The account has no function that changes its own code, no `delegatecall`, and no dependency on the factory for moving assets to `owner`: `withdraw`, `withdrawAll`, `returnAsset` and the claim functions succeed even if every factory call reverts (factory reads used by them are wrapped and fall back to the hard-coded limits).
 
@@ -402,7 +405,7 @@ An account whose total assets are worth less than one fee stays in `SaleAllowed`
 | Only when cUSD plus cUSD+ do not cover the fee | Contract |
 | Only after `forcedSaleNotice` since `startPaymentNotice` for this period | Contract |
 | At most one successful sale per unpaid period | Contract (`forcedSaleForPeriod`) |
-| Venue is `STOCK_ROUTER.sellToSavings` or `SWAP_ROUTER.sell` only | Contract (address and selector) |
+| Venue is `STOCK_ROUTER.sellToSavings` (proceeds always in cUSD+; the stock router has no cUSD leg) or `SWAP_ROUTER.sell` (proceeds in cUSD+ or cUSD), or for CONFIO the `confioSale` venue once set (5.5). Nothing else | Contract (address and selector) |
 | Proceeds land in the account | Structural: both functions pay `msg.sender`, which is the account. The contract also asserts its own dollar balance delta |
 | Proceeds are at least the shortfall and at most `shortfall * (1 + FORCED_SALE_MARGIN) + FORCED_SALE_ROUNDING` | Contract. Margin 5%, rounding US$1. The margin exists because the 0.9% entry fee is taken from the proceeds and stock notional rounds |
 | Amount of the asset sold is consistent with a reference price | Contract. Stocks: the Ondo-signed quote (the router takes price and quantity from it). Bitcoin and gold: the Chainlink feed fixed in the implementation; the sale reverts if the feed is older than its maximum age or if dollars received per unit sold are more than the tolerance below the feed price after the 0.9% entry fee. A reverted sale is retried later like any failed sale |
@@ -415,7 +418,7 @@ The sale pays the normal 0.9% entry fee when proceeds re-enter cUSD+ or cUSD (de
 
 `plan = Annual`, fee `annualFeeUsd` (US$149.99), `periodSeconds = 365 days`. One charge at subscribe and one per year. The failure path is identical. The annual plan is the preselected one on the sign-up screen (decision 2).
 
-No refunds (decision 22). A cancelled plan, monthly or annual, runs to `paidUntil` and then returns the assets. There is no refund function. The probe plan's note about legal withdrawal rights (for example Brazil's 7-day right) is not addressed by this decision; if one applies, it is an off-chain payment by Confío.
+No refunds (decision 22). A cancelled plan, monthly or annual, runs to `paidUntil` and then returns the assets. There is no refund function.
 
 Price changes (decision 24): the Safe schedules a new price in the factory at least `FEE_CHANGE_DELAY` ahead. Each account pays the price in force at its own next renewal. A monthly subscriber sees it within a month; an annual subscriber at the next anniversary. The backend notifies every subscriber when a change is scheduled and again before their renewal. The first charge is protected by `maxFeeUsd` in the signed `subscribe`; later charges are bounded by the hard-coded maximum in the account.
 
@@ -475,7 +478,7 @@ During the window the account behaves normally: fees are collected, rules run, f
 
 - Any owner-signed function on the account cancels a pending claim (`_ownerTouch`).
 - While a claim is pending, the backend appends `account.cancelClaim()` to every sponsored batch the owner signs for any purpose from the personal wallet (a send, a payment, a trade). The owner's signature covers the call list, so this is an owner-signed transaction as decision 9 requires. The app tells the owner it is doing so.
-- `collectFee`, `startPaymentNotice`, `forcedSale`, `executeRule` and `returnAsset` do not cancel a claim. They are not owner-signed.
+- `collectFee`, `startPaymentNotice`, `forcedSale`, `executeRule`, `convertUsdt` and `returnAsset` do not cancel a claim. They are not owner-signed.
 - A cancel sets `claimCooldownUntil`. The same beneficiary cannot call `initiateClaim` before it. Length: 30 days.
 - `removeBeneficiary()` ends the designation and any pending claim.
 - `setBeneficiary` with a new address (being an owner function) cancels any pending claim. The new person replaces the old one when they accept.
@@ -501,7 +504,7 @@ No fee is charged at execution (decision 8).
 
 In `Inherited` state the only state-changing functions are `withdraw(token, amount, to)` and `withdrawAll(tokens[], to)`, callable by the new owner, with `to` restricted to the new owner's wallet or the new owner's own Cuenta inteligente. There is no deadline. The relayer has no function. The previous owner's key has no function. The new owner cannot trade, automate, subscribe or name a beneficiary on this account; to do any of those they move the assets into their own Cuenta inteligente.
 
-Selling an inherited stock position therefore happens after moving it out. Withdraw-only handling is treated as sufficient for a new owner who is not Ondo-eligible (decision 19).
+Selling an inherited stock position therefore happens after moving it out. A new owner who is not Ondo-eligible can only withdraw (decision 19).
 
 ### 6.7 Direct on-chain path (without Confío's server)
 
@@ -541,7 +544,7 @@ All soft-deletable where they represent user-visible records, and all registered
 
 | Model | Key fields | Notes |
 |---|---|---|
-| `SmartAccount` | `owner_user`, `owner_account` (the personal `users.Account`), `account` (the `users.Account` row of the new type, 7.2), `contract_address`, `status`, `billing_status`, `plan`, `fee_usd`, `paid_until`, `cancel_requested_at`, `inherited_from` (nullable FK to another `SmartAccount`), `created_tx`, timestamps | One per owner (unique). An inherited account is a row whose `owner_user` was replaced on `ClaimExecuted` and whose `status = inherited` |
+| `SmartAccount` | `owner_user`, `owner_account` (the personal `users.Account`), `account` (the `users.Account` row of the new type, 7.2), `contract_address` (unique), `status`, `billing_status`, `plan`, `paid_until`, `cancel_requested_at`, `inherited_from_user` (nullable; the previous owner), `inherited_at`, `created_tx`, timestamps | At most one row per user with `status` other than `inherited` (the user's own account); any number of inherited rows. On `ClaimExecuted` the same row changes `owner_user` and becomes `inherited`. The fee is not stored: it is read from the factory |
 | `SmartAccountEvent` | `smart_account`, `tx_hash`, `log_index`, `name`, `args`, `block_number`, `block_time` | Append-only mirror of contract events; unique on (`tx_hash`, `log_index`). This is the audit trail for financial operations |
 | `SmartAccountCharge` | `smart_account`, `period_start`, `period_end`, `fee_usd`, `cusd_amount`, `cusd_plus_shares`, `p_plus`, `tx_hash`, `status` | One per collected fee |
 | `SmartAccountForcedSale` | `smart_account`, `period_end`, `notice_started_at`, `asset`, `amount_in`, `dollars_out`, `quote_ref`, `tx_hash`, `status`, `attempts`, `last_error` | One per period at most in `succeeded` state |
@@ -558,7 +561,7 @@ IA+ entitlement: `assistant/billing.py:has_plus` returns true when an `Assistant
 
 The project rule stands: account context comes from the JWT only, never from client parameters.
 
-- `users.Account.ACCOUNT_TYPE_CHOICES` (`users/models.py:594-597`) has two values. Add a third, `smart` (the field is `max_length=10`), with `account_index = 0`. Its `bsc_address` is the contract address, so the stored-balance, holdings and history pipelines that key on `Account.bsc_address` work unchanged.
+- `users.Account.ACCOUNT_TYPE_CHOICES` (`users/models.py:594-597`) has two values. Add a third, `smart` (the field is `max_length=10`), with `account_index = 0` for the user's own account. Its `bsc_address` is the contract address, so the stored-balance, holdings and history pipelines that key on `Account.bsc_address` work unchanged.
 - `SwitchAccountToken` (`users/schema.py:4030`) issues a token with `account_type = 'smart'` after verifying the caller owns that `SmartAccount`. An inherited account is switched to the same way, identified by its `account_index` (0 for the user's own, 1 and up for inherited accounts in order received).
 - The signer for a `smart` context is the user's personal account key. Every place that today resolves "the JWT account's registered BSC key" (`cusd_plus/sponsor_7702.py`, the `validate_policy` path) must resolve to `owner_account.bsc_address` when the context is `smart`.
 - Risk: many code paths branch on `account_type == 'business'` and treat everything else as personal. Each must be reviewed so that a `smart` context is neither treated as the personal wallet (wrong address for balances) nor allowed into flows the account does not support (P2P, payroll, presale, perps, ramps, Comprar). The default for an unreviewed flow is to refuse a `smart` context.
@@ -594,7 +597,7 @@ Mutations. Each validates the JWT context, refuses employees and business contex
 | `prepareSmartAccountPlanChange(plan)` | Owner | `changePlan` |
 | `prepareSmartAccountCancel` / `…UndoCancel` | Owner | `cancelSubscription`, `undoCancel` |
 | `prepareBeneficiaryDesignation(beneficiaryHandle, windowDays, disclosureAccepted)` | Owner | `setBeneficiary`. The beneficiary is named by Confío handle or contact; the server resolves the address. The client never sends an address |
-| `prepareBeneficiaryAcceptance(designationId)` / `declineBeneficiaryDesignation(designationId)` | Named beneficiary | `acceptBeneficiary`; declining is server-only and records `declined_at` |
+| `prepareBeneficiaryAcceptance(designationId)` / `declineBeneficiaryDesignation(designationId)` | Named beneficiary | `acceptBeneficiary`; declining is server-only and records `declined_at`; the owner is told, and the on-chain pending entry lapses by itself after 30 days |
 | `prepareBeneficiaryRemoval` | Owner | `removeBeneficiary` |
 | `prepareClaimCancel` | Owner | `cancelClaim` |
 | `prepareBeneficiaryClaim(designationId)` | Beneficiary | `initiateClaim` |
@@ -610,7 +613,7 @@ Today's flow (`cusd_plus/sponsor_7702.py`) builds one shape: a sponsor-signed tr
 | Shape | Sender | Target | Used for | Change |
 |---|---|---|---|---|
 | Owner-signed batch | Sponsor, executing the owner's signed intent | Owner EOA, inner calls to the account | Every owner and beneficiary function; deposits | New policy branch `_validate_smart_account_batch`: the inner `to` must equal the `contract_address` registered for the signer (or for a designation or inherited account the signer holds); selector allowlist per `kind`; for `trade`, decode the wrapped router call with the existing `_decode_stock_call` / `decode_crypto_call` and apply the same quote and slippage checks; for deposits, `transfer` recipient pinned to the signer's own account. New `kind` values (`smart_subscribe`, `smart_deposit`, `smart_withdraw`, `smart_trade`, `smart_rule`, `smart_cancel`, `smart_beneficiary`, `smart_claim`, `smart_inherited_withdraw`) added to `classify_calls_kind` and to the identity-restriction list in `send_sponsored_batch` as appropriate (withdrawals to the owner's own wallet are not outgoing transfers) |
-| Relayer call | Sponsor | The account directly | `collectFee`, `startPaymentNotice`, `forcedSale`, `executeRule` | New `send_relayer_call(account, calldata, kind, source_id)`: a plain type-2 transaction from the KMS sponsor signer. It must take the shared sponsor nonce lock (`acquire_sponsor_nonce_lock`), simulate under the real gas budget, apply the gas-price cap, and write a `SmartAccountRelayTx` row with the deterministic signed hash before broadcast, the same durability rule as `SponsoredBatch` |
+| Relayer call | Sponsor | The account directly | `collectFee`, `startPaymentNotice`, `forcedSale`, `executeRule`, `convertUsdt` | New `send_relayer_call(account, calldata, kind, source_id)`: a plain type-2 transaction from the KMS sponsor signer. It must take the shared sponsor nonce lock (`acquire_sponsor_nonce_lock`), simulate under the real gas budget, apply the gas-price cap, and write a `SmartAccountRelayTx` row with the deterministic signed hash before broadcast, the same durability rule as `SponsoredBatch` |
 | Keeper call | Sponsor (anyone could) | The account | `returnAsset` per token after expiry | Same function as the relayer call, `kind = smart_return` |
 
 While a claim is pending on the signer's account, `send_sponsored_batch` appends `account.cancelClaim()` to the calls the server prepares for that owner (6.4). It must be part of the prepared call list the user signs, not added after signing.
@@ -772,7 +775,7 @@ Carried from the decision session, verified on 2026-11-20:
 |---|---|---|
 | V1 | Deployed implementation bytecode matches the repository source, with immutables and metadata masked, for `ConfioStockRouter` (proxy `0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`), `CusdPlusVault` (proxy `0x3C29417eb4314155e63d4C7D4507852b87763Ed1`) and `CusdVault` (proxy `0x6101cC370635cF2c7f2725EaB010aC407A8d543F`) | Not re-run for this document |
 | V2 | `ConfioStockRouter.buyWithSavings` and `sellToSavings` treat `msg.sender` as the user and require only `VAULT.isSponsor(tx.origin)`. There is no EOA check, so a contract account can trade. `sellToUsdt` has no sponsor gate but needs an Ondo-signed quote, which today only Confío's backend obtains. Ondo's minimum order is about US$0.98 | `ConfioStockRouter.sol:241-244, 255-304, 316-350, 357-383`; re-read for this document |
-| V3 | `CusdPlusVault`: share transfers are blocked only for `frozen` addresses; `subscribeAndMint` requires `recipient == msg.sender \|\| isSponsor[msg.sender]` plus a sponsor; `redeemToUsdt` has no sponsor gate; `unwrapToCusd` requires a sponsor. `CusdVault.redeemWithFee` is permissionless | `CusdPlusVault.sol:494-527, 638-657, 685-707, 794-797, 837-839`; `CusdVault.sol:175-193`; re-read for this document |
+| V3 | `CusdPlusVault`: share transfers are blocked for `frozen` addresses and, corrected on re-reading, while the vault is paused (the decision session recorded "only for frozen"); `subscribeAndMint` requires `recipient == msg.sender \|\| isSponsor[msg.sender]` plus a sponsor; `redeemToUsdt` has no sponsor gate; `unwrapToCusd` requires a sponsor. `CusdVault.redeemWithFee` is permissionless | `CusdPlusVault.sol:494-527, 638-657, 685-707, 794-797, 837-839`; `CusdVault.sol:175-193`; re-read for this document |
 | V4 | Ondo GM stock tokens transferred freely to never-whitelisted addresses when measured on 2026-08-01; the whitelist gates primary mint and redeem only | Measurement of 2026-08-01, not repeated |
 | V5 | `ConfioPresaleVault`: allocations are ledger entries `purchased[address]` with no transfer function; `claim()` pays `msg.sender` only and only after `claimsUnlocked` | `ConfioPresaleVault.sol:121, 352-356`; re-read for this document |
 
@@ -784,7 +787,7 @@ Verified while writing this document, by reading the source in this checkout:
 | N2 | `ConfioSwapRouter` has no sponsor-less sell. Without Confío a holder sells on a DEX from their own wallet | `ConfioSwapRouter.sol:26-28, 173-181` |
 | N3 | The app's Emergency Exit already signs on the device and submits through bundled public RPCs, without the sponsor endpoint | `apps/src/services/emergencyExit/` (`bscRpcs.ts`, `gatedTx.ts`, `bscExit.ts`); comment at `cusd_plus/sponsor_7702.py:749-753` |
 | N4 | `CusdPlusVault.wrapCusd` and `unwrapToCusd` accept a contract caller with `recipient == msg.sender` when a sponsor is `tx.origin` | `CusdPlusVault.sol:553-572, 685-707` |
-| N5 | cUSD transfers revert while `CusdVault` is paused; cUSD+ transfers have no pause check, only the `frozen` check | `CusdVault.sol:452-455`; `CusdPlusVault.sol:794-797` |
+| N5 | Both dollars stop moving while their vault is paused or either address is frozen. With cUSD+ paused, the in-kind fee, `withdraw`, `returnAsset`, send rules and inherited withdrawals of cUSD+ all revert until unpause; other assets are unaffected | `CusdVault.sol:452-455`; `CusdPlusVault.sol:794-797` |
 | N6 | `ConfioStockRouter.buyWithSavings` sends redemption excess in USDT and GM's USDon refund to `msg.sender` | `ConfioStockRouter.sol:412-425, 460-466` |
 | N7 | `CusdVault.armReferral` requires the caller's code to be the 7702 designator of the configured delegate | `CusdVault.sol:282-284, 315-319` |
 | N8 | The relay policy refuses any call destination it does not list | `cusd_plus/sponsor_7702.py:616-800` (final `destination_not_allowed`) |
@@ -808,7 +811,7 @@ Not verified:
 
 ### 9.2 Conflicts found
 
-Each is a place where a decision and the code, or two decisions, did not fit as written. The founder answered the first draft on 2026-11-20; the table records the outcome. Three remain open.
+Each is a place where a decision and the code, or two decisions, did not fit as written. The founder answered the first draft on 2026-11-20; the table records the outcome of each.
 
 | # | Conflict | Location | Outcome |
 |---|---|---|---|
@@ -826,9 +829,9 @@ Closed by the founder on 2026-11-20:
 
 | # | Was | Answer | Recorded as |
 |---|---|---|---|
-| O1 | Does a user-owned contract with limited relayer sell authority satisfy Ondo's self-custody requirement, and is withdraw-only handling of an ineligible new owner enough | Yes to both | Decision 19 |
+| O1 | Self-custody of stock tokens in a user-owned contract; handling of an ineligible new owner | Closed | Decision 19 |
 | O2 | How waitlist members who answered at US$9.99 are told about US$14.99 | No separate notice | Decision 20 |
-| O3 | App Review exposure (Apple 3.1.1, Google Play billing) | Accepted. The beneficiary feature helps; IA+ is a minor benefit, not the product | Decision 21 |
+| O3 | Store positioning | Closed | Decision 21 |
 | O4 | Residual risk for a living owner who misses every notice | It goes on the screen | Section 8.3, item 7 |
 | O5 | Annual plan cancellation | No refund; runs to expiry | Decision 22 |
 | O7 | Scope of "works even if Confío disappears" in copy | No copy rule | Decision 28 |
@@ -836,7 +839,7 @@ Closed by the founder on 2026-11-20:
 | S3 | How a price change reaches subscribers | From the next renewal | Decision 24 |
 | S4, S5 | Rules, fee and forced sales while a claim is pending | All continue | Decision 25 |
 | S6 | Designation made directly on-chain | Not possible; sponsor gate | Decision 26 |
-| S7 | Succession-law review per country | Not commissioned | Decision 28 |
+| S7 | Per-country legal review | Not in v1 scope | Decision 28 |
 | S8 | Beneficiary acceptance | Required; designation and acceptance times recorded | Decision 26 |
 | — | Waitlist rows after the probe | Kept | Decision 27 |
 | C7 | What the contract binds for a bank payment | The signed rule only | Decision 29 |
@@ -850,6 +853,7 @@ Still open:
 | # | Open point | State | Who decides |
 |---|---|---|---|
 | C2 | Match the two feed addresses against Chainlink's published list; set tolerance and maximum feed age | Design resolved (9.2) | Engineering, in the contract audit |
+| C6 | A claim pending when a signed cancellation expires | Default kept: the return wins (9.2). Not answered by the founder | Founder, if he wants it otherwise |
 | P1 | Which rails are live for payment rules at launch. All three run on the same provider path, so the question is the provider's terms and limits (X9), not three separate integrations | Not started | Founder |
 
 Numbers (O6), all confirmed by the founder on 2026-11-20:
@@ -883,7 +887,7 @@ Numbers (O6), all confirmed by the founder on 2026-11-20:
 
 General availability of step 1 (beyond the canary list) is a founder call and does not depend on step 3.
 
-Before any push or deploy at any step: the Codex audit-and-fix loop until clean. Store review notes describe the account as a financial account service with a monthly account fee charged from the user's own balance.
+Before any push or deploy at any step: the Codex audit-and-fix loop until clean.
 
 ### 10.2 Contract tests
 
@@ -909,9 +913,12 @@ Lifecycle and billing:
 | **Death with only bitcoin**: an account holding only BTCB, owner never signs again. Each period: notice, wait, forced sale of one fee's worth, fee collected. The beneficiary initiates, fees and sales continue through the window without cancelling the claim, the beneficiary executes and withdraws the remaining BTCB. No asset reaches the old owner's wallet at any point | Decisions 6, 7, 8, 9; I-5, I-8 |
 | Account worth less than one fee stays paused; nothing is taken partially; nothing is returned | 5.2 |
 | Cancel: automation runs until `paidUntil`; `returnAsset` reverts before it and works after it, for any caller, to `owner` only | I-7 |
-| Return per asset: a token that reverts on transfer (paused cUSD, frozen address, a reverting mock) does not block the others | Decision 7 |
+| Return per asset: a token that reverts on transfer (paused cUSD, paused cUSD+, frozen address, a reverting mock) does not block the others | Decision 7 |
 | `returnAsset` without a signed cancellation reverts in every billing state | I-7 |
 | `undoCancel`; re-subscribe after `Expired` | 4.9 |
+| A payment notice started under one subscription does not survive cancel and re-subscribe: the next missed payment needs a new notice and the full notice period before any sale | I-5 |
+| A contract that is a sponsor (a router) calling a relayer function reverts; only a sponsor that is also `tx.origin` passes | 4.1 |
+| `forcedSale` sells and collects in one transaction; if the fee rose so that proceeds no longer cover it, the whole call reverts and can be retried | 5.3 |
 | No allowance remains after `trade`, `executeRule`, `forcedSale` | I-14 |
 | `relayerPaused` blocks only relayer functions | I-15 |
 | Referral: an account created by the factory can arm and the referrer is paid on a rule buy, a forced sale and a USDT conversion; an arbitrary contract still cannot arm; a relayer call without the optional referrer keeps the whole fee; `referrer == owner` reverts; existing EOA arming is unchanged | Decision 32 |
@@ -938,13 +945,16 @@ Inheritance:
 | `executeClaim` one second before the window ends reverts; at the window end succeeds | I-10 |
 | **Claim versus cancel ordering**: an owner transaction and `executeClaim` in the same block, in both orders. Owner first: the execution reverts. Execution first: the old owner's transaction reverts and changes nothing | I-9, I-13 |
 | Every owner function cancels a pending claim (one test per function), including `withdraw` of a zero-value token and `cancelClaim` appended to an unrelated batch | I-9 |
-| **Fee deduction does not cancel a claim**: `collectFee`, `startPaymentNotice`, `forcedSale`, `executeRule` and `returnAsset` each leave `claimStartedAt` unchanged | I-8 |
+| **Fee deduction does not cancel a claim**: `collectFee`, `startPaymentNotice`, `forcedSale`, `executeRule`, `convertUsdt` and `returnAsset` each leave `claimStartedAt` unchanged | I-8 |
 | Rules, fee collection and forced sales all succeed while a claim is pending | Decision 25 |
 | **Repeated claims**: claim, cancel, immediate re-claim reverts during the cooldown; after it succeeds; many cycles do not move any asset and do not shorten the window | I-11 |
 | `removeBeneficiary` during a pending claim; `setBeneficiary` replacing the beneficiary during a pending claim; the old beneficiary can no longer initiate or execute | 6.4 |
 | Execution resets every field listed in 6.5 and moves no token | I-12 |
 | After execution: relayer functions, `subscribe`, `setBeneficiary`, `acceptBeneficiary`, `createRule`, `trade` revert; the previous owner's calls revert | I-12, I-13 |
 | Inherited withdraw to the new owner's wallet; to the new owner's own account; to any other address reverts; to `accountOf` when the new owner has none reverts | I-1 |
+| Inherited withdraw to `accountOf(owner)` reverts when that account has itself been inherited by someone else | Decision 10 |
+| A pending designation lapses 30 days after naming; `acceptBeneficiary` then reverts | 4.4 |
+| The cooldown is clamped: a factory returning zero, a huge value or reverting neither removes the cooldown nor makes an owner call revert | I-9, I-20 |
 | A claim pending when a signed cancellation expires: the return works and the claim cannot execute | C6 |
 | The account has no upgrade or `delegatecall` path (bytecode check in the test suite) | Decision 23, I-20 |
 | The direct path: `initiateClaim`, `executeClaim` and inherited `withdraw` sent as plain self-paid transactions with no sponsor in the call chain | 6.7 |
@@ -985,7 +995,7 @@ Property tests (fuzzed sequences of calls by owner, beneficiary, relayer and str
 - Merchant subscriptions and debit control.
 - Refunds.
 - Upgradeable account instances.
-- A succession-law review per country.
+- A per-country legal review.
 - More than one beneficiary, percentage splits, contingent beneficiaries, beneficiaries who are not verified Confío users.
 - Locked presale CONFIO, presale purchases from the account, any change to `ConfioPresaleVault`.
 - Futures/perps inside the account.
