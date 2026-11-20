@@ -187,7 +187,7 @@ An account snapshots its challenge window at the owner-signed designation; a lat
 | `inherited` | `bool` | Set once by `executeClaim`. Terminal |
 | `plan` | `enum {None, Monthly, Annual}` | The plan of the current period. The period length is a constant of the plan (30 days, 365 days), not a separate stored value |
 | `nextPlan` | `enum {None, Monthly, Annual}` | Set only by owner-signed `changePlan`. Applied at the next renewal |
-| `feeUsd()` | view | Fee for the next charge: the factory's current price for `plan`, clamped to `MAX_MONTHLY_FEE_USD` / `MAX_ANNUAL_FEE_USD` (constants in the implementation), 18 decimals. Not stored |
+| `feeUsd()` | view | Fee for the next charge: the factory's current price for the renewal plan (`nextPlan` when set, otherwise `plan`), clamped to `MAX_MONTHLY_FEE_USD` / `MAX_ANNUAL_FEE_USD` (constants in the implementation), 18 decimals. Not stored. Every use of the fee (the coverage check in `collectFee`, `startPaymentNotice` and `forcedSale`, the shortfall and its cap, and the amount collected) reads this one view, so they can never disagree about which plan is being renewed |
 | `periodSeconds()` | view | 30 days for `Monthly`, 365 days for `Annual` |
 | `paidUntil` | `uint64` | End of the paid period |
 | `cancelRequested` | `bool` | Set by owner-signed `cancelSubscription` |
@@ -204,7 +204,7 @@ An account snapshots its challenge window at the owner-signed designation; a lat
 | `nextRuleId` | `uint256` | |
 | `confioSaleVenue`, `confioSalePriceRef` | `address` | Zero until latched from the factory, then fixed (section 5.5) |
 
-`Rule { kind (Send, Payout, Buy), tokenIn, tokenOut, payee, payoutRef, amount, frequency (Daily, Weekly, Biweekly, Monthly), nextRunAt, active }`. `payoutRef` is the hash of the saved bank destination a `Payout` rule pays; the bank details themselves are never on-chain. The contract enforces a minimum gap per frequency (1, 7, 14 and 28 days); the backend schedules on the calendar within that.
+`Rule { kind (Send, Payout, Buy), tokenIn, tokenOut, payee, payoutRef, amount, frequency (Daily, Weekly, Biweekly, Monthly), nextRunAt, active }`. `payoutRef` is the hash of the saved bank destination a `Payout` rule pays; the bank details themselves are never on-chain. `amount` is always in US dollars with 18 decimals, never in token units. When `tokenIn` is cUSD the token amount equals it. When `tokenIn` is cUSD+ the account converts at execution: shares = `ceil(amount * 1e18 / pPlus)` after `CUSD_PLUS.accrue()`, the same arithmetic as the fee (5.1), and that share count is the spending limit for the run. A rule therefore moves the same dollar value every time, whatever the share price. The contract enforces a minimum gap per frequency (1, 7, 14 and 28 days); the backend schedules on the calendar within that.
 
 ### 4.5 Derived states
 
@@ -256,7 +256,7 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 
 | Function | Preconditions | Effect |
 |---|---|---|
-| `acceptBeneficiary()` | `msg.sender == pendingBeneficiary`; `CUSD_PLUS.isSponsor(tx.origin)`; `Active`; not `inherited` | Requires `block.timestamp < pendingBeneficiaryExpiresAt`. Moves `pendingBeneficiary` to `beneficiary` and `pendingChallengeWindow` to `challengeWindow`; clears `claimCooldownUntil` and any claim pending for the replaced beneficiary; emits `BeneficiaryAccepted` |
+| `acceptBeneficiary()` | `msg.sender == pendingBeneficiary`; `CUSD_PLUS.isSponsor(tx.origin)`; `Active`; not `inherited` | Requires `block.timestamp < pendingBeneficiaryExpiresAt`. Moves `pendingBeneficiary` to `beneficiary` and `pendingChallengeWindow` to `challengeWindow`; if the accepted address changes, clears `claimCooldownUntil` and any claim pending for the replaced beneficiary; if the owner re-named the same person (to change the window), the cooldown is kept, so re-designation can never shorten it; emits `BeneficiaryAccepted` |
 | `initiateClaim()` | `msg.sender == beneficiary`; `Active` (including `CancelPending` and any billing state); `NoClaim`; `block.timestamp >= claimCooldownUntil`. No sponsor gate (decision 9) | Sets `claimStartedAt`; emits `ClaimInitiated` with the earliest execution time |
 | `executeClaim()` | `msg.sender == beneficiary`; `Executable`; lifecycle not `Expired`. No sponsor gate | Section 6.5 |
 
@@ -282,9 +282,9 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 
 | Kind | What the relayer may do | Enforced on-chain |
 |---|---|---|
-| `Send` | Transfer `amount` of `tokenIn` (cUSD or cUSD+) to `payee` | `payee`, `tokenIn`, `amount` and `frequency` come from the stored rule; the relayer supplies nothing (decision 16) |
-| `Payout` | Exit up to `amount` of `tokenIn` to USDT (`CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee`, both sponsor-less, both paying the normal 0.9% exit fee) with the USDT sent to the address the relayer names for this run; the bridge and the provider then pay the bank destination behind `payoutRef` (CLABE, Pix, Bre-B) | `tokenIn`, `amount`, `frequency` and `payoutRef` come from the stored rule; `tokenIn` falls by at most `amount`; at most one run per minimum gap; the event carries `payoutRef` and the destination. The destination address itself is **not** bound: it is a bridge deposit address created per transfer (section 9.2, C7). There is no allowlist |
-| `Buy` | Spend up to `amount` of `tokenIn` on `tokenOut`: a stock through `STOCK_ROUTER.buyWithSavings`, which takes cUSD+ only, or bitcoin or gold (the tokens with a feed constant, nothing else) through `SWAP_ROUTER.buy`, which takes cUSD+ or cUSD | Venue and selector fixed; `tokenIn` falls by at most `amount`; `tokenOut` rises by at least the relayer-supplied `minOut` and by more than zero; no other token balance passed in the check list falls. Worst case per run is the rule's `amount` |
+| `Send` | Transfer `amount` dollars' worth of `tokenIn` (cUSD or cUSD+) to `payee` | `payee`, `tokenIn`, `amount` and `frequency` come from the stored rule; the relayer supplies nothing (decision 16) |
+| `Payout` | Exit up to `amount` dollars' worth of `tokenIn` to USDT (`CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee`, both sponsor-less, both paying the normal 0.9% exit fee) with the USDT sent to the address the relayer names for this run; the bridge and the provider then pay the bank destination behind `payoutRef` (CLABE, Pix, Bre-B) | `tokenIn`, `amount`, `frequency` and `payoutRef` come from the stored rule; `tokenIn` falls by at most the token equivalent of `amount`; at most one run per minimum gap; the event carries `payoutRef` and the destination. The destination address itself is **not** bound: it is a bridge deposit address created per transfer (section 9.2, C7). There is no allowlist |
+| `Buy` | Spend up to `amount` dollars' worth of `tokenIn` on `tokenOut`: a stock through `STOCK_ROUTER.buyWithSavings`, which takes cUSD+ only, or bitcoin or gold (the tokens with a feed constant, nothing else) through `SWAP_ROUTER.buy`, which takes cUSD+ or cUSD | Venue and selector fixed; `tokenIn` falls by at most the token equivalent of `amount`; `tokenOut` rises by at least the relayer-supplied `minOut` and by more than zero; no other token balance passed in the check list falls. Worst case per run is the rule's `amount` |
 
 There is no saving rule and no conversion function (decision 17).
 
@@ -369,7 +369,7 @@ Each is a testable statement. Section 10.2 maps them to tests.
 16. The Safe has no function that moves an account's assets, changes its `owner` or changes its `beneficiary`. The one indirect power is `confioSale`: until an account has latched it (5.5) the Safe decides which venue and price reference that account will use for CONFIO forced sales; after the latch it cannot.
 17. `factory.accountOf[owner]` is written once per owner and never overwritten.
 18. `setBeneficiary` and `acceptBeneficiary` revert unless `tx.origin` is a sponsor. A self-sent transaction from the owner or from the named address cannot create or accept a designation. (Contract-level statement only; that the relay itself originates no designation it did not check is a backend test, 10.3.)
-19. `initiateClaim` and `executeClaim` revert for `pendingBeneficiary`. Only an accepted beneficiary can claim.
+19. `initiateClaim` and `executeClaim` succeed only for the accepted `beneficiary`. A `pendingBeneficiary` who is not also the current accepted beneficiary cannot claim. When the owner re-names the current beneficiary, that person keeps their standing and their cooldown; only the window changes, on acceptance.
 20. The implementation has no function that changes code and contains no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT`; each account's runtime code is exactly the EIP-1167 pattern pointing at that implementation (the clone's one fixed `DELEGATECALL`). The account has and no dependency on the factory for moving assets to `owner`: `withdraw`, `withdrawAll`, `returnAsset` and the claim functions succeed even if every factory call reverts (factory reads used by them are wrapped and fall back to the hard-coded limits).
 
 What the invariants do not cover: the Safe can upgrade `ConfioStockRouter`, `ConfioSwapRouter`, `CusdVault` and `CusdPlusVault`, can pause them and can freeze addresses. Those powers predate this feature. The limits above bound the relayer key, not the Safe.
@@ -927,7 +927,7 @@ Lifecycle and billing:
 | Return per asset: a token that reverts on transfer (paused cUSD, paused cUSD+, frozen address, a reverting mock) does not block the others | Decision 7 |
 | `returnAsset` without a signed cancellation reverts in every billing state | I-7 |
 | `undoCancel`; re-subscribe after `Expired` | 4.9 |
-| `changePlan` in both directions: the current period is untouched; the next renewal charges the new plan's price for the new plan's length; the relayer cannot set or alter `nextPlan` | I-3, I-4 |
+| `changePlan` in both directions, with a dollar balance between the two prices: annual to monthly renews without a notice or sale when the balance covers US$14.99; monthly to annual starts a notice when it does not cover US$149.99; the current period is untouched; the next renewal charges the new plan's price for the new plan's length; the relayer cannot set or alter `nextPlan` | I-3, I-4 |
 | `cancelSubscription` while payment is due makes the account `Expired` at once; `returnAsset` works immediately; no forced sale can follow | 4.9 |
 | A payment notice started under one subscription does not survive cancel and re-subscribe: the next missed payment needs a new notice and the full notice period before any sale | I-5 |
 | A contract that is a sponsor (a router) calling a relayer function reverts; only a sponsor that is also `tx.origin` passes | 4.1 |
@@ -944,6 +944,7 @@ Rules:
 | A send rule pays only its stored payee, amount and token, at most once per minimum gap of its frequency; the relayer cannot alter any of them | I-1, I-4, decision 16 |
 | A payment rule exits at most its amount, at most once per minimum gap, and emits its `payoutRef` and destination; works from cUSD and from cUSD+; an account with no payment rule has no path by which the relayer can send dollars to an arbitrary address | I-1, C7 |
 | Each frequency (daily, weekly, biweekly, monthly) enforces its minimum gap | Decision 18 |
+| Rule amounts are dollars: with cUSD+ as `tokenIn`, runs before and after a rise in `pPlus` move the same dollar value and a different share count; the share limit is computed in the call, not supplied by the relayer | 4.4 |
 | A buy rule spends at most its amount; delivers the asset to the account; reverts if another balance falls | 4.7 |
 | Missed runs are not caught up | 4.6 |
 
@@ -953,6 +954,7 @@ Inheritance:
 |---|---|
 | `setBeneficiary` reverts while `inheritanceEnabled` is false; reverts for self, zero, a disallowed window | 4.6 |
 | `setBeneficiary` and `acceptBeneficiary` sent directly (no sponsor as `tx.origin`) revert, from the owner and from the named address | Decision 26, I-18 |
+| Re-naming the current beneficiary while their claim is pending cancels the claim and starts the cooldown, and accepting the re-designation does not clear it | 6.4, I-11 |
 | A named but not yet accepted beneficiary cannot initiate or execute; after acceptance they can; the previous accepted beneficiary keeps their standing until the new one accepts and loses it at that moment | I-19 |
 | Only the beneficiary can initiate and execute; everyone else reverts, including the relayer and the Safe | I-8, I-10, I-16 |
 | `executeClaim` one second before the window ends reverts; at the window end succeeds | I-10 |
