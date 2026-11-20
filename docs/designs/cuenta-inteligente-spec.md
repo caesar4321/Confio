@@ -192,7 +192,7 @@ An account snapshots its challenge window at the owner-signed designation; a lat
 | `paidUntil` | `uint64` | End of the paid period |
 | `cancelRequested` | `bool` | Set by owner-signed `cancelSubscription` |
 | `noticeStartedAt` | `uint64` | Non-zero while a payment notice runs for the current unpaid period |
-| `forcedSaleForPeriod` | `uint64` | The `paidUntil` value for which a forced sale already succeeded |
+| `forcedSaleForPeriod` | `uint64` | The old `paidUntil` of the unpaid period for which a forced sale succeeded. Because a successful sale also collects the fee and moves `paidUntil` on, this is a record and a second guard, not the only one |
 | `pendingBeneficiary` | `address` | Named by the owner, not yet accepted. Cannot claim. Lapses 30 days after naming (`pendingBeneficiaryExpiresAt`): `acceptBeneficiary` reverts after that and the owner names again |
 | `beneficiary` | `address` | Accepted beneficiary. Zero when none |
 | `challengeWindow` | `uint64` | The accepted beneficiary's window |
@@ -244,6 +244,7 @@ The account has three independent dimensions. The functions check them with inte
 | `createRule(rule)`, `updateRule(id, rule)`, `cancelRule(id)` | `Active`; not `inherited` | Stores the rule |
 | `setBeneficiary(addr, window)` | `Active`; `factory.inheritanceEnabled`; **`CUSD_PLUS.isSponsor(tx.origin)`** (decision 26: only a transaction Confío's relay originated can designate, so a self-sent transaction cannot. As the vault's own audit note says of the same pattern, `tx.origin` proves a sponsor started the transaction, not that it approved this call; the guarantee therefore also rests on the relay policy never executing a call to an account that it did not prepare, which 7.4 requires); `addr` not zero, not `owner`, not `address(this)`; `factory.allowedChallengeWindows[window]` | Sets `pendingBeneficiary`, `pendingChallengeWindow`, `pendingBeneficiaryExpiresAt`. `window` must also be at least the account's hard-coded minimum (90 days), whatever the factory allows. The current accepted beneficiary, if any, stays until the new one accepts |
 | `removeBeneficiary()` | Not `inherited`. No sponsor gate: the owner can always remove | Clears `pendingBeneficiary`, `pendingChallengeWindow`, `pendingBeneficiaryExpiresAt`, `beneficiary`, `challengeWindow`, `claimCooldownUntil` |
+| `withdrawDesignation()` | Not `inherited`; `pendingBeneficiary` set | Clears only `pendingBeneficiary`, `pendingChallengeWindow` and `pendingBeneficiaryExpiresAt`. The accepted beneficiary, their window and their cooldown are untouched. (Like every owner function it cancels a pending claim with cooldown.) |
 | `cancelClaim()` | Not `inherited` | Explicit touch. Succeeds (no-op) when no claim is pending so that it can be appended to any batch |
 
 After `executeClaim`, the owner functions that remain are the inherited forms only:
@@ -267,7 +268,7 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 |---|---|---|
 | `collectFee()` | `PaymentDue` (so `block.timestamp >= paidUntil`); cUSD plus cUSD+ cover `feeUsd()` | Section 5.1. If `nextPlan` is set, charges and renews on that plan and makes it the current one (this is the owner's signed instruction taking effect, not a relayer choice). Sets `paidUntil = block.timestamp + periodSeconds()` of the plan charged; clears `noticeStartedAt` |
 | `startPaymentNotice()` | `PaymentDue`; dollars do not cover `feeUsd`; `noticeStartedAt == 0` | Sets `noticeStartedAt`; emits `PaymentNoticeStarted` |
-| `forcedSale(legs[], minDollarsOut, referrer, shareBps)` where each leg is `(venue, data, tokenIn, maxIn)` | `SaleAllowed`; `forcedSaleForPeriod != paidUntil`; every leg's `tokenIn` is not cUSD or cUSD+ and has a price reference (a listed stock via its Ondo quote, BTCB, XAUt, or CONFIO once switched on); dollars do not cover `feeUsd()` | Section 5.3. One atomic operation: runs the legs in order (several are needed when no single holding covers the fee, for example two positions each smaller than an annual fee), then collects the fee in the same transaction. The notice, the proceeds cap and the one-per-period rule apply once to the whole operation, and the price check applies to each leg. If the dollars still do not cover the fee the whole call reverts, so nothing is sold without the fee being paid by it. Sets `forcedSaleForPeriod` on success |
+| `forcedSale(legs[], minDollarsOut, referrer, shareBps)` where each leg is `(venue, data, tokenIn, maxIn)` | `SaleAllowed`; `forcedSaleForPeriod != paidUntil`; every leg's `tokenIn` is not cUSD or cUSD+ and has a price reference (a listed stock via its Ondo quote, BTCB, XAUt, or CONFIO once switched on); dollars do not cover `feeUsd()` | Section 5.3. One atomic operation: runs the legs in order (several are needed when no single holding covers the fee, for example two positions each smaller than an annual fee), then collects the fee in the same transaction. The notice, the proceeds cap and the one-per-period rule apply once to the whole operation, and the price check applies to each leg. If the dollars still do not cover the fee the whole call reverts, so nothing is sold without the fee being paid by it. On success sets `forcedSaleForPeriod` to the `paidUntil` value read at the start of the call (the period that was unpaid, not the new one), advances `paidUntil` and clears `noticeStartedAt` exactly as `collectFee` does, so the next missed payment needs a fresh notice |
 | `executeRule(id, data, minOut, referrer, shareBps)` | `Active` (including `CancelPending`), `Current`; rule active; `block.timestamp >= rule.nextRunAt` | Runs the rule (4.7); sets `nextRunAt = block.timestamp + minimum gap of the rule's frequency` (missed runs are not caught up). Runs whether or not a claim is pending (decision 25) |
 | `convertUsdt(dest, minDollarsOut, referrer, shareBps)` | Not `inherited`; lifecycle `Active` (any billing state, so a deposit of USDT can cure a missed payment); USDT balance above zero; `dest` is cUSD+ or cUSD | Converts the whole USDT balance through the normal entry, paying the 0.9% entry fee as any deposit does: `CUSD.mintWithFee(usdt, minDollarsOut, address(this))`, or `CUSD_PLUS.subscribeAndMint(usdt, 0, address(this))`. The vault's own floor argument is in USDY units, so it is passed as zero (as both routers do) and the account enforces the floor itself: the dollar value received (cUSD at par; cUSD+ shares gained times `pPlus`) must be at least `minDollarsOut`, and `minDollarsOut` must be no lower than the USDT amount less the live fee and a small tolerance. Recipient is fixed to the account. The relayer picks `dest` from the owner's eligibility, as the server does for the personal wallet. Emits `UsdtConverted` |
 
@@ -323,7 +324,8 @@ no beneficiary --setBeneficiary (U, relay-originated only)--> pending acceptance
 pending acceptance --acceptBeneficiary (B, relay-originated only)--> beneficiary set (NoClaim)
 ClaimPending by the old beneficiary --a different named person accepts (B, relay-originated only)--> NoClaim for the new beneficiary; ClaimCancelled emitted for the old one
 ClaimPending --the same person accepts a re-designation--> ClaimPending, execution time unchanged
-pending acceptance --removeBeneficiary (U)--> no beneficiary
+pending acceptance --withdrawDesignation (U)--> as before the naming (the accepted beneficiary, if any, stays)
+pending acceptance --removeBeneficiary (U)--> no beneficiary at all, accepted one included
 NoClaim --initiateClaim (B)--> ClaimPending
 ClaimPending --any owner function, or cancelClaim (U)--> NoClaim + cooldown   ("Cancelled")
 ClaimPending --removeBeneficiary (U)--> NoClaim, no beneficiary
@@ -466,7 +468,7 @@ Step 1, owner-signed `setBeneficiary(addr, window)`. The backend prepares and re
 
 The server records `designated_at`. The named person is notified (push and in-app) that they were named, by whom, and the challenge window, and is asked to accept.
 
-Step 2, beneficiary-signed `acceptBeneficiary()`. The backend re-runs the identity and residence checks at acceptance, relays the call, and records `accepted_at` (the block time of `BeneficiaryAccepted`) next to `designated_at`. Only after acceptance can the beneficiary claim. The acceptance screen shows the account address and chain; that is the beneficiary's record for the direct path (6.7). A designation that is not accepted has no effect and the owner sees it as pending; the owner can withdraw it with `removeBeneficiary`. The previous accepted beneficiary, if there was one, stays in place until the new one accepts.
+Step 2, beneficiary-signed `acceptBeneficiary()`. The backend re-runs the identity and residence checks at acceptance, relays the call, and records `accepted_at` (the block time of `BeneficiaryAccepted`) next to `designated_at`. Only after acceptance can the beneficiary claim. The acceptance screen shows the account address and chain; that is the beneficiary's record for the direct path (6.7). A designation that is not accepted has no effect and the owner sees it as pending; the owner can withdraw it with `withdrawDesignation`, which leaves the current accepted beneficiary in place; `removeBeneficiary` is different and removes the accepted beneficiary as well. The previous accepted beneficiary, if there was one, stays in place until the new one accepts.
 
 The contract cannot verify KYC or residence. It does not need to: it refuses any designation or acceptance that Confío's relay did not originate, and the relay originates one only after the checks above. `removeBeneficiary`, `cancelClaim`, `initiateClaim` and `executeClaim` carry no such gate.
 
@@ -701,7 +703,7 @@ Every task that sends a transaction is idempotent on (`account`, `kind`, period 
 | `users/paid_offers.py` | Probe rules: flags, `price()`, `available()`, `billeteras_row_visible()`; docstring says nothing is sold | Keep as the rule module for who sees the door. `price()` gains a plan argument. Add `can_subscribe()` (flag, canary list, build floor, personal non-employee, identity rules). The docstring's "nothing is sold, charged or unlocked" is no longer true once the flag is on and must be rewritten |
 | `users/models_product_waitlist.py` | `ProductWaitlistEntry` with `would_pay`, `volume_range`, `notified_at` | No new waitlist joins after launch for users who can subscribe. `notified_at` records the launch message. Rows and answers are kept as funnel data (decision 27); the fake-door plan's "deleted 90 days after the decision" line is withdrawn and no deletion job is built |
 | `scripts/ops/paid_offer_funnel.py` | Counts probe stages and waitlist answers | Add the paid funnel: `subscribe_opened`, `subscribe_signed`, `subscribed`, `first_deposit`, `rule_created`, `beneficiary_set`, `cancelled`, by plan. Aggregate counts only, as today |
-| `users/funnel_schema.py`, `ClientFunnelEvent` | `paid_offer_interest` stages | Add the stages above as a new event name; keep `paid_offer_interest` for history |
+| `users/funnel_schema.py`, `TrackFunnelEvent` / `CLIENT_EMITTABLE_EVENTS` | `paid_offer_interest` stages | Add the stages above as a new event name; keep `paid_offer_interest` for history |
 | `assistant/prompts.py:146-172` | `PAID_OFFER_SECTIONS['cuenta_inteligente']` lists Pix/Bre-B/CLABE/Alias payments, merchant subscriptions, debit control, "todavía no está disponible", "nunca digas que se puede pagar" | Keep automatic payments to CLABE, Pix and Bre-B and scheduled transfers; remove merchant subscriptions and debit control; add automatic investing and the beneficiary; both prices from the server; say it can be opened now. Only rails confirmed for unattended payouts are named. `IA_PLUS_IN_SMART_ACCOUNT` already frames IA+ as account service and stays |
 | `assistant/destinations.py`, `assistant/paid_chips.py` | `cuenta_inteligente` destination opens the pitch | Opens the subscribe screen for those who can subscribe; the existing chip caps stay |
 | `apps/src/screens/PaidOfferScreen.tsx`, `apps/src/services/paidOffers.ts` | Pitch with "Sí, avísame" / "Solo miraba" and the would-pay question | Becomes the entry to the subscribe flow (8.1). The would-pay and volume questions are removed |
@@ -864,7 +866,7 @@ Still open:
 
 | # | Open point | State | Who decides |
 |---|---|---|---|
-| C2 | Match the two feed addresses against Chainlink's published list; set tolerance and maximum feed age | Design resolved (9.2) | Engineering, in the contract audit |
+| C2 | Match the two feed addresses against Chainlink's published list before they are hard-coded | Design resolved (9.2); tolerance and feed age are in the numbers table | Engineering, in the contract audit |
 | C6 | A claim pending when a signed cancellation expires | Default kept: the return wins (9.2). Not answered by the founder | Founder, if he wants it otherwise |
 | P1 | Which rails are live for payment rules at launch. All three run on the same provider path, so the question is the provider's terms and limits (X9), not three separate integrations | Not started | Founder |
 
@@ -975,6 +977,8 @@ Inheritance:
 | Inherited withdraw to the new owner's wallet; to the new owner's own account; to any other address reverts; to `accountOf` when the new owner has none reverts | I-1 |
 | Inherited withdraw to `accountOf(owner)` reverts when that account has itself been inherited by someone else | Decision 10 |
 | A pending designation lapses 30 days after naming; `acceptBeneficiary` then reverts | 4.4 |
+| `withdrawDesignation` clears only the pending entry and leaves the accepted beneficiary able to claim; `removeBeneficiary` clears both | 4.6 |
+| After a successful forced sale `noticeStartedAt` is zero; the next unpaid period needs a new `startPaymentNotice` and the full notice before any sale | I-5 |
 | The cooldown is clamped: a factory returning zero, a huge value or reverting neither removes the cooldown nor makes an owner call revert | I-9, I-20 |
 | A claim pending when a signed cancellation expires: the return works and the claim cannot execute | C6 |
 | Bytecode checks: the implementation contains no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT`; a deployed account's runtime code equals the EIP-1167 pattern with the expected implementation address | Decision 23, I-20 |
