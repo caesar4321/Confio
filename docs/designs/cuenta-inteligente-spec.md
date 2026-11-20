@@ -201,6 +201,7 @@ An account snapshots its challenge window at the owner-signed designation; a lat
 | `claimCooldownUntil` | `uint64` | Earliest time the current beneficiary may claim again |
 | `rules` | `mapping(uint256 => Rule)` | Automation rules |
 | `nextRuleId` | `uint256` | |
+| `confioSaleVenue`, `confioSalePriceRef` | `address` | Zero until latched from the factory, then fixed (section 5.5) |
 
 `Rule { kind (Send, Payout, Buy), tokenIn, tokenOut, payee, payoutRef, amount, frequency (Daily, Weekly, Biweekly, Monthly), nextRunAt, active }`. `payoutRef` is the hash of the saved bank destination a `Payout` rule pays; the bank details themselves are never on-chain. The contract enforces a minimum gap per frequency (1, 7, 14 and 28 days); the backend schedules on the calendar within that.
 
@@ -233,7 +234,7 @@ The account has three independent dimensions. The functions check them with inte
 |---|---|---|
 | `subscribe(plan, maxFeeUsd)` | `Unsubscribed` or `Expired`; not `inherited`; `feeUsd()` for `plan` `<= maxFeeUsd` | Sets `plan`, `periodSeconds`; clears `cancelRequested`, `noticeStartedAt` and `forcedSaleForPeriod` (a notice from an earlier subscription must never count for a later one); takes the first fee (section 5.1) in the same call, reverting if dollars are short; sets `paidUntil` |
 | `changePlan(plan)` | `Active`, `Current` | Records the new plan; it applies from the next renewal |
-| `cancelSubscription()` | `Active` | Sets `cancelRequested`. Automation keeps running until `paidUntil` |
+| `cancelSubscription()` | `Active` | Sets `cancelRequested`. Automation keeps running until `paidUntil`. If the period has already ended unpaid (`PaymentDue`, `Notice`, `SaleAllowed`) the account is `Expired` at once: the return opens immediately and the lapsed period is not charged |
 | `undoCancel()` | `CancelPending` | Clears `cancelRequested` |
 | `withdraw(token, amount)` | Not `inherited` | Transfers to `owner` |
 | `withdrawAll(tokens[])` | Not `inherited` | Transfers each full balance to `owner` |
@@ -273,6 +274,7 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 | Function | Preconditions | Effect |
 |---|---|---|
 | `returnAsset(token)` | `Expired`; not `inherited` | Transfers the full balance of `token` to `owner`. A failing token reverts only its own call |
+| `latchConfioSale()` | Not `inherited`; `factory.confioSale` non-empty; not yet latched | Copies the venue and price reference into the account's own storage (`confioSaleVenue`, `confioSalePriceRef`); emits `ConfioSaleLatched`. Moves nothing. Reverts on an inherited account, which never sells |
 | Views | — | `status()`, `billingStatus()`, `claimStatus()`, `claimExecutableAt()`, `feeDue()`, `rule(id)` |
 
 ### 4.7 Rule execution
@@ -289,7 +291,7 @@ There is no saving rule and no conversion function (decision 17).
 
 ### 4.8 Events
 
-`Subscribed(plan, feeUsd, paidUntil)`, `PlanChanged`, `SubscriptionCancelled(paidUntil)`, `CancelUndone`, `FeeCollected(cusdAmount, cusdPlusShares, pPlus, paidUntil)`, `PaymentNoticeStarted(saleAllowedAt)`, `ForcedSale(tokenIn, amountIn, dollarsOut, forPeriod)`, `Withdrawn(token, to, amount)`, `AssetReturned(token, amount)`, `Traded(venue, tokenIn, tokenOut, amountIn, amountOut)`, `RuleCreated`, `RuleUpdated`, `RuleCancelled`, `RuleExecuted(id, tokenIn, tokenOut, amountIn, amountOut)`, `UsdtConverted(dest, usdtIn, dollarsOut)`, `PayoutSent(id, payoutRef, destination, tokenIn, amountIn, usdtOut)`, `BeneficiaryNamed(pendingBeneficiary, challengeWindow)`, `BeneficiaryAccepted(beneficiary)`, `BeneficiaryRemoved`, `ClaimInitiated(beneficiary, executableAt)`, `ClaimCancelled(beneficiary, cooldownUntil)`, `ClaimExecuted(previousOwner, newOwner)`.
+`Subscribed(plan, feeUsd, paidUntil)`, `PlanChanged`, `SubscriptionCancelled(paidUntil)`, `CancelUndone`, `FeeCollected(cusdAmount, cusdPlusShares, pPlus, paidUntil)`, `PaymentNoticeStarted(saleAllowedAt)`, `ForcedSale(tokenIn, amountIn, dollarsOut, forPeriod)`, `Withdrawn(token, to, amount)`, `AssetReturned(token, amount)`, `Traded(venue, tokenIn, tokenOut, amountIn, amountOut)`, `RuleCreated`, `RuleUpdated`, `RuleCancelled`, `RuleExecuted(id, tokenIn, tokenOut, amountIn, amountOut)`, `UsdtConverted(dest, usdtIn, dollarsOut)`, `PayoutSent(id, payoutRef, destination, tokenIn, amountIn, usdtOut)`, `BeneficiaryNamed(pendingBeneficiary, challengeWindow)`, `BeneficiaryAccepted(beneficiary)`, `BeneficiaryRemoved`, `ConfioSaleLatched(venue, priceRef)`, `ClaimInitiated(beneficiary, executableAt)`, `ClaimCancelled(beneficiary, cooldownUntil)`, `ClaimExecuted(previousOwner, newOwner)`.
 
 Factory: `AccountCreated(owner, account)`, and one event per setter.
 
@@ -304,6 +306,7 @@ Lifecycle:
 ```
 Unsubscribed --subscribe (U)--> Active
 Active --cancelSubscription (U)--> CancelPending
+Active with payment due (PaymentDue, Notice, SaleAllowed) --cancelSubscription (U)--> Expired, immediately
 CancelPending --undoCancel (U)--> Active
 CancelPending --paidUntil reached (T)--> Expired
 Expired --returnAsset per token (P)--> Expired (emptied = "Returned")
@@ -350,15 +353,15 @@ Each is a testable statement. Section 10.2 maps them to tests.
 1. A token balance of the account decreases only through: a transfer to `owner`; a transfer to `FEE_COLLECTOR` inside `collectFee` or `subscribe`; a transfer to a `Send` rule's stored `payee` inside `executeRule`; a burn by `CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee` inside a `Payout` rule, limited to the rule's stored amount and frequency, whose USDT goes to the address the relayer names for that run (the one exit whose destination the contract does not fix; C7); a pull by `STOCK_ROUTER` or `SWAP_ROUTER` inside `trade`, `executeRule` or `forcedSale`; a pull of CONFIO by the `confioSale` venue inside `forcedSale`, once that venue is set; a pull of USDT by `CUSD_PLUS` or `CUSD` inside `convertUsdt`, which mints the owner's dollar back to the account. In `Inherited` state only: a transfer to `owner` or `FACTORY.accountOf(owner)`.
 2. `owner` changes only in `executeClaim`, and only to the `beneficiary` stored at that moment.
 3. `collectFee` succeeds at most once for any value of `paidUntil`, and each success moves `paidUntil` forward by exactly `periodSeconds` from the block time. The total collected by one success never exceeds `feeUsd()` in value (cUSD at par, cUSD+ at `pPlus`, rounding up by at most one share unit), and `feeUsd()` never exceeds the implementation's hard-coded maximum for the plan whatever the factory returns.
-4. The relayer cannot change the fee, `plan`, `periodSeconds`, `owner`, `pendingBeneficiary`, `beneficiary`, `challengeWindow` or any rule. The price changes only through the factory's delayed `scheduleFee`, which is Safe-only.
+4. The relayer cannot change the fee, `plan`, `periodSeconds`, `owner`, `pendingBeneficiary`, `beneficiary`, `challengeWindow` or any rule field other than `nextRunAt`, which `executeRule` advances. The price changes only through the factory's delayed `scheduleFee`, which is Safe-only.
 5. `forcedSale` succeeds at most once per unpaid period, only after `forcedSaleNotice` has elapsed since an on-chain `startPaymentNotice` for that period, and only while cUSD plus cUSD+ do not cover `feeUsd`.
-6. After `forcedSale`, the gross proceeds (the rise in the account's cUSD plus cUSD+ value measured before the fee is taken in the same call) are at least the shortfall and no more than the cap in section 5.3; the fee is collected in that call; the sold token's balance fell by at most `maxIn`; no other checked balance fell; no token left to any address other than the venue.
+6. After `forcedSale`, the gross proceeds (the rise in the account's cUSD plus cUSD+ value measured before the fee is taken in the same call) are at least the shortfall and no more than the cap in section 5.3; the fee is collected in that call; the sold token's balance fell by at most `maxIn`; no other checked balance fell; no token left to any address other than the venue and, for the fee, `FEE_COLLECTOR`.
 7. `returnAsset` reverts unless `cancelRequested` is true and `block.timestamp >= paidUntil`. Its only destination is `owner`.
 8. No relayer function and no permissionless function changes `claimStartedAt`, `claimCooldownUntil` or `beneficiary`.
 9. Every owner function sets `claimStartedAt` to zero. If a claim was pending, it also sets `claimCooldownUntil = block.timestamp + claimCooldown`, except `removeBeneficiary`, which ends the designation and clears the cooldown with it. `claimCooldown` is read from the factory and clamped to hard-coded bounds in the account (1 to 90 days), and a failing factory read falls back to 30 days, so no factory value can remove the cooldown or make an owner call revert.
 10. `executeClaim` reverts before `claimStartedAt + challengeWindow`, reverts for any caller other than `beneficiary`, and reverts if `claimStartedAt == 0`.
 11. `initiateClaim` reverts while `block.timestamp < claimCooldownUntil`.
-12. After `executeClaim`: `plan == None`, `beneficiary == 0`, `pendingBeneficiary == 0`, `claimStartedAt == 0`, every rule inactive, and every relayer function, `subscribe`, `setBeneficiary`, `acceptBeneficiary`, `createRule` and `trade` revert forever.
+12. After `executeClaim`: `plan == None`, `beneficiary == 0`, `pendingBeneficiary == 0`, `claimStartedAt == 0`, no rule executable, and every relayer function, `subscribe`, `setBeneficiary`, `acceptBeneficiary`, `createRule` and `trade` revert forever.
 13. After `executeClaim` the previous owner address has no function it can call successfully other than views.
 14. The account never holds a non-zero allowance to any address at the end of a transaction.
 15. `factory.relayerPaused` blocks only relayer functions. `withdraw`, `withdrawAll`, `cancelSubscription`, `returnAsset`, `cancelClaim`, `removeBeneficiary`, `initiateClaim` and `executeClaim` work while it is set.
@@ -366,7 +369,7 @@ Each is a testable statement. Section 10.2 maps them to tests.
 17. `factory.accountOf[owner]` is written once per owner and never overwritten.
 18. `setBeneficiary` and `acceptBeneficiary` revert unless `tx.origin` is a sponsor. A self-sent transaction from the owner or from the named address cannot create or accept a designation. (Contract-level statement only; that the relay itself originates no designation it did not check is a backend test, 10.3.)
 19. `initiateClaim` and `executeClaim` revert for `pendingBeneficiary`. Only an accepted beneficiary can claim.
-20. The account has no function that changes its own code, no `delegatecall`, and no dependency on the factory for moving assets to `owner`: `withdraw`, `withdrawAll`, `returnAsset` and the claim functions succeed even if every factory call reverts (factory reads used by them are wrapped and fall back to the hard-coded limits).
+20. The implementation has no function that changes code and contains no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT`; each account's runtime code is exactly the EIP-1167 pattern pointing at that implementation (the clone's one fixed `DELEGATECALL`). The account has and no dependency on the factory for moving assets to `owner`: `withdraw`, `withdrawAll`, `returnAsset` and the claim functions succeed even if every factory call reverts (factory reads used by them are wrapped and fall back to the hard-coded limits).
 
 What the invariants do not cover: the Safe can upgrade `ConfioStockRouter`, `ConfioSwapRouter`, `CusdVault` and `CusdPlusVault`, can pause them and can freeze addresses. Those powers predate this feature. The limits above bound the relayer key, not the Safe.
 
@@ -497,7 +500,7 @@ During the window the account behaves normally: fees are collected, rules run, f
 | `plan`, `periodSeconds`, `paidUntil` | Cleared |
 | `cancelRequested`, `noticeStartedAt`, `forcedSaleForPeriod` | Cleared |
 | `beneficiary`, `pendingBeneficiary`, `challengeWindow`, `pendingChallengeWindow`, `pendingBeneficiaryExpiresAt`, `claimStartedAt`, `claimCooldownUntil` | Cleared |
-| Every rule | Inactive; `createRule` reverts from now on |
+| Every rule | Dead without iteration: `executeRule`, `createRule` and `updateRule` revert when `inherited`. `executeClaim` never loops over rules, so no number of rules can make it run out of gas |
 | Token balances | Unchanged. Nothing moves |
 | `factory.accountOf` | Unchanged for both parties. The previous owner address keeps pointing at this account, so that address cannot open another. The new owner's own entry is untouched |
 
@@ -580,7 +583,7 @@ Queries (viewer-scoped from the JWT):
 
 | Query | Returns |
 |---|---|
-| `smartAccountOffer` | Monthly and annual prices from settings, whether the viewer may subscribe, headline order (`beneficiary_first` when the viewer has a balance, else `automation_first`) |
+| `smartAccountOffer` | Monthly and annual prices from the factory (settings as display fallback), the default plan, whether the viewer may subscribe, headline order (`beneficiary_first` when the viewer has a balance, else `automation_first`) |
 | `smartAccount` | The viewer's account, plan, billing state, assets, rules, beneficiary, pending claim |
 | `smartAccountCharges` | Paginated |
 | `inheritedAccounts` | Accounts the viewer owns by inheritance |
@@ -619,7 +622,7 @@ Today's flow (`cusd_plus/sponsor_7702.py`) builds one shape: a sponsor-signed tr
 | Relayer call | Sponsor | The account directly | `collectFee`, `startPaymentNotice`, `forcedSale`, `executeRule`, `convertUsdt` | New `send_relayer_call(account, calldata, kind, source_id)`: a plain type-2 transaction from the KMS sponsor signer. It must take the shared sponsor nonce lock (`acquire_sponsor_nonce_lock`), simulate under the real gas budget, apply the gas-price cap, and write a `SmartAccountRelayTx` row with the deterministic signed hash before broadcast, the same durability rule as `SponsoredBatch` |
 | Keeper call | Sponsor (anyone could) | The account | `returnAsset` per token after expiry | Same function as the relayer call, `kind = smart_return` |
 
-While a claim is pending on the signer's account, `send_sponsored_batch` appends `account.cancelClaim()` to the calls the server prepares for that owner (6.4). It must be part of the prepared call list the user signs, not added after signing.
+While a claim is pending on the signer's account, every prepare step appends `account.cancelClaim()` to the calls it returns for that owner to sign (6.4), and the policy check before `send_sponsored_batch` refuses a batch from that owner that lacks it. It must be part of the prepared call list the user signs, not added after signing.
 
 Fee referral: `CusdVault.armReferral` requires the caller to be a 7702-delegated EOA (`_isConfioAccount`, `CusdVault.sol:282-284, 315-319`). In an owner-signed batch the server keeps placing the arm as the first call, made by the owner's EOA, exactly as today; fees charged later in that transaction pay the referrer even though the account is the one converting. Relayer calls cannot arm today; decision 32 changes that:
 
@@ -868,6 +871,7 @@ Numbers (O6), all confirmed by the founder on 2026-11-20:
 | Challenge window, options | 90, 180, 365 days | Decision session |
 | Claim cooldown after a cancel | 30 days | Decision session |
 | Notice before a forced sale | 7 days | This document |
+| Hard-coded floor for that notice in the account | 3 days | This document |
 | Sale order when several non-dollar assets are held | Largest position by dollar value first; CONFIO included once its sale is switched on | This document, amended by decision 30 |
 | Forced-sale proceeds cap | Shortfall plus 5%, plus US$1 | This document |
 | Notice before a price change takes effect (`FEE_CHANGE_DELAY`) | 30 days | This document |
@@ -887,8 +891,8 @@ Numbers (O6), all confirmed by the founder on 2026-11-20:
 |---|---|---|---|
 | 0 | Contracts on BSC testnet and a mainnet fork; full test suite; Codex audit loop on the factory, the account and the collector until clean; a separate audit pass on the inheritance path (`setBeneficiary`, `initiateClaim`, `_ownerTouch`, `cancelClaim`, `executeClaim`, inherited `withdraw`) | Engineering | Both audit passes clean; fork tests green |
 | 1 | Mainnet factory deployed by the documented production deploy path (never from a laptop), source verified on BscScan, ownership to the Safe, `inheritanceEnabled = false`. `SMART_ACCOUNT_ENABLED` for the canary list only. Automation and IA+ with small amounts | Canary users | Fee collection, in-kind cUSD+ fee, one rule of each kind, a payment failure with notice, a forced sale of a stock and of a crypto token, and a cancel-and-return all observed on mainnet |
-| 2 | The founder runs the whole claim and return flow with his own funds on mainnet: designation, claim, cancel by an unrelated signed action, cooldown, second claim, full window (using the shortest allowed window), execution, inherited withdrawal to wallet and to the new owner's own account; and the direct on-chain path with the server not involved | Founder | Every step observed; discrepancies fixed and re-audited |
-| 3 | Safe sets `inheritanceEnabled = true`; `SMART_ACCOUNT_BENEFICIARY_ENABLED` on; the beneficiary screens appear | All subscribers | — |
+| 2 | The Safe sets `inheritanceEnabled = true` (it is global and one-way, and `setBeneficiary` reverts without it); the relay and `SMART_ACCOUNT_BENEFICIARY_ENABLED` still limit designation to the founder's account. The founder runs the whole claim and return flow with his own funds on mainnet: designation, acceptance, claim, cancel by an unrelated signed action, cooldown, second claim, full window, execution, inherited withdrawal to wallet and to the new owner's own account; and the direct on-chain path with the server not involved. With the 90-day minimum window and the 30-day cooldown this run takes at least about 120 days of chain time. The same sequence is run first on a mainnet fork with time advanced, which takes minutes | Founder | Every step observed on the fork and on mainnet; discrepancies fixed and re-audited. Whether step 3 waits for the mainnet run to finish, or follows the fork run plus the mainnet steps completed so far, is the founder's call |
+| 3 | `SMART_ACCOUNT_BENEFICIARY_ENABLED` on for everyone; the beneficiary screens appear | All subscribers | — |
 
 General availability of step 1 (beyond the canary list) is a founder call and does not depend on step 3.
 
@@ -921,6 +925,7 @@ Lifecycle and billing:
 | Return per asset: a token that reverts on transfer (paused cUSD, paused cUSD+, frozen address, a reverting mock) does not block the others | Decision 7 |
 | `returnAsset` without a signed cancellation reverts in every billing state | I-7 |
 | `undoCancel`; re-subscribe after `Expired` | 4.9 |
+| `cancelSubscription` while payment is due makes the account `Expired` at once; `returnAsset` works immediately; no forced sale can follow | 4.9 |
 | A payment notice started under one subscription does not survive cancel and re-subscribe: the next missed payment needs a new notice and the full notice period before any sale | I-5 |
 | A contract that is a sponsor (a router) calling a relayer function reverts; only a sponsor that is also `tx.origin` passes | 4.1 |
 | `forcedSale` sells and collects in one transaction; if the fee rose so that proceeds no longer cover it, the whole call reverts and can be retried | 5.3 |
@@ -953,7 +958,7 @@ Inheritance:
 | **Fee deduction does not cancel a claim**: `collectFee`, `startPaymentNotice`, `forcedSale`, `executeRule`, `convertUsdt` and `returnAsset` each leave `claimStartedAt` unchanged | I-8 |
 | Rules, fee collection and forced sales all succeed while a claim is pending | Decision 25 |
 | **Repeated claims**: claim, cancel, immediate re-claim reverts during the cooldown; after it succeeds; many cycles do not move any asset and do not shorten the window | I-11 |
-| `removeBeneficiary` during a pending claim; `setBeneficiary` replacing the beneficiary during a pending claim; the old beneficiary can no longer initiate or execute | 6.4 |
+| `removeBeneficiary` during a pending claim; `setBeneficiary` naming someone new during a pending claim cancels that claim with cooldown; the old beneficiary keeps standing until the new one accepts and loses it at that moment | 6.4 |
 | Execution resets every field listed in 6.5 and moves no token | I-12 |
 | After execution: relayer functions, `subscribe`, `setBeneficiary`, `acceptBeneficiary`, `createRule`, `trade` revert; the previous owner's calls revert | I-12, I-13 |
 | Inherited withdraw to the new owner's wallet; to the new owner's own account; to any other address reverts; to `accountOf` when the new owner has none reverts | I-1 |
@@ -961,7 +966,7 @@ Inheritance:
 | A pending designation lapses 30 days after naming; `acceptBeneficiary` then reverts | 4.4 |
 | The cooldown is clamped: a factory returning zero, a huge value or reverting neither removes the cooldown nor makes an owner call revert | I-9, I-20 |
 | A claim pending when a signed cancellation expires: the return works and the claim cannot execute | C6 |
-| The account has no upgrade or `delegatecall` path (bytecode check in the test suite) | Decision 23, I-20 |
+| Bytecode checks: the implementation contains no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT`; a deployed account's runtime code equals the EIP-1167 pattern with the expected implementation address | Decision 23, I-20 |
 | The direct path: `initiateClaim`, `executeClaim` and inherited `withdraw` sent as plain self-paid transactions with no sponsor in the call chain | 6.7 |
 | Factory: one account per owner; predicted address equals deployed address; the Safe has no function over account assets | I-16, I-17 |
 
@@ -974,7 +979,7 @@ Property tests (fuzzed sequences of calls by owner, beneficiary, relayer and str
 - Tasks: each is idempotent under a double run and a crash between sign and broadcast; an RPC or quote failure leaves state unchanged.
 - Designation: unverified beneficiary refused; ineligible-by-residence refused; disclosure not accepted refused; checks re-run at acceptance; `designated_at` and `accepted_at` both stored; a declined designation records `declined_at` and sends no transaction.
 - Payment rules: the standing authorization is created only with Face at rule creation and is bound to destination, amount and frequency; a run whose bridge cost or FX rate is outside the rule's limits is skipped and notified; a payout method that is not the viewer's is refused; an edited or deleted method deactivates its rule; a rail not confirmed for unattended payouts is not offered.
-- Offer: annual is the default plan; prices are 14.99 and 149.99 from settings and equal the factory's.
+- Offer: annual is the default plan; prices are 14.99 and 149.99, read from the factory with settings as fallback.
 - Entitlement: IA+ on at `FeeCollected`, off after `paid_until`, never on for an inherited account.
 - App: subscribe, move everything, rule creation, cancel, claim and inherited withdrawal on a real device; the claim-pending banner appears in every account context; older builds never receive the new GraphQL fields in shared queries.
 - Local tests must patch the Telegram alert path (they otherwise reach the real channel).
