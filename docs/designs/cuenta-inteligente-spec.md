@@ -185,9 +185,10 @@ An account snapshots its challenge window at the owner-signed designation; a lat
 |---|---|---|
 | `owner` | `address` | Current owner wallet. Changes only in `executeClaim` |
 | `inherited` | `bool` | Set once by `executeClaim`. Terminal |
-| `plan` | `enum {None, Monthly, Annual}` | Chosen at `subscribe` / `changePlan` |
+| `plan` | `enum {None, Monthly, Annual}` | The plan of the current period. The period length is a constant of the plan (30 days, 365 days), not a separate stored value |
+| `nextPlan` | `enum {None, Monthly, Annual}` | Set only by owner-signed `changePlan`. Applied at the next renewal |
 | `feeUsd()` | view | Fee for the next charge: the factory's current price for `plan`, clamped to `MAX_MONTHLY_FEE_USD` / `MAX_ANNUAL_FEE_USD` (constants in the implementation), 18 decimals. Not stored |
-| `periodSeconds` | `uint64` | 30 days or 365 days |
+| `periodSeconds()` | view | 30 days for `Monthly`, 365 days for `Annual` |
 | `paidUntil` | `uint64` | End of the paid period |
 | `cancelRequested` | `bool` | Set by owner-signed `cancelSubscription` |
 | `noticeStartedAt` | `uint64` | Non-zero while a payment notice runs for the current unpaid period |
@@ -232,8 +233,8 @@ The account has three independent dimensions. The functions check them with inte
 
 | Function | Preconditions | Effect |
 |---|---|---|
-| `subscribe(plan, maxFeeUsd)` | `Unsubscribed` or `Expired`; not `inherited`; `feeUsd()` for `plan` `<= maxFeeUsd` | Sets `plan`, `periodSeconds`; clears `cancelRequested`, `noticeStartedAt` and `forcedSaleForPeriod` (a notice from an earlier subscription must never count for a later one); takes the first fee (section 5.1) in the same call, reverting if dollars are short; sets `paidUntil` |
-| `changePlan(plan)` | `Active`, `Current` | Records the new plan; it applies from the next renewal |
+| `subscribe(plan, maxFeeUsd)` | `Unsubscribed` or `Expired`; not `inherited`; `feeUsd()` for `plan` `<= maxFeeUsd` | Sets `plan`; clears `nextPlan`; clears `cancelRequested`, `noticeStartedAt` and `forcedSaleForPeriod` (a notice from an earlier subscription must never count for a later one); takes the first fee (section 5.1) in the same call, reverting if dollars are short; sets `paidUntil` |
+| `changePlan(plan)` | `Active`, `Current` | Sets `nextPlan`. `paidUntil` is unchanged. At the next renewal the fee collection charges the new plan's price and starts a period of the new plan's length (Annual to Monthly: US$14.99 for 30 days; Monthly to Annual: US$149.99 for 365 days), then sets `plan = nextPlan` |
 | `cancelSubscription()` | `Active` | Sets `cancelRequested`. Automation keeps running until `paidUntil`. If the period has already ended unpaid (`PaymentDue`, `Notice`, `SaleAllowed`) the account is `Expired` at once: the return opens immediately and the lapsed period is not charged |
 | `undoCancel()` | `CancelPending` | Clears `cancelRequested` |
 | `withdraw(token, amount)` | Not `inherited` | Transfers to `owner` |
@@ -263,9 +264,9 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 
 | Function | Preconditions | Effect |
 |---|---|---|
-| `collectFee()` | `PaymentDue` (so `block.timestamp >= paidUntil`); cUSD plus cUSD+ cover `feeUsd()` | Section 5.1. Sets `paidUntil = block.timestamp + periodSeconds`; clears `noticeStartedAt` |
+| `collectFee()` | `PaymentDue` (so `block.timestamp >= paidUntil`); cUSD plus cUSD+ cover `feeUsd()` | Section 5.1. If `nextPlan` is set, charges and renews on that plan and makes it the current one (this is the owner's signed instruction taking effect, not a relayer choice). Sets `paidUntil = block.timestamp + periodSeconds()` of the plan charged; clears `noticeStartedAt` |
 | `startPaymentNotice()` | `PaymentDue`; dollars do not cover `feeUsd`; `noticeStartedAt == 0` | Sets `noticeStartedAt`; emits `PaymentNoticeStarted` |
-| `forcedSale(venue, data, tokenIn, maxIn, minDollarsOut, referrer, shareBps)` | `SaleAllowed`; `forcedSaleForPeriod != paidUntil`; `tokenIn` is not cUSD or cUSD+; `tokenIn` has a price reference (a listed stock via its Ondo quote, BTCB, XAUt, or CONFIO once switched on); dollars still do not cover `feeUsd` | Section 5.3. Sells, then collects the fee in the same transaction; if the dollars still do not cover the fee the whole call reverts, so a sale never happens without the fee being paid by it. Sets `forcedSaleForPeriod` on success |
+| `forcedSale(legs[], minDollarsOut, referrer, shareBps)` where each leg is `(venue, data, tokenIn, maxIn)` | `SaleAllowed`; `forcedSaleForPeriod != paidUntil`; every leg's `tokenIn` is not cUSD or cUSD+ and has a price reference (a listed stock via its Ondo quote, BTCB, XAUt, or CONFIO once switched on); dollars do not cover `feeUsd()` | Section 5.3. One atomic operation: runs the legs in order (several are needed when no single holding covers the fee, for example two positions each smaller than an annual fee), then collects the fee in the same transaction. The notice, the proceeds cap and the one-per-period rule apply once to the whole operation, and the price check applies to each leg. If the dollars still do not cover the fee the whole call reverts, so nothing is sold without the fee being paid by it. Sets `forcedSaleForPeriod` on success |
 | `executeRule(id, data, minOut, referrer, shareBps)` | `Active` (including `CancelPending`), `Current`; rule active; `block.timestamp >= rule.nextRunAt` | Runs the rule (4.7); sets `nextRunAt = block.timestamp + minimum gap of the rule's frequency` (missed runs are not caught up). Runs whether or not a claim is pending (decision 25) |
 | `convertUsdt(dest, minDollarsOut, referrer, shareBps)` | Not `inherited`; lifecycle `Active` (any billing state, so a deposit of USDT can cure a missed payment); USDT balance above zero; `dest` is cUSD+ or cUSD | Converts the whole USDT balance through the normal entry, paying the 0.9% entry fee as any deposit does: `CUSD.mintWithFee(usdt, minDollarsOut, address(this))`, or `CUSD_PLUS.subscribeAndMint(usdt, 0, address(this))`. The vault's own floor argument is in USDY units, so it is passed as zero (as both routers do) and the account enforces the floor itself: the dollar value received (cUSD at par; cUSD+ shares gained times `pPlus`) must be at least `minDollarsOut`, and `minDollarsOut` must be no lower than the USDT amount less the live fee and a small tolerance. Recipient is fixed to the account. The relayer picks `dest` from the owner's eligibility, as the server does for the personal wallet. Emits `UsdtConverted` |
 
@@ -352,10 +353,10 @@ Each is a testable statement. Section 10.2 maps them to tests.
 
 1. A token balance of the account decreases only through: a transfer to `owner`; a transfer to `FEE_COLLECTOR` inside `collectFee` or `subscribe`; a transfer to a `Send` rule's stored `payee` inside `executeRule`; a burn by `CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee` inside a `Payout` rule, limited to the rule's stored amount and frequency, whose USDT goes to the address the relayer names for that run (the one exit whose destination the contract does not fix; C7); a pull by `STOCK_ROUTER` or `SWAP_ROUTER` inside `trade`, `executeRule` or `forcedSale`; a pull of CONFIO by the `confioSale` venue inside `forcedSale`, once that venue is set; a pull of USDT by `CUSD_PLUS` or `CUSD` inside `convertUsdt`, which mints the owner's dollar back to the account. In `Inherited` state only: a transfer to `owner` or `FACTORY.accountOf(owner)`.
 2. `owner` changes only in `executeClaim`, and only to the `beneficiary` stored at that moment.
-3. `collectFee` succeeds at most once for any value of `paidUntil`, and each success moves `paidUntil` forward by exactly `periodSeconds` from the block time. The total collected by one success never exceeds `feeUsd()` in value (cUSD at par, cUSD+ at `pPlus`, rounding up by at most one share unit), and `feeUsd()` never exceeds the implementation's hard-coded maximum for the plan whatever the factory returns.
-4. The relayer cannot change the fee, `plan`, `periodSeconds`, `owner`, `pendingBeneficiary`, `beneficiary`, `challengeWindow` or any rule field other than `nextRunAt`, which `executeRule` advances. The price changes only through the factory's delayed `scheduleFee`, which is Safe-only.
-5. `forcedSale` succeeds at most once per unpaid period, only after `forcedSaleNotice` has elapsed since an on-chain `startPaymentNotice` for that period, and only while cUSD plus cUSD+ do not cover `feeUsd`.
-6. After `forcedSale`, the gross proceeds (the rise in the account's cUSD plus cUSD+ value measured before the fee is taken in the same call) are at least the shortfall and no more than the cap in section 5.3; the fee is collected in that call; the sold token's balance fell by at most `maxIn`; no other checked balance fell; no token left to any address other than the venue and, for the fee, `FEE_COLLECTOR`.
+3. `collectFee` succeeds at most once for any value of `paidUntil`, and each success moves `paidUntil` forward by exactly the period length of the plan charged, from the block time. The total collected by one success never exceeds `feeUsd()` in value (cUSD at par, cUSD+ at `pPlus`, rounding up by at most one share unit), and `feeUsd()` never exceeds the implementation's hard-coded maximum for the plan whatever the factory returns.
+4. The relayer cannot change the fee, `plan` (it changes only to the `nextPlan` the owner signed, at renewal), `nextPlan`, `owner`, `pendingBeneficiary`, `beneficiary`, `challengeWindow` or any rule field other than `nextRunAt`, which `executeRule` advances. The price changes only through the factory's delayed `scheduleFee`, which is Safe-only.
+5. `forcedSale` (one atomic operation of one or more sale legs) succeeds at most once per unpaid period, only after `forcedSaleNotice` has elapsed since an on-chain `startPaymentNotice` for that period, and only while cUSD plus cUSD+ do not cover `feeUsd`.
+6. After `forcedSale`, the gross proceeds (the rise in the account's cUSD plus cUSD+ value measured before the fee is taken in the same call) are at least the shortfall and no more than the cap in section 5.3; the fee is collected in that call; each sold token's balance fell by at most its leg's `maxIn`; no other checked balance fell; no token left to any address other than the venue and, for the fee, `FEE_COLLECTOR`.
 7. `returnAsset` reverts unless `cancelRequested` is true and `block.timestamp >= paidUntil`. Its only destination is `owner`.
 8. No relayer function and no permissionless function changes `claimStartedAt`, `claimCooldownUntil` or `beneficiary`.
 9. Every owner function sets `claimStartedAt` to zero. If a claim was pending, it also sets `claimCooldownUntil = block.timestamp + claimCooldown`, except `removeBeneficiary`, which ends the designation and clears the cooldown with it. `claimCooldown` is read from the factory and clamped to hard-coded bounds in the account (1 to 90 days), and a failing factory read falls back to 30 days, so no factory value can remove the cooldown or make an owner call revert.
@@ -409,7 +410,7 @@ An account whose total assets are worth less than one fee stays in `SaleAllowed`
 |---|---|
 | Only when cUSD plus cUSD+ do not cover the fee | Contract |
 | Only after `forcedSaleNotice` since `startPaymentNotice` for this period | Contract |
-| At most one successful sale per unpaid period | Contract (`forcedSaleForPeriod`) |
+| At most one successful sale operation per unpaid period. An operation may have several legs, because the fee can exceed any single holding; the legs together obey one cap | Contract (`forcedSaleForPeriod`) |
 | Venue is `STOCK_ROUTER.sellToSavings` (proceeds always in cUSD+; the stock router has no cUSD leg) or `SWAP_ROUTER.sell` (proceeds in cUSD+ or cUSD), or for CONFIO the `confioSale` venue once set (5.5). Nothing else | Contract (address and selector) |
 | Proceeds land in the account | Structural: both functions pay `msg.sender`, which is the account. The contract also asserts its own dollar balance delta |
 | Proceeds are at least the shortfall and at most `shortfall * (1 + FORCED_SALE_MARGIN) + FORCED_SALE_ROUNDING` | Contract. Margin 5%, rounding US$1. The margin exists because the 0.9% entry fee is taken from the proceeds and stock notional rounds |
@@ -421,7 +422,7 @@ The sale pays the normal 0.9% entry fee when proceeds re-enter cUSD+ or cUSD (de
 
 ### 5.4 Annual plan
 
-`plan = Annual`, fee `annualFeeUsd` (US$149.99), `periodSeconds = 365 days`. One charge at subscribe and one per year. The failure path is identical. The annual plan is the preselected one on the sign-up screen (decision 2).
+`plan = Annual`, fee `annualFeeUsd` (US$149.99), period 365 days. One charge at subscribe and one per year. The failure path is identical. The annual plan is the preselected one on the sign-up screen (decision 2).
 
 No refunds (decision 22). A cancelled plan, monthly or annual, runs to `paidUntil` and then returns the assets. There is no refund function.
 
@@ -497,7 +498,7 @@ During the window the account behaves normally: fees are collected, rules run, f
 |---|---|
 | `owner` | The beneficiary's address |
 | `inherited` | `true` |
-| `plan`, `periodSeconds`, `paidUntil` | Cleared |
+| `plan`, `nextPlan`, `paidUntil` | Cleared |
 | `cancelRequested`, `noticeStartedAt`, `forcedSaleForPeriod` | Cleared |
 | `beneficiary`, `pendingBeneficiary`, `challengeWindow`, `pendingChallengeWindow`, `pendingBeneficiaryExpiresAt`, `claimStartedAt`, `claimCooldownUntil` | Cleared |
 | Every rule | Dead without iteration: `executeRule`, `createRule` and `updateRule` revert when `inherited`. `executeClaim` never loops over rules, so no number of rules can make it run out of gas |
@@ -567,7 +568,7 @@ IA+ entitlement: `assistant/billing.py:has_plus` returns true when an `Assistant
 
 The project rule stands: account context comes from the JWT only, never from client parameters.
 
-- `users.Account.ACCOUNT_TYPE_CHOICES` (`users/models.py:594-597`) has two values. Add a third, `smart` (the field is `max_length=10`), with `account_index = 0` for the user's own account. Its `bsc_address` is the contract address, so the stored-balance, holdings and history pipelines that key on `Account.bsc_address` work unchanged.
+- `users.Account.ACCOUNT_TYPE_CHOICES` (`users/models.py:594-597`) has two values. Add a third, `smart` (the field is `max_length=10`), with `account_index = 0` for the user's own account. Its `bsc_address` is the contract address, so address-keyed balance reads (stored balances, holdings, history) can be reused. The correctness checks around them cannot be reused as they are: in-flight detection for stocks (`cusd_plus/gm_holdings.py`) and crypto (`cusd_plus/crypto_holdings.py:69`, `batches_in_flight`) and the confirmation invalidation in `cusd_plus/tasks.py` look only at existing `SponsoredBatch` kinds at the signer's address. They must be extended to the new owner-signed kinds (whose effect lands at the contract address, not the signer's) and to `SmartAccountRelayTx`, for broadcast, confirmation and reorg, or the account's holdings will be shown as current while a trade is in flight.
 - `SwitchAccountToken` (`users/schema.py:4030`) issues a token with `account_type = 'smart'` after verifying the caller owns that `SmartAccount`. An inherited account is switched to the same way, identified by its `account_index` (0 for the user's own, 1 and up for inherited accounts in order received).
 - The signer for a `smart` context is the user's personal account key. Every place that today resolves "the JWT account's registered BSC key" (`cusd_plus/sponsor_7702.py`, the `validate_policy` path) must resolve to `owner_account.bsc_address` when the context is `smart`.
 - Risk: many code paths branch on `account_type == 'business'` and treat everything else as personal. Each must be reviewed so that a `smart` context is neither treated as the personal wallet (wrong address for balances) nor allowed into flows the account does not support (P2P, payroll, presale, perps, ramps, Comprar). The default for an unreviewed flow is to refuse a `smart` context.
@@ -916,6 +917,7 @@ Lifecycle and billing:
 | `forcedSale` before notice, before the notice period ends, twice in one period, with enough dollars present, on cUSD/cUSD+: all revert | I-5 |
 | Forced sale of a stock: proceeds land in the account as cUSD+, within the cap, and the fee is collected in the same call | I-6 |
 | Forced sale of a crypto token to cUSD+ and to cUSD: same | I-6 |
+| Diversified holdings: an annual subscriber with two positions, each worth less than the fee and together worth more, is charged by one operation with two legs; the aggregate cap holds; a second operation in the period reverts; if the legs together still fall short the whole call reverts and nothing is sold | 5.3, I-5, I-6 |
 | CONFIO: `forcedSale` reverts while `confioSale` is unset; the Safe can set it once and a second set reverts; once set, a CONFIO sale obeys every cap of 5.3; the slot affects no other token, destination or fee | Decision 30, 5.5 |
 | Forced sale of bitcoin or gold through a manipulated route is refused by the feed check; a stale feed (gold on a weekend) reverts the sale and a later retry succeeds; fork test reads the two live feeds | C2 |
 | **Failed sale**: the venue reverts (paused router, expired quote, closed market). The account stays `SaleAllowed`, nothing is returned, `returnAsset` reverts, a retry later succeeds | Decision 7, I-7 |
@@ -925,6 +927,7 @@ Lifecycle and billing:
 | Return per asset: a token that reverts on transfer (paused cUSD, paused cUSD+, frozen address, a reverting mock) does not block the others | Decision 7 |
 | `returnAsset` without a signed cancellation reverts in every billing state | I-7 |
 | `undoCancel`; re-subscribe after `Expired` | 4.9 |
+| `changePlan` in both directions: the current period is untouched; the next renewal charges the new plan's price for the new plan's length; the relayer cannot set or alter `nextPlan` | I-3, I-4 |
 | `cancelSubscription` while payment is due makes the account `Expired` at once; `returnAsset` works immediately; no forced sale can follow | 4.9 |
 | A payment notice started under one subscription does not survive cancel and re-subscribe: the next missed payment needs a new notice and the full notice period before any sale | I-5 |
 | A contract that is a sponsor (a router) calling a relayer function reverts; only a sponsor that is also `tx.origin` passes | 4.1 |
