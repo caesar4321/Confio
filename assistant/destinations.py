@@ -33,10 +33,13 @@ DESTINATIONS = {
     'notifications': 'Notificaciones.',
     'achievements': 'Logros y recompensas.',
     'pending_incoming': 'Dinero por recibir: transferencias a tu cuenta local que esperan tu confirmación con Confío Face.',
-    # Paid-offer probes: a pitch with "Sí, avísame". Only offered while each
-    # probe is on (users/paid_offers.py); chips are capped by the server.
+    # Paid offers. Confío IA+ is a pitch with "Sí, avísame". Cuenta inteligente
+    # opens the subscribe screen for whoever can subscribe (paid_offers.can_subscribe)
+    # and the waitlist pitch otherwise. Chips are capped by the server.
     'ia_plus': 'Confío IA+: la versión más avanzada de Confío IA que estamos preparando (lista de espera).',
-    'cuenta_inteligente': 'Cuenta inteligente: pagos y débitos automáticos que estamos preparando (lista de espera).',
+    'cuenta_inteligente': ('Cuenta inteligente: cuenta de pago con pagos y transferencias automáticas, inversión '
+                           'automática y beneficiario. Abre la pantalla para suscribirse a quien ya puede, y la '
+                           'lista de espera a los demás.'),
 }
 
 # Paid-offer probe keys and the waitlist product each one opens.

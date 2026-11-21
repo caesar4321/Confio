@@ -5,6 +5,8 @@ const mockDeriveIntentId = jest.fn(
   (_calls: unknown, _requestId?: string) => `0x${'33'.repeat(32)}`,
 );
 
+// No claim pending on an own account in these tests (see sponsored7702.claimCancel.test).
+jest.mock('../ownClaimCancel', () => ({ ownClaimCancelCall: async () => null, forgetOwnPendingClaim: () => {} }));
 jest.mock('../bscServerRpc', () => ({
   sponsorBscBatch: (...args: unknown[]) => mockSponsorBscBatch(...args),
 }));

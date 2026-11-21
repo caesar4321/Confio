@@ -62,6 +62,13 @@ contract CusdVault is
     /// contract reached during a sponsored batch (a token hook, a router
     /// target) could arm itself. Zero disables arming. Appended.
     address public batchDelegate;
+    /// Recognised Cuenta inteligente factories (ConfioSmartAccountFactory).
+    /// An account one of them created may arm a referral for its owner, so
+    /// relayer-triggered conversions (rules, forced sales, USDT conversion)
+    /// pay the referrer like owner-signed ones. A set, not one address: a
+    /// later account version is a new factory. Appended: layout above must
+    /// stay.
+    mapping(address => bool) public isSmartAccountFactory;
 
     event SponsorSet(address indexed sponsor, bool allowed);
     event SavingsVaultSet(address indexed previousVault, address indexed newVault);
@@ -94,6 +101,7 @@ contract CusdVault is
     event AddressUnfrozen(address indexed target);
     event ReferralShareCapSet(uint256 previousCapBps, uint256 newCapBps);
     event BatchDelegateSet(address indexed previousDelegate, address indexed newDelegate);
+    event SmartAccountFactorySet(address indexed factory, bool allowed);
     event ReferralPaid(
         address indexed referee, address indexed referrer, uint256 feeUsdt, uint256 shareCusd, uint256 shareBps
     );
@@ -278,10 +286,11 @@ contract CusdVault is
     /// Confio-sponsored transaction may arm, and only once; the sponsor's
     /// policy decides who the referrer is and the share. A share above the
     /// owner cap arms nothing (never reverts the batch).
-    /// msg.sender (the user's 7702 account) is recorded as the referee.
+    /// msg.sender (the user's 7702 account, or the user's Cuenta
+    /// inteligente) is recorded as the referee.
     function armReferral(address referrer, uint256 shareBps) external whenNotPaused {
         require(isSponsor[tx.origin], "not sponsored");
-        require(_isConfioAccount(msg.sender), "not a Confio account");
+        require(_isConfioAccount(msg.sender) || _isSmartAccount(msg.sender), "not a Confio account");
         require(_tload(_REFERRER_SLOT) == 0, "already armed");
         require(referrer != address(0), "zero referrer");
         require(referrer != msg.sender, "self referral");
@@ -316,6 +325,28 @@ contract CusdVault is
         address delegate = batchDelegate;
         if (delegate == address(0)) return false;
         return keccak256(account.code) == keccak256(abi.encodePacked(hex"ef0100", delegate));
+    }
+
+    function setSmartAccountFactory(address factory, bool allowed) external onlyOwner {
+        require(factory != address(0), "zero factory");
+        require(!allowed || factory.code.length > 0, "factory not contract");
+        isSmartAccountFactory[factory] = allowed;
+        emit SmartAccountFactorySet(factory, allowed);
+    }
+
+    /// A Cuenta inteligente: a contract that reports its factory, where the
+    /// Safe recognises that factory and the factory confirms it created the
+    /// caller. Both answers must agree, so a contract cannot name a real
+    /// factory and pass. Raw staticcalls: any failure, missing function or
+    /// short answer means "no", never a revert with someone else's reason.
+    function _isSmartAccount(address account) internal view returns (bool) {
+        if (account.code.length == 0) return false;
+        (bool ok, bytes memory out) = account.staticcall(abi.encodeWithSignature("FACTORY()"));
+        if (!ok || out.length != 32) return false;
+        address factory = address(uint160(uint256(bytes32(out))));
+        if (!isSmartAccountFactory[factory]) return false;
+        (ok, out) = factory.staticcall(abi.encodeWithSignature("isAccount(address)", account));
+        return ok && out.length == 32 && uint256(bytes32(out)) == 1;
     }
 
     function setReferralShareCapBps(uint256 newCapBps) external onlyOwner {

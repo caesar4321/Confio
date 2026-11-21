@@ -317,7 +317,11 @@ def stock_batches_in_flight(user_bsc_address: str, max_age=IN_FLIGHT_MAX_AGE):
 
 def _wallet_in_flight(key: str) -> bool:
     try:
-        return stock_batches_in_flight(key).exists()
+        # A Cuenta inteligente's address is a contract: what is on the wire
+        # for it is an owner-signed batch recorded at the SIGNER's address,
+        # or a relayer transaction (smart_account/inflight.py).
+        from smart_account.inflight import address_in_flight
+        return stock_batches_in_flight(key).exists() or address_in_flight(key)
     except Exception:  # noqa: BLE001 — unknown: don't cache (the read is still served)
         logger.warning('in-flight check failed for %s', key, exc_info=True)
         return True

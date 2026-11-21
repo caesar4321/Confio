@@ -4091,6 +4091,13 @@ class SwitchAccountToken(graphene.Mutation):
 						f"SwitchAccountToken - Normalizing business account_index from {account_index} to {normalized_index} for business {business_id}"
 					)
 					account_index = normalized_index
+			elif account_type == 'smart':
+				# Cuenta inteligente: the caller must own that SmartAccount.
+				# Index 0 is their own account, 1+ an inherited one.
+				from smart_account.context import owned_smart_account
+				if business_id or owned_smart_account(user, account_index) is None:
+					raise Exception("You don't have access to this account")
+				business_id = None
 			else:
 				# For personal accounts or business without business_id, find owned account
 				account = Account.objects.get(

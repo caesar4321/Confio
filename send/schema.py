@@ -684,6 +684,11 @@ class ReclaimInviteCalls(graphene.Mutation):
         if not invite:
             return ReclaimInviteCalls(success=False, error='invite_not_found')
         calls = invite_bsc_flow.build_reclaim_calls('0x' + invite.invitation_id)
+        # Cuenta inteligente (spec 6.4): while a claim is pending on the
+        # inviter's own account, the reclaim also cancels it (submit accepts
+        # the calls with or without it; the signature decides).
+        from smart_account.relay_policy import pending_cancel_claim_calls
+        calls = calls + pending_cancel_claim_calls(info.context.user, (invite.inviter_address or '').lower())
         return ReclaimInviteCalls(
             success=True,
             calls=[BscSendCallType(to=c['to'], value_wei=c['value'], data=c['data']) for c in calls],

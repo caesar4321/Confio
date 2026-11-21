@@ -1363,6 +1363,11 @@ class MarketOrderActionCalls(graphene.Mutation):
             if ship_error:
                 return MarketOrderActionCalls(success=False, error=ship_error)
         calls = escrow.action_calls(order, action)
+        # Cuenta inteligente (spec 6.4): while a claim is pending on the
+        # actor's own account, the action also cancels it (submit accepts
+        # the calls with or without it; the signature decides).
+        from smart_account.relay_policy import pending_cancel_claim_calls
+        calls = calls + pending_cancel_claim_calls(info.context.user, escrow.actor_address(order, action))
         return MarketOrderActionCalls(
             success=True,
             calls=[MarketCallType(to=c['to'], value_wei=c['value'], data=c['data']) for c in calls],

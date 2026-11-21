@@ -140,9 +140,11 @@ NO_NAVIGATION_NOTE = (
 )
 
 
-# The paid-offer probes (waitlists, nothing is sold). Each block is in the
-# prompt only while its probe is on, so the model never advertises an offer
-# the person can't open. The price is the server's value, never app copy.
+# The paid offers. Confío IA+ alone is a waitlist probe (nothing is sold);
+# Cuenta inteligente is a real paid account for whoever can subscribe and a
+# waitlist for everyone else. Each block is in the prompt only while the
+# person can open that door, so the model never advertises an offer they
+# can't open. Prices are the server's values, never app copy.
 PAID_OFFER_SECTIONS = {
     'ia_plus': (
         '\n## Confío IA+ (lista de espera)\n'
@@ -151,15 +153,32 @@ PAID_OFFER_SECTIONS = {
         'metas{price}. Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame".\n'
         '- Si preguntan por Confío IA+, responde con esto y abre `ia_plus`. Nunca des una fecha, nunca prometas '
         'beneficios fuera de esta lista y nunca digas que se puede pagar o reservar ahora.\n'),
+    # The real product (docs/designs/cuenta-inteligente-spec.md). This wording is
+    # for someone who cannot subscribe yet (flag, canary list, build, identity):
+    # same product, still a waitlist for them.
     'cuenta_inteligente': (
         '\n## Cuenta inteligente (lista de espera)\n'
-        '- Cuenta inteligente es una cuenta que estamos preparando: pagos automáticos a Pix, Bre-B, CLABE y Alias, '
-        'suscripciones con comercios, transferencias programadas, control de tus débitos y aviso antes de cada '
-        'cobro{price}.{ia_plus} Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame".\n'
+        '- Cuenta inteligente es una cuenta de pago dentro de Confío: pagos y transferencias automáticas'
+        '{rails} (diarias, semanales, quincenales o mensuales), inversión automática en acciones, bitcoin y oro, y '
+        'un beneficiario que recibe la cuenta si la persona deja de usarla{price}.{ia_plus} Para esta persona '
+        'todavía no está disponible y no tiene fecha; si le interesa, toca "Sí, avísame".\n'
         '- Si la persona cuenta que paga a mano cada mes (alquiler, familia, servicios), que quiere que su dinero se '
-        'mueva solo, o que le cuesta mover dinero cada mes, menciónala en una frase y abre `cuenta_inteligente`. Si '
-        'pregunta por ella, responde con esto y ábrela. Nunca des una fecha, nunca prometas beneficios fuera de esta '
-        'lista y nunca digas que se puede pagar o reservar ahora.\n'),
+        'mueva solo, o que le preocupa qué pasa con su dinero si le ocurre algo, menciónala en una frase y abre '
+        '`cuenta_inteligente`. Si pregunta por ella, responde con esto y ábrela. Nunca des una fecha, nunca prometas '
+        'beneficios fuera de esta lista y nunca digas que esta persona puede pagarla o abrirla ahora.\n'),
+    # For someone who can open it now (users/paid_offers.can_subscribe).
+    'cuenta_inteligente_live': (
+        '\n## Cuenta inteligente\n'
+        '- Cuenta inteligente es una cuenta de pago dentro de Confío que ya se puede abrir: pagos y transferencias '
+        'automáticas{rails} (diarias, semanales, quincenales o mensuales), inversión automática en acciones, bitcoin '
+        'y oro, y un beneficiario que recibe la cuenta si la persona deja de usarla{price}.{ia_plus} Solo lo que la '
+        'persona mueve dentro de la cuenta se automatiza y queda cubierto; su cuenta personal no cambia. Se cobra '
+        'desde adentro de la cuenta, no hay reembolsos y la comisión de conversión de 0.9% es la misma de siempre.\n'
+        '- Si la persona cuenta que paga a mano cada mes (alquiler, familia, servicios), que quiere que su dinero se '
+        'mueva solo, que quiere invertir un poco cada cierto tiempo, o que le preocupa qué pasa con su dinero si le '
+        'ocurre algo, menciónala en una frase y abre `cuenta_inteligente`. Si pregunta por ella, responde con esto y '
+        'ábrela. Nunca prometas beneficios fuera de esta lista: no hay suscripciones con comercios, ni control de '
+        'débitos, ni descuentos en comisiones, ni ahorro automático. Nunca digas un precio distinto al de aquí.\n'),
 }
 
 
@@ -171,17 +190,42 @@ IA_PLUS_IN_SMART_ACCOUNT = (
     'si preguntan por Confío IA+, dilo así y abre `cuenta_inteligente`.')
 
 
-def _paid_offer_sections(destinations, ia_plus_bundled=False):
+# Bank rails are named only where payment rules are live for them.
+_RAIL_NAMES = {'mx_clabe': 'CLABE', 'br_pix': 'Pix', 'co_breb': 'Bre-B'}
+
+
+def _smart_account_rails():
+    from smart_account import offer
+    names = [_RAIL_NAMES[r] for r in offer.payout_rails() if r in _RAIL_NAMES]
+    if not names:
+        return ' a otras personas en Confío'
+    joined = names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' y ' + names[-1]
+    return f' a otras personas en Confío y a cuentas guardadas de {joined}'
+
+
+def _paid_offer_sections(destinations, ia_plus_bundled=False, smart_account_open=False):
     from users import paid_offers
 
     from .destinations import PAID_OFFERS
     out = ''
-    for key, section in PAID_OFFER_SECTIONS.items():
-        if key in destinations:
-            amount = paid_offers.price(PAID_OFFERS[key])
-            bundled = ia_plus_bundled and key == 'cuenta_inteligente' and 'ia_plus' not in destinations
-            out += section.format(price=f', por US${amount} al mes' if amount else '',
+    for key in PAID_OFFERS:
+        if key not in destinations:
+            continue
+        product = PAID_OFFERS[key]
+        monthly = paid_offers.price(product)
+        if key == 'cuenta_inteligente':
+            # Both prices, from the server (never app copy); annual first.
+            annual = paid_offers.price(product, 'annual')
+            parts = [f'US${annual} al año' if annual else '', f'US${monthly} al mes' if monthly else '']
+            parts = [p for p in parts if p]
+            price = (', por ' + ' o '.join(parts)) if parts else ''
+            section = PAID_OFFER_SECTIONS['cuenta_inteligente_live' if smart_account_open else key]
+            bundled = (smart_account_open or ia_plus_bundled) and 'ia_plus' not in destinations
+            out += section.format(price=price, rails=_smart_account_rails(),
                                   ia_plus=IA_PLUS_IN_SMART_ACCOUNT if bundled else '')
+        else:
+            out += PAID_OFFER_SECTIONS[key].format(
+                price=f', por US${monthly} al mes' if monthly else '', ia_plus='')
     return out
 
 
@@ -290,10 +334,10 @@ IDENTITY_NOTES = {
 
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
                         ia_plus_bundled=False, identity=None, ve_topup=None, ve_send=None, dex=True,
-                        local_account_topup='', bo_withdraw=None):
+                        local_account_topup='', bo_withdraw=None, smart_account_open=False):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
     prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text(dex=dex))
-              + _paid_offer_sections(destinations, ia_plus_bundled)
+              + _paid_offer_sections(destinations, ia_plus_bundled, smart_account_open)
               + DESTINATIONS_SECTION.format(destinations=lines))
     if not can_navigate:
         prompt += NO_NAVIGATION_NOTE

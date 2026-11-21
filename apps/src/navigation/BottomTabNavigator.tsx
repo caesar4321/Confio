@@ -22,6 +22,19 @@ import { peekBadge, useCommunityPeek, watchCommunityPeek } from '../services/com
 import { useSharedQr } from '../hooks/useSharedQr';
 import { Alert } from 'react-native';
 
+// The Cuenta inteligente homes, loaded only when a smart context is active:
+// almost nobody is in one at launch, and the tab bar should not pull their
+// modules (the account switcher, the signing path) in for everyone else.
+// Module-level components, so their identity is stable across renders.
+const SmartAccountHomeTab = () => {
+  const Screen = require('../screens/SmartAccountHomeScreen').SmartAccountHomeTab;
+  return <Screen />;
+};
+const InheritedAccountTab = () => {
+  const Screen = require('../screens/InheritedAccountScreen').InheritedAccountTab;
+  return <Screen />;
+};
+
 // Single navigator instance
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
 
@@ -44,6 +57,12 @@ export const BottomTabNavigator = () => {
   const canSendFunds = !isEmployee || activeAccount?.employeePermissions?.sendFunds === true;
   // Check if account is business (using normalized type)
   const isBusinessAccount = accountType === 'business';
+  // A Cuenta inteligente context (own, or inherited when index > 0). Its home
+  // replaces Inicio, and only what the account supports stays: no Invertir
+  // (Futuros, Comunidad), no Pagar, no Cobrar, no Comprar. The server refuses
+  // those flows for a smart token too (dual enforcement).
+  const isSmartAccount = accountType === 'smart';
+  const isInheritedAccount = isSmartAccount && (activeAccount?.index ?? 0) > 0;
 
   // A QR shared from another app opens Pagar as if it had been scanned; the
   // scan handler applies every check (employee, rail, account) from there.
@@ -165,14 +184,18 @@ export const BottomTabNavigator = () => {
       >
         <Tabs.Screen 
           name="Home" 
-          component={HomeScreen}
+          component={isInheritedAccount ? InheritedAccountTab : isSmartAccount ? SmartAccountHomeTab : HomeScreen}
           options={{
             header: () => <HomeHeader />,
+            // The smart homes draw the shared Header themselves (help circle
+            // and the account avatar live in it).
+            headerShown: !isSmartAccount,
             freezeOnBlur: true,
             tabBarLabel: 'Inicio',
             tabBarIcon: ({ color, size }: any) => <GuideAnchorView id="tab_home"><Icon name="home" size={size} color={color} /></GuideAnchorView>
           }}
         />
+        {!isSmartAccount && (
         <Tabs.Screen
           name="Invest"
           component={InvestTabScreen}
@@ -199,6 +222,7 @@ export const BottomTabNavigator = () => {
               : { backgroundColor: colors.secondary, color: '#fff', fontSize: 10 },
           }}
         />
+        )}
         {isBusinessAccount && (
           <Tabs.Screen
             name="Charge"
@@ -206,7 +230,7 @@ export const BottomTabNavigator = () => {
             options={{ ...chargeTabOptions, freezeOnBlur: true }}
           />
         )}
-        {!isBusinessAccount && (
+        {!isBusinessAccount && !isSmartAccount && (
           <Tabs.Screen
             name="Scan"
             component={ScanTab}
@@ -215,6 +239,7 @@ export const BottomTabNavigator = () => {
         )}
         {/* Comunidad moved into Invertir; news and Julian's posts live in the
             assistant bubble. The fourth tab is Comprar (marketplace). */}
+        {!isSmartAccount && (
         <Tabs.Screen
           name="Comprar"
           component={ComprarScreen}
@@ -235,6 +260,7 @@ export const BottomTabNavigator = () => {
             tabBarIcon: ({ color, size }) => <GuideAnchorView id="tab_comprar"><Icon name="shopping-bag" size={size} color={color} /></GuideAnchorView>,
           }}
         />
+        )}
         <Tabs.Screen 
           name="Profile" 
           component={ProfileScreen}

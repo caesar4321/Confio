@@ -1,4 +1,5 @@
 import { authenticateWithFace } from '../services/faceAuthentication';
+import { requireKeyedAccountType } from '../utils/accountManager';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -310,7 +311,7 @@ export const USDCConversionScreen = () => {
                 const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
                 const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
                 const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
-                await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
+                await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, requireKeyedAccountType(activeAccount?.type || 'personal'), activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
               }
               const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
               if (!optInResult.success) {

@@ -58,6 +58,23 @@ app.conf.beat_schedule.setdefault('marketplace-requeue-stuck-reviews', {
     'schedule': crontab(minute='*/10'),
 })
 
+# Cuenta inteligente (smart_account/tasks.py, spec 7.8). Every task is a no-op
+# unless SMART_ACCOUNT_ENABLED and SMART_ACCOUNT_FACTORY_ADDRESS are set.
+for _name, _task, _schedule in (
+    ('smart-account-reconcile-events', 'smart_account.reconcile_events', crontab(minute='*')),
+    ('smart-account-reconcile-relay-txs', 'smart_account.reconcile_relay_txs', crontab(minute='*/2')),
+    ('smart-account-collect-due-fees', 'smart_account.collect_due_fees', crontab(minute=7)),
+    ('smart-account-start-payment-notices', 'smart_account.start_payment_notices', crontab(minute=17)),
+    ('smart-account-run-forced-sales', 'smart_account.run_forced_sales', crontab(minute=27)),
+    ('smart-account-convert-usdt', 'smart_account.convert_usdt', crontab(minute='*/5')),
+    ('smart-account-run-rules', 'smart_account.run_rules', crontab(minute='*/5')),
+    ('smart-account-return-expired', 'smart_account.return_expired', crontab(minute=37)),
+    ('smart-account-claim-notices', 'smart_account.claim_notices', crontab(hour=14, minute=5)),
+    ('smart-account-sync-entitlements', 'smart_account.sync_entitlements', crontab(hour=6, minute=45)),
+    ('smart-account-latch-confio-sale', 'smart_account.latch_confio_sale', crontab(minute=47)),
+):
+    app.conf.beat_schedule.setdefault(_name, {'task': _task, 'schedule': _schedule})
+
 app.conf.beat_schedule.setdefault('fee-ledger-summary', {
     'task': 'cusd_plus.refresh_fee_ledger_summary',
     'schedule': crontab(minute='*/10'),

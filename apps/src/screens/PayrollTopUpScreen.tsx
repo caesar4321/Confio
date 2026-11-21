@@ -1,4 +1,5 @@
 import { authenticateWithFace } from '../services/faceAuthentication';
+import { requireKeyedAccountType } from '../utils/accountManager';
 import React, { useMemo, useState } from 'react';
 import {
   View,
@@ -262,7 +263,7 @@ const PayrollTopUpScreen = () => {
             oauthData.subject,
             aud,
             oauthData.provider,
-            activeAccount?.type || 'business',
+            requireKeyedAccountType(activeAccount?.type || 'business'),
             activeAccount?.index || 0,
             activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined
           );

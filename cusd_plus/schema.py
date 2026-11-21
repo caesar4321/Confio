@@ -2112,8 +2112,21 @@ class SponsorBscBatch(graphene.Mutation):
         # one batch. Personal contexts are unaffected: the permission check in
         # get_jwt_business_context_with_validation only applies to business ones.
         from users.jwt_context import get_jwt_business_context_with_validation
-        _ctx = get_jwt_business_context_with_validation(info, required_permission=None)
-        if _ctx and _ctx.get('account_type') == 'business':
+        # allow_smart: a Cuenta inteligente context has no key of its own. Its
+        # signer is the user's personal account, and in that context this
+        # endpoint executes ONLY batches the server prepared (checked below).
+        _ctx = get_jwt_business_context_with_validation(
+            info, required_permission=None, allow_smart=True)
+        smart_context = bool(_ctx and _ctx.get('account_type') == 'smart')
+        # A batch the server prepared for this user's Cuenta inteligente is
+        # signed with the PERSONAL key whatever the active context is (an
+        # owner cancels a claim from a business or employee session too). It
+        # is recognised by its request id here and fully validated below; it
+        # never moves the business's money, so the business permission and
+        # address do not apply to it.
+        from smart_account import relay_policy as _smart_policy
+        _smart_early = _smart_policy.early_action(user, request_id)
+        if _ctx and _ctx.get('account_type') == 'business' and _smart_early is None:
             if not get_jwt_business_context_with_validation(
                     info, required_permission='send_funds'):
                 return SponsorBscBatch(success=False, error='permission_denied')
@@ -2124,15 +2137,23 @@ class SponsorBscBatch(graphene.Mutation):
             return SponsorBscBatch(success=False, error='delegate_not_configured')
         # JWT-bound address: the intent must be signed by THIS account's
         # registered BSC key — never a client-supplied address.
-        user_addr = _active_bsc_address(info)
+        if smart_context or _smart_early is not None:
+            from smart_account.context import personal_account as _smart_signer_account
+            _signer_account = _smart_signer_account(user)
+            user_addr = (_signer_account.bsc_address or None) if _signer_account else None
+        else:
+            user_addr = _active_bsc_address(info)
         if not user_addr:
             return SponsorBscBatch(success=False, error='no_bsc_address')
         user_addr = user_addr.lower()
 
         # Normalize + structural caps. One extra slot for the optional
-        # leading fee-referral arm (cusd_plus/fee_referral.py); every policy
-        # below still sees at most 4 calls.
-        if not calls or len(calls) > 5:
+        # leading fee-referral arm (cusd_plus/fee_referral.py) and one for
+        # an optional trailing account.cancelClaim() (smart_account,
+        # spec 6.4); every policy below still sees at most 4 calls.
+        from smart_account.abi import SEL_CANCEL_CLAIM as _SEL_CANCEL_CLAIM
+        _max_calls = 5 + (1 if calls and (calls[-1].data or '').lower()[2:10] == _SEL_CANCEL_CLAIM else 0)
+        if not calls or len(calls) > _max_calls:
             return SponsorBscBatch(success=False, error='bad_batch_size')
         try:
             norm_calls = [{
@@ -2222,26 +2243,58 @@ class SponsorBscBatch(graphene.Mutation):
             base_calls = (strip_stored_arm(norm_calls) if recorded_replay
                           else strip_arm(norm_calls, user, user_addr,
                                          delegating=authorization is not None))
+            # A personal-wallet batch may end with cancelClaim() on the
+            # signer's own Cuenta inteligente (spec 6.4): set aside here so
+            # every flow-specific check below (the local-mint fee transfer,
+            # a Futuros return) sees exactly the calls it prepared. It is
+            # re-attached for the generic policy, which validates it, and is
+            # signed and broadcast with the rest.
+            _personal_cancel = None
+            if _smart_early is None and not smart_context:
+                base_calls, _personal_cancel = _smart_policy.split_personal_cancel_claim(
+                    base_calls, user, user_addr)
             if len(base_calls) > 4:
                 raise sponsor_7702.PolicyError('bad_batch_size')
             policy_calls = mint_policy_calls(base_calls, user, user_addr, request_id)
+            _checked_calls = policy_calls + ([_personal_cancel] if _personal_cancel else [])
             from . import perps_flow as _perps_flow
             # An exact replay (same request id, same calls) of a Futuros batch
             # already signed and recorded goes straight to the existing-batch
             # answer below (after the intent signature check): its transaction,
             # never a rejection by today's quote/state guards.
             perps_replay = _perps_flow.recorded_batch(user, norm_calls, request_id)
-            if perps_replay is None:
-                sponsor_7702.validate_policy(policy_calls, user, user_addr)
+            # Cuenta inteligente: the prepared action this batch must match,
+            # or None for a personal-wallet batch (smart_account/relay_policy).
+            _generic_calls, _is_account_batch = _smart_policy.split_generic(
+                _checked_calls, user, user_addr)
+            smart_action = None
+            if _smart_early is not None and not _is_account_batch:
+                # The request id names a prepared account batch but the
+                # calls are something else: never relay that as personal.
+                raise sponsor_7702.PolicyError('smart_action_mismatch')
+            if _is_account_batch:
+                if perps_replay is not None:
+                    raise sponsor_7702.PolicyError('bad_smart_batch')
+                smart_action = _smart_policy.validate_batch(
+                    policy_calls, user, user_addr, request_id)
+            elif smart_context:
+                # Dual enforcement: from an account context only account
+                # batches are relayed, never a personal-wallet flow.
+                raise sponsor_7702.PolicyError('smart_context_not_supported')
+            elif perps_replay is None:
+                sponsor_7702.validate_policy(
+                    _checked_calls, user, user_addr, request_id=request_id)
 
             # The generic savings rail's kind (and thus the intentId the user
             # signed) is derived from the selectors; the client derives the
             # SAME value. source_id is omitted (no domain row here).
-            kind = sponsor_7702.classify_calls_kind(norm_calls)
+            kind = (smart_action.kind if smart_action is not None
+                    else sponsor_7702.classify_calls_kind(norm_calls))
             # The kind the batch is STORED and settled as. It differs from
             # the signed intent kind only for a Futuros return, whose entry
             # calls are an ordinary mint (cusd_plus/perps_flow.return_kind).
-            stored_kind = (perps_replay.kind if perps_replay is not None
+            stored_kind = (smart_action.kind if smart_action is not None
+                           else perps_replay.kind if perps_replay is not None
                            else _perps_flow.return_kind(kind, base_calls, request_id, user))
             # A Futuros return is an exit that happens to mint, so it is not
             # capped; that is why this waits for the stored kind.
@@ -2296,6 +2349,14 @@ class SponsorBscBatch(graphene.Mutation):
                         if (a := sponsor_7702._decode_stock_call(c, historical=True)) is not None)
                     if review_cap_exceeded_wei(user, stock_debit):
                         return SponsorBscBatch(success=False, error='review_amount_cap')
+            if smart_action is not None and smart_action.kind == 'smart_trade':
+                # A trade inside a Cuenta inteligente gets the SAME entry
+                # gates as the personal stock/crypto rail above (complex
+                # products, review cap, crypto buy gates), re-run at submit.
+                smart_trade_refusal = _smart_policy.trade_refusal(
+                    smart_action, policy_calls, user, getattr(info.context, 'META', {}))
+                if smart_trade_refusal:
+                    return SponsorBscBatch(success=False, error=smart_trade_refusal)
             intent_id = sponsor_7702.intent_id_for(
                 kind, client_request_id=request_id or None)
             digest = sponsor_7702.intent_digest(
@@ -2314,6 +2375,12 @@ class SponsorBscBatch(graphene.Mutation):
                 kind in ('wrap_cusd', 'unwrap_to_cusd', 'mint_cusd')
                 or (kind == 'redeem'
                     and sponsor_7702.SEL_CUSD_REDEEM in selectors)
+                # Cuenta inteligente: the app's generic intent classifier
+                # (evmWallet.deriveIntentId) does not know the account
+                # selectors and signs such a batch as `subscribe`. The exact
+                # calls, nonce and deadline are bound by EIP-712 and the
+                # batch already byte-matched its prepared action.
+                or smart_action is not None
             )
             if signer != user_addr and legacy_subscribe_intent:
                 legacy_intent_id = sponsor_7702.intent_id_for(
@@ -2417,7 +2484,14 @@ class SponsorBscBatch(graphene.Mutation):
             # clients have no slot: include nonce/deadline via the digest so
             # a fresh signed transfer cannot reuse this approval. The legacy
             # signature compatibility branch binds the same calls and nonce.
-            step_up = claim_external_outflow(
+            # A prepared account batch never leaves the signer's own two
+            # addresses unchecked (deposit recipients are pinned by the
+            # policy). Face for a send rule, a bank payment rule or a
+            # beneficiary designation is claimed when it is prepared, bound
+            # to its terms, and re-checked here by that same action key
+            # (relay_policy.face_refusal); no other account batch moves
+            # money to anyone but the owner.
+            step_up = (_smart_policy.face_refusal(smart_action, user) or '') if smart_action is not None else claim_external_outflow(
                 user, _ctx, policy_calls, user_addr,
                 namespace='bsc_sponsor', identifier=request_id or digest.hex(),
                 # Keyed WITHOUT the fee-referral arm: a resend without it (the
@@ -2434,11 +2508,22 @@ class SponsorBscBatch(graphene.Mutation):
                 client_request_id=request_id, intent_id=intent_id,
                 # Futuros: the position and its batch commit together,
                 # before broadcast (perps_flow.link_signed).
-                persist_signed=(_perps_flow.link_signed if stored_kind in _perps_flow.PERPS_KINDS
+                persist_signed=(_smart_policy.persist_signed_for(smart_action)
+                                if smart_action is not None
+                                else _perps_flow.link_signed if stored_kind in _perps_flow.PERPS_KINDS
                                 else persist_local_fee if request_id.startswith('local-mint-')
                                 else _persist_savings_mint if request_id.startswith('savings-mint-')
                                 else None))
             broadcast_tx_hash = tx_hash  # past the point of no return
+            if smart_action is not None:
+                # Past the broadcast: never raise. The account's holdings are
+                # not storable while this batch is on the wire.
+                try:
+                    from smart_account import inflight as _smart_inflight
+                    _smart_inflight.on_broadcast(smart_action)
+                except Exception:  # noqa: BLE001
+                    logger.warning('smart account post-broadcast invalidation failed for %s',
+                                   user_addr, exc_info=True)
             if kind in ('stock_buy', 'stock_sell'):
                 # Drop only fresh values (no scan is cached while this trade
                 # is on the wire: gm_holdings asks the database). Not if it

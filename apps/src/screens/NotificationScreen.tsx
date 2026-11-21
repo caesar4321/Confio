@@ -24,6 +24,7 @@ import { InlineBanner } from '../components/common/InlineBanner';
 import { IconChip } from '../components/icons/IconChip';
 import { notificationVisual } from '../components/icons/vocabulary';
 import { Header } from '../navigation/Header';
+import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
 
 const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
   REFERRAL_EVENT_TOP_UP: 'top_up',
@@ -330,6 +331,36 @@ export const NotificationScreen = () => {
         });
       } catch (error) {
       }
+    }
+
+    // Cuenta inteligente notifications name their screen in the data. First:
+    // some are security alerts, which would otherwise open Verification.
+    const smartTarget = smartNotificationRoute(notification.data);
+    if (smartTarget) {
+      // From a business context (owner or employee) the person's Cuenta
+      // inteligente is not reachable: switch first, the same deferred switch
+      // a push uses (HomeScreen performs it), then open the screen.
+      let switchTo: string | null = null;
+      try {
+        const { AuthService } = await import('../services/authService');
+        const current = await AuthService.getInstance().getActiveAccountContext();
+        switchTo = smartNotificationSwitchTarget(notification.data, current);
+      } catch {
+        switchTo = null;
+      }
+      if (switchTo) {
+        const { PushNotificationService } = await import('../services/pushNotificationService');
+        const RootNavigation = await import('../navigation/RootNavigation');
+        PushNotificationService.deferSwitchThenNavigate(switchTo, () => {
+          (RootNavigation.navigationRef as any).navigate('Main', {
+            screen: smartTarget.screen,
+            params: smartTarget.params,
+          });
+        });
+        return;
+      }
+      (navigation as any).navigate(smartTarget.screen, smartTarget.params);
+      return;
     }
 
     // Handle navigation based on notification type/actionUrl/related object

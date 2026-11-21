@@ -130,8 +130,22 @@ def allowed_destinations(viewer: Viewer, *, paid_offers_allowed=True):
     from users import paid_offers
     keys = [k for k in keys if k not in PAID_OFFERS or paid_offers.available(
         PAID_OFFERS[k], is_employee=viewer.is_employee, meta=viewer.request_meta,
-        user_id=getattr(viewer.user, 'pk', None))]
+        user_id=getattr(viewer.user, 'pk', None))
+        # Cuenta inteligente is sold, not only pitched: whoever can subscribe
+        # keeps the door when the waitlist probe is switched off.
+        or (k == 'cuenta_inteligente' and _smart_account_open(viewer))]
     return keys
+
+
+def _smart_account_open(viewer) -> bool:
+    from users import paid_offers
+    try:
+        return paid_offers.can_subscribe(
+            viewer.user, is_employee=viewer.is_employee, account_type=viewer.account_type,
+            meta=viewer.request_meta)
+    except Exception:  # noqa: BLE001 — a hidden door, never a failed turn
+        logger.warning('smart account door check failed', exc_info=True)
+        return False
 
 
 def _phone_eligible(viewer):
@@ -1637,6 +1651,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         can_navigate=belt.can_navigate,
         ia_plus_bundled=('cuenta_inteligente' in belt.destinations and paid_offers.ia_plus_bundled(
             meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
+        smart_account_open=('cuenta_inteligente' in belt.destinations and _smart_account_open(viewer)),
         identity=_identity_status(viewer),
         ve_topup=_ve_topup(viewer, country),
         ve_send=_ve_send(viewer, country),

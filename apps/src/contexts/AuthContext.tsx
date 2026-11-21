@@ -539,7 +539,18 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       if (isAuthenticated) {
         try {
           const authService = AuthService.getInstance();
-          const accountContext = await authService.getActiveAccountContext();
+          let accountContext = await authService.getActiveAccountContext();
+
+          // A stored Cuenta inteligente context: the token must name that
+          // account, or the app returns to the personal wallet (never a smart
+          // home over another account's token).
+          if (accountContext.type === 'smart') {
+            const smartSync = await authService.ensureSmartContextToken(apolloClient);
+            accountContext = await authService.getActiveAccountContext();
+            if (smartSync === 'reset') {
+              setAccountContextTick((t) => t + 1);
+            }
+          }
 
           // CRITICAL: Sync JWT token with stored active account context on app startup
           // This ensures the JWT has the correct business context after app restart
@@ -1126,7 +1137,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             let accessToken = tokens.accessToken;
             const refreshToken = tokens.refreshToken;
             let startupAccountContext: {
-              type: 'personal' | 'business';
+              type: 'personal' | 'business' | 'smart';
               index: number;
               businessId?: string;
             } | null = null;

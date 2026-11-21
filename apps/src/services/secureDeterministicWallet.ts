@@ -296,9 +296,20 @@ export async function getActiveEvmWallet(
   }
 
   let ctx = ctxOverride;
+  // A Cuenta inteligente (own or inherited) is a contract with no key: its
+  // owner is the personal wallet, so the signer is ALWAYS personal_0. Treated
+  // like an explicit override below so the personal address is never cached
+  // as "the active account's address" while a smart context is active.
+  let signsForSmartContext = false;
   if (!ctx) {
     const { AuthService } = await import('./authService');
-    ctx = await AuthService.getInstance().getActiveAccountContext();
+    const active = await AuthService.getInstance().getActiveAccountContext();
+    if (active.type === 'smart') {
+      signsForSmartContext = true;
+      ctx = { type: 'personal', index: 0 };
+    } else {
+      ctx = { type: active.type, index: active.index, businessId: active.businessId };
+    }
   }
 
   const masterSecret = await getOrCreateMasterSecret(oauth.subject, undefined, {
@@ -312,7 +323,7 @@ export async function getActiveEvmWallet(
     businessId: ctx.businessId,
   } as const;
   const wallet = deriveEvmKeyFromMasterSecret(masterSecret, opts);
-  if (ctxOverride) {
+  if (ctxOverride || signsForSmartContext) {
     // Emergency-exit sweep of a non-active account: persist the address
     // per-account but do NOT clobber the "last derived" slot the ramp and
     // vault flows read for the ACTIVE account.

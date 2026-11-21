@@ -164,6 +164,24 @@ def _notify_recipient_needs_app(recipient_user, sender_user) -> None:
         logger.exception('recipient-needs-app notification failed')
 
 
+# Code returned to the app; SMART_ACCOUNT_RECIPIENT_MESSAGE is its copy.
+SMART_ACCOUNT_RECIPIENT_ERROR = 'recipient_is_smart_account'
+SMART_ACCOUNT_RECIPIENT_MESSAGE = (
+    'Esa dirección es una Cuenta inteligente. Para agregar dólares, usa "Agregar" dentro de la Cuenta '
+    'inteligente; no se puede enviar a ella desde aquí.')
+
+
+def _is_smart_account_address(addr: str) -> bool:
+    """A Cuenta inteligente contract: any 'smart' users.Account row (live or
+    closed, e.g. inherited away), any SmartAccount mirror row, or an address
+    handed out for an account not created yet (a prepared subscribe)."""
+    from smart_account.models import SmartAccount, SmartAccountPreparedAction
+    from users.models import Account
+    return (Account.all_objects.filter(account_type='smart', bsc_address__iexact=addr).exists()
+            or SmartAccount.all_objects.filter(contract_address__iexact=addr).exists()
+            or SmartAccountPreparedAction.objects.filter(target_address__iexact=addr).exists())
+
+
 def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
     """Mirror of the Algorand rail's priority (blockchain/mutations.py):
     user id → phone (any client shape) → raw 0x address. Returns
@@ -196,6 +214,11 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
         if not EVM_ADDR_RE.match(recipient_address):
             return None, None, None, 'invalid_recipient_address'
         addr = recipient_address.lower()
+        if _is_smart_account_address(addr):
+            # A Cuenta inteligente is a contract, not a wallet: money goes in
+            # only through the account's own deposit flow (smart_account),
+            # never as a send that would credit it as a person.
+            return None, None, None, SMART_ACCOUNT_RECIPIENT_ERROR
         # Serialize reverse lookup with reenrollment. A concurrent address
         # replacement either sees the later SendTransaction reservation or
         # commits its tombstone before this lookup is allowed to continue.
@@ -203,7 +226,7 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
             match = Account.objects.select_for_update(of=('self',)).filter(
                 bsc_address__iexact=addr,
                 deleted_at__isnull=True,
-            ).select_related('user', 'business').first()
+            ).exclude(account_type='smart').select_related('user', 'business').first()
             if RetiredWalletAddress.is_retired(
                 RetiredWalletAddress.CHAIN_BSC,
                 addr,
@@ -840,6 +863,11 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         from cusd_plus.fee_referral import arm_calls_for, has_fee_bearing_call
         if has_fee_bearing_call(calls):
             calls = arm_calls_for(user, sender_addr) + calls
+    # Cuenta inteligente (spec 6.4): while a claim is pending on the
+    # sender's own account, the send they sign also cancels it. Owner key
+    # only; submit sets it aside before the byte-exact rebuild below.
+    from smart_account.relay_policy import pending_cancel_claim_calls
+    calls = calls + pending_cancel_claim_calls(user, sender_addr)
 
     with transaction.atomic():
         if recipient_user is not None or recipient_business is not None:
@@ -1164,8 +1192,10 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
 
     try:
         from cusd_plus.fee_referral import strip_stored_arm
-        # Prepare decided the arm; submit only shape-checks it.
-        _validate_send_batch(strip_stored_arm(calls), send_tx, meta)
+        from smart_account.relay_policy import strip_cancel_claim
+        # Prepare decided the arm; submit only shape-checks it. A trailing
+        # cancelClaim must be exactly the sender's own account's.
+        _validate_send_batch(strip_stored_arm(strip_cancel_claim(calls, user, sender_addr)), send_tx, meta)
 
         intent_id = sponsor_7702.intent_id_for(kind, send_tx.id)
         digest = sponsor_7702.intent_digest(

@@ -429,9 +429,16 @@ def submit_action(user, order, action: str, nonce: int, deadline: int,
         if action == 'deposit':
             validate_deposit_calls(calls, order)
         intent_id = sponsor_7702.intent_id_for(kind, order.pk)
-        digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), signer_addr,
-                                            chain_id(), intent_id)
-        if sponsor_7702.recover_intent_signer(digest, intent_signature) != signer_addr:
+        # The actor's batch may end with cancelClaim() on their own Cuenta
+        # inteligente (spec 6.4): the signature says which one was signed.
+        from smart_account.relay_policy import signed_variants
+        for variant in signed_variants(calls, user, signer_addr):
+            digest = sponsor_7702.intent_digest(variant, int(nonce), int(deadline), signer_addr,
+                                                chain_id(), intent_id)
+            if sponsor_7702.recover_intent_signer(digest, intent_signature) == signer_addr:
+                calls = variant
+                break
+        else:
             return {'success': False, 'error': 'bad_intent_signature'}
         auth_dict = None
         if not sponsor_7702.is_delegated(signer_addr):

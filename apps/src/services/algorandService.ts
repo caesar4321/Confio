@@ -1,4 +1,5 @@
 import * as Keychain from 'react-native-keychain';
+import { requireKeyedAccountType } from '../utils/accountManager';
 import { secureDeterministicWallet } from './secureDeterministicWallet';
 import { jwtDecode } from 'jwt-decode';
 import { Buffer } from 'buffer'; // RN polyfill for base64
@@ -239,7 +240,7 @@ class AlgorandService {
           sub,
           aud,
           provider,
-          accountContext.type,
+          requireKeyedAccountType(accountContext.type),
           accountContext.index,
           accountContext.businessId
         );
@@ -414,7 +415,7 @@ class AlgorandService {
         sub,
         aud,
         provider,
-        accountContext.type,
+        requireKeyedAccountType(accountContext.type),
         accountContext.index,
         accountContext.businessId
       );

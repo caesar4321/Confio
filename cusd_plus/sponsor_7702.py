@@ -587,6 +587,15 @@ def classify_calls_kind(calls: list) -> str:
 
     from .perps_flow import classify as perps_classify
 
+    # Cuenta inteligente (smart_account/): account and factory functions have
+    # their own selectors, so this can never reclassify an existing batch. A
+    # pure deposit (ERC-20 transfers only) is indistinguishable here; its kind
+    # comes from the prepared action (SponsorBscBatch).
+    from smart_account import abi as smart_abi
+    smart_kind = smart_abi.classify(calls)
+    if smart_kind:
+        return smart_kind
+
     # Futuros first: a Relay-deposit batch also carries an exit.
     perps_kind = perps_classify(calls)
     if perps_kind:
@@ -613,7 +622,7 @@ def classify_calls_kind(calls: list) -> str:
     return 'subscribe'
 
 
-def validate_policy(calls: list, user, user_addr: str) -> None:
+def validate_policy(calls: list, user, user_addr: str, *, request_id: Optional[str] = None) -> None:
     """Raise PolicyError unless every call is an allowlisted vault-flow
     action for THIS user. calls: [{'to','value','data'}] normalized lower.
 
@@ -622,6 +631,20 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
     vault = _vault_address()
     if not vault:
         raise PolicyError('vault_not_configured')
+
+    # Cuenta inteligente (spec 7.4). A batch that touches an account contract
+    # (a call to it, a transfer into it, the factory's createAccount) is
+    # accepted ONLY when it byte-matches a batch the server prepared for this
+    # user; nothing below runs for it. A personal-wallet batch may end with
+    # cancelClaim() on the signer's own account: that single call is set
+    # aside and every existing branch below validates the rest unchanged.
+    from smart_account import relay_policy as smart_policy
+    original_calls = calls
+    calls, is_account_batch = smart_policy.split_generic(calls, user, user_addr)
+    if is_account_batch:
+        smart_policy.validate_batch(calls, user, user_addr, request_id)
+        return
+    smart_policy.require_cancel_claim_generic(original_calls, user, user_addr)
     user_word = user_addr.lower().replace('0x', '').rjust(64, '0')
     cusd = _cusd_address()
 
@@ -877,10 +900,14 @@ def _pay_v4_gas(data: str) -> int:
 
 
 def gas_budget(calls: list, num_authorizations: int) -> int:
+    from smart_account import abi as smart_abi
     total = GAS_BASE + GAS_PER_AUTHORIZATION * num_authorizations + GAS_EXECUTE_OVERHEAD
     for c in calls:
         sel = c['data'][2:10].lower()
-        if sel == SEL_PAY_V4:
+        smart_gas = smart_abi.gas_for_call(c)
+        if smart_gas is not None:
+            total += smart_gas
+        elif sel == SEL_PAY_V4:
             total += _pay_v4_gas(c['data'])
         else:
             total += GAS_PER_SELECTOR.get(sel, 100_000)
@@ -1129,7 +1156,17 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
                     # every other escrow action settles funds already escrowed
                     # (a held buyer must still be able to take a refund back).
                     'market_ship', 'market_confirm', 'market_dispute',
-                    'market_refund', 'market_reclaim'}:
+                    'market_refund', 'market_reclaim',
+                    # Cuenta inteligente: moves between the signer's own two
+                    # addresses, trades inside the account, cancelling (the
+                    # subscription or a rule: smart_rule_cancel is cancelRule
+                    # alone, smart_account/abi.py), and
+                    # the protective calls an owner must never be refused
+                    # (cancelClaim, removing a beneficiary). Subscribing,
+                    # rules and designations stay under the identity hold.
+                    'smart_deposit', 'smart_withdraw', 'smart_trade', 'smart_cancel',
+                    'smart_rule_cancel', 'smart_beneficiary_remove', 'smart_claim',
+                    'smart_inherited_withdraw'}:
         from security.identity_reuse import outgoing_identity_restriction
         restriction = outgoing_identity_restriction(user)
         if restriction:

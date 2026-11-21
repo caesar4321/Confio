@@ -79,6 +79,23 @@ import PayrollRunScreen from '../screens/PayrollRunScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { MonthSummaryScreen } from '../screens/MonthSummaryScreen';
 import { PaidOfferScreen } from '../screens/PaidOfferScreen';
+import { SmartAccountOfferScreen } from '../screens/SmartAccountOfferScreen';
+import { SmartAccountFundScreen } from '../screens/SmartAccountFundScreen';
+import { SmartAccountHomeScreen } from '../screens/SmartAccountHomeScreen';
+import { SmartAccountMoveScreen } from '../screens/SmartAccountMoveScreen';
+import { SmartAccountRulesScreen } from '../screens/SmartAccountRulesScreen';
+import { SmartAccountRuleEditScreen } from '../screens/SmartAccountRuleEditScreen';
+import { SmartAccountBillingScreen } from '../screens/SmartAccountBillingScreen';
+import { SmartAccountChargesScreen } from '../screens/SmartAccountChargesScreen';
+import { SmartAccountCancelScreen } from '../screens/SmartAccountCancelScreen';
+import { BeneficiarySetupScreen } from '../screens/BeneficiarySetupScreen';
+import { BeneficiaryStatusScreen } from '../screens/BeneficiaryStatusScreen';
+import { BeneficiaryInviteScreen } from '../screens/BeneficiaryInviteScreen';
+import { BeneficiaryClaimScreen } from '../screens/BeneficiaryClaimScreen';
+import { BeneficiaryClaimStatusScreen } from '../screens/BeneficiaryClaimStatusScreen';
+import { BeneficiaryDesignationsScreen } from '../screens/BeneficiaryDesignationsScreen';
+import { InheritedAccountScreen } from '../screens/InheritedAccountScreen';
+import { SmartAccountClaimAlertHost } from '../components/smartAccount/SmartAccountClaimAlertHost';
 import { MonthMovementsScreen } from '../screens/MonthMovementsScreen';
 import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
@@ -691,6 +708,27 @@ export const MainNavigator = () => {
           component={PaidOfferScreen}
           options={{ headerShown: false }}
         />
+        {/* Cuenta inteligente. Each screen draws the shared Header itself. */}
+        <Stack.Screen name="SmartAccountOffer" component={SmartAccountOfferScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="SmartAccountFund" component={SmartAccountFundScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="SmartAccountHome" options={{ headerShown: false, animation: 'slide_from_right' }}>
+          {() => <SmartAccountHomeScreen />}
+        </Stack.Screen>
+        <Stack.Screen name="SmartAccountMove" component={SmartAccountMoveScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="SmartAccountRules" component={SmartAccountRulesScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="SmartAccountRuleEdit" component={SmartAccountRuleEditScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="SmartAccountBilling" component={SmartAccountBillingScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="SmartAccountCharges" component={SmartAccountChargesScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="SmartAccountCancel" component={SmartAccountCancelScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="BeneficiarySetup" component={BeneficiarySetupScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="BeneficiaryStatus" component={BeneficiaryStatusScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="BeneficiaryInvite" component={BeneficiaryInviteScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="BeneficiaryClaim" component={BeneficiaryClaimScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="BeneficiaryClaimStatus" component={BeneficiaryClaimStatusScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="BeneficiaryDesignations" component={BeneficiaryDesignationsScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="InheritedAccount" options={{ headerShown: false, animation: 'slide_from_right' }}>
+          {() => <InheritedAccountScreen />}
+        </Stack.Screen>
         <Stack.Screen
           name="MonthMovements"
           component={MonthMovementsScreen}
@@ -920,6 +958,9 @@ export const MainNavigator = () => {
       <TopUpExitQuestionHost />
       <MigrationModal />
       <OnboardingModalCoordinator />
+      {/* A beneficiary's pending claim on the viewer's Cuenta inteligente:
+          over every screen, in every account context, until it is cancelled. */}
+      <SmartAccountClaimAlertHost />
     </AssistantProvider>
   );
 };

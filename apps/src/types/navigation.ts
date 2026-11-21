@@ -346,6 +346,27 @@ export type MainStackParamList = {
   MonthSummary: { year?: number; month?: number; masked?: boolean } | undefined;
   // Paid-offer probe pitch (waitlist only): which offer, and where it was opened.
   PaidOffer: { offer: 'ia_plus' | 'smart_account'; door?: 'billeteras' | 'assistant_header' | 'chip'; trigger?: string };
+  // Cuenta inteligente (docs/designs/cuenta-inteligente-spec.md, section 8.2).
+  // No account id or address travels in a route: the JWT names the viewer, and
+  // designationId / inheritedAccountId are opaque ids the server issued.
+  SmartAccountOffer: { door?: 'billeteras' | 'assistant_header' | 'chip'; trigger?: string } | undefined;
+  SmartAccountFund: { plan: string };
+  SmartAccountHome: undefined;
+  SmartAccountMove: { direction?: 'in' | 'out' } | undefined;
+  SmartAccountRules: undefined;
+  SmartAccountRuleEdit: { ruleId?: string; kind?: 'send' | 'payout' | 'buy' } | undefined;
+  SmartAccountBilling: undefined;
+  SmartAccountCharges: undefined;
+  SmartAccountCancel: undefined;
+  BeneficiarySetup: { handle?: string; name?: string; windowDays?: number } | undefined;
+  BeneficiaryStatus: undefined;
+  BeneficiaryInvite: { designationId: string };
+  /** `account`: the device-stored address, when opened without the server. */
+  BeneficiaryClaim: { designationId: string; account?: string };
+  BeneficiaryClaimStatus: { designationId: string };
+  /** Two or more designations: the list, each row opening its own screen. */
+  BeneficiaryDesignations: undefined;
+  InheritedAccount: { inheritedAccountId?: string; contractAddress?: string } | undefined;
   MonthMovements: {
     year: number;
     month: number;

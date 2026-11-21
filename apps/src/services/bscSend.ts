@@ -100,6 +100,10 @@ export const BSC_SEND_ERRORS: Record<string, string> = {
   recipient_not_on_confio:
     'Ese número no está en Confío todavía.',
   invalid_recipient_address: 'La dirección no es válida.',
+  // send/bsc_flow.py: a Cuenta inteligente is funded only from its owner's
+  // own wallet, through the account's flow.
+  recipient_is_smart_account:
+    'Esa dirección es una Cuenta inteligente. Envíale a la persona por su número o usuario de Confío.',
   self_send_not_allowed: 'Esa dirección es tuya — elige otro destinatario.',
   insufficient_balance: 'Saldo insuficiente.',
   invalid_activation_payment: 'La cuenta aún no está lista para el pago. Vuelve a revisar la apertura.',

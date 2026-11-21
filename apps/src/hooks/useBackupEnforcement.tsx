@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { AccountManager, requireKeyedAccountType } from '../utils/accountManager';
 import { Platform, Alert, ActivityIndicator, Modal, StyleSheet, View } from 'react-native';
 import { Text } from '../components/common/AppText';
 import { useAuth } from '../contexts/AuthContext';
@@ -174,7 +175,17 @@ export const useBackupEnforcement = () => {
                 const { getActiveEvmWallet } = await import('../services/secureDeterministicWallet');
                 // Derive from the recovered secret, never from a display cache.
                 // This refuses to generate a replacement secret when one is absent.
-                const localWallet = await getActiveEvmWallet(activeContext);
+                // A Cuenta inteligente has no key: its signer is personal_0.
+                const localWallet = await getActiveEvmWallet(
+                    AccountManager.getInstance().getSigningContext(activeContext));
+                if (activeContext.type === 'smart') {
+                    // The registered address of a smart context is the
+                    // CONTRACT, so there is nothing to compare the signer
+                    // with here. Deriving above already proved this device
+                    // holds the owner's secret, and the delegate re-verifies
+                    // the owner's signature on-chain for every batch.
+                    return true;
+                }
                 const { data } = await apolloClient.query({
                     query: GET_INBOUND_BSC_ADDRESS,
                     fetchPolicy: 'no-cache',
@@ -257,7 +268,7 @@ export const useBackupEnforcement = () => {
                 oauthData.subject,
                 aud,
                 provider,
-                activeContext.type,
+                requireKeyedAccountType(activeContext.type),
                 activeContext.index,
                 activeContext.businessId
             );

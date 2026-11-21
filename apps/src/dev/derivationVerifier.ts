@@ -1,5 +1,5 @@
 import { SecureDeterministicWalletService } from '../services/secureDeterministicWallet';
-import { AccountManager } from '../utils/accountManager';
+import { AccountManager, requireKeyedAccountType } from '../utils/accountManager';
 import authService from '../services/authService';
 import { oauthStorage } from '../services/oauthStorageService';
 import { GOOGLE_CLIENT_IDS } from '../config/env';
@@ -66,7 +66,7 @@ export async function verifyDerivationForActiveContext(): Promise<DerivationVeri
       oauthData.subject,
       aud,
       provider,
-      accountContext.type,
+      requireKeyedAccountType(accountContext.type),
       accountContext.index,
       accountContext.businessId
     );

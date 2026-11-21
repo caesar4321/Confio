@@ -1,8 +1,11 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useApolloClient, useQuery } from '@apollo/client';
 import { GET_USER_ACCOUNTS } from '../apollo/queries';
 import { AuthService } from '../services/authService';
 import { AccountManager, StoredAccount, AccountContext } from '../utils/accountManager';
+import {
+  mergeSmartAccounts, rememberKnownSmartAccounts, shouldReadSmartAccounts, smartPlaceholderAccount,
+} from '../utils/smartAccounts';
 import { useAuth } from '../contexts/AuthContext';
 import { waitForAuthReady } from '../contexts/AuthContext';
 
@@ -35,6 +38,11 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const [isLoading, setIsLoading] = useState(false); // Start as false since query handles loading
   const [activeAccountContext, setActiveAccountContext] = useState<AccountContext | null>(null);
   const [authGatePassed, setAuthGatePassed] = useState(false);
+  // Cuenta inteligente entries (own + inherited). Kept apart from the keyed
+  // roster: they come from the product's own isolated queries, have no key
+  // and no derived address, and never enter the emergency-exit roster.
+  const [smartAccounts, setSmartAccounts] = useState<StoredAccount[]>([]);
+  const smartAccountsRef = useRef<StoredAccount[]>([]);
 
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
@@ -51,9 +59,19 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const ensureActiveAccountFrom = useCallback(async (list: StoredAccount[]) => {
     try {
       const ctx = await authService.getActiveAccountContext();
-      const expectedId = ctx.type === 'business' && ctx.businessId
-        ? `business_${ctx.businessId}_${ctx.index}`
-        : `personal_${ctx.index}`;
+      if (ctx.type === 'smart') {
+        // No address is derived for a Cuenta inteligente, and it must never
+        // fall back to list[0] (the personal wallet): the tabs would then
+        // show the personal home over a smart token.
+        const smartId = accountManager.contextToAccountId(ctx);
+        const smartPick = smartAccountsRef.current.find(a => a.id === smartId) || smartPlaceholderAccount(ctx);
+        setActiveAccount(prev => (
+          prev && prev.id === smartPick.id && prev.smart?.contractAddress === smartPick.smart?.contractAddress
+            ? prev : smartPick
+        ));
+        return;
+      }
+      const expectedId = accountManager.contextToAccountId(ctx);
       const pick = list.find(a => a.id === expectedId) || list[0];
       if (pick) {
         // Pass context explicitly to ensure address matches the account we're picking
@@ -69,6 +87,29 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         setActiveAccount({ ...pick, algorandAddress: addr ?? '' });
       }
     } catch { }
+  }, [authService, accountManager]);
+
+  // Own and inherited Cuenta inteligente entries. A failed read keeps what
+  // was already known for that half: "could not ask" is not "has none".
+  // In a business (owner or employee) context the smart reads are not run:
+  // they would be asked with a business token, and a refusal must not erase
+  // the personal smart entries. What was known is kept as is.
+  const loadSmartAccounts = useCallback(async (): Promise<StoredAccount[]> => {
+    try {
+      const ctx = await authService.getActiveAccountContext().catch(() => null);
+      if (!shouldReadSmartAccounts(ctx)) {
+        return smartAccountsRef.current;
+      }
+      const { fetchSmartAccountEntry, fetchInheritedAccounts } = await import('../services/smartAccount');
+      const [own, inherited] = await Promise.all([fetchSmartAccountEntry(), fetchInheritedAccounts()]);
+      const next = mergeSmartAccounts(smartAccountsRef.current, own, inherited);
+      smartAccountsRef.current = next;
+      rememberKnownSmartAccounts(next);
+      setSmartAccounts(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+      return next;
+    } catch {
+      return smartAccountsRef.current;
+    }
   }, [authService]);
 
   // Delay any server-bound account queries until the auth gate is truly ready
@@ -91,6 +132,10 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const convertServerAccounts = useCallback((serverAccounts: any[]): StoredAccount[] => {
     const converted: StoredAccount[] = serverAccounts
       .filter((acc: any) => acc != null)
+      // A Cuenta inteligente row (account_type 'smart') is not a keyed
+      // account: it is listed from the product's own queries
+      // (loadSmartAccounts), never given a business-style id or a key here.
+      .filter((acc: any) => String(acc.accountType || '').toLowerCase() !== 'smart')
       .map((serverAcc: any) => {
         const displayName = serverAcc.displayName || 'Account';
         const avatar = serverAcc.avatarLetter || displayName.charAt(0).toUpperCase();
@@ -179,7 +224,9 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       }
 
       // Find the active account by exact ID match
-      const active = convertedAccounts.find(acc => acc.id === expectedActiveAccountId);
+      const active = activeContext.type === 'smart'
+        ? undefined
+        : convertedAccounts.find(acc => acc.id === expectedActiveAccountId);
 
       if (active) {
         // Get the address for the active account (may already be computed)
@@ -217,14 +264,15 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       try { await waitForAuthReady(); } catch { }
       // Seed fast placeholder into AccountContext so UI never empties
       try {
-        const ctx = await authService.getActiveAccountContext();
+        const activeCtx = await authService.getActiveAccountContext();
+        // The seed keeps the keyed roster from ever being empty; in a smart
+        // context that roster entry is the personal wallet (the owner).
+        const ctx: AccountContext = activeCtx.type === 'smart' ? { type: 'personal', index: 0 } : activeCtx;
         const seedName = ctx.type === 'business'
           ? (profileData?.businessProfile?.name || 'Negocio')
           : (profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal');
         const seedAvatar = (seedName || 'N').charAt(0).toUpperCase();
-        const seedId = ctx.type === 'business' && ctx.businessId
-          ? `business_${ctx.businessId}_${ctx.index}`
-          : `personal_${ctx.index}`;
+        const seedId = accountManager.contextToAccountId(ctx);
         const seed: StoredAccount = {
           id: seedId,
           name: seedName,
@@ -265,6 +313,9 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       }
 
       const converted = dedupeById(convertServerAccounts(serverAccounts));
+      // Before the active account is resolved: a smart context needs its own
+      // entry (contract address, inherited or not) to resolve against.
+      await loadSmartAccounts();
 
       // Always provide at least one safe placeholder so header/menu never disappears.
       // If we have a business profile available, include it too so the menu shows both entries.
@@ -276,7 +327,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         import('../services/emergencyExit/accountRoster').then(async ({ saveAccountRoster }) => {
           const { emergencyStore } = await import('../services/emergencyExit/store');
           await saveAccountRoster(emergencyStore, converted.map(a => ({
-            type: a.type,
+            // convertServerAccounts drops smart rows: only keyed accounts here.
+            type: a.type === 'business' ? 'business' as const : 'personal' as const,
             index: a.index,
             businessId: a.business?.id,
             name: a.name,
@@ -331,13 +383,14 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       // ensure one from the active context — never clobbering an already
       // hydrated activeAccount on a transient failure.
       try {
-        const ctx = await authService.getActiveAccountContext();
+        const activeCtx = await authService.getActiveAccountContext();
+        const ctx: AccountContext = activeCtx.type === 'smart' ? { type: 'personal', index: 0 } : activeCtx;
         const name = ctx.type === 'business'
           ? (profileData?.businessProfile?.name || 'Negocio')
           : (profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal');
         const addr = await authService.getAlgorandAddress({ type: ctx.type, index: ctx.index, businessId: ctx.businessId });
         const fallback: StoredAccount = {
-          id: ctx.type === 'business' && ctx.businessId ? `business_${ctx.businessId}_${ctx.index}` : `personal_${ctx.index}`,
+          id: accountManager.contextToAccountId(ctx),
           name,
           type: ctx.type,
           index: ctx.index,
@@ -355,10 +408,16 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           } : undefined,
         } as StoredAccount;
         setAccounts(prev => (prev.length > 0 ? prev : [fallback]));
-        setActiveAccount(prev => prev ?? fallback);
+        // A smart context stays a smart context when the server is away: the
+        // personal entry above is only the roster fallback.
+        const activeFallback = activeCtx.type === 'smart'
+          ? (smartAccountsRef.current.find(a => a.id === accountManager.contextToAccountId(activeCtx))
+            || smartPlaceholderAccount(activeCtx))
+          : fallback;
+        setActiveAccount(prev => prev ?? activeFallback);
       } catch { }
     }
-  }, [apolloClient, convertServerAccounts, profileData?.userProfile?.firstName, profileData?.userProfile?.username, dedupeById, ensureActiveAccountFrom]);
+  }, [apolloClient, convertServerAccounts, profileData?.userProfile?.firstName, profileData?.userProfile?.username, dedupeById, ensureActiveAccountFrom, loadSmartAccounts, accountManager]);
 
   // Load accounts on mount and when server data changes
   useEffect(() => {
@@ -497,6 +556,23 @@ export const useAccountManager = (): UseAccountManagerReturn => {
             } : undefined,
           };
         });
+
+      if (accountId.startsWith('smart_')) {
+        // A Cuenta inteligente: no address to compute, the personal profile
+        // stays, and the switch fails closed inside authService.
+        const smartTarget = smartAccountsRef.current.find(acc => acc.id === accountId);
+        if (!smartTarget) {
+          throw new Error('Cuenta no encontrada');
+        }
+        await authService.switchAccount(smartTarget.id, apolloClient);
+        setActiveAccount(smartTarget);
+        setActiveAccountContext(await authService.getActiveAccountContext());
+        try {
+          await apolloClient.clearStore();
+          await apolloClient.reFetchObservableQueries();
+        } catch { }
+        return;
+      }
 
       // Find the new active account by server ID
       const newActiveAccount = convertedAccounts.find(acc => acc.id === accountId);
@@ -646,9 +722,16 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   // Combine loading states
   const combinedLoading = isLoading || serverLoading;
 
+  // What the switcher lists: the keyed roster, then the Cuenta inteligente
+  // (own first, inherited after, in the order received).
+  const allAccounts = useMemo(
+    () => (smartAccounts.length > 0 ? [...accounts, ...smartAccounts] : accounts),
+    [accounts, smartAccounts],
+  );
+
   return {
     activeAccount,
-    accounts,
+    accounts: allAccounts,
     isLoading: combinedLoading,
     switchAccount,
     createAccount,

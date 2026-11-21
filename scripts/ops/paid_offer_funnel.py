@@ -1,4 +1,5 @@
-"""Confío IA+ and Cuenta inteligente probe funnel (read-only, aggregate counts only).
+"""Confío IA+ and Cuenta inteligente funnels: the waitlist probes and the paid
+Cuenta inteligente funnel (read-only, aggregate counts only).
 
 Run on prod:
     ssh confio-prod 'cd /opt/confio && myvenv/bin/python manage.py shell' < scripts/ops/paid_offer_funnel.py
@@ -90,6 +91,25 @@ for label in ('old', 'with IA+'):
     print(f"  {label:<9} saw {seen:>4}  opened {len(users_at['detail_opened']):>4}"
           f"  joined {len(users_at['avisame_tapped']):>4} ({pct(len(users_at['avisame_tapped']), seen).strip()})"
           f"  would pay {dict(Counter(answers[label].values()))}")
+
+# Paid funnel (docs/designs/cuenta-inteligente-spec.md 7.9): distinct users per
+# stage of smart_account_funnel, by plan. subscribe_opened / subscribe_signed
+# come from the app; the rest are written by the server from chain events.
+PAID_STAGES = ('subscribe_opened', 'subscribe_signed', 'subscribed', 'first_deposit', 'rule_created',
+               'beneficiary_set', 'cancelled')
+paid = FunnelEvent.objects.filter(event_name='smart_account_funnel', user__isnull=False).exclude(user_id__in=PREVIEW)
+paid_users = defaultdict(set)
+for uid, props in paid.values_list('user_id', 'properties'):
+    props = props or {}
+    paid_users[(props.get('stage'), props.get('plan') or '-')].add(uid)
+print("\n=== Cuenta inteligente: paid funnel ===")
+plans = sorted({plan for (_stage, plan) in paid_users}) or ['-']
+print(f"  {'stage':<20}{'all':>6}" + ''.join(f"{plan:>10}" for plan in plans))
+opened = len(set().union(*[paid_users[('subscribe_opened', plan)] for plan in plans]))
+for stage in PAID_STAGES:
+    total = len(set().union(*[paid_users[(stage, plan)] for plan in plans]))
+    print(f"  {stage:<20}{total:>6}" + ''.join(f"{len(paid_users[(stage, plan)]):>10}" for plan in plans)
+          + f"   {pct(total, opened).strip()} of opened")
 
 both = (set(ProductWaitlistEntry.objects.filter(product='ia_plus').values_list('user_id', flat=True))
         & set(ProductWaitlistEntry.objects.filter(product='smart_account').values_list('user_id', flat=True))) - PREVIEW

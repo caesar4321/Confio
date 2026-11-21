@@ -4,13 +4,16 @@ import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
+import { smartSwitcherLabel } from '../utils/smartAccounts';
 
 // Utility function to format phone number with country code
 
 interface Account {
   id: string;
   name: string;
-  type: 'personal' | 'business';
+  type: 'personal' | 'business' | 'smart';
+  /** Cuenta inteligente entries: inherited ones carry the "heredada" label. */
+  smart?: { inherited: boolean };
   phone?: string;
   category?: string;
   avatar: string;
@@ -78,7 +81,9 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = React.memo(({
                 <Text style={styles.accountType}>
                   {headerAccount.type.toLowerCase() === "personal" 
                     ? "Personal"
-                    : "Negocio"}
+                    : headerAccount.type.toLowerCase() === "smart"
+                      ? smartSwitcherLabel(headerAccount)
+                      : "Negocio"}
                 </Text>
               </View>
             </View>
@@ -102,6 +107,11 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = React.memo(({
                     selectedAccount === account.id && styles.selectedAccount
                   ]}
                   onPress={() => onAccountSwitch(account.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selectedAccount === account.id }}
+                  accessibilityLabel={`${account.name}, ${account.type.toLowerCase() === 'personal'
+                    ? 'Personal'
+                    : account.type.toLowerCase() === 'smart' ? smartSwitcherLabel(account) : 'Negocio'}`}
                 >
                   <View style={styles.accountItemAvatar}>
                     <Text style={styles.accountItemAvatarText}>{account.avatar}</Text>
@@ -111,7 +121,9 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = React.memo(({
                     <Text style={styles.accountItemType}>
                       {account.type.toLowerCase() === "personal" 
                         ? "Personal" 
-                        : account.isEmployee 
+                        : account.type.toLowerCase() === "smart"
+                          ? smartSwitcherLabel(account)
+                          : account.isEmployee 
                           ? `Empleado - ${account.employeeRole === 'cashier' ? 'Cajero' : account.employeeRole === 'manager' ? 'Gerente' : 'Admin'}`
                           : "Negocio"}
                     </Text>
@@ -234,6 +246,7 @@ const styles = StyleSheet.create({
   accountItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 48,
     padding: 8,
     borderRadius: 8,
     marginBottom: 4,

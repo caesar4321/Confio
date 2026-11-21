@@ -27,6 +27,7 @@ import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inv
 import { CommissionsEntryRow } from '../components/CommissionsEntryRow';
 import { DEFAULT_TERMS, commissionPercents, useFeeReferralSummary, windowRule } from '../hooks/useFeeReferralSummary';
 import { formatDecimal } from '../utils/numberLocale';
+import { profileDisplayInfo } from './profileDisplayInfo';
 
 // Utility function to format phone number with country code
 
@@ -332,48 +333,9 @@ export const ProfileScreen = () => {
   };
 
   // Get display information based on active account
-  const getDisplayInfo = () => {
-    // Only show loading when we have no data yet
-    const stillFetching = (accountsLoading && !activeAccount) ||
-      (isUserProfileLoading && !userProfile);
-
-    if (stillFetching) {
-      return { name: 'Cargando...', subtitle: '', showAccountType: false };
-    }
-
-    if (activeAccount) {
-      const isPersonal = activeAccount.type.toLowerCase() === 'personal';
-      const accountType = isPersonal ? 'Personal' : 'Negocio';
-
-      if (isPersonal) {
-        // Personal: name and @username (no phone number, no account type label)
-        const displayName = userProfile?.firstName || userProfile?.username || activeAccount.name;
-        return {
-          name: displayName,
-          subtitle: username,
-          accountType: '',
-          showAccountType: false
-        };
-      } else {
-        // For business accounts, show business info with account type only (no category)
-        return {
-          name: activeAccount.name,
-          subtitle: '',
-          accountType,
-          showAccountType: true
-        };
-      }
-    }
-
-    // Fallback: name and @username (no account type label)
-    const displayName = userProfile?.firstName || userProfile?.username || 'Sin perfil';
-    return {
-      name: displayName,
-      subtitle: username,
-      accountType: '',
-      showAccountType: false
-    };
-  };
+  const getDisplayInfo = () => profileDisplayInfo({
+    activeAccount, userProfile, username, accountsLoading, isUserProfileLoading,
+  });
 
   const displayInfo = getDisplayInfo();
   const authReady = useAuthReady();

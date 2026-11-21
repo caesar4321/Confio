@@ -33,6 +33,7 @@ import {
 } from './evmWallet';
 import { bytesToHex } from '@noble/hashes/utils';
 import { secureRandomBytes } from '../setup/entropyGuard';
+import { forgetOwnPendingClaim, ownClaimCancelCall } from './ownClaimCancel';
 
 const DELEGATION_PREFIX = '0xef0100';
 
@@ -137,6 +138,19 @@ const rememberArm = (requestId: string | undefined, arm: BatchCall | null) => {
   }
 };
 
+/** The claim-cancel decision per request id, for the same exact replay. */
+const cancelByRequest = new Map<string, BatchCall | null>();
+const rememberCancel = (requestId: string | undefined, call: BatchCall | null) => {
+  if (!requestId) return;
+  cancelByRequest.delete(requestId);
+  cancelByRequest.set(requestId, call);
+  while (cancelByRequest.size > ARM_BY_REQUEST_MAX) {
+    const oldest = cancelByRequest.keys().next().value;
+    if (oldest === undefined) break;
+    cancelByRequest.delete(oldest);
+  }
+};
+
 /** Server codes that refuse only the referral arm (eligibility changed,
  * first-use delegation, not fee-bearing), and a pre-flight revert of an
  * armed batch: resend the same batch without it. A commission must never
@@ -209,6 +223,10 @@ export const executeSponsoredBatch = async (params: {
   /** Unix seconds the signed batch must not outlive (e.g. a bridge quote's
    *  deadline). The intent deadline is capped to it. */
   notAfter?: number;
+  /** Spec 6.4: append the own account's `cancelClaim()` while a claim is
+   *  pending on it (personal context only). false for Cuenta inteligente
+   *  batches, which the server builds itself. Default true. */
+  ownClaimCancel?: boolean;
 }): Promise<SponsoredBatchResultReceipt> => {
   const { sponsorBscBatch } = await import('./bscServerRpc');
   const { wallet, calls: baseCalls, delegateAddress, requestId, notAfter } = params;
@@ -228,9 +246,19 @@ export const executeSponsoredBatch = async (params: {
   else arm = await fetchFeeReferralArm();
   rememberArm(requestId, arm);
 
+  // Spec 6.4: any signature of the owner cancels a pending claim on their
+  // own account, so a personal batch carries one trailing cancelClaim()
+  // while such a claim is known. After the base calls (the arm stays first).
+  let claimCancel: BatchCall | null;
+  if (params.ownClaimCancel === false) claimCancel = null;
+  else if (requestId && cancelByRequest.has(requestId)) claimCancel = cancelByRequest.get(requestId) ?? null;
+  else claimCancel = await ownClaimCancelCall(baseCalls).catch(() => null);
+  rememberCancel(requestId, claimCancel);
+
   let lastError = 'unknown';
+  let claimCancelRefetched = false;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const calls = arm ? [arm, ...baseCalls] : baseCalls;
+    const calls = [...(arm ? [arm] : []), ...baseCalls, ...(claimCancel ? [claimCancel] : [])];
     // A mined no-op legitimately needs a fresh delegate nonce and therefore
     // a fresh idempotency slot. Transport retries of either attempt still
     // reproduce the same suffix and resolve to its original transaction.
@@ -271,11 +299,49 @@ export const executeSponsoredBatch = async (params: {
 
     if (!res.success) {
       lastError = res.error || 'sponsor rejected';
+      if (claimCancel && res.error === 'claim_cancel_not_allowed') {
+        // The server refused only the trailing cancel: keep the arm (and its
+        // commission), drop the cancel, resend.
+        claimCancel = null;
+        rememberCancel(requestId, null);
+        forgetOwnPendingClaim();
+        attempt--;
+        continue;
+      }
+      if (!claimCancel && !claimCancelRefetched && params.ownClaimCancel !== false
+          && res.error === 'claim_cancel_required') {
+        // The server knows of a pending claim our (cached) answer missed.
+        // Nothing was broadcast: look it up fresh (bypassing both caches),
+        // add the cancel and resend once. Still nothing → surface the error.
+        claimCancelRefetched = true;
+        forgetOwnPendingClaim();
+        if (requestId) cancelByRequest.delete(requestId);
+        const fresh = await ownClaimCancelCall(baseCalls, { fresh: true }).catch(() => null);
+        if (fresh) {
+          claimCancel = fresh;
+          rememberCancel(requestId, fresh);
+          attempt--;
+          continue;
+        }
+        throw new Error(`sponsored batch rejected: ${lastError}`);
+      }
       if (arm && isReferralArmRejection(res.error)) {
         // Nothing was broadcast; the same attempt slot is free. Drop the arm
         // and resend: a commission must never block the member's money.
         arm = null;
         rememberArm(requestId, null);
+        attempt--;
+        continue;
+      }
+      if (claimCancel && !claimCancelRefetched && res.error === 'simulation_reverted') {
+        // The claim may have just ended: never let the cancel block the
+        // member's own batch. Drop it, ask again next time, resend.
+        // Not after a claim_cancel_required refetch: the server just said the
+        // cancel is required, so dropping it would only loop back to that
+        // refusal. The revert is the batch's own: surface it as is.
+        claimCancel = null;
+        rememberCancel(requestId, null);
+        forgetOwnPendingClaim();
         attempt--;
         continue;
       }
@@ -285,6 +351,10 @@ export const executeSponsoredBatch = async (params: {
     }
 
     const txHash = res.txHash as string;
+    if (claimCancel) {
+      // Broadcast with the cancel: the claim is (or is about to be) gone.
+      forgetOwnPendingClaim();
+    }
     // The sponsor watched the chain before answering; null (it didn't see
     // the tx inside its budget) falls through to our own poll. A server
     // without `execution` fails this whole mutation at GraphQL validation

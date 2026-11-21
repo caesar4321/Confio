@@ -16,6 +16,7 @@ import {
 } from '../utils/keychainInternetCredentials';
 import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 import { extractFcmTransactionData } from '../utils/fcmData';
+import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
 import { androidChannelFor, createCommunityChannel } from './notificationChannels';
 
 const FCM_TOKEN_SERVICE = 'confio_fcm_token';
@@ -709,7 +710,9 @@ class MessagingService {
 
     // For foreground notifications, also defer account switching
     // to avoid conflicts with UI state
-    if (accountContext && !skipAccountCheck) {
+    // A Cuenta inteligente notification is checked even without an
+    // account_context: from a business context it must switch first.
+    if ((accountContext || smartNotificationRoute(data)) && !skipAccountCheck) {
       try {
         // Import AuthService to check current context
         const { AuthService } = await import('./authService');
@@ -727,8 +730,14 @@ class MessagingService {
         // Check if we need to switch
         let needSwitch = false;
         let targetAccountId = '';
+        const smartSwitch = smartNotificationSwitchTarget(data, currentContext);
 
-        if (accountContext === 'business' && businessId) {
+        if (smartSwitch) {
+          // A Cuenta inteligente screen from a business context: personal_0
+          // (or the inherited smart_N) first, then the screen.
+          needSwitch = true;
+          targetAccountId = smartSwitch;
+        } else if (accountContext === 'business' && businessId) {
           // Check if current account is the correct business account
           needSwitch = currentContext?.type !== 'business' ||
             currentContext?.businessId !== businessId;
@@ -739,8 +748,10 @@ class MessagingService {
             console.log('[MessagingService] Need to switch to business account:', targetAccountId);
           }
         } else if (accountContext === 'personal') {
-          // Check if current account is a personal account
-          needSwitch = currentContext?.type !== 'personal';
+          // Check if current account is a personal account (a Cuenta
+          // inteligente notification opens from the smart context too).
+          needSwitch = currentContext?.type !== 'personal'
+            && !(currentContext?.type === 'smart' && smartNotificationRoute(data));
 
           if (needSwitch) {
             // Personal account ID format: personal_{index}
@@ -783,6 +794,18 @@ class MessagingService {
         console.error('[MessagingService] Error checking account context:', error);
         // Continue with navigation even if account check fails
       }
+    }
+
+    // Cuenta inteligente: the server names the screen in the data.
+    const smartTarget = smartNotificationRoute(data);
+    if (smartTarget) {
+      if (navigationRef.current && navigationRef.current.isReady()) {
+        (navigationRef.current as any).navigate('Main', {
+          screen: smartTarget.screen,
+          params: smartTarget.params,
+        });
+      }
+      return;
     }
 
     // Navigate based on notification data

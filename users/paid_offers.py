@@ -1,6 +1,12 @@
-"""Rules for the paid-offer probes (Confío IA+, Cuenta inteligente).
+"""Rules for who sees the paid-offer doors (Confío IA+, Cuenta inteligente).
 
-Pure intent probes: nothing is sold, charged or unlocked. Who sees each door:
+Cuenta inteligente is a real paid account once SMART_ACCOUNT_ENABLED is on
+(docs/designs/cuenta-inteligente-spec.md): a person who passes
+`can_subscribe` opens the subscribe flow and is charged from inside the
+account; everyone else still sees the waitlist pitch while
+SMART_ACCOUNT_PROBE_ENABLED is on. Confío IA+ alone remains an intent probe:
+nothing is sold for it. Waitlist rows and answers are kept as funnel data.
+Who sees each door:
 
 - Confío IA+: the assistant header pill and investing chips, for anyone who
   is not an employee, on a build that has the pitch screen.
@@ -49,10 +55,33 @@ def enabled(product, user_id=None):
     return on or (product != PRODUCT_IA_PLUS and previewing(user_id))
 
 
-def price(product):
-    """The monthly price as shown ("9.99"), or None: the screen then hides it."""
-    value = str(getattr(settings, PRICES.get(product, ''), '') or '').strip()
+ANNUAL_PRICES = {PRODUCT_SMART_ACCOUNT: 'SMART_ACCOUNT_ANNUAL_PRICE_USD'}
+
+
+def price(product, plan='monthly'):
+    """The price as shown ("14.99"), or None: the screen then hides it.
+    `plan` is 'monthly' (default) or 'annual'. Cuenta inteligente shows the
+    factory's price in force (settings are the display fallback)."""
+    if plan not in ('monthly', 'annual'):
+        return None
+    if product == PRODUCT_SMART_ACCOUNT:
+        from smart_account import chain, offer
+        if chain.enabled():
+            return offer.price_usd(plan)
+    names = PRICES if plan == 'monthly' else ANNUAL_PRICES
+    value = str(getattr(settings, names.get(product, ''), '') or '').strip()
     return value if re.fullmatch(r'[0-9]{1,4}(\.[0-9]{2})?', value) else None
+
+
+def can_subscribe(user, *, is_employee, account_type='personal', meta=None):
+    """May this person open and pay for a Cuenta inteligente now? Flag,
+    canary list, build floor, personal non-employee context, identity rules
+    (smart_account/offer.py holds the rule; this is the door's view of it)."""
+    if user is None or is_employee:
+        return False
+    from smart_account import offer
+    return offer.subscribe_block(
+        user, personal_context=account_type in ('personal', 'smart'), meta=meta or {}) is None
 
 
 def _version(value):

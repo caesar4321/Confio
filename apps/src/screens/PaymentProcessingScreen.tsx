@@ -1,4 +1,5 @@
 import { authenticateWithFace } from '../services/faceAuthentication';
+import { requireKeyedAccountType } from '../utils/accountManager';
 import { Buffer } from 'buffer';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
@@ -325,7 +326,7 @@ export const PaymentProcessingScreen = () => {
               oauthData.subject,
               aud,
               oauthData.provider,
-              accountContext.type,
+              requireKeyedAccountType(accountContext.type),
               accountContext.index,
               accountContext.businessId
             );

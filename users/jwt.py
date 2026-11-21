@@ -99,6 +99,20 @@ def jwt_payload_handler(*args, **kwargs):
             except Account.DoesNotExist:
                 logger.warning(f"Business account not found for user {user_id} with index {account_index}")
     
+    if account_type == 'smart':
+        # Cuenta inteligente: issued only for an account this user owns. A
+        # refresh after the account passed to someone else (or a client that
+        # merely asks) falls back to the personal context, never to a smart
+        # context the user does not hold.
+        business_id = None
+        from smart_account.context import owned_smart_account
+        try:
+            owned = owned_smart_account(user, int(account_index or 0))
+        except (TypeError, ValueError):
+            owned = None
+        if owned is None:
+            account_type, account_index = 'personal', 0
+
     logger.info(f"User details - id: {user_id}, username: {username}, auth_token_version: {auth_token_version}")
     logger.info(f"Account context - type: {account_type}, index: {account_index}, business_id: {business_id}")
     

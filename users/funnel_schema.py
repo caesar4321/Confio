@@ -37,8 +37,16 @@ CLIENT_EMITTABLE_EVENTS = frozenset({
     'category_chip_skipped',
     'category_chip_dismissed',
     # Paid-offer probes (Confío IA+, Cuenta inteligente); `stage` in properties.
+    # Kept for history; the paid Cuenta inteligente funnel is the event below.
     'paid_offer_interest',
+    # Paid Cuenta inteligente funnel (spec 7.9); `stage` and `plan` in properties.
+    'smart_account_funnel',
 })
+
+# smart_account_funnel stages a client may emit. Everything the chain proves
+# (subscribed, first_deposit, rule_created, beneficiary_set, cancelled) is
+# written by the server from the event it reconciled, never on a client's word.
+SMART_ACCOUNT_CLIENT_STAGES = frozenset({'subscribe_opened', 'subscribe_signed'})
 
 
 def _cached_ip_country(meta):
@@ -135,6 +143,16 @@ class TrackFunnelEvent(graphene.Mutation):
             # (with the waitlist row as the authority); a client can't add them.
             logger.info('[funnel] rejected client paid_offer_interest stage %r', properties.get('stage'))
             return cls(success=True, recorded=False)
+
+        if event_name == 'smart_account_funnel':
+            if properties.get('stage') not in SMART_ACCOUNT_CLIENT_STAGES:
+                logger.info('[funnel] rejected client smart_account_funnel stage %r', properties.get('stage'))
+                return cls(success=True, recorded=False)
+            plan = properties.get('plan')
+            properties = {'stage': properties['stage'],
+                          'plan': plan if plan in ('annual', 'monthly') else ''}
+            from users.paid_offers import app_version
+            properties['app_version'] = app_version(getattr(info.context, 'META', {}))
 
         if event_name == 'paid_offer_interest':
             # Server-stamped (never the client's word): which pitch the build had.

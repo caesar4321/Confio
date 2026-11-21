@@ -25,7 +25,7 @@ import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, bufferToHex } from '../utils/encoding';
 import { ApolloClient } from '@apollo/client';
-import { AccountManager, AccountContext } from '../utils/accountManager';
+import { AccountManager, AccountContext, requireKeyedAccountType } from '../utils/accountManager';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
 import {
@@ -286,6 +286,13 @@ async function attemptBscRegistration(addressOverride?: string): Promise<BscRegi
     // personal address onto a business account (or vice versa) after a
     // switch — and the server refuses corrections (immutability guard).
     const ctx = await AuthService.getInstance().getActiveAccountContext();
+    if (ctx.type === 'smart') {
+      // A Cuenta inteligente's address is its contract, reported by the
+      // server. Registering the owner's wallet under a smart JWT would point
+      // the account at the wrong address, permanently.
+      return 'done';
+    }
+    const signingCtx = { type: ctx.type, index: ctx.index, businessId: ctx.businessId };
     const tokenAtStart = await verifiedTokenForContext(ctx);
     if (!tokenAtStart) {
       console.log('[AuthService] Skipping BSC registration: JWT does not match the active account');
@@ -307,7 +314,7 @@ async function attemptBscRegistration(addressOverride?: string): Promise<BscRegi
     // writes the replacement JWT, so a re-read could hand back account B's
     // address while the verified token still names account A — and the write
     // is permanent.
-    const address = (await getActiveEvmWallet(ctx)).address;
+    const address = (await getActiveEvmWallet(signingCtx)).address;
     if (!address) return 'done';
     if (addressOverride && addressOverride.toLowerCase() !== address.toLowerCase()) {
       console.log('[AuthService] Skipping BSC registration: caller address does not match the derived wallet');
@@ -2385,6 +2392,11 @@ export class AuthService {
       accountContext = await accountManager.getActiveAccountContext();
     }
 
+    if (accountContext.type === 'smart') {
+      // A Cuenta inteligente has no derived address on any chain.
+      return '';
+    }
+
     console.log('🔎 getAlgorandAddress - Account context:', {
       type: accountContext.type,
       index: accountContext.index,
@@ -2580,7 +2592,7 @@ export class AuthService {
           oauthSubject,           // OAuth subject
           aud,                    // OAuth audience
           provider,               // Provider
-          accountContext.type,
+          requireKeyedAccountType(accountContext.type),
           accountContext.index,
           accountContext.businessId
         );
@@ -3139,6 +3151,14 @@ export class AuthService {
 
     console.log('AuthService - switchAccount called with accountId:', accountId);
 
+    // A Cuenta inteligente (smart_0) or an inherited one (smart_1..) is a
+    // contract: nothing below applies to it (no derivation, no address
+    // registration, no Algorand restore).
+    if (accountId.startsWith('smart_')) {
+      await this.switchToSmartAccount(accountId, apolloClient);
+      return;
+    }
+
     // Parse the account ID to extract type, businessId (if present), and index
     let accountContext: AccountContext;
 
@@ -3403,7 +3423,7 @@ export class AuthService {
                   oauthSubject,
                   aud,
                   provider,
-                  accountContext.type,
+                  requireKeyedAccountType(accountContext.type),
                   accountContext.index,
                   accountContext.businessId
                 );
@@ -3517,7 +3537,7 @@ export class AuthService {
           oauthSubject,           // OAuth subject
           aud,                    // OAuth audience (Google web client ID or Apple bundle ID)
           provider,
-          accountContext.type,    // Use the actual account type (personal or business)
+          requireKeyedAccountType(accountContext.type),    // personal or business; a smart context returned above
           accountContext.index,   // Use the actual account index
           accountContext.businessId // Pass the businessId for business accounts
         );
@@ -3569,6 +3589,117 @@ export class AuthService {
       });
     } catch (error) {
       console.error('AuthService - Error getting new address after account switch:', error);
+    }
+  }
+
+  /**
+   * Switch the JWT context to a Cuenta inteligente. Unlike the keyed
+   * accounts this FAILS CLOSED: a smart context with a personal or business
+   * token would show one account's screens over another account's data, so
+   * without a server token that names the smart account the previous context
+   * is restored and the switch throws. No key or address is derived: the
+   * address is the contract's, served by the server, and every signature
+   * comes from personal_0.
+   */
+  private async switchToSmartAccount(accountId: string, apolloClient?: any): Promise<void> {
+    const accountManager = AccountManager.getInstance();
+    const target = accountManager.parseAccountId(accountId);
+    if (target.type !== 'smart') {
+      throw new Error(`Not a smart account id: "${accountId}"`);
+    }
+    const previous = await accountManager.getActiveAccountContext();
+    const previousIsTarget = previous.type === 'smart' && previous.index === target.index;
+    try {
+      if (!apolloClient) {
+        throw new Error('smart_switch_requires_server');
+      }
+      await accountManager.setActiveAccountContext(target);
+      const { SWITCH_ACCOUNT_TOKEN } = await import('../apollo/queries');
+      const { data } = await apolloClient.mutate({
+        mutation: SWITCH_ACCOUNT_TOKEN,
+        variables: { accountType: 'smart', accountIndex: target.index },
+      });
+      const token: string | undefined = data?.switchAccountToken?.token;
+      if (!token) {
+        throw new Error('smart_switch_refused');
+      }
+      // The token itself must name the smart account: an older server that
+      // ignores the unknown type could answer with a personal token.
+      const claims = jwtDecode<CustomJwtPayload>(token);
+      if (String(claims?.account_type ?? '') !== 'smart'
+          || Number(claims?.account_index ?? -1) !== target.index) {
+        throw new Error('smart_switch_wrong_context');
+      }
+
+      const credentials = await Keychain.getGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME,
+      });
+      let refreshToken = '';
+      if (credentials && credentials.password) {
+        try {
+          refreshToken = JSON.parse(credentials.password).refreshToken || '';
+        } catch (e) {
+          console.error('Error parsing existing tokens:', e);
+        }
+      }
+      await Keychain.setGenericPassword(
+        AUTH_KEYCHAIN_USERNAME,
+        JSON.stringify({ accessToken: token, refreshToken }),
+        {
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME,
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
+        },
+      );
+    } catch (error) {
+      // The caller that persisted the target before calling us (the atomic
+      // switch) restores its own previous context; restoring "target" here
+      // would be a no-op at best.
+      if (!previousIsTarget) {
+        await accountManager.setActiveAccountContext(previous).catch(() => {});
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * App start with a stored smart context: make sure the token really names
+   * that Cuenta inteligente, or fall back to the personal wallet. The keyed
+   * accounts tolerate a token that lags the stored context; a smart context
+   * cannot (the screens and the money would belong to different accounts).
+   * Returns 'reset' when it had to fall back.
+   */
+  public async ensureSmartContextToken(apolloClient?: any): Promise<'ok' | 'reset'> {
+    const accountManager = AccountManager.getInstance();
+    const ctx = await accountManager.getActiveAccountContext();
+    if (ctx.type !== 'smart') {
+      return 'ok';
+    }
+    try {
+      const creds = await Keychain.getGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME,
+      });
+      const accessToken = creds && creds.password ? JSON.parse(creds.password)?.accessToken : null;
+      if (accessToken) {
+        const claims = jwtDecode<CustomJwtPayload>(accessToken);
+        if (String(claims?.account_type ?? '') === 'smart'
+            && Number(claims?.account_index ?? -1) === ctx.index) {
+          return 'ok';
+        }
+      }
+      await this.switchToSmartAccount(accountManager.contextToAccountId(ctx), apolloClient);
+      return 'ok';
+    } catch (error) {
+      console.warn('AuthService - Smart context could not be confirmed; returning to the personal wallet');
+      try {
+        // The ordinary personal switch also realigns the token.
+        await this.switchAccount('personal_0', apolloClient);
+      } catch {
+        await accountManager.setActiveAccountContext(accountManager.getDefaultAccountContext()).catch(() => {});
+      }
+      return 'reset';
     }
   }
 

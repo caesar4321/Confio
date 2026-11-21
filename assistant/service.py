@@ -230,6 +230,37 @@ def send_team_notice(conversation, body, tag, *, user_id, hand_back=True):
     return message, True
 
 
+def post_system_note(user, body, tag):
+    """A server-side notice in the user's PERSONAL assistant thread (the
+    support thread Confio Assistant answers), e.g. a claim on their Cuenta
+    inteligente. Shown as a system line, like the greeting: never as the
+    team (no staff user, no hand-back) and never as an AI reply. Idempotent
+    on ``tag`` per thread, so a retried caller does not post twice. No push:
+    the caller's own notification carries one. Returns (message, created),
+    or (None, False) for a user without a personal account."""
+    from users.models import Account
+    if not isinstance(tag, str) or not tag.strip():
+        raise ValueError('tag required')
+    if not (body or '').strip():
+        raise ValueError('body required')
+    personal = Account.objects.filter(
+        user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
+    if personal is None:
+        return None, False
+    with transaction.atomic():
+        lock_user(user)
+        conversation = get_or_create_support_conversation(user, personal, None)
+        existing = conversation.messages.filter(metadata__notice=tag).first()
+        if existing is not None:
+            return existing, False
+        message = SupportMessage.objects.create(
+            conversation=conversation, sender_type='SYSTEM', message_type='TEXT', body=body,
+            metadata={'notice': tag, 'system_note': True})
+        conversation.last_message_at = message.created_at
+        conversation.save(update_fields=['last_message_at', 'updated_at'])
+    return message, True
+
+
 TEAM_PUSH_WINDOW = timedelta(minutes=10)
 TEAM_PUSHES_PER_WINDOW = 5
 

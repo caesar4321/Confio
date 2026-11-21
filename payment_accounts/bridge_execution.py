@@ -205,10 +205,17 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
             prefix = []  # Infinia pays the deposit itself; wallet Polygon returns use permits
         if q.expires_at <= timezone.now():
             raise NextError('Quote expired during preparation; request a fresh quote')
+        suffix = []
+        if source_chain == 'BSC' and infinia_journey is None:
+            # Cuenta inteligente (spec 6.4): while a claim is pending on the
+            # owner's own account, the bridge they sign also cancels it
+            # (owner key only; the stored calls are what is signed).
+            from smart_account.relay_policy import pending_cancel_claim_calls
+            suffix = pending_cancel_claim_calls(owner.user, q.source_address)
         return PaymentBridgeTransfer.objects.create(
             quote=q, funding_mode='infinia' if infinia_journey is not None else 'wallet',
             deposit_address=deposit, amount_out_min=str(minimum),
-            amount_out=build['amountOut'], deadline=deadline, calls=prefix + [call],
+            amount_out=build['amountOut'], deadline=deadline, calls=prefix + [call] + suffix,
             binding=dict(binding, funding=funding),
         )
 

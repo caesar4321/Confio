@@ -594,6 +594,10 @@ class Account(SoftDeleteModel):
     ACCOUNT_TYPE_CHOICES = [
         ('personal', 'Personal'),
         ('business', 'Business'),
+        # Cuenta inteligente (smart_account/): bsc_address is the account
+        # CONTRACT; it has no key of its own. Index 0 = the user's own
+        # account, 1 and up = inherited accounts in order received.
+        ('smart', 'Cuenta inteligente'),
     ]
 
     user = models.ForeignKey(

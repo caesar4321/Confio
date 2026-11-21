@@ -76,6 +76,17 @@ export function logDoorShown(offer: PaidOfferKey, door: PaidOfferDoor) {
   );
 }
 
+export type SmartAccountClientStage = 'subscribe_opened' | 'subscribe_signed';
+
+/** Client stages of the paid Cuenta inteligente funnel (event `smart_account_funnel`). */
+export function logSmartAccountFunnel(stage: SmartAccountClientStage, plan?: string) {
+  void AnalyticsService.logFunnelEvent(
+    'smart_account_funnel',
+    { stage, plan: plan === 'annual' || plan === 'monthly' ? plan : '' },
+    { sourceType: 'smart_account' },
+  );
+}
+
 export function logOfferStep(offer: PaidOfferKey, stage: 'detail_opened' | 'solo_miraba', door: string, trigger: string) {
   void AnalyticsService.logFunnelEvent('paid_offer_interest', { stage, offer, door, trigger }, { sourceType: offer });
 }

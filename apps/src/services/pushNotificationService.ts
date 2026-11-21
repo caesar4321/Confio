@@ -10,6 +10,7 @@ import {
   loadPendingNotificationOpen,
 } from './notificationOpenStore';
 import { confirmedReceiptContext, extractFcmTransactionData } from '../utils/fcmData';
+import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
 
 const NOTIFICATION_PERMISSION_KEY = 'push_notification_permission';
 const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
@@ -78,6 +79,21 @@ export class PushNotificationService {
   }
 
   /**
+   * Switch account first (HomeScreen performs it on focus, as for a push),
+   * then run `navigate`. Used by the in-app notification list too.
+   */
+  static deferSwitchThenNavigate(targetAccountId: string, navigate: () => void): void {
+    PushNotificationService.pendingAccountSwitchGlobal = targetAccountId;
+    PushNotificationService.pendingNavigationAfterSwitch = navigate;
+    if (RootNavigation.navigationRef.isReady()) {
+      (RootNavigation.navigationRef as any).navigate('Main', {
+        screen: 'BottomTabs',
+        params: { screen: 'Home' },
+      });
+    }
+  }
+
+  /**
    * Get pending navigation
    */
   static getPendingNavigation(): (() => void) | null {
@@ -136,8 +152,10 @@ export class PushNotificationService {
       account_index
     });
     
-    // Check if we need to switch accounts - defer the switch until app is ready
-    if (account_context) {
+    // Check if we need to switch accounts - defer the switch until app is ready.
+    // A Cuenta inteligente notification is checked even without an
+    // account_context: from a business context it must switch first.
+    if (account_context || smartNotificationRoute(remoteMessage.data)) {
       try {
         // Import AuthService to check current context
         const { AuthService } = await import('./authService');
@@ -154,8 +172,14 @@ export class PushNotificationService {
         // Check if we need to switch
         let needSwitch = false;
         let targetAccountId = '';
-        
-        if (account_context === 'business' && business_id) {
+        const smartSwitch = smartNotificationSwitchTarget(remoteMessage.data, currentContext);
+
+        if (smartSwitch) {
+          // A Cuenta inteligente screen from a business context: personal_0
+          // (or the inherited smart_N) first, then the screen.
+          needSwitch = true;
+          targetAccountId = smartSwitch;
+        } else if (account_context === 'business' && business_id) {
           // Check if current account is the correct business account
           needSwitch = currentContext?.type !== 'business' || 
                       currentContext?.businessId !== business_id;
@@ -166,8 +190,11 @@ export class PushNotificationService {
             console.log('[PushNotificationService] Will defer switch to business account:', targetAccountId);
           }
         } else if (account_context === 'personal') {
-          // Check if current account is a personal account
-          needSwitch = currentContext?.type !== 'personal';
+          // Check if current account is a personal account. A Cuenta
+          // inteligente notification opens its own screens from the smart
+          // context as well: no switch back to the personal wallet for it.
+          needSwitch = currentContext?.type !== 'personal'
+            && !(currentContext?.type === 'smart' && smartNotificationRoute(remoteMessage.data));
           
           if (needSwitch) {
             // Personal account ID format: personal_{index}
@@ -238,6 +265,16 @@ export class PushNotificationService {
         extra_transactionType,
         notification_type
       });
+
+      // Cuenta inteligente: the server names the screen in the data.
+      const smartTarget = smartNotificationRoute(remoteMessage.data);
+      if (smartTarget) {
+        (RootNavigation.navigationRef as any).navigate('Main', {
+          screen: smartTarget.screen,
+          params: smartTarget.params,
+        });
+        return;
+      }
 
       if (action_url?.includes('app/deeplink/')) {
         console.log('[PushNotificationService] Delegating app/deeplink notification to MessagingService');

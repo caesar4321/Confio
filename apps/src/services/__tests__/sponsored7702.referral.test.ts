@@ -6,6 +6,8 @@ const ARM = { to: CUSD, data: `0x${ARM_SELECTOR}${'00'.repeat(64)}` };
 const mockSponsorBscBatch = jest.fn();
 const mockQuery = jest.fn();
 
+// No claim pending on an own account in these tests (see sponsored7702.claimCancel.test).
+jest.mock('../ownClaimCancel', () => ({ ownClaimCancelCall: async () => null, forgetOwnPendingClaim: () => {} }));
 jest.mock('../bscServerRpc', () => ({
   sponsorBscBatch: (...args: unknown[]) => mockSponsorBscBatch(...args),
 }));

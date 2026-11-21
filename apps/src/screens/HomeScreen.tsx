@@ -39,7 +39,7 @@ import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
 import { useAccount } from '../contexts/AccountContext';
 import { useAtomicAccountSwitch } from '../hooks/useAtomicAccountSwitch';
-import { PushNotificationService } from '../services/pushNotificationService';
+import { usePendingNotificationSwitch } from '../hooks/usePendingNotificationSwitch';
 import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery, useMutation } from '@apollo/client';
@@ -80,6 +80,8 @@ import { useMonthHeroLine } from '../hooks/useMonthHeroLine';
 import { AnalyticsService } from '../services/analyticsService';
 import { logDoorShown, usePaidOffers } from '../services/paidOffers';
 import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
+import { useSmartAccountEntry } from '../hooks/useSmartAccountEntry';
+import { formatUsdAmount } from '../utils/numberLocale';
 import { formatDecimal } from '../utils/numberLocale';
 import { formatMinorMoney } from '../utils/currencies';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
@@ -224,7 +226,17 @@ export const HomeScreen = () => {
   useRememberExitTokens();
   // Cuenta inteligente probe row (waitlist only): the server decides who sees
   // it (flag on, never employees, this build or newer).
-  const smartAccountRow = usePaidOffers().smart_account?.rowVisible === true;
+  const smartAccountProbeRow = usePaidOffers().smart_account?.rowVisible === true;
+  // The real account (docs/designs/cuenta-inteligente-spec.md 8.1): a
+  // subscriber's row shows the account's balance and opens the account;
+  // someone who may subscribe gets the sign-up; a named beneficiary gets
+  // their invitation. Personal, non-employee contexts only. When none of it
+  // applies (or the server does not know these queries yet) the row stays
+  // the probe: same visibility, same pitch.
+  const smartEntry = useSmartAccountEntry(
+    activeAccount?.type === 'personal' && !activeAccount?.isEmployee,
+  );
+  const smartAccountRow = smartAccountProbeRow || smartEntry.target !== null;
   useEffect(() => {
     if (smartAccountRow) {
       logDoorShown('smart_account', 'billeteras');
@@ -1134,39 +1146,7 @@ export const HomeScreen = () => {
   };
 
   // Check for pending account switch from push notification when screen gains focus
-  useFocusEffect(
-    useCallback(() => {
-      // Add a small delay to ensure the screen is fully mounted
-      const timer = setTimeout(() => {
-        const pendingSwitch = PushNotificationService.getPendingAccountSwitch();
-        const pendingNavigation = PushNotificationService.getPendingNavigation();
-
-
-        // Only process if we have BOTH a pending switch AND navigation
-        if (pendingSwitch && pendingNavigation && handleAccountSwitch) {
-
-          // Clear the pending switch to prevent duplicate processing
-          PushNotificationService.clearPendingAccountSwitch();
-          PushNotificationService.clearPendingNavigation();
-
-          // Store the navigation function before clearing
-          const navigationToExecute = pendingNavigation;
-
-          // Execute the account switch
-          handleAccountSwitch(pendingSwitch).then(success => {
-            if (success) {
-              // Execute navigation after a short delay
-              setTimeout(() => {
-                navigationToExecute();
-              }, 500);
-            }
-          }).catch(() => {});
-        }
-      }, 100); // Small delay to ensure screen is ready
-
-      return () => clearTimeout(timer);
-    }, [handleAccountSwitch])
-  );
+  usePendingNotificationSwitch(handleAccountSwitch);
 
   return (
     <View style={styles.container}>
@@ -1677,9 +1657,25 @@ export const HomeScreen = () => {
                     styles.walletCard,
                     pressed && { opacity: 0.7 }
                   ]}
-                  onPress={() => navigation.navigate('PaidOffer', { offer: 'smart_account', door: 'billeteras' })}
+                  onPress={() => {
+                    const target = smartEntry.target;
+                    if (!target) {
+                      navigation.navigate('PaidOffer', { offer: 'smart_account', door: 'billeteras' });
+                    } else if (target.screen === 'SmartAccountHome') {
+                      navigation.navigate('SmartAccountHome');
+                    } else if (target.screen === 'SmartAccountOffer') {
+                      navigation.navigate('SmartAccountOffer', target.params);
+                    } else if (target.screen === 'BeneficiaryDesignations') {
+                      navigation.navigate('BeneficiaryDesignations');
+                    } else {
+                      navigation.navigate(target.screen, target.params);
+                    }
+                  }}
                   accessibilityRole="button"
-                  accessibilityLabel="Cuenta inteligente, pagos y débitos automáticos"
+                  accessibilityLabel={smartEntry.subscriber
+                    ? 'Cuenta inteligente, ' + ((canViewBalance && showBalance && smartEntry.totalUsd !== null)
+                      ? formatUsdAmount(smartEntry.totalUsd) : 'saldo oculto')
+                    : 'Cuenta inteligente, pagos e inversión automáticos'}
                 >
                   <View style={styles.walletCardContent}>
                     <View
@@ -1691,9 +1687,25 @@ export const HomeScreen = () => {
                     </View>
                     <View style={styles.walletInfo}>
                       <Text style={styles.walletName} numberOfLines={1}>Cuenta inteligente</Text>
-                      <Text style={styles.walletSymbol} numberOfLines={2}>Pagos y débitos automáticos</Text>
+                      <Text style={styles.walletSymbol} numberOfLines={2}>
+                        {!smartEntry.subscriber && !smartEntry.canSubscribe && smartEntry.designation
+                          ? (smartEntry.designation.state === 'pending_acceptance'
+                            ? 'Te eligieron como beneficiario' : 'Eres beneficiario')
+                          : !smartEntry.subscriber && !smartEntry.canSubscribe && smartEntry.offlineDesignation
+                            ? 'Eres beneficiario'
+                            : 'Pagos e inversión automáticos'}
+                      </Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
+                      {/* Only a subscriber has a number here, and it is the
+                          account's own total: a dash while unknown, never zero. */}
+                      {smartEntry.subscriber ? (
+                        <Text style={styles.walletBalanceText}>
+                          {!(canViewBalance && showBalance) ? '••••'
+                            : smartEntry.totalUsd === null ? '—'
+                            : '$' + formatFixedFloor(Number(smartEntry.totalUsd), 2)}
+                        </Text>
+                      ) : null}
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>
                   </View>

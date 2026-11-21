@@ -404,8 +404,12 @@ def _fee_bearing_selectors() -> set:
     from .sponsor_7702 import (SEL_CUSD_MINT, SEL_CUSD_REDEEM, SEL_REDEEM_TO_USDT,
                                SEL_STOCK_BUY, SEL_STOCK_SELL, SEL_SUBSCRIBE_AND_MINT)
 
+    # A trade inside a Cuenta inteligente crosses the perimeter through the
+    # same routers; the owner's EOA arms first, exactly as for its own trade.
+    from smart_account.abi import SEL_TRADE
+
     return {SEL_CUSD_MINT, SEL_CUSD_REDEEM, SEL_REDEEM_TO_USDT, SEL_SUBSCRIBE_AND_MINT,
-            SEL_STOCK_BUY, SEL_STOCK_SELL, SEL_CRYPTO_BUY, SEL_CRYPTO_SELL}
+            SEL_STOCK_BUY, SEL_STOCK_SELL, SEL_CRYPTO_BUY, SEL_CRYPTO_SELL, SEL_TRADE}
 
 
 def has_fee_bearing_call(calls: list) -> bool:

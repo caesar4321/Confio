@@ -317,6 +317,11 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
     avg_price = (actual_gross_usd / confio_amount).quantize(Decimal('0.0001'))
     unwrap = plan.get('unwrap')
     calls = _build_calls(vault, q_wei, funding_net_wei, plan)
+    # Cuenta inteligente (spec 6.4): while a claim is pending on the buyer's
+    # own account, the purchase they sign also cancels it (owner key only;
+    # submit sets it aside before the byte-exact validation).
+    from smart_account.relay_policy import pending_cancel_claim_calls
+    calls = calls + pending_cancel_claim_calls(user, user_addr)
 
     # Race-safe per-user reservation (audit 2026-07-31 P2): total_purchased
     # only counts CONFIRMED purchases, so N concurrent prepares each read the
@@ -549,7 +554,8 @@ def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature:
         return {'success': False, 'error': 'conversion_paused'}
 
     try:
-        _validate_presale_batch(calls, purchase)
+        from smart_account.relay_policy import strip_cancel_claim
+        _validate_presale_batch(strip_cancel_claim(calls, user, user_addr), purchase)
 
         intent_id = sponsor_7702.intent_id_for('presale_buy', purchase.id)
         digest = sponsor_7702.intent_digest(

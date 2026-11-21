@@ -669,6 +669,11 @@ def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '
         {'to': pay_contract, 'value': '0',
          'data': '0x' + pay_selector + pay_args.hex()},
     ]
+    # Cuenta inteligente (spec 6.4): while a claim is pending on the payer's
+    # own account, the payment they sign also cancels it (owner key only;
+    # submit sets it aside before the byte-exact validation).
+    from smart_account.relay_policy import pending_cancel_claim_calls
+    calls = calls + pending_cancel_claim_calls(user, payer_addr)
 
     # Idempotent row per (invoice, payer): re-prepare refreshes the batch
     # (prices move) without duplicating rows — the placeholder-hash pattern
@@ -1019,7 +1024,8 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
     calls = meta.get('bsc_calls') or []
 
     try:
-        _validate_payment_batch(calls, payment_tx)
+        from smart_account.relay_policy import strip_cancel_claim
+        _validate_payment_batch(strip_cancel_claim(calls, user, payer_addr), payment_tx)
 
         intent_id = sponsor_7702.intent_id_for(kind, payment_tx.id)
         digest = sponsor_7702.intent_digest(

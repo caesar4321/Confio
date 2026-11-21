@@ -1242,7 +1242,10 @@ def _registered_bsc_addresses() -> dict:
         return cached
     addr_map = {
         row['bsc_address'].lower(): row['id']
-        for row in Account.objects.filter(deleted_at__isnull=True)
+        # A Cuenta inteligente row's address is a contract the owner funds
+        # from their own wallet: its inflows are not deposits to credit, and
+        # ramps never deliver there (spec section 11).
+        for row in Account.objects.filter(deleted_at__isnull=True).exclude(account_type='smart')
         .exclude(bsc_address__isnull=True).exclude(bsc_address='')
         .values('id', 'bsc_address')
     }
@@ -2376,6 +2379,10 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             if batch.kind in ('crypto_buy', 'crypto_sell'):
                 from .crypto_holdings import invalidate_holdings as invalidate_crypto
                 invalidate_crypto(batch.user_bsc_address)
+            if batch.kind.startswith('smart_'):
+                # Its effect landed at the account contract, not the signer.
+                from smart_account.inflight import on_batch_reorged
+                on_batch_reorged(batch)
             # A read between inclusion and the reorg stored the post-
             # transaction balances: stale again.
             _mark_receipt_balances_stale(batch.user_bsc_address, receipt)
@@ -2454,6 +2461,12 @@ def check_sponsored_batch_receipt(self, batch_id: int):
     if batch.kind in ('crypto_buy', 'crypto_sell'):
         from .crypto_holdings import invalidate_holdings as invalidate_crypto
         invalidate_crypto(batch.user_bsc_address, min_block=blk_num)
+    if batch.kind.startswith('smart_'):
+        # Cuenta inteligente: the batch was signed at the owner's address but
+        # its effect is at the account contract. Invalidate THAT address's
+        # holdings before the row turns 'confirmed' (same rule as above).
+        from smart_account.inflight import on_batch_confirmed
+        on_batch_confirmed(batch, blk_num)
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'

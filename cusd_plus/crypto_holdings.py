@@ -102,7 +102,11 @@ def _storable(key: str, generation, block: int | None) -> bool:
     if floor and (block is None or block < int(floor)):
         return False
     try:
-        return not batches_in_flight(key).exists()
+        # A Cuenta inteligente's address is a contract: what is on the wire
+        # for it is an owner-signed batch recorded at the SIGNER's address,
+        # or a relayer transaction (smart_account/inflight.py).
+        from smart_account.inflight import address_in_flight
+        return not batches_in_flight(key).exists() and not address_in_flight(key)
     except Exception:  # noqa: BLE001 — unknown: serve, don't store
         logger.warning('crypto in-flight check failed for %s', key, exc_info=True)
         return False

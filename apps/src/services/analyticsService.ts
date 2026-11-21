@@ -40,7 +40,11 @@ export type ClientFunnelEvent =
     | 'category_chip_dismissed'
     // Paid-offer probes (Confío IA+, Cuenta inteligente): one event, the step
     // in `stage` (door_shown, detail_opened, solo_miraba).
-    | 'paid_offer_interest';
+    | 'paid_offer_interest'
+    // Paid Cuenta inteligente funnel (spec 7.9). The client may only emit
+    // `subscribe_opened` and `subscribe_signed`; every chain-proven stage is
+    // written by the server (users/funnel_schema.py SMART_ACCOUNT_CLIENT_STAGES).
+    | 'smart_account_funnel';
 
 export const AnalyticsService = {
     /**

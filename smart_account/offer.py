@@ -1,0 +1,293 @@
+"""The Cuenta inteligente offer: prices, who may subscribe, the copy the
+sign-up screen shows (spec 7.3, 8.3). Prices come from the factory; the
+settings values are a display fallback only."""
+from __future__ import annotations
+
+import logging
+import re
+from decimal import Decimal
+
+from django.conf import settings
+from django.core.cache import cache
+
+from . import abi, chain
+
+logger = logging.getLogger(__name__)
+
+PLANS = ('annual', 'monthly')
+PRICE_SETTINGS = {'monthly': 'SMART_ACCOUNT_MONTHLY_PRICE_USD', 'annual': 'SMART_ACCOUNT_ANNUAL_PRICE_USD'}
+PRICE_FALLBACK = {'monthly': '14.99', 'annual': '149.99'}
+WINDOW_OPTIONS_DAYS = [90, 180, 365]
+DEFAULT_WINDOW_DAYS = 180
+
+DISCLOSURES = [
+    'El precio es el del plan que elijas, por 30 días (mensual) o 365 días (anual). Se renueva al precio vigente '
+    'en la fecha de renovación, se cobra desde adentro de tu Cuenta inteligente y no hay reembolsos.',
+    'El cobro usa primero tu Confío Dollar, luego tu Confío Dollar+. Si no alcanza, después de varios avisos se '
+    'vende parte de tus inversiones, solo por el valor de un período.',
+    'Solo lo que está dentro de la Cuenta inteligente se automatiza y queda cubierto por tu beneficiario. '
+    'Tu cuenta personal no.',
+    'La comisión de conversión de 0.9% se aplica igual que en el resto de Confío. No hay descuento.',
+    'Si cancelas, al terminar el período pagado todo vuelve a tu cuenta personal y termina la cobertura de tu '
+    'beneficiario.',
+    'Es una cuenta de autocustodia, no una cuenta bancaria.',
+]
+BENEFICIARY_DISCLOSURE = (
+    'Si tu beneficiario inicia un reclamo y tú no firmas ninguna acción en la cuenta durante todo el plazo '
+    '(Confío agrega una automáticamente a cada operación que firmas desde tu cuenta personal), tu beneficiario '
+    'pasa a ser dueño de la cuenta y de todo lo que hay en ella. Si no ves ningún aviso durante todo el plazo, '
+    'pierdes la cuenta.'
+)
+
+# The same disclosure as short sentences for the setup screen; the app fills
+# {name} (the beneficiary) and {days} (the chosen window).
+BENEFICIARY_RISK_DISCLOSURE = [
+    'Si {name} inicia un reclamo, tienes {days} días para cancelarlo.',
+    'Cualquier acción que firmes en tu Cuenta inteligente lo cancela. Confío agrega una automáticamente a cada '
+    'operación que firmas desde tu cuenta personal.',
+    'Si no firmas nada durante los {days} días, {name} pasa a ser dueño de la cuenta y de todo lo que hay en ella.',
+    'Si no ves ningún aviso durante todo ese plazo, pierdes la cuenta.',
+]
+
+BENEFITS = {
+    'beneficiary': ('Beneficiario', 'Nombra a una persona que recibe la cuenta si dejas de usarla.'),
+    'payments': ('Pagos y envíos automáticos', 'Programa envíos y pagos diarios, semanales, quincenales o mensuales.'),
+    'investing': ('Inversión automática', 'Compra acciones, bitcoin y oro de forma periódica.'),
+    'assistant': ('Confío IA+', 'Tu asistente analiza los movimientos de la cuenta, te avisa y sigue tus metas.'),
+}
+HEADLINE_ORDER = {
+    'beneficiary_first': ['beneficiary', 'payments', 'investing', 'assistant'],
+    'automation_first': ['payments', 'investing', 'beneficiary', 'assistant'],
+}
+
+
+def _valid_price(value) -> str | None:
+    value = str(value or '').strip()
+    return value if re.fullmatch(r'[0-9]{1,4}(\.[0-9]{2})?', value) else None
+
+
+def settings_price(plan: str) -> str:
+    return _valid_price(getattr(settings, PRICE_SETTINGS[plan], '')) or PRICE_FALLBACK[plan]
+
+
+def default_plan() -> str:
+    value = str(getattr(settings, 'SMART_ACCOUNT_DEFAULT_PLAN', 'annual') or 'annual').strip().lower()
+    return value if value in PLANS else 'annual'
+
+
+def _usd_text(wei: int) -> str:
+    return format((Decimal(int(wei)) / Decimal(10 ** 18)).quantize(Decimal('0.01')), 'f')
+
+
+def factory_prices(*, fresh: bool = False) -> dict | None:
+    """{plan: {'price_wei', 'next_wei', 'next_at'}} from the factory, or None
+    when it is not configured or unreadable (display then falls back)."""
+    if not chain.factory_address():
+        return None
+    key = 'smart_account_factory_prices_v1'
+    cached = None if fresh else cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        out = {}
+        for plan in PLANS:
+            price = chain.factory_fee_usd_wei(plan)
+            next_wei, next_at = chain.factory_scheduled_fee(plan)
+            if price <= 0:
+                raise chain.ChainError('factory fee is zero')
+            out[plan] = {'price_wei': price, 'next_wei': next_wei, 'next_at': next_at}
+    except Exception:  # noqa: BLE001 — display only; signing re-reads fresh and fails closed
+        logger.warning('smart account: factory prices unreadable', exc_info=True)
+        return None
+    cache.set(key, out, 60)
+    return out
+
+
+def signing_fee_wei(plan: str) -> int:
+    """The fee a subscribe will be signed against (maxFeeUsd). Read fresh
+    from the factory; raises when unreadable. Never the settings value."""
+    return chain.factory_fee_usd_wei(plan)
+
+
+def plans() -> list[dict]:
+    prices = factory_prices()
+    out = []
+    for plan in PLANS:
+        row = (prices or {}).get(plan)
+        entry = {
+            'key': plan,
+            'price_usd': _usd_text(row['price_wei']) if row else settings_price(plan),
+            'period_days': abi.PERIOD_DAYS[plan],
+            'next_price_usd': None,
+            'next_price_effective_at': None,
+            'is_default': plan == default_plan(),
+        }
+        if row and row['next_wei'] and row['next_at']:
+            entry['next_price_usd'] = _usd_text(row['next_wei'])
+            entry['next_price_effective_at'] = chain.to_dt(row['next_at'])
+        out.append(entry)
+    return out
+
+
+def price_usd(plan: str) -> str:
+    return next(p['price_usd'] for p in plans() if p['key'] == plan)
+
+
+def _id_list(setting: str) -> set:
+    raw = str(getattr(settings, setting, '') or '')
+    return {p.strip() for p in raw.split(',') if p.strip()}
+
+
+def canary_allows(user_id) -> bool:
+    """SMART_ACCOUNT_ALLOWED_USER_IDS: ids, or '*' for everyone. Empty means
+    nobody (fail closed)."""
+    allowed = _id_list('SMART_ACCOUNT_ALLOWED_USER_IDS')
+    return '*' in allowed or (user_id is not None and str(user_id) in allowed)
+
+
+def beneficiary_enabled(user_id) -> bool:
+    if not chain.enabled():
+        return False
+    if bool(getattr(settings, 'SMART_ACCOUNT_BENEFICIARY_ENABLED', False)):
+        return True
+    return user_id is not None and str(user_id) in _id_list('SMART_ACCOUNT_BENEFICIARY_ALLOWED_USER_IDS')
+
+
+def _version(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}', value):
+        return None
+    return tuple(int(part) for part in value.split('.'))
+
+
+def build_supported(meta) -> bool:
+    floor = _version(str(getattr(settings, 'SMART_ACCOUNT_MIN_APP_VERSION', '') or ''))
+    version = _version(str((meta or {}).get('HTTP_X_CONFIO_VERSION', '') or ''))
+    return floor is not None and version is not None and version >= floor
+
+
+def payout_rails() -> list[str]:
+    """Rails confirmed for unattended payouts. Empty = payment rules are
+    neither offered nor run."""
+    from payment_accounts import local_money
+    if not getattr(settings, 'SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED', False):
+        # The unattended provider path is not verified yet (payouts.ProviderAdapter):
+        # no rail is offered, whatever the list says.
+        return []
+    rails = [r.strip() for r in str(getattr(settings, 'SMART_ACCOUNT_PAYOUT_RAILS', '') or '').split(',')]
+    return [r for r in rails if r in local_money.METHODS and local_money.METHODS[r].direction == 'send']
+
+
+BLOCKED = {
+    'disabled': 'La Cuenta inteligente todavía no está disponible.',
+    'canary': 'La Cuenta inteligente todavía no está disponible para tu cuenta.',
+    'build': 'Actualiza Confío para abrir tu Cuenta inteligente.',
+    'personal_only': 'La Cuenta inteligente solo está disponible para cuentas personales.',
+    'identity': 'Verifica tu identidad para abrir tu Cuenta inteligente.',
+    'identity_hold': 'Tu cuenta está en revisión. Escríbenos por soporte para continuar.',
+    'minor': 'La Cuenta inteligente está disponible para mayores de 18 años.',
+    'wallet_account_inherited': ('La Cuenta inteligente de esta billetera pasó a tu beneficiario. '
+                                 'Con esta billetera no se puede abrir otra.'),
+    'chain_unavailable': 'No pudimos consultar la red. Inténtalo de nuevo en unos minutos.',
+}
+
+
+def subscribe_block(user, *, personal_context: bool, meta) -> str | None:
+    """Reason code this person cannot subscribe, or None. Flag, canary list,
+    build floor, personal non-employee context, identity rules."""
+    if not chain.enabled():
+        return 'disabled'
+    if not personal_context:
+        return 'personal_only'
+    if not canary_allows(getattr(user, 'pk', None)):
+        return 'canary'
+    if not build_supported(meta):
+        return 'build'
+    from security.identity_status import is_identity_verified
+    if not is_identity_verified(user):
+        return 'identity'
+    from security.minors import is_known_minor
+    if is_known_minor(user):
+        return 'minor'
+    from security.identity_reuse import outgoing_identity_restriction
+    if outgoing_identity_restriction(user):
+        return 'identity_hold'
+    return inherited_wallet_block(user)
+
+
+def inherited_wallet_block(user) -> str | None:
+    """'wallet_account_inherited' when this person has no own row but the
+    factory already maps their signer to a clone that is inherited or owned
+    by someone else on chain: a claim moved it to the heir, and accountOf is
+    never reset (spec 6.5, invariant 17), so a subscribe batch from this
+    wallet only reverts (NotOwner). Decided by the clone's owner() and
+    inherited(), not the mirror (which may lag a ClaimExecuted). An
+    unreadable chain is 'chain_unavailable': fail closed. A clone the
+    signer still owns is created-but-not-reconciled and stays open."""
+    from . import context
+    from .models import SmartAccount
+    if context.own_account(user) is not None:
+        return None
+    personal = context.personal_account(user)
+    signer = (getattr(personal, 'bsc_address', '') or '').lower()
+    if not signer:
+        return None
+    try:
+        existing = chain.account_of(signer)
+        mapped = int(existing, 16) != 0
+    except Exception:  # noqa: BLE001 — unknown is never 'may subscribe'
+        logger.warning('smart account: accountOf read failed for subscribe check', exc_info=True)
+        return 'chain_unavailable'
+    if not mapped:
+        return None
+    # Fast path: inheritance is irreversible, so a mirror that already shows
+    # it can never disagree with the chain.
+    if SmartAccount.objects.filter(contract_address__iexact=existing, status='inherited').exists():
+        return 'wallet_account_inherited'
+    return mapped_clone_block(user, existing, signer)
+
+
+def mapped_clone_block(user, clone: str, signer: str) -> str | None:
+    """Chain truth for the clone factory.accountOf(signer) names (spec 6.5):
+    'wallet_account_inherited' when it is inherited() or its owner() is not
+    the signer, whatever the mirror says (a ClaimExecuted it has not
+    applied); None when the signer still owns it (created, not reconciled).
+    Unreadable is 'chain_unavailable': fail closed."""
+    from .models import SmartAccount
+    try:
+        state = chain.account_control(clone)
+        owner = str(state['owner'] or '').lower()
+        if not int(owner or '0x0', 16):
+            raise chain.ChainError(f'{clone} has no owner')
+    except Exception:  # noqa: BLE001 — unknown is never 'may subscribe'
+        logger.warning('smart account: owner()/inherited() read failed for subscribe check', exc_info=True)
+        return 'chain_unavailable'
+    if state['inherited'] or owner != (signer or '').lower():
+        return 'wallet_account_inherited'
+    if SmartAccount.objects.filter(contract_address__iexact=clone).exclude(owner_user=user).exists():
+        # The chain says this signer owns it, the mirror names someone else.
+        logger.warning('smart account %s: mirror owner differs from chain owner %s', clone, owner)
+        try:
+            from config.ops_alerts import send_ops_alert
+            send_ops_alert(f'Cuenta inteligente {clone}: el espejo nombra otro dueño que la red ({owner}). '
+                           f'Revisión manual.', dedupe_key=f'smart_owner_mirror_differs_{clone}',
+                           dedupe_seconds=86400)
+        except Exception:  # noqa: BLE001
+            logger.exception('smart account ops alert failed for %s', clone)
+    return None
+
+
+def viewer_dollar(user, meta=None) -> str:
+    """'cusd_plus' for an Ondo-eligible viewer, else 'cusd' (decision 17).
+    With a request, the full mint policy (phone AND IP); without, phone."""
+    from cusd_plus.eligibility import check_savings_mint_eligibility, is_ondo_eligible
+    eligible = check_savings_mint_eligibility(user, meta) if meta is not None else is_ondo_eligible(user)
+    return 'cusd_plus' if eligible else 'cusd'
+
+
+def crypto_investing_enabled(user, meta) -> bool:
+    from cusd_plus import crypto_risk
+    try:
+        return bool(crypto_risk.surfaces_enabled(user, meta or {}))
+    except Exception:  # noqa: BLE001 — a hidden surface, never an error
+        logger.warning('smart account: crypto surface check failed', exc_info=True)
+        return False

@@ -275,6 +275,11 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
         return {'success': False, 'error': 'invite_already_pending'}
 
     calls = build_create_calls(token_type, token_units, invite_id32)
+    # Cuenta inteligente (spec 6.4): while a claim is pending on the
+    # inviter's own account, the invite they sign also cancels it (owner key
+    # only; submit sets it aside before the shape check).
+    from smart_account.relay_policy import pending_cancel_claim_calls
+    calls = calls + pending_cancel_claim_calls(user, inviter_addr)
     stored_batch = json.dumps({
         'calls': calls, 'kind': 'invite_create', 'inviter': inviter_addr,
     })
@@ -451,7 +456,8 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     # authorization, and that return abandoned the row in 'creating' — the
     # retry then found no 'draft' row and first-use invites failed outright.
     try:
-        _validate_create_batch(calls, phone_invite.token_type, invite_id32)
+        from smart_account.relay_policy import strip_cancel_claim
+        _validate_create_batch(strip_cancel_claim(calls, user, inviter_addr), phone_invite.token_type, invite_id32)
         intent_id = sponsor_7702.intent_id_for('invite_create', phone_invite.pk)
         digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), inviter_addr, chain_id, intent_id)
         if sponsor_7702.recover_intent_signer(digest, intent_signature) != inviter_addr:
@@ -853,8 +859,15 @@ def submit_reclaim(user, phone_invite, nonce, deadline, intent_signature, author
     # the money was unreachable (Codex follow-up audit 2026-08-02 P1).
     try:
         intent_id = sponsor_7702.intent_id_for('invite_reclaim', phone_invite.pk)
-        digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), inviter_addr, chain_id, intent_id)
-        if sponsor_7702.recover_intent_signer(digest, intent_signature) != inviter_addr:
+        # The app may end the reclaim with cancelClaim() on the inviter's own
+        # Cuenta inteligente (spec 6.4): the signature says which was signed.
+        from smart_account.relay_policy import signed_variants
+        for variant in signed_variants(calls, user, inviter_addr):
+            digest = sponsor_7702.intent_digest(variant, int(nonce), int(deadline), inviter_addr, chain_id, intent_id)
+            if sponsor_7702.recover_intent_signer(digest, intent_signature) == inviter_addr:
+                calls = variant
+                break
+        else:
             return {'success': False, 'error': 'bad_intent_signature'}
         auth_dict = None
         if not sponsor_7702.is_delegated(inviter_addr):

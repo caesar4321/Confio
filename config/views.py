@@ -702,6 +702,12 @@ def guardarian_transaction_proxy(request):
     from security.face_client import request_update_required, UPDATE_CODE, UPDATE_MESSAGE
     if request_update_required(request):
         return JsonResponse({'error': UPDATE_MESSAGE, 'code': UPDATE_CODE, 'next_step': 'update_app'}, status=426)
+    if payload.get('account_type') == 'smart':
+        # Cuenta inteligente context: ramps are not supported there, and an
+        # order must never deliver to the account contract's address.
+        return JsonResponse(
+            {'error': 'Esta función no está disponible desde tu Cuenta inteligente. Cambia a tu cuenta personal.'},
+            status=403)
     if payload.get('account_type') == 'business':
         from users.jwt_context import RAMP_OWNER_ONLY_MESSAGE, is_business_employee
         if is_business_employee(user, payload.get('business_id')):

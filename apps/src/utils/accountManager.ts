@@ -1,6 +1,26 @@
 import Keychain from 'react-native-keychain';
 
-export type AccountType = 'personal' | 'business';
+// 'smart' = a Cuenta inteligente (a contract account owned by the personal
+// wallet). Ids: smart_0 is the user's own account, smart_1.. are accounts
+// received by inheritance, in the order received. A smart context has NO key
+// and NO derived address of its own: the address is the contract address the
+// server reports, and every signature comes from personal_0.
+export type AccountType = 'personal' | 'business' | 'smart';
+
+/** Account types that own a derived key. A smart context signs with personal_0. */
+export type KeyedAccountType = 'personal' | 'business';
+
+/**
+ * Guard for every place that derives a key or an address from an account
+ * type. A Cuenta inteligente must never reach one: it would mint a wallet
+ * that does not exist. Fails closed.
+ */
+export function requireKeyedAccountType(type: AccountType): KeyedAccountType {
+  if (type === 'smart') {
+    throw new Error('A Cuenta inteligente has no key of its own; it signs with personal_0');
+  }
+  return type;
+}
 
 export interface AccountContext {
   type: AccountType;
@@ -41,6 +61,17 @@ export interface StoredAccount {
     viewAnalytics: boolean;
   };
   employeeRecordId?: string;
+  /** Cuenta inteligente entries only (type 'smart'). Server-reported. */
+  smart?: {
+    /** true for an account received by inheritance (smart_1..). */
+    inherited: boolean;
+    /** The contract address. Never derived on the device. */
+    contractAddress?: string;
+    /** Opaque server id of an inherited account. */
+    inheritedAccountId?: string;
+    /** Whose account it was (inherited only). */
+    fromName?: string;
+  };
   business?: {
     id: string;
     name: string;
@@ -88,6 +119,37 @@ export class AccountManager {
     return `${type}_${index}`;
   }
 
+  /** The full account id of a context, business id included. */
+  public contextToAccountId(context: AccountContext): string {
+    if (context.type === 'business' && context.businessId) {
+      return `business_${context.businessId}_${context.index}`;
+    }
+    return this.generateAccountId(context.type, context.index);
+  }
+
+  public isSmartContext(context: Pick<AccountContext, 'type'> | null | undefined): boolean {
+    return context?.type === 'smart';
+  }
+
+  /** smart_0 is the user's own Cuenta inteligente; smart_1.. are inherited. */
+  public isInheritedSmartContext(context: AccountContext | null | undefined): boolean {
+    return context?.type === 'smart' && context.index > 0;
+  }
+
+  /**
+   * The context whose key signs for `context`. A Cuenta inteligente (own or
+   * inherited) is a contract owned by the personal wallet, so it signs with
+   * personal_0 and never derives anything from its own type or index.
+   */
+  public getSigningContext(context: AccountContext): {
+    type: KeyedAccountType; index: number; businessId?: string;
+  } {
+    if (context.type === 'smart') {
+      return { type: 'personal', index: 0 };
+    }
+    return { type: context.type, index: context.index, businessId: context.businessId };
+  }
+
   /**
    * Parse account ID to get type and index
    * Supports: personal_{index} and business_{businessId}_{index}
@@ -128,8 +190,20 @@ export class AccountManager {
         index,
         businessId
       };
+    } else if (parts.length === 2 && parts[0].toLowerCase() === 'smart') {
+      // Cuenta inteligente: smart_0 (own) or smart_N (inherited, N >= 1)
+      const index = /^\d+$/.test(parts[1]) ? parseInt(parts[1], 10) : NaN;
+
+      if (isNaN(index)) {
+        throw new Error(`Invalid account ID format: "${accountId}" (expected format: "smart_0")`);
+      }
+
+      return {
+        type: 'smart' as AccountType,
+        index
+      };
     } else {
-      throw new Error(`Invalid account ID format: "${accountId}" (expected format: "personal_0" or "business_19_0")`);
+      throw new Error(`Invalid account ID format: "${accountId}" (expected format: "personal_0", "business_19_0" or "smart_0")`);
     }
   }
 
@@ -411,6 +485,11 @@ export class AccountManager {
   public async getNextAvailableIndex(type: AccountType): Promise<number> {
     const accounts = await this.getStoredAccounts();
 
+    if (type === 'smart') {
+      // A Cuenta inteligente is created on-chain by the server-prepared
+      // subscribe batch; the device never allocates an index for one.
+      throw new Error('Smart accounts are created by the server, not locally');
+    }
     if (type === 'personal') {
       // Only allow 1 personal account (index 0)
       const personalAccounts = accounts.filter(acc => acc.type === 'personal');

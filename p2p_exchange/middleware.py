@@ -27,6 +27,12 @@ def get_user_and_context_from_token(token):
             user = User.objects.get(id=user_id)
             
             # Extract account context from JWT
+            if payload.get('account_type') == 'smart':
+                # Cuenta inteligente context: no websocket flow (P2P, presale,
+                # donations, conversions, payments) supports it. Refused here,
+                # the one place every consumer gets its account context from.
+                return AnonymousUser(), None
+
             account_context = {
                 'account_type': payload.get('account_type', 'personal'),
                 'account_index': payload.get('account_index', 0),

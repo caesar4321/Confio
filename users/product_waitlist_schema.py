@@ -128,6 +128,11 @@ class JoinPaidOfferWaitlist(graphene.Mutation):
         user, is_employee, account_type = _who(info)
         if not paid_offers.available(product, is_employee=is_employee, meta=_meta(info), user_id=user.pk):
             return cls(success=False, error='Esta oferta no está disponible.')
+        if (product == paid_offers.PRODUCT_SMART_ACCOUNT and paid_offers.can_subscribe(
+                user, is_employee=is_employee, account_type=account_type, meta=_meta(info))):
+            # Spec 7.9: after launch, whoever can subscribe opens the account
+            # instead of joining a list. Existing rows are kept as funnel data.
+            return cls(success=False, error='La Cuenta inteligente ya está disponible para ti. Ábrela para suscribirte.')
         if door == 'chip' and not trigger:
             # The chip's reason is known to the server (it logged the chip),
             # so the app never has to carry it.

@@ -1521,3 +1521,9 @@ class LocationReadingAdmin(admin.ModelAdmin):
 
 
 confio_admin_site.register(LocationReading, LocationReadingAdmin)
+
+
+# Cuenta inteligente (smart_account/): every model, read-only mirrors.
+from smart_account.admin import REGISTRY as SMART_ACCOUNT_ADMIN_REGISTRY
+for _smart_model, _smart_admin in SMART_ACCOUNT_ADMIN_REGISTRY:
+    confio_admin_site.register(_smart_model, _smart_admin)

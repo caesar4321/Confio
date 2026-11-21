@@ -127,8 +127,14 @@ def is_business_employee(user, business_id) -> bool:
         return True
 
 
-def get_jwt_business_context_with_validation(info, required_permission=None):
+def get_jwt_business_context_with_validation(info, required_permission=None, *, allow_smart=False):
     """
+    A Cuenta inteligente context (account_type == 'smart') is REFUSED (None)
+    unless the caller passes allow_smart=True: every flow that was not
+    reviewed for it (P2P, payroll, presale, perps, ramps, Comprar, ...)
+    denies by default. With allow_smart=True the context is returned only
+    when the user owns that smart account row.
+
     Extract business context from JWT token and validate access through BusinessEmployee.
     This ensures that for business accounts, the user has proper access rights.
     
@@ -192,6 +198,25 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
         return None
 
     
+    if jwt_context['account_type'] == 'smart':
+        if not allow_smart:
+            return None
+        from .models import Account
+        try:
+            smart_index = int(jwt_context.get('account_index') or 0)
+        except (TypeError, ValueError):
+            return None
+        if jwt_context.get('business_id') or not Account.objects.filter(
+                user=user, account_type='smart', account_index=smart_index,
+                deleted_at__isnull=True).exists():
+            logger.warning("User %s holds no smart account at index %s - access denied",
+                           user.id, jwt_context.get('account_index'))
+            return None
+        return jwt_context
+    if jwt_context['account_type'] not in ('personal', 'business'):
+        # An account type this server does not know is never personal.
+        return None
+
     # For business accounts, validate access through BusinessEmployee OR ownership
     if jwt_context['account_type'] == 'business' and jwt_context['business_id']:
         from .models_employee import BusinessEmployee

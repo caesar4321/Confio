@@ -4,7 +4,7 @@ import { useApolloClient } from '@apollo/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { AuthService } from '../services/authService';
-import { AccountManager } from '../utils/accountManager';
+import { AccountManager, AccountContext } from '../utils/accountManager';
 
 interface AccountSwitchState {
   isLoading: boolean;
@@ -32,6 +32,7 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
 
   // Use a ref to track if switch is in progress to prevent concurrent switches
   const switchInProgressRef = useRef(false);
+  const restoreContextRef = useRef<AccountContext | null>(null);
 
   const apolloClient = useApolloClient();
   const { refreshProfile } = useAuth();
@@ -93,11 +94,17 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
 
       // Step 4: Update account context in Keychain
       setState(prev => ({ ...prev, progress: 'Actualizando contexto de cuenta...' }));
-      const accountContext = {
-        type: targetAccount.type as 'personal' | 'business',
+      const accountContext: AccountContext = {
+        type: targetAccount.type,
         index: targetAccount.index || 0,
         businessId: targetAccount.business?.id,
       };
+      // Remembered so a refused switch can put the context back. A Cuenta
+      // inteligente has no local fallback: without the server's token for it
+      // the app must stay where it was, not sit in a smart context over
+      // another account's token.
+      const previousContext = await accountManager.getActiveAccountContext();
+      restoreContextRef.current = accountContext.type === 'smart' ? previousContext : null;
 
       await accountManager.setActiveAccountContext(accountContext);
 
@@ -136,13 +143,16 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
       const newContext = await authService.getActiveAccountContext();
       const contextMatchesTarget = (
         newContext.type === targetAccount.type &&
-        (newContext.businessId || '') === (targetAccount.business?.id || '')
+        (newContext.businessId || '') === (targetAccount.business?.id || '') &&
+        // Inherited accounts differ only by index (smart_1, smart_2...).
+        (targetAccount.type !== 'smart' || newContext.index === (targetAccount.index || 0))
       );
 
       if (!contextMatchesTarget) {
         throw new Error('La sincronización de cuenta falló. Por favor intenta nuevamente.');
       }
 
+      restoreContextRef.current = null;
       setState({ isLoading: false, error: null, progress: '' });
       switchInProgressRef.current = false;
 
@@ -150,6 +160,19 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
 
     } catch (error) {
       console.error('❌ [AtomicAccountSwitch] Account switch failed:', error);
+
+      // A refused switch to a Cuenta inteligente: back to the context the
+      // current token still names, before anything refetches.
+      if (restoreContextRef.current) {
+        const restore = restoreContextRef.current;
+        restoreContextRef.current = null;
+        try {
+          await accountManager.setActiveAccountContext(restore);
+          await refreshAccountsRef.current();
+        } catch (restoreError) {
+          console.error('Failed to restore the previous account context:', restoreError);
+        }
+      }
 
       // Attempt to recover by resuming queries
       try {
